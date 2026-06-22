@@ -1,0 +1,10 @@
+[project]
+name = "stone-pipeline"
+version = "0.1.0"
+description = "Stone scrape to Medusa import pipeline"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["stone_pipeline/tests"]
+addopts = "-q"
+pythonpath = ["."]

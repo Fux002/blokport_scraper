@@ -1,0 +1,58 @@
+[
+  {
+    "key": "block_travertine_marjan_6c92eb72-46b6-576f-9785-aabfcc30062a",
+    "variant": "Marjan",
+    "category": "Blocks",
+    "stone_type": "Travertine",
+    "color": [
+      "Silver"
+    ],
+    "finishes": [
+      "Honed",
+      "Polished",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "block_travertine_marjan_6c92eb72-46b6-576f-9785-aabfcc30062a.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "block_infinity_white_8d273d63-6169-5907-9420-8f9096bb2a62",
+    "variant": "INFINITY WHITE",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "block_infinity_white_8d273d63-6169-5907-9420-8f9096bb2a62.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  }
+]

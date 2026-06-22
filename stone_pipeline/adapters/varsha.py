@@ -1,0 +1,69 @@
+"""Varsha adapter (section 7 Stage 1, section 14 M11).
+
+Named-variety slabware source: material_name is the variety (Alaska Gold). It has
+no usable type or colour column (composition is a classification tag like
+"EXOTIC /"), so type is left for the matched variety to supply and colour is
+recovered from the variety name when it embeds a colour word. Dimensions come
+from the per-slab width/height pipe lists; take the first slab. Many varieties
+are exotic granites absent from the slabs reference and legitimately gap.
+"""
+
+from __future__ import annotations
+
+import re
+
+from stone_pipeline.adapters.base import AdapterBase
+from stone_pipeline.adapters.tokens import extract_color
+
+# varsha prefixes some material names with an internal code that is NOT part of the
+# official variety: a leading 'Z ', optionally with a 'B ' sub-code ('Z ASTORIA' ->
+# 'Astoria', 'Z B  FUSION BLACK' -> 'Fusion Black'). 'B ' only strips when it's the
+# standalone code letter, so 'Z BLACK FOREST' keeps 'Black Forest'.
+_Z_PREFIX = re.compile(r"^[Zz]\s+(?:[Bb]\s+)?")
+
+
+def _variety(record) -> str:
+    return _Z_PREFIX.sub("", AdapterBase.clean(record.get("material_name"))).strip()
+
+
+class VarshaAdapter(AdapterBase):
+    source = "varsha"
+    adapter_version = "1.1.0"
+    variety_match_key = "material_name"
+    format_field = "format"  # scraper should emit the explicit block/slab/tile tag here
+    required_columns = ["bundle_id", "material_name", "finish", "quality",
+                        "thickness", "slab_count", "photo_urls"]
+    required_canonical = ("src_natural_key", "raw_name")
+
+    field_map = {
+        "src_natural_key": lambda r: AdapterBase.clean(r.get("bundle_id")),
+        "scrape_timestamp": lambda r: AdapterBase.clean(r.get("scrape_timestamp")),
+        "raw_name": lambda r: _variety(r),
+        "variety_match_key": lambda r: _variety(r),
+        # composition is a classification tag, not a stone type; leave type to the
+        # matched variety (Stage 5 is authoritative)
+        "raw_type": lambda r: "",
+        "raw_color": lambda r: AdapterBase.clean(r.get("color")) or extract_color(_variety(r)),
+        "raw_finish": lambda r: AdapterBase.clean(r.get("finish")),
+        "raw_quality": lambda r: AdapterBase.clean(r.get("quality")),
+        "raw_format": lambda r: AdapterBase.clean(r.get("format")),
+        "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
+        "raw_dimensions": lambda r: _dims(r),
+        "raw_total_m2": lambda r: AdapterBase.clean(r.get("total_sqmt")),
+        "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
+        "raw_origin": lambda r: AdapterBase.clean(r.get("country_code")),
+        "raw_description": lambda r: AdapterBase.clean(r.get("description")),
+        "raw_image_urls": lambda r: AdapterBase.split_list(r.get("photo_urls"), "|"),
+    }
+
+
+def _dims(r: dict) -> str:
+    width = AdapterBase.first_of(r.get("slab_widths_m"), "|")
+    height = AdapterBase.first_of(r.get("slab_heights_m"), "|")
+    if not width and not height:
+        return ""
+    # width is the long edge on these exports; map it to length, height to height
+    return f"length={width}m;height={height}m"
+
+
+ADAPTER = VarshaAdapter()

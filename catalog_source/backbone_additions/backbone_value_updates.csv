@@ -1,0 +1,38 @@
+variety,attribute,add_value,currently_allowed,match_method,match_confidence,verdict,example_url
+White Travertine,quality,B,A,descriptor_exact_blocked,high,verify_match,https://marenostone.com/product/white-travertine-tile-2/
+Labradorite Di Oriente,color,Blue,"Green, Gold",projection_deprefixed,high,likely_real,https://marenostone.com/product/labradorite-blue-granite-slab/
+Namibia,color,White,Yellow,exact,high,likely_real,https://marenostone.com/product/namibia-white-granite-slab/
+Cloud,color,White,"Beige, Ivory, Cream",exact,high,likely_real,https://marenostone.com/product/cloud-white-marble-slab-21/
+Pearl Yellow,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",exact_blocked,high,likely_real,https://marenostone.com/product/pearl-grey-granite-slab/
+Persian Asgard,quality,B,A,exact,high,likely_real,https://marenostone.com/product/persian-asgard-marble-slab/
+Silver Travertine,quality,B,A,descriptor_phonetic,medium,verify_match,https://marenostone.com/product/silver-travertine/
+Arcadia Grey,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/sky-marble/
+China Golden Black,color,Pink,"Black, Gold, Brown, White, Yellow",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=470
+Fantasy Blue,color,White,"Grey, Blue",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=366
+Matarazzo,color,White,Gold,projection_tokenset,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=281
+Naika,color,Cream,White,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=673
+Patagonia Pink,color,Orchid,Pink,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=616
+Shadow White,quality,C,A,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=602
+Mystic Spring,color,Cream,"White, Grey, Black",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=651
+Mystic Spring,quality,B,A,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=651
+Giallo Alaska,quality,B,A,exact,high,likely_real,
+Andromeda White,quality,B,A,phonetic,medium,verify_match,
+Astoria Pink,quality,B,A,fuzzy,medium,verify_match,
+Black Forest Gold,quality,B,A,phonetic,medium,verify_match,
+Black Forest Gold,quality,C,A,phonetic,medium,verify_match,
+Amazon Blue,quality,B,A,fuzzy,medium,verify_match,
+Bordeaux,color,Bordeaux,"Brown, Red, Purple",exact,high,likely_real,
+Colonial White,quality,B,A,fuzzy,medium,verify_match,
+Colonial White,quality,C,A,fuzzy,medium,verify_match,
+Black Cosmic,quality,C,A,fuzzy,medium,verify_match,
+Grey Macaubus,quality,B,A,exact,high,likely_real,
+Indian Kinawa,quality,C,A,exact,high,likely_real,
+Kashmir Gold,quality,B,A,fuzzy,medium,verify_match,
+Massimo,quality,B,A,exact,high,likely_real,
+Mona Lisa,quality,B,A,fuzzy,medium,verify_match,
+Mona Lisa,quality,C,A,fuzzy,medium,verify_match,
+River White,quality,B,A,phonetic,medium,verify_match,
+River White,quality,C,A,fuzzy,medium,verify_match,
+Viscount White,quality,B,A,exact,high,likely_real,
+Viscount White,quality,C,A,exact,high,likely_real,
+Vizag Blue,quality,B,A,phonetic,medium,verify_match,

@@ -1,0 +1,5 @@
+match_type,pattern,country_iso,city,county
+variety,Carrara,IT,Carrara,Tuscany
+variety,Travertine,IT,Tivoli,Lazio
+pattern,carrara,IT,Carrara,Tuscany
+pattern,calacatta,IT,Carrara,Tuscany

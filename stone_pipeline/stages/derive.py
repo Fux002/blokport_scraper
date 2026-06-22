@@ -1,0 +1,346 @@
+"""Stage 6: field derivation (section 7 Stage 6, worked ladders in section 10).
+
+Runs the remaining resolvers in dependency order: category and units first, then
+bundle and dimensions and origin, then title (needs variety/finish/format), then
+description (needs origin/finish), then handle (needs title). Each resolver is a
+trust-ordered strategy ladder, so the ordering is a dependency declaration, not
+bespoke control flow. Never guesses a value above its floor into output; a
+low-confidence fill still emits but always carries its flag.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence
+from stone_pipeline.config.sources import SourceConfig
+from stone_pipeline.core import ids, logfmt
+from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
+from stone_pipeline.core.text import slugify, title_case
+from stone_pipeline.reference.loaders import ReferenceData
+
+log = logfmt.get_logger("derive")
+
+_NUM_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*([a-zµ\"']+)?", flags=re.IGNORECASE)
+
+# section 10.2 branch dimension/weight ranges (fallback only; real parsed dims win)
+_SLAB_RANGES = {"weight": (0.225, 0.350), "length": (1.5, 3.0), "height": (1.5, 3.0)}
+_BLOCK_RANGES = {"weight": (18.0, 23.0), "length": (1.5, 3.0), "width": (1.5, 3.0), "height": (1.5, 3.0)}
+
+# section 10.4 finish-to-surface-phrase table
+_FINISH_PHRASE = {
+    "honed": "a smooth matte surface",
+    "polished": "a bright reflective surface",
+    "leathered": "a soft textured surface",
+    "brushed": "a lightly textured surface",
+    "flamed": "a rugged non-slip surface",
+    "split face": "a dramatic three-dimensional natural cleft",
+    "sandblasted": "a fine matte texture",
+    "tumbled": "a worn antique surface",
+}
+
+
+def _conf_name(c: Confidence) -> str:
+    return Confidence(c).name
+
+
+def _parse_measure(text: str, ref: ReferenceData) -> float | None:
+    """Parse a single '2cm' / '2.80m' measure to metres via units.csv."""
+    if not text:
+        return None
+    match = _NUM_UNIT.search(text)
+    if not match:
+        return None
+    value = float(match.group(1))
+    token = (match.group(2) or "m").lower().strip("\"'")
+    converted = ref.units.convert(value, token)
+    return converted if converted is not None else value
+
+
+# --- category (section 7 Stage 6) ---------------------------------------------
+def derive_category(row: CanonicalRow, ref: ReferenceData) -> None:
+    """Map the already-resolved format (format_resolve stage) to a backend
+    category. Each active category routes to its OWN pcat via
+    category_pcat_for_branch (Blocks->Blocks, Slabs->Slabs, Tiles->Tiles once the
+    tile category id is set). If the format stage has not run, resolve it now as a
+    safety net so this stage never depends on ordering."""
+    from stone_pipeline.stages.format_resolve import branch_of, category_pcat_for_branch, resolve_format
+
+    if not row.format_value:
+        resolve_format(row, ref)
+    row.category_pcat_id = category_pcat_for_branch(branch_of(row), ref)
+    row.category_method = f"format:{row.format_method or 'unknown'}"
+
+
+# --- dimensions and weight (section 10.2) -------------------------------------
+def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
+    parsed: dict[str, float] = {}
+    if row.raw_dimensions:
+        for part in row.raw_dimensions.split(";"):
+            if "=" in part:
+                key, val = part.split("=", 1)
+                meters = _parse_measure(val, ref)
+                if meters is not None:
+                    parsed[key.strip().lower()] = meters
+    width = _parse_measure(row.raw_thickness, ref) if row.raw_thickness else None
+
+    ranges = _BLOCK_RANGES if row.is_block else _SLAB_RANGES
+    methods = []
+
+    length = parsed.get("length")
+    height = parsed.get("height")
+    if length is None:
+        length = round(ids.seeded_uniform(row.surrogate_key, "length", *ranges["length"]), 3)
+        methods.append("length:synthetic")
+    else:
+        methods.append("length:parsed")
+    if height is None:
+        height = round(ids.seeded_uniform(row.surrogate_key, "height", *ranges["height"]), 3)
+        methods.append("height:synthetic")
+    else:
+        methods.append("height:parsed")
+    if width is None:
+        low, high = ranges.get("width", (0.2, 0.2))
+        width = round(ids.seeded_uniform(row.surrogate_key, "width", low, high), 3) if low != high else low
+        methods.append("width:synthetic")
+    else:
+        methods.append("width:parsed")
+
+    weight = _parse_measure(row.raw_weight, ref) if row.raw_weight else None
+    if weight is None or weight <= 0:
+        weight = round(ids.seeded_uniform(row.surrogate_key, "weight", *ranges["weight"]), 3)
+        methods.append("weight:synthetic")
+    else:
+        methods.append("weight:parsed")
+
+    # range sanity: flag out-of-range parsed dims (section 6 Stage 6)
+    for name, value in (("length", length), ("width", width), ("height", height)):
+        lo, hi = ranges.get(name, (0.0, 5.0))
+        if value < lo * 0.3 or value > hi * 3:
+            row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_out_of_range,
+                                    raw_value=str(value), confidence=Confidence.low,
+                                    method="range_check", src_url=row.src_url))
+
+    row.length, row.width, row.height, row.weight = round(length, 3), round(width, 3), round(height, 3), round(weight, 3)
+    row.dimension_method = ",".join(methods)
+
+
+# --- bundle size ladder (section 10.1, the exemplar) --------------------------
+def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
+    if row.is_block:
+        row.sold_in_bundle = False
+        row.bundle_size = None
+        row.bundle_size_method = "block_short_circuit"
+        row.bundle_size_confidence = _conf_name(Confidence.high)
+        return
+
+    row.sold_in_bundle = True
+
+    def _accept(value, method, conf, flag_code=None):
+        row.bundle_size = int(value)
+        row.bundle_size_method = method
+        row.bundle_size_confidence = _conf_name(conf)
+        if flag_code:
+            row.add_flag(ReviewFlag(field="bundle_size", code=flag_code, best_guess=str(value),
+                                    confidence=conf, method=method, src_url=row.src_url))
+
+    # 2. explicit bundle size
+    if row.raw_bundle_size and row.raw_bundle_size.strip().isdigit():
+        return _accept(int(row.raw_bundle_size), "explicit_bundle_size", Confidence.high)
+    # 3. explicit slab count
+    if row.raw_slab_count and row.raw_slab_count.strip().isdigit():
+        return _accept(int(row.raw_slab_count), "explicit_slab_count", Confidence.high)
+    # 4. slabs array length
+    if row.raw_slabs_array:
+        count = row.raw_slabs_array.count('"n"') or row.raw_slabs_array.count('"Numero"')
+        if count > 0:
+            return _accept(count, "slabs_array_length", Confidence.high)
+    # 5. area division
+    total = _to_float(row.raw_total_m2)
+    per = _to_float(row.raw_per_slab_m2)
+    if total and per and per > 0:
+        quotient = total / per
+        if 1 <= quotient <= 60 and abs(quotient - round(quotient)) < 0.15:
+            return _accept(round(quotient), "area_division", Confidence.medium)
+        row.add_flag(ReviewFlag(field="bundle_size", code=FlagCode.bundle_ratio_noninteger,
+                                best_guess=f"{quotient:.2f}", confidence=Confidence.low,
+                                method="area_division", src_url=row.src_url))
+    # 6. standard slab area
+    if total:
+        area = _standard_area(ref, row.type_name)
+        if area:
+            est = max(1, round(total / area))
+            return _accept(est, "standard_slab_area", Confidence.low, FlagCode.bundle_estimated)
+    # 7. config default
+    _accept(source_cfg.default_bundle_size, "config_default", Confidence.low, FlagCode.bundle_default)
+
+
+def _standard_area(ref: ReferenceData, type_name: str | None) -> float | None:
+    # standard_slab_area.csv is loaded lazily here from the reference dir
+    from stone_pipeline.config.settings import SETTINGS as _S
+    import csv
+    path = _S.paths.standard_slab_area_csv
+    if not path.exists():
+        return None
+    default = None
+    by_type = {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for r in csv.DictReader(handle):
+            if r["scope"] == "default":
+                default = float(r["slab_area_m2"])
+            elif r["scope"] == "type":
+                by_type[r["key"].casefold()] = float(r["slab_area_m2"])
+    if type_name and type_name.casefold() in by_type:
+        return by_type[type_name.casefold()]
+    return default
+
+
+def _to_float(text: str | None) -> float | None:
+    if not text:
+        return None
+    try:
+        return float(str(text).replace(",", ""))
+    except ValueError:
+        return None
+
+
+# --- origin (section 7 Stage 6) -----------------------------------------------
+def derive_origin(row: CanonicalRow, ref: ReferenceData,
+                  source_cfg: SourceConfig | None = None) -> None:
+    # 1. populated source location/country (rare, high)
+    if row.raw_origin and len(row.raw_origin) == 2 and row.raw_origin.isalpha():
+        row.origin_country_code = row.raw_origin.upper()
+        row.origin_source = "scrape_field"
+        row.origin_confidence = _conf_name(Confidence.high)
+        return
+    # 2. origin_map by variety or pattern (medium) — the per-variety source of truth
+    rule = ref.origin_map.lookup(row.variation_name or row.raw_name or "")
+    if rule:
+        row.origin_country_code = rule.country_iso
+        row.origin_city = rule.city
+        row.origin_county = rule.county
+        row.origin_source = "origin_map"
+        row.origin_confidence = _conf_name(Confidence.medium)
+        return
+    # 3. supplier default: the country of this source's default port (the company's
+    #    country). A logical placeholder until origin_map covers the variety.
+    if source_cfg:
+        iso = ref.ports.country_of((source_cfg.ports_default or [None])[0])
+        if iso:
+            row.origin_country_code = iso
+            row.origin_source = "source_default"
+            row.origin_confidence = _conf_name(Confidence.low)
+            return
+    # 4. none + review flag
+    row.origin_source = "unresolved"
+    row.origin_confidence = _conf_name(Confidence.none)
+    row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_unresolved,
+                            raw_value=row.raw_origin, confidence=Confidence.none,
+                            method="no_strategy", src_url=row.src_url))
+
+
+# --- ports (section 3.3) ------------------------------------------------------
+def derive_ports(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
+    if row.origin_country_code:
+        ports = ref.ports.for_country(row.origin_country_code, limit=2)
+        if ports:
+            row.port_ids = ports
+            return
+    row.port_ids = list(source_cfg.ports_default)
+    row.add_flag(ReviewFlag(field="port_ids", code=FlagCode.ports_default,
+                            best_guess="|".join(row.port_ids), confidence=Confidence.low,
+                            method="default", src_url=row.src_url))
+
+
+# --- title / description / handle (section 10.3, 10.4) ------------------------
+_FORMAT_WORD = {c.name: c.name.title() for c in CATEGORIES}  # slab -> Slab
+
+
+def _primary_variety_name(name: str) -> str:
+    """Drop a trailing parenthetical alias from a variant name for display
+    (e.g. 'Carrara (Bianco Carrara)' -> 'Carrara')."""
+    return re.sub(r"\s*\(.*?\)\s*", " ", name or "").strip()
+
+
+def derive_title(row: CanonicalRow) -> None:
+    fmt = _FORMAT_WORD.get((row.format_value or "").strip().casefold(), "Slab")
+    if row.variation_name:
+        parts = [_primary_variety_name(row.variation_name)]
+        if row.finish_name:
+            parts.append(row.finish_name)
+        parts.append(fmt)
+        row.title = title_case(" ".join(parts))
+        row.title_method = "construct"
+    else:
+        row.title = title_case(row.raw_name or "")
+        row.title_method = "raw_name_fallback"
+
+
+def derive_description(row: CanonicalRow) -> None:
+    if row.raw_description and len(row.raw_description.strip()) > 20:
+        row.description = row.raw_description.strip()
+        row.description_method = "passthrough"
+        return
+    variety = row.variation_name or row.raw_name or "This stone"
+    color = (row.color_name or "natural").lower()
+    stone_type = (row.type_name or "stone").lower()
+    if row.origin_city and row.origin_country_code:
+        origin_clause = f"extracted in {row.origin_city}, {row.origin_country_code}"
+    else:
+        origin_clause = "natural stone"
+    fmt = _FORMAT_WORD.get((row.format_value or "").strip().casefold(), "slab").lower()
+    finish = (row.finish_name or "").lower()
+    phrase = _FINISH_PHRASE.get(finish, "a refined natural surface")
+    finish_clause = f"a {finish} {fmt}" if finish else f"a {fmt}"
+    row.description = (
+        f"{variety} is a {color} {stone_type} {origin_clause}. "
+        f"Supplied as {finish_clause}, it presents {phrase}."
+    )
+    row.description_method = "template"
+
+
+def derive_handle(row: CanonicalRow, source_cfg: SourceConfig) -> None:
+    # slugify(title), namespaced with source code + surrogate for global
+    # uniqueness and stable upsert (section 10 Stage 10, section 11.4)
+    base = slugify(row.title or row.raw_name or "")
+    namespaced = f"{base}-{source_cfg.source_code}-{slugify(row.surrogate_key or '')}"
+    row.handle = namespaced
+    row.slug = namespaced
+
+
+def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
+    """Override is the top strategy for the derived fields too (section 8.4)."""
+    if ref.overrides is None:
+        return
+    get = lambda f: ref.overrides.get(row.src_site, row.surrogate_key or "", f)
+    if (v := get("bundle_size")) and str(v).isdigit():
+        row.bundle_size, row.bundle_size_method, row.bundle_size_confidence = int(v), "override", "high"
+    if v := get("origin_country_code"):
+        row.origin_country_code, row.origin_source, row.origin_confidence = v.upper(), "override", "high"
+    if v := get("origin_city"):
+        row.origin_city = v
+    if v := get("title"):
+        row.title, row.title_method = v, "override"
+    if v := get("description"):
+        row.description, row.description_method = v, "override"
+
+
+@dataclass
+class DeriveStats:
+    rows: int = 0
+
+
+def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) -> DeriveStats:
+    for row in rows:
+        derive_category(row, ref)
+        derive_dimensions(row, ref)
+        derive_bundle_size(row, ref, source_cfg)
+        derive_origin(row, ref, source_cfg)
+        derive_ports(row, ref, source_cfg)
+        derive_title(row)
+        derive_description(row)
+        _apply_overrides(row, ref)  # overrides win over the derived values
+        derive_handle(row, source_cfg)  # handle follows the (possibly overridden) title
+    log.info("derive done", extra={"extra_fields": {"rows": len(rows)}})
+    return DeriveStats(rows=len(rows))

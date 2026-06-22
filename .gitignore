@@ -1,0 +1,35 @@
+# --- Python ---
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- Produced pipeline output (regenerated every run; not source) ---
+outputs/
+state/
+data/
+to_upload/
+review/
+images/
+image_pipeline/images/
+image_pipeline/to_upload/
+image_pipeline/prompts_to_generate.json
+*.parquet
+*.bak
+failures.jsonl
+
+# Large, environment-specific Medusa download — provide/refresh at deploy time.
+# (catalog_source/ and from_medusa/attributes.csv ARE committed: source of truth.)
+from_medusa/variants_export.csv
+
+# --- OS ---
+.DS_Store
+
+# --- Terraform (state, plans, provider cache, and secret tfvars) ---
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+infra/**/terraform.tfvars
+infra/**/*.auto.tfvars

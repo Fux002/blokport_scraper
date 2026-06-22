@@ -1,0 +1,452 @@
+[
+  {
+    "key": "tile_granite_tiger_769d13c7-c940-543f-aaae-60ddf3a509c1",
+    "variant": "Tiger",
+    "category": "Tiles",
+    "stone_type": "Granite",
+    "color": [
+      "Black"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_granite_tiger_769d13c7-c940-543f-aaae-60ddf3a509c1.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "tile_onyx_dark_91190bb7-8c09-580e-aaff-bf629bf0797c",
+    "variant": "Dark",
+    "category": "Tiles",
+    "stone_type": "Onyx",
+    "color": [
+      "Green"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_onyx_dark_91190bb7-8c09-580e-aaff-bf629bf0797c.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_granite_grey_basalt_795b0bf5-5a88-54f2-84ed-74ffc7eec078",
+    "variant": "Grey Basalt",
+    "category": "Tiles",
+    "stone_type": "Granite",
+    "color": [
+      "Grey"
+    ],
+    "finishes": [
+      "Honed",
+      "Polished",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_granite_grey_basalt_795b0bf5-5a88-54f2-84ed-74ffc7eec078.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "tile_onyx_brown_onyx_9c0c4257-fea3-5fb9-ab77-ecc8aceec501",
+    "variant": "Brown Onyx",
+    "category": "Tiles",
+    "stone_type": "Onyx",
+    "color": [
+      "Brown"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_onyx_brown_onyx_9c0c4257-fea3-5fb9-ab77-ecc8aceec501.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_granite_crystal_white_2405f15a-2c1a-59f8-953c-f3f0b10f4518",
+    "variant": "Crystal White",
+    "category": "Tiles",
+    "stone_type": "Granite",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Textured",
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_granite_crystal_white_2405f15a-2c1a-59f8-953c-f3f0b10f4518.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_granite_grey_granite_fbe8f311-b47f-56aa-bd32-b5392acb5e15",
+    "variant": "Grey Granite",
+    "category": "Tiles",
+    "stone_type": "Granite",
+    "color": [
+      "Grey"
+    ],
+    "finishes": [
+      "Textured",
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_granite_grey_granite_fbe8f311-b47f-56aa-bd32-b5392acb5e15.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_travertine_golden_silver_2194cf24-5dc1-597e-b390-022bfa1d7d1e",
+    "variant": "Golden Silver",
+    "category": "Tiles",
+    "stone_type": "Travertine",
+    "color": [
+      "Cream"
+    ],
+    "finishes": [
+      "Leathered",
+      "Polished",
+      "Honed",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_travertine_golden_silver_2194cf24-5dc1-597e-b390-022bfa1d7d1e.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_marble_white_gold_5fb1a2b0-e0b6-5bac-8ffd-485871924afe",
+    "variant": "White Gold",
+    "category": "Tiles",
+    "stone_type": "Marble",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_marble_white_gold_5fb1a2b0-e0b6-5bac-8ffd-485871924afe.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_travertine_marjan_0bd27718-cf46-5234-8eb1-ad0b81c25ec4",
+    "variant": "Marjan",
+    "category": "Tiles",
+    "stone_type": "Travertine",
+    "color": [
+      "Silver"
+    ],
+    "finishes": [
+      "Honed",
+      "Polished",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_travertine_marjan_0bd27718-cf46-5234-8eb1-ad0b81c25ec4.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_travertine_cream_travertine_6496c625-c6fa-5498-be05-2aec17dfdaf0",
+    "variant": "Cream Travertine",
+    "category": "Tiles",
+    "stone_type": "Travertine",
+    "color": [
+      "Cream"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_travertine_cream_travertine_6496c625-c6fa-5498-be05-2aec17dfdaf0.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_marble_golden_blue_801c730c-9c25-5210-b942-11a905ab8cdd",
+    "variant": "Golden Blue",
+    "category": "Tiles",
+    "stone_type": "Marble",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_marble_golden_blue_801c730c-9c25-5210-b942-11a905ab8cdd.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_marble_white_marble_7251f9ee-a0ea-5ed3-82fe-e5759723f299",
+    "variant": "White Marble",
+    "category": "Tiles",
+    "stone_type": "Marble",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_marble_white_marble_7251f9ee-a0ea-5ed3-82fe-e5759723f299.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_dolomite_marble_calacatta_gold_a2b35b35-38d5-5149-b284-d7db1f560aae",
+    "variant": "CALACATTA GOLD",
+    "category": "Tiles",
+    "stone_type": "Dolomite Marble",
+    "color": [
+      "Yellow"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_dolomite_marble_calacatta_gold_a2b35b35-38d5-5149-b284-d7db1f560aae.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060",
+    "variant": "Matarazzo",
+    "category": "Tiles",
+    "stone_type": "Dolomite Marble",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_dolomite_marble_super_white_bea4f3ba-a202-540e-9922-5722e8124efa",
+    "variant": "SUPER WHITE",
+    "category": "Tiles",
+    "stone_type": "Dolomite Marble",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_dolomite_marble_super_white_bea4f3ba-a202-540e-9922-5722e8124efa.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_infinity_white_3edea7fa-6e7c-5d5f-a18a-3f8890d8f452",
+    "variant": "INFINITY WHITE",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_infinity_white_3edea7fa-6e7c-5d5f-a18a-3f8890d8f452.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  }
+]

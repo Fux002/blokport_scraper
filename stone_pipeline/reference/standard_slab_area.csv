@@ -1,0 +1,5 @@
+scope,key,slab_area_m2
+default,default,5.0
+type,Granite,5.4
+type,Marble,5.0
+type,Quartzite,5.4

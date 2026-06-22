@@ -1,0 +1,27 @@
+# Keep the build context small + never bake data/secrets into the image.
+.venv/
+.git/
+.github/
+infra/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Produced / downloaded data — regenerated at runtime, not part of the image.
+outputs/
+state/
+data/
+to_upload/
+review/
+from_medusa/variants_export.csv
+images/
+image_pipeline/images/
+image_pipeline/to_upload/
+*.parquet
+*.bak
+failures.jsonl
+
+# Docs (not needed at runtime)
+*.md
+!RUNBOOK.md

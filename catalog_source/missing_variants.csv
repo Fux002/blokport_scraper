@@ -1,0 +1,4 @@
+Key,Name,branch,reason
+block_granite_rosa_porrino_676849dd-5499-4f1b-b703-52ef4020b2f4,Rosa Porrino,block,ambiguous_image: shares Key-stem block_granite_rosa_porrino with Rosa Porriño; 2 images can't be auto-assigned
+block_granite_rosa_porrino_e7f2768e-b9a2-4269-a10b-c7571768b33b,Rosa Porriño,block,ambiguous_image: shares Key-stem block_granite_rosa_porrino with Rosa Porrino; 2 images can't be auto-assigned
+block_quartzitic_sandstone_kandla_quartzitic_c59cb35b-1cf7-4655-a0b6-31c0b681b717,Kandla Quartzitic,block,no_image: no image exists for this variant (was on the to-generate list)

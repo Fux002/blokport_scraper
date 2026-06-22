@@ -1,0 +1,155 @@
+"""AdapterBase and the adapter framework (section 7 Stage 1, section 7A).
+
+An adapter is thin and mostly declarative (section 7A.1): a field map from source
+columns (or small extraction rules) to canonical src_ and raw_ fields. AdapterBase
+owns the canonical schema, the required-field assertions, the variety_match_key
+declaration, and the shared parsing helpers, so an adapter author writes only what
+is genuinely source-specific.
+
+The adapter does only column mapping and light parsing. No normalization, no
+matching, no derivation, and it does not build title, description, handle, or
+slug; those are generated downstream in Stage 6 (section 7 Stage 1).
+"""
+
+from __future__ import annotations
+
+import html
+import re
+from typing import Any, Callable, Iterable, Optional, Union
+
+import polars as pl
+
+from stone_pipeline.config.contracts import SourceContract, generate_contract_from_sample
+from stone_pipeline.core import logfmt
+from stone_pipeline.core.schema import CanonicalRow
+
+log = logfmt.get_logger("adapter")
+
+# A field map entry is either a source column name (str) or a callable that takes
+# the source row dict and returns the canonical value.
+FieldRule = Union[str, Callable[[dict[str, Any]], Any]]
+
+
+class AdapterBase:
+    """Subclass and set: source, adapter_version, variety_match_key (the source
+    column carrying the variety name, may be None for generic-descriptor sources),
+    required_columns (source columns Stage 0 must see), and field_map."""
+
+    source: str = ""
+    adapter_version: str = "0.0.0"
+    variety_match_key: Optional[str] = None
+    # the scrape column that carries the explicit block/slab/tile tag (the scraper
+    # should set this); None when the source has no format tag yet
+    format_field: Optional[str] = None
+    # True for sources whose product name is a generic colour+type descriptor with
+    # no clean variety column. The matcher then auto-accepts only deterministic
+    # (exact/projection) variation hits and routes fuzzy/phonetic ones to review.
+    generic_descriptor: bool = False
+    required_columns: list[str] = []
+    # canonical field -> source column or callable
+    field_map: dict[str, FieldRule] = {}
+    # canonical fields that must be non-empty after mapping, else the row is bad
+    required_canonical: tuple[str, ...] = ("src_natural_key",)
+
+    # --- shared parsing helpers (section 7A.1) --------------------------------
+    @staticmethod
+    def clean(value: Any) -> str:
+        if value is None:
+            return ""
+        # decode HTML entities (&#8211; -> en-dash, &amp; -> &) so scraped names match
+        # the reference, which stores decoded names — else 'Marjan &#8211; No. 426'
+        # never matches the variant 'Marjan – No. 426' and the product is dropped.
+        return html.unescape(str(value)).strip()
+
+    @staticmethod
+    def strip_trailing_token(value: Any, token: str = "/") -> str:
+        """Drop a trailing render or grade tag such as polonine's 'Granite /'."""
+        text = AdapterBase.clean(value)
+        text = re.sub(rf"\s*{re.escape(token)}\s*$", "", text)
+        return text.strip()
+
+    @staticmethod
+    def split_list(value: Any, sep: str = "|") -> list[str]:
+        text = AdapterBase.clean(value)
+        if not text:
+            return []
+        return [part.strip() for part in text.split(sep) if part.strip()]
+
+    @staticmethod
+    def first_of(value: Any, sep: str = "|") -> str:
+        parts = AdapterBase.split_list(value, sep)
+        return parts[0] if parts else ""
+
+    # --- the engine -----------------------------------------------------------
+    def _apply_rule(self, rule: FieldRule, record: dict[str, Any]) -> Any:
+        if callable(rule):
+            return rule(record)
+        return record.get(rule)
+
+    def adapt_record(self, record: dict[str, Any]) -> Optional[CanonicalRow]:
+        data: dict[str, Any] = {"src_site": self.source, "adapter_version": self.adapter_version}
+        for canonical_field, rule in self.field_map.items():
+            data[canonical_field] = self._apply_rule(rule, record)
+        # declare the variety match key value only when the field map did not set
+        # it at all. An empty string set by the map is intentional (a generic
+        # descriptor with no named variety) and must not fall back to the raw
+        # column, or the gap routing for those rows is defeated.
+        if self.variety_match_key and "variety_match_key" not in data:
+            data["variety_match_key"] = self.clean(record.get(self.variety_match_key))
+        row = CanonicalRow.model_validate(data)
+        for required in self.required_canonical:
+            if not getattr(row, required, None):
+                return None
+        return row
+
+    def adapt(self, frame: pl.DataFrame) -> list[CanonicalRow]:
+        """Row-isolated mapping (section 13A.3): a malformed row is dropped, the
+        batch continues; the count of dropped rows is logged."""
+        rows: list[CanonicalRow] = []
+        dropped = 0
+        for record in frame.iter_rows(named=True):
+            try:
+                row = self.adapt_record(dict(record))
+            except Exception as exc:  # isolate the bad row
+                dropped += 1
+                log.warning(
+                    "adapter dropped a row",
+                    extra={"extra_fields": {"source": self.source, "error": str(exc)}},
+                )
+                continue
+            if row is None:
+                dropped += 1
+                continue
+            rows.append(row)
+        log.info(
+            f"adapted {len(rows)} rows ({dropped} dropped) for {self.source}",
+            extra={"extra_fields": {"source": self.source, "version": self.adapter_version}},
+        )
+        return rows
+
+    def smoke_count(self, sample: pl.DataFrame) -> int:
+        """Count valid canonical rows produced from a sample, for the Stage 0
+        parse smoke test (section 7 check 5)."""
+        return len(self.adapt(sample))
+
+    def generate_contract(self, frame: pl.DataFrame) -> SourceContract:
+        """The field map generates the source's contract entry (section 7A.1),
+        keeping the health contract and the adapter in sync by construction."""
+        contract = generate_contract_from_sample(
+            self.source, frame, self.required_columns, self.adapter_version
+        )
+        return contract
+
+
+def normalize_header(frame: pl.DataFrame) -> pl.DataFrame:
+    """Strip a leading UTF-8 BOM from the first column name (common in these
+    scrape exports) so the field map matches by plain column names."""
+    if frame.width and frame.columns[0].startswith("﻿"):
+        frame = frame.rename({frame.columns[0]: frame.columns[0].lstrip("﻿")})
+    return frame
+
+
+def read_scrape_csv(path) -> pl.DataFrame:
+    """Read a scrape file as all-strings (adapters do their own light parsing)."""
+    frame = pl.read_csv(path, infer_schema_length=0)
+    return normalize_header(frame)

@@ -1,0 +1,17 @@
+# Optional image-processing extras for the scraped-photo enhancement pipeline
+# (stone_pipeline/io/image_processing.py). The FAITHFUL enhancement + Lanczos
+# upscale chain needs only OpenCV/numpy/Pillow (already core deps); these are
+# ONLY required for de-watermarking flagged sources (varsha), which detects the
+# mark with Florence-2 and inpaints it with LaMa. Install on the AWS image-
+# processing container/job; the core pipeline does not need them.
+#
+#   pip install -r stone_pipeline/requirements-imageproc.txt
+#
+# GPU is optional but a large speed-up for a big batch; CPU works for small runs.
+
+torch>=2.2
+torchvision>=0.17
+transformers>=4.44      # Florence-2 (microsoft/Florence-2-large, trust_remote_code)
+einops                  # required by Florence-2's remote code
+timm                    # required by Florence-2's vision backbone
+simple-lama-inpainting  # LaMa inpainting wrapper (downloads weights on first use)

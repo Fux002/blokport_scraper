@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (gitignored) to override defaults.
+#
+# The dev staging bucket is known and preset. The PROD bucket is TBD — fill it in
+# when the prod S3 details are shared, which grants the task write access to it:
+# prod_staging_bucket = "blokport-prod-staging-REPLACE_ME"
+#
+# default_target_env  = "development"   # what a bare run/schedule targets
+# image_tag           = "core"          # or "imageproc" for de-watermark
+# schedule_enabled    = false           # flip true once a manual run is verified
+# schedule_expression = "cron(0 3 * * ? *)"

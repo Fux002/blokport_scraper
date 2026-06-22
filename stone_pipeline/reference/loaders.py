@@ -1,0 +1,430 @@
+"""Reference data loaders (section 6, section 6A).
+
+Three files do three jobs (section 6A):
+  - backbone.json decides what is valid (per variety: stone_type and the allowed
+    colour, finish, quality sets). Names only, no ids.
+  - attributes.csv maps attribute names to backend ids (colour, finish, quality,
+    type, and the two category pcat ids).
+  - variants_<category>.csv maps a variety name (plus aliases) to its variation
+    id, selected by branch (slabs vs blocks).
+
+Every id-bearing file is a live backend export and can lag (section 6). A
+content hash of each is recorded so a run is reproducible against a snapshot.
+The loaders return typed structures; gap detection and id validity are checked
+against the live set at run start (the fingerprint check below).
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS
+from stone_pipeline.core import logfmt
+from stone_pipeline.core.manifest import content_hash
+
+log = logfmt.get_logger("reference")
+
+# Vocabulary categories carried in attributes.csv (section 6).
+VOCAB_CATEGORIES = ("color", "finish", "type", "quality")
+
+
+def _norm(value: str) -> str:
+    """The shared normalization used for every name lookup: casefold, collapse
+    whitespace. Matching projections (5A.1) extend this; this is the base key."""
+    return " ".join((value or "").strip().casefold().split())
+
+
+# --- attributes.csv -----------------------------------------------------------
+@dataclass
+class Attributes:
+    """Name to backend id, per vocabulary, plus the two category pcat ids."""
+
+    # category -> {normalized_name -> (canonical_name, id)}
+    by_category: dict[str, dict[str, tuple[str, str]]] = field(default_factory=dict)
+    category_pcat: dict[str, str] = field(default_factory=dict)  # 'Slabs'/'Blocks' -> pcat id
+
+    def resolve_id(self, category: str, name: str) -> Optional[tuple[str, str]]:
+        """Return (canonical_name, id) for an exact normalized name, else None."""
+        table = self.by_category.get(category, {})
+        return table.get(_norm(name))
+
+    def canonical_names(self, category: str) -> list[str]:
+        return [canon for canon, _ in self.by_category.get(category, {}).values()]
+
+    def all_ids(self) -> list[str]:
+        ids: list[str] = list(self.category_pcat.values())
+        for table in self.by_category.values():
+            ids.extend(i for _, i in table.values())
+        return ids
+
+
+def load_attributes(path: Path | None = None) -> Attributes:
+    path = Path(path or SETTINGS.paths.attributes_csv)
+    attrs = Attributes()
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            category = (record.get("category") or "").strip()
+            value = (record.get("value") or "").strip()
+            sourceid = (record.get("sourceid") or "").strip()
+            if not category or not value or not sourceid:
+                continue
+            if category == "category":
+                attrs.category_pcat[value] = sourceid
+            else:
+                attrs.by_category.setdefault(category, {})[_norm(value)] = (value, sourceid)
+    return attrs
+
+
+# --- variants_<category>.csv --------------------------------------------------
+@dataclass
+class Variant:
+    variation_id: str
+    key: str
+    name: str
+    image: str
+    aliases: list[str]
+
+
+@dataclass
+class VariantTable:
+    branch: str  # 'slab' or 'block'
+    by_id: dict[str, Variant] = field(default_factory=dict)
+    # normalized name/alias -> variation_id (built here for exact lookups; the
+    # full projection index is built in matching/index.py for M5).
+    surface_to_id: dict[str, str] = field(default_factory=dict)
+
+    def all_ids(self) -> list[str]:
+        return list(self.by_id.keys())
+
+
+def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> VariantTable:
+    """Load a variants table. key_prefix filters rows by their Key's leading token
+    (slab/block), so a single combined export can feed both branches: slab-keyed
+    rows go to the slab table, block-keyed rows to the block table."""
+    table = VariantTable(branch=branch)
+    path = Path(path)
+    if not path.exists():
+        log.warning(f"variants file absent for branch {branch}: {path}")
+        return table
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            vid = (record.get("Id") or "").strip()
+            name = (record.get("Name") or "").strip()
+            key = (record.get("Key") or "").strip()
+            if not vid or not name:
+                continue
+            if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
+                continue
+            aliases_raw = (record.get("Aliases") or "").strip()
+            aliases = [a.strip() for a in aliases_raw.split("|") if a.strip()] if aliases_raw else []
+            variant = Variant(
+                variation_id=vid,
+                key=(record.get("Key") or "").strip(),
+                name=name,
+                image=(record.get("Image") or "").strip(),
+                aliases=aliases,
+            )
+            table.by_id[vid] = variant
+            for surface in [name, *aliases]:
+                table.surface_to_id.setdefault(_norm(surface), vid)
+    return table
+
+
+# --- backbone.json ------------------------------------------------------------
+@dataclass
+class BackboneVariety:
+    variant: str
+    category: str
+    stone_type: str
+    colors: list[str]
+    finishes: list[str]
+    qualities: list[str]
+    aliases: list[str]
+
+
+@dataclass
+class Backbone:
+    # A name can repeat across stone types and colours (e.g. "Green" appears as
+    # several distinct varieties), so each key holds a list and disambiguation is
+    # by stone_type (section 5A blocking).
+    by_norm_name: dict[str, list[BackboneVariety]] = field(default_factory=dict)
+    by_norm_alias: dict[str, list[BackboneVariety]] = field(default_factory=dict)
+
+    def lookup_all(self, name: str) -> list[BackboneVariety]:
+        key = _norm(name)
+        return self.by_norm_name.get(key) or self.by_norm_alias.get(key) or []
+
+    def lookup(self, name: str, stone_type: str | None = None) -> Optional[BackboneVariety]:
+        candidates = self.lookup_all(name)
+        if not candidates:
+            return None
+        if stone_type:
+            for variety in candidates:
+                if _norm(variety.stone_type) == _norm(stone_type):
+                    return variety
+        return candidates[0]
+
+    def is_valid_leaf(self, variety: BackboneVariety, color: str, finish: str, quality: str) -> bool:
+        """Set-membership validity (section 6A): the chosen colour, finish, and
+        quality must each be in the variety's allowed set. Names compared
+        normalized so case never causes a false gap."""
+        cset = {_norm(c) for c in variety.colors}
+        fset = {_norm(f) for f in variety.finishes}
+        qset = {_norm(q) for q in variety.qualities}
+        return (
+            (not color or _norm(color) in cset)
+            and (not finish or _norm(finish) in fset)
+            and (not quality or _norm(quality) in qset)
+        )
+
+    def __len__(self) -> int:
+        return len(self.by_norm_name)
+
+
+def _split_aliases(raw_aliases: list) -> list[str]:
+    """Backbone aliases are a list of strings, some containing comma-joined
+    surface forms (e.g. 'Preto Agata, Agate Black'). Flatten into single forms."""
+    out: list[str] = []
+    for entry in raw_aliases or []:
+        if not isinstance(entry, str):
+            continue
+        for piece in entry.split(","):
+            piece = piece.strip()
+            if piece:
+                out.append(piece)
+    return out
+
+
+def load_backbone(path: Path | None = None) -> Backbone:
+    path = Path(path or SETTINGS.paths.backbone_json)
+    backbone = Backbone()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    posts = data.get("posts", data if isinstance(data, list) else [])
+    for post in posts:
+        variant_name = (post.get("variant") or "").strip()
+        if not variant_name:
+            continue
+        variety = BackboneVariety(
+            variant=variant_name,
+            category=(post.get("category") or "").strip(),
+            stone_type=(post.get("stone_type") or "").strip(),
+            colors=[c for c in (post.get("color") or []) if c],
+            finishes=[f for f in (post.get("finishes") or []) if f],
+            qualities=[q for q in (post.get("qualities") or []) if q],
+            aliases=_split_aliases(post.get("aliases") or []),
+        )
+        backbone.by_norm_name.setdefault(_norm(variant_name), []).append(variety)
+        for alias in variety.aliases:
+            backbone.by_norm_alias.setdefault(_norm(alias), []).append(variety)
+    return backbone
+
+
+# --- ports.csv ----------------------------------------------------------------
+@dataclass
+class Ports:
+    by_country: dict[str, list[str]] = field(default_factory=dict)  # iso2 -> [port_id]
+    iso_by_port: dict[str, str] = field(default_factory=dict)        # port_id -> iso2
+
+    def for_country(self, iso2: str, limit: int = 2) -> list[str]:
+        return self.by_country.get((iso2 or "").strip().upper(), [])[:limit]
+
+    def country_of(self, port_id: str | None) -> str | None:
+        return self.iso_by_port.get((port_id or "").strip())
+
+    def all_ids(self) -> list[str]:
+        ids: list[str] = []
+        for lst in self.by_country.values():
+            ids.extend(lst)
+        return ids
+
+
+def load_ports(path: Path | None = None) -> Ports:
+    """ports.csv is supplied by the user into catalog_source; fall back to the
+    reference stub if absent (section 6, section 3.3)."""
+    candidate = Path(path) if path else SETTINGS.paths.ports_csv
+    if not candidate.exists():
+        candidate = SETTINGS.paths.ports_csv_fallback
+    ports = Ports()
+    if not candidate.exists():
+        log.warning("ports.csv absent; origin->ports resolution will fall back to default")
+        return ports
+    with candidate.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            pid = (record.get("port_id") or record.get("id") or record.get("Id") or "").strip()
+            iso = (record.get("country_iso") or "").strip().upper()
+            if pid and iso:
+                ports.by_country.setdefault(iso, []).append(pid)
+                ports.iso_by_port[pid] = iso
+    return ports
+
+
+# --- units.csv ----------------------------------------------------------------
+@dataclass
+class UnitEntry:
+    dimension: str
+    canonical: str
+    factor: float
+
+
+@dataclass
+class Units:
+    by_token: dict[str, UnitEntry] = field(default_factory=dict)
+
+    def convert(self, value: float, token: str) -> Optional[float]:
+        entry = self.by_token.get((token or "").strip().casefold())
+        if entry is None:
+            return None
+        return value * entry.factor
+
+
+def load_units(path: Path | None = None) -> Units:
+    path = Path(path or SETTINGS.paths.units_csv)
+    units = Units()
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            token = (record.get("token") or "").strip().casefold()
+            if not token:
+                continue
+            units.by_token[token] = UnitEntry(
+                dimension=(record.get("dimension") or "").strip(),
+                canonical=(record.get("canonical") or "").strip(),
+                factor=float(record.get("factor") or 1.0),
+            )
+    return units
+
+
+# --- synonyms/<vocab>.csv -----------------------------------------------------
+def load_synonyms(vocab: str, directory: Path | None = None) -> dict[str, str]:
+    """raw (normalized) -> canonical backend value, or 'none' to resolve to no id
+    without an error (section 7, Stage 3). Missing file is an empty map."""
+    directory = Path(directory or SETTINGS.paths.synonyms_dir)
+    path = directory / f"{vocab}.csv"
+    mapping: dict[str, str] = {}
+    if not path.exists():
+        return mapping
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            raw = _norm(record.get("raw") or "")
+            canon = (record.get("canonical") or "").strip()
+            if raw and canon:
+                mapping[raw] = canon
+    return mapping
+
+
+# --- origin_map.csv -----------------------------------------------------------
+@dataclass
+class OriginRule:
+    match_type: str  # 'variety' or 'pattern'
+    pattern: str
+    country_iso: str
+    city: str
+    county: str
+
+
+@dataclass
+class OriginMap:
+    rules: list[OriginRule] = field(default_factory=list)
+
+    def lookup(self, name: str) -> Optional[OriginRule]:
+        norm_name = _norm(name)
+        # exact variety match first, then substring pattern
+        for rule in self.rules:
+            if rule.match_type == "variety" and _norm(rule.pattern) == norm_name:
+                return rule
+        for rule in self.rules:
+            if rule.match_type == "pattern" and _norm(rule.pattern) in norm_name:
+                return rule
+        return None
+
+
+def load_origin_map(path: Path | None = None) -> OriginMap:
+    path = Path(path or SETTINGS.paths.origin_map_csv)
+    origin = OriginMap()
+    if not path.exists():
+        return origin
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            origin.rules.append(
+                OriginRule(
+                    match_type=(record.get("match_type") or "pattern").strip(),
+                    pattern=(record.get("pattern") or "").strip(),
+                    country_iso=(record.get("country_iso") or "").strip().upper(),
+                    city=(record.get("city") or "").strip(),
+                    county=(record.get("county") or "").strip(),
+                )
+            )
+    return origin
+
+
+# --- the bundle of all reference data + version pinning -----------------------
+@dataclass
+class ReferenceData:
+    attributes: Attributes
+    # category name -> variant table, for categories that share the stone-variety
+    # vocabulary (slab/block/tile). One per registry entry; the named accessors
+    # below are kept for existing callers/tests.
+    variants: dict[str, VariantTable]
+    backbone: Backbone
+    ports: Ports
+    units: Units
+    origin_map: OriginMap
+    synonyms: dict[str, dict[str, str]]
+    versions: dict[str, str]
+    overrides: object = None  # state.overrides.Overrides; lazy import to avoid cycle
+
+    @property
+    def variants_slabs(self) -> VariantTable:
+        return self.variants["slab"]
+
+    @property
+    def variants_blocks(self) -> VariantTable:
+        return self.variants["block"]
+
+    @property
+    def variants_tiles(self) -> VariantTable:
+        return self.variants["tile"]
+
+
+def load_all() -> ReferenceData:
+    from stone_pipeline.state.overrides import load_overrides
+
+    paths = SETTINGS.paths
+    ref = ReferenceData(
+        attributes=load_attributes(),
+        # ONE combined export for every category; the category is the Key prefix, so
+        # the same file is split into a per-category index, one per registry entry
+        # that shares the stone-variety vocabulary.
+        variants={c.name: load_variants(paths.export_file, c.name, key_prefix=c.name)
+                  for c in CATEGORIES if c.shares_variety_vocab},
+        backbone=load_backbone(),
+        ports=load_ports(),
+        units=load_units(),
+        origin_map=load_origin_map(),
+        synonyms={v: load_synonyms(v) for v in VOCAB_CATEGORIES},
+        overrides=load_overrides(),
+        versions={
+            "attributes": content_hash(paths.attributes_csv),
+            "variants_export": content_hash(paths.export_file),
+            "backbone": content_hash(paths.backbone_json),
+            "ports": content_hash(
+                paths.ports_csv if paths.ports_csv.exists() else paths.ports_csv_fallback
+            ),
+            "units": content_hash(paths.units_csv),
+            "origin_map": content_hash(paths.origin_map_csv),
+        },
+    )
+    log.info(
+        "reference loaded",
+        extra={
+            "extra_fields": {
+                "attributes_colors": len(ref.attributes.by_category.get("color", {})),
+                "variants_slabs": len(ref.variants_slabs.by_id),
+                "backbone_varieties": len(ref.backbone),
+            }
+        },
+    )
+    return ref

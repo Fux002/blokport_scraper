@@ -1,0 +1,58 @@
+[
+  {
+    "key": "slab_travertine_marjan_38856b59-467f-5a7c-a842-ea86ad2cc78c",
+    "variant": "Marjan",
+    "category": "Slabs",
+    "stone_type": "Travertine",
+    "color": [
+      "Silver"
+    ],
+    "finishes": [
+      "Honed",
+      "Polished",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_travertine_marjan_38856b59-467f-5a7c-a842-ea86ad2cc78c.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf",
+    "variant": "INFINITY WHITE",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  }
+]

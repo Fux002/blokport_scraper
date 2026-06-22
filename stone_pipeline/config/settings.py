@@ -1,0 +1,438 @@
+"""Global configuration block for the stone import pipeline.
+
+Operating principle 1: no argparse. All paths, ids, thresholds, and tunables
+live here (global defaults) or in config/sources.yaml (per source). Nothing is
+inlined in stage or resolver code.
+
+Operating principle 8: the template is the schema authority. Column names and
+order are read from the live template at emit time, never hardcoded here. This
+file only points at where that template lives.
+
+All backend ids below belong to one backend environment (section 3.2). The
+defaults are the dev-staging values observed in the real upload example; a real
+run must confirm them against the live backend fingerprint.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from enum import IntEnum
+from pathlib import Path
+
+# Repository root: this file is stone_pipeline/config/settings.py, so two parents up.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE_ROOT = REPO_ROOT.parent
+
+
+# --- Deployment environment (AWS development vs production) --------------------
+# The whole pipeline deploys to AWS, with separate DEVELOPMENT and PRODUCTION
+# setups. BLOKPORT_ENV selects which; everything environment-specific (S3 bucket,
+# the URL/key path segment, dry-run, image mode, processing) derives from it or
+# from a matching env var, so promotion dev -> prod is a CONFIG change (env vars
+# on the ECS task / Lambda / Batch job) and never a code edit. The defaults below
+# reproduce the current dev-staging behaviour exactly, so nothing changes until
+# the env vars are set. See DEV_PROD_PIPELINE.md for the promotion checklist.
+BLOKPORT_ENV = os.environ.get("BLOKPORT_ENV", "development").strip().lower()
+IS_PRODUCTION = BLOKPORT_ENV in ("production", "prod")
+ENV_SEGMENT = "prod" if IS_PRODUCTION else "dev"  # S3 path/key namespace (dev/... vs prod/...)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean env var (1/true/yes/on); fall back to default when unset."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+# The dev bucket is known. The PROD bucket is supplied at deploy time via
+# BLOKPORT_S3_BUCKET (kept at the dev bucket as a well-formed default until then —
+# images._build_backend warns if a production run is still pointing at it).
+_DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
+S3_BUCKET = os.environ.get("BLOKPORT_S3_BUCKET", _DEV_S3_BUCKET)
+S3_REGION = os.environ.get("BLOKPORT_S3_REGION", "eu-west-1")
+
+
+# --- Confidence enum with a fixed numeric mapping (section 3.4) ----------------
+class Confidence(IntEnum):
+    """Four level confidence, high > medium > low > none, with numeric backing
+    so thresholds compare uniformly across every resolver."""
+
+    none = 0
+    low = 1
+    medium = 2
+    high = 3
+
+    @classmethod
+    def from_name(cls, name: str) -> "Confidence":
+        return cls[name.strip().lower()]
+
+
+@dataclass(frozen=True)
+class Paths:
+    repo_root: Path = REPO_ROOT
+    workspace_root: Path = WORKSPACE_ROOT
+    config_dir: Path = REPO_ROOT / "config"
+    reference_dir: Path = REPO_ROOT / "reference"
+    synonyms_dir: Path = REPO_ROOT / "reference" / "synonyms"
+    state_dir: Path = REPO_ROOT / "state"
+    outputs_dir: Path = REPO_ROOT / "outputs"
+    fixtures_dir: Path = REPO_ROOT / "adapters" / "fixtures"
+    # Live scrape outputs (scrapers write here): data/<source>/<timestamp>/products.csv
+    data_dir: Path = WORKSPACE_ROOT / "data"
+    # Top-level workspace folders, grouped by what you DO with each file:
+    #   to_upload/      - PRODUCED by the pipeline; upload these to Medusa (numbered order)
+    #   from_medusa/    - SAVE Medusa's downloads here; the pipeline only READS these
+    #   catalog_source/ - the source data you MAINTAIN by hand (backbones + attributes)
+    #   review/         - look before uploading; never uploaded
+    catalog_source_dir: Path = WORKSPACE_ROOT / "catalog_source"
+    to_upload_dir: Path = WORKSPACE_ROOT / "to_upload"
+    from_medusa_dir: Path = WORKSPACE_ROOT / "from_medusa"
+    review_dir: Path = WORKSPACE_ROOT / "review"
+    # small CSV samples the test suite reads (self-contained in the package).
+    tests_fixtures_dir: Path = REPO_ROOT / "tests" / "fixtures"
+
+    # attribute name -> Medusa id; lives in from_medusa/ because its ids come FROM
+    # Medusa (like the variants export), not hand-maintained like catalog_source/.
+    attributes_csv: Path = WORKSPACE_ROOT / "from_medusa" / "attributes.csv"
+    # The combined cross-category id-variants EXPORT (with Medusa Id), download-only:
+    # the immutable "existing variants" the catalog reads. The UPLOAD files are PRODUCED
+    # by the catalog (to_upload/) and never read back -- input and output never alias.
+    variants_export_csv: Path = WORKSPACE_ROOT / "from_medusa" / "variants_export.csv"
+
+    # per-category backbone files derive from the CATEGORIES registry.
+    @property
+    def backbone_json(self) -> Path:        # legacy alias (== slab backbone)
+        return self.backbone_slabs_json
+
+    @property
+    def backbone_slabs_json(self) -> Path:
+        return category("slab").backbone_path
+
+    @property
+    def backbone_blocks_json(self) -> Path:
+        return category("block").backbone_path
+
+    @property
+    def backbone_tiles_json(self) -> Path:
+        return category("tile").backbone_path
+    # ports.csv is supplied by the user into catalog_source; loader falls back to reference/.
+    ports_csv: Path = WORKSPACE_ROOT / "catalog_source" / "ports.csv"
+    ports_csv_fallback: Path = REPO_ROOT / "reference" / "ports.csv"
+    units_csv: Path = REPO_ROOT / "reference" / "units.csv"
+    origin_map_csv: Path = REPO_ROOT / "reference" / "origin_map.csv"
+    placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
+    standard_slab_area_csv: Path = REPO_ROOT / "reference" / "standard_slab_area.csv"
+
+    # The import template defines the emit schema (operating principle 8). Lives in
+    # the package (header is the schema authority).
+    template_csv: Path = REPO_ROOT / "reference" / "medusa_import_template.csv"
+    upload_sample_csv: Path = REPO_ROOT / "tests" / "fixtures" / "marenostone_bootstrap_200_final.csv"
+
+    # Config files
+    sources_yaml: Path = REPO_ROOT / "config" / "sources.yaml"
+    source_contracts_yaml: Path = REPO_ROOT / "config" / "source_contracts.yaml"
+
+    # Medusa product export (handle/SKU/inventory) the user downloads, so the
+    # pipeline can tell new vs existing products and inventory changes (item 4/5).
+    products_known_csv: Path = WORKSPACE_ROOT / "from_medusa" / "products_export.csv"
+
+    # State
+    baselines_json: Path = REPO_ROOT / "state" / "scrape_baselines.json"
+    overrides_csv: Path = REPO_ROOT / "state" / "manual_overrides.csv"
+
+    @property
+    def export_file(self) -> Path:
+        """The one combined id-variants export (with Medusa Id) for every category."""
+        return self.variants_export_csv
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    """Section 3.4. Single source of truth for all matching and derivation."""
+
+    variation_auto_accept: float = 92.0
+    variation_review_floor: float = 84.0  # band 84..92 routes to review
+    attribute_fuzzy_floor: float = 90.0
+    derived_accept: Confidence = Confidence.medium
+    health_fill_drop_warn: float = 0.15
+    health_fill_drop_fail: float = 0.40
+    health_rowcount_floor: float = 0.50
+
+
+@dataclass(frozen=True)
+class BackendConstants:
+    """Section 3.1 static values. Defaults observed in the real upload example
+    (dev-staging environment). Per-source overrides live in sources.yaml."""
+
+    # Category pcat ids derive from the CATEGORIES registry (single source of truth).
+    @property
+    def cat_slabs_pcat(self) -> str:
+        return category("slab").pcat_id
+
+    @property
+    def cat_blocks_pcat(self) -> str:
+        return category("block").pcat_id
+
+    @property
+    def cat_tiles_pcat(self) -> str:
+        return category("tile").pcat_id
+
+    visibility: str = "public"
+    discountable: str = "true"
+    status: str = "published"
+    # Variant defaults (section 3.1)
+    variant_title: str = "Default"
+    variant_manage_inventory: str = "true"
+    variant_allow_backorder: str = "false"
+    variant_option_1_name: str = "Default option"
+    variant_option_1_value: str = "Default option value"
+
+
+@dataclass(frozen=True)
+class S3Config:
+    # All env-driven so dev/prod differ by configuration only. The path segment
+    # (dev/ vs prod/) follows BLOKPORT_ENV; bucket/region/profile/dry-run each
+    # have their own override.
+    bucket: str = S3_BUCKET
+    region: str = S3_REGION
+    # The S3 key prefix the image stage re-hosts product photos under. This is the
+    # real staging location (blokport-dev-staging-3e58a6/dev/products/), and it MUST
+    # match the path in ImagesConfig.public_base so the emitted URL resolves to the
+    # uploaded object. Content-addressed: <prefix>/<src_site>/<sha256>.jpg.
+    staging_prefix: str = f"{ENV_SEGMENT}/products/"
+    credentials_profile: str = os.environ.get("BLOKPORT_AWS_PROFILE", "default")
+    # When true the image stage does not hit S3; it derives keys deterministically
+    # and records them, but performs no network IO. Used when creds are absent.
+    # Default true in dev; set BLOKPORT_S3_DRY_RUN=false to actually upload.
+    dry_run: bool = _env_bool("BLOKPORT_S3_DRY_RUN", True)
+
+
+@dataclass(frozen=True)
+class ImageProcessingConfig:
+    """Faithful enhancement + de-watermark applied to scraped product photos
+    during re-host (the local/s3 image modes; passthrough never downloads bytes
+    so it cannot process them).
+
+    These are photos of the ACTUAL slabs a customer buys, usually shot in a
+    storage unit under poor, uneven light. The goal is to fix that — exposure,
+    white balance, local contrast, noise, softness — WITHOUT inventing detail
+    (no generative super-resolution): the picture must stay a true record of the
+    stone. Pixel upscaling uses high-quality Lanczos resampling, not a model.
+
+    De-watermark runs ONLY on sources flagged `watermarked: true` in sources.yaml
+    (e.g. varsha burns a visible mark into its photos). It needs the optional
+    torch stack (requirements-imageproc.txt); if those deps are absent the step
+    is skipped with a warning and enhancement still runs.
+
+    Disabled by default: until `enabled` is true the image stage behaves exactly
+    as before (no processing, no new deps loaded). Enable per deployment with
+    BLOKPORT_IMAGE_PROCESSING=true (the AWS image-processing container)."""
+
+    enabled: bool = _env_bool("BLOKPORT_IMAGE_PROCESSING", False)
+    # --- faithful enhancement (all images) ---
+    enhance: bool = True              # white balance + CLAHE local contrast + exposure
+    denoise: bool = True              # gentle chroma/luma denoise
+    denoise_strength: int = 3         # cv2 fastNlMeans h; keep low to avoid smearing veins
+    clahe_clip: float = 2.0           # local-contrast strength; higher = punchier, riskier
+    sharpen_amount: float = 0.6       # unsharp-mask amount (0 = off)
+    # --- pixel upscaling (faithful, Lanczos — never generative) ---
+    upscale: bool = True
+    upscale_max_scale: float = 2.0    # never enlarge beyond this factor
+    upscale_target_long_edge: int = 2048  # stop upscaling once the long edge reaches this
+    # --- de-watermark (flagged sources only; needs the imageproc extra) ---
+    dewatermark: bool = True
+    dewatermark_prompt: str = "watermark"  # Florence-2 open-vocab detection prompt
+    # --- output / audit ---
+    jpeg_quality: int = 92
+    write_preview: bool = True        # images/reports/processed_preview.csv (source -> processed)
+    # Improved and raw-scraped images are kept in two sibling folders under the
+    # products prefix, so the upgraded set is cleanly separated from the originals:
+    #   <products>/improved/<site>/<hash>.jpg   the enhanced image (Medusa uses this)
+    #   <products>/scraped/<site>/<hash>.jpg    the raw download (audit / re-tuning)
+    # Downloads are in-memory; the scraped copy is only persisted when keep_scraped
+    # is on (the untouched original also still lives at the supplier URL). Handy in
+    # dev while testing, optional in prod.
+    improved_subdir: str = "improved"
+    scraped_subdir: str = "scraped"
+    keep_scraped: bool = _env_bool("BLOKPORT_KEEP_SCRAPED", False)
+
+
+@dataclass(frozen=True)
+class ImagesConfig:
+    """Image staging (section 7 Stage 7). mode selects the storage backend:
+
+      passthrough  use the source image URLs directly in the emit (no download).
+                   The default until staging infrastructure exists.
+      local        download bytes, content-address, store under local_staging_dir.
+                   The interim 'staging bucket' on local disk.
+      s3           download bytes, content-address, upload to the staging bucket.
+
+    public_base is prepended to the content key for the emitted URL and is the
+    same for local and s3, so the emitted URLs match once the local staging dir is
+    synced to the bucket. Switching from local to s3 is a one-line mode change."""
+
+    mode: str = os.environ.get("BLOKPORT_IMAGE_MODE", "passthrough")
+    local_staging_dir: Path = REPO_ROOT / "state" / "image_staging"
+    public_base: str = os.environ.get(
+        "BLOKPORT_IMAGE_PUBLIC_BASE",
+        f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{ENV_SEGMENT}/products/")
+    concurrency: int = 8
+    timeout: float = 20.0
+    retries: int = 3
+    require_images: bool = False  # when true, a row with no image is rejected (Stage 9)
+    processing: ImageProcessingConfig = field(default_factory=ImageProcessingConfig)
+
+
+@dataclass(frozen=True)
+class MatchingConfig:
+    """Advanced variation tiers (section 5A.2 tiers 7 and 8). Both off by default;
+    they are heavy optional dependencies and feed review only / the residual only."""
+
+    enable_splink: bool = False  # tier 7, residual probabilistic linkage
+    enable_semantic: bool = False  # tier 8, embedding nearest-neighbour suggestion
+    semantic_review_floor: float = 60.0  # below this a semantic hit is not even suggested
+    semantic_model: str = "all-MiniLM-L6-v2"
+
+
+@dataclass(frozen=True)
+class CurationConfig:
+    """Curation loop tunables (the new-variant / alias upload flow)."""
+
+    # S3 staging base for variant catalog images (the small website image). Medusa
+    # reads variant images from the dev/variations/ folder, so the variant Image is
+    # {variant_image_base}{Key}.png. The bucket base is the ONLY env-specific part of
+    # the catalog (dev vs prod): the {Key}.png image files are identical across
+    # environments, so the SAME generated images upload to both buckets. Build the
+    # prod variant file by setting BLOKPORT_VARIANT_IMAGE_BASE to the prod bucket and
+    # re-running the catalog (stages/emit_catalog.py stamps it).
+    variant_image_base: str = os.environ.get(
+        "BLOKPORT_VARIANT_IMAGE_BASE",
+        "https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/")
+    # Base images per category derive from the CATEGORIES registry (image_prompts
+    # selects by Key prefix; these accessors remain for any direct callers).
+    @property
+    def variant_base_image_slab(self) -> str:
+        return category("slab").base_image
+
+    @property
+    def variant_base_image_block(self) -> str:
+        return category("block").base_image
+
+    @property
+    def variant_base_image_tile(self) -> str:
+        return category("tile").base_image
+
+    # (Volume per kg (m³/kg) is per-category now; see CATEGORIES[*].volume_per_kg.)
+    # a gap whose nearest existing variety scores at or above this is proposed as
+    # an ALIAS of that variety rather than a new variant, to avoid creating
+    # near-duplicate variants for what suppliers just renamed.
+    alias_suggest_floor: float = 70.0
+
+
+@dataclass(frozen=True)
+class EmitPolicy:
+    # Section 9.2. Default true for slabs bootstrap; configurable per source.
+    emit_on_review_default: bool = True
+
+
+# --- Category registry: the SINGLE source of truth for categories --------------
+@dataclass(frozen=True)
+class Category:
+    """One product category. Adding a category = ONE entry here (plus its data
+    files); every stage derives the category set from this list, so a misspelled
+    or unwired category fails loudly instead of silently becoming a slab.
+
+    The behaviour flags let a category opt out of the stone-variety model: slab/
+    block/tile are FORMS of one stone variety (shared vocabulary, fan-out, texture
+    -swap images), whereas e.g. accessories would set shares_variety_vocab=False,
+    fan_out=False, base_image="" (own vocabulary, own backbone, real photos)."""
+
+    name: str                   # canonical lowercase; also the variant Key prefix
+    plural: str                 # inbox folder + tree-build group key
+    label: str                  # Medusa category name / backbone "category" value
+    pcat_id: str                # Medusa product-category id ("" until created)
+    backbone_filename: str      # under catalog_source/
+    base_image: str             # fal.ai base for texture generation ("" = real photo)
+    shares_variety_vocab: bool  # shares the stone-variety vocabulary (slab/block/tile)
+    fan_out: bool               # a new variety is also created in this category
+    mirror_of: str | None       # backbone mirrors this category's (tile -> slab) else None
+    volume_per_kg: str = ""     # static "Volume per kg (m³/kg)" written into every variant
+
+    @property
+    def active(self) -> bool:
+        """Live once its Medusa category id exists."""
+        return bool(self.pcat_id)
+
+    @property
+    def backbone_path(self) -> Path:
+        return WORKSPACE_ROOT / "catalog_source" / self.backbone_filename
+
+
+# The category list. Adding a category = ADD AN ENTRY HERE (a source edit): every
+# category-derived constant in the pipeline recomputes from this tuple at import.
+# `_BY_NAME` below is the runtime index the helpers read (so activation via the env
+# pcat, and tests, can flip a category); behaviour is keyed off the flags + active.
+# Full recipe: CATEGORY_GUIDE.md.
+CATEGORIES: tuple[Category, ...] = (
+    Category("slab", "slabs", "Slabs",
+             "pcat_01KTY5MCZTZ4C52G4M8F1Y03XW", "backbone_slabs.json",
+             "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg",
+             shares_variety_vocab=True, fan_out=True, mirror_of=None, volume_per_kg="0.0017"),
+    Category("block", "blocks", "Blocks",
+             "pcat_01KTY5JQ7YYZW7XASMSHBB3HF0", "backbone_blocks.json",
+             "https://v3b.fal.media/files/b/0a9f301e/Vlbo_xk9vDJtYKhEbkxBZ_base_block.jpeg",
+             shares_variety_vocab=True, fan_out=True, mirror_of=None, volume_per_kg="0.0014348"),
+    # tiles (and other non-slab categories) use the block volume per kg
+    Category("tile", "tiles", "Tiles",
+             os.environ.get("BLOKPORT_CAT_TILES_PCAT", "pcat_01KVNKZD2YGBN7416P5CK57KMZ"), "backbone_tiles.json",
+             "https://v3b.fal.media/files/b/0a9f30f3/jdmNyxqelKJM4DxFi4jyG_base_tiles.png",
+             shares_variety_vocab=True, fan_out=True, mirror_of="slab", volume_per_kg="0.0014348"),
+)
+
+_BY_NAME = {c.name: c for c in CATEGORIES}
+_BY_LABEL = {c.label: c for c in CATEGORIES}
+
+
+def category(name: str) -> "Category | None":
+    return _BY_NAME.get((name or "").strip().casefold())
+
+
+def category_by_label(label: str) -> "Category | None":
+    return _BY_LABEL.get((label or "").strip())
+
+
+def category_for_key(key: str) -> "Category | None":
+    """The category a variant Key belongs to, by its prefix (slab_..., tile_...)."""
+    return _BY_NAME.get((key or "").split("_", 1)[0].casefold())
+
+
+def active_categories() -> tuple[Category, ...]:
+    # iterate _BY_NAME (the runtime registry) so tests can flip a category's pcat
+    return tuple(c for c in _BY_NAME.values() if c.active)
+
+
+@dataclass(frozen=True)
+class Settings:
+    environment: str = BLOKPORT_ENV  # "development" | "production" (BLOKPORT_ENV)
+    # A hash of the live id set (section 3.2). Computed from reference data at
+    # M1; a mismatch against the live backend aborts. Empty means "not pinned yet".
+    backend_id_fingerprint: str = ""
+    code_version: str = "0.1.0"
+
+    paths: Paths = field(default_factory=Paths)
+    thresholds: Thresholds = field(default_factory=Thresholds)
+    backend: BackendConstants = field(default_factory=BackendConstants)
+    s3: S3Config = field(default_factory=S3Config)
+    images: ImagesConfig = field(default_factory=ImagesConfig)
+    matching: MatchingConfig = field(default_factory=MatchingConfig)
+    curation: CurationConfig = field(default_factory=CurationConfig)
+    emit: EmitPolicy = field(default_factory=EmitPolicy)
+
+    # The source proven first (section 14). develi is absent from the supplied
+    # data, so polonine is the clean named-variety proving source.
+    spine_source: str = "polonine"
+
+
+SETTINGS = Settings()
