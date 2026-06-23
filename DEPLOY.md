@@ -119,6 +119,22 @@ load automatically when the Medusa auto-link is eventually enabled. So full
 auto-linking stays safe: new or unproven sources are quarantined by default and can
 never silently push bad data live.
 
+## Residential proxy for the Cloudflare-fronted scrapers (varsha etc.)
+Cloudflare blocks datacenter IPs, so the Cloudflare-fronted sources (the SlabWare
+tenants — varsha, polonine, ferraz, brumagran) fail from the AWS NAT egress even
+though they work from a residential IP locally. Route just those through a
+**residential proxy**:
+
+1. Get a residential proxy URL (`http://user:pass@host:port`) from a provider.
+2. Store it as an SSM SecureString, e.g.:
+   `aws ssm put-parameter --name /blokport-dev/SCRAPER_PROXY --type SecureString --value '<url>'`
+3. Wire it: `cd infra && terraform apply -var scraper_proxy_ssm_name=/blokport-dev/SCRAPER_PROXY`
+   (injects `BLOKPORT_SCRAPER_PROXY` into the task).
+
+`ScraperBase` routes its **curl_cffi** session (only the Cloudflare sources use it)
+through `BLOKPORT_SCRAPER_PROXY` when set; unset = direct connection (local default).
+The clean sources (marenostone, zucchi) never touch the proxy, so bandwidth cost stays tiny.
+
 ## Cost (cheapest working)
 Pay-per-run Fargate (a scheduled batch, idle otherwise) + S3 + ECR + CloudWatch
 logs ≈ **a few dollars/month**. No NAT/ALB/GPU added — reuses the platform's network.

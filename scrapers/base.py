@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 import random
 import time
 from datetime import datetime, timezone
@@ -89,7 +90,10 @@ class ScraperBase:
 
     # --- HTTP ----------------------------------------------------------------
     def _cffi(self):
-        """Lazily build a curl_cffi session (Chrome TLS impersonation)."""
+        """Lazily build a curl_cffi session (Chrome TLS impersonation), routed through
+        BLOKPORT_SCRAPER_PROXY when set. Cloudflare blocks datacenter IPs (the AWS NAT
+        egress), so the Cloudflare-fronted sources need a residential proxy from AWS;
+        locally the env var is unset and it connects directly."""
         if getattr(self, "_cffi_session", None) is None:
             try:
                 from curl_cffi import requests as cffi_requests
@@ -98,7 +102,12 @@ class ScraperBase:
                     "this scraper needs curl_cffi (Cloudflare bypass). "
                     "Install: pip3 install curl_cffi"
                 ) from exc
-            self._cffi_session = cffi_requests.Session(impersonate=self.impersonate)
+            opts: dict = {"impersonate": self.impersonate}
+            proxy = os.environ.get("BLOKPORT_SCRAPER_PROXY", "").strip()
+            if proxy:
+                opts["proxies"] = {"http": proxy, "https": proxy}
+                self.log.info("routing %s through proxy", self.source)
+            self._cffi_session = cffi_requests.Session(**opts)
         return self._cffi_session
 
     def _request(self, method: str, url: str, **kwargs):

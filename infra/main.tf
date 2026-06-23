@@ -14,6 +14,27 @@ data "aws_ssm_parameter" "fal_key" {
   name  = var.fal_key_ssm_name
 }
 
+# Residential proxy URL for the Cloudflare-fronted scrapers (varsha + other SlabWare
+# tenants). Optional + by-ARN like FAL_KEY: Cloudflare blocks the AWS datacenter IP,
+# so those sources need a residential proxy when run from AWS. Locally it's unset.
+variable "scraper_proxy_ssm_name" {
+  type        = string
+  default     = ""
+  description = "SSM SecureString name holding the proxy URL (http://user:pass@host:port). Empty = no proxy injected."
+}
+
+data "aws_ssm_parameter" "scraper_proxy" {
+  count = var.scraper_proxy_ssm_name == "" ? 0 : 1
+  name  = var.scraper_proxy_ssm_name
+}
+
+locals {
+  ssm_secrets = merge(
+    var.fal_key_ssm_name == "" ? {} : { FAL_KEY = data.aws_ssm_parameter.fal_key[0].arn },
+    var.scraper_proxy_ssm_name == "" ? {} : { BLOKPORT_SCRAPER_PROXY = data.aws_ssm_parameter.scraper_proxy[0].arn },
+  )
+}
+
 module "scraper" {
   source = "./modules/scraper"
 
@@ -27,8 +48,8 @@ module "scraper" {
   schedule_expression = var.schedule_expression
   keep_scraped        = var.keep_scraped
 
-  # FAL_KEY injected only if configured (see fal_key_ssm_name above).
-  ssm_secret_arns = var.fal_key_ssm_name == "" ? {} : { FAL_KEY = data.aws_ssm_parameter.fal_key[0].arn }
+  # Secrets injected only when their SSM names are configured (FAL_KEY, proxy URL).
+  ssm_secret_arns = local.ssm_secrets
 
   # Sizing — cheapest that runs scrape + pipeline + CPU image enhancement.
   # For de-watermark: image_tag=imageproc + memory=8192 (Florence-2 needs the RAM).
