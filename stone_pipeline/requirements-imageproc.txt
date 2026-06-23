@@ -9,6 +9,8 @@
 #
 # GPU is optional but a large speed-up for a big batch; CPU works for small runs.
 
+pillow>=10              # keep the modern cp312 wheel; stops pip backtracking to a
+                        # pre-3.12 Pillow sdist (which has no wheel and won't compile)
 torch>=2.2
 torchvision>=0.17
 transformers>=4.44      # Florence-2 (microsoft/Florence-2-large, trust_remote_code)

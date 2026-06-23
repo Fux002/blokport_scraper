@@ -36,6 +36,10 @@ ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 
 # --- de-watermark variant (optional, CPU torch) -----------------------------
 FROM core AS imageproc
+# Build tooling as a safety net for any sdist-only dependency in the torch stack.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libjpeg-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY stone_pipeline/requirements-imageproc.txt /tmp/requirements-imageproc.txt
 # --extra-index-url (NOT --index-url): keep PyPI as the primary index so deps like
 # pillow/transformers resolve to their normal wheels, while torch/torchvision pull
