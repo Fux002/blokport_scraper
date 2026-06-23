@@ -13,6 +13,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_imageproc:
+        description: "Also build + push the heavy imageproc image (torch + Florence-2 + LaMa de-watermark)"
+        type: boolean
+        default: false
 
 permissions:
   id-token: write   # OIDC
@@ -55,3 +60,14 @@ jobs:
           docker push "$REPO:core"
           docker push "$REPO:$SHA"
           echo "Pushed $REPO:core and :$SHA"
+
+      # Heavy (~3 GB torch image); only on manual dispatch with the flag set.
+      - name: Build and push imageproc image
+        if: steps.gate.outputs.ready == 'true' && inputs.build_imageproc
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          REPO="$REGISTRY/blokport-scraper"
+          docker build --target imageproc -t "$REPO:imageproc" .
+          docker push "$REPO:imageproc"
+          echo "Pushed $REPO:imageproc"

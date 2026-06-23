@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -195,6 +196,11 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             url_to_public[u] = manifest[u]
         else:
             new_urls.append(u)
+    # validation cap: process only N new images per run, so de-watermark/enhance
+    # output can be eyeballed on a sample before a full run. 0 = no cap.
+    sample_limit = int(os.environ.get("BLOKPORT_IMAGE_SAMPLE_LIMIT", "0") or 0)
+    if sample_limit > 0:
+        new_urls = new_urls[:sample_limit]
     fetched = dl.fetch_many(new_urls, fetch, concurrency=cfg.concurrency)
 
     # content-address: bytes hash -> public url (so identical bytes upload once)

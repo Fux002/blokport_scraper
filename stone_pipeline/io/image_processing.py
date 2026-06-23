@@ -44,13 +44,15 @@ log = logfmt.get_logger("image_processing")
 #  Faithful enhancement (classical, OpenCV — no invented detail)
 # --------------------------------------------------------------------------- #
 
-def _gray_world_white_balance(bgr):
+def _gray_world_white_balance(bgr, max_shift: float = 0.15):
     """Neutralise a colour cast (storage-unit lighting is rarely neutral) by
-    scaling each channel so its mean matches the overall grey mean. Faithful:
-    it only re-weights colour, never adds structure."""
+    scaling each channel toward the overall grey mean. The per-channel scale is
+    CLAMPED to [1-max_shift, 1+max_shift] so a genuinely coloured stone (cream
+    marble, green quartzite) can't be washed grey — gray-world only corrects mild
+    casts, never strongly re-tints. Faithful: re-weights colour, adds no structure."""
     means = bgr.reshape(-1, 3).mean(axis=0)
     grey = means.mean()
-    scale = grey / np.clip(means, 1e-6, None)
+    scale = np.clip(grey / np.clip(means, 1e-6, None), 1.0 - max_shift, 1.0 + max_shift)
     out = bgr.astype(np.float32) * scale
     return np.clip(out, 0, 255).astype("uint8")
 

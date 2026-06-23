@@ -32,6 +32,17 @@ variable "image_tag" {
   description = "core = enhancement+upscale; imageproc = also de-watermark (heavier, raise memory)."
 }
 
+variable "cpu" {
+  type    = number
+  default = 1024
+}
+
+variable "memory" {
+  type        = number
+  default     = 4096
+  description = "Fargate task memory (MiB). Raise to 8192 for the imageproc (de-watermark) image."
+}
+
 variable "schedule_enabled" {
   type    = bool
   default = false

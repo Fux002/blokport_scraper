@@ -1,8 +1,17 @@
-# fal.ai key for variant-image generation, stored as a SecureString in SSM
-# (/blokport-<home_env>/FAL_KEY). Looked up by ARN — the value never enters code or
-# tfstate; the task decrypts it at runtime via the IAM the module already grants.
+# fal.ai key for variant-image generation, stored as a SecureString in SSM.
+# OPTIONAL: the scheduled scraper run does NOT use it (it's only for the separate
+# variant-image generation), so it's looked up only when fal_key_ssm_name is set.
+# This lets the scraper deploy before the key exists. Point the var at the SSM name
+# (e.g. /blokport-dev/FAL_KEY) once it's created to inject it into the task.
+variable "fal_key_ssm_name" {
+  type        = string
+  default     = ""
+  description = "SSM SecureString name for FAL_KEY. Empty = not injected (scraper doesn't need it)."
+}
+
 data "aws_ssm_parameter" "fal_key" {
-  name = "/blokport-${var.home_env}/FAL_KEY"
+  count = var.fal_key_ssm_name == "" ? 0 : 1
+  name  = var.fal_key_ssm_name
 }
 
 module "scraper" {
@@ -18,11 +27,11 @@ module "scraper" {
   schedule_expression = var.schedule_expression
   keep_scraped        = var.keep_scraped
 
-  # Injected into the task as the FAL_KEY env var (container secret) for image generation.
-  ssm_secret_arns = { FAL_KEY = data.aws_ssm_parameter.fal_key.arn }
+  # FAL_KEY injected only if configured (see fal_key_ssm_name above).
+  ssm_secret_arns = var.fal_key_ssm_name == "" ? {} : { FAL_KEY = data.aws_ssm_parameter.fal_key[0].arn }
 
   # Sizing — cheapest that runs scrape + pipeline + CPU image enhancement.
-  # Raise memory (~8192) + set image_tag = "imageproc" to enable de-watermark.
-  cpu    = 1024
-  memory = 4096
+  # For de-watermark: image_tag=imageproc + memory=8192 (Florence-2 needs the RAM).
+  cpu    = var.cpu
+  memory = var.memory
 }
