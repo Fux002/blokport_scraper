@@ -2,7 +2,7 @@
 """
 Batch image-to-image generator for fal.ai — FLUX.2 [klein] 4B Base (edit).
 
-Converts a single base slab image into N stone variants defined in prompts.json.
+Converts a single base slab image into N stone variants defined in prompts_to_generate.json.
 
 Key facts (verified against fal.ai docs):
   - Endpoint:   fal-ai/flux-2/klein/4b/base/edit   (image-to-image)
@@ -20,7 +20,7 @@ Designed for a 3000-image run:
 
 SETUP
   pip install fal-client requests pillow
-  Paste your key into FAL_KEY below, set MODEL (klein/turbo/dev/pro/max), then run.
+  export FAL_KEY="<id>:<secret>"  (or from SSM), set MODEL (klein/turbo/dev/pro/max), then run.
 """
 
 import os
@@ -55,7 +55,7 @@ from PIL import Image
 BASE_IMAGE = None                     # using the hosted URL below
 BASE_IMAGE_URL = "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg"
 
-PROMPTS_FILE = "prompts_to_generate.json"   # built by `python -m stone_pipeline.stages.image_prompts`
+PROMPTS_FILE = os.environ.get("PROMPTS_FILE", "prompts_to_generate.json")  # override for targeted runs
 OUTPUT_DIR = Path("./images")               # writes {Key}.png (output_name = variant Key)
 
 # --- MODEL SWITCH -----------------------------------------------------------
@@ -81,7 +81,7 @@ MODELS = {
     "max":   {"endpoint": "fal-ai/flux-2-max/edit",           "flux_knobs": False, "max_steps": 0,  "approx_per_image": 0.100},
 }
 
-# Which slice of prompts.json to process.
+# Which slice of prompts_to_generate.json to process.
 START_INDEX = 0
 COUNT = None                            # process the whole prompts file
 
@@ -91,7 +91,8 @@ COUNT = None                            # process the whole prompts file
 # locally. Output below 1 MP is billed as 1 MP anyway, so native editing is
 # the SAME price as 512 but cleaner. FINAL_SIZE = the square size we save at.
 FINAL_SIZE = 512                       # set to None to keep native resolution
-OUTPUT_FORMAT = "png"                  # "png" | "jpeg" | "webp" (webp = smaller files)
+OUTPUT_FORMAT = "png"                  # REQUIRED png: the de-background step + the variant
+                                       # Image URLs ({Key}.png) are png-only — do not change.
 
 # Throughput / reliability.
 MAX_WORKERS = 12                        # raise to 8-12 if your fal plan allows it
@@ -105,7 +106,7 @@ ACCELERATION = "regular"             # "none" = max quality | "regular" | "high"
 ENABLE_SAFETY_CHECKER = False        # stone textures are harmless; avoids false flags
 
 # --- PROMPT HANDLING --------------------------------------------------------
-# Your prompts.json keeps the stone surface clean (no glare/reflections/etc.),
+# Your prompts_to_generate.json keeps the stone surface clean (no glare/reflections/etc.),
 # which we KEEP. We only drop the few phrases that fight the composition
 # (flat view / no perspective / no background) — those are what flattened the
 # image and turned the background white. Everything else is carried through.
@@ -160,6 +161,17 @@ PROMPT_TEMPLATES = {
         "colour, leaving all geometry unchanged. {directives}"
     ),
 }
+
+# Some varieties are named after a fruit, a painting, a person, etc. (e.g. 'Mona Lisa',
+# 'Banana', 'Picasso'). Without a guard the model renders the LITERAL subject (the
+# painting) onto the slab. This pins every edit to natural stone only. It is appended
+# to the {stone} value so it sits right where the name is introduced in each template.
+STONE_ONLY_GUARD = (
+    " — a natural stone variety (this is only the quarry trade name). Render a "
+    "realistic natural stone surface only: mineral grain, crystalline veining and "
+    "polished rock. Do NOT depict any object, person, face, animal, fruit, plant, "
+    "painting, logo, scene or text the name might literally suggest"
+)
 
 GUIDANCE_SCALE = 5.0                  # raise to ~6-7 if it still drifts; lower if too rigid
 
@@ -233,7 +245,7 @@ def build_prompt(raw_prompt: str, category: str = "slab") -> str:
         stone = after[:idx].strip().rstrip(". ")
         directives = after[idx:].strip()
 
-    stone = re.sub(r"\s+", " ", stone)
+    stone = re.sub(r"\s+", " ", stone) + STONE_ONLY_GUARD   # keep it natural stone, not the literal name
     directives = clean_directives(directives)
     template = PROMPT_TEMPLATES.get(category, PROMPT_TEMPLATES["slab"])
     return template.format(stone=stone, directives=directives).strip()

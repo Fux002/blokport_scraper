@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import html
 import re
-from typing import Any, Callable, Iterable, Optional, Union
+from pathlib import Path
+from typing import Any, Callable, Optional, Union
 
 import polars as pl
 
 from stone_pipeline.config.contracts import SourceContract, generate_contract_from_sample
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.text import clean_variety_name, detect_code_prefixes
 
 log = logfmt.get_logger("adapter")
 
@@ -45,6 +47,11 @@ class AdapterBase:
     # no clean variety column. The matcher then auto-accepts only deterministic
     # (exact/projection) variation hits and routes fuzzy/phonetic ones to review.
     generic_descriptor: bool = False
+    # source-specific code-prefix regexes the generic name cleanup can't infer (e.g. varsha's
+    # collapsed 'Z'/'ZB'). Generic artifacts (lone-letter / alphanumeric leading codes) are
+    # stripped for EVERY source without listing them here.
+    code_prefixes: tuple[str, ...] = ()
+    _lead_codes: frozenset = frozenset()  # data-discovered per batch in adapt()
     required_columns: list[str] = []
     # canonical field -> source column or callable
     field_map: dict[str, FieldRule] = {}
@@ -96,15 +103,42 @@ class AdapterBase:
         # column, or the gap routing for those rows is defeated.
         if self.variety_match_key and "variety_match_key" not in data:
             data["variety_match_key"] = self.clean(record.get(self.variety_match_key))
+        # honour the declared format column when the map didn't set raw_format, so a new
+        # adapter only needs `format_field = "format"` (no boilerplate field_map entry).
+        if self.format_field and "raw_format" not in data:
+            data["raw_format"] = self.clean(record.get(self.format_field))
+        # smart name cleanup: strip supplier-code artifacts so matching AND minting see a
+        # clean variety name: generic structural rules + data-discovered codes (_lead_codes)
+        # + any explicit code_prefixes override — so codes are removed without hardcoding them.
+        if data.get("variety_match_key"):
+            data["variety_match_key"] = clean_variety_name(
+                data["variety_match_key"], self.code_prefixes, self._lead_codes)
         row = CanonicalRow.model_validate(data)
         for required in self.required_canonical:
             if not getattr(row, required, None):
                 return None
         return row
 
+    def load_frame(self, scrape_path: Optional[Path] = None):
+        """Ingest hook for NON-FILE data sources (API / DB / partner feed). Override to return
+        ``(frame, timestamp_token, origin_label)`` — the records as a polars frame, a timestamp
+        string for the run id, and a label for logging. Everything downstream (adapt -> stages ->
+        emit) is identical regardless of where the frame came from.
+
+        Default returns ``None``, so the run reads the standard
+        ``data/<source>/<timestamp>/products.csv`` (the scraper path). A new tabular source needs
+        only an adapter; a non-file source additionally overrides this one method."""
+        return None
+
     def adapt(self, frame: pl.DataFrame) -> list[CanonicalRow]:
         """Row-isolated mapping (section 13A.3): a malformed row is dropped, the
         batch continues; the count of dropped rows is logged."""
+        # DISCOVER this source's leading code prefixes from the whole batch (data-driven, no
+        # hardcoded strings), so adapt_record strips them from every variety — generalises to
+        # a new scraper's own codes without listing them.
+        if self.variety_match_key and self.variety_match_key in frame.columns:
+            names = [self.clean(v) for v in frame[self.variety_match_key].to_list()]
+            self._lead_codes = detect_code_prefixes(names)
         rows: list[CanonicalRow] = []
         dropped = 0
         for record in frame.iter_rows(named=True):

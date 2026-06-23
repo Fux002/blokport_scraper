@@ -31,11 +31,16 @@ def sha256_hex(*parts: str) -> str:
 def mint_surrogate(src_site: str, src_url: str | None, raw_name: str | None, ordinal: int) -> str:
     """Deterministic surrogate when the natural key is missing (section 2, Stage 2).
 
-    Keyed on sha1(src_url or raw_name + ordinal) so a blank key never flows into
-    handles, image keys, or dedup, and the same blank row mints the same key on
-    every run."""
-    basis = src_url or raw_name or ""
-    return "mint_" + sha1_hex(src_site, basis, str(ordinal))[:16]
+    Keyed on a STABLE basis — the product url, else its raw name — so the same product mints the
+    same surrogate (and thus the same SKU) on every re-scrape, even if the supplier reorders its
+    listing. This is what keeps the inventory lane's existing-product link intact for blank-key
+    rows. The scrape position (ordinal) is NOT reproducible across runs, so it is used ONLY as a
+    last resort when there is no url and no name at all (keys_dedupe still asserts uniqueness, so a
+    genuine collision surfaces loudly rather than silently drifting)."""
+    basis = (src_url or "").strip() or (raw_name or "").strip()
+    if basis:
+        return "mint_" + sha1_hex(src_site, basis)[:16]
+    return "mint_" + sha1_hex(src_site, str(ordinal))[:16]
 
 
 def stable_seed(surrogate_key: str, field_name: str) -> int:

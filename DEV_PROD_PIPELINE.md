@@ -1,9 +1,27 @@
 # Catalog & tree pipeline — dev/prod parity
 
-The variant catalog and Medusa tree are built so the **dev and prod catalogs are
-structurally identical** — the only differences are the ids Medusa generates in
+The variant catalog and Medusa combinations are built so the **dev and prod catalogs
+are structurally identical** — the only differences are the ids Medusa generates in
 each environment and the S3 bucket in image URLs. See `RUNBOOK.md` for the full
 workflow; this file is just the dev↔prod story.
+
+## Two output sets, one core
+
+The **core is shared**: the raw scrape (`data/`) and the hand-maintained
+`catalog_source/` (backbones, ports — names, never Medusa ids) are env-independent.
+Everything that carries Medusa ids is **per environment**, in sibling folders selected
+by `BLOKPORT_ENV` (`development` default, `production`):
+
+| folder | shared / per-env | holds |
+|---|---|---|
+| `data/`, `catalog_source/` | **shared** | the scrape + hand-maintained backbones (names) |
+| `from_medusa/<env>/` | per-env | that env's downloads: `variants_export.csv`, `attributes.csv` |
+| `to_upload/<env>/` | per-env | the upload set: variants, `2_valid_combinations.csv`, products |
+| `review/<env>/`, `outputs/<env>/` | per-env | look-before-upload + internal staging |
+
+So you **scrape once**, then run `catalog`/`tree` under each `BLOKPORT_ENV` to produce
+both sets. Each resolves names→ids against its own `from_medusa/<env>/` reference, so
+`to_upload/development/` carries dev ids and `to_upload/production/` carries prod ids.
 
 ## Deploying on AWS (development & production)
 

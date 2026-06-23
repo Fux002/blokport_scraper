@@ -10,6 +10,8 @@ low-confidence fill still emits but always carries its flag.
 
 from __future__ import annotations
 
+import csv
+import functools
 import re
 from dataclasses import dataclass
 
@@ -24,9 +26,12 @@ log = logfmt.get_logger("derive")
 
 _NUM_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*([a-zµ\"']+)?", flags=re.IGNORECASE)
 
-# section 10.2 branch dimension/weight ranges (fallback only; real parsed dims win)
-_SLAB_RANGES = {"weight": (0.225, 0.350), "length": (1.5, 3.0), "height": (1.5, 3.0)}
+# section 10.2 branch dimension/weight ranges in METRES/tonnes (fallback only; parsed dims win).
+# A tile is a small finished piece (~30–60 cm face, ~1–2 cm thick), NOT a slab — sources often
+# ship tiles with no dimensions, so the synthetic fill MUST be tile-sized or tiles come out slab-big.
+_SLAB_RANGES = {"weight": (0.225, 0.350), "length": (1.5, 3.0), "width": (0.02, 0.03), "height": (1.5, 3.0)}
 _BLOCK_RANGES = {"weight": (18.0, 23.0), "length": (1.5, 3.0), "width": (1.5, 3.0), "height": (1.5, 3.0)}
+_TILE_RANGES = {"weight": (0.005, 0.012), "length": (0.3, 0.6), "width": (0.01, 0.02), "height": (0.3, 0.6)}
 
 # section 10.4 finish-to-surface-phrase table
 _FINISH_PHRASE = {
@@ -85,7 +90,9 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
                     parsed[key.strip().lower()] = meters
     width = _parse_measure(row.raw_thickness, ref) if row.raw_thickness else None
 
-    ranges = _BLOCK_RANGES if row.is_block else _SLAB_RANGES
+    fmt = (row.format_value or "").casefold()
+    ranges = (_BLOCK_RANGES if (row.is_block or fmt == "block")
+              else _TILE_RANGES if fmt == "tile" else _SLAB_RANGES)
     methods = []
 
     length = parsed.get("length")
@@ -168,7 +175,7 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
                                 method="area_division", src_url=row.src_url))
     # 6. standard slab area
     if total:
-        area = _standard_area(ref, row.type_name)
+        area = _standard_area(row.type_name)
         if area:
             est = max(1, round(total / area))
             return _accept(est, "standard_slab_area", Confidence.low, FlagCode.bundle_estimated)
@@ -176,24 +183,25 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
     _accept(source_cfg.default_bundle_size, "config_default", Confidence.low, FlagCode.bundle_default)
 
 
-def _standard_area(ref: ReferenceData, type_name: str | None) -> float | None:
-    # standard_slab_area.csv is loaded lazily here from the reference dir
-    from stone_pipeline.config.settings import SETTINGS as _S
-    import csv
-    path = _S.paths.standard_slab_area_csv
+@functools.lru_cache(maxsize=1)
+def _standard_areas() -> tuple[float | None, dict[str, float]]:
+    """Parse standard_slab_area.csv once: (default area, {type_casefold: area})."""
+    path = SETTINGS.paths.standard_slab_area_csv
     if not path.exists():
-        return None
-    default = None
-    by_type = {}
+        return None, {}
+    default, by_type = None, {}
     with path.open(newline="", encoding="utf-8-sig") as handle:
         for r in csv.DictReader(handle):
             if r["scope"] == "default":
                 default = float(r["slab_area_m2"])
             elif r["scope"] == "type":
                 by_type[r["key"].casefold()] = float(r["slab_area_m2"])
-    if type_name and type_name.casefold() in by_type:
-        return by_type[type_name.casefold()]
-    return default
+    return default, by_type
+
+
+def _standard_area(type_name: str | None) -> float | None:
+    default, by_type = _standard_areas()
+    return by_type.get((type_name or "").casefold(), default)
 
 
 def _to_float(text: str | None) -> float | None:
@@ -206,15 +214,25 @@ def _to_float(text: str | None) -> float | None:
 
 
 # --- origin (section 7 Stage 6) -----------------------------------------------
+def _to_iso(value: str, ref: ReferenceData) -> str | None:
+    """A 2-letter ISO passes through; a country NAME ('India') resolves via country_codes."""
+    v = (value or "").strip()
+    if len(v) == 2 and v.isalpha():
+        return v.upper()
+    return ref.country_codes.get(" ".join(v.casefold().split())) or None
+
+
 def derive_origin(row: CanonicalRow, ref: ReferenceData,
                   source_cfg: SourceConfig | None = None) -> None:
-    # 1. populated source location/country (rare, high)
-    if row.raw_origin and len(row.raw_origin) == 2 and row.raw_origin.isalpha():
-        row.origin_country_code = row.raw_origin.upper()
-        row.origin_source = "scrape_field"
-        row.origin_confidence = _conf_name(Confidence.high)
-        return
-    # 2. origin_map by variety or pattern (medium) — the per-variety source of truth
+    # 1. scraped country: an ISO code OR a country name (the real data when present)
+    if row.raw_origin:
+        iso = _to_iso(row.raw_origin, ref)
+        if iso:
+            row.origin_country_code = iso
+            row.origin_source = "scrape_field"
+            row.origin_confidence = _conf_name(Confidence.high)
+            return
+    # 2. origin_map by variety or pattern — the accurate per-variety override
     rule = ref.origin_map.lookup(row.variation_name or row.raw_name or "")
     if rule:
         row.origin_country_code = rule.country_iso
@@ -223,15 +241,13 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData,
         row.origin_source = "origin_map"
         row.origin_confidence = _conf_name(Confidence.medium)
         return
-    # 3. supplier default: the country of this source's default port (the company's
-    #    country). A logical placeholder until origin_map covers the variety.
-    if source_cfg:
-        iso = ref.ports.country_of((source_cfg.ports_default or [None])[0])
-        if iso:
-            row.origin_country_code = iso
-            row.origin_source = "source_default"
-            row.origin_confidence = _conf_name(Confidence.low)
-            return
+    # 3. supplier default: the SUPPLIER's country (the scraped website's company),
+    #    set per source in sources.yaml — origin follows the supplier when unknown.
+    if source_cfg and source_cfg.origin_default:
+        row.origin_country_code = source_cfg.origin_default.strip().upper()
+        row.origin_source = "source_default"
+        row.origin_confidence = _conf_name(Confidence.low)
+        return
     # 4. none + review flag
     row.origin_source = "unresolved"
     row.origin_confidence = _conf_name(Confidence.none)
@@ -242,15 +258,15 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData,
 
 # --- ports (section 3.3) ------------------------------------------------------
 def derive_ports(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
-    if row.origin_country_code:
-        ports = ref.ports.for_country(row.origin_country_code, limit=2)
-        if ports:
-            row.port_ids = ports
-            return
-    row.port_ids = list(source_cfg.ports_default)
-    row.add_flag(ReviewFlag(field="port_ids", code=FlagCode.ports_default,
-                            best_guess="|".join(row.port_ids), confidence=Confidence.low,
-                            method="default", src_url=row.src_url))
+    # ports belong to the SUPPLIER (the scraped website's company) and where it ships
+    # from — set per source in sources.yaml by name/locode/id, resolved against ports.csv.
+    # Independent of the stone's origin.
+    row.port_ids = [pid for t in (source_cfg.ports_default or []) if (pid := ref.ports.resolve(t))]
+    if source_cfg.ports_default and not row.port_ids:
+        row.add_flag(ReviewFlag(field="port_ids", code=FlagCode.ports_default,
+                                raw_value="|".join(source_cfg.ports_default),
+                                confidence=Confidence.low, method="port_unresolved",
+                                src_url=row.src_url))
 
 
 # --- title / description / handle (section 10.3, 10.4) ------------------------
@@ -264,12 +280,11 @@ def _primary_variety_name(name: str) -> str:
 
 
 def derive_title(row: CanonicalRow) -> None:
-    fmt = _FORMAT_WORD.get((row.format_value or "").strip().casefold(), "Slab")
+    # variety (+ finish) only — NOT the category word (no 'Slab'/'Block'/'Tile' in the title)
     if row.variation_name:
         parts = [_primary_variety_name(row.variation_name)]
         if row.finish_name:
             parts.append(row.finish_name)
-        parts.append(fmt)
         row.title = title_case(" ".join(parts))
         row.title_method = "construct"
     else:
@@ -282,7 +297,7 @@ def derive_description(row: CanonicalRow) -> None:
         row.description = row.raw_description.strip()
         row.description_method = "passthrough"
         return
-    variety = row.variation_name or row.raw_name or "This stone"
+    variety = title_case(_primary_variety_name(row.variation_name or row.raw_name or "This stone"))
     color = (row.color_name or "natural").lower()
     stone_type = (row.type_name or "stone").lower()
     if row.origin_city and row.origin_country_code:

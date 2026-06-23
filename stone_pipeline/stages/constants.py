@@ -17,9 +17,13 @@ log = logfmt.get_logger("constants")
 
 def run(rows: list[CanonicalRow], source_cfg: SourceConfig) -> None:
     backend = SETTINGS.backend
+    # owner ids are env config (settings, from env vars), never hardcoded here. sales_channel is
+    # one id per env; company is the general Blokport default unless this scrape overrides it.
+    company = source_cfg.company_id or backend.company_id
+    sales_channel = backend.sales_channel_id
     for row in rows:
-        row.company_id = source_cfg.company_id
-        row.sales_channel_id = source_cfg.sales_channel_id
+        row.company_id = company
+        row.sales_channel_id = sales_channel
         row.visibility = backend.visibility
         row.discountable = backend.discountable
     log.info("constants applied", extra={"extra_fields": {"rows": len(rows)}})

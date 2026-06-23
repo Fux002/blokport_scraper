@@ -228,12 +228,22 @@ def load_backbone(path: Path | None = None) -> Backbone:
 class Ports:
     by_country: dict[str, list[str]] = field(default_factory=dict)  # iso2 -> [port_id]
     iso_by_port: dict[str, str] = field(default_factory=dict)        # port_id -> iso2
+    by_name: dict[str, str] = field(default_factory=dict)            # norm(name) -> port_id
+    by_locode: dict[str, str] = field(default_factory=dict)          # UN/LOCODE -> port_id
 
     def for_country(self, iso2: str, limit: int = 2) -> list[str]:
         return self.by_country.get((iso2 or "").strip().upper(), [])[:limit]
 
     def country_of(self, port_id: str | None) -> str | None:
         return self.iso_by_port.get((port_id or "").strip())
+
+    def resolve(self, token: str) -> str | None:
+        """Resolve a sources.yaml port entry to a port id: a known id passes through,
+        else a UN/LOCODE ('ITBDS') or a port name ('Brindisi') from ports.csv."""
+        t = (token or "").strip()
+        if t in self.iso_by_port:
+            return t
+        return self.by_locode.get(t.upper()) or self.by_name.get(_norm(t))
 
     def all_ids(self) -> list[str]:
         ids: list[str] = []
@@ -255,10 +265,16 @@ def load_ports(path: Path | None = None) -> Ports:
     with candidate.open(newline="", encoding="utf-8-sig") as handle:
         for record in csv.DictReader(handle):
             pid = (record.get("port_id") or record.get("id") or record.get("Id") or "").strip()
+            if not pid:
+                continue
             iso = (record.get("country_iso") or "").strip().upper()
-            if pid and iso:
+            if iso:
                 ports.by_country.setdefault(iso, []).append(pid)
                 ports.iso_by_port[pid] = iso
+            if name := (record.get("name") or "").strip():       # for resolving by name
+                ports.by_name[_norm(name)] = pid
+            if locode := (record.get("un_locode") or "").strip().upper():
+                ports.by_locode[locode] = pid
     return ports
 
 
@@ -341,6 +357,21 @@ class OriginMap:
         return None
 
 
+def load_country_codes(path: Path | None = None) -> dict[str, str]:
+    """country name (normalized) -> ISO-2, so a scraped 'India'/'Turkey' resolves."""
+    path = Path(path or SETTINGS.paths.country_codes_csv)
+    out: dict[str, str] = {}
+    if not path.exists():
+        return out
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            name = _norm(record.get("name") or "")
+            iso = (record.get("iso2") or "").strip().upper()
+            if name and iso:
+                out[name] = iso
+    return out
+
+
 def load_origin_map(path: Path | None = None) -> OriginMap:
     path = Path(path or SETTINGS.paths.origin_map_csv)
     origin = OriginMap()
@@ -372,6 +403,7 @@ class ReferenceData:
     ports: Ports
     units: Units
     origin_map: OriginMap
+    country_codes: dict[str, str]   # country name (normalized) -> ISO-2
     synonyms: dict[str, dict[str, str]]
     versions: dict[str, str]
     overrides: object = None  # state.overrides.Overrides; lazy import to avoid cycle
@@ -404,6 +436,7 @@ def load_all() -> ReferenceData:
         ports=load_ports(),
         units=load_units(),
         origin_map=load_origin_map(),
+        country_codes=load_country_codes(),
         synonyms={v: load_synonyms(v) for v in VOCAB_CATEGORIES},
         overrides=load_overrides(),
         versions={

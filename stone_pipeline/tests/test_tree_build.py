@@ -72,14 +72,14 @@ def _for(combos, vid):
     return [c for c in combos if c[VAR] == vid]
 
 
-def test_every_variation_priceable_in_category_product_used_finishes(tmp_path):
-    # two slab products establish the category's used finishes {Polished, Honed};
-    # an UN-SOLD backbone variation becomes priceable in BOTH
-    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
+def test_every_variation_gets_all_category_finishes(tmp_path):
+    # category finishes = ALL the backbone's finishes (Polished, Raw) UNION any its
+    # products use (Honed). An UN-SOLD variation is priceable in every one of them.
+    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished", "Raw"])])
     exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
     prod = _products(tmp_path, [_prow(vid="sold1", fin="f_pol"), _prow(vid="sold2", fin="f_hon")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert {c[FIN] for c in _for(combos, "v1")} == {"f_pol", "f_hon"}
+    assert {c[FIN] for c in _for(combos, "v1")} == {"f_pol", "f_raw", "f_hon"}
     assert not unc
 
 
@@ -95,13 +95,13 @@ def test_combination_tuple_shape_and_csv(tmp_path):
     assert n == len(combos) == len(rows) - 1
 
 
-def test_product_backed_uses_scraped_colour(tmp_path):
+def test_product_backed_unions_backbone_and_scraped_colour(tmp_path):
     bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"], color=["White"])])
     exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
     prod = _products(tmp_path, [_prow(vid="v1", col="c_grey")])  # scraped Grey, backbone White
     combos, stats, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert {c[COL] for c in _for(combos, "v1")} == {"c_grey"}  # scraped colour wins
-    assert stats["by_source"]["product"] == 1
+    assert {c[COL] for c in _for(combos, "v1")} == {"c_white", "c_grey"}  # both — widest valid set
+    assert stats["covered"] == 1
 
 
 def test_tiles_mirror_slab_finishes(tmp_path):
@@ -121,11 +121,11 @@ def test_mirror_inherits_colour_from_variety_sold_elsewhere(tmp_path):
                              ("vb", "block_marble_carrara_2", "Carrara")])
     prod = _products(tmp_path, [_prow(vid="vs", col="c_grey")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert stats["by_source"]["inherited"] == 1 and not unc
+    assert not unc
     blk = _for(combos, "vb")
     assert {c[CAT] for c in blk} == {"cat_block"}      # category is the variation's own
     assert {c[FIN] for c in blk} == {"f_raw"}          # block finishes, not slab
-    assert {c[COL] for c in blk} == {"c_grey"}         # inherited colour
+    assert {c[COL] for c in blk} == {"c_white", "c_grey"}  # backbone White + inherited scraped Grey
 
 
 def test_unbackboned_variation_priceable_via_type_from_name(tmp_path):
@@ -136,8 +136,8 @@ def test_unbackboned_variation_priceable_via_type_from_name(tmp_path):
                              ("vq", "slab_everest_quartzite_2", "Everest Quartzite")])
     prod = _products(tmp_path, [_prow(vid="vs", col="c_grey")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert not unc and stats["by_source"]["default"] == 1
-    assert _for(combos, "vq")  # priceable
+    assert not unc
+    assert _for(combos, "vq")  # priceable via type-from-name + default colour
 
 
 def test_truly_unresolvable_variation_is_uncovered(tmp_path):

@@ -17,7 +17,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Optional
 
-from stone_pipeline.adapters import selftest as adapter_registry
+from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
 from stone_pipeline.config.settings import SETTINGS
@@ -99,23 +99,39 @@ def find_scrape_file(source: str) -> Optional[Path]:
 
 def run_source(
     source: str, scrape_path: Optional[Path] = None, outputs_dir: Optional[Path] = None,
-    state_dir: Optional[Path] = None,
+    state_dir: Optional[Path] = None, inventory_only: bool = False,
 ) -> Manifest:
-    adapter: AdapterBase = adapter_registry.REGISTRY[source]
-    scrape_path = scrape_path or find_scrape_file(source)
-    if scrape_path is None:
-        raise FileNotFoundError(f"no scrape file found for source {source}")
+    # inventory_only: a lightweight stock refresh for EXISTING products. Runs the same scrape ->
+    # match -> classify path, then emits ONLY inventory_update.csv (Variant Sku + Inventory
+    # Quantity). Skips the image stage and the product-import/canonical writes entirely, so it
+    # never re-imports products or regenerates images. See stone_pipeline.inventory.
+    adapter: AdapterBase = adapter_registry.REGISTRY.get(source)
+    if adapter is None:
+        raise SystemExit(
+            f"source '{source}' has no adapter. Add stone_pipeline/adapters/{source}.py ending "
+            f"in `ADAPTER = ...` (auto-registered). Adapters available: {sorted(adapter_registry.REGISTRY)}"
+        )
     outputs_dir = Path(outputs_dir or SETTINGS.paths.outputs_dir)
     # write-back persists to state (production); tests pass a temp state_dir so a
     # run never pollutes the repo's learned aliases
     state_dir = Path(state_dir or SETTINGS.paths.state_dir)
     writeback_path = state_dir / "alias_writeback.csv"
 
-    frame = read_scrape_csv(scrape_path)
-    run_id = make_run_id(source, _scrape_ts(frame))
+    # INGEST is pluggable: a non-file source (API/DB/feed) overrides adapter.load_frame to hand back
+    # its own frame; everything below is identical. The default is the scraper CSV.
+    custom = adapter.load_frame(scrape_path)
+    if custom is not None:
+        frame, ts_token, origin = custom
+    else:
+        scrape_path = scrape_path or find_scrape_file(source)
+        if scrape_path is None:
+            raise FileNotFoundError(f"no scrape file found for source {source}")
+        frame = read_scrape_csv(scrape_path)
+        ts_token, origin = _scrape_ts(frame), scrape_path.name
+    run_id = make_run_id(source, ts_token)
     layout = RunLayout.for_run(outputs_dir, run_id).ensure()
     run_log = logfmt.bind(log, run_id=run_id, source=source)
-    run_log.info(f"run start on {scrape_path.name} ({frame.height} rows)")
+    run_log.info(f"run start on {origin} ({frame.height} rows)")
 
     ref = loaders.load_all()
     fingerprint = check_fingerprint(ref)
@@ -125,8 +141,8 @@ def run_source(
         source=source,
         code_version=SETTINGS.code_version,
         environment=SETTINGS.environment,
-        input_path=str(scrape_path),
-        input_hash=content_hash(scrape_path),
+        input_path=origin,
+        input_hash=content_hash(scrape_path) if scrape_path else "",
         reference_versions=ref.versions,
     )
     manifest.totals["backend_fingerprint_ok"] = 1
@@ -178,8 +194,8 @@ def run_source(
     # Stage 6: derivation
     source_cfg = load_source(source)
     derive.run(rows, ref, source_cfg)
-    # Stage 7: images
-    img_stats = images.run(rows)
+    # Stage 7: images  (skipped for an inventory-only refresh — stock never touches images)
+    img_stats = images.ImageStats() if inventory_only else images.run(rows)
     # Stage 8: constants
     constants.run(rows, source_cfg)
 
@@ -192,7 +208,7 @@ def run_source(
         ])
     # Stage 9: validation
     validation = validate.run(rows, emit_on_review=source_cfg.emit_on_review,
-                              require_images=SETTINGS.images.require_images)
+                              require_images=False if inventory_only else SETTINGS.images.require_images)
     manifest.add_stage(StageMetric(stage="validate", rows_in=len(rows), rows_out=len(validation.emit),
                                    rejected=len(validation.rejects), reviewed=len(validation.review_only),
                                    extra={"images_staged": img_stats.staged}))
@@ -217,21 +233,32 @@ def run_source(
                            inventory_changed=pstats.inventory_changed)
 
     # Stage 10: emit into the clean per-run layout (outputs/<run_id>/...)
-    columns = emit.read_template_columns()
-    emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
-    new_rows = [r for r in validation.emit if r.product_status == "new"]
     existing_rows = [r for r in validation.emit if r.product_status == "existing"]
-    if known:  # only split when we know what exists
-        emit.write_import_csv(new_rows, source_cfg, layout.products_import / "medusa_import_new.csv", columns)
-        emit.write_import_csv(existing_rows, source_cfg, layout.products_import / "medusa_import_existing.csv", columns)
-        # item 5: inventory-only update for existing products whose stock changed
-        changed = [r for r in existing_rows if r.product_changed]
-        if changed:
-            emit.write_inventory_csv(changed, source_cfg, layout.products_import / "inventory_update.csv")
-    emit.write_review_csv(validation.review_only + validation.emit, layout.review / "products_review.csv")
-    emit.write_rejects_csv(validation.rejects, layout.review / "products_rejects.csv")
-    staging.write_canonical(rows, layout.diagnostics / "canonical.parquet")
-    gap_count = _write_gap_queue(rows, layout.review / "tree_gaps.csv")
+    # item 5: the inventory-only delta — existing products whose supplier stock moved. Shared by
+    # both modes: it is the SOLE output of an inventory refresh and one output of a full run.
+    changed = [r for r in existing_rows if r.product_changed] if known else []
+    # delete loop: products in Medusa (this source) that the latest scrape dropped -> stock-0 delist + report
+    discontinued = product_state.discontinued(rows, source_cfg, known)
+    if known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
+        emit.write_inventory_csv(changed, source_cfg, layout.products_import / "inventory_update.csv",
+                                 discontinued=tuple(discontinued))
+        emit.write_discontinued_csv(discontinued, layout.review / "products_discontinued.csv")
+    manifest.totals["products_discontinued"] = len(discontinued)
+    gap_count = 0
+    if inventory_only:
+        run_log.info("inventory-only: wrote stock delta, skipped products/images/canonical",
+                     extra={"extra_fields": {"existing": len(existing_rows), "changed": len(changed)}})
+    else:
+        columns = emit.read_template_columns()
+        emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
+        new_rows = [r for r in validation.emit if r.product_status == "new"]
+        if known:  # only split when we know what exists
+            emit.write_import_csv(new_rows, source_cfg, layout.products_import / "medusa_import_new.csv", columns)
+            emit.write_import_csv(existing_rows, source_cfg, layout.products_import / "medusa_import_existing.csv", columns)
+        emit.write_review_csv(validation.review_only + validation.emit, layout.review / "products_review.csv")
+        emit.write_rejects_csv(validation.rejects, layout.review / "products_rejects.csv")
+        staging.write_canonical(rows, layout.diagnostics / "canonical.parquet")
+        gap_count = _write_gap_queue(rows, layout.review / "tree_gaps.csv")
     # NOTE: variants/backbone/tree/images are SHARED across sources and are
     # consolidated by `python -m stone_pipeline.catalog` (reads every run's
     # canonical.parquet), not written per source. This folder is products only.
@@ -279,14 +306,15 @@ def print_summary(manifest: Manifest) -> None:
 
 
 def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = None,
-            state_dir: Optional[Path] = None) -> dict[str, Manifest]:
+            state_dir: Optional[Path] = None, inventory_only: bool = False) -> dict[str, Manifest]:
     """Multi-source run with source-level isolation (section 13A.3): one source
     failing does not affect the others."""
     sources = sources or list(adapter_registry.REGISTRY.keys())
     results: dict[str, Manifest] = {}
     for source in sources:
         try:
-            results[source] = run_source(source, outputs_dir=outputs_dir, state_dir=state_dir)
+            results[source] = run_source(source, outputs_dir=outputs_dir, state_dir=state_dir,
+                                         inventory_only=inventory_only)
         except SystemExit:
             log.error(f"{source} aborted on health gate; continuing other sources")
         except Exception:

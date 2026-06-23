@@ -44,7 +44,11 @@ def test_alias_addition_preserves_and_augments(ref):
     # existing aliases are preserved (not overwritten)
     assert "|" in entry["Aliases"] and len(entry["Aliases"]) > len("ALPINE")
     existing = curate.load_existing("slab").by_name["alpine"]
-    assert entry["Key"] == existing["Key"] and entry["Image"] == existing["Image"]  # kept verbatim
+    assert entry["Key"] == existing["Key"]
+    # Image is re-linked to the clean deterministic {Key}.png (blank if the variant has none),
+    # never the export's internal/blank value
+    expect = curate.image_url(curate.image_filename(existing["Key"])) if (existing.get("Image") or "").strip() else ""
+    assert entry["Image"] == expect
 
 
 def test_exact_match_is_not_proposed_as_alias(ref):
@@ -68,7 +72,8 @@ def test_new_variant_emitted_for_active_categories(ref):
         assert len(rows) == 1, f"expected new variant in {branch}"
         out = rows[0]
         keys[branch] = out["Key"]
-        assert out["Image"].endswith(f"{out['Key']}.png")  # image name IS the Key
+        # only the product-backed branch (slab) carries an image link; block/tile fan-out blank
+        assert out["Image"].endswith(f"{out['Key']}.png") if branch == "slab" else out["Image"] == ""
         assert "Volume per kg (m³/kg)" in out
         post = next(p for p in result.backbone_new[branch] if p["variant"] == "Totally Novel Xyz")
         assert post["image_file"] == f"{out['Key']}.png"
@@ -96,9 +101,11 @@ def test_active_branches_gates_tiles_on_config(monkeypatch):
     assert curate.active_branches() == ("slab", "block")
 
 
-def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref):
-    # a gap whose nearest existing variety scores high is proposed as an ALIAS of
-    # that variety, not a new variant (avoids near-duplicate variants)
+def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref, monkeypatch):
+    # FALLBACK path (alias model off): a gap whose nearest existing variety scores high is
+    # proposed as an ALIAS of that variety, not a new variant. (The tier-7 model path is covered
+    # by test_alias_resolver; the confirm-ledger read-back by test_decisions.)
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     nearest = next(iter(ref.variants_slabs.by_id.values())).name
     row = CanonicalRow(src_site="polonine", surrogate_key="ac1",
                        variety_match_key="Suppliers Rebrand Xyz", raw_type="Marble")
@@ -154,6 +161,31 @@ def test_attribute_curation_suggests_synonym(ref):
     entry = next(a for a in attr if a["raw_value"] == "Semiprecious")
     assert entry["suggested_value"] == "Semi-Precious Stone"
     assert entry["recommended_action"] in ("synonym", "synonym?")
+
+
+def test_looks_like_artifact_heuristic():
+    f = curate._looks_like_artifact
+    assert f("Z Astoria") and f("X Blue") and f("") and f("123") and f("A")     # codes / junk
+    assert f("Super – 1.08") and f("Marjan No. 426") and f("883 Black") and f("Matrix 3D")  # number codes
+    assert not (f("G682") or f("G032") or f("G684 (Fuding Black)"))              # granite G-codes kept
+    # ambiguous 2-char codes ('Zb') are the corpus cleaner's job, not this single-name heuristic
+    assert not f("Zb Patagonia")
+    assert not (f("Carrara") or f("Mona Lisa") or f("Verde Star") or f("Blue Pearl"))
+    assert not (f("La Perla") or f("El Dorado") or f("Mt Blanc"))               # real 2-char leads kept
+    assert not (f("G682") or f("G032") or f("G682 (Sunset Gold)"))              # granite G-codes kept
+
+
+def test_code_like_name_flagged_not_minted(ref):
+    # a leftover supplier code (single-letter prefix) must NOT become a variant + image;
+    # it is routed to review/suspicious_variety_names.csv instead
+    row = CanonicalRow(src_site="varsha", surrogate_key="z1",
+                       variety_match_key="Z Astoria", raw_type="Granite")
+    row.add_gap(TreeGap(src_site="varsha", surrogate_key="z1", raw_name="Z Astoria",
+                        gap_kind=GapKind.missing_variation, nearest_existing="Something", nearest_score=40.0))
+    result = curate.build_curation([row], ref)
+    assert not any(r["Name"] == "Z Astoria" for b in result.new_variants.values() for r in b)
+    assert any(s["raw_name"] == "Z Astoria" for s in result.suspicious_names)
+    assert result.counts["suspicious_names"] >= 1
 
 
 def test_curation_does_not_modify_reference_files(ref, tmp_path):

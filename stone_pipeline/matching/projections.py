@@ -18,6 +18,8 @@ import re
 
 import jellyfish
 
+from stone_pipeline.core.text import ascii_fold
+
 _PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
 _WS = re.compile(r"\s+")
 # inventory prefixes seen on supplier exports (Z, ZB, "Z B")
@@ -27,7 +29,7 @@ _TRAIL_TAG = re.compile(r"\s*(/.*|\b\d+\s?cm\b|\bgrade\s+\w+|\b[abcd]\b)\s*$", f
 
 
 def norm(value: str) -> str:
-    text = (value or "").strip().casefold()
+    text = ascii_fold((value or "").strip()).casefold()  # fold accents so 'Porriño' == 'Porrino'
     text = _PUNCT.sub(" ", text)
     return _WS.sub(" ", text).strip()
 

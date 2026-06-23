@@ -28,10 +28,10 @@
     "merged_from": []
   },
   {
-    "key": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf",
-    "variant": "INFINITY WHITE",
+    "key": "slab_quartzite_porto_bianco_034acf83-5284-5fd8-9d44-093f0dfb6fbb",
+    "variant": "Porto Bianco",
     "category": "Slabs",
-    "stone_type": "",
+    "stone_type": "Quartzite",
     "color": [
       "White"
     ],
@@ -49,7 +49,115 @@
       "A"
     ],
     "aliases": [],
-    "image_file": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf.png",
+    "image_file": "slab_quartzite_porto_bianco_034acf83-5284-5fd8-9d44-093f0dfb6fbb.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_granite_sodalite_baia_7dd1c8a3-f2b7-55bf-b230-58c6bc729eaf",
+    "variant": "Sodalite Baia",
+    "category": "Slabs",
+    "stone_type": "Granite",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_granite_sodalite_baia_7dd1c8a3-f2b7-55bf-b230-58c6bc729eaf.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_crystallo_divine_dc0d3019-2a92-539b-b31c-a34cff2ee97a",
+    "variant": "Crystallo Divine",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_crystallo_divine_dc0d3019-2a92-539b-b31c-a34cff2ee97a.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_lava_oro_8ad1ca8f-cc8e-58f4-a33c-91ba8acde80b",
+    "variant": "Lava Oro",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_lava_oro_8ad1ca8f-cc8e-58f4-a33c-91ba8acde80b.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_cream_quartzite_968a0186-4863-5aeb-b4d1-89b920801c2c",
+    "variant": "Cream Quartzite",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Cream"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_cream_quartzite_968a0186-4863-5aeb-b4d1-89b920801c2c.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": true,

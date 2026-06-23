@@ -19,7 +19,9 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
   `backbone_value_updates.csv` (existing varieties missing a colour/finish). Apply
   these to the backbones before building the tree.
 
-- `ports.csv` — origin → shipping ports.
+- `ports.csv` — the MASTER list of shipping ports (id, name, un_locode, country_iso, …).
+  Assign which ports each supplier ships from in `config/sources.yaml` `ports_default`,
+  by port NAME or UN/LOCODE (e.g. `Brindisi` / `ITBDS`) — resolved to ids against this file.
 - `missing_variants.csv` — variants parked OUT of the tree (no/ambiguous image).
 - `image_model.csv` — which model made each variant's image (`flux-2-max` vs `legacy`);
   the redo-on-max worklist.

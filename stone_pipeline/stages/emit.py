@@ -20,6 +20,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.stages.product_state import inventory_for
 
 log = logfmt.get_logger("emit")
 
@@ -38,11 +39,8 @@ def _sku(row: CanonicalRow, cfg: SourceConfig) -> str:
     return f"{cfg.source_code}-{row.surrogate_key}".upper()
 
 
-def _inventory(row: CanonicalRow) -> str:
-    for candidate in (row.raw_slab_count, row.bundle_size):
-        if candidate and str(candidate).strip().isdigit():
-            return str(int(str(candidate)))
-    return "1"
+# single source of truth so the imported stock and the change-feed (product_state) agree
+_inventory = inventory_for
 
 
 def _slot(keys: list[str], index: int) -> str:
@@ -152,10 +150,13 @@ INVENTORY_COLUMNS = ["Variant Sku", "Product Handle", "Variant Title",
                      "Inventory Quantity", "Reserved Quantity"]
 
 
-def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path) -> Path:
-    """Inventory-only update (item 5): for existing products whose stock changed,
-    emit the inventory CSV. The importer uses only Variant Sku (which product) and
-    Inventory Quantity, but the full structure is written so the file loads."""
+def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
+                        discontinued: tuple[tuple[str, str], ...] = ()) -> Path:
+    """Inventory-only update (item 5): for existing products whose stock changed, emit the
+    inventory CSV. The importer uses only Variant Sku (which product) and Inventory Quantity, but
+    the full structure is written so the file loads. `discontinued` (sku, handle) pairs — products
+    the supplier dropped — are written at quantity 0: a reversible delist (a later scrape that
+    carries the stone again simply sets it back)."""
     from stone_pipeline.stages.product_state import inventory_for, sku_for
 
     path = Path(path)
@@ -171,6 +172,31 @@ def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path)
                 "Inventory Quantity": inventory_for(row),  # read by importer
                 "Reserved Quantity": "",
             })
+        for sku, handle_val in discontinued:
+            writer.writerow({
+                "Variant Sku": sku, "Product Handle": handle_val,
+                "Variant Title": SETTINGS.backend.variant_title,
+                "Inventory Quantity": "0",                 # out of stock = reversible delist
+                "Reserved Quantity": "",
+            })
+    return path
+
+
+DISCONTINUED_COLUMNS = ["Variant Sku", "Product Handle", "Action"]
+
+
+def write_discontinued_csv(discontinued: list[tuple[str, str]], path: Path) -> Path:
+    """The delete-loop report: products in Medusa that the supplier no longer carries. The
+    inventory update already set them to stock 0 (out of stock); this lists them so they can be
+    reviewed and optionally hard-deleted/archived in Medusa. The pipeline never auto-deletes."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=DISCONTINUED_COLUMNS)
+        writer.writeheader()
+        for sku, handle_val in discontinued:
+            writer.writerow({"Variant Sku": sku, "Product Handle": handle_val,
+                             "Action": "set to stock 0; review for delete/archive"})
     return path
 
 

@@ -32,6 +32,7 @@ from pathlib import Path
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
+from stone_pipeline.core.text import ascii_fold, looks_like_artifact as _looks_like_artifact, title_case
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
 from stone_pipeline.stages.format_resolve import branch_of
@@ -54,8 +55,10 @@ def active_branches() -> tuple[str, ...]:
 
 
 def _slug_us(text: str) -> str:
-    """Underscore slug matching the existing Key convention (agata_black)."""
-    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", (text or "").casefold())).strip("_")
+    """Underscore slug matching the existing Key convention (agata_black). Accent-folded so the
+    Key is fold-invariant — same key whether the caller passes 'Porriño' or 'Porrino' — matching
+    title_case/slugify and so the deterministic Key can never split one variety in two."""
+    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", ascii_fold(text or "").casefold())).strip("_")
 
 
 def gen_key(branch: str, stone_type: str, name: str) -> str:
@@ -137,10 +140,6 @@ _DEFAULT_FINISHES = ["Polished", "Honed", "Leathered", "Brushed", "Flamed",
                      "Sandblasted", "Sawn Cut", "Raw"]
 
 
-def _title(name: str) -> str:
-    return " ".join(w.capitalize() if not w.isupper() else w for w in (name or "").split())
-
-
 # format words to strip from a variety name (singular + plural of every category)
 _FORMAT_WORDS = {w for c in CATEGORIES for w in (c.name, c.plural)}
 
@@ -175,6 +174,9 @@ class CurationResult:
     backbone_new: dict[str, list[dict]] = field(default_factory=dict)      # branch -> posts
     backbone_updates: list[dict] = field(default_factory=list)            # leaf-gap suggestions
     images_to_generate: list[dict] = field(default_factory=list)          # image checklist
+    suspicious_names: list[dict] = field(default_factory=list)            # code-like names, NOT minted
+    pending_confirm: list[dict] = field(default_factory=list)             # uncertain -> variants_to_confirm.csv
+    rejected: set = field(default_factory=set)                            # user said 'no' -> never propose again
     counts: dict[str, int] = field(default_factory=dict)
 
 
@@ -189,8 +191,39 @@ def _non_exact_confirmed(row: CanonicalRow) -> bool:
     )
 
 
+def _alias_model():
+    """The tier-7 alias resolver + nearest-variety lookup, trained from the backbones. The model
+    itself lives in matching.alias_resolver; this is the curate-side handle."""
+    from stone_pipeline.matching.alias_resolver import from_backbones
+    return from_backbones()
+
+
 def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     imports = {b: load_existing(b) for b in BRANCHES}
+    resolver, near_meta = _alias_model() if SETTINGS.curation.enable_alias_model else (None, {})
+    # every known SURFACE (canonical name + each alias) of an existing variety -> the set of
+    # canonical varieties that carry it. A scrape whose cleaned name is already a surface must
+    # NEVER mint a duplicate (this is the alias-aware existence check); unambiguous -> confirm the
+    # spelling as an alias, ambiguous across varieties -> review.
+    existing_surface: dict[str, set[str]] = {}
+    for b in active_branches():
+        for nrm, v in imports[b].by_name.items():
+            existing_surface.setdefault(nrm, set()).add(nrm)
+            for al in _alias_list(v.get("Aliases", "")):
+                existing_surface.setdefault(proj.norm(al), set()).add(nrm)
+    # vocabulary of pure colour + stone-type words. A name made ONLY of these (e.g. 'Cream
+    # Quartzite', 'Black Granite') is an unbranded GENERIC trade name -- its own underdog variety,
+    # never to be aliased UP into a premium quarry-specific stone (the backbone lists such generics
+    # as aliases of the premium, so the model/surface would otherwise missell it).
+    generic_words: set[str] = set()
+    for cat in ("color", "type"):
+        for canon, _id in ref.attributes.by_category.get(cat, {}).values():
+            generic_words |= set(proj.norm(canon).split())
+    # human decisions read back from the ledger (variants_to_confirm.csv) + the persistent reject memory
+    from stone_pipeline.stages import decisions
+    confirm_decisions = decisions.load_confirm_decisions()
+    rejected = decisions.load_rejected()
+    pending_confirm: list[dict] = []
     result = CurationResult(
         alias_additions={b: [] for b in BRANCHES},
         new_variants={b: [] for b in BRANCHES},
@@ -234,6 +267,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
 
     # --- 2. classify gaps: alias-of-nearest (preferred) vs genuinely new variant --
     seen_new: set[str] = set()
+    suspicious: list[dict] = []          # names that look like supplier codes, not varieties
     new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches)
     for row in rows:
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
@@ -245,25 +279,67 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         gap = gaps[0]
         stone_type = row.raw_type or gap.suggested_type or ""
         clean = _clean_variety(name, stone_type)  # strip format words + stone-type
+        if _looks_like_artifact(clean):           # backstop: never mint a code as a variety
+            suspicious.append({"src_site": row.src_site, "raw_name": name, "cleaned_name": clean})
+            continue
         # dedup on the MINTED identity (cleaned name), not the raw name: two raw
         # names that clean to the same variety must not mint duplicate Keys.
         if proj.norm(clean) in seen_new:
             continue
         seen_new.add(proj.norm(clean))
-        # lean toward alias rather than minting a near-duplicate variant: a decent
-        # fuzzy nearest, OR a truncated name that is a token-subset of an existing
-        # variety ('Marjan' -> 'Marjan Silver', 'Heser' -> 'Heser Black'). The
-        # original spelling is added as the alias.
-        nearest = gap.nearest_existing or ""
-        if nearest and ((gap.nearest_score or 0) >= alias_floor
-                        or _is_token_subset(clean, nearest)):
-            review_candidates.setdefault(proj.norm(nearest), set()).add(name)
+        if proj.norm(clean) in rejected:           # user said 'no' on a past run -> never propose again
             continue
+        # a generic colour+type trade name is its own variety -- skip ALL alias routing (surface
+        # match + model) so it can never be promoted into a premium named stone (misselling).
+        ctoks = set(proj.norm(clean).split())
+        generic = bool(ctoks) and ctoks <= generic_words
+        # the cleaned name ALREADY EXISTS as a variety (any branch / any type) -> never mint a
+        # duplicate. A typeless source (e.g. varsha) whose name collides with an existing variety
+        # — possibly ambiguous across types — is routed to review so a human confirms which
+        # variety it is, instead of auto-cloning a typeless copy.
+        owners = existing_surface.get(proj.norm(clean))
+        if owners and not generic:
+            if len(owners) == 1:                       # unambiguous existing variety (name or alias)
+                alias_new.setdefault(next(iter(owners)), set()).add(name)
+            else:                                       # the surface spans several varieties/types
+                review_candidates.setdefault(proj.norm(clean), set()).add(name)
+            continue
+        # alias-vs-new decision against the nearest existing variety. The tier-7 model uses
+        # name + type + colour to tell a real alias ('Marjan' -> 'Marjan Silver') from a distinct
+        # sibling ('Cristallo Divine' vs 'Cristallo Bianco'): P>=hi auto-confirms the alias, P<=lo
+        # mints, the uncertain middle goes to review. Falls back to the flat fuzzy floor + token
+        # subset when the model isn't available.
+        nearest = (gap.nearest_existing or "").split(",")[0].strip()
+        if nearest and not generic:
+            if resolver is not None:
+                nt, nc, nal = near_meta.get(proj.norm(nearest), ("", [], []))
+                d = resolver.decide_against(clean, stone_type, [gap.suggested_color or ""],
+                                            [nearest, *nal], nt, nc)
+                if d.verdict == "alias":
+                    alias_new.setdefault(proj.norm(nearest), set()).add(name)   # confident -> confirmed
+                    continue
+                if d.verdict == "review":
+                    # uncertain -> the human decides via variants_to_confirm.csv
+                    dec = confirm_decisions.get(proj.norm(clean))
+                    if dec == "no":
+                        rejected.add(proj.norm(clean))
+                        continue
+                    if dec != "yes":               # pending: hold out of the upload, ask for a decision
+                        pending_confirm.append({
+                            "confirm": "", "variant": clean, "stone_type": stone_type,
+                            "color": gap.suggested_color or "", "nearest_existing": nearest,
+                            "score": gap.nearest_score or "", "model_prob": round(d.prob, 2)})
+                        continue
+                    # dec == "yes" -> the human confirmed it IS a new variety -> fall through to mint
+                # "mint" -> fall through to create a new variant
+            elif (gap.nearest_score or 0) >= alias_floor or _is_token_subset(clean, nearest):
+                review_candidates.setdefault(proj.norm(nearest), set()).add(name)
+                continue
         new_variant_rows.append((
-            clean, _title(clean), stone_type,
-            _title(_attr_surface(row, "color")),
+            clean, title_case(clean), stone_type,
+            title_case(_attr_surface(row, "color")),
             (row.quality_name or "A").strip() or "A",
-            _title(_attr_surface(row, "finish")), gap,
+            title_case(_attr_surface(row, "finish")), gap,
             variety_branches.get(proj.norm(clean), set()),  # product-backed branches
         ))
 
@@ -278,8 +354,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             additions = [s for s in sorted(spellings) if proj.norm(s) not in have]
             if not additions:
                 continue
+            # re-link the clean deterministic image when the variant has one; never copy
+            # the export's empty/internal value (would send a blank Image and risk a wipe)
+            img = image_url(image_filename(existing["Key"])) if (existing.get("Image") or "").strip() else ""
             result.alias_additions[branch].append({
-                "Key": existing["Key"], "Name": existing["Name"], "Image": existing["Image"],
+                "Key": existing["Key"], "Name": existing["Name"], "Image": img,
                 "Aliases": "|".join(current + additions),
                 "Volume per kg (m³/kg)": existing.get("Volume") or category(branch).volume_per_kg,
                 "_added": "|".join(additions),
@@ -325,7 +404,9 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             result.new_variants[branch].append({
                 "Key": key,
                 "Name": title,
-                "Image": image_url(fname),  # consistent with the backbone image_file
+                # only link an image when a product uses this branch; fan-out tile/block
+                # copies stay imageless until a product adds them (lazy generation)
+                "Image": image_url(fname) if product_backed else "",
                 "Aliases": "",
                 "Volume per kg (m³/kg)": category(branch).volume_per_kg,
                 "_nearest_existing": gap.nearest_existing or "",
@@ -393,7 +474,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         "distinct_new_varieties": len(new_variant_rows),
         "backbone_updates": len(result.backbone_updates),
         "images_to_generate": len(result.images_to_generate),
+        "suspicious_names": len(suspicious),
+        "pending_confirm": len(pending_confirm),
     }
+    result.suspicious_names = suspicious   # written to review by write_curation
+    result.pending_confirm = pending_confirm
+    result.rejected = rejected
     return result
 
 
@@ -482,30 +568,38 @@ def write_curation(result: CurationResult) -> None:
                           encoding="utf-8")
     if upload_rows:
         _write_csv(to_upload / "1_variants_update.csv", _IMPORT_COLS, upload_rows)
-    if needs_review:
-        _write_csv(review / "alias_candidates.csv", _IMPORT_COLS + ["_added", "_status"], needs_review)
-    if triage:
-        _write_csv(review / "variants_update_triage.csv",
-                   ["Key", "Name", "_suggested_type", "_nearest_existing", "_nearest_score", "_example_url"],
-                   triage)
-    if result.images_to_generate:
-        _write_csv(review / "images_to_generate.csv",
-                   ["image_filename", "s3_url", "variant", "category", "status"], result.images_to_generate)
-    if result.backbone_updates:
+    # the ONLY review file from curate: the decision ledger (uncertain new varieties, confirm
+    # true/false). Always (re)written so applied/rejected rows drop out. Advisory sets (uncertain
+    # alias spellings, code-like names, images) are logged as counts, not clutter files.
+    from stone_pipeline.stages import decisions
+    decisions.write_confirm_file(result.pending_confirm)
+    decisions.save_rejected(result.rejected)
+    if result.backbone_updates:   # value changes to apply to the backbones (apply artifact, not review)
         _write_csv(additions / "backbone_value_updates.csv",
                    ["variety", "attribute", "add_value", "currently_allowed", "match_method",
                     "match_confidence", "verdict", "example_url"], result.backbone_updates)
+    result.counts["uncertain_aliases"] = len(needs_review)
+    result.counts["suspicious_names_skipped"] = len(result.suspicious_names)
     log.info("curation written", extra={"extra_fields": result.counts})
 
 
-def run(rows: list[CanonicalRow], ref: ReferenceData, products_counts: dict | None = None) -> CurationResult:
+def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
+    from stone_pipeline.stages import decisions
     result = build_curation(rows, ref)
-    if products_counts:
-        result.counts.update(products_counts)
     write_curation(result)
     attr = build_attribute_curation(rows, ref)
-    if attr:
-        _write_csv(SETTINGS.paths.review_dir / "attribute_synonyms.csv",
-                   ["vocab", "raw_value", "count", "suggested_value", "score", "recommended_action"], attr)
+    # ONE attribute decision file: adopt any Medusa ids you filled in last run -> attributes.csv,
+    # then re-list every unresolved colour/finish/type/quality value (new ones to create + id, plus
+    # synonym suggestions) in attributes_to_add.csv. No separate synonyms file.
+    filled = decisions.load_attribute_ids()
+    adopted = decisions.adopt_attribute_ids(filled)
+    _ATTR_VOCABS = ("color", "finish", "type", "quality")   # NOT 'variation' -> that's variants_to_confirm
+    to_add = [{"medusa_id": "", "kind": a["vocab"], "value": a["raw_value"], "count": a["count"],
+               "suggested_value": a["suggested_value"], "action": a["recommended_action"]}
+              for a in attr if a["vocab"] in _ATTR_VOCABS
+              and (a["vocab"], proj.norm(a["raw_value"])) not in filled]
+    decisions.write_attributes_to_add(to_add)
     result.counts["attribute_values"] = len(attr)
+    result.counts["attributes_to_add"] = len(to_add)
+    result.counts["attributes_adopted"] = adopted
     return result

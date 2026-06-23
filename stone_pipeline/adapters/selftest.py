@@ -12,22 +12,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from stone_pipeline.adapters.base import AdapterBase, read_scrape_csv
+from stone_pipeline.adapters import REGISTRY  # auto-discovered source -> adapter
+from stone_pipeline.adapters.base import read_scrape_csv
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core.schema import CanonicalRow
-
-# adapter source id -> adapter instance
-from stone_pipeline.adapters.marenostone import ADAPTER as MARENOSTONE
-from stone_pipeline.adapters.polonine import ADAPTER as POLONINE
-from stone_pipeline.adapters.varsha import ADAPTER as VARSHA
-from stone_pipeline.adapters.zucchi import ADAPTER as ZUCCHI
-
-REGISTRY: dict[str, AdapterBase] = {
-    POLONINE.source: POLONINE,
-    MARENOSTONE.source: MARENOSTONE,
-    ZUCCHI.source: ZUCCHI,
-    VARSHA.source: VARSHA,
-}
 
 
 def fixture_dir(source: str) -> Path:

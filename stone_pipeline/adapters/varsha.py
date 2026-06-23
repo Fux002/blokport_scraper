@@ -10,25 +10,22 @@ are exotic granites absent from the slabs reference and legitimately gap.
 
 from __future__ import annotations
 
-import re
-
 from stone_pipeline.adapters.base import AdapterBase
 from stone_pipeline.adapters.tokens import extract_color
 
-# varsha prefixes some material names with an internal code that is NOT part of the
-# official variety: a leading 'Z ', optionally with a 'B ' sub-code ('Z ASTORIA' ->
-# 'Astoria', 'Z B  FUSION BLACK' -> 'Fusion Black'). 'B ' only strips when it's the
-# standalone code letter, so 'Z BLACK FOREST' keeps 'Black Forest'.
-_Z_PREFIX = re.compile(r"^[Zz]\s+(?:[Bb]\s+)?")
+# varsha prefixes many material names with an internal code that is NOT part of the official
+# variety ('Z ASTORIA', 'Z B FUSION BLACK', collapsed 'ZB PATAGONIA'). No regex is hardcoded
+# for it: AdapterBase auto-discovers the 'z'/'zb' code prefixes from the batch (they fan out
+# across many varieties) and strips them, like it would any new scraper's codes.
 
 
 def _variety(record) -> str:
-    return _Z_PREFIX.sub("", AdapterBase.clean(record.get("material_name"))).strip()
+    return AdapterBase.clean(record.get("material_name"))  # base strips discovered codes
 
 
 class VarshaAdapter(AdapterBase):
     source = "varsha"
-    adapter_version = "1.1.0"
+    adapter_version = "1.3.0"
     variety_match_key = "material_name"
     format_field = "format"  # scraper should emit the explicit block/slab/tile tag here
     required_columns = ["bundle_id", "material_name", "finish", "quality",

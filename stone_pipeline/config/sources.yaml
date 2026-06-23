@@ -1,42 +1,41 @@
 # Per-source configuration (section 3.1, section 12).
-# company_id and sales_channel_id own the products from a site; ports_default is
-# the fallback when origin yields no ports. Values below are the dev-staging
-# defaults observed in the real upload; replace per source when real accounts exist.
+# company_id and sales_channel_id own the products from a site. ports_default = the
+# SUPPLIER's shipping ports BY NAME or UN/LOCODE (resolved against catalog_source/ports.csv,
+# the master list of 601 ports); always applied, the product ships from the supplier.
+# origin_default = ISO-2 country of the SUPPLIER, the origin fallback when the scrape
+# has no country and origin_map doesn't cover the variety. Backend ids are dev-staging
+# defaults; replace per source when real accounts exist. VERIFY each origin_default.
 polonine:
   adapter: polonine
   source_code: pol
-  company_id: 01KTV98X8RG743YR3QHCECZKKA
-  sales_channel_id: sc_01KTM2B2DJNSW6WPS1Q8FN8B2R
   ports_default:
-    - 01KTY75JMKC7K169PJ81FB6MEC
-    - 01KTY75JPE89B5QSREW9PAM6DZ
+    - Brindisi
+    - Civitavecchia
   emit_on_review: true
+  origin_default: IT  # VERIFY supplier country
   default_bundle_size: 6
 marenostone:
   adapter: marenostone
   source_code: mar
-  company_id: 01KTV98X8RG743YR3QHCECZKKA
-  sales_channel_id: sc_01KTM2B2DJNSW6WPS1Q8FN8B2R
   ports_default:
-    - 01KTY75JMKC7K169PJ81FB6MEC
+    - Brindisi
   emit_on_review: true
+  origin_default: IT  # VERIFY supplier country
   default_bundle_size: 6
 zucchi:
   adapter: zucchi
   source_code: zuc
-  company_id: 01KTV98X8RG743YR3QHCECZKKA
-  sales_channel_id: sc_01KTM2B2DJNSW6WPS1Q8FN8B2R
   ports_default:
-    - 01KTY75JMKC7K169PJ81FB6MEC
+    - Brindisi
   emit_on_review: true
+  origin_default: IT  # Zucchi = Italian stone company
   default_bundle_size: 6
 varsha:
   adapter: varsha
   source_code: var
-  company_id: 01KTV98X8RG743YR3QHCECZKKA
-  sales_channel_id: sc_01KTM2B2DJNSW6WPS1Q8FN8B2R
   ports_default:
-    - 01KTY75JMKC7K169PJ81FB6MEC
+    - Brindisi
   emit_on_review: true
+  origin_default: IN  # Varsha Stones, India
   default_bundle_size: 6
   watermarked: true   # varshastones.slabware.com burns a visible watermark into its photos

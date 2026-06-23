@@ -102,3 +102,17 @@ def classify(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) 
         "new": stats.new, "existing": stats.existing, "inventory_changed": stats.inventory_changed,
         "known": len(known)}})
     return stats
+
+
+def discontinued(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) -> list[tuple[str, str]]:
+    """Close the delete loop: Medusa SKUs owned by THIS source (sku prefix `{source_code}-`) that
+    the latest scrape did NOT produce — the supplier dropped them. Returned as (sku, handle) for a
+    reversible stock-0 delist + a review report. Empty without a baseline (`known`), so it never
+    fires until the Medusa product export is present. Source-scoped by SKU prefix, so one supplier's
+    run can never delist another's products."""
+    if not known.by_sku:
+        return []
+    scraped = {sku_for(r, cfg) for r in rows}
+    prefix = f"{cfg.source_code}-".upper()
+    return [(sku, (entry.get("handle") or "")) for sku, entry in known.by_sku.items()
+            if sku.startswith(prefix) and sku not in scraped]

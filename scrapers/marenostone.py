@@ -60,6 +60,37 @@ def _attr(attributes: list, name: str) -> str:
     return ""
 
 
+# The real Length/Width/Thickness are CUSTOM product attributes rendered in the page's
+# WooCommerce attributes table; the Store API exposes only the taxonomy (pa_*) attributes, so
+# they must be read from the product-page HTML. Each row is:
+#   <th ...__label">Length (cm)</th> <td ...__value"><p>140</p></td>
+_DIM_ROW = re.compile(r'__label">\s*([^<]+?)\s*</th>\s*<td[^>]*__value">\s*<p>\s*([^<]*?)\s*</p>',
+                      re.IGNORECASE | re.DOTALL)
+
+
+def _dims_from_html(html: str) -> dict:
+    """Length / Width / Thickness (with their unit from the label, e.g. '140cm') from a
+    marenostone product page's attributes table. 'Length' is the long face, 'Width' the short
+    face, 'Thickness' the depth."""
+    out: dict = {}
+    for label, value in _DIM_ROW.findall(html or ""):
+        value = value.strip()
+        if not value:
+            continue
+        unit = re.search(r"\((\w+)\)", label)
+        valued = f"{value}{unit.group(1) if unit else 'cm'}"
+        low = label.lower()
+        if "length" in low:
+            out["length"] = valued
+        elif "width" in low:
+            out["width"] = valued
+        elif "thick" in low:
+            out["thickness"] = valued
+        elif "height" in low:
+            out.setdefault("height", valued)
+    return out
+
+
 class MarenoStoneScraper(ScraperBase):
     source = "marenostone"
     category = None  # format is per-product (attr_format), not a constant
@@ -85,6 +116,17 @@ class MarenoStoneScraper(ScraperBase):
                 break
             page += 1
 
+    def _page_dims(self, url: str) -> dict:
+        """Fetch the product page and read its real Length/Width/Thickness from the attributes
+        table (the Store API does not expose these custom attributes)."""
+        if not url:
+            return {}
+        try:
+            return _dims_from_html(self.get(url).text)
+        except Exception as exc:  # never let a missing page kill the row
+            self.log.warning("dimension fetch failed for %s: %s", url, exc)
+            return {}
+
     def parse_product(self, p: dict) -> Optional[dict]:
         attributes = p.get("attributes") or []
         attrs = {col: _attr(attributes, disp) for disp, col in ATTRIBUTE_NAMES.items()}
@@ -96,7 +138,9 @@ class MarenoStoneScraper(ScraperBase):
                 seen.add(src)
                 fulls.append(src)
                 thumbs.append((img.get("thumbnail") or src).strip())
-        dims = p.get("dimensions") or {}
+        # real dimensions live on the product page, not the Store API; 'Width' is the second face
+        # dimension (-> our height), 'Thickness' is the depth (-> our width).
+        pd = self._page_dims(p.get("permalink"))
         stock = p.get("stock_availability") or {}
         return {
             "product_id": p.get("id"),
@@ -110,9 +154,9 @@ class MarenoStoneScraper(ScraperBase):
             "stock_status": stock.get("class", ""),
             "stock_text": _clean(stock.get("text", "")),
             "weight": p.get("weight") or "",
-            "dimensions_length": dims.get("length", ""),
-            "dimensions_width": dims.get("width", ""),
-            "dimensions_height": dims.get("height", ""),
+            "dimensions_length": pd.get("length", ""),    # long face
+            "dimensions_height": pd.get("width", ""),      # short face -> our height
+            "dimensions_width": pd.get("thickness", ""),   # depth -> our width (thickness)
             "short_description": _clean(p.get("short_description", "")),
             "description": _clean(p.get("description", "")),
             "image_urls_thumb": " | ".join(thumbs),

@@ -68,14 +68,14 @@ def test_title_matches_upload_style(ref, cfg):
     row = _slab_row(variation_name="Walnut Travertine", finish_name="Honed")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Walnut Travertine Honed Slab"
+    assert row.title == "Walnut Travertine Honed"   # variety + finish, NO category word
 
 
 def test_title_strips_parenthetical_alias(ref, cfg):
     row = _slab_row(variation_name="Carrara (Bianco Carrara)", finish_name="Polished")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Carrara Polished Slab"
+    assert row.title == "Carrara Polished"
 
 
 def test_dimensions_prefer_parsed(ref, cfg):
@@ -87,12 +87,47 @@ def test_dimensions_prefer_parsed(ref, cfg):
     assert "length:parsed" in row.dimension_method
 
 
+def test_tile_dimensions_are_tile_sized(ref, cfg):
+    # a tile with no scraped dimensions must get TILE-sized synthetic dims (~0.3-0.6m face,
+    # ~1-2cm thick), NOT slab-sized (1.5-3m) -- sources often ship tiles with no dimensions.
+    row = _slab_row(raw_format="Tile")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert 0.3 <= row.length <= 0.6 and 0.3 <= row.height <= 0.6   # tile face, not slab
+    assert 0.01 <= row.width <= 0.02                               # tile thickness ~1-2cm
+    assert row.length < 1.0 and row.height < 1.0                   # definitively not slab-sized
+
+
 def test_description_template_reads_origin(ref, cfg):
     row = _slab_row(origin_city="Carrara", origin_country_code="IT")
     derive.derive_category(row, ref)
     derive.derive_description(row)
     assert "Carrara, IT" in row.description
     assert row.description_method == "template"
+
+
+def test_ports_belong_to_supplier(ref, cfg):
+    # ports come from the source (supplier) BY NAME, resolved via ports.csv to real
+    # port ids, independent of the stone's origin
+    row = _slab_row(origin_country_code="IN")
+    derive.derive_ports(row, ref, cfg)
+    assert row.port_ids == [ref.ports.resolve(p) for p in cfg.ports_default]
+    assert row.port_ids and all(pid in ref.ports.iso_by_port for pid in row.port_ids)
+
+
+def test_origin_falls_back_to_supplier_country(ref, cfg):
+    # no scraped country + variety not in origin_map -> the source's origin_default
+    row = _slab_row(variation_name="Verde Ubatuba", raw_origin="")
+    derive.derive_origin(row, ref, cfg)
+    assert row.origin_country_code == cfg.origin_default == "IT"
+    assert row.origin_source == "source_default"
+
+
+def test_origin_accepts_country_name(ref, cfg):
+    row = _slab_row(raw_origin="India")
+    derive.derive_origin(row, ref, cfg)
+    assert row.origin_country_code == "IN"      # name resolved via country_codes
+    assert row.origin_source == "scrape_field"
 
 
 def test_handle_is_namespaced_and_stable(ref, cfg):

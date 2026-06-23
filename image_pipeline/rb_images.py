@@ -74,7 +74,11 @@ def process_images():
         try:
             print(f"🎨 [{i}/{len(files)}] {filename}")
             foreground = remove_background_ben2(model, input_path)
-            foreground.save(output_path, format="PNG")
+            # write-then-rename so an interruption never leaves a truncated {Key}.png that
+            # SKIP_EXISTING would then skip forever (shipping a corrupt image).
+            tmp = output_path.with_suffix(".png.tmp")
+            foreground.save(tmp, format="PNG")
+            tmp.replace(output_path)
             done += 1
             print(f"✨ → {output_path.name}\n")
         except Exception as e:

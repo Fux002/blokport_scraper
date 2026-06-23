@@ -20,14 +20,25 @@ class SourceConfig:
     source: str
     adapter: str = ""
     source_code: str = ""
+    # Optional per-scrape owner override; blank -> the general Blokport company (settings/env var).
+    # The sales channel is env-level (one per env) and is NOT settable per scrape.
     company_id: str = ""
-    sales_channel_id: str = ""
     ports_default: list[str] = field(default_factory=list)
+    # ISO-2 country of the SUPPLIER (the scraped website's company). The origin default
+    # when the scrape has no country and origin_map doesn't cover the variety; origin_map
+    # (per-variety) overrides it for stones with a known specific origin.
+    origin_default: str = ""
     emit_on_review: bool = True
     default_bundle_size: int = 6
     # The source burns a visible watermark into its product photos (e.g. varsha).
     # When true the image stage de-watermarks before re-hosting (local/s3 modes).
     watermarked: bool = False
+    # Trust level for auto-loading into Medusa: "review" (default) quarantines the
+    # source's output to the stage-for-sign-off lane; "auto" lets it load
+    # automatically. Promote review->auto only after `python -m stone_pipeline.certify
+    # <source>` is green. New sources stay in review so they can never silently
+    # push bad data live.
+    mode: str = "review"
 
 
 def load_sources(path: Path | None = None) -> dict[str, SourceConfig]:

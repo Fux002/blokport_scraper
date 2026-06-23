@@ -57,6 +57,35 @@ def test_inventory_csv_matches_medusa_contract(tmp_path):
     assert rows[0]["Inventory Quantity"] == "10"
 
 
+def test_discontinued_is_source_scoped_and_scrape_aware(tmp_path):
+    # delete loop: an export sku owned by THIS source that the scrape no longer carries is
+    # discontinued; a scraped one is kept, and another source's sku is never touched.
+    cfg = load_source("polonine")  # source_code 'pol'
+    path = tmp_path / "known.csv"
+    path.write_text("Variant Sku,Product Handle,Variant Inventory Quantity\n"
+                    "POL-1,h1,5\nPOL-2,h2,5\nMAR-9,h9,5\n", encoding="utf-8")
+    known = product_state.load_known_products(path)
+    gone = product_state.discontinued([_row("1")], cfg, known)   # only POL-1 scraped
+    assert {s for s, _ in gone} == {"POL-2"}                     # POL-1 kept, MAR-9 other source
+    assert dict(gone)["POL-2"] == "h2"                           # handle carried for the report
+
+
+def test_discontinued_empty_without_baseline(tmp_path):
+    cfg = load_source("polonine")
+    known = product_state.load_known_products(tmp_path / "absent.csv")
+    assert product_state.discontinued([_row("1")], cfg, known) == []   # never fires without export
+
+
+def test_inventory_csv_writes_discontinued_at_zero(tmp_path):
+    from stone_pipeline.stages import emit
+    cfg = load_source("polonine")
+    row = CanonicalRow(src_site="polonine", surrogate_key="620", handle="h", raw_slab_count="10")
+    p = emit.write_inventory_csv([row], cfg, tmp_path / "inv.csv", discontinued=(("POL-99", "gone-h"),))
+    by = {r["Variant Sku"]: r["Inventory Quantity"]
+          for r in csv.DictReader(open(p, encoding="utf-8-sig"))}
+    assert by["POL-620"] == "10" and by["POL-99"] == "0"   # active keeps real stock; discontinued -> 0
+
+
 def test_no_export_means_all_new(tmp_path):
     cfg = load_source("polonine")
     known = product_state.load_known_products(tmp_path / "absent.csv")

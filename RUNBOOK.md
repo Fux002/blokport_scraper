@@ -14,19 +14,30 @@ file you upload in ONE folder — `to_upload/` — with a checklist (`SYNC_STEPS
 
 ```bash
 python -m stone_pipeline.run all          # 1. scrape every source -> per-source products
-python -m stone_pipeline.catalog          # 2. build to_upload/ (variants + products) + review/
-python -m stone_pipeline.tree             # 3. build to_upload/2_valid_combinations.csv (after the export)
-# then follow to_upload/SYNC_STEPS.md
+python -m stone_pipeline.catalog          # 2. build to_upload/<env>/ (variants + products) + review/<env>/
+python -m stone_pipeline.tree             # 3. build to_upload/<env>/2_valid_combinations.csv (after the export)
+# then follow to_upload/<env>/SYNC_STEPS.md
+
+# <env> is development by default. For the production set, prefix every command:
+#   BLOKPORT_ENV=production python -m stone_pipeline.catalog   (etc.)
+# The scrape (step 1, data/) is shared, so only re-run steps 2-3 for the second env.
 ```
 
 ## Where the files live — four top-level folders
 
 ```
-to_upload/        ← PRODUCED by the pipeline; UPLOAD these to Medusa (numbered order)
-from_medusa/      ← SAVE Medusa's downloads here; the pipeline only READS these
-catalog_source/   ← the data you MAINTAIN by hand (backbones + the attribute mapping)
-review/           ← look before uploading; never uploaded
+SHARED across environments (the "core"):
+  data/              ← the raw scrape (env-independent)
+  catalog_source/    ← the data you MAINTAIN by hand (backbones; names, not Medusa ids)
+PER ENVIRONMENT — development/ and production/, selected by BLOKPORT_ENV
+(the Medusa pcat / attribute / variation ids differ per env, so each has its own set):
+  from_medusa/<env>/ ← SAVE that env's Medusa downloads here (variants_export, attributes); READ-only
+  to_upload/<env>/   ← PRODUCED by the pipeline; UPLOAD these to that env's Medusa (numbered order)
+  review/<env>/      ← look before uploading; never uploaded
 ```
+You scrape ONCE (shared), then build the catalog/combinations per env:
+`BLOKPORT_ENV=development` (default) and `BLOKPORT_ENV=production` each read/write their own
+`from_medusa/<env>/` + `to_upload/<env>/`. Everything below shows paths relative to one `<env>/`.
 
 ### `to_upload/`  — everything you push to Medusa, in number order
 ```

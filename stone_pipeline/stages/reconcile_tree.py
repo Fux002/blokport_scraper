@@ -23,11 +23,6 @@ from stone_pipeline.reference.loaders import Backbone, BackboneVariety, Referenc
 
 log = logfmt.get_logger("reconcile_tree")
 
-# lowest-trust attribute first: snap quality, then finish; colour is not snapped
-# silently because it is more identity-bearing (a wrong colour is a wrong product).
-_SNAPPABLE = ("quality", "finish")
-
-
 @dataclass
 class ReconcileStats:
     validated: int = 0
@@ -38,11 +33,9 @@ class ReconcileStats:
     filled_from_variety: int = 0
 
 
-# attributes that may be filled from the matched variety when the scrape omits
-# them. The backbone variety is the authority for these, so this is not a guess.
-# Finish is deliberately excluded: a variety allows many finishes and finish is
-# identity-bearing for the product, so a missing finish is not invented.
-_FILLABLE_FROM_VARIETY = ("color", "quality")
+# Colour/quality MAY be filled from the matched variety when the scrape omits them
+# (the backbone variety is the authority, so it is not a guess). Finish is deliberately
+# NOT: a variety allows many finishes and finish is identity-bearing for the product.
 
 
 def _fill_missing_from_variety(

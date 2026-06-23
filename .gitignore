@@ -18,9 +18,12 @@ image_pipeline/prompts_to_generate.json
 *.bak
 failures.jsonl
 
-# Large, environment-specific Medusa download — provide/refresh at deploy time.
-# (catalog_source/ and from_medusa/attributes.csv ARE committed: source of truth.)
+# Large, environment-specific Medusa download — provide/refresh at deploy time
+# (lives on S3 at <env>/scraper/from_medusa/; fetched into the task at run time).
+# Per-env layout (from_medusa/<env>/) and the legacy flat path both covered.
+# (catalog_source/ and from_medusa/**/attributes.csv ARE committed: source of truth.)
 from_medusa/variants_export.csv
+from_medusa/**/variants_export.csv
 
 # --- OS ---
 .DS_Store

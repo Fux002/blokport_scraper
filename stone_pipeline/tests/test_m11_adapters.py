@@ -16,10 +16,20 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.run import run_source
 
 
-@pytest.mark.parametrize("source", ["polonine", "marenostone", "zucchi", "varsha"])
+@pytest.mark.parametrize("source", sorted(selftest.REGISTRY))  # every auto-registered adapter
 def test_fixture_selftest_passes(source):
     ok, message = selftest.run_fixture(source)
     assert ok, message
+
+
+def test_every_adapter_has_a_fixture_and_config():
+    # a source is fully onboarded only when its adapter, fixture, and sources.yaml agree;
+    # this catches a new adapter that forgot one of the wiring steps.
+    from stone_pipeline.config.sources import load_sources
+    configured = set(load_sources())
+    for source in selftest.REGISTRY:
+        assert (selftest.fixture_dir(source) / "input.csv").exists(), f"{source}: missing fixture"
+        assert source in configured, f"{source}: missing from sources.yaml"
 
 
 def test_generic_descriptor_yields_empty_variety():
@@ -59,3 +69,77 @@ def test_blank_sku_mints_not_drops(tmp_path):
     rows = selftest.REGISTRY["marenostone"].adapt(frame)
     # adapter keeps every row (blank keys included); minting happens in Stage 2
     assert len(rows) == frame.height
+
+
+def test_codes_auto_detected_from_corpus_no_hardcoding():
+    # supplier codes are DISCOVERED from how they fan out across a source's names — no string
+    # is hardcoded. varsha's 'Z'/'ZB' front many varieties, so they are detected and stripped;
+    # a real shared prefix that does not fan out, and single z-words, are kept.
+    from stone_pipeline.core.text import detect_code_prefixes, clean_variety_name
+    corpus = ["Z ASTORIA", "Z AQUA BLUE", "Z B FUSION BLACK", "ZB PATAGONIA", "ZB AZUL",
+              "Z MONALISA", "Carrara", "Statuario", "Mt Blanc", "ZEBRINO"]
+    codes = detect_code_prefixes(corpus)
+    assert "z" in codes and "zb" in codes
+    c = lambda s: clean_variety_name(s, (), codes)
+    assert c("Z ASTORIA") == "ASTORIA"
+    assert c("Z B FUSION BLACK") == "FUSION BLACK"
+    assert c("ZB PATAGONIA") == "PATAGONIA"        # collapsed code, auto-detected
+    assert c("Z BLACK FOREST") == "BLACK FOREST"   # embedded B kept (lone-letter run stops)
+    assert c("ZEBRINO") == "ZEBRINO"               # single z-word, no fan-out -> kept
+    assert c("Carrara") == "Carrara" and c("Mt Blanc") == "Mt Blanc"  # real names untouched
+
+
+def test_clean_variety_name_generic_and_prefix():
+    from stone_pipeline.core.text import clean_variety_name as c
+    # lone-letter leading codes + stray punctuation
+    assert c("A Bianco") == "Bianco"
+    assert c("  - Statuario ") == "Statuario"
+    # ANY number-bearing token is stripped ('No.' too) — no stone uses numbers in its name...
+    assert c("Super – 1.08") == "Super" and c("Wave - 1.06") == "Wave"
+    assert c("Marjan – No. 426") == "Marjan"
+    assert c("883 Black") == "Black"
+    assert c("Arizona 3D Grey") == "Arizona Grey" and c("Matrix 3D") == "Matrix"
+    assert c("Calacatta 2cm") == "Calacatta"
+    # ...EXCEPT granite's 'G' + number code, which IS the real name -> kept
+    assert c("G682") == "G682" and c("G032") == "G032"
+    assert c("G682 (Sunset Gold)") == "G682 (Sunset Gold)"
+    # real names untouched (no false positives)
+    assert c("La Perla") == "La Perla" and c("El Dorado") == "El Dorado"
+    # source-declared prefix (varsha 'Z'/'ZB') strips on top of the generic rules
+    assert c("Z B Fusion Black", (r"^[Zz]\s*[Bb]?\s+",)) == "Fusion Black"
+    assert c("ZB Patagonia", (r"^[Zz]\s*[Bb]?\s+",)) == "Patagonia"
+
+
+def test_accents_folded_consistently_everywhere():
+    # a variety name never carries a special character; the SAME folding applies to the display
+    # name, the slug/key, and the match key, so 'Porriño' and 'Porrino' are one stone.
+    from stone_pipeline.core.text import ascii_fold, title_case, slugify
+    from stone_pipeline.matching.projections import norm
+    assert ascii_fold("Rosa Porriño") == "Rosa Porrino"
+    assert title_case("são GABRIEL") == "Sao Gabriel"
+    assert slugify("Cinza Corumbá") == "cinza-corumba"
+    assert norm("Porriño") == norm("Porrino")            # accent-insensitive matching
+    assert all(ord(c) < 128 for c in title_case("Rosa Porriño"))  # output is pure ASCII
+
+
+def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch):
+    # a source that overrides load_frame (e.g. an API/DB) runs through the WHOLE pipeline without
+    # the CSV ingest being touched; the run id uses the timestamp it hands back.
+    import pytest
+
+    from stone_pipeline import adapters as reg
+    from stone_pipeline import run as run_mod
+    from stone_pipeline.adapters.base import read_scrape_csv
+    live = run_mod.find_scrape_file("marenostone")
+    if live is None:
+        pytest.skip("no marenostone scrape present")
+    frame = read_scrape_csv(live)                              # an in-memory frame (could be from an API)
+    monkeypatch.setattr(reg.REGISTRY["marenostone"], "load_frame",
+                        lambda scrape_path=None: (frame, "20260101_000000", "api://marenostone"))
+
+    def _boom(_source):
+        raise AssertionError("CSV ingest was used — load_frame override ignored")
+    monkeypatch.setattr(run_mod, "find_scrape_file", _boom)   # fails if the file path is taken
+    manifest = run_mod.run_source("marenostone", outputs_dir=tmp_path, state_dir=tmp_path)
+    assert manifest.run_id == "marenostone_20260101_000000"   # used the load_frame timestamp token
+    assert manifest.totals["rows"] >= 1                        # ran the in-memory frame end to end

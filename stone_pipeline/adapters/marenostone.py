@@ -49,7 +49,8 @@ class MarenostoneAdapter(AdapterBase):
         # explicit format tag from the source; the Format Resolver decides, with
         # the product name and structure as fallbacks (no blind default here)
         "raw_format": lambda r: AdapterBase.clean(r.get("attr_format")),
-        "raw_thickness": lambda r: "",
+        # the scraper puts the depth (Thickness) in dimensions_width -> our thickness/width
+        "raw_thickness": lambda r: _na(r.get("dimensions_width")),
         "raw_dimensions": lambda r: _dims(r),
         "raw_weight": lambda r: _na(r.get("weight")),
         "raw_description": lambda r: AdapterBase.clean(r.get("description")) or AdapterBase.clean(r.get("short_description")),

@@ -51,7 +51,7 @@ The `{Key}.png` files are identical across environments. So:
 pip install fal-client requests pillow      # generator
 pip install torch ben2                        # background remover (BEN2)
 ```
-- The fal key is pasted at the top of `genetate_images.py` (rotate it as needed).
+- The fal key comes from the environment: `export FAL_KEY="<id>:<secret>"` (on AWS it is injected from SSM SecureString /blokport-<env>/FAL_KEY). Rotate it as needed.
 - `MODEL = "max"` is already set (best fidelity). 206 prompts ≈ **$21** at ~$0.10/img.
 - BEN2 runs on CPU here (slow but fine); a GPU box is far faster for a big batch.
 
@@ -64,6 +64,35 @@ python rb_images.py                                    # ./to_upload/{Key}.png
 aws s3 cp ./to_upload/ s3://blokport-dev-staging-3e58a6/dev/variations/ --recursive
 ```
 Both scripts are resumable (skip files already produced), so re-running continues a partial batch.
+
+## Prompt-builder modes (all write the same prompts_to_generate.json)
+```
+python -m stone_pipeline.stages.image_prompts              # new product-backed variants (normal)
+python -m stone_pipeline.stages.image_prompts --regenerate # EVERY imaged variant (replace old set)
+python -m stone_pipeline.stages.image_prompts --keys K1 K2 # just these variant Keys (fix a few)
+```
+`output_name` is the variant Key, so every mode overwrites `{Key}.png` in place — one image per
+variant, never a new name. Need the fal key first: `export FAL_KEY=$(aws ssm get-parameter
+--name /blokport-<env>/FAL_KEY --with-decryption --query Parameter.Value --output text)`.
+
+## Regenerate ALL images (replace the old, inferior-model set)
+The bulk of the live images were made by an earlier, worse model. To re-make every
+variant image with the current model in ONE pass:
+```
+python -m stone_pipeline.stages.image_prompts --regenerate   # prompts for EVERY imaged variant
+cd image_pipeline
+python genetate_images.py        # generates the missing/old ones, SKIPS what's already in images/
+python rb_images.py
+aws s3 cp ./to_upload/ s3://blokport-dev-staging-3e58a6/dev/variations/ --recursive  # overwrites old
+```
+- `--regenerate` reads `to_upload/<env>/1_variants_full.csv` and emits one prompt per variant
+  whose Image is set (≈12,553: 12,215 slab + 332 block + 6 tile). Imageless mirror tiles/blocks
+  are excluded (nothing to make) — they are imaged later, lazily, when a product lands on them.
+- **Resume = free regen control:** files already in `images/` are skipped, so the ~89 recently
+  generated (good) images are kept and only the old ones are re-made. To force a FULL redo of
+  everything, empty `images/` first.
+- **Cost / time:** ≈12.5k images ≈ **$1,255** at ~$0.10/img — a heavy paid batch; best run on the
+  AWS task (FAL_KEY is in SSM) rather than a laptop. The chain is resumable, so it can run in waves.
 
 ## Notes / caveats
 - **Base image per category:** each prompt carries its own `base_image_url` — slab

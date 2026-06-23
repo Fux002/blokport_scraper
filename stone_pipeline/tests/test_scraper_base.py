@@ -98,3 +98,17 @@ def test_default_uses_source_links_no_download(tmp_path):
     assert by_id["32429"]["image_urls"] == "http://x/a.jpg | http://x/b.png"  # source links
     assert by_id["32429"]["image_filenames_local"] == ""  # nothing downloaded
     assert not s.images_dir.exists()  # no images folder created
+
+
+def test_marenostone_parses_dimensions_from_attributes_table():
+    # the real Length/Width/Thickness live in the product page's WooCommerce attributes table,
+    # not the Store API; the scraper must read them (the unit comes from the label).
+    from scrapers.marenostone import _dims_from_html
+    html = ('<table><tr><th class="woocommerce-product-attributes-item__label">Length (cm)</th>'
+            '<td class="woocommerce-product-attributes-item__value"><p>140</p></td></tr>'
+            '<tr><th class="woocommerce-product-attributes-item__label">Width (cm)</th>'
+            '<td class="woocommerce-product-attributes-item__value"><p>35</p></td></tr>'
+            '<tr><th class="woocommerce-product-attributes-item__label">Thickness (cm)</th>'
+            '<td class="woocommerce-product-attributes-item__value"><p>3</p></td></tr></table>')
+    assert _dims_from_html(html) == {"length": "140cm", "width": "35cm", "thickness": "3cm"}
+    assert _dims_from_html("<table></table>") == {}  # no dims -> empty, never crashes

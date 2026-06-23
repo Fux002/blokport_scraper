@@ -14,8 +14,7 @@ Polonine sells slab inventory (bundles of slabs) -> constant format `slab`.
 Cloudflare fronts SlabWare, so use_curl_cffi routes HTTP through a Chrome TLS
 fingerprint (install once: pip3 install curl_cffi).
 
-NEEDS A LIVE RUN to confirm the API path works for this tenant; the proven
-Playwright fallback remains at scraper_slabware.py.
+Verified live against the tenant API.
 
 Run:  python scrapers/polonine.py
 """

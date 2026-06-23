@@ -76,3 +76,28 @@ def test_standalone_matcher_plugs_in(monkeypatch):
     stage.resolve_row(row)
     assert row.variation_id == "acc_123" and row.variation_method == "accessory_sku"
     assert not row.tree_gaps  # matched, not held
+
+
+def test_pcat_comes_only_from_env_export(monkeypatch):
+    # a category's Medusa pcat is sourced ONLY from THIS env's export (attributes.csv -> _ENV_PCATS),
+    # never a hardcoded literal; a category absent from the export goes inactive ("").
+    from stone_pipeline.config import settings
+    monkeypatch.setattr(settings, "_ENV_PCATS", {"Slabs": "pcat_FROM_EXPORT"})
+    assert settings._pcat("Slabs") == "pcat_FROM_EXPORT"          # from the env's export
+    monkeypatch.setattr(settings, "_ENV_PCATS", {})
+    assert settings._pcat("Slabs") == ""                          # absent -> inactive, no literal id
+    monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "pcat_OVERRIDE")
+    assert settings._pcat("Tiles", "BLOKPORT_CAT_TILES_PCAT") == "pcat_OVERRIDE"  # explicit override only
+
+
+def test_owner_ids_are_env_vars_with_prod_guard(monkeypatch):
+    # company + sales-channel are operational env vars, never hardcoded: an explicit env var wins;
+    # dev falls back to a local default; prod with no env var stays "" (never a dev id).
+    from stone_pipeline.config import settings
+    monkeypatch.setenv("BLOKPORT_COMPANY_ID", "comp_X")
+    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default") == "comp_X"
+    monkeypatch.delenv("BLOKPORT_COMPANY_ID", raising=False)
+    monkeypatch.setattr(settings, "IS_PRODUCTION", False)
+    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default") == "dev_default"
+    monkeypatch.setattr(settings, "IS_PRODUCTION", True)
+    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default") == ""

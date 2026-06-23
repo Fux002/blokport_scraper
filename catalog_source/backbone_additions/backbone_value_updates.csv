@@ -1,9 +1,11 @@
 variety,attribute,add_value,currently_allowed,match_method,match_confidence,verdict,example_url
 White Travertine,quality,B,A,descriptor_exact_blocked,high,verify_match,https://marenostone.com/product/white-travertine-tile-2/
 Labradorite Di Oriente,color,Blue,"Green, Gold",projection_deprefixed,high,likely_real,https://marenostone.com/product/labradorite-blue-granite-slab/
+Colored Green,color,Pink,Green,exact,high,likely_real,https://marenostone.com/product/colored-pink-onyx-slab/
 Namibia,color,White,Yellow,exact,high,likely_real,https://marenostone.com/product/namibia-white-granite-slab/
 Cloud,color,White,"Beige, Ivory, Cream",exact,high,likely_real,https://marenostone.com/product/cloud-white-marble-slab-21/
 Pearl Yellow,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",exact_blocked,high,likely_real,https://marenostone.com/product/pearl-grey-granite-slab/
+Verde Alpi,quality,C,A,exact,high,likely_real,https://marenostone.com/product/black-marble/
 Persian Asgard,quality,B,A,exact,high,likely_real,https://marenostone.com/product/persian-asgard-marble-slab/
 Silver Travertine,quality,B,A,descriptor_phonetic,medium,verify_match,https://marenostone.com/product/silver-travertine/
 Arcadia Grey,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/sky-marble/

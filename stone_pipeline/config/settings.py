@@ -35,7 +35,17 @@ WORKSPACE_ROOT = REPO_ROOT.parent
 # the env vars are set. See DEV_PROD_PIPELINE.md for the promotion checklist.
 BLOKPORT_ENV = os.environ.get("BLOKPORT_ENV", "development").strip().lower()
 IS_PRODUCTION = BLOKPORT_ENV in ("production", "prod")
-ENV_SEGMENT = "prod" if IS_PRODUCTION else "dev"  # S3 path/key namespace (dev/... vs prod/...)
+ENV_SEGMENT = "prod" if IS_PRODUCTION else "dev"      # S3 path/key namespace (dev/... vs prod/...)
+ENV_NAME = "production" if IS_PRODUCTION else "development"  # workspace folder per env
+
+# Dev and prod hold SEPARATE Medusa downloads and upload sets, because the Medusa ids
+# (pcat / attribute / variation) differ per environment. What is SHARED is the "core":
+# the raw scrape (data/) and the hand-maintained catalog_source/ (names, not ids). So
+# you scrape once, then run the catalog/tree per env (BLOKPORT_ENV) to get each set.
+_FROM_MEDUSA = WORKSPACE_ROOT / "from_medusa" / ENV_NAME   # the env's Medusa downloads
+_TO_UPLOAD = WORKSPACE_ROOT / "to_upload" / ENV_NAME       # the env's upload files
+_REVIEW = WORKSPACE_ROOT / "review" / ENV_NAME             # the env's look-before-upload
+_OUTPUTS = REPO_ROOT / "outputs" / ENV_NAME                # the env's per-source staging
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -52,6 +62,27 @@ def _env_bool(name: str, default: bool) -> bool:
 _DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
 S3_BUCKET = os.environ.get("BLOKPORT_S3_BUCKET", _DEV_S3_BUCKET)
 S3_REGION = os.environ.get("BLOKPORT_S3_REGION", "eu-west-1")
+
+
+# Owner Medusa ids — operational config, NOT catalog attributes, so they are environment
+# variables (the catalog attribute ids — color/finish/type/quality/category — come from the
+# env's attributes.csv instead). The sales channel is ONE id per environment; the company is
+# the general Blokport owner by default and can be overridden per scrape in sources.yaml. Each
+# has a dev default for local runs; a PRODUCTION run must set the env var — it never falls back
+# to a dev id (returns "" so the miss is loud, never a silent dev/prod cross).
+_DEV_SALES_CHANNEL_ID = "sc_01KTM2B2DJNSW6WPS1Q8FN8B2R"
+_DEV_COMPANY_ID = "01KTV98X8RG743YR3QHCECZKKA"
+
+
+def _owner_id(env_var: str, dev_default: str) -> str:
+    val = os.environ.get(env_var, "").strip()
+    if val:
+        return val
+    return "" if IS_PRODUCTION else dev_default
+
+
+SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID)
+COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID)
 
 
 # --- Confidence enum with a fixed numeric mapping (section 3.4) ----------------
@@ -73,33 +104,33 @@ class Confidence(IntEnum):
 class Paths:
     repo_root: Path = REPO_ROOT
     workspace_root: Path = WORKSPACE_ROOT
-    config_dir: Path = REPO_ROOT / "config"
-    reference_dir: Path = REPO_ROOT / "reference"
     synonyms_dir: Path = REPO_ROOT / "reference" / "synonyms"
     state_dir: Path = REPO_ROOT / "state"
-    outputs_dir: Path = REPO_ROOT / "outputs"
     fixtures_dir: Path = REPO_ROOT / "adapters" / "fixtures"
     # Live scrape outputs (scrapers write here): data/<source>/<timestamp>/products.csv
     data_dir: Path = WORKSPACE_ROOT / "data"
-    # Top-level workspace folders, grouped by what you DO with each file:
-    #   to_upload/      - PRODUCED by the pipeline; upload these to Medusa (numbered order)
-    #   from_medusa/    - SAVE Medusa's downloads here; the pipeline only READS these
-    #   catalog_source/ - the source data you MAINTAIN by hand (backbones + attributes)
-    #   review/         - look before uploading; never uploaded
-    catalog_source_dir: Path = WORKSPACE_ROOT / "catalog_source"
-    to_upload_dir: Path = WORKSPACE_ROOT / "to_upload"
-    from_medusa_dir: Path = WORKSPACE_ROOT / "from_medusa"
-    review_dir: Path = WORKSPACE_ROOT / "review"
+    # Top-level workspace folders, grouped by what you DO with each file. SHARED across
+    # environments: data/ (the scrape) and catalog_source/ (hand-maintained backbones,
+    # names not ids). PER-ENV (development/ vs production/, selected by BLOKPORT_ENV):
+    #   to_upload/<env>/   - PRODUCED by the pipeline; upload these to that env's Medusa
+    #   from_medusa/<env>/ - SAVE that env's Medusa downloads here; the pipeline READS them
+    #   review/<env>/      - look before uploading; never uploaded
+    #   outputs/<env>/     - internal per-source staging (canonical + products)
+    catalog_source_dir: Path = WORKSPACE_ROOT / "catalog_source"   # SHARED
+    to_upload_dir: Path = _TO_UPLOAD
+    from_medusa_dir: Path = _FROM_MEDUSA
+    review_dir: Path = _REVIEW
+    outputs_dir: Path = _OUTPUTS
     # small CSV samples the test suite reads (self-contained in the package).
     tests_fixtures_dir: Path = REPO_ROOT / "tests" / "fixtures"
 
-    # attribute name -> Medusa id; lives in from_medusa/ because its ids come FROM
-    # Medusa (like the variants export), not hand-maintained like catalog_source/.
-    attributes_csv: Path = WORKSPACE_ROOT / "from_medusa" / "attributes.csv"
+    # attribute name -> Medusa id; lives in from_medusa/<env>/ because its ids come FROM
+    # that env's Medusa (like the variants export), not hand-maintained like catalog_source/.
+    attributes_csv: Path = _FROM_MEDUSA / "attributes.csv"
     # The combined cross-category id-variants EXPORT (with Medusa Id), download-only:
     # the immutable "existing variants" the catalog reads. The UPLOAD files are PRODUCED
     # by the catalog (to_upload/) and never read back -- input and output never alias.
-    variants_export_csv: Path = WORKSPACE_ROOT / "from_medusa" / "variants_export.csv"
+    variants_export_csv: Path = _FROM_MEDUSA / "variants_export.csv"
 
     # per-category backbone files derive from the CATEGORIES registry.
     @property
@@ -122,6 +153,7 @@ class Paths:
     ports_csv_fallback: Path = REPO_ROOT / "reference" / "ports.csv"
     units_csv: Path = REPO_ROOT / "reference" / "units.csv"
     origin_map_csv: Path = REPO_ROOT / "reference" / "origin_map.csv"
+    country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
     standard_slab_area_csv: Path = REPO_ROOT / "reference" / "standard_slab_area.csv"
 
@@ -136,7 +168,7 @@ class Paths:
 
     # Medusa product export (handle/SKU/inventory) the user downloads, so the
     # pipeline can tell new vs existing products and inventory changes (item 4/5).
-    products_known_csv: Path = WORKSPACE_ROOT / "from_medusa" / "products_export.csv"
+    products_known_csv: Path = _FROM_MEDUSA / "products_export.csv"
 
     # State
     baselines_json: Path = REPO_ROOT / "state" / "scrape_baselines.json"
@@ -179,6 +211,10 @@ class BackendConstants:
     def cat_tiles_pcat(self) -> str:
         return category("tile").pcat_id
 
+    # Owner ids, from env vars (settings top). sales_channel_id: one per env. company_id: the
+    # general Blokport owner default; a per-scrape sources.yaml value overrides it (constants).
+    sales_channel_id: str = SALES_CHANNEL_ID
+    company_id: str = COMPANY_ID
     visibility: str = "public"
     discountable: str = "true"
     status: str = "published"
@@ -307,9 +343,11 @@ class CurationConfig:
     # environments, so the SAME generated images upload to both buckets. Build the
     # prod variant file by setting BLOKPORT_VARIANT_IMAGE_BASE to the prod bucket and
     # re-running the catalog (stages/emit_catalog.py stamps it).
+    # derive from the env's bucket + segment (dev/ vs prod/) so a prod build NEVER stamps the
+    # dev path; the BLOKPORT_VARIANT_IMAGE_BASE override is for an out-of-band bucket only.
     variant_image_base: str = os.environ.get(
         "BLOKPORT_VARIANT_IMAGE_BASE",
-        "https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/")
+        f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{ENV_SEGMENT}/variations/")
     # Base images per category derive from the CATEGORIES registry (image_prompts
     # selects by Key prefix; these accessors remain for any direct callers).
     @property
@@ -329,6 +367,13 @@ class CurationConfig:
     # an ALIAS of that variety rather than a new variant, to avoid creating
     # near-duplicate variants for what suppliers just renamed.
     alias_suggest_floor: float = 70.0
+    # Tier-7 alias model (matching.alias_resolver): a trained entity-resolution model replaces the
+    # flat alias_suggest_floor for the alias-vs-new decision. P>=hi -> confirmed alias, P<=lo ->
+    # mint new, the uncertain middle -> review. The hi/lo gap is the automation dial: wider = less
+    # review, more risk. Falls back to alias_suggest_floor when the model can't train.
+    enable_alias_model: bool = True
+    alias_model_hi: float = 0.90
+    alias_model_lo: float = 0.20
 
 
 @dataclass(frozen=True)
@@ -370,6 +415,35 @@ class Category:
         return WORKSPACE_ROOT / "catalog_source" / self.backbone_filename
 
 
+# DEV/PROD SEGREGATION: a category's Medusa pcat id is INSTANCE-SPECIFIC (the dev and prod
+# Medusa assign different ids), so it must come from the env's own download, never a hardcoded
+# value. Read it from from_medusa/<env>/attributes.csv (the same file the reference loads) so a
+# prod run uses prod pcats and a dev run uses dev pcats -- the ids can never cross. The literals
+# below are only a bootstrap fallback for an env whose attributes.csv isn't downloaded yet.
+def _env_category_pcats() -> dict[str, str]:
+    path = _FROM_MEDUSA / "attributes.csv"
+    out: dict[str, str] = {}
+    if path.exists():
+        import csv as _csv
+        with path.open(encoding="utf-8-sig", newline="") as h:
+            for r in _csv.DictReader(h):
+                if (r.get("category") or "").strip() == "category" and (r.get("sourceid") or "").strip():
+                    out[(r.get("value") or "").strip()] = r["sourceid"].strip()
+    return out
+
+
+_ENV_PCATS = _env_category_pcats()  # {'Slabs': pcat, 'Blocks': pcat, 'Tiles': pcat} for THIS env
+
+
+def _pcat(label: str, env_var: str | None = None) -> str:
+    """A category's Medusa pcat for THIS env, sourced ONLY from the env's Medusa export
+    (from_medusa/<env>/attributes.csv) — never hardcoded. An explicit env-var override is allowed.
+    A category absent from the export stays "" (inactive, emits nothing), so dev and prod ids can
+    never cross and no stale literal can leak."""
+    if env_var and os.environ.get(env_var):
+        return os.environ[env_var]
+    return _ENV_PCATS.get(label, "")
+
 # The category list. Adding a category = ADD AN ENTRY HERE (a source edit): every
 # category-derived constant in the pipeline recomputes from this tuple at import.
 # `_BY_NAME` below is the runtime index the helpers read (so activation via the env
@@ -377,16 +451,17 @@ class Category:
 # Full recipe: CATEGORY_GUIDE.md.
 CATEGORIES: tuple[Category, ...] = (
     Category("slab", "slabs", "Slabs",
-             "pcat_01KTY5MCZTZ4C52G4M8F1Y03XW", "backbone_slabs.json",
+             _pcat("Slabs"), "backbone_slabs.json",
              "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg",
              shares_variety_vocab=True, fan_out=True, mirror_of=None, volume_per_kg="0.0017"),
     Category("block", "blocks", "Blocks",
-             "pcat_01KTY5JQ7YYZW7XASMSHBB3HF0", "backbone_blocks.json",
+             _pcat("Blocks"), "backbone_blocks.json",
              "https://v3b.fal.media/files/b/0a9f301e/Vlbo_xk9vDJtYKhEbkxBZ_base_block.jpeg",
              shares_variety_vocab=True, fan_out=True, mirror_of=None, volume_per_kg="0.0014348"),
     # tiles (and other non-slab categories) use the block volume per kg
     Category("tile", "tiles", "Tiles",
-             os.environ.get("BLOKPORT_CAT_TILES_PCAT", "pcat_01KVNKZD2YGBN7416P5CK57KMZ"), "backbone_tiles.json",
+             _pcat("Tiles", "BLOKPORT_CAT_TILES_PCAT"),
+             "backbone_tiles.json",
              "https://v3b.fal.media/files/b/0a9f30f3/jdmNyxqelKJM4DxFi4jyG_base_tiles.png",
              shares_variety_vocab=True, fan_out=True, mirror_of="slab", volume_per_kg="0.0014348"),
 )

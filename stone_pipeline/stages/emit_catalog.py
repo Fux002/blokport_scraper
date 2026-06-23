@@ -20,6 +20,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, category, category_for_key
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.text import looks_like_artifact, title_case
 
 log = logfmt.get_logger("emit_catalog")
 
@@ -45,9 +46,13 @@ def _mirror_rows(by_key: dict[str, dict]) -> list[dict]:
         src = category(cat.mirror_of)
         src_posts = json.loads(src.backbone_path.read_text(encoding="utf-8-sig"))["posts"]
         mir_posts = json.loads(cat.backbone_path.read_text(encoding="utf-8-sig"))["posts"]
-        for sp, mp in zip(src_posts, mir_posts):  # backbones are built in lockstep
+        # join slab<->tile on variety identity (type, variant), NOT positional zip: the two
+        # backbones can drift in order and a zip would silently mis-pair varieties.
+        mir_by = {(mp.get("stone_type"), mp.get("variant")): mp for mp in mir_posts}
+        for sp in src_posts:
             s = by_key.get(sp.get("key"))
-            if s:
+            mp = mir_by.get((sp.get("stone_type"), sp.get("variant")))
+            if s and mp:
                 out.append({"Key": mp["key"], "Name": s["Name"], "Image": "",
                             "Aliases": s["Aliases"], "Volume per kg (m³/kg)": ""})
     return out
@@ -68,12 +73,21 @@ def build(existing_path: Path | None = None) -> Path:
             order.append(r["Key"])                            # genuinely new variant
     mirror = [m for m in _mirror_rows(by_key) if m["Key"] not in by_key]  # tiles for existing varieties
     rows = [by_key[k] for k in order] + mirror
+    # keep code-like names (e.g. a stale 'Z Astoria' still in the export) OUT of the upload
+    # file -- only clean variety names ever reach Medusa. Their varieties are to be deleted there.
+    rows = [r for r in rows if not looks_like_artifact(r["Name"])]
 
     base = SETTINGS.curation.variant_image_base               # dev/prod switch via env
     for r in rows:
         cat = category_for_key(r["Key"])
-        r["Image"] = f"{base}{r['Key']}.png"
+        # only a variant that HAS an image gets a link, normalized to the clean S3 name;
+        # imageless mirror tiles/blocks (no product) stay blank until a product adds one
+        if (r.get("Image") or "").strip():
+            r["Image"] = f"{base}{r['Key']}.png"
         r["Volume per kg (m³/kg)"] = cat.volume_per_kg if cat else ""
+        # consistent casing for the whole catalog regardless of how Medusa/source cased it
+        r["Name"] = title_case(r["Name"])
+        r["Aliases"] = "|".join(title_case(a) for a in r["Aliases"].split("|") if a.strip())
 
     path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
