@@ -5,12 +5,19 @@ __pycache__/
 .pytest_cache/
 
 # --- Produced pipeline output (regenerated every run; not source) ---
-outputs/
-state/
-data/
-to_upload/
-review/
-images/
+# NOTE: anchor runtime dirs to the repo ROOT with a leading slash, so they do NOT
+# also match the CODE package stone_pipeline/state/ (writeback.py, overrides.py).
+/outputs/
+/state/
+/data/
+/to_upload/
+/review/
+/images/
+# runtime state/diagnostics that live INSIDE the code package (keep the .py code)
+stone_pipeline/state/*.csv
+stone_pipeline/state/*.json
+stone_pipeline/outputs/
+*.parquet
 image_pipeline/images/
 image_pipeline/to_upload/
 image_pipeline/prompts_to_generate.json
