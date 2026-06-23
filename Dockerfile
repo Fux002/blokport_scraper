@@ -37,6 +37,8 @@ ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 # --- de-watermark variant (optional, CPU torch) -----------------------------
 FROM core AS imageproc
 COPY stone_pipeline/requirements-imageproc.txt /tmp/requirements-imageproc.txt
-# CPU-only torch wheels keep the image far smaller than the CUDA build.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision \
-    && pip install -r /tmp/requirements-imageproc.txt
+# --extra-index-url (NOT --index-url): keep PyPI as the primary index so deps like
+# pillow/transformers resolve to their normal wheels, while torch/torchvision pull
+# the CPU build from the pytorch index (far smaller than the default CUDA wheels).
+RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r /tmp/requirements-imageproc.txt
