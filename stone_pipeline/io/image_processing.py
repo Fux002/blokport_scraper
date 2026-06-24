@@ -70,8 +70,10 @@ def _clahe_contrast(bgr, clip: float):
 
 def _denoise(bgr, strength: int):
     # Light non-local-means; low h preserves fine veining while killing sensor grain.
+    # searchWindowSize is the cost driver (NLM is ~O(searchWindow^2)); 11 instead of
+    # the default 21 is ~3-4x faster per image with negligible quality loss at low h.
     return cv2.fastNlMeansDenoisingColored(bgr, None, h=strength, hColor=strength,
-                                           templateWindowSize=7, searchWindowSize=21)
+                                           templateWindowSize=7, searchWindowSize=11)
 
 
 def _unsharp(bgr, amount: float):
