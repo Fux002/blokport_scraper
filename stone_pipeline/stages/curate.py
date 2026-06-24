@@ -587,6 +587,30 @@ def write_curation(result: CurationResult) -> None:
             bp.parent.mkdir(parents=True, exist_ok=True)
             bp.write_text(json.dumps(result.backbone_new[branch], indent=2, ensure_ascii=False),
                           encoding="utf-8")
+    # Drop no-op rows: a variant whose Key is ALREADY in the export and that adds no new alias and
+    # no new image is just upsert noise (the mint guard can miss a duplicate-name generic). Keep the
+    # update file to the genuine delta -- new variants + real alias/image changes only.
+    exp_idx: dict[str, tuple[set, str]] = {}
+    ef = SETTINGS.paths.export_file
+    if ef.exists():
+        with ef.open(encoding="utf-8-sig") as h:
+            for r in csv.DictReader(h):
+                if (r.get("Key") or "").strip():
+                    exp_idx[r["Key"]] = ({proj.norm(a) for a in (r.get("Aliases") or "").split("|") if a.strip()},
+                                         (r.get("Image") or "").strip())
+
+    def _is_real_delta(row: dict) -> bool:
+        e = exp_idx.get(row["Key"])
+        if e is None:
+            return True                                    # genuinely new variant (key not in export)
+        cur = {proj.norm(a) for a in (row.get("Aliases") or "").split("|") if a.strip()}
+        img = (row.get("Image") or "").strip()
+        return bool(cur - e[0]) or (bool(img) and img != e[1])   # new alias OR new image
+
+    before = len(upload_rows)
+    upload_rows = [r for r in upload_rows if _is_real_delta(r)]
+    if before != len(upload_rows):
+        log.info("update delta pruned", extra={"extra_fields": {"dropped_noops": before - len(upload_rows)}})
     if upload_rows:
         _write_csv(to_upload / "1_variants_update.csv", _IMPORT_COLS, upload_rows)
     # the ONLY review file from curate: the decision ledger (uncertain new varieties, confirm
