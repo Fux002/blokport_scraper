@@ -119,6 +119,54 @@ def _load_products(path: Path | None) -> dict[str, dict]:
     return out
 
 
+def _load_assigned_types(path: Path, attr: dict) -> dict[str, str]:
+    """review/tree_uncovered_variations.csv 'assign_type' -> {variant_name_lower: type_id}: a stone
+    type the user gives a variation the scrape never typed, so it gets allocated to combinations on
+    the next run (closes the 'found a variant but it has no type' gap)."""
+    out: dict[str, str] = {}
+    if Path(path).exists():
+        with Path(path).open(encoding="utf-8-sig", newline="") as h:
+            for r in csv.DictReader(h):
+                tid = attr["type"].get((r.get("assign_type") or "").strip().lower())
+                nm = (r.get("variant") or "").strip().lower()
+                if nm and tid:
+                    out[nm] = tid
+    return out
+
+
+def _write_uncovered(uncovered: list[dict], path: Path) -> None:
+    """Surface variations that got NO combinations (no resolvable stone type) so they are NEVER
+    silently dropped: one row per variety with an 'assign_type' column the user fills. A row that
+    ALREADY carries an assign_type is preserved even once it's covered -- otherwise the variant would
+    drop off the file and fall back to uncovered next run (the assignment must persist)."""
+    prior: dict[str, dict] = {}
+    if Path(path).exists():
+        with Path(path).open(encoding="utf-8-sig", newline="") as h:
+            for r in csv.DictReader(h):
+                nm = (r.get("variant") or "").strip().lower()
+                if nm:
+                    prior[nm] = {"assign_type": (r.get("assign_type") or "").strip(),
+                                 "variant": (r.get("variant") or "").strip(), "key": (r.get("key") or "").strip()}
+    rows: list[dict] = []
+    seen: set = set()
+    for nm, r in prior.items():                          # keep every persisted assignment (type sticks)
+        if r["assign_type"]:
+            rows.append(r)
+            seen.add(nm)
+    for u in uncovered:                                  # add still-uncovered varieties (blank -> needs you)
+        nm = u["Name"].strip().lower()
+        if nm in seen:
+            continue
+        seen.add(nm)
+        rows.append({"assign_type": prior.get(nm, {}).get("assign_type", ""),
+                     "variant": u["Name"], "key": u["Key"]})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as h:
+        w = csv.DictWriter(h, fieldnames=["assign_type", "variant", "key"])
+        w.writeheader()
+        w.writerows(rows)
+
+
 def _resolve_type(key: str, name: str, attr: dict) -> str | None:
     """Find the stone type for an un-backboned variation: longest match of the Key's
     type slug (branch_<type>_<name>_<uuid>), else a type word in the Name (e.g.
@@ -138,10 +186,12 @@ def _resolve_type(key: str, name: str, attr: dict) -> str | None:
 
 
 def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: list[Path],
-                       products_csv: Path | None) -> tuple[set, dict, list[dict]]:
+                       products_csv: Path | None,
+                       assigned_types: dict[str, str] | None = None) -> tuple[set, dict, list[dict]]:
     """Build the set of valid combinations (6-tuples). Returns (combinations, stats,
     uncovered)."""
     attr = _load_attributes(attributes_csv)
+    assigned_types = assigned_types or {}
     by_key, by_cat_name, by_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
@@ -212,7 +262,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             typ, colors, quals = typ or t, colors | c, quals | q
         if inh := variety.get(nl):
             typ, colors, quals = typ or inh["type"], colors | inh["colors"], quals | inh["quals"]
-        typ = typ or _resolve_type(key, name, attr)        # last resort: parse the type
+        typ = typ or _resolve_type(key, name, attr) or assigned_types.get(nl)   # parse, else user-assigned
         colors = colors or {default_color}                 # last resort: catalogue defaults
         quals = quals or {default_qual}
         if add(cat_pcat.get(prefix), typ, vid, cat_finishes.get(prefix, []), colors, quals):
@@ -254,13 +304,16 @@ def run() -> Path:
     if not export.exists():
         raise SystemExit(f"no variants export: {export} (download it from Medusa first)")
     products = SETTINGS.paths.to_upload_dir / "3_products_all.csv"
+    uncovered_file = SETTINGS.paths.review_dir / "tree_uncovered_variations.csv"
+    assigned = _load_assigned_types(uncovered_file, _load_attributes(SETTINGS.paths.attributes_csv))
     combinations, stats, uncovered = build_combinations(
         export, SETTINGS.paths.attributes_csv, _backbone_paths(),
-        products if products.exists() else None)
+        products if products.exists() else None, assigned)
     path = SETTINGS.paths.to_upload_dir / "2_valid_combinations.csv"
     write_combinations(combinations, path)
-    # variations whose type couldn't resolve are simply absent from 2_valid_combinations (not
-    # priceable yet); reported as a count, not a clutter file.
+    # SURFACE the variations that got no combination (no resolvable type) so they are never silently
+    # dropped -- the user fills 'assign_type' and they get allocated next run.
+    _write_uncovered(uncovered, uncovered_file)
     stats["uncovered_variations"] = len(uncovered)
     log.info("valid combinations built", extra={"extra_fields": stats})
     return path
