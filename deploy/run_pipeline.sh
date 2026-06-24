@@ -10,6 +10,16 @@
 # variants-export refresh, which is a human gate. Run it after importing.
 set -euo pipefail
 
+# RUN_MODE selects what this task does (default = the full pipeline):
+#   pipeline            scrape -> pipeline -> catalog -> upload   (default)
+#   validate-dewatermark   de-watermark a sample of existing scraped/ originals and
+#                          write before/after pairs to S3 (no scrape) — eyeball gate.
+RUN_MODE="${RUN_MODE:-pipeline}"
+if [ "$RUN_MODE" = "validate-dewatermark" ]; then
+  echo "==> de-watermark validation sample (no scrape)"
+  exec python -m deploy.validate_dewatermark
+fi
+
 ENV_NAME="${BLOKPORT_ENV:-development}"
 echo "==> blokport scraper run | env=${ENV_NAME} image_mode=${BLOKPORT_IMAGE_MODE:-passthrough} processing=${BLOKPORT_IMAGE_PROCESSING:-false}"
 
