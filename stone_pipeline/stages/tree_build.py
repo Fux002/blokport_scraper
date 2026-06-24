@@ -127,10 +127,16 @@ def _load_assigned_types(path: Path, attr: dict) -> dict[str, str]:
     if Path(path).exists():
         with Path(path).open(encoding="utf-8-sig", newline="") as h:
             for r in csv.DictReader(h):
-                tid = attr["type"].get((r.get("assign_type") or "").strip().lower())
+                raw = (r.get("assign_type") or "").strip()
                 nm = (r.get("variant") or "").strip().lower()
-                if nm and tid:
+                if not (raw and nm):
+                    continue
+                tid = attr["type"].get(raw.lower())
+                if tid:
                     out[nm] = tid
+                else:                                   # typo'd / unknown type -> don't fail silently
+                    log.warning("assign_type is not a known stone type; variation stays uncovered",
+                                extra={"extra_fields": {"variant": r.get("variant"), "assign_type": raw}})
     return out
 
 

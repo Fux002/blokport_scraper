@@ -307,9 +307,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 continue
         if code_why:
             base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
-            pending_confirm.append({"confirm": "", "variant": clean, "stone_type": stone_type,
-                                    "color": code_why, "nearest_existing": base, "score": "", "model_prob": ""})
-            continue
+            dec = confirm_decisions.get(proj.norm(clean))
+            if dec == "no":                            # honour 'no' so the code stops re-appearing
+                rejected.add(proj.norm(clean))
+                continue
+            if dec != "yes":                           # blank -> hold out of the upload and ask
+                pending_confirm.append({"confirm": "", "variant": clean, "stone_type": stone_type,
+                                        "color": code_why, "nearest_existing": base, "score": "", "model_prob": ""})
+                continue
+            # dec == "yes" -> the human confirmed it IS a real variety -> fall through to mint
         # a generic colour+type trade name is its own variety -- skip ALL alias routing (surface
         # match + model) so it can never be promoted into a premium named stone (misselling).
         ctoks = set(proj.norm(clean).split())
