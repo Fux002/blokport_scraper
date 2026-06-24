@@ -291,9 +291,20 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if proj.norm(clean) in rejected:           # user said 'no' on a past run -> never propose again
             continue
         # code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
-        # varieties. NEVER mint them and NEVER auto-merge (colours like 'Agata Black' stay distinct);
-        # route to review with the de-coded base as a suggestion, and let the human decide.
+        # varieties -> NEVER mint them. A trailing lone-letter grade whose de-coded base is a KNOWN,
+        # single, NON-colour variety is auto-aliased to that variety ('Rosal C' -> 'Rosal'), so a
+        # re-scrape resolves instead of re-adding. The colour guard (base not pure colour/type words)
+        # means a colour-named variety is never reclassified or merged ('Agata Black' stays distinct,
+        # 'White G' is too bare to auto-resolve -> review). Everything else -> review.
         code_why = looks_code_shaped(clean)
+        if code_why == "lone_letter":
+            base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip()
+            bnorm = proj.norm(base)
+            btoks = set(bnorm.split())
+            owners = existing_surface.get(bnorm)
+            if owners and len(owners) == 1 and btoks and not (btoks <= generic_words):
+                alias_new.setdefault(next(iter(owners)), set()).add(name)   # auto-alias to the real variety
+                continue
         if code_why:
             base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
             pending_confirm.append({"confirm": "", "variant": clean, "stone_type": stone_type,
