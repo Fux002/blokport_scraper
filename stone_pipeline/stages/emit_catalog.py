@@ -20,11 +20,46 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, category, category_for_key
 from stone_pipeline.core import logfmt
-from stone_pipeline.core.text import looks_like_artifact, title_case
+from stone_pipeline.core.text import clean_variety_name, looks_like_artifact, title_case
 
 log = logfmt.get_logger("emit_catalog")
 
 _COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
+
+
+def _consolidate(rows: list[dict]) -> list[dict]:
+    """Fold ONLY variants whose name carries a trailing grade code into their base variety, so a
+    graded family becomes ONE searchable variety with the originals as aliases ('Rosal C'/'Rosal
+    T'/'Rosal B' -> 'Rosal'). Every other variant passes through UNTOUCHED -- distinct same-name
+    variants are NOT deduped and real names ('Rosal Codacal Favor', 'Agata Black') never merge,
+    because only a row whose clean_variety_name DIFFERS from its name (a code was stripped) is
+    folded. If a base with the clean name already exists it absorbs the code as an alias; otherwise
+    the first coded row is renamed to the base (its Key survives the in-place Medusa rename)."""
+    coded, passthrough = [], []
+    for r in rows:
+        clean = clean_variety_name(r["Name"]) or r["Name"]
+        (coded if clean.casefold() != r["Name"].casefold() else passthrough).append((clean, r))
+    out = [r for _, r in passthrough]
+    base_by: dict[tuple, dict] = {}
+    for r in out:                                                      # existing real bases to fold into
+        cat = category_for_key(r["Key"])
+        base_by.setdefault(((cat.label if cat else ""), r["Name"].casefold()), r)
+    for clean, r in coded:
+        cat = category_for_key(r["Key"])
+        gkey = ((cat.label if cat else ""), clean.casefold())
+        target = base_by.get(gkey)
+        new_aliases = {r["Name"].strip()} | {a.strip() for a in (r.get("Aliases") or "").split("|") if a.strip()}
+        if target is None:                                            # no base yet -> this row becomes it
+            nr = dict(r); nr["Name"] = clean
+            nr["Aliases"] = "|".join(sorted(a for a in new_aliases if a.casefold() != clean.casefold()))
+            base_by[gkey] = nr
+            out.append(nr)
+        else:                                                         # fold the code into the base
+            cur = {a.strip() for a in (target.get("Aliases") or "").split("|") if a.strip()}
+            target["Aliases"] = "|".join(sorted((cur | new_aliases) - {""}
+                                                - {a for a in (cur | new_aliases) if a.casefold() == clean.casefold()}))
+            target["Image"] = target.get("Image") or r.get("Image") or ""
+    return out
 
 
 def _rows(path: Path) -> list[dict]:
@@ -76,6 +111,7 @@ def build(existing_path: Path | None = None) -> Path:
     # keep code-like names (e.g. a stale 'Z Astoria' still in the export) OUT of the upload
     # file -- only clean variety names ever reach Medusa. Their varieties are to be deleted there.
     rows = [r for r in rows if not looks_like_artifact(r["Name"])]
+    rows = _consolidate(rows)                                 # 'Rosal C/T/B' -> one 'Rosal' + aliases
 
     base = SETTINGS.curation.variant_image_base               # dev/prod switch via env
     for r in rows:

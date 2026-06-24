@@ -154,3 +154,21 @@ def test_looks_code_shaped_flags_codes_not_real_names():
     assert L("Gs") == "bare_code" and L("Zb") == "bare_code" and L("Lg") == "bare_code"
     assert not L("Ice") and not L("Oak") and not L("Ash") and not L("Sun") and not L("Tan")
     assert not L("G682") and not L("Agata Black") and not L("Carrara") and not L("Cristallo Divine")
+
+
+def test_emit_consolidate_folds_grade_codes_only():
+    # graded variants fold into one base (originals -> aliases); distinct same-name variants are
+    # NOT deduped and real names never merge.
+    from stone_pipeline.stages.emit_catalog import _consolidate
+    rows=[{"Key":"slab_limestone_rosal_b_1","Name":"Rosal B","Image":"","Aliases":"Rosal Cd","Volume per kg (m³/kg)":""},
+          {"Key":"slab_limestone_rosal_c_1","Name":"Rosal C","Image":"","Aliases":"","Volume per kg (m³/kg)":""},
+          {"Key":"slab_limestone_rosal_original_1","Name":"Rosal Original","Image":"","Aliases":"","Volume per kg (m³/kg)":""},
+          {"Key":"slab_agate_agata_black_1","Name":"Agata Black","Image":"","Aliases":"","Volume per kg (m³/kg)":""},
+          {"Key":"slab_agate_agata_black_2","Name":"Agata Black","Image":"","Aliases":"","Volume per kg (m³/kg)":""}]
+    out=_consolidate(rows)
+    names=[r["Name"] for r in out]
+    assert "Rosal" in names and "Rosal C" not in names and "Rosal B" not in names   # folded
+    assert names.count("Agata Black")==2                                            # NOT deduped
+    assert "Rosal Original" in names                                                # distinct, kept
+    rosal=next(r for r in out if r["Name"]=="Rosal")
+    assert "Rosal B" in rosal["Aliases"] and "Rosal C" in rosal["Aliases"] and "Rosal Cd" in rosal["Aliases"]
