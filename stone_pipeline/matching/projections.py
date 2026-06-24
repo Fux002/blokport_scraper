@@ -24,8 +24,13 @@ _PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
 _WS = re.compile(r"\s+")
 # inventory prefixes seen on supplier exports (Z, ZB, "Z B")
 _INV_PREFIX = re.compile(r"^(z\s?b|z)\s+", flags=re.IGNORECASE)
-# trailing render or grade tags: a trailing slash tag, a 2cm/3cm thickness, grade letters
-_TRAIL_TAG = re.compile(r"\s*(/.*|\b\d+\s?cm\b|\bgrade\s+\w+|\b[abcd]\b)\s*$", flags=re.IGNORECASE)
+# trailing render tags only: a trailing slash render/thickness tag or an explicit 'grade X'. A bare
+# trailing letter (a/b/c/d) is NOT stripped here -- this projection feeds a HIGH-confidence EXACT
+# match, and stripping a grade letter would auto-merge distinct siblings ('Marfil A' == 'Marfil B')
+# with no review. Grade-letter handling lives in clean_variety_name (curate), with an alias/review
+# gate. The slash arm only strips a thickness/render tag, not an arbitrary compound second name.
+_TRAIL_TAG = re.compile(r"\s*(/\s*(\d+\s?cm|polished|honed|leather(ed)?|brushed|matt?e?)\b.*|"
+                        r"\b\d+\s?cm\b|\bgrade\s+\w+)\s*$", flags=re.IGNORECASE)
 
 
 def norm(value: str) -> str:
