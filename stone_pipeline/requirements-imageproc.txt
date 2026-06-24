@@ -13,7 +13,8 @@ pillow>=10              # keep the modern cp312 wheel; stops pip backtracking to
                         # pre-3.12 Pillow sdist (which has no wheel and won't compile)
 torch>=2.2
 torchvision>=0.17
-transformers>=4.44      # Florence-2 (microsoft/Florence-2-large, trust_remote_code)
+transformers==4.44.2    # PINNED: Florence-2-large's remote code needs forced_bos_token_id,
+                        # which newer transformers (>=4.49) removed -> AttributeError on load.
 einops                  # required by Florence-2's remote code
 timm                    # required by Florence-2's vision backbone
 simple-lama-inpainting  # LaMa inpainting wrapper (downloads weights on first use)
