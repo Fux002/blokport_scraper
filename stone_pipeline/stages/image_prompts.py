@@ -78,9 +78,35 @@ def _variants() -> dict[str, dict]:
     return out
 
 
+def product_backed_keys() -> set[str]:
+    """Variant Keys a product references (export Key<->Id map + the products' variation ids). A
+    product-backed variant MUST have an image -- including an EXISTING fan-out tile/block that
+    gained a product AFTER its slab was first created (those are never in backbone_additions, so
+    the new-variety queue alone misses them)."""
+    keys: set[str] = set()
+    exp = SETTINGS.paths.export_file
+    prods = SETTINGS.paths.to_upload_dir / "3_products_all.csv"
+    if not (exp.exists() and prods.exists()):
+        return keys
+    id_to_key: dict[str, str] = {}
+    with exp.open(encoding="utf-8-sig", newline="") as h:
+        for r in csv.DictReader(h):
+            if (r.get("Id") or "").strip() and (r.get("Key") or "").strip():
+                id_to_key[r["Id"].strip()] = r["Key"].strip()
+    with prods.open(encoding="utf-8-sig", newline="") as h:
+        for r in csv.DictReader(h):
+            k = id_to_key.get((r.get("STN Variation Id") or "").strip())
+            if k:
+                keys.add(k)
+    return keys
+
+
 def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Path:
-    """New product-backed variants only -- the normal pipeline step. Reads the new-variety
-    backbone deltas; fan-out copies with no product are skipped (no wasted generation)."""
+    """Product-backed variants needing an image. Two sources: (1) the new-variety backbone deltas
+    (fan-out copies with no product are skipped), and (2) BACKFILL -- existing variants that have a
+    product but still no image (e.g. a tile/block that gained a product after its slab was created;
+    these are never in backbone_additions, so without this they'd never be generated)."""
+    run_backfill = additions_dir is None         # backfill is whole-catalog; skip on a scoped call
     additions_dir = Path(additions_dir or SETTINGS.paths.catalog_source_dir / "backbone_additions")
     items, seen = [], set()
     for f in sorted(additions_dir.glob("*.json")):
@@ -92,6 +118,22 @@ def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Pa
             if item:
                 seen.add(key)
                 items.append(item)
+    # (2) BACKFILL: product-backed variants with NO image in Medusa yet. Signal is the immutable
+    # EXPORT Image (blank), NOT 1_variants_full -- emit may have just stamped the CSV link, but the
+    # real S3 image isn't generated until this queue runs. Once generated + uploaded + re-exported,
+    # the export Image is non-blank and it drops out of the queue.
+    backed, ktype = (product_backed_keys(), _backbone_types()) if run_backfill else (set(), {})
+    exp = SETTINGS.paths.export_file
+    if run_backfill and exp.exists():
+        with exp.open(encoding="utf-8-sig", newline="") as h:
+            for r in csv.DictReader(h):
+                key = (r.get("Key") or "").strip()
+                if not key or key in seen or key not in backed or (r.get("Image") or "").strip():
+                    continue
+                item = _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip())
+                if item:
+                    seen.add(key)
+                    items.append(item)
     return _write(items, out_path, "new")
 
 
