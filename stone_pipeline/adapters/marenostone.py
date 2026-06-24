@@ -1,17 +1,18 @@
 """Marenostone adapter (section 7 Stage 1, section 14 M11).
 
-Generic-descriptor source: the `name` is "Cream Marble Tile" with no named
-variety, so variety_match_key is the name with colour/type/format tokens stripped
-(usually empty), and such rows legitimately resolve to a null variation and route
-to the tree-gap queue. This is correct behaviour, not a failure. Colour lives in
-attr_category2, type in attr_category1, format in attr_format (Tile routes to
-Slabs). Some SKUs are blank and mint a surrogate downstream.
+The `name` carries the variety AND a trailing format word ("Super White Travertine Slab",
+"Cream Marble Tile"). variety_match_key strips ONLY the format word (strip_format), KEEPING colour
+and type -- because the colour is often part of the variety name: "Super White Travertine" and
+"Pink Onyx" are real backbone varieties, and stripping the colour (the old strip_variety) truncated
+them to "Super"/"" and lost the variety. A genuinely generic descriptor ("Cream Marble") still
+finds no backbone match and routes to the tree-gap queue. Colour also lives in attr_category2, type
+in attr_category1, format in attr_format (Tile routes to Slabs). Blank SKUs mint a surrogate.
 """
 
 from __future__ import annotations
 
 from stone_pipeline.adapters.base import AdapterBase
-from stone_pipeline.adapters.tokens import strip_variety
+from stone_pipeline.adapters.tokens import strip_format
 
 
 class MarenostoneAdapter(AdapterBase):
@@ -41,7 +42,7 @@ class MarenostoneAdapter(AdapterBase):
         # (empty for a purely generic descriptor). When empty, the variation stage
         # falls back to a strict canonical-name match on the colour+type name, so a
         # real variety named by colour+type (White Travertine) still resolves
-        "variety_match_key": lambda r: strip_variety(AdapterBase.clean(r.get("name"))),
+        "variety_match_key": lambda r: strip_format(AdapterBase.clean(r.get("name"))),
         "raw_type": lambda r: AdapterBase.clean(r.get("attr_category1")),
         "raw_color": lambda r: AdapterBase.clean(r.get("attr_category2")),
         "raw_finish": lambda r: AdapterBase.clean(r.get("attr_finish")),

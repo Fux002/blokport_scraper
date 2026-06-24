@@ -27,7 +27,7 @@
     "src_natural_key": "P/11/01",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/cream-marble-tile-2/",
-    "variety_match_key": ""
+    "variety_match_key": "Cream Marble"
   },
   {
     "adapter_version": "1.2.0",
@@ -57,7 +57,7 @@
     "src_natural_key": "P/11/07",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/escato-marble-slab-2/",
-    "variety_match_key": "Pietra"
+    "variety_match_key": "Pietra Gray Marble"
   },
   {
     "adapter_version": "1.2.0",
@@ -87,7 +87,7 @@
     "src_natural_key": "P/07/07",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/black-granite-tile/",
-    "variety_match_key": ""
+    "variety_match_key": "Black Granite"
   },
   {
     "adapter_version": "1.2.0",
@@ -117,7 +117,7 @@
     "src_natural_key": "P/04/03",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/tiger-black-granite-slab-13/",
-    "variety_match_key": "Tiger"
+    "variety_match_key": "Tiger Black Granite"
   },
   {
     "adapter_version": "1.2.0",
@@ -147,7 +147,7 @@
     "src_natural_key": "P/04/04",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/tiger-black-granite-slab-12/",
-    "variety_match_key": "Tiger"
+    "variety_match_key": "Tiger Black Granite"
   },
   {
     "adapter_version": "1.2.0",
@@ -177,7 +177,7 @@
     "src_natural_key": "P/08/07",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/white-travertine-tile-2/",
-    "variety_match_key": ""
+    "variety_match_key": "White Travertine"
   },
   {
     "adapter_version": "1.2.0",
@@ -207,7 +207,7 @@
     "src_natural_key": "P/08/06",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/white-travertine-tile/",
-    "variety_match_key": ""
+    "variety_match_key": "White Travertine"
   },
   {
     "adapter_version": "1.2.0",
@@ -237,7 +237,7 @@
     "src_natural_key": "P/10/09",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/pink-onyx-slab-2/",
-    "variety_match_key": ""
+    "variety_match_key": "Pink Onyx"
   },
   {
     "adapter_version": "1.2.0",
@@ -267,7 +267,7 @@
     "src_natural_key": "P/10/08",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/white-onyx-slab/",
-    "variety_match_key": ""
+    "variety_match_key": "White Onyx"
   },
   {
     "adapter_version": "1.2.0",
@@ -297,7 +297,7 @@
     "src_natural_key": "P/06/24",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/labradorite-blue-granite-slab/",
-    "variety_match_key": "Labradorite"
+    "variety_match_key": "Labradorite Blue Granite"
   },
   {
     "adapter_version": "1.2.0",
@@ -327,7 +327,7 @@
     "src_natural_key": "P/05/01",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/sunny-beige-marble-slab-3/",
-    "variety_match_key": "Sunny"
+    "variety_match_key": "Sunny Beige Marble"
   },
   {
     "adapter_version": "1.2.0",
@@ -357,7 +357,7 @@
     "src_natural_key": "P/05/02",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/sunny-beige-marble-slab-2/",
-    "variety_match_key": "Sunny"
+    "variety_match_key": "Sunny Beige Marble"
   },
   {
     "adapter_version": "1.2.0",
@@ -387,7 +387,7 @@
     "src_natural_key": "P/06/25",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/turquoise-granite-slab/",
-    "variety_match_key": "Turquoise"
+    "variety_match_key": "Turquoise Granite"
   },
   {
     "adapter_version": "1.2.0",
@@ -417,7 +417,7 @@
     "src_natural_key": "P/05/03",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/sunny-beige-marble-slab/",
-    "variety_match_key": "Sunny"
+    "variety_match_key": "Sunny Beige Marble"
   },
   {
     "adapter_version": "1.2.0",
@@ -447,6 +447,6 @@
     "src_natural_key": "P/09/04",
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/black-wave-marble-slab-3/",
-    "variety_match_key": "Wave"
+    "variety_match_key": "Black Wave Marble"
   }
 ]
