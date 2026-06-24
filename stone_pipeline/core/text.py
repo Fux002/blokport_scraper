@@ -113,6 +113,14 @@ def clean_variety_name(name: str, code_prefixes: tuple[str, ...] = (),
             (len(toks[i]) == 1 and toks[i].isalpha()) or toks[i].casefold() in lead_codes):
         i += 1
     toks = [t for t in toks[i:] if not _is_number_code(t)]                # drop loose numbers
+    # strip a TRAILING lone-letter grade code so a graded product collapses to its base variety
+    # ('Rosal C'/'Rosal T' -> 'Rosal'; customer finds it under 'Rosal' and tells them apart by the
+    # product's colour). Space-separated and hyphen-attached ('Red Wendeng-z' -> 'Red Wendeng').
+    # Validated against 11,645 backbone varieties: none legitimately ends in a lone letter.
+    while len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha():
+        toks = toks[:-1]
+    if toks:
+        toks[-1] = re.sub(r"-[A-Za-z]$", "", toks[-1]) or toks[-1]        # 'Wendeng-z' -> 'Wendeng'
     toks = [t for t in toks if t.strip("-–—_/|")]                         # drop dangling separators
     return _EDGE_PUNCT.sub("", " ".join(toks)).strip() or n or (name or "").strip()
 
