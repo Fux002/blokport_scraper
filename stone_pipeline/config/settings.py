@@ -56,11 +56,16 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
-# The dev bucket is known. The PROD bucket is supplied at deploy time via
-# BLOKPORT_S3_BUCKET (kept at the dev bucket as a well-formed default until then —
-# images._build_backend warns if a production run is still pointing at it).
+# The dev bucket is known. The PROD bucket is supplied at deploy time via BLOKPORT_S3_BUCKET.
+# In PRODUCTION we must NOT silently fall back to the dev bucket (that would store prod images in
+# dev and stamp prod Medusa rows with dev URLs) -- fail fast instead. Dev keeps the known default.
 _DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
-S3_BUCKET = os.environ.get("BLOKPORT_S3_BUCKET", _DEV_S3_BUCKET)
+_S3_BUCKET_ENV = os.environ.get("BLOKPORT_S3_BUCKET", "").strip()
+if IS_PRODUCTION and not _S3_BUCKET_ENV:
+    raise RuntimeError(
+        "BLOKPORT_S3_BUCKET must be set in production — refusing to default to the dev bucket "
+        f"({_DEV_S3_BUCKET}). Set BLOKPORT_S3_BUCKET to the prod bucket before running prod.")
+S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
 S3_REGION = os.environ.get("BLOKPORT_S3_REGION", "eu-west-1")
 
 

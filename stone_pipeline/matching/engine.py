@@ -27,11 +27,17 @@ def _fuzzy_score(query: str, candidate: str) -> float:
     return max(fuzz.ratio(a, b), fuzz.token_sort_ratio(a, b))
 
 
+# spelling/form variants of the SAME colour -- without canonicalizing these, 'Pietra Grey' and
+# 'Pietra Gray' read as a colour CONFLICT and the same stone is wrongly split into two varieties.
+_COLOUR_CANON = {"gray": "grey", "golden": "gold"}
+
+
 def _colour_words(text: str) -> set[str]:
     from stone_pipeline.adapters.tokens import COLOR_TOKENS
 
     cset = {c.casefold() for c in COLOR_TOKENS}
-    return {t.casefold() for t in proj.norm(text).split() if t.casefold() in cset}
+    return {_COLOUR_CANON.get(t.casefold(), t.casefold())
+            for t in proj.norm(text).split() if t.casefold() in cset}
 
 
 def _colour_conflict(query: str, candidate: str) -> bool:

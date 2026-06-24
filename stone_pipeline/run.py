@@ -239,6 +239,18 @@ def run_source(
     changed = [r for r in existing_rows if r.product_changed] if known else []
     # delete loop: products in Medusa (this source) that the latest scrape dropped -> stock-0 delist + report
     discontinued = product_state.discontinued(rows, source_cfg, known)
+    # SAFETY: a partial scrape (truncated Cloudflare page, transient block) passes the DEGRADED
+    # health gate yet would delist every product it failed to fetch. Refuse to mass-delist: if a
+    # single run would discontinue >30% of this source's known products, drop the delist and flag
+    # it loudly -- almost certainly an incomplete scrape, not a real bulk discontinuation.
+    _src_prefix = f"{source_cfg.source_code}-".upper()
+    _src_known = sum(1 for sku in known.by_sku if sku.startswith(_src_prefix)) if known else 0
+    if _src_known and len(discontinued) > 0.30 * _src_known:
+        run_log.warning("delist refused: a single run would discontinue too much of the catalog "
+                        "(likely a partial scrape) -- keeping products listed",
+                        extra={"extra_fields": {"would_delist": len(discontinued), "source_known": _src_known,
+                                                "fraction": round(len(discontinued) / _src_known, 3)}})
+        discontinued = []
     if known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
         emit.write_inventory_csv(changed, source_cfg, layout.products_import / "inventory_update.csv",
                                  discontinued=tuple(discontinued))

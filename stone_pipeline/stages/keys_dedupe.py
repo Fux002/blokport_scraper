@@ -61,15 +61,19 @@ def assign_surrogates(rows: list[CanonicalRow]) -> int:
 def run(rows: list[CanonicalRow]) -> DedupResult:
     minted = assign_surrogates(rows)
 
-    # exact dedup on surrogate_key, keep first by scrape order
+    # exact dedup on surrogate_key, keep first by scrape order. Dedup in the CASE-FOLDED space
+    # because the product SKU is `{source}-{surrogate}`.upper() (emit/medusa_client) -- two natural
+    # keys differing only in case ('ab12' vs 'AB12') collapse to one SKU on upload, so they must
+    # collapse here too or one silently overwrites the other in Medusa, evading this guard.
     seen: set[str] = set()
     kept: list[CanonicalRow] = []
     dropped_exact = 0
     for row in rows:
-        if row.surrogate_key in seen:
+        sk = (row.surrogate_key or "").upper()
+        if sk in seen:
             dropped_exact += 1
             continue
-        seen.add(row.surrogate_key)
+        seen.add(sk)
         kept.append(row)
 
     # near-duplicate flag: same normalized name + branch + colour

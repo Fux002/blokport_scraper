@@ -9,13 +9,24 @@ _NON_SLUG = re.compile(r"[^a-z0-9]+")
 _WS = re.compile(r"\s+")
 
 
+# Latin letters that do NOT NFKD-decompose to ASCII+marks -- without this map they'd be silently
+# DROPPED ('Łysa'->'ysa', 'Ægean'->'gean'), corrupting names and splitting the same stone across
+# scrapes. Transliterate them before the ASCII pass.
+_TRANSLIT = str.maketrans({
+    "Æ": "AE", "æ": "ae", "Œ": "OE", "œ": "oe", "Ø": "O", "ø": "o", "Ł": "L", "ł": "l",
+    "Đ": "D", "đ": "d", "Ð": "D", "ð": "d", "Þ": "TH", "þ": "th", "ß": "ss", "ẞ": "SS",
+    "Ħ": "H", "ħ": "h", "Ŧ": "T", "ŧ": "t", "ı": "i", "İ": "I", "Ŋ": "N", "ŋ": "n",
+})
+
+
 def ascii_fold(text: str) -> str:
     """Fold accented/special Latin letters to plain ASCII so a variety name never carries a
     special character that splits the same stone in two -- 'Rosa Porriño' == 'Rosa Porrino',
-    'São Gabriel' == 'Sao Gabriel'. NFKD decomposes the accent, the combining marks are dropped,
-    and any remaining non-ASCII is removed. Applied in slug, title-case, and the match key so the
-    folding is consistent everywhere (scrapes that use accents match those that don't)."""
-    decomposed = unicodedata.normalize("NFKD", text or "")
+    'São Gabriel' == 'Sao Gabriel', 'Łysa' == 'Lysa'. Non-decomposing letters (Æ/Œ/Ø/Ł/ß...) are
+    transliterated first; then NFKD decomposes accents, combining marks are dropped, and any
+    remaining non-ASCII is removed. Applied in slug, title-case, and the match key so the folding
+    is consistent everywhere (scrapes that use accents/ligatures match those that don't)."""
+    decomposed = unicodedata.normalize("NFKD", (text or "").translate(_TRANSLIT))
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
     return stripped.encode("ascii", "ignore").decode("ascii")
 
@@ -113,14 +124,17 @@ def clean_variety_name(name: str, code_prefixes: tuple[str, ...] = (),
             (len(toks[i]) == 1 and toks[i].isalpha()) or toks[i].casefold() in lead_codes):
         i += 1
     toks = [t for t in toks[i:] if not _is_number_code(t)]                # drop loose numbers
-    # strip a TRAILING lone-letter grade code so a graded product collapses to its base variety
-    # ('Rosal C'/'Rosal T' -> 'Rosal'; customer finds it under 'Rosal' and tells them apart by the
-    # product's colour). Space-separated and hyphen-attached ('Red Wendeng-z' -> 'Red Wendeng').
-    # Validated against 11,645 backbone varieties: none legitimately ends in a lone letter.
-    while len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha():
+    # strip ONE trailing lone-letter grade code so a graded product collapses to its base variety
+    # ('Rosal C'/'Rosal T' -> 'Rosal'; customer finds it under 'Rosal', tells them apart by colour).
+    # Space-separated and hyphen-attached ('Red Wendeng-z' -> 'Red Wendeng'). Only ONE letter (no
+    # cascade: 'Bianco C T' -> 'Bianco C', not 'Bianco') and KEEP a Roman-numeral 'I' grade ('Onyx I'
+    # stays distinct from 'Onyx II'). Validated: no backbone variety ends in a lone non-'I' letter.
+    if len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha() and toks[-1].upper() != "I":
         toks = toks[:-1]
     if toks:
-        toks[-1] = re.sub(r"-[A-Za-z]$", "", toks[-1]) or toks[-1]        # 'Wendeng-z' -> 'Wendeng'
+        m = re.search(r"-([A-Za-z])$", toks[-1])
+        if m and m.group(1).upper() != "I":
+            toks[-1] = toks[-1][:m.start()] or toks[-1]                   # 'Wendeng-z' -> 'Wendeng'
     toks = [t for t in toks if t.strip("-–—_/|")]                         # drop dangling separators
     return _EDGE_PUNCT.sub("", " ".join(toks)).strip() or n or (name or "").strip()
 

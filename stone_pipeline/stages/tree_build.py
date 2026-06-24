@@ -262,13 +262,21 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         typ, colors, quals = None, set(), set()
         if prod := products.get(vid):
             typ, colors, quals = prod["type"], colors | prod["colors"], quals | prod["quals"]
-        post = by_key.get(key) or by_cat_name.get((prefix + "s", nl)) or by_name.get(nl)
+        kpost = by_key.get(key)                                          # the variation's OWN backbone post
+        post = kpost or by_cat_name.get((prefix + "s", nl)) or by_name.get(nl)
         if post:
             t, c, q = combo(post)
-            typ, colors, quals = typ or t, colors | c, quals | q
+            colors |= c
+            quals |= q
+            # adopt the post's TYPE only from a KEY match. A name-only post (by_cat_name/by_name) can
+            # be a DIFFERENT stone of the same name -> using its type mis-prices the variation
+            # ('Pietra' the Marble priced as Granite). Its colour/quality are still safe to union.
+            if kpost:
+                typ = typ or t
         if inh := variety.get(nl):
-            typ, colors, quals = typ or inh["type"], colors | inh["colors"], quals | inh["quals"]
-        typ = typ or _resolve_type(key, name, attr) or assigned_types.get(nl)   # parse, else user-assigned
+            colors |= inh["colors"]                                     # colour/quality inherit by name OK
+            quals |= inh["quals"]                                       # but NOT type (same cross-type risk)
+        typ = typ or _resolve_type(key, name, attr) or assigned_types.get(nl)   # the variation's own Key, else user-assigned
         colors = colors or {default_color}                 # last resort: catalogue defaults
         quals = quals or {default_qual}
         if add(cat_pcat.get(prefix), typ, vid, cat_finishes.get(prefix, []), colors, quals):
