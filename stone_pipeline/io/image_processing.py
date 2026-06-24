@@ -127,13 +127,24 @@ class _Dewatermarker:
         return self._ok
 
     def _load(self) -> None:
+        from unittest.mock import patch
+
         import torch
         from transformers import AutoModelForCausalLM, AutoProcessor
+        from transformers.dynamic_module_utils import get_imports
         from simple_lama_inpainting import SimpleLama
 
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
-        self._florence = AutoModelForCausalLM.from_pretrained(
-            "microsoft/Florence-2-large", trust_remote_code=True).to(self._device).eval()
+
+        # Florence-2's remote code hard-requires flash_attn (GPU-only). On CPU, strip
+        # it from the import check and force eager attention so the model still loads.
+        def _no_flash(filename):
+            return [imp for imp in get_imports(filename) if imp != "flash_attn"]
+
+        with patch("transformers.dynamic_module_utils.get_imports", _no_flash):
+            self._florence = AutoModelForCausalLM.from_pretrained(
+                "microsoft/Florence-2-large", trust_remote_code=True,
+                attn_implementation="eager").to(self._device).eval()
         self._processor = AutoProcessor.from_pretrained(
             "microsoft/Florence-2-large", trust_remote_code=True)
         self._lama = SimpleLama(device=self._device)
