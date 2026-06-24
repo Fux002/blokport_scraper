@@ -36,9 +36,12 @@ ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 
 # --- de-watermark variant (optional, CPU torch) -----------------------------
 FROM core AS imageproc
-# Build tooling as a safety net for any sdist-only dependency in the torch stack.
+# Build tooling for any sdist-only dep, plus libgl1/libglib2.0-0: the LaMa stack
+# (simple-lama-inpainting) pulls in the FULL opencv-python (not headless), which
+# links libGL.so.1 — absent in the slim base, so cv2 import fails without it.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libjpeg-dev zlib1g-dev \
+    && apt-get install -y --no-install-recommends \
+       build-essential libjpeg-dev zlib1g-dev libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 COPY stone_pipeline/requirements-imageproc.txt /tmp/requirements-imageproc.txt
 # --extra-index-url (NOT --index-url): keep PyPI as the primary index so deps like
