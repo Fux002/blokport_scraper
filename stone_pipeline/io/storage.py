@@ -90,7 +90,14 @@ class S3StorageBackend:
         if self._client is None:
             import boto3  # lazy
 
-            session = boto3.Session(profile_name=self.profile, region_name=self.region)
+            # Empty profile -> default credential chain (the ECS task IAM role on AWS,
+            # or ambient creds locally). A named profile is used only if one is set;
+            # on Fargate there is no profile, so profile_name="default" would raise
+            # ProfileNotFound.
+            if self.profile:
+                session = boto3.Session(profile_name=self.profile, region_name=self.region)
+            else:
+                session = boto3.Session(region_name=self.region)
             self._client = session.client("s3")
         return self._client
 

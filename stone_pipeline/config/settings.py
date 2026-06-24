@@ -238,7 +238,10 @@ class S3Config:
     # match the path in ImagesConfig.public_base so the emitted URL resolves to the
     # uploaded object. Content-addressed: <prefix>/<src_site>/<sha256>.jpg.
     staging_prefix: str = f"{ENV_SEGMENT}/products/"
-    credentials_profile: str = os.environ.get("BLOKPORT_AWS_PROFILE", "default")
+    # Empty by default -> boto3 default credential chain (the ECS task IAM role on
+    # AWS; ambient creds locally). Set BLOKPORT_AWS_PROFILE only to force a named
+    # local profile — never on Fargate, where no profile exists (ProfileNotFound).
+    credentials_profile: str = os.environ.get("BLOKPORT_AWS_PROFILE", "")
     # When true the image stage does not hit S3; it derives keys deterministically
     # and records them, but performs no network IO. Used when creds are absent.
     # Default true in dev; set BLOKPORT_S3_DRY_RUN=false to actually upload.
