@@ -40,8 +40,12 @@ def main() -> int:
         print(f"no originals at s3://{S3_BUCKET}/{src} — run the pipeline with keep_scraped first")
         return 1
 
-    proc = ImageProcessor(ImageProcessingConfig(enabled=True, dewatermark=True, write_preview=False))
-    print(f"==> de-watermarking {len(keys)} varsha originals -> s3://{S3_BUCKET}/{out}/")
+    # Detection prompt is overridable via VALIDATE_PROMPT so we can try "logo" / "text"
+    # / "watermark" on the sample without rebuilding the image each time.
+    prompt = os.environ.get("VALIDATE_PROMPT", "logo")
+    proc = ImageProcessor(ImageProcessingConfig(
+        enabled=True, dewatermark=True, write_preview=False, dewatermark_prompt=prompt))
+    print(f"==> de-watermarking {len(keys)} varsha originals (prompt={prompt!r}) -> s3://{S3_BUCKET}/{out}/")
     hits = 0
     for i, key in enumerate(keys):
         data = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
