@@ -42,7 +42,7 @@ def main() -> int:
 
     # Detection prompt is overridable via VALIDATE_PROMPT so we can try "logo" / "text"
     # / "watermark" on the sample without rebuilding the image each time.
-    prompt = os.environ.get("VALIDATE_PROMPT", "logo")
+    prompt = os.environ.get("VALIDATE_PROMPT", "logo,watermark")
     proc = ImageProcessor(ImageProcessingConfig(
         enabled=True, dewatermark=True, write_preview=False, dewatermark_prompt=prompt))
     print(f"==> de-watermarking {len(keys)} varsha originals (prompt={prompt!r}) -> s3://{S3_BUCKET}/{out}/")

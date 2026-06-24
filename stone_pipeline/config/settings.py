@@ -284,12 +284,15 @@ class ImageProcessingConfig:
     # --- pixel upscaling (faithful, Lanczos — never generative) ---
     upscale: bool = True
     upscale_max_scale: float = 2.0    # never enlarge beyond this factor
-    upscale_target_long_edge: int = 2048  # stop upscaling once the long edge reaches this
+    upscale_target_long_edge: int = 1600  # stop upscaling once the long edge reaches this
+                                          # (1600 is crisp for web + retina; 2048 only helps deep zoom and ~2x the bytes)
     # --- de-watermark (flagged sources only; needs the imageproc extra) ---
     dewatermark: bool = True
-    dewatermark_prompt: str = "watermark"  # Florence-2 open-vocab detection prompt
+    # Comma-separated Florence-2 prompts, unioned: "logo" catches the centered branding,
+    # "watermark" the corner info-label — together they clear both.
+    dewatermark_prompt: str = "logo,watermark"
     # --- output / audit ---
-    jpeg_quality: int = 92
+    jpeg_quality: int = 85  # 85 is visually identical to 92 for photos at ~30-40% smaller files
     write_preview: bool = True        # images/reports/processed_preview.csv (source -> processed)
     # Improved and raw-scraped images are kept in two sibling folders under the
     # products prefix, so the upgraded set is cleanly separated from the originals:

@@ -107,7 +107,10 @@ class _Dewatermarker:
     reconstructed (not blurred over). Self-hosted, free, runs on the AWS stack."""
 
     def __init__(self, prompt: str):
-        self.prompt = prompt
+        # prompt may be comma-separated ("logo,watermark"): detect each and union the
+        # regions, so we catch both the centered branding logo and the corner info-label
+        # (each prompt alone catches only one of the two).
+        self.prompts = [p.strip() for p in prompt.split(",") if p.strip()] or ["watermark"]
         self._ok: Optional[bool] = None
         self._florence = None
         self._processor = None
@@ -150,21 +153,24 @@ class _Dewatermarker:
         self._lama = SimpleLama(device=self._device)
 
     def _detect_boxes(self, pil_image):
-        """Florence-2 open-vocabulary detection -> list of (x1,y1,x2,y2) boxes
-        for the watermark prompt. Empty list = nothing found (image left as-is)."""
+        """Florence-2 open-vocab detection over every configured prompt -> unioned
+        list of (x1,y1,x2,y2) boxes. Empty list = nothing found (image left as-is)."""
         import torch
 
         task = "<OPEN_VOCABULARY_DETECTION>"
-        inputs = self._processor(text=task + self.prompt, images=pil_image,
-                                 return_tensors="pt").to(self._device)
-        with torch.no_grad():
-            ids = self._florence.generate(input_ids=inputs["input_ids"],
-                                          pixel_values=inputs["pixel_values"],
-                                          max_new_tokens=1024, num_beams=3)
-        text = self._processor.batch_decode(ids, skip_special_tokens=False)[0]
-        parsed = self._processor.post_process_generation(
-            text, task=task, image_size=(pil_image.width, pil_image.height))
-        return parsed.get(task, {}).get("bboxes", []) or []
+        boxes: list = []
+        for prompt in self.prompts:
+            inputs = self._processor(text=task + prompt, images=pil_image,
+                                     return_tensors="pt").to(self._device)
+            with torch.no_grad():
+                ids = self._florence.generate(input_ids=inputs["input_ids"],
+                                              pixel_values=inputs["pixel_values"],
+                                              max_new_tokens=1024, num_beams=3)
+            text = self._processor.batch_decode(ids, skip_special_tokens=False)[0]
+            parsed = self._processor.post_process_generation(
+                text, task=task, image_size=(pil_image.width, pil_image.height))
+            boxes.extend(parsed.get(task, {}).get("bboxes", []) or [])
+        return boxes
 
     def process(self, pil_image):
         """Return a watermark-free copy, or the original if nothing was detected."""
