@@ -32,7 +32,8 @@ from pathlib import Path
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
-from stone_pipeline.core.text import ascii_fold, looks_like_artifact as _looks_like_artifact, title_case
+from stone_pipeline.core.text import (ascii_fold, looks_code_shaped,
+                                      looks_like_artifact as _looks_like_artifact, title_case)
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
 from stone_pipeline.stages.format_resolve import branch_of
@@ -288,6 +289,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             continue
         seen_new.add(proj.norm(clean))
         if proj.norm(clean) in rejected:           # user said 'no' on a past run -> never propose again
+            continue
+        # code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
+        # varieties. NEVER mint them and NEVER auto-merge (colours like 'Agata Black' stay distinct);
+        # route to review with the de-coded base as a suggestion, and let the human decide.
+        code_why = looks_code_shaped(clean)
+        if code_why:
+            base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
+            pending_confirm.append({"confirm": "", "variant": clean, "stone_type": stone_type,
+                                    "color": code_why, "nearest_existing": base, "score": "", "model_prob": ""})
             continue
         # a generic colour+type trade name is its own variety -- skip ALL alias routing (surface
         # match + model) so it can never be promoted into a premium named stone (misselling).

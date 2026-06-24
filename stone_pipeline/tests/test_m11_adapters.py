@@ -143,3 +143,14 @@ def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch):
     manifest = run_mod.run_source("marenostone", outputs_dir=tmp_path, state_dir=tmp_path)
     assert manifest.run_id == "marenostone_20260101_000000"   # used the load_frame timestamp token
     assert manifest.totals["rows"] >= 1                        # ran the in-memory frame end to end
+
+
+def test_looks_code_shaped_flags_codes_not_real_names():
+    # supplier codes/grades -> flagged (routed to review, never minted/merged); real short stone
+    # names and granite G-codes -> NOT flagged (no false positives), colours stay distinct.
+    from stone_pipeline.core.text import looks_code_shaped as L
+    assert L("Rosal C") == "lone_letter" and L("Trani Bianco H") == "lone_letter"
+    assert L("Colonial White - M") == "lone_letter" and L("Bianco V") == "lone_letter"
+    assert L("Gs") == "bare_code" and L("Zb") == "bare_code" and L("Lg") == "bare_code"
+    assert not L("Ice") and not L("Oak") and not L("Ash") and not L("Sun") and not L("Tan")
+    assert not L("G682") and not L("Agata Black") and not L("Carrara") and not L("Cristallo Divine")

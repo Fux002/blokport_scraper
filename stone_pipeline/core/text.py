@@ -133,3 +133,21 @@ def looks_like_artifact(name: str) -> bool:
     if len(toks) >= 2 and len(toks[0]) == 1 and toks[0].isalpha():
         return True                                     # leading lone-letter code: 'Z Astoria'
     return False
+
+
+def looks_code_shaped(name: str) -> str:
+    """If `name` is shaped like a supplier code rather than a variety, return WHY ('lone_letter'
+    or 'bare_code'); else "". These are routed to review (confirm), never minted or merged:
+      - trailing lone-letter grade code: 'Rosal C', 'Trani Bianco H', 'Colonial White - M', 'Red Wendeng-z'
+      - bare short code: 'Gs', 'Zb'  (granite G+number names like 'G682' are real -> kept)
+    Colours are NEVER touched here (Agata Black vs Agata Blue stay distinct)."""
+    toks = [t for t in re.split(r"[\s\-]+", (name or "").strip()) if t]
+    if not toks:
+        return ""
+    if len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha():
+        return "lone_letter"
+    # a SINGLE token that is code-SHAPED (no vowel or <=2 chars -> un-pronounceable: 'Gs','Zb','Lg')
+    # but NOT a real short name ('Ice','Oak','Ash' have a vowel) and NOT granite 'G682'.
+    if len(toks) == 1 and not _GRANITE_CODE.fullmatch(toks[0]) and looks_codey(toks[0]):
+        return "bare_code"
+    return ""
