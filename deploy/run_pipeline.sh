@@ -14,10 +14,17 @@ set -euo pipefail
 #   pipeline            scrape -> pipeline -> catalog -> upload   (default)
 #   validate-dewatermark   de-watermark a sample of existing scraped/ originals and
 #                          write before/after pairs to S3 (no scrape) — eyeball gate.
+#   reprocess           re-run enhance/de-watermark on a source's scraped/ originals,
+#                       writing into improved/ in place (no scrape). Slice with
+#                       SLICE_OFFSET / SLICE_COUNT to parallelise across tasks.
 RUN_MODE="${RUN_MODE:-pipeline}"
 if [ "$RUN_MODE" = "validate-dewatermark" ]; then
   echo "==> de-watermark validation sample (no scrape)"
   exec python -m deploy.validate_dewatermark
+fi
+if [ "$RUN_MODE" = "reprocess" ]; then
+  echo "==> reprocess a source's scraped/ originals -> improved/ (no scrape)"
+  exec python -m deploy.reprocess_source
 fi
 
 ENV_NAME="${BLOKPORT_ENV:-development}"
