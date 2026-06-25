@@ -14,25 +14,47 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
 from stone_pipeline.core import logfmt
+from stone_pipeline.io.ssrf import url_allowed
 
 log = logfmt.get_logger("download")
 
+_MAX_REDIRECTS = 5
+
 
 def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5) -> Callable[[str], Optional[bytes]]:
-    """Return a fetch(url) -> bytes | None using httpx, with retry and backoff."""
+    """Return a fetch(url) -> bytes | None using httpx, with retry and backoff.
+
+    SSRF guard: redirects are followed MANUALLY so every hop is validated by
+    url_allowed (a public URL must not 302 into an internal/link-local one)."""
     import httpx
 
-    client = httpx.Client(timeout=timeout, follow_redirects=True,
+    client = httpx.Client(timeout=timeout, follow_redirects=False,
                           limits=httpx.Limits(max_connections=16, max_keepalive_connections=8))
 
     def fetch(url: str) -> Optional[bytes]:
         for attempt in range(retries):
             try:
-                response = client.get(url)
-                if response.status_code == 200 and response.content:
-                    return response.content
-                if response.status_code in (404, 410):
-                    return None  # permanent, do not retry
+                current = url
+                for _ in range(_MAX_REDIRECTS + 1):
+                    if not url_allowed(current):
+                        log.warning("blocked by SSRF guard (non-public host or scheme)",
+                                    extra={"extra_fields": {"url": current}})
+                        return None
+                    response = client.get(current)
+                    if response.is_redirect:
+                        loc = response.headers.get("location")
+                        if not loc:
+                            return None
+                        current = str(httpx.URL(current).join(loc))  # resolve relative -> revalidate
+                        continue
+                    if response.status_code == 200 and response.content:
+                        return response.content
+                    if response.status_code in (404, 410):
+                        return None  # permanent, do not retry
+                    break  # other status -> retry with backoff
+                else:
+                    log.warning("too many redirects", extra={"extra_fields": {"url": url}})
+                    return None
             except Exception as exc:  # transient: retry with backoff
                 if attempt == retries - 1:
                     log.warning("download failed", extra={"extra_fields": {"url": url, "error": str(exc)}})

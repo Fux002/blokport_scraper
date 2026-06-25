@@ -29,8 +29,15 @@ from typing import Any, Iterable, Optional
 
 import httpx
 
+from stone_pipeline.io.ssrf import url_allowed
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
+_MAX_REDIRECTS = 5
+
+
+class _SSRFBlocked(Exception):
+    """A fetch target resolved to a non-public host (or non-http(s) scheme) — never retried."""
 
 VALID_FORMATS = ("slab", "block", "tile")
 _USER_AGENTS = [
@@ -85,7 +92,9 @@ class ScraperBase:
         self.products_csv = self.run_dir / "products.csv"
         self.failures_csv = self.run_dir / "failures.csv"
         self._failures: list[dict] = []
-        self._client = httpx.Client(timeout=self.timeout, follow_redirects=True)
+        # follow_redirects=False: _request follows hops manually so the SSRF guard
+        # validates every one (a public source must not 30x into an internal host).
+        self._client = httpx.Client(timeout=self.timeout, follow_redirects=False)
         self.log = self._make_logger()
 
     # --- HTTP ----------------------------------------------------------------
@@ -119,16 +128,35 @@ class ScraperBase:
         last_exc = None
         for attempt in range(self.max_retries):
             try:
-                if self.use_curl_cffi:
-                    r = self._cffi().request(method, url, headers=headers, **kwargs)
+                current = url
+                for _ in range(_MAX_REDIRECTS + 1):
+                    # SSRF guard: validate every hop (entry + each redirect target)
+                    if not url_allowed(current):
+                        self.record_failure("ssrf_blocked", method=method, url=current,
+                                             error="non-public host or non-http(s) scheme")
+                        raise _SSRFBlocked(current)
+                    if self.use_curl_cffi:
+                        r = self._cffi().request(method, current, headers=headers,
+                                                 allow_redirects=False, **kwargs)
+                    else:
+                        r = self._client.request(method, current, headers=headers, **kwargs)
+                    if r.status_code in (301, 302, 303, 307, 308):
+                        loc = r.headers.get("location")
+                        if not loc:
+                            break
+                        current = str(httpx.URL(current).join(loc))  # resolve relative -> revalidate
+                        continue
+                    if r.status_code == 200:
+                        return r
+                    if r.status_code == 429:
+                        time.sleep(self.backoff_base ** attempt * 5)
+                        break  # retry from the top
+                    r.raise_for_status()
+                    break
                 else:
-                    r = self._client.request(method, url, headers=headers, **kwargs)
-                if r.status_code == 200:
-                    return r
-                if r.status_code == 429:
-                    time.sleep(self.backoff_base ** attempt * 5)
-                    continue
-                r.raise_for_status()
+                    last_exc = RuntimeError(f"too many redirects: {url}")
+            except _SSRFBlocked:
+                raise  # permanent — never retry a blocked target
             except Exception as exc:  # transient: back off and retry
                 last_exc = exc
                 time.sleep(self.backoff_base ** attempt)
