@@ -3,9 +3,10 @@ images from EVERY source run into one shared catalog folder, with a sync
 checklist. The catalog (variants/backbone/tree/images) is shared across sources;
 products are per-source. Run this after scraping, before importing products.
 
-    python -m stone_pipeline.run all      # scrape every source
-    python -m stone_pipeline.catalog      # build to_upload/ + review/
-    # follow to_upload/SYNC_STEPS.md ; then python -m stone_pipeline.tree
+    python -m stone_pipeline.build        # scrape + catalog + combinations + consistency gate
+    # (or the stages individually: `run all` then `catalog` -- catalog now builds the combinations
+    #  itself and runs the consistency gate, so `tree` is no longer a separate manual step.)
+    # then follow to_upload/SYNC_STEPS.md
 
 It reads every run's diagnostics/canonical.parquet, so it reflects all sources at
 once and de-duplicates a variant that several suppliers carry.
