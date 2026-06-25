@@ -23,7 +23,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.layout import write_sync_md
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
-from stone_pipeline.stages import curate, emit, emit_catalog
+from stone_pipeline.stages import curate, emit, emit_catalog, tree_build
 
 log = logfmt.get_logger("catalog")
 
@@ -73,10 +73,24 @@ def run(outputs_root: Path | None = None) -> Path:
     images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
     held = gate_on_images()                        # hold new variants with no S3 image out of the upload
     pruned = prune_superseded_runs(outputs_root)  # leave only the latest run folder per source
+    # Build the valid combinations HERE, in the same step as the variants/products, so they are
+    # always derived from the SAME export. They can never go stale by someone forgetting to run
+    # `tree` separately after the export changed (which silently shipped stale combinations before).
+    tree_build.run()                              # -> to_upload/2_valid_combinations.csv
     log.info("catalog consolidated", extra={"extra_fields": {
         "sources": sorted(set(sources)), **result.counts,
         "products": sum(products.values()), "inventory": inventory,
         "discontinued": discontinued, "pruned_stale_runs": pruned}})
+    # Deterministic consistency gate: fail loudly if the upload set is internally inconsistent
+    # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check.
+    errors, warnings = verify_consistency()
+    for w in warnings:
+        log.warning("consistency warning", extra={"extra_fields": {"warning": w}})
+    if errors:
+        for e in errors:
+            log.error("consistency gate FAILED", extra={"extra_fields": {"error": e}})
+        raise SystemExit("catalog consistency gate FAILED -- inconsistent upload set:\n  - "
+                         + "\n  - ".join(errors))
     return sync
 
 
@@ -284,6 +298,43 @@ def collect_discontinued(outputs_root: Path) -> int:
         writer.writerow(emit.DISCONTINUED_COLUMNS)
         writer.writerows(by_sku.values())
     return len(by_sku)
+
+
+def verify_consistency() -> tuple[list[str], list[str]]:
+    """Deterministic cross-artifact consistency gate -- no heuristics, no sampling. Every product and
+    every valid-combination row must reference a variation id that EXISTS in the current export, and
+    every product's variation should have at least one valid combination. This catches stale or
+    out-of-order artifacts (the classic failure: combinations not rebuilt after the export changed)
+    before they ship, so correctness is structural, not something a human/AI eyeballs. Returns
+    (errors, warnings); a non-empty errors list means the upload set is inconsistent."""
+    p = SETTINGS.paths
+
+    def _ids(path: Path, col: str) -> set[str]:
+        try:
+            with path.open(encoding="utf-8-sig", newline="") as h:
+                return {(r.get(col) or "").strip() for r in csv.DictReader(h) if (r.get(col) or "").strip()}
+        except FileNotFoundError:
+            return set()
+
+    export_ids = _ids(p.variants_export_csv, "Id")
+    if not export_ids:
+        return (["variants_export.csv is missing or has no Ids -- cannot verify"], [])
+    combo_ids = _ids(p.to_upload_dir / "2_valid_combinations.csv", "variation_id")
+    prod_ids = _ids(p.to_upload_dir / "3_products_all.csv", "STN Variation Id")
+    errors: list[str] = []
+    warnings: list[str] = []
+    stale_combo = combo_ids - export_ids
+    if stale_combo:
+        errors.append(f"{len(stale_combo)} combination variation ids are NOT in the current export "
+                      "(stale combinations -- rebuild against the refreshed export)")
+    stale_prod = prod_ids - export_ids
+    if stale_prod:
+        errors.append(f"{len(stale_prod)} product variation ids are NOT in the current export "
+                      "(stale products -- rerun run all + catalog)")
+    uncovered = prod_ids - combo_ids
+    if uncovered:
+        warnings.append(f"{len(uncovered)} product variations have no valid-combination row")
+    return (errors, warnings)
 
 
 def main(argv: list[str] | None = None) -> int:

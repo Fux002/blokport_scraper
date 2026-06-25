@@ -56,34 +56,6 @@
     "merged_from": []
   },
   {
-    "key": "tile_onyx_azul_white_quartzite_5217367c-d728-53c9-8b8b-dd8610ab4269",
-    "variant": "Azul White Quartzite",
-    "category": "Tiles",
-    "stone_type": "Onyx",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "tile_onyx_azul_white_quartzite_5217367c-d728-53c9-8b8b-dd8610ab4269.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
     "key": "tile_granite_grey_granite_fbe8f311-b47f-56aa-bd32-b5392acb5e15",
     "variant": "Grey Granite",
     "category": "Tiles",
@@ -135,34 +107,6 @@
     ],
     "aliases": [],
     "image_file": "tile_travertine_golden_silver_2194cf24-5dc1-597e-b390-022bfa1d7d1e.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
-    "key": "tile_travertine_maran_white_8d486b9a-9da5-56f4-a252-42734e4a06aa",
-    "variant": "Maran White",
-    "category": "Tiles",
-    "stone_type": "Travertine",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "tile_travertine_maran_white_8d486b9a-9da5-56f4-a252-42734e4a06aa.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": false,
