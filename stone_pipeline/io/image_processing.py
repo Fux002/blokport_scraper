@@ -83,17 +83,18 @@ def _unsharp(bgr, amount: float):
     return cv2.addWeighted(bgr, 1.0 + amount, blur, -amount, 0)
 
 
-def _lanczos_upscale(bgr, max_scale: float, target_long_edge: int):
-    """Enlarge with Lanczos (high-quality, non-generative). Grows the long edge
-    toward target_long_edge but never beyond max_scale and never shrinks."""
+def _fit_long_edge(bgr, target_long_edge: int):
+    """Cap the long edge at target_long_edge by DOWNSCALING only; never enlarge.
+    Enlarging a smaller original adds bytes, not real detail — crispness comes from
+    the enhancement, not pixel count (and bloated files load slowly). Returns
+    (image, changed). INTER_AREA is the right filter for downscaling."""
     h, w = bgr.shape[:2]
     long_edge = max(h, w)
-    if long_edge >= target_long_edge:
-        return bgr
-    scale = min(max_scale, target_long_edge / long_edge)
-    if scale <= 1.0:
-        return bgr
-    return cv2.resize(bgr, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_LANCZOS4)
+    if long_edge <= target_long_edge:
+        return bgr, False
+    scale = target_long_edge / long_edge
+    return cv2.resize(bgr, (round(w * scale), round(h * scale)),
+                      interpolation=cv2.INTER_AREA), True
 
 
 # --------------------------------------------------------------------------- #
@@ -268,12 +269,11 @@ class ImageProcessor:
         if self.cfg.denoise:
             bgr = _denoise(bgr, self.cfg.denoise_strength)
 
-        # 3) faithful pixel upscale (Lanczos), then a final measured sharpen to
-        #    counter resampling softness
+        # 3) cap the long edge (downscale-only — never enlarge), then a final
+        #    measured sharpen to counter any resampling softness
         if self.cfg.upscale:
-            up = _lanczos_upscale(bgr, self.cfg.upscale_max_scale, self.cfg.upscale_target_long_edge)
-            res.upscaled = up.shape[:2] != bgr.shape[:2]
-            bgr = up
+            bgr, resized = _fit_long_edge(bgr, self.cfg.upscale_target_long_edge)
+            res.upscaled = resized
         if self.cfg.sharpen_amount > 0:
             bgr = _unsharp(bgr, self.cfg.sharpen_amount)
 
