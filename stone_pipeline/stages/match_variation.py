@@ -9,8 +9,8 @@ and colour; the input is variety_match_key; aliases participate in every tier.
 
 Outcomes (section 5A.3):
   - at or above auto_accept: accept, set method to the winning tier, write the
-    scraped spelling back as a new alias (in-memory here; the file write-back is
-    M9) so it is an exact alias hit next time.
+    scraped spelling back as a new alias (in-memory for this run AND persisted to
+    state/ for the next) so it is an exact alias hit next time.
   - in the review band: route to review with the top candidates.
   - below the floor or no candidate: route to the tree-gap queue as
     missing_variation, carrying the nearest candidate and score.

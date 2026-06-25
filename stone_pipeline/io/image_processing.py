@@ -187,8 +187,7 @@ class ImageProcessor:
 
     def __init__(self, cfg: ImageProcessingConfig):
         self.cfg = cfg
-        self._dw = (_Dewatermarker(cfg.dewatermark_prompt, getattr(cfg, "dewatermark_ocr", True))
-                    if cfg.dewatermark else None)
+        self._dw = _Dewatermarker() if cfg.dewatermark else None  # hue-based; no prompt/OCR args
 
     def process(self, data: bytes, *, watermarked: bool = False) -> ProcessResult:
         if not self.cfg.enabled:

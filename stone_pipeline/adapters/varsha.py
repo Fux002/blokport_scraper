@@ -1,11 +1,11 @@
 """Varsha adapter (section 7 Stage 1, section 14 M11).
 
-Named-variety slabware source: material_name is the variety (Alaska Gold). It has
-no usable type or colour column (composition is a classification tag like
-"EXOTIC /"), so type is left for the matched variety to supply and colour is
-recovered from the variety name when it embeds a colour word. Dimensions come
-from the per-slab width/height pipe lists; take the first slab. Many varieties
-are exotic granites absent from the slabs reference and legitimately gap.
+Named-variety slabware source: material_name is the variety (Alaska Gold). Composition is
+a classification tag like "EXOTIC /", not a stone type, so type is left for the matched
+variety to supply; colour comes from the `color` column when present, else is recovered
+from a colour word in the variety name. Dimensions come from the per-slab width/height pipe
+lists; take the first slab. Many varieties are exotic granites absent from the slabs
+reference and legitimately gap.
 """
 
 from __future__ import annotations

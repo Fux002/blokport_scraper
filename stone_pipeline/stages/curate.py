@@ -539,7 +539,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     "status": "to_generate",
                 })
 
-    # --- 3. backbone updates: existing variety sold in a not-yet-allowed value ---
+    # --- 5. backbone updates: existing variety sold in a not-yet-allowed value ---
     seen_leaf: set[tuple] = set()
     for row in rows:
         for g in row.tree_gaps:

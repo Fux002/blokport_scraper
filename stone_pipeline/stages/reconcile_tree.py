@@ -183,8 +183,7 @@ def _reconcile_attribute(
     allowed_norm = {proj.norm(a) for a in allowed}
 
     if not chosen:
-        # nothing chosen: only a gap if the variety requires this attribute and
-        # has exactly one allowed value we could have used. Otherwise leave null.
+        # nothing chosen for this (optional) attribute: leave it null, never gap on it.
         return True
 
     if proj.norm(chosen) in allowed_norm:

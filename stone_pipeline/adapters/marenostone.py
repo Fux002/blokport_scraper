@@ -38,10 +38,8 @@ class MarenostoneAdapter(AdapterBase):
         "src_url": lambda r: AdapterBase.clean(r.get("permalink")),
         "scrape_timestamp": lambda r: AdapterBase.clean(r.get("scrape_timestamp")),
         "raw_name": lambda r: AdapterBase.clean(r.get("name")),
-        # primary candidate variety: descriptor minus colour/type/format tokens
-        # (empty for a purely generic descriptor). When empty, the variation stage
-        # falls back to a strict canonical-name match on the colour+type name, so a
-        # real variety named by colour+type (White Travertine) still resolves
+        # candidate variety = the name minus the FORMAT word only (colour+type kept -- the colour is
+        # often part of the variety, e.g. 'Super White Travertine'); see the module docstring.
         "variety_match_key": lambda r: strip_format(AdapterBase.clean(r.get("name"))),
         "raw_type": lambda r: AdapterBase.clean(r.get("attr_category1")),
         "raw_color": lambda r: AdapterBase.clean(r.get("attr_category2")),

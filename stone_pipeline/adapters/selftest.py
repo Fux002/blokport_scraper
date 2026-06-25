@@ -27,7 +27,7 @@ def row_to_comparable(row: CanonicalRow) -> dict:
     adapter_version). Downstream fields are stage outputs, not adapter outputs."""
     data = row.model_dump(mode="json")
     keep_prefixes = ("src_", "raw_", "variety_match_key", "adapter_version", "scrape_timestamp")
-    return {k: v for k, v in data.items() if k.startswith(keep_prefixes) or k == "variety_match_key"}
+    return {k: v for k, v in data.items() if k.startswith(keep_prefixes)}
 
 
 def regenerate_fixture(source: str, sample_input: Path) -> None:

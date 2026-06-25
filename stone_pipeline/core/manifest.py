@@ -27,10 +27,6 @@ def content_hash(path: Path) -> str:
     return digest.hexdigest()[:16]
 
 
-def text_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-
-
 @dataclass
 class StageMetric:
     stage: str

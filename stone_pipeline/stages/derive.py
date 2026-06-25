@@ -225,8 +225,7 @@ def _to_iso(value: str, ref: ReferenceData) -> str | None:
     return ref.country_codes.get(" ".join(v.casefold().split())) or None
 
 
-def derive_origin(row: CanonicalRow, ref: ReferenceData,
-                  source_cfg: SourceConfig | None = None) -> None:
+def derive_origin(row: CanonicalRow, ref: ReferenceData) -> None:
     # 1. scraped country: an ISO code OR a country name (the real data when present)
     if row.raw_origin:
         iso = _to_iso(row.raw_origin, ref)
@@ -351,7 +350,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
         derive_category(row, ref)
         derive_dimensions(row, ref)
         derive_bundle_size(row, ref, source_cfg)
-        derive_origin(row, ref, source_cfg)
+        derive_origin(row, ref)
         derive_ports(row, ref, source_cfg)
         derive_title(row)
         derive_description(row)

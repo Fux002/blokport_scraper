@@ -188,9 +188,9 @@ class Backbone:
         return candidates[0]
 
     def is_valid_leaf(self, variety: BackboneVariety, color: str, finish: str, quality: str) -> bool:
-        """Set-membership validity (section 6A): the chosen colour, finish, and
-        quality must each be in the variety's allowed set. Names compared
-        normalized so case never causes a false gap."""
+        """Set-membership validity (section 6A): a PRESENT colour, finish, or quality must each be in
+        the variety's allowed set (an empty value passes). Names compared normalized so case never
+        causes a false gap."""
         cset = {_norm(c) for c in variety.colors}
         fset = {_norm(f) for f in variety.finishes}
         qset = {_norm(q) for q in variety.qualities}

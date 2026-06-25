@@ -97,33 +97,13 @@ class CandidateIndex:
         return self.by_phonetic.get(phon, set()) if phon else set()
 
 
-def build_shared_aliases(*variant_tables) -> dict[str, set[str]]:
-    """Aggregate every surface form per variety NAME across all branches. Blocks,
-    slabs, and tiles are the same materials with format-specific ids, so a name's
-    aliases are shared: a scraped spelling known for the slab of a stone is just as
-    valid for its block. This lets an incomplete block/tile export still match on
-    the full alias set; only the resolved id differs by branch.
-    """
-    gaz: dict[str, set[str]] = {}
-    for table in variant_tables:
-        for variant in table.by_id.values():
-            bucket = gaz.setdefault(proj.norm(variant.name), set())
-            bucket.add(variant.name)
-            bucket.update(variant.aliases)
-    return gaz
-
-
-def build_variation_index(variant_table, backbone, shared_aliases: dict | None = None) -> "CandidateIndex":
+def build_variation_index(variant_table, backbone) -> "CandidateIndex":
     """Build a per-branch candidate index from a VariantTable, enriched with the
     backbone's stone_type and allowed colours for blocking (section 5A.1). When
     the backbone lacks the variety, the type is recovered from the variant Key and
     the colour from a colour word in the variant name, so blocking still works for
     the many variants that have no backbone record (this prevents cross-colour
     fuzzy matches like White -> the Cream variety).
-
-    shared_aliases (built across all branches) is unioned into each candidate's
-    surfaces by variety name, so an incomplete block/tile file still matches on the
-    full, format-independent alias set.
     """
     from stone_pipeline.adapters.tokens import COLOR_TOKENS
 
@@ -138,8 +118,6 @@ def build_variation_index(variant_table, backbone, shared_aliases: dict | None =
         block_type = variety.stone_type if variety else _type_from_key(variant.key)
         block_colors = set(variety.colors) if variety and variety.colors else colors_from_name(variant.name)
         surfaces = set(variant.aliases)
-        if shared_aliases:
-            surfaces |= shared_aliases.get(proj.norm(variant.name), set())
         index.add(
             cid=variant.variation_id,
             canonical=variant.name,
