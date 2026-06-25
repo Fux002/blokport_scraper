@@ -62,8 +62,10 @@ def run(outputs_root: Path | None = None) -> Path:
 
     ref = loaders.load_all()
     result = curate.run(rows, ref)                # -> to_upload/1_variants_update.csv, review/, backbone_additions/
-    emit_catalog.build()                          # -> to_upload/1_variants_full.csv (the complete file)
     products = collect_products(outputs_root)     # -> to_upload/3_products_*.csv (per source + combined)
+    emit_catalog.build()                          # -> to_upload/1_variants_full.csv -- AFTER products, so its
+                                                  #    product-backed image stamping reads THIS run's products
+                                                  #    (their variation ids), never a stale prior set
     inventory = collect_inventory(outputs_root)   # -> to_upload/4_inventory_update.csv (existing stock only)
     discontinued = collect_discontinued(outputs_root)  # -> review/4 delete-loop report (stock-0'd in inventory)
     sync = write_sync_md(counts=result.counts, sources=sorted(set(sources)),
