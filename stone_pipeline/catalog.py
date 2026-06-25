@@ -22,6 +22,7 @@ from pathlib import Path
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.layout import write_sync_md
+from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate, emit, emit_catalog, tree_build
@@ -73,6 +74,7 @@ def run(outputs_root: Path | None = None) -> Path:
                          products=products, inventory=inventory, discontinued=discontinued)
     images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
     held = gate_on_images()                        # hold new variants with no S3 image out of the upload
+    to_delete = write_variants_to_delete()         # surface bare-code junk variants for deletion
     pruned = prune_superseded_runs(outputs_root)  # leave only the latest run folder per source
     # Build the valid combinations HERE, in the same step as the variants/products, so they are
     # always derived from the SAME export. They can never go stale by someone forgetting to run
@@ -133,17 +135,20 @@ def _generate_queued_images() -> None:
 
 def _s3_image_checker():
     """Return a callable Key -> bool that checks <env>/variations/{Key}.png on the staging bucket,
-    or None when S3 isn't reachable (dry-run / no boto3 / local dev) so the gate simply doesn't
-    engage. On AWS it head_objects the real bucket."""
+    or None ONLY when S3/boto3 is genuinely unreachable (no boto3, no creds -- e.g. CI) so the gate
+    falls back to a no-op there. The check is READ-ONLY, so it MUST run even when s3.dry_run is set:
+    dry_run only suppresses image WRITES, but the variant images are uploaded by the image_pipeline
+    independently, so a new variant with no {Key}.png on S3 must still be held out of the upload."""
     from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS as _S
     s3 = _S.s3
-    if s3.dry_run:
-        return None
     try:
         import boto3
     except ImportError:
         return None
-    client = boto3.Session(profile_name=s3.credentials_profile, region_name=s3.region).client("s3")
+    try:
+        client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+    except Exception:
+        return None
     prefix = f"{ENV_SEGMENT}/variations/"
 
     def exists(key: str) -> bool:
@@ -299,6 +304,35 @@ def collect_discontinued(outputs_root: Path) -> int:
         writer.writerow(emit.DISCONTINUED_COLUMNS)
         writer.writerows(by_sku.values())
     return len(by_sku)
+
+
+def write_variants_to_delete() -> int:
+    """Surface BARE-CODE existing variants ('Mgt','Gs','Ak',...) -- supplier codes/brand
+    abbreviations wrongly minted as varieties in a past run -- to review/<env>/variants_to_delete.csv
+    so they can be deleted from Medusa. These are excluded from matching (loaders), so their products
+    re-gap to review; deleting them in Medusa + re-exporting removes them everywhere. Their
+    <env>/variations/{Key}.png on S3 should be deleted too (the Image column gives the url)."""
+    exp = SETTINGS.paths.export_file
+    if not exp.exists():
+        return 0
+    rows = []
+    with exp.open(encoding="utf-8-sig", newline="") as h:
+        for r in csv.DictReader(h):
+            name = (r.get("Name") or "").strip()
+            if name and looks_code_shaped(name) == "bare_code":
+                rows.append({"Key": (r.get("Key") or "").strip(), "Name": name,
+                             "Id": (r.get("Id") or "").strip(), "Image": (r.get("Image") or "").strip()})
+    out = SETTINGS.paths.review_dir / "variants_to_delete.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="", encoding="utf-8") as h:
+        w = csv.DictWriter(h, fieldnames=["Key", "Name", "Id", "Image"])
+        w.writeheader()
+        w.writerows(sorted(rows, key=lambda r: r["Key"]))
+    if rows:
+        log.warning("bare-code junk variants in the export -- delete in Medusa + S3",
+                    extra={"extra_fields": {"count": len(rows), "file": str(out),
+                                            "names": sorted({r["Name"] for r in rows})}})
+    return len(rows)
 
 
 def verify_consistency() -> tuple[list[str], list[str]]:

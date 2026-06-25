@@ -25,6 +25,7 @@ from typing import Optional
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import content_hash
+from stone_pipeline.core.text import looks_code_shaped
 
 log = logfmt.get_logger("reference")
 
@@ -116,6 +117,12 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
             name = (record.get("Name") or "").strip()
             key = (record.get("Key") or "").strip()
             if not vid or not name:
+                continue
+            # A bare-code existing variant ('Mgt','Gs','Ak',...) is a supplier code/brand abbreviation
+            # wrongly minted in a past run, NOT a real variety. Never match products to it -- it is
+            # surfaced in review/<env>/variants_to_delete.csv for deletion from Medusa. (bare_code
+            # only, so genuine lone-letter grade names are untouched.)
+            if looks_code_shaped(name) == "bare_code":
                 continue
             if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
                 continue

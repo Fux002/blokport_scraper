@@ -1,11 +1,11 @@
 [
   {
-    "key": "slab_onyx_azul_white_quartzite_efb444ba-9a35-5d0b-8c65-f658f95d5637",
-    "variant": "Azul White Quartzite",
+    "key": "slab_onyx_mgt_onyx_e886e4b0-e795-5af5-bb69-c96fd7751c36",
+    "variant": "Mgt Onyx",
     "category": "Slabs",
     "stone_type": "Onyx",
     "color": [
-      "White"
+      "Multicolor"
     ],
     "finishes": [
       "Polished",
@@ -21,35 +21,7 @@
       "A"
     ],
     "aliases": [],
-    "image_file": "slab_onyx_azul_white_quartzite_efb444ba-9a35-5d0b-8c65-f658f95d5637.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf",
-    "variant": "Infinity White",
-    "category": "Slabs",
-    "stone_type": "",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf.png",
+    "image_file": "slab_onyx_mgt_onyx_e886e4b0-e795-5af5-bb69-c96fd7751c36.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": true,
