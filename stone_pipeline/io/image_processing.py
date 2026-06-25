@@ -98,34 +98,38 @@ def _fit_long_edge(bgr, target_long_edge: int):
 
 
 # --------------------------------------------------------------------------- #
-#  De-watermark (detect with Florence-2, inpaint with LaMa) — optional, lazy
+#  De-watermark (locate the fixed logo by colour, inpaint with LaMa) — optional
 # --------------------------------------------------------------------------- #
 
 class _Dewatermarker:
-    """Lazily loads Florence-2 (open-vocab detection) + LaMa (inpainting). The
-    watermark varies per image, so we detect it each time rather than assume a
-    fixed mask, then inpaint the detected region so the stone behind it is
-    reconstructed (not blurred over). Self-hosted, free, runs on the AWS stack."""
+    """Removes a consistent, centred logo watermark. Florence-2 open-vocab detection
+    proved unreliable on a faint, semi-transparent logo over light stone (it missed an
+    unknown fraction of slabs), so we locate the mark by its distinctive HUE instead —
+    the 'VARSHA STONES' logo is pink/magenta, a colour natural stone never carries — with
+    a fixed central fallback that guarantees coverage when the mark is too faint to
+    colour-detect (every flagged slab carries the logo). The located region is inpainted
+    with LaMa so the stone behind it is reconstructed.
 
-    def __init__(self, prompt: str, ocr: bool = True):
-        # prompt may be comma-separated ("logo,watermark"): detect each and union the
-        # regions, so we catch both the centered branding logo and the corner info-label
-        # (each prompt alone catches only one of the two).
-        self.prompts = [p.strip() for p in prompt.split(",") if p.strip()] or ["watermark"]
-        # OCR-with-region also marks every text overlay (info banners/labels) for removal;
-        # stone carries no text, so any detected text box is an overlay, not the slab.
-        self.ocr = ocr
+    Tuned for the varsha centred-logo style; the hue/region constants below are the knobs
+    to retune for a different consistent watermark. No Florence/transformers needed."""
+
+    HUE_LO, HUE_HI, SAT_MIN, VAL_MIN = 148, 180, 40, 60   # magenta/pink in OpenCV HSV (0-180)
+    MIN_PINK = 25                        # pink px needed to trust a colour hit
+    BAND = (0.28, 0.74, 0.18, 0.82)      # y0,y1,x0,x1 fractions of the central search band
+    FALLBACK = (0.28, 0.38, 0.72, 0.62)  # x0,y0,x1,y1 fractions: fixed box when colour is faint
+
+    def __init__(self, *_args, **_kwargs):  # *_args kept for call-site compatibility
         self._ok: Optional[bool] = None
-        self._florence = None
-        self._processor = None
         self._lama = None
-        self._device = None
 
     def available(self) -> bool:
         if self._ok is not None:
             return self._ok
         try:
-            self._load()
+            import torch
+            from simple_lama_inpainting import SimpleLama
+
+            self._lama = SimpleLama(device="cuda" if torch.cuda.is_available() else "cpu")
             self._ok = True
         except Exception as exc:  # deps/weights absent — degrade gracefully
             log.warning("de-watermark unavailable; skipping (enhancement still runs)",
@@ -133,78 +137,32 @@ class _Dewatermarker:
             self._ok = False
         return self._ok
 
-    def _load(self) -> None:
-        from unittest.mock import patch
-
-        import torch
-        from transformers import AutoModelForCausalLM, AutoProcessor
-        from transformers.dynamic_module_utils import get_imports
-        from simple_lama_inpainting import SimpleLama
-
-        self._device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        # Florence-2's remote code hard-requires flash_attn (GPU-only). On CPU, strip
-        # it from the import check and force eager attention so the model still loads.
-        def _no_flash(filename):
-            return [imp for imp in get_imports(filename) if imp != "flash_attn"]
-
-        with patch("transformers.dynamic_module_utils.get_imports", _no_flash):
-            self._florence = AutoModelForCausalLM.from_pretrained(
-                "microsoft/Florence-2-large", trust_remote_code=True,
-                attn_implementation="eager").to(self._device).eval()
-        self._processor = AutoProcessor.from_pretrained(
-            "microsoft/Florence-2-large", trust_remote_code=True)
-        self._lama = SimpleLama(device=self._device)
-
-    def _detect_boxes(self, pil_image):
-        """Florence-2 open-vocab detection over every configured prompt -> unioned
-        list of (x1,y1,x2,y2) boxes. Empty list = nothing found (image left as-is)."""
-        import torch
-
-        task = "<OPEN_VOCABULARY_DETECTION>"
-        boxes: list = []
-        for prompt in self.prompts:
-            inputs = self._processor(text=task + prompt, images=pil_image,
-                                     return_tensors="pt").to(self._device)
-            with torch.no_grad():
-                ids = self._florence.generate(input_ids=inputs["input_ids"],
-                                              pixel_values=inputs["pixel_values"],
-                                              max_new_tokens=1024, num_beams=3)
-            text = self._processor.batch_decode(ids, skip_special_tokens=False)[0]
-            parsed = self._processor.post_process_generation(
-                text, task=task, image_size=(pil_image.width, pil_image.height))
-            boxes.extend(parsed.get(task, {}).get("bboxes", []) or [])
-
-        # Text overlays (the top info-banner, corner labels): OCR-with-region returns a
-        # quad per text run; reduce each quad to its bounding box and add to the union.
-        if self.ocr:
-            ocr_task = "<OCR_WITH_REGION>"
-            inputs = self._processor(text=ocr_task, images=pil_image,
-                                     return_tensors="pt").to(self._device)
-            with torch.no_grad():
-                ids = self._florence.generate(input_ids=inputs["input_ids"],
-                                              pixel_values=inputs["pixel_values"],
-                                              max_new_tokens=1024, num_beams=3)
-            text = self._processor.batch_decode(ids, skip_special_tokens=False)[0]
-            parsed = self._processor.post_process_generation(
-                text, task=ocr_task, image_size=(pil_image.width, pil_image.height))
-            for quad in parsed.get(ocr_task, {}).get("quad_boxes", []) or []:
-                xs, ys = quad[0::2], quad[1::2]
-                boxes.append([min(xs), min(ys), max(xs), max(ys)])
-        return boxes
+    def _logo_box(self, bgr):
+        """(x0,y0,x1,y1) of the centred logo: located by hue, else a fixed central box."""
+        h, w = bgr.shape[:2]
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        H, S, V = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+        pink = ((H >= self.HUE_LO) & (H <= self.HUE_HI) &
+                (S >= self.SAT_MIN) & (V >= self.VAL_MIN)).astype(np.uint8)
+        by0, by1, bx0, bx1 = self.BAND
+        band = np.zeros_like(pink)
+        band[int(h * by0):int(h * by1), int(w * bx0):int(w * bx1)] = 1
+        pink &= band
+        ys, xs = np.where(pink)
+        if len(xs) >= self.MIN_PINK:  # located by colour — tight box, expanded for the grey text
+            x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+            bw, bh = max(x1 - x0, 1), max(y1 - y0, 1)
+            return (max(0, int(x0 - 0.15 * bw)), max(0, int(y0 - 0.35 * bh)),
+                    min(w, int(x1 + 0.60 * bw)), min(h, int(y1 + 1.6 * bh)))
+        fx0, fy0, fx1, fy1 = self.FALLBACK
+        return (int(w * fx0), int(h * fy0), int(w * fx1), int(h * fy1))
 
     def process(self, pil_image):
-        """Return a watermark-free copy, or the original if nothing was detected."""
-        boxes = self._detect_boxes(pil_image)
-        if not boxes:
-            return pil_image, False
-        w, h = pil_image.size
-        pad = max(2, round(0.01 * min(w, h)))  # cover the mark's soft anti-aliased edges
+        """Return a watermark-free copy (the located logo region inpainted)."""
+        bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        x0, y0, x1, y1 = self._logo_box(bgr)
         mask = Image.new("L", pil_image.size, 0)
-        draw = ImageDraw.Draw(mask)
-        for x1, y1, x2, y2 in boxes:
-            draw.rectangle([max(0, x1 - pad), max(0, y1 - pad),
-                            min(w, x2 + pad), min(h, y2 + pad)], fill=255)
+        ImageDraw.Draw(mask).rectangle([x0, y0, x1, y1], fill=255)
         cleaned = self._lama(pil_image.convert("RGB"), mask)
         return cleaned, True
 
