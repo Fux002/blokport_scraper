@@ -65,22 +65,36 @@ def run(rows: list[CanonicalRow]) -> DedupResult:
     # because the product SKU is `{source}-{surrogate}`.upper() (emit/medusa_client) -- two natural
     # keys differing only in case ('ab12' vs 'AB12') collapse to one SKU on upload, so they must
     # collapse here too or one silently overwrites the other in Medusa, evading this guard.
-    seen: set[str] = set()
+    seen: dict[str, str] = {}     # case-folded SKU -> the surrogate_key of the kept (first) row
     kept: list[CanonicalRow] = []
     dropped_exact = 0
     for row in rows:
         sk = (row.surrogate_key or "").upper()
         if sk in seen:
             dropped_exact += 1
+            # NOT silent: a distinct scraped product can collide here only when its surrogate is
+            # minted from a non-unique basis (blank url + duplicate raw_name). Log every drop with
+            # its identity so a scraper failure (blank SKUs/permalinks) is visible, never swallowed.
+            log.warning(
+                "exact-dup surrogate dropped (collapses to one SKU on upload)",
+                extra={"extra_fields": {"source": row.src_site, "surrogate_key": row.surrogate_key,
+                                        "raw_name": row.raw_name, "src_url": row.src_url,
+                                        "kept_first": seen[sk]}},
+            )
             continue
-        seen.add(sk)
+        seen[sk] = row.surrogate_key
         kept.append(row)
 
     # near-duplicate flag: same normalized name + branch + colour
     near_index: dict[tuple, str] = {}
     near_duplicates = 0
     for row in kept:
-        key = (proj.norm(row.raw_name or ""), bool(row.is_block), proj.norm(row.raw_color or ""))
+        # branch from the RAW format tag, not row.is_block: keys_dedupe runs BEFORE format_resolve
+        # and match_variation, the only stages that set is_block, so is_block is still its default
+        # False here -- using it would collapse the block/slab dimension and falsely flag a block and
+        # a slab of the same name+colour as near-duplicates.
+        is_block = (row.raw_format or "").strip().casefold() == "block"
+        key = (proj.norm(row.raw_name or ""), is_block, proj.norm(row.raw_color or ""))
         if key in near_index and key[0]:
             near_duplicates += 1
             row.add_flag(

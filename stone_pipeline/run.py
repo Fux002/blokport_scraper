@@ -20,7 +20,7 @@ from typing import Optional
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import COMPANY_ID, IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core import ids as ids_mod
 from stone_pipeline.core import logfmt
@@ -257,9 +257,13 @@ def run_source(
         emit.write_discontinued_csv(discontinued, layout.review / "products_discontinued.csv")
     manifest.totals["products_discontinued"] = len(discontinued)
     gap_count = 0
+    # rejects are an audit invariant: write them in BOTH modes so a rejected row never vanishes
+    # without a per-row record (inventory_only still runs validate above).
+    emit.write_rejects_csv(validation.rejects, layout.review / "products_rejects.csv")
     if inventory_only:
-        run_log.info("inventory-only: wrote stock delta, skipped products/images/canonical",
-                     extra={"extra_fields": {"existing": len(existing_rows), "changed": len(changed)}})
+        run_log.info("inventory-only: wrote stock delta + rejects, skipped products/images/canonical",
+                     extra={"extra_fields": {"existing": len(existing_rows), "changed": len(changed),
+                                             "rejected": len(validation.rejects)}})
     else:
         columns = emit.read_template_columns()
         emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
@@ -268,7 +272,6 @@ def run_source(
             emit.write_import_csv(new_rows, source_cfg, layout.products_import / "medusa_import_new.csv", columns)
             emit.write_import_csv(existing_rows, source_cfg, layout.products_import / "medusa_import_existing.csv", columns)
         emit.write_review_csv(validation.review_only + validation.emit, layout.review / "products_review.csv")
-        emit.write_rejects_csv(validation.rejects, layout.review / "products_rejects.csv")
         staging.write_canonical(rows, layout.diagnostics / "canonical.parquet")
         gap_count = _write_gap_queue(rows, layout.review / "tree_gaps.csv")
     # NOTE: variants/backbone/tree/images are SHARED across sources and are
@@ -337,12 +340,28 @@ def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = N
 def main(argv: Optional[list[str]] = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     target = argv[0] if argv else SETTINGS.spine_source
+    # Fail fast in production if the owner ids are unset: settings returns "" (never a dev id) and
+    # nothing downstream rejects a blank company/sales-channel, so without this guard a prod run
+    # would emit a "valid" import of unowned, channel-less (invisible) products.
+    if IS_PRODUCTION and not (SALES_CHANNEL_ID and COMPANY_ID):
+        log.error("production run requires BLOKPORT_SALES_CHANNEL_ID and BLOKPORT_COMPANY_ID "
+                  "(refusing to emit unowned, channel-less products)")
+        return 1
     try:
         if target == "all":
-            results = run_all()
+            # only sources that actually HAVE a scrape this run are expected to produce output; a
+            # registered adapter with no scrape file is absent, not failed (don't alert on it).
+            requested = [s for s in adapter_registry.REGISTRY if find_scrape_file(s)]
+            results = run_all(requested)
             for manifest in results.values():
                 print_summary(manifest)
-            # non-zero if any source produced no emit and was not simply empty
+            # exit non-zero if a source that HAD data failed to produce output (run_all isolates a
+            # failing source by omitting it from results) -- so a scheduler is alerted, not misled.
+            missing = [s for s in requested if s not in results]
+            if missing:
+                log.error("run all: source(s) with data failed to produce output",
+                          extra={"extra_fields": {"failed": missing}})
+                return 1
             return 0
         manifest = run_source(target)
         print_summary(manifest)

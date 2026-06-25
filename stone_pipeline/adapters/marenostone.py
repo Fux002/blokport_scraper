@@ -55,7 +55,8 @@ class MarenostoneAdapter(AdapterBase):
         "raw_dimensions": lambda r: _dims(r),
         "raw_weight": lambda r: _na(r.get("weight")),
         "raw_description": lambda r: AdapterBase.clean(r.get("description")) or AdapterBase.clean(r.get("short_description")),
-        # base scrapers now emit `image_urls`; fall back to the legacy column name
+        # full-size images: current scraper emits `image_urls`, the legacy format (kept in the
+        # adapter fixture) emits `image_urls_full`. Never thumbnails. Blank in both -> no image.
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls") or r.get("image_urls_full"), "|"),
     }
 

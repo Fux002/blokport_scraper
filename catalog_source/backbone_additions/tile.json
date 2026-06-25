@@ -139,5 +139,89 @@
     "in_csv": "yes",
     "product_backed": false,
     "merged_from": []
+  },
+  {
+    "key": "tile_travertine_maran_white_8d486b9a-9da5-56f4-a252-42734e4a06aa",
+    "variant": "Maran White",
+    "category": "Tiles",
+    "stone_type": "Travertine",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_travertine_maran_white_8d486b9a-9da5-56f4-a252-42734e4a06aa.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060",
+    "variant": "Matarazzo",
+    "category": "Tiles",
+    "stone_type": "Dolomite Marble",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_infinity_white_3edea7fa-6e7c-5d5f-a18a-3f8890d8f452",
+    "variant": "Infinity White",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_infinity_white_3edea7fa-6e7c-5d5f-a18a-3f8890d8f452.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
   }
 ]

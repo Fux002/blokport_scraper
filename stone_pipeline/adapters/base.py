@@ -152,7 +152,16 @@ class AdapterBase:
                 )
                 continue
             if row is None:
+                # required canonical field empty (e.g. blank variety/material/name). Symmetric with
+                # the exception path above: log it so the drop is never silent.
                 dropped += 1
+                log.warning(
+                    "adapter dropped a row: empty required canonical field(s)",
+                    extra={"extra_fields": {"source": self.source,
+                                            "required_canonical": list(self.required_canonical),
+                                            "sku": record.get("sku"), "name": record.get("name"),
+                                            "permalink": record.get("permalink")}},
+                )
                 continue
             rows.append(row)
         log.info(

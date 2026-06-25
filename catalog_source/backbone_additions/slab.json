@@ -26,5 +26,33 @@
     "in_csv": "yes",
     "product_backed": true,
     "merged_from": []
+  },
+  {
+    "key": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf",
+    "variant": "Infinity White",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_infinity_white_71cfe23b-043c-5d8f-aa64-2c79203634bf.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
   }
 ]

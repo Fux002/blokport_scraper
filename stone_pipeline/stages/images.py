@@ -59,8 +59,9 @@ def _build_backend(cfg) -> Optional[storage.StorageBackend]:
         # default until BLOKPORT_S3_BUCKET is set on the prod deployment).
         from stone_pipeline.config.settings import IS_PRODUCTION, _DEV_S3_BUCKET
         if IS_PRODUCTION and s3.bucket == _DEV_S3_BUCKET:
-            log.warning("production run targeting the DEV S3 bucket — set BLOKPORT_S3_BUCKET",
-                        extra={"extra_fields": {"bucket": s3.bucket}})
+            raise RuntimeError(
+                "production run targeting the DEV S3 bucket -- refusing to write/stamp prod images "
+                f"into {_DEV_S3_BUCKET}. Set BLOKPORT_S3_BUCKET to the prod bucket.")
         return storage.S3StorageBackend(
             bucket=s3.bucket, region=s3.region, key_prefix=s3.staging_prefix,
             public_base=cfg.public_base, profile=s3.credentials_profile, dry_run=s3.dry_run,
@@ -174,9 +175,15 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         # source url. An image the imageproc hasn't processed yet (not in the manifest) is DROPPED,
         # not defaulted to its scrape url -- so the upload only ever carries S3 image links.
         manifest = _readonly_manifest()
+        if not manifest:
+            log.warning("passthrough: imageproc manifest empty/unreachable -- product images are "
+                        "DROPPED, never linked to raw source urls. Run the image stage in s3 mode "
+                        "or restore S3 access to populate the manifest.")
         for row in rows:
             srcs = [u for u in dict.fromkeys(row.raw_image_urls or []) if u and u.strip()]
-            urls = [manifest[u] for u in srcs if u in manifest] if manifest else srcs
+            # map ONLY through the manifest -> improved S3; an unprocessed image is dropped, never
+            # defaulted to its raw supplier url (no `else srcs` fallback that would leak source urls).
+            urls = [manifest[u] for u in srcs if u in manifest]
             _slot_row(row, urls)
             stats.staged += 1 if urls else 0
             stats.no_image += 0 if urls else 1

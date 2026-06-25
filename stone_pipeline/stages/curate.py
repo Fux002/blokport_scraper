@@ -328,6 +328,22 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if owners and not generic:
             if len(owners) == 1:                       # unambiguous existing variety (name or alias)
                 alias_new.setdefault(next(iter(owners)), set()).add(name)
+                # If a scraped product backs this variety in a branch where it does NOT yet exist
+                # (e.g. a block product for a variety that only has a slab/tile sibling), ALSO mint
+                # the missing sibling so the product can resolve next round -- otherwise the alias
+                # dead-ends (emit_alias_rows can only attach where the variety already exists) and the
+                # product never gets a variation_id. Gated on an ALREADY-EXISTING owner + a real
+                # product, so it can only ever create a sibling of a KNOWN variety, never a junk mint;
+                # the new-variant emitter's existing-cores guard skips the branches where it lives.
+                # (clean is already in seen_new from the dedup above, so the loop runs this once per
+                # variety; the new-variant emitter then skips the branches where it already exists.)
+                backed = variety_branches.get(proj.norm(clean), set())
+                if backed:
+                    new_variant_rows.append((
+                        clean, title_case(clean), stone_type,
+                        title_case(_attr_surface(row, "color")),
+                        (row.quality_name or "A").strip() or "A",
+                        title_case(_attr_surface(row, "finish")), gap, backed))
             else:                                       # the surface spans several varieties/types
                 review_candidates.setdefault(proj.norm(clean), set()).add(name)
             continue
@@ -369,6 +385,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             title_case(_attr_surface(row, "finish")), gap,
             variety_branches.get(proj.norm(clean), set()),  # product-backed branches
         ))
+
+    # A spelling already CONFIRMED as an alias of its real owner (gap loop above) must NOT also be
+    # proposed as a needs-review alias onto a different fuzzy-near variety (the match-review path's
+    # best_guess, e.g. "Marjan Silver Travertine" -> generic "Silver Travertine") -- or an operator
+    # could rubber-stamp a wrong merge. Drop confirmed spellings from the review suggestions.
+    _confirmed_norm = {proj.norm(s) for spset in alias_new.values() for s in spset}
+    review_candidates = {tgt: {s for s in sp if proj.norm(s) not in _confirmed_norm}
+                         for tgt, sp in review_candidates.items()}
+    review_candidates = {tgt: sp for tgt, sp in review_candidates.items() if sp}
 
     # --- 3. emit alias additions (after gap classification feeds review_candidates)
     def emit_alias_rows(name_norm: str, spellings: set[str], confirmed: bool) -> None:

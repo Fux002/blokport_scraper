@@ -40,6 +40,13 @@ class SourceConfig:
     # push bad data live.
     mode: str = "review"
 
+    def __post_init__(self):
+        # source_code is the SKU prefix ({source_code}-{surrogate}) and the delist scope key. A
+        # configured source that omits source_code must still get a usable prefix, or its SKUs
+        # become "-{surrogate}" and cross-source delist scoping (+ the 30% cap denominator) break.
+        if not (self.source_code or "").strip():
+            self.source_code = self.source[:3]
+
 
 def load_sources(path: Path | None = None) -> dict[str, SourceConfig]:
     path = Path(path or SETTINGS.paths.sources_yaml)

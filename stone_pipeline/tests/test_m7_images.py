@@ -100,14 +100,14 @@ def test_passthrough_links_to_improved_s3(monkeypatch):
     assert row.product_image_keys == ["https://s3/dev/products/improved/x/aa.jpg"]  # b.jpg dropped
 
 
-def test_passthrough_falls_back_to_source_when_manifest_unreachable(monkeypatch):
-    # fully-offline / no S3 -> empty manifest -> keep source urls so a local run still works
+def test_passthrough_drops_images_when_manifest_unreachable(monkeypatch):
+    # offline / no S3 -> empty manifest -> images are DROPPED, never leaked as raw source urls
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {})
     cfg = ImagesConfig(mode="passthrough")
     row = CanonicalRow(src_site="x", surrogate_key="7", is_block=False,
                        raw_image_urls=["http://x/a.jpg", "http://x/a.jpg", "http://x/b.jpg"])
     images.run([row], cfg=cfg)
-    assert row.product_image_keys == ["http://x/a.jpg", "http://x/b.jpg"]
+    assert row.product_image_keys == []
 
 
 def _jpeg_bytes(h=120, w=180, fill=50):

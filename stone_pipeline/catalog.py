@@ -213,10 +213,18 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
             rows = list(csv.reader(h))
         if not rows:
             continue
-        header, body = rows[0], rows[1:]
+        header_row, body = rows[0], rows[1:]
+        # every source emits the SAME template header (emit.read_template_columns); refuse to merge
+        # if one differs, or the combined 3_products_all.csv would silently mis-align columns.
+        if header is None:
+            header = header_row
+        elif header_row != header:
+            raise RuntimeError(
+                f"collect_products: source '{source}' product header differs from earlier sources -- "
+                "a column-schema mismatch would mis-align 3_products_all.csv; refusing to merge")
         counts[source] = len(body)
         with (to_upload / f"3_products_{source}.csv").open("w", newline="", encoding="utf-8") as h:
-            csv.writer(h).writerows([header, *body])
+            csv.writer(h).writerows([header_row, *body])
         all_rows += body
     if header is not None:
         with (to_upload / "3_products_all.csv").open("w", newline="", encoding="utf-8") as h:
