@@ -16,7 +16,7 @@ Silver Travertine,quality,B,A,phonetic,medium,verify_match,https://marenostone.c
 Arcadia Grey,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/sky-marble/
 China Golden Black,color,Pink,"Black, Gold, Brown, White, Yellow",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=470
 Fantasy Blue,color,White,"Grey, Blue",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=366
-Matarazzo,color,White,Gold,projection_tokenset,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=281
+Matarazzo,color,White,Gold,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=281
 Naika,color,Cream,White,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=673
 Patagonia Pink,color,Orchid,Pink,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=616
 Shadow White,quality,C,A,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=602

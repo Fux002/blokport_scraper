@@ -97,17 +97,20 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
 
     length = parsed.get("length")
     height = parsed.get("height")
-    if length is None:
+    # A physical dimension can never be <= 0; a parsed 0 is bad source data (e.g. marenostone's
+    # "0cm" thickness typo) -- treat it like missing and synthesise, exactly as weight does below.
+    # Otherwise a 0 ships through and Medusa's area/volume pricing formula rejects the product.
+    if length is None or length <= 0:
         length = round(ids.seeded_uniform(row.surrogate_key, "length", *ranges["length"]), 3)
         methods.append("length:synthetic")
     else:
         methods.append("length:parsed")
-    if height is None:
+    if height is None or height <= 0:
         height = round(ids.seeded_uniform(row.surrogate_key, "height", *ranges["height"]), 3)
         methods.append("height:synthetic")
     else:
         methods.append("height:parsed")
-    if width is None:
+    if width is None or width <= 0:
         low, high = ranges.get("width", (0.2, 0.2))
         width = round(ids.seeded_uniform(row.surrogate_key, "width", low, high), 3) if low != high else low
         methods.append("width:synthetic")
