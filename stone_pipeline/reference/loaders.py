@@ -23,9 +23,21 @@ from pathlib import Path
 from typing import Optional
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS
+from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.core.text import looks_code_shaped
+
+
+def is_mistyped_variant(key: str, name: str) -> bool:
+    """An existing variant whose NAME ends in an unambiguous stone-type word different from its own
+    type (the Key's type segment) is mis-typed -- e.g. 'Azul White Quartzite' under a slab_ONYX_ key,
+    or 'Cream Quartzite' keyed type 'cream'. Excluded from matching + listed for deletion so the
+    cleaning flow re-mints it under the correct type."""
+    ntw = explicit_type_word(name)
+    parts = (key or "").split("_")
+    key_type = parts[1].casefold() if len(parts) >= 3 else ""
+    return bool(ntw) and bool(key_type) and ntw.casefold() != key_type
 
 log = logfmt.get_logger("reference")
 
@@ -118,11 +130,11 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
             key = (record.get("Key") or "").strip()
             if not vid or not name:
                 continue
-            # A bare-code existing variant ('Mgt','Gs','Ak',...) is a supplier code/brand abbreviation
-            # wrongly minted in a past run, NOT a real variety. Never match products to it -- it is
-            # surfaced in review/<env>/variants_to_delete.csv for deletion from Medusa. (bare_code
-            # only, so genuine lone-letter grade names are untouched.)
-            if looks_code_shaped(name) == "bare_code":
+            # Never match products to a JUNK existing variant -- a bare-code one ('Mgt','Gs', a
+            # supplier code/brand abbreviation wrongly minted) OR a mis-typed one ('Azul White
+            # Quartzite' under a slab_ONYX_ key). Both are surfaced in review/<env>/variants_to_delete.csv
+            # for deletion from Medusa; the cleaning flow re-mints the mis-typed ones correctly.
+            if looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name):
                 continue
             if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
                 continue

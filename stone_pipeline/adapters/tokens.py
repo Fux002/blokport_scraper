@@ -30,6 +30,23 @@ TYPE_TOKENS = [
     "Sandstone", "Schist", "Serpentine", "Slate", "Soapstone", "Travertine", "Tuff",
 ]
 
+# Type words that double as common variety-NAME descriptors -- never used to override a supplier's
+# type ('Spectra Crystal' is a quartzite; 'Crystal' is a descriptor, not the type).
+_AMBIGUOUS_TYPE_WORDS = {"crystal", "quartz", "agate", "amethyst", "coral"}
+_CLEAR_TYPE_WORDS = {t.casefold() for t in TYPE_TOKENS if " " not in t} - _AMBIGUOUS_TYPE_WORDS
+
+
+def explicit_type_word(name: str) -> str | None:
+    """The stone-TYPE word a variety name explicitly ends with (suppliers name '{Variety} {Type}'),
+    IF it is an unambiguous rock type. 'Azul White Quartzite' -> 'Quartzite', 'Grey Basalt' ->
+    'Basalt'. None for: a single-token name (a variety NAMED after a type, e.g. 'Agate'), a
+    descriptor-prone type word ('Spectra Crystal'), or no trailing type word ('Crystal White')."""
+    toks = (name or "").split()
+    if len(toks) < 2:
+        return None
+    return toks[-1] if toks[-1].casefold() in _CLEAR_TYPE_WORDS else None
+
+
 # plural + singular title of every category (registry), plural first so e.g.
 # "Slabs" is stripped before "Slab"
 FORMAT_TOKENS = [t for c in CATEGORIES for t in (c.label, c.name.title())]

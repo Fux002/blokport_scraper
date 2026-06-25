@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
@@ -117,6 +118,19 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
                     src_url=row.src_url,
                 )
             )
+
+    # Name-over-tag type: a variety NAME with an explicit, valid stone-type word is more reliable
+    # than the supplier's category tag, which is often wrong ('Azul White Quartzite' tagged Onyx,
+    # 'Grey Basalt' tagged Granite). When the name carries exactly ONE valid type word that differs
+    # from the resolved type, the NAME wins -- so a mis-tagged variety is corrected here in the
+    # cleaning flow, never minted or imaged under the wrong type.
+    name_type = explicit_type_word(row.variety_match_key or row.raw_name or "")
+    if name_type and name_type.casefold() != (row.type_name or "").casefold():
+        looked = ref.attributes.resolve_id("type", name_type)
+        if looked:
+            row.type_name, row.type_id = name_type, looked[1]
+            row.type_confidence = _confidence_name(Confidence.high)
+            row.type_method = "name_explicit"
 
     # Blocks are sold raw/unfinished, so sources rarely give a finish ('' or 'Other');
     # that would null finish_id and reject the row at validate (finish is required).

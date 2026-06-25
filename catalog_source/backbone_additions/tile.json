@@ -1,15 +1,15 @@
 [
   {
-    "key": "tile_granite_grey_basalt_795b0bf5-5a88-54f2-84ed-74ffc7eec078",
-    "variant": "Grey Basalt",
+    "key": "tile_onyx_brazilian_white_quartzite_5b31b2ac-d1b8-5f8b-8a27-9722b7ee250e",
+    "variant": "Brazilian White Quartzite",
     "category": "Tiles",
-    "stone_type": "Granite",
+    "stone_type": "Onyx",
     "color": [
-      "Grey"
+      "White"
     ],
     "finishes": [
-      "Honed",
       "Polished",
+      "Honed",
       "Leathered",
       "Brushed",
       "Flamed",
@@ -20,11 +20,13 @@
     "qualities": [
       "A"
     ],
-    "aliases": [],
-    "image_file": "tile_granite_grey_basalt_795b0bf5-5a88-54f2-84ed-74ffc7eec078.png",
+    "aliases": [
+      "Brazilian White Quartzite"
+    ],
+    "image_file": "tile_onyx_brazilian_white_quartzite_5b31b2ac-d1b8-5f8b-8a27-9722b7ee250e.png",
     "exists": "no",
     "in_csv": "yes",
-    "product_backed": true,
+    "product_backed": false,
     "merged_from": []
   },
   {
@@ -50,6 +52,36 @@
     ],
     "aliases": [],
     "image_file": "tile_onyx_brown_onyx_9c0c4257-fea3-5fb9-ab77-ecc8aceec501.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_onyx_azul_white_quartzite_5217367c-d728-53c9-8b8b-dd8610ab4269",
+    "variant": "Azul White Quartzite",
+    "category": "Tiles",
+    "stone_type": "Onyx",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Azul White Quartzite"
+    ],
+    "image_file": "tile_onyx_azul_white_quartzite_5217367c-d728-53c9-8b8b-dd8610ab4269.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": false,
@@ -137,6 +169,118 @@
       "Matarazzo"
     ],
     "image_file": "tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_everest_quartzite_73c29a4e-1ee8-5494-9645-a4dcb53f4d00",
+    "variant": "Everest Quartzite",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Everest Quartzite"
+    ],
+    "image_file": "tile_everest_quartzite_73c29a4e-1ee8-5494-9645-a4dcb53f4d00.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_gaya_quartzite_16ea694e-791b-5915-a746-4de9aac1e3db",
+    "variant": "Gaya Quartzite",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "GAYA QUARTZITE"
+    ],
+    "image_file": "tile_gaya_quartzite_16ea694e-791b-5915-a746-4de9aac1e3db.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_smoky_quartzite_0c4d333c-e17c-5bfc-ba2a-5b9ced0f91cf",
+    "variant": "Smoky Quartzite",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "SMOKY QUARTZITE"
+    ],
+    "image_file": "tile_smoky_quartzite_0c4d333c-e17c-5bfc-ba2a-5b9ced0f91cf.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_cream_quartzite_e5685057-8f1f-52a6-a67a-ea4b7a5c9a59",
+    "variant": "Cream Quartzite",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Cream"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "tile_cream_quartzite_e5685057-8f1f-52a6-a67a-ea4b7a5c9a59.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": false,

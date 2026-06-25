@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.layout import write_sync_md
 from stone_pipeline.core.text import looks_code_shaped
@@ -307,11 +308,11 @@ def collect_discontinued(outputs_root: Path) -> int:
 
 
 def write_variants_to_delete() -> int:
-    """Surface BARE-CODE existing variants ('Mgt','Gs','Ak',...) -- supplier codes/brand
-    abbreviations wrongly minted as varieties in a past run -- to review/<env>/variants_to_delete.csv
-    so they can be deleted from Medusa. These are excluded from matching (loaders), so their products
-    re-gap to review; deleting them in Medusa + re-exporting removes them everywhere. Their
-    <env>/variations/{Key}.png on S3 should be deleted too (the Image column gives the url)."""
+    """Surface JUNK existing variants to review/<env>/variants_to_delete.csv for deletion from Medusa:
+    BARE-CODE ones ('Mgt','Gs',... supplier codes wrongly minted) and MIS-TYPED ones ('Azul White
+    Quartzite' keyed under type Onyx). Both are excluded from matching (loaders), so their products
+    re-gap and (for mis-typed) re-mint under the correct type; deleting them in Medusa + re-exporting
+    removes them everywhere. Their <env>/variations/{Key}.png on S3 should be deleted too."""
     exp = SETTINGS.paths.export_file
     if not exp.exists():
         return 0
@@ -319,17 +320,24 @@ def write_variants_to_delete() -> int:
     with exp.open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
             name = (r.get("Name") or "").strip()
+            key = (r.get("Key") or "").strip()
+            reason = ""
             if name and looks_code_shaped(name) == "bare_code":
-                rows.append({"Key": (r.get("Key") or "").strip(), "Name": name,
-                             "Id": (r.get("Id") or "").strip(), "Image": (r.get("Image") or "").strip()})
+                reason = "bare_code: supplier code/brand abbreviation, not a variety"
+            elif name and loaders.is_mistyped_variant(key, name):
+                kt = key.split("_")[1] if key.count("_") >= 2 else "?"
+                reason = f"mistyped: name says '{explicit_type_word(name)}' but keyed as type '{kt}'"
+            if reason:
+                rows.append({"Key": key, "Name": name, "Id": (r.get("Id") or "").strip(),
+                             "Image": (r.get("Image") or "").strip(), "reason": reason})
     out = SETTINGS.paths.review_dir / "variants_to_delete.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=["Key", "Name", "Id", "Image"])
+        w = csv.DictWriter(h, fieldnames=["Key", "Name", "Id", "Image", "reason"])
         w.writeheader()
         w.writerows(sorted(rows, key=lambda r: r["Key"]))
     if rows:
-        log.warning("bare-code junk variants in the export -- delete in Medusa + S3",
+        log.warning("junk variants in the export -- delete in Medusa + S3",
                     extra={"extra_fields": {"count": len(rows), "file": str(out),
                                             "names": sorted({r["Name"] for r in rows})}})
     return len(rows)
