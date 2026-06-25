@@ -1,1 +1,204 @@
-[]
+[
+  {
+    "key": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb",
+    "variant": "Brazilian White",
+    "category": "Blocks",
+    "stone_type": "Quartzite",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Brazilian White Quartzite"
+    ],
+    "image_file": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_quartzite_azul_white_62cb7497-bd26-5c42-8c7c-ce84b3f16d61",
+    "variant": "Azul White",
+    "category": "Blocks",
+    "stone_type": "Quartzite",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Azul White Quartzite"
+    ],
+    "image_file": "block_quartzite_azul_white_62cb7497-bd26-5c42-8c7c-ce84b3f16d61.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_dolomite_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed",
+    "variant": "Matarazzo",
+    "category": "Blocks",
+    "stone_type": "Dolomite",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Matarazzo"
+    ],
+    "image_file": "block_dolomite_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_quartzite_everest_quartzite_7de56ca0-6132-5972-bd9e-2545acd34c6c",
+    "variant": "Everest Quartzite",
+    "category": "Blocks",
+    "stone_type": "Quartzite",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Everest Quartzite"
+    ],
+    "image_file": "block_quartzite_everest_quartzite_7de56ca0-6132-5972-bd9e-2545acd34c6c.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_quartzite_gaya_quartzite_1c6e1940-b19f-5ec0-8622-c9f47678e8e1",
+    "variant": "Gaya Quartzite",
+    "category": "Blocks",
+    "stone_type": "QUARTZITE",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "GAYA QUARTZITE"
+    ],
+    "image_file": "block_quartzite_gaya_quartzite_1c6e1940-b19f-5ec0-8622-c9f47678e8e1.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_quartzite_smoky_quartzite_11bac54e-46ae-5117-932a-868389d06c7f",
+    "variant": "Smoky Quartzite",
+    "category": "Blocks",
+    "stone_type": "QUARTZITE",
+    "color": [],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "SMOKY QUARTZITE"
+    ],
+    "image_file": "block_quartzite_smoky_quartzite_11bac54e-46ae-5117-932a-868389d06c7f.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_quartzite_cream_quartzite_831849ed-a9aa-565a-b119-16d83492c6e4",
+    "variant": "Cream Quartzite",
+    "category": "Blocks",
+    "stone_type": "QUARTZITE",
+    "color": [
+      "Cream"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "block_quartzite_cream_quartzite_831849ed-a9aa-565a-b119-16d83492c6e4.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  }
+]

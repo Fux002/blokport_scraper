@@ -17,6 +17,21 @@ Because a stone is the same material as a slab, block, or tile (only the id and
 Key prefix differ), an addition is emitted for every category's import file.
 Keys match the existing convention exactly: {branch}_{type}_{name}_{uuid}, where
 the uuid is a deterministic uuid5 (stable across runs, structurally a valid uuid).
+
+THE CLEANING / VERIFICATION FLOW spans several stages, each doing its cleaning at the
+point in the pipeline where the needed information first exists -- so the order is:
+  1. adapter   strip supplier codes + format words from the raw name (clean_variety_name)
+  2. normalize resolve type/colour/finish/quality; NAME-over-tag corrects a mis-tagged
+               type ('Azul White Quartzite' tagged Onyx -> Quartzite) BEFORE matching, so
+               the variety is matched + minted under the correct type
+  3. loaders   drop JUNK existing variants (bare-code 'Mgt'; mis-typed under the wrong Key
+               type) from the match set, so products never bind to them (they're listed in
+               variants_to_delete.csv)
+  4. matching  resolve to an existing variant (exact -> projection -> fuzzy -> phonetic)
+  5. curate    classify what's still unresolved (the loop below), in STRICT priority order:
+               CANONICALISE -> DEDUP -> REJECT/HOLD junk -> RESOLVE to existing -> MINT new.
+The single rule for every gate's position: do the cheapest, most DECISIVE thing first, and
+REUSE before MINT; when uncertain, HOLD for human review rather than guess.
 """
 
 from __future__ import annotations
@@ -267,10 +282,21 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             continue
         nm = (row.variety_match_key or row.raw_name or "").strip()
         if nm:
-            clean = _clean_variety(nm, row.raw_type or g.suggested_type or "")
+            # same canonical identity as the classify loop below: resolved type, not the raw tag
+            clean = _clean_variety(nm, row.type_name or row.raw_type or g.suggested_type or "")
             variety_branches.setdefault(proj.norm(clean), set()).add(branch_of(row))
 
-    # --- 2. classify gaps: alias-of-nearest (preferred) vs genuinely new variant --
+    # --- 2. classify each gapped variety, in STRICT PRIORITY ORDER (the cleaning/verification flow).
+    # The rule for the ordering: do the cheapest, most DECISIVE thing first, and REUSE before MINT.
+    #   PHASE 1  CANONICALISE  the name (_clean_variety, using the RESOLVED type)
+    #   PHASE 2  DEDUP         one decision per cleaned identity
+    #   PHASE 3  REJECT/HOLD   junk -- artifact, human-rejected, code-shaped -- NEVER mint these
+    #   PHASE 4  RESOLVE       to an EXISTING variety (an alias beats a new variant): exact surface
+    #                          match first, then the fuzzy nearest (model/floor). A generic trade name
+    #                          is its own variety and skips alias routing (never promoted to a premium
+    #                          stone).
+    #   PHASE 5  MINT          a new variety -- the LAST resort, only for a clean, product-backed name.
+    # Uncertain at any resolve/mint step -> HOLD for human review (variants_to_confirm.csv), never guess.
     seen_new: set[str] = set()
     suspicious: list[dict] = []          # names that look like supplier codes, not varieties
     new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches)
@@ -282,19 +308,27 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if not name:
             continue
         gap = gaps[0]
-        stone_type = row.raw_type or gap.suggested_type or ""
-        clean = _clean_variety(name, stone_type)  # strip format words + stone-type
-        if _looks_like_artifact(clean):           # backstop: never mint a code as a variety
-            suspicious.append({"src_site": row.src_site, "raw_name": name, "cleaned_name": clean})
-            continue
-        # dedup on the MINTED identity (cleaned name), not the raw name: two raw
-        # names that clean to the same variety must not mint duplicate Keys.
+        # PHASE 1 -- CANONICALISE. Use the RESOLVED type (normalize's name-over-tag correction), not
+        # the raw supplier tag, so the cleaned identity AND the mint are under the CORRECT type:
+        # 'Azul White Quartzite' (typed Quartzite) cleans to 'Azul White' and mints as quartzite, not
+        # under the supplier's wrong 'Onyx' tag.
+        stone_type = row.type_name or row.raw_type or gap.suggested_type or ""
+        clean = _clean_variety(name, stone_type)
+
+        # PHASE 2 -- DEDUP: classify each cleaned identity once (two raw names that clean to the same
+        # variety must never mint duplicate Keys).
         if proj.norm(clean) in seen_new:
             continue
         seen_new.add(proj.norm(clean))
-        if proj.norm(clean) in rejected:           # user said 'no' on a past run -> never propose again
+
+        # PHASE 3 -- REJECT / HOLD gates (never mint), cheapest + most decisive FIRST, before any
+        # reuse-or-mint decision so junk can't be matched, aliased, or minted:
+        if _looks_like_artifact(clean):            # 3a. not a variety name at all (code artifact)
+            suspicious.append({"src_site": row.src_site, "raw_name": name, "cleaned_name": clean})
             continue
-        # code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
+        if proj.norm(clean) in rejected:           # 3b. a human said 'no' on a past run
+            continue
+        # 3c. code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
         # varieties -> NEVER mint them. A trailing lone-letter grade whose de-coded base is a KNOWN,
         # single, NON-colour variety is auto-aliased to that variety ('Rosal C' -> 'Rosal'), so a
         # re-scrape resolves instead of re-adding. The colour guard (base not pure colour/type words)
@@ -320,14 +354,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                                         "color": code_why, "nearest_existing": base, "score": "", "model_prob": ""})
                 continue
             # dec == "yes" -> the human confirmed it IS a real variety -> fall through to mint
-        # a generic colour+type trade name is its own variety -- skip ALL alias routing (surface
-        # match + model) so it can never be promoted into a premium named stone (misselling).
+        # PHASE 4 -- RESOLVE to an EXISTING variety (prefer an alias over a new variant). A generic
+        # colour+type trade name is its OWN variety, so it skips all alias routing (surface match +
+        # model) -- it can never be promoted into a premium named stone (misselling).
         ctoks = set(proj.norm(clean).split())
         generic = bool(ctoks) and ctoks <= generic_words
-        # the cleaned name ALREADY EXISTS as a variety (any branch / any type) -> never mint a
-        # duplicate. A typeless source (e.g. varsha) whose name collides with an existing variety
-        # — possibly ambiguous across types — is routed to review so a human confirms which
-        # variety it is, instead of auto-cloning a typeless copy.
+        # 4a. exact surface match: the cleaned name ALREADY EXISTS as a variety (any branch/type) ->
+        # never mint a duplicate. A typeless source whose name collides with an existing variety
+        # (possibly ambiguous across types) is routed to review so a human confirms which variety it
+        # is, instead of auto-cloning a typeless copy.
         owners = existing_surface.get(proj.norm(clean))
         if owners and not generic:
             if len(owners) == 1:                       # unambiguous existing variety (name or alias)
@@ -351,10 +386,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             else:                                       # the surface spans several varieties/types
                 review_candidates.setdefault(proj.norm(clean), set()).add(name)
             continue
-        # alias-vs-new decision against the nearest existing variety. The tier-7 model uses
-        # name + type + colour to tell a real alias ('Marjan' -> 'Marjan Silver') from a distinct
-        # sibling ('Cristallo Divine' vs 'Cristallo Bianco'): P>=hi auto-confirms the alias, P<=lo
-        # mints, the uncertain middle goes to review. Falls back to the flat fuzzy floor + token
+        # 4b. fuzzy nearest: alias-vs-new decision against the nearest existing variety. The tier-7
+        # model uses name + type + colour to tell a real alias ('Marjan' -> 'Marjan Silver') from a
+        # distinct sibling ('Cristallo Divine' vs 'Cristallo Bianco'): P>=hi auto-confirms the alias,
+        # P<=lo mints, the uncertain middle goes to review. Falls back to the flat fuzzy floor + token
         # subset when the model isn't available.
         nearest = (gap.nearest_existing or "").split(",")[0].strip()
         if nearest and not generic:
@@ -382,6 +417,8 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             elif (gap.nearest_score or 0) >= alias_floor or _is_token_subset(clean, nearest):
                 review_candidates.setdefault(proj.norm(nearest), set()).add(name)
                 continue
+        # PHASE 5 -- MINT a new variety: nothing rejected it, nothing existing claims it -> it is a
+        # clean, novel, product-backed name, so create it (the last resort).
         new_variant_rows.append((
             clean, title_case(clean), stone_type,
             title_case(_attr_surface(row, "color")),
