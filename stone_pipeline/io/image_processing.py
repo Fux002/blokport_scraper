@@ -117,6 +117,11 @@ class _Dewatermarker:
     MIN_PINK = 25                        # pink px needed to trust a colour hit
     BAND = (0.28, 0.74, 0.18, 0.82)      # y0,y1,x0,x1 fractions of the central search band
     FALLBACK = (0.28, 0.38, 0.72, 0.62)  # x0,y0,x1,y1 fractions: fixed box when colour is faint
+    # Mask the watermark's INK (its strokes), not the whole box: a solid box forces LaMa to
+    # fill a large patch of clean stone, which reads as a cloudy smudge on uniform slabs.
+    INK_MEDIAN = 31                      # median window estimating the stone under the thin text
+    INK_DELTA = 10                       # gray deviation from that local stone = watermark ink
+    MIN_INK = 300                        # too little ink found -> fall back to the solid box
 
     def __init__(self, *_args, **_kwargs):  # *_args kept for call-site compatibility
         self._ok: Optional[bool] = None
@@ -157,12 +162,36 @@ class _Dewatermarker:
         fx0, fy0, fx1, fy1 = self.FALLBACK
         return (int(w * fx0), int(h * fy0), int(w * fx1), int(h * fy1))
 
-    def process(self, pil_image):
-        """Return a watermark-free copy (the located logo region inpainted)."""
-        bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
+    def _ink_mask(self, bgr):
+        """uint8 mask of the watermark's strokes inside the located region. Within that
+        region the underlying stone is estimated by a median blur; pixels that deviate
+        from it (the thin text) plus any pink ink are the mask, dilated to cover soft
+        edges. Tight, so LaMa repairs only the strokes and blends — no cloudy box-fill.
+        Falls back to the solid region when too little ink is found (a faint logo we must
+        still remove), where a slight cloud beats a visible watermark."""
+        h, w = bgr.shape[:2]
         x0, y0, x1, y1 = self._logo_box(bgr)
-        mask = Image.new("L", pil_image.size, 0)
-        ImageDraw.Draw(mask).rectangle([x0, y0, x1, y1], fill=255)
+        mask = np.zeros((h, w), np.uint8)
+        roi = bgr[y0:y1, x0:x1]
+        if roi.size == 0:
+            return mask
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        bg = cv2.medianBlur(gray, self.INK_MEDIAN)
+        ink = cv2.absdiff(gray, bg) > self.INK_DELTA
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        pink = (hsv[:, :, 0] >= self.HUE_LO) & (hsv[:, :, 0] <= self.HUE_HI) & (hsv[:, :, 1] >= self.SAT_MIN - 5)
+        roi_mask = cv2.dilate(((ink | pink) * 255).astype(np.uint8),
+                              np.ones((5, 5), np.uint8), iterations=2)
+        if int((roi_mask > 0).sum()) >= self.MIN_INK:
+            mask[y0:y1, x0:x1] = roi_mask
+        else:  # too faint to isolate -> remove the whole region to be safe
+            mask[y0:y1, x0:x1] = 255
+        return mask
+
+    def process(self, pil_image):
+        """Return a watermark-free copy (the located logo strokes inpainted)."""
+        bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        mask = Image.fromarray(self._ink_mask(bgr))
         cleaned = self._lama(pil_image.convert("RGB"), mask)
         return cleaned, True
 
