@@ -48,9 +48,13 @@ The `{Key}.png` files are identical across environments. So:
 
 ## Setup (once)
 ```
-pip install fal-client requests pillow      # generator
-pip install torch ben2                        # background remover (BEN2)
+pip install fal-client requests pillow            # generator
+pip install torch "ben2==0.0.1"                   # background remover (BEN2) — PIN the version
 ```
+> Supply-chain note: `ben2` is a small external package (not in the deployed scraper
+> image) and `BEN_Base.from_pretrained("PramaLLC/BEN2")` downloads model weights from
+> Hugging Face. Pin the version (above), and treat this generation feature as gated /
+> run it in an isolated environment — it is NOT part of the Fargate scraper deploy.
 - The fal key comes from the environment: `export FAL_KEY="<id>:<secret>"` (on AWS it is injected from SSM SecureString /blokport-<env>/FAL_KEY). Rotate it as needed.
 - `MODEL = "max"` is already set (best fidelity). 206 prompts ≈ **$21** at ~$0.10/img.
 - BEN2 runs on CPU here (slow but fine); a GPU box is far faster for a big batch.

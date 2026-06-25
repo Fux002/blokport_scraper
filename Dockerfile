@@ -3,9 +3,9 @@
 # Two build targets:
 #   core       — scrape + pipeline + faithful image enhancement/upscale (CPU,
 #                no torch). This is what the scheduled Fargate task runs.
-#   imageproc  — core + the de-watermark stack (Florence-2 + LaMa). Only needed
-#                when BLOKPORT_IMAGE_PROCESSING=true AND a source is watermarked.
-#                Heavier image; build/push it separately when you enable that.
+#   imageproc  — core + the de-watermark stack (colour-locate + LaMa inpaint, CPU
+#                torch). Only needed when BLOKPORT_IMAGE_PROCESSING=true AND a source
+#                is watermarked. Heavier image; build/push it separately to enable.
 #
 #   docker build --target core      -t blokport-scraper:core .
 #   docker build --target imageproc -t blokport-scraper:imageproc .
@@ -22,6 +22,9 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
+
+# Patch build tooling first: setuptools < 78.1.1 is vulnerable to PYSEC-2025-49.
+RUN pip install --upgrade "pip" "setuptools>=78.1.1"
 
 # Install deps first (layer cache) — both requirement files live in stone_pipeline/.
 COPY stone_pipeline/requirements.txt /tmp/requirements.txt
@@ -41,11 +44,20 @@ FROM core AS imageproc
 # links libGL.so.1 — absent in the slim base, so cv2 import fails without it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       build-essential libjpeg-dev zlib1g-dev libgl1 libglib2.0-0 \
+       build-essential libjpeg-dev zlib1g-dev libgl1 libglib2.0-0 curl \
     && rm -rf /var/lib/apt/lists/*
 COPY stone_pipeline/requirements-imageproc.txt /tmp/requirements-imageproc.txt
-# --extra-index-url (NOT --index-url): keep PyPI as the primary index so deps like
-# pillow/transformers resolve to their normal wheels, while torch/torchvision pull
-# the CPU build from the pytorch index (far smaller than the default CUDA wheels).
+# --extra-index-url (NOT --index-url): keep PyPI as the primary index so pillow etc.
+# resolve normally, while torch/torchvision pull the CPU build from the pytorch index
+# (far smaller than the default CUDA wheels).
 RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
     -r /tmp/requirements-imageproc.txt
+
+# Bake the LaMa weights at build time with a pinned SHA-256, into the torch-hub cache
+# where simple-lama looks. This closes the runtime supply-chain hole: the weights are
+# never fetched-then-torch.load-ed (pickle) from an unverified source on a live task.
+RUN mkdir -p /root/.cache/torch/hub/checkpoints \
+    && curl -fsSL -o /root/.cache/torch/hub/checkpoints/big-lama.pt \
+       https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt \
+    && echo "7ba7aa7ac37a4d41fdbbeba3a2af7ead18058552997e3a3cd1a3b2210c9e6b4c  /root/.cache/torch/hub/checkpoints/big-lama.pt" \
+       | sha256sum -c -
