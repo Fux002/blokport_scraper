@@ -291,6 +291,7 @@ class ImageProcessingConfig:
     # Comma-separated Florence-2 prompts, unioned: "logo" catches the centered branding,
     # "watermark" the corner info-label — together they clear both.
     dewatermark_prompt: str = "logo,watermark"
+    dewatermark_ocr: bool = True  # also remove text overlays (top info-banner, labels) via OCR-with-region
     # --- output / audit ---
     jpeg_quality: int = 85  # 85 is visually identical to 92 for photos at ~30-40% smaller files
     write_preview: bool = True        # images/reports/processed_preview.csv (source -> processed)

@@ -106,11 +106,14 @@ class _Dewatermarker:
     fixed mask, then inpaint the detected region so the stone behind it is
     reconstructed (not blurred over). Self-hosted, free, runs on the AWS stack."""
 
-    def __init__(self, prompt: str):
+    def __init__(self, prompt: str, ocr: bool = True):
         # prompt may be comma-separated ("logo,watermark"): detect each and union the
         # regions, so we catch both the centered branding logo and the corner info-label
         # (each prompt alone catches only one of the two).
         self.prompts = [p.strip() for p in prompt.split(",") if p.strip()] or ["watermark"]
+        # OCR-with-region also marks every text overlay (info banners/labels) for removal;
+        # stone carries no text, so any detected text box is an overlay, not the slab.
+        self.ocr = ocr
         self._ok: Optional[bool] = None
         self._florence = None
         self._processor = None
@@ -170,6 +173,23 @@ class _Dewatermarker:
             parsed = self._processor.post_process_generation(
                 text, task=task, image_size=(pil_image.width, pil_image.height))
             boxes.extend(parsed.get(task, {}).get("bboxes", []) or [])
+
+        # Text overlays (the top info-banner, corner labels): OCR-with-region returns a
+        # quad per text run; reduce each quad to its bounding box and add to the union.
+        if self.ocr:
+            ocr_task = "<OCR_WITH_REGION>"
+            inputs = self._processor(text=ocr_task, images=pil_image,
+                                     return_tensors="pt").to(self._device)
+            with torch.no_grad():
+                ids = self._florence.generate(input_ids=inputs["input_ids"],
+                                              pixel_values=inputs["pixel_values"],
+                                              max_new_tokens=1024, num_beams=3)
+            text = self._processor.batch_decode(ids, skip_special_tokens=False)[0]
+            parsed = self._processor.post_process_generation(
+                text, task=ocr_task, image_size=(pil_image.width, pil_image.height))
+            for quad in parsed.get(ocr_task, {}).get("quad_boxes", []) or []:
+                xs, ys = quad[0::2], quad[1::2]
+                boxes.append([min(xs), min(ys), max(xs), max(ys)])
         return boxes
 
     def process(self, pil_image):
@@ -208,7 +228,8 @@ class ImageProcessor:
 
     def __init__(self, cfg: ImageProcessingConfig):
         self.cfg = cfg
-        self._dw = _Dewatermarker(cfg.dewatermark_prompt) if cfg.dewatermark else None
+        self._dw = (_Dewatermarker(cfg.dewatermark_prompt, getattr(cfg, "dewatermark_ocr", True))
+                    if cfg.dewatermark else None)
 
     def process(self, data: bytes, *, watermarked: bool = False) -> ProcessResult:
         if not self.cfg.enabled:

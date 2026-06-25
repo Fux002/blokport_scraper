@@ -28,14 +28,21 @@ def main() -> int:
     out = f"{ENV_SEGMENT}/scraper/dewatermark-validation"
     client = boto3.client("s3", region_name=S3_REGION)
 
-    keys: list[str] = []
-    for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=src):
-        for obj in page.get("Contents", []):
-            keys.append(obj["Key"])
+    # VALIDATE_KEYS pins specific images (comma-separated object basenames, with or
+    # without .jpg) so we can eyeball a known-tricky slab (e.g. the top-banner style);
+    # otherwise just take the first N.
+    pinned = [k.strip() for k in os.environ.get("VALIDATE_KEYS", "").split(",") if k.strip()]
+    if pinned:
+        keys = [f"{src}{k if k.endswith('.jpg') else k + '.jpg'}" for k in pinned]
+    else:
+        keys = []
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=src):
+            for obj in page.get("Contents", []):
+                keys.append(obj["Key"])
+                if len(keys) >= n:
+                    break
             if len(keys) >= n:
                 break
-        if len(keys) >= n:
-            break
     if not keys:
         print(f"no originals at s3://{S3_BUCKET}/{src} — run the pipeline with keep_scraped first")
         return 1
