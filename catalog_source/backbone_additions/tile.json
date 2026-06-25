@@ -113,34 +113,6 @@
     "merged_from": []
   },
   {
-    "key": "tile_onyx_mgt_onyx_3183e884-8572-503d-bcbd-d7241394c872",
-    "variant": "Mgt Onyx",
-    "category": "Tiles",
-    "stone_type": "Onyx",
-    "color": [
-      "Multicolor"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "tile_onyx_mgt_onyx_3183e884-8572-503d-bcbd-d7241394c872.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
     "key": "tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060",
     "variant": "Matarazzo",
     "category": "Tiles",
@@ -161,7 +133,9 @@
     "qualities": [
       "A"
     ],
-    "aliases": [],
+    "aliases": [
+      "Matarazzo"
+    ],
     "image_file": "tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060.png",
     "exists": "no",
     "in_csv": "yes",
@@ -189,7 +163,9 @@
     "qualities": [
       "A"
     ],
-    "aliases": [],
+    "aliases": [
+      "INFINITY WHITE"
+    ],
     "image_file": "tile_infinity_white_3edea7fa-6e7c-5d5f-a18a-3f8890d8f452.png",
     "exists": "no",
     "in_csv": "yes",

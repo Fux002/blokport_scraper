@@ -32,7 +32,7 @@ from pathlib import Path
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
-from stone_pipeline.core.text import (ascii_fold, looks_code_shaped,
+from stone_pipeline.core.text import (ascii_fold, looks_code_shaped, looks_codey,
                                       looks_like_artifact as _looks_like_artifact, title_case)
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
@@ -156,7 +156,11 @@ def _clean_variety(name: str, stone_type: str) -> str:
     type_toks = {t.casefold() for t in (stone_type or "").split()}
     no_fmt = [t for t in toks if t.casefold() not in _FORMAT_WORDS]
     no_type = [t for t in no_fmt if t.casefold() not in type_toks]
-    chosen = no_type if len(no_type) >= 2 else no_fmt
+    # Strip the type when a distinctive multi-word name remains, OR when the single remaining token is
+    # a supplier CODE -- so 'MGT Onyx' -> 'MGT' is caught downstream as a bare code and routed to
+    # review, NOT minted as a type-baked variety 'Mgt Onyx'. Keep the type only when the remainder is
+    # a real word ('White Onyx' -> 'White Onyx', not 'White').
+    chosen = no_type if (len(no_type) >= 2 or (len(no_type) == 1 and looks_codey(no_type[0]))) else no_fmt
     return " ".join(chosen) or " ".join(no_fmt) or (name or "").strip()
 
 
@@ -447,6 +451,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # categories). Tiles are excluded until they are wired up (active_branches).
     for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed in new_variant_rows:
         finishes = list(dict.fromkeys([*([obs_finish] if obs_finish else []), *_DEFAULT_FINISHES]))
+        # A cross-branch sibling's variety already exists in another branch carrying the scraped
+        # spelling as an alias (alias_new). Carry that SAME alias onto the new sibling so its product
+        # resolves in ONE upload, not two (mint the variety AND attach its alias in the same leg --
+        # otherwise a brand-new branch like a block needs a second round-trip to add the alias).
+        sib_aliases = sorted({s for owner, sp in alias_new.items()
+                              if proj.norm(owner) == proj.norm(title) for s in sp})
         for branch in active_branches():
             key = gen_key(branch, stone_type, title)
             if _core(key, branch) in existing_cores[branch]:
@@ -459,7 +469,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 # only link an image when a product uses this branch; fan-out tile/block
                 # copies stay imageless until a product adds them (lazy generation)
                 "Image": image_url(fname) if product_backed else "",
-                "Aliases": "",
+                "Aliases": "|".join(sib_aliases),
                 "Volume per kg (m³/kg)": category(branch).volume_per_kg,
                 "_nearest_existing": gap.nearest_existing or "",
                 "_nearest_score": gap.nearest_score if gap.nearest_score is not None else "",
@@ -474,7 +484,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 "color": [obs_color] if obs_color else [],
                 "finishes": finishes,
                 "qualities": [obs_quality],
-                "aliases": [],
+                "aliases": list(sib_aliases),
                 "image_file": fname,  # same name as the variant Image, for consistency
                 "exists": "no",
                 "in_csv": "yes",
@@ -612,12 +622,14 @@ def write_curation(result: CurationResult) -> None:
         upload_rows += confirmed + result.new_variants[branch]
         needs_review += [r for r in result.alias_additions[branch] if r.get("_status") != "confirmed"]
         triage += result.new_variants[branch]
-        # backbone deltas: the new varieties to append to catalog_source/backbone_*.json
-        if result.backbone_new.get(branch):
-            bp = additions / f"{branch}.json"
-            bp.parent.mkdir(parents=True, exist_ok=True)
-            bp.write_text(json.dumps(result.backbone_new[branch], indent=2, ensure_ascii=False),
-                          encoding="utf-8")
+        # backbone deltas: the new varieties to append to catalog_source/backbone_*.json. ALWAYS
+        # (over)write -- including an empty list -- so a variety that is no longer minted this run
+        # (resolved, held, or now code-detected like 'Mgt Onyx') can never PERSIST as a stale
+        # addition from a prior run (which would keep feeding the image queue + tree).
+        bp = additions / f"{branch}.json"
+        bp.parent.mkdir(parents=True, exist_ok=True)
+        bp.write_text(json.dumps(result.backbone_new[branch], indent=2, ensure_ascii=False),
+                      encoding="utf-8")
     # Drop no-op rows: a variant whose Key is ALREADY in the export and that adds no new alias and
     # no new image is just upsert noise (the mint guard can miss a duplicate-name generic). Keep the
     # update file to the genuine delta -- new variants + real alias/image changes only.
