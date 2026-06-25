@@ -88,7 +88,21 @@ def test_placeholder_blocked(local_cfg, monkeypatch):
     assert any(f.code == FlagCode.no_image for f in row.review_flags)
 
 
-def test_passthrough_mode_uses_source_urls():
+def test_passthrough_links_to_improved_s3(monkeypatch):
+    # passthrough points product images at the IMPROVED S3 versions via the imageproc manifest,
+    # never the raw source url; an image not in the manifest is DROPPED, not defaulted.
+    monkeypatch.setattr(images, "_readonly_manifest",
+                        lambda: {"http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg"})
+    cfg = ImagesConfig(mode="passthrough")
+    row = CanonicalRow(src_site="x", surrogate_key="7", is_block=False,
+                       raw_image_urls=["http://x/a.jpg", "http://x/a.jpg", "http://x/b.jpg"])
+    images.run([row], cfg=cfg)
+    assert row.product_image_keys == ["https://s3/dev/products/improved/x/aa.jpg"]  # b.jpg dropped
+
+
+def test_passthrough_falls_back_to_source_when_manifest_unreachable(monkeypatch):
+    # fully-offline / no S3 -> empty manifest -> keep source urls so a local run still works
+    monkeypatch.setattr(images, "_readonly_manifest", lambda: {})
     cfg = ImagesConfig(mode="passthrough")
     row = CanonicalRow(src_site="x", surrogate_key="7", is_block=False,
                        raw_image_urls=["http://x/a.jpg", "http://x/a.jpg", "http://x/b.jpg"])

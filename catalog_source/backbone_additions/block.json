@@ -1,37 +1,9 @@
 [
   {
-    "key": "block_travertine_marjan_6c92eb72-46b6-576f-9785-aabfcc30062a",
-    "variant": "Marjan",
+    "key": "block_onyx_azul_white_quartzite_67393c02-728c-5a1b-9caa-6d53b66915b0",
+    "variant": "Azul White Quartzite",
     "category": "Blocks",
-    "stone_type": "Travertine",
-    "color": [
-      "Silver"
-    ],
-    "finishes": [
-      "Honed",
-      "Polished",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "block_travertine_marjan_6c92eb72-46b6-576f-9785-aabfcc30062a.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "block_quartzite_porto_bianco_b55b43d1-e1fb-5d6a-9762-e6334aac87f0",
-    "variant": "Porto Bianco",
-    "category": "Blocks",
-    "stone_type": "Quartzite",
+    "stone_type": "Onyx",
     "color": [
       "White"
     ],
@@ -49,115 +21,7 @@
       "A"
     ],
     "aliases": [],
-    "image_file": "block_quartzite_porto_bianco_b55b43d1-e1fb-5d6a-9762-e6334aac87f0.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
-    "key": "block_granite_sodalite_baia_428df178-85ac-53fd-95f1-9b88b792a292",
-    "variant": "Sodalite Baia",
-    "category": "Blocks",
-    "stone_type": "Granite",
-    "color": [
-      "Blue"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "block_granite_sodalite_baia_428df178-85ac-53fd-95f1-9b88b792a292.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
-    "key": "block_crystallo_divine_a1f34c8f-d342-59de-a166-14b168c43b1b",
-    "variant": "Crystallo Divine",
-    "category": "Blocks",
-    "stone_type": "",
-    "color": [],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "block_crystallo_divine_a1f34c8f-d342-59de-a166-14b168c43b1b.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
-    "key": "block_lava_oro_1cedbef4-0f42-541a-bd28-21f13ccdf209",
-    "variant": "Lava Oro",
-    "category": "Blocks",
-    "stone_type": "",
-    "color": [],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "block_lava_oro_1cedbef4-0f42-541a-bd28-21f13ccdf209.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": false,
-    "merged_from": []
-  },
-  {
-    "key": "block_cream_quartzite_831849ed-a9aa-565a-b119-16d83492c6e4",
-    "variant": "Cream Quartzite",
-    "category": "Blocks",
-    "stone_type": "",
-    "color": [
-      "Cream"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [],
-    "image_file": "block_cream_quartzite_831849ed-a9aa-565a-b119-16d83492c6e4.png",
+    "image_file": "block_onyx_azul_white_quartzite_67393c02-728c-5a1b-9caa-6d53b66915b0.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": false,

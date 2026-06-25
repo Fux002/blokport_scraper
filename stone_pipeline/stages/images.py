@@ -145,18 +145,43 @@ def _slot_row(row: CanonicalRow, public_urls: list[str]) -> None:
                                 confidence=Confidence.none, method="zero_usable", src_url=row.src_url))
 
 
+def _readonly_manifest() -> dict[str, str]:
+    """Read the imageproc manifest (source_url -> IMPROVED S3 url) straight from S3, read-only, so
+    even a no-download passthrough run links products to the upscaled/de-watermarked images and
+    NEVER to a raw supplier url. Best-effort: {} if S3/boto3 is unreachable (then source urls are
+    kept so a fully-offline run still works)."""
+    try:
+        import boto3
+        from stone_pipeline.config.settings import ENV_SEGMENT
+        s3 = SETTINGS.s3
+        client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+        obj = client.get_object(Bucket=s3.bucket, Key=f"{ENV_SEGMENT}/products/{_MANIFEST_KEY}")
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        log.warning("imageproc manifest unreachable; passthrough keeps source urls",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return {}
+
+
 def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> ImageStats:
     cfg = cfg or SETTINGS.images
     placeholders = _load_placeholder_hashes()
     stats = ImageStats()
 
     if cfg.mode == "passthrough":
+        # Link product images to the IMPROVED S3 versions via the imageproc manifest, never the raw
+        # source url. An image the imageproc hasn't processed yet (not in the manifest) is DROPPED,
+        # not defaulted to its scrape url -- so the upload only ever carries S3 image links.
+        manifest = _readonly_manifest()
         for row in rows:
-            urls = list(dict.fromkeys(u for u in (row.raw_image_urls or []) if u and u.strip()))
+            srcs = [u for u in dict.fromkeys(row.raw_image_urls or []) if u and u.strip()]
+            urls = [manifest[u] for u in srcs if u in manifest] if manifest else srcs
             _slot_row(row, urls)
             stats.staged += 1 if urls else 0
             stats.no_image += 0 if urls else 1
-        log.info("images done (passthrough)", extra={"extra_fields": {"staged": stats.staged, "no_image": stats.no_image}})
+        log.info("images done (passthrough -> improved S3)", extra={"extra_fields": {
+            "staged": stats.staged, "no_image": stats.no_image, "manifest_entries": len(manifest)}})
         return stats
 
     backend = _build_backend(cfg)

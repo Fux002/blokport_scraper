@@ -1,17 +1,22 @@
 variety,attribute,add_value,currently_allowed,match_method,match_confidence,verdict,example_url
-White Travertine,quality,B,A,descriptor_exact_blocked,high,verify_match,https://marenostone.com/product/white-travertine-tile-2/
-Labradorite Di Oriente,color,Blue,"Green, Gold",projection_deprefixed,high,likely_real,https://marenostone.com/product/labradorite-blue-granite-slab/
-Colored Green,color,Pink,Green,exact,high,likely_real,https://marenostone.com/product/colored-pink-onyx-slab/
-Namibia,color,White,Yellow,exact,high,likely_real,https://marenostone.com/product/namibia-white-granite-slab/
-Cloud,color,White,"Beige, Ivory, Cream",exact,high,likely_real,https://marenostone.com/product/cloud-white-marble-slab-21/
-Pearl Yellow,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",exact_blocked,high,likely_real,https://marenostone.com/product/pearl-grey-granite-slab/
-Verde Alpi,quality,C,A,exact,high,likely_real,https://marenostone.com/product/black-marble/
+White Travertine,quality,B,A,exact_blocked,high,likely_real,https://marenostone.com/product/white-travertine-tile-2/
+Silver Waves,color,Black,"Grey, Silver",exact,high,likely_real,https://marenostone.com/product/black-wave-marble-slab-3/
+Storen,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",exact,high,likely_real,https://marenostone.com/product/crystal-white-granite-slab-2/
+Classic Black,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",exact,high,likely_real,https://marenostone.com/product/dark-grey-granite-slab/
+Amazon White,color,Grey,White,exact,high,likely_real,https://marenostone.com/product/amazon-marble-slab/
+Grey Emperador,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/pietra-grey-marble-tile-2/
+Grigio Sardo,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",fuzzy,medium,verify_match,https://marenostone.com/product/pearl-grey-granite-slab/
+Tiger Black,quality,B,A,exact,high,likely_real,https://marenostone.com/product/tiger-black-granite-tiles-5/
+Silver Mist,color,Grey,Silver,exact,high,likely_real,https://marenostone.com/product/silver-mist-marble-slab/
+Toros Black,quality,C,A,exact_blocked,high,likely_real,https://marenostone.com/product/black-marble/
+Verde Guatemala,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/forest-green-marble-slab/
 Persian Asgard,quality,B,A,exact,high,likely_real,https://marenostone.com/product/persian-asgard-marble-slab/
-Silver Travertine,quality,B,A,descriptor_phonetic,medium,verify_match,https://marenostone.com/product/silver-travertine/
+Iran White,quality,B,A,exact,high,likely_real,https://marenostone.com/product/super-white-travertine-slab-1-07/
+Silver Travertine,quality,B,A,phonetic,medium,verify_match,https://marenostone.com/product/silver-travertine/
 Arcadia Grey,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/sky-marble/
 China Golden Black,color,Pink,"Black, Gold, Brown, White, Yellow",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=470
 Fantasy Blue,color,White,"Grey, Blue",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=366
-Matarazzo,color,White,Gold,projection_tokenset,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=281
+Matarazzo,color,White,Gold,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=281
 Naika,color,Cream,White,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=673
 Patagonia Pink,color,Orchid,Pink,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=616
 Shadow White,quality,C,A,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=602
@@ -24,8 +29,8 @@ Black Forest Gold,quality,B,A,phonetic,medium,verify_match,
 Black Forest Gold,quality,C,A,phonetic,medium,verify_match,
 Amazon Blue,quality,B,A,fuzzy,medium,verify_match,
 Bordeaux,color,Bordeaux,"Brown, Red, Purple",exact,high,likely_real,
-Colonial White,quality,B,A,fuzzy,medium,verify_match,
-Colonial White,quality,C,A,fuzzy,medium,verify_match,
+Colonial White,quality,B,A,phonetic,medium,verify_match,
+Colonial White,quality,C,A,phonetic,medium,verify_match,
 Black Cosmic,quality,C,A,fuzzy,medium,verify_match,
 Grey Macaubus,quality,B,A,exact,high,likely_real,
 Indian Kinawa,quality,C,A,exact,high,likely_real,
