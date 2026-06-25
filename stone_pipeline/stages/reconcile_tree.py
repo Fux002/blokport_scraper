@@ -19,7 +19,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.matching import projections as proj
-from stone_pipeline.reference.loaders import Backbone, BackboneVariety, ReferenceData
+from stone_pipeline.reference.loaders import BackboneVariety, ReferenceData
 
 log = logfmt.get_logger("reconcile_tree")
 

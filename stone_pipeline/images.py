@@ -13,8 +13,6 @@ and new variants always come with their {Key}.png name to generate.
 
 from __future__ import annotations
 
-import sys
-
 from stone_pipeline.stages import image_intake
 
 

@@ -15,7 +15,6 @@ review band, exactly as the plan specifies.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from stone_pipeline.core import logfmt
 

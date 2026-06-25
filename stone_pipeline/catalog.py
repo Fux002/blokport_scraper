@@ -75,7 +75,7 @@ def run(outputs_root: Path | None = None) -> Path:
                          products=products, inventory=inventory, discontinued=discontinued)
     images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
     held = gate_on_images()                        # hold new variants with no S3 image out of the upload
-    to_delete = write_variants_to_delete()         # surface bare-code junk variants for deletion
+    to_delete = write_variants_to_delete()         # surface junk variants (bare-code + mis-typed) for deletion
     pruned = prune_superseded_runs(outputs_root)  # leave only the latest run folder per source
     # Build the valid combinations HERE, in the same step as the variants/products, so they are
     # always derived from the SAME export. They can never go stale by someone forgetting to run
@@ -84,7 +84,8 @@ def run(outputs_root: Path | None = None) -> Path:
     log.info("catalog consolidated", extra={"extra_fields": {
         "sources": sorted(set(sources)), **result.counts,
         "products": sum(products.values()), "inventory": inventory,
-        "discontinued": discontinued, "pruned_stale_runs": pruned}})
+        "discontinued": discontinued, "pruned_stale_runs": pruned,
+        "images_queued": images_queued, "variants_held_no_image": held, "variants_to_delete": to_delete}})
     # Deterministic consistency gate: fail loudly if the upload set is internally inconsistent
     # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check.
     errors, warnings = verify_consistency()

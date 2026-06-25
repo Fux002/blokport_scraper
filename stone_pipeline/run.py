@@ -134,7 +134,7 @@ def run_source(
     run_log.info(f"run start on {origin} ({frame.height} rows)")
 
     ref = loaders.load_all()
-    fingerprint = check_fingerprint(ref)
+    check_fingerprint(ref)                          # warns/raises on a reference drift; return unused
 
     manifest = Manifest(
         run_id=run_id,

@@ -9,8 +9,6 @@ refreshed (from_medusa/variants_export.csv), so every new variant resolves to a 
 
 from __future__ import annotations
 
-import sys
-
 from stone_pipeline.stages import tree_build
 
 

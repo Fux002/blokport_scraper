@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from stone_pipeline.config.settings import SETTINGS, active_categories
+from stone_pipeline.config.settings import active_categories
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, RejectReason
 
