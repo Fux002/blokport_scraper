@@ -97,20 +97,20 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
 
     length = parsed.get("length")
     height = parsed.get("height")
-    # A physical dimension can never be <= 0; a parsed 0 is bad source data (e.g. marenostone's
-    # "0cm" thickness typo) -- treat it like missing and synthesise, exactly as weight does below.
-    # Otherwise a 0 ships through and Medusa's area/volume pricing formula rejects the product.
-    if length is None or length <= 0:
+    # Synthesise a SIZE only when the scrape gave NONE (absent). A value that was PRESENT but invalid
+    # (<= 0, e.g. marenostone's "0cm" thickness typo) is deliberately LEFT <= 0 so validate REJECTS
+    # the whole product -- we never fabricate over bad source data; the product is skipped instead.
+    if length is None:
         length = round(ids.seeded_uniform(row.surrogate_key, "length", *ranges["length"]), 3)
         methods.append("length:synthetic")
     else:
         methods.append("length:parsed")
-    if height is None or height <= 0:
+    if height is None:
         height = round(ids.seeded_uniform(row.surrogate_key, "height", *ranges["height"]), 3)
         methods.append("height:synthetic")
     else:
         methods.append("height:parsed")
-    if width is None or width <= 0:
+    if width is None:
         low, high = ranges.get("width", (0.2, 0.2))
         width = round(ids.seeded_uniform(row.surrogate_key, "width", low, high), 3) if low != high else low
         methods.append("width:synthetic")
@@ -244,14 +244,11 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData,
         row.origin_source = "origin_map"
         row.origin_confidence = _conf_name(Confidence.medium)
         return
-    # 3. supplier default: the SUPPLIER's country (the scraped website's company),
-    #    set per source in sources.yaml — origin follows the supplier when unknown.
-    if source_cfg and source_cfg.origin_default:
-        row.origin_country_code = source_cfg.origin_default.strip().upper()
-        row.origin_source = "source_default"
-        row.origin_confidence = _conf_name(Confidence.low)
-        return
-    # 4. none + review flag
+    # 3. NO supplier fallback. The supplier's country is where the stone is SOLD FROM, not where it
+    #    was quarried -- a trader in one country sells stone from many (a UAE/Turkish supplier ships
+    #    Italian Carrara, Brazilian quartzite, ...). Country of origin is a property of the VARIETY
+    #    (origin_map) or the scraped field; if neither knows it, leave it UNRESOLVED and flag for
+    #    review so origin_map gets expanded -- never stamp the supplier's country as the origin.
     row.origin_source = "unresolved"
     row.origin_confidence = _conf_name(Confidence.none)
     row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_unresolved,

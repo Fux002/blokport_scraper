@@ -46,6 +46,13 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
         row.add_reject(RejectReason(rule="handle_missing", detail=""))
     if require_images and not row.image_keys:
         row.add_reject(RejectReason(rule="no_image", detail=""))
+    # Bad source data: a SIZE that was present in the scrape but invalid (<= 0, e.g. a "0cm" typo)
+    # is left <= 0 by derive (never fabricated over). Reject the product rather than sell it with a
+    # wrong size that breaks the category's area/volume pricing. (Absent sizes are synthesised > 0.)
+    for dim in ("length", "width", "height"):
+        if (getattr(row, dim, None) or 0) <= 0:
+            row.add_reject(RejectReason(rule="dimension_invalid", detail=dim))
+            break
 
 
 def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = False) -> ValidationResult:

@@ -115,12 +115,13 @@ def test_ports_belong_to_supplier(ref, cfg):
     assert row.port_ids and all(pid in ref.ports.iso_by_port for pid in row.port_ids)
 
 
-def test_origin_falls_back_to_supplier_country(ref, cfg):
-    # no scraped country + variety not in origin_map -> the source's origin_default
+def test_origin_unresolved_when_unknown_never_supplier(ref, cfg):
+    # no scraped country + variety not in origin_map -> UNRESOLVED (flagged for review), NEVER the
+    # supplier's country. The supplier is where the stone is sold from, not where it was quarried.
     row = _slab_row(variation_name="Verde Ubatuba", raw_origin="")
     derive.derive_origin(row, ref, cfg)
-    assert row.origin_country_code == cfg.origin_default == "IT"
-    assert row.origin_source == "source_default"
+    assert not row.origin_country_code              # blank, not the supplier's "IT"
+    assert row.origin_source == "unresolved"
 
 
 def test_origin_accepts_country_name(ref, cfg):
