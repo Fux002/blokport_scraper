@@ -312,8 +312,33 @@ def _backbone_paths() -> list[Path]:
     return paths
 
 
+def _load_combination_set(path: Path) -> set[tuple[str, ...]]:
+    """Read a combinations CSV back into a set of string-tuples (to diff builds). Empty if absent."""
+    if not path.exists():
+        return set()
+    with path.open(encoding="utf-8-sig", newline="") as h:
+        rows = csv.reader(h)
+        next(rows, None)  # skip header
+        return {tuple(row) for row in rows if row}
+
+
+def _product_variation_ids(products_csv: Path) -> set[str]:
+    """Variation ids the product sheet actually uses (for the products-only one-off)."""
+    if not products_csv.exists():
+        return set()
+    with products_csv.open(encoding="utf-8-sig", newline="") as h:
+        return {(r.get("STN Variation Id") or "").strip()
+                for r in csv.DictReader(h) if (r.get("STN Variation Id") or "").strip()}
+
+
 def run() -> Path:
-    """Build the valid combinations and write to_upload/2_valid_combinations.csv."""
+    """Build the valid combinations and write the upload set to to_upload/:
+      2_valid_combinations.csv          FULL set  -- one-time bulk load / resync (huge)
+      2_valid_combinations_update.csv   DELTA     -- only combinations NEW since the last build; this
+                                                    is the DAILY upload (add into the existing set)
+      2_valid_combinations_products_only.csv      TESTING one-off (drops off in production): combos
+                                                    for just the variations the product sheet uses.
+    """
     export = SETTINGS.paths.export_file
     if not export.exists():
         raise SystemExit(f"no variants export: {export} (download it from Medusa first)")
@@ -323,11 +348,33 @@ def run() -> Path:
     combinations, stats, uncovered = build_combinations(
         export, SETTINGS.paths.attributes_csv, _backbone_paths(),
         products if products.exists() else None, assigned)
-    path = SETTINGS.paths.to_upload_dir / "2_valid_combinations.csv"
-    write_combinations(combinations, path)
+
+    to_upload = SETTINGS.paths.to_upload_dir
+    path = to_upload / "2_valid_combinations.csv"
+    # The PREVIOUS full file is the baseline. Normalise to string-tuples so the in-memory build diffs
+    # cleanly against the CSV-read baseline.
+    current = {tuple(str(x) for x in c) for c in combinations}
+    previous = _load_combination_set(path)
+    write_combinations(current, path)                                   # FULL: bulk load / resync
+
+    # INCREMENTAL delta -- only the combinations NEW vs the last build, so the daily upload adds into
+    # the existing Medusa set instead of re-sending ~2M rows. First build (no baseline) -> delta is
+    # the full set. If a daily delta is ever skipped, re-upload the FULL file once to resync.
+    additions = current - previous
+    removed = previous - current
+    write_combinations(additions, to_upload / "2_valid_combinations_update.csv")
+
+    # TESTING one-off (drops off in production): combinations for ONLY the product sheet's variations.
+    vidx = COMBINATION_COLUMNS.index("variation_id")
+    prod_vids = _product_variation_ids(products)
+    products_only = {c for c in current if c[vidx] in prod_vids} if prod_vids else set()
+    write_combinations(products_only, to_upload / "2_valid_combinations_products_only.csv")
+
     # SURFACE the variations that got no combination (no resolvable type) so they are never silently
     # dropped -- the user fills 'assign_type' and they get allocated next run.
     _write_uncovered(uncovered, uncovered_file)
-    stats["uncovered_variations"] = len(uncovered)
+    stats.update(uncovered_variations=len(uncovered), combinations_total=len(current),
+                 combinations_added=len(additions), combinations_removed=len(removed),
+                 combinations_products_only=len(products_only))
     log.info("valid combinations built", extra={"extra_fields": stats})
     return path
