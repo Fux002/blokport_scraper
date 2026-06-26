@@ -50,6 +50,7 @@ class Manifest:
     input_hash: str = ""
     reference_versions: dict[str, str] = field(default_factory=dict)
     health_status: str = ""
+    gate_status: dict[str, str] = field(default_factory=dict)  # module gate -> OK/DEGRADED/FAILED
     stage_metrics: list[StageMetric] = field(default_factory=list)
     match_method_distribution: dict[str, int] = field(default_factory=dict)
     review_code_counts: dict[str, int] = field(default_factory=dict)

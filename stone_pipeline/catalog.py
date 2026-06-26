@@ -74,8 +74,16 @@ def run(outputs_root: Path | None = None) -> Path:
     sync = write_sync_md(counts=result.counts, sources=sorted(set(sources)),
                          products=products, inventory=inventory, discontinued=discontinued)
     images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
-    held = gate_on_images()                        # hold new variants with no S3 image out of the upload
+    # Give each new colour-less variety a real colour read from its fresh texture (then propagate to
+    # mirrors), so a no-colour source like zucchi never nulls colour_id; 'Natural' only if no texture.
+    from stone_pipeline.stages import variety_color
+    from stone_pipeline.config.settings import CATEGORIES
+    _additions = sorted((SETTINGS.paths.catalog_source_dir / "backbone_additions").glob("*.json"))
+    _merged = [c.backbone_path for c in CATEGORIES]   # read-only: lets a new tile/block mirror inherit
+    color_stats = variety_color.fill_colors(backbone_paths=_additions, reference_paths=_merged)
     to_delete = write_variants_to_delete()         # surface junk variants (bare-code + mis-typed) for deletion
+    migrated = migrate_retyped_variant_images(ref) # a re-typed variant keeps its image at its new Key
+    held = gate_on_images()                        # AFTER migration: hold only the genuinely-imageless new
     pruned = prune_superseded_runs(outputs_root)  # leave only the latest run folder per source
     # Build the valid combinations HERE, in the same step as the variants/products, so they are
     # always derived from the SAME export. They can never go stale by someone forgetting to run
@@ -85,7 +93,9 @@ def run(outputs_root: Path | None = None) -> Path:
         "sources": sorted(set(sources)), **result.counts,
         "products": sum(products.values()), "inventory": inventory,
         "discontinued": discontinued, "pruned_stale_runs": pruned,
-        "images_queued": images_queued, "variants_held_no_image": held, "variants_to_delete": to_delete}})
+        "images_queued": images_queued, "variant_colors": color_stats,
+        "variants_held_no_image": held, "variants_to_delete": to_delete,
+        "retyped_images_migrated": migrated}})
     # Deterministic consistency gate: fail loudly if the upload set is internally inconsistent
     # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check.
     errors, warnings = verify_consistency()
@@ -162,6 +172,62 @@ def _s3_image_checker():
     return exists
 
 
+def _s3_image_copier():
+    """Return a callable (old_key, new_key) -> bool that copies {old}.png to {new}.png in
+    <env>/variations/ on S3, or None when S3 is unreachable. A re-typed variant is the SAME stone, so
+    its existing image is copied to the new Key rather than regenerated."""
+    from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS as _S
+    s3 = _S.s3
+    try:
+        import boto3
+        client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+    except Exception:
+        return None
+    prefix = f"{ENV_SEGMENT}/variations/"
+
+    def copy(old: str, new: str) -> bool:
+        try:
+            client.copy_object(Bucket=s3.bucket, Key=f"{prefix}{new}.png",
+                               CopySource={"Bucket": s3.bucket, "Key": f"{prefix}{old}.png"})
+            return True
+        except Exception:
+            return False
+    return copy
+
+
+def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
+    """When a variant is re-typed (its mis-typed Key is flagged in variants_to_delete and its NAME
+    resolves to a different, correct type), copy its S3 image from the old Key to the new correct Key
+    -- so the re-typed variant keeps its image instead of being held imageless out of the upload.
+    Idempotent (skips when the new Key already has an image); no-op when S3 is unreachable, so the
+    local sandbox is unchanged and AWS does it in-build."""
+    dele = SETTINGS.paths.review_dir / "variants_to_delete.csv"
+    if not dele.exists():
+        return 0
+    checker = checker if checker is not None else _s3_image_checker()
+    copier = copier if copier is not None else _s3_image_copier()
+    if checker is None or copier is None:
+        return 0
+    from stone_pipeline.adapters.tokens import explicit_type_word
+    from stone_pipeline.stages.curate import gen_key
+    copied = 0
+    for r in csv.DictReader(dele.open(encoding="utf-8-sig")):
+        old = (r.get("Key") or "").strip()
+        name = (r.get("Name") or "").strip()
+        if not old or not name:
+            continue
+        looked = ref.attributes.resolve_id("type", explicit_type_word(name) or name)
+        if not looked:
+            continue                                   # can't derive the correct type from the name
+        new = gen_key(old.split("_")[0], looked[0], name)
+        if new != old and checker(old) and not checker(new) and copier(old, new):
+            copied += 1
+    if copied:
+        log.info("migrated re-typed variant images to their new S3 Keys",
+                 extra={"extra_fields": {"copied": copied}})
+    return copied
+
+
 def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Path | None = None) -> int:
     """Enforce the invariant 'a variant is in the upload file ⟺ its image is on S3'. After image
     generation, any genuinely-new variant (in 1_variants_update, not in the Medusa export) whose
@@ -216,7 +282,7 @@ def prune_superseded_runs(outputs_root: Path) -> int:
 def collect_products(outputs_root: Path) -> dict[str, int]:
     """Gather each source's product import CSV into to_upload/: one file per source
     (3_products_<source>.csv) plus a combined all-sources file (3_products_all.csv),
-    same 45-column Medusa schema. So the products are next to the variants and tree."""
+    same Medusa import schema. So the products are next to the variants and tree."""
     to_upload = SETTINGS.paths.to_upload_dir
     to_upload.mkdir(parents=True, exist_ok=True)
     # prune stale per-source files first so a source that no longer runs cannot leave a
@@ -318,10 +384,15 @@ def write_variants_to_delete() -> int:
     if not exp.exists():
         return 0
     rows = []
+    export_keys: set[str] = set()
+    by_key: dict[str, dict] = {}
     with exp.open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
             name = (r.get("Name") or "").strip()
             key = (r.get("Key") or "").strip()
+            if key:
+                export_keys.add(key)
+                by_key[key] = r
             reason = ""
             if name and looks_code_shaped(name) == "bare_code":
                 reason = "bare_code: supplier code/brand abbreviation, not a variety"
@@ -332,6 +403,19 @@ def write_variants_to_delete() -> int:
                 rows.append({"Key": key, "Name": name, "Id": (r.get("Id") or "").strip(),
                              "Image": (r.get("Image") or "").strip(), "reason": reason})
     out = SETTINGS.paths.review_dir / "variants_to_delete.csv"
+    # Preserve a previously-flagged variant that auto-detection can't re-derive (e.g. a single-token
+    # name like 'Sodalita' that isn't an explicit type word) AS LONG AS it is still in the export.
+    # Once it is actually deleted in Medusa (gone from the export) it drops off here automatically.
+    auto_keys = {r["Key"] for r in rows}
+    if out.exists():
+        for prev in csv.DictReader(out.open(encoding="utf-8-sig")):
+            pk = (prev.get("Key") or "").strip()
+            if pk and pk in export_keys and pk not in auto_keys:
+                src = by_key.get(pk, {})
+                rows.append({"Key": pk, "Name": (src.get("Name") or prev.get("Name") or "").strip(),
+                             "Id": (src.get("Id") or prev.get("Id") or "").strip(),
+                             "Image": (src.get("Image") or prev.get("Image") or "").strip(),
+                             "reason": prev.get("reason") or "flagged for deletion"})
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="", encoding="utf-8") as h:
         w = csv.DictWriter(h, fieldnames=["Key", "Name", "Id", "Image", "reason"])
@@ -344,13 +428,43 @@ def write_variants_to_delete() -> int:
     return len(rows)
 
 
+def _consistency_errors(export_ids: set[str], combo_ids: set[str], prod_ids: set[str],
+                        inv_skus: set[str], known_skus: set[str]) -> tuple[list[str], list[str]]:
+    """Pure set-arithmetic core of the consistency gate (testable without files). Every product and
+    combination variation id must exist in the export; every inventory SKU must exist in Medusa."""
+    if not export_ids:
+        return (["variants_export.csv is missing or has no Ids -- cannot verify"], [])
+    errors: list[str] = []
+    warnings: list[str] = []
+    if combo_ids - export_ids:
+        errors.append(f"{len(combo_ids - export_ids)} combination variation ids are NOT in the current "
+                      "export (stale combinations -- rebuild against the refreshed export)")
+    if prod_ids - export_ids:
+        errors.append(f"{len(prod_ids - export_ids)} product variation ids are NOT in the current export "
+                      "(stale products -- rerun run all + catalog)")
+    if prod_ids - combo_ids:
+        # HARD: a product whose variation has no valid-combination row ships UNPRICEABLE in Medusa.
+        # With the finish->Raw fallback every typed variation gets a combination, so this firing means
+        # a genuinely uncovered variation (no resolvable type) is being emitted -- it must be assigned
+        # a type (review/tree_uncovered_variations.csv) or held, not silently shipped.
+        errors.append(f"{len(prod_ids - combo_ids)} product variations have NO valid-combination row "
+                      "(unpriceable -- assign a type in tree_uncovered_variations.csv or hold them)")
+    # Inventory updates may ONLY target products that exist in Medusa -- never push stock for a product
+    # that was never imported (an imageless product held out of the catalog, or a stray SKU). Only
+    # checked once a Medusa product export is present (known_skus non-empty).
+    if known_skus and (inv_skus - known_skus):
+        errors.append(f"{len(inv_skus - known_skus)} inventory SKUs are NOT in the Medusa product export "
+                      "(refusing to update stock for products that don't exist)")
+    return (errors, warnings)
+
+
 def verify_consistency() -> tuple[list[str], list[str]]:
     """Deterministic cross-artifact consistency gate -- no heuristics, no sampling. Every product and
-    every valid-combination row must reference a variation id that EXISTS in the current export, and
-    every product's variation should have at least one valid combination. This catches stale or
-    out-of-order artifacts (the classic failure: combinations not rebuilt after the export changed)
-    before they ship, so correctness is structural, not something a human/AI eyeballs. Returns
-    (errors, warnings); a non-empty errors list means the upload set is inconsistent."""
+    every valid-combination row must reference a variation id that EXISTS in the current export; every
+    inventory SKU must exist in Medusa; every product's variation should have a valid combination. This
+    catches stale or out-of-order artifacts (the classic failure: combinations not rebuilt after the
+    export changed) before they ship, so correctness is structural, not something a human/AI eyeballs.
+    Returns (errors, warnings); a non-empty errors list means the upload set is inconsistent."""
     p = SETTINGS.paths
 
     def _ids(path: Path, col: str) -> set[str]:
@@ -360,25 +474,15 @@ def verify_consistency() -> tuple[list[str], list[str]]:
         except FileNotFoundError:
             return set()
 
-    export_ids = _ids(p.variants_export_csv, "Id")
-    if not export_ids:
-        return (["variants_export.csv is missing or has no Ids -- cannot verify"], [])
-    combo_ids = _ids(p.to_upload_dir / "2_valid_combinations.csv", "variation_id")
-    prod_ids = _ids(p.to_upload_dir / "3_products_all.csv", "STN Variation Id")
-    errors: list[str] = []
-    warnings: list[str] = []
-    stale_combo = combo_ids - export_ids
-    if stale_combo:
-        errors.append(f"{len(stale_combo)} combination variation ids are NOT in the current export "
-                      "(stale combinations -- rebuild against the refreshed export)")
-    stale_prod = prod_ids - export_ids
-    if stale_prod:
-        errors.append(f"{len(stale_prod)} product variation ids are NOT in the current export "
-                      "(stale products -- rerun run all + catalog)")
-    uncovered = prod_ids - combo_ids
-    if uncovered:
-        warnings.append(f"{len(uncovered)} product variations have no valid-combination row")
-    return (errors, warnings)
+    from stone_pipeline.stages.product_state import load_known_products
+    known = load_known_products()
+    return _consistency_errors(
+        export_ids=_ids(p.variants_export_csv, "Id"),
+        combo_ids=_ids(p.to_upload_dir / "2_valid_combinations.csv", "variation_id"),
+        prod_ids=_ids(p.to_upload_dir / "3_products_all.csv", "STN Variation Id"),
+        inv_skus={s.upper() for s in _ids(p.to_upload_dir / "4_inventory_update.csv", "Variant Sku")},
+        known_skus=set(known.by_sku),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

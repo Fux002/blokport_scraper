@@ -172,3 +172,50 @@ def test_emit_consolidate_folds_grade_codes_only():
     assert "Rosal Original" in names                                                # distinct, kept
     rosal=next(r for r in out if r["Name"]=="Rosal")
     assert "Rosal B" in rosal["Aliases"] and "Rosal C" in rosal["Aliases"] and "Rosal Cd" in rosal["Aliases"]
+
+
+def test_variant_image_link_never_points_at_a_missing_image():
+    # a variant advertises its S3 image link ONLY when the {Key}.png actually exists -- a
+    # product-backed variant whose image was never generated (the marjan_silver bug) stays blank.
+    from stone_pipeline.stages.emit_catalog import _image_link
+    base = "https://b.s3/dev/variations/"
+    s3 = {"block_travertine_marjan_6c92"}  # only this one is actually on S3
+    # product-backed but NOT on S3 -> blank (was a 404 before)
+    assert _image_link("block_travertine_marjan_silver_4735", False, True, s3, base) == ""
+    # on S3 -> stamped
+    assert _image_link("block_travertine_marjan_6c92", False, True, s3, base) == f"{base}block_travertine_marjan_6c92.png"
+    # already-imaged variant not in the (stale) listing -> still blank when S3 is authoritative
+    assert _image_link("k", True, False, s3, base) == ""
+
+
+def test_variant_image_link_falls_back_when_s3_unreachable():
+    # S3 unreachable (s3_keys=None, e.g. CI): keep the prior heuristic so output is unchanged.
+    from stone_pipeline.stages.emit_catalog import _image_link
+    base = "https://b.s3/dev/variations/"
+    assert _image_link("k", False, True, None, base) == f"{base}k.png"   # product-backed -> stamp
+    assert _image_link("k", True, False, None, base) == f"{base}k.png"   # already-imaged -> stamp
+    assert _image_link("k", False, False, None, base) == ""              # neither -> blank
+
+
+def test_plural_format_tag_resolves():
+    # a scraper that tags its format in the plural ('Slabs'/'Blocks'/'Tiles') must still resolve the
+    # explicit tag, not silently fall through to the slab default.
+    from stone_pipeline.config.settings import category
+    assert category("Slabs").name == "slab"
+    assert category("Blocks").name == "block"
+    assert category("Tiles").name == "tile"
+    assert category("Slab").name == "slab"     # singular still works
+    assert category("nonsense") is None
+
+
+def test_source_codes_are_unique_across_sources():
+    # a new source with a duplicate/typo'd source_code would collide SKUs and the delist-scoping
+    # prefix -- assert uniqueness so adding a scraper can't silently alias another source.
+    from stone_pipeline import adapters as ar
+    from stone_pipeline.config.sources import load_source
+    seen: dict[str, str] = {}
+    for src in ar.REGISTRY:
+        code = load_source(src).source_code
+        assert code, f"{src} has an empty source_code"
+        assert code not in seen, f"source_code {code!r} collides: {src} and {seen[code]}"
+        seen[code] = src

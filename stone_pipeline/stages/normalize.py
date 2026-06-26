@@ -128,7 +128,9 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
     if name_type and name_type.casefold() != (row.type_name or "").casefold():
         looked = ref.attributes.resolve_id("type", name_type)
         if looked:
-            row.type_name, row.type_id = name_type, looked[1]
+            # looked is (canonical_name, id) -- use the canonical name, not the raw
+            # token, so a miscased source word ('QUARTZITE') becomes 'Quartzite'.
+            row.type_name, row.type_id = looked
             row.type_confidence = _confidence_name(Confidence.high)
             row.type_method = "name_explicit"
 

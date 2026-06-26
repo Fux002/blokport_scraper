@@ -41,7 +41,7 @@ def assign_surrogates(rows: list[CanonicalRow]) -> int:
             row.surrogate_key = natural
         else:
             row.surrogate_key = ids.mint_surrogate(
-                row.src_site, row.src_url, row.raw_name, ordinal
+                row.src_site, row.src_url, row.raw_name, ordinal, row.raw_format
             )
             minted += 1
             row.add_flag(

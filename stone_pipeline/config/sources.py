@@ -24,9 +24,10 @@ class SourceConfig:
     # The sales channel is env-level (one per env) and is NOT settable per scrape.
     company_id: str = ""
     ports_default: list[str] = field(default_factory=list)
-    # ISO-2 country of the SUPPLIER (the scraped website's company). The origin default
-    # when the scrape has no country and origin_map doesn't cover the variety; origin_map
-    # (per-variety) overrides it for stones with a known specific origin.
+    # ISO-2 country of the SUPPLIER (the scraped website's company). Used by derive_origin
+    # as the LOW-confidence fallback (flagged origin_supplier_default) when the scrape has no
+    # country and origin_map doesn't cover the variety -- Medusa requires an origin for its
+    # pricing-rule lookup. origin_map (per-variety) overrides it for known specific origins.
     origin_default: str = ""
     emit_on_review: bool = True
     default_bundle_size: int = 6
@@ -39,6 +40,11 @@ class SourceConfig:
     # <source>` is green. New sources stay in review so they can never silently
     # push bad data live.
     mode: str = "review"
+    # Catastrophic-scrape floor: if a run yields fewer than this many rows it is treated as a failed
+    # scrape (auth/endpoint broke, truncated) -- the run aborts and NEVER feeds discontinuation, so a
+    # broken fetch can't mass-delist the catalog. Set well below the normal count (it guards against
+    # near-empty scrapes, not normal supplier inventory variation). 0 = only the empty-scrape guard.
+    min_expected_rows: int = 0
 
     def __post_init__(self):
         # source_code is the SKU prefix ({source_code}-{surrogate}) and the delist scope key. A
@@ -57,6 +63,16 @@ def load_sources(path: Path | None = None) -> dict[str, SourceConfig]:
     for source, body in data.items():
         body = body or {}
         out[source] = SourceConfig(source=source, **body)
+    # source_code is the SKU prefix AND the delist scope key: two sources sharing one (e.g. an auto
+    # source[:3] collision like marenostone->'mar' and a future 'marble'->'mar') would scope each
+    # other's products for discontinuation and pollute the 30% cap. Refuse to load on a collision.
+    by_code: dict[str, str] = {}
+    for src, cfg in out.items():
+        clash = by_code.get(cfg.source_code)
+        if clash:
+            raise ValueError(f"duplicate source_code {cfg.source_code!r} for {clash!r} and {src!r}; "
+                             f"set an explicit unique source_code in sources.yaml")
+        by_code[cfg.source_code] = src
     return out
 
 

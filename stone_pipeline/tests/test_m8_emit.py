@@ -39,7 +39,7 @@ def test_header_matches_template_exactly(emitted, tmp_path_factory):
     with open(path, newline="", encoding="utf-8-sig") as handle:
         header = next(csv.reader(handle))
     assert header == read_template_columns()
-    assert len(header) == 45
+    assert len(header) == 55  # 45 base + Product Image 6..15 (see product_image_slots)
 
 
 def test_emitted_rows_exist(emitted):
@@ -91,3 +91,42 @@ def test_booleans_lowercase(emitted):
         assert row["Product Discountable"] in ("true", "false")
         assert row["STN Sold In Bundle"] in ("true", "false")
         assert row["STN Popular"] in ("true", "false")
+
+
+def test_product_image_columns_match_slot_setting():
+    # the template must carry exactly product_image_slots numbered Product Image columns, all mapped
+    # by emit -- so the column count, the image cap, and the header can never silently drift.
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.stages.emit import COLUMN_MAP
+    cols = read_template_columns()
+    image_cols = [c for c in cols if c.startswith("Product Image ")]
+    assert len(image_cols) == SETTINGS.images.product_image_slots
+    assert image_cols == [f"Product Image {i + 1}" for i in range(SETTINGS.images.product_image_slots)]
+    assert all(c in COLUMN_MAP for c in image_cols)
+
+
+def test_product_images_fill_up_to_cap_then_blank():
+    # a product with more photos than slots fills every slot; one with fewer leaves the rest blank.
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.config.sources import load_source
+    from stone_pipeline.core.schema import CanonicalRow
+    from stone_pipeline.stages import images
+    from stone_pipeline.stages.emit import COLUMN_MAP
+    slots = SETTINGS.images.product_image_slots
+    cfg = load_source("polonine")
+
+    many = CanonicalRow(src_site="x")
+    many.product_image_keys = [f"u{i}" for i in range(slots + 3)]
+    cells = [COLUMN_MAP[f"Product Image {n}"](many, cfg) for n in range(1, slots + 1)]
+    assert all(cells) and len(cells) == slots  # every slot filled, extras simply have no column
+
+    few = CanonicalRow(src_site="x")
+    few.product_image_keys = ["a", "b"]
+    cells = [COLUMN_MAP[f"Product Image {n}"](few, cfg) for n in range(1, slots + 1)]
+    assert cells[:2] == ["a", "b"] and cells[2:] == [""] * (slots - 2)
+
+
+def test_images_slab_slot_cap_tracks_setting():
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.stages import images
+    assert images._SLAB_SLOTS == SETTINGS.images.product_image_slots

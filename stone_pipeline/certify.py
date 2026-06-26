@@ -29,11 +29,61 @@ import sys
 from dataclasses import dataclass, field
 
 from stone_pipeline.adapters import REGISTRY as ADAPTERS
-from stone_pipeline.adapters.selftest import run_fixture
+from stone_pipeline.adapters.selftest import fixture_dir, run_fixture
 from stone_pipeline.config.contracts import load_contract
 from stone_pipeline.config.sources import load_source, load_sources
 
 _VALID_MODES = ("review", "auto")
+_MIN_VOCAB_VALUES = 5  # need enough non-empty values for a swap signal to be meaningful
+
+
+def _vocab_swaps(per_attr: dict[str, dict]) -> list[str]:
+    """Pure core of the vocab check. `per_attr[attr] = {"n": int, "own": float, "cross": {other: float}}`.
+    Flags a likely column SWAP: an attribute whose values resolve far better as a DIFFERENT vocabulary
+    than its own (the self-test can't catch this -- the golden fixture is made by the same adapter, so a
+    finish-mapped-into-the-color-column is baked in and passes). Conservative thresholds: only fires on a
+    clear cross-vocab winner, so merely-novel (unresolvable-everywhere) values never trip it."""
+    msgs: list[str] = []
+    for attr, d in sorted(per_attr.items()):
+        if d["n"] < _MIN_VOCAB_VALUES:
+            continue
+        own = d["own"]
+        best_other, best_rate = max(d["cross"].items(), key=lambda kv: kv[1], default=(None, 0.0))
+        if best_other and own < 0.5 and best_rate >= 0.5 and best_rate - own >= 0.4:
+            msgs.append(f"raw_{attr} resolves as '{best_other}' ({best_rate:.0%}) but as '{attr}' only "
+                        f"({own:.0%}) -- the {attr}/{best_other} columns look swapped")
+    return msgs
+
+
+def check_vocab(source: str) -> tuple[bool, str]:
+    """Run the fixture through the adapter and check each mapped attribute's values draw from the
+    RIGHT vocabulary -- catching a column mis-mapping the self-test cannot. No fixture / no reference
+    -> skip (ok), so this never blocks on infrastructure; the selftest already guards a missing fixture."""
+    fdir = fixture_dir(source)
+    if source not in ADAPTERS or not (fdir / "input.csv").exists():
+        return True, "skipped (no adapter/fixture)"
+    try:
+        from stone_pipeline.adapters.base import read_scrape_csv
+        from stone_pipeline.reference import loaders
+        from stone_pipeline.stages.normalize import VOCAB_FIELDS, AttributeResolvers
+        ref = loaders.load_all()
+        resolvers = AttributeResolvers.build(ref)
+        rows = ADAPTERS[source].adapt(read_scrape_csv(fdir / "input.csv"))
+
+        def rate(values: list[str], vocab: str) -> float:
+            vals = [v for v in values if v]
+            return sum(1 for v in vals if resolvers.resolvers[vocab].resolve(v).value is not None) / len(vals) if vals else 0.0
+
+        per_attr: dict[str, dict] = {}
+        for attr in VOCAB_FIELDS:
+            vals = [getattr(r, f"raw_{attr}", "") or "" for r in rows]
+            n = sum(1 for v in vals if v)
+            per_attr[attr] = {"n": n, "own": rate(vals, attr),
+                              "cross": {o: rate(vals, o) for o in VOCAB_FIELDS if o != attr}}
+        swaps = _vocab_swaps(per_attr)
+    except Exception as exc:
+        return True, f"skipped (could not evaluate: {exc})"
+    return (not swaps, "; ".join(swaps) if swaps else "attribute columns map to the right vocabularies")
 
 
 @dataclass
@@ -74,6 +124,10 @@ def certify_source(source: str) -> CertResult:
         except Exception as exc:  # missing/broken fixture
             ok, msg = False, f"error: {exc} — regenerate the golden fixture"
         res.checks.append(Check("selftest", ok, msg))
+        # the self-test only proves the adapter is STABLE (the golden file is made by the same
+        # adapter); the vocab check proves it is CORRECT -- a swapped attribute column is caught here.
+        v_ok, v_msg = check_vocab(source)
+        res.checks.append(Check("vocab", v_ok, v_msg))
     else:
         res.checks.append(Check("selftest", False, "skipped (no adapter)"))
 

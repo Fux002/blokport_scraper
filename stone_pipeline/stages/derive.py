@@ -18,13 +18,14 @@ from dataclasses import dataclass
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import ids, logfmt
+from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.core.text import slugify, title_case
 from stone_pipeline.reference.loaders import ReferenceData
 
 log = logfmt.get_logger("derive")
 
-_NUM_UNIT = re.compile(r"(-?\d+(?:\.\d+)?)\s*([a-zµ\"']+)?", flags=re.IGNORECASE)
+_NUM_UNIT = re.compile(r"(-?\d[\d.,]*\d|-?\d)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
 
 # section 10.2 branch dimension/weight ranges in METRES/tonnes (fallback only; parsed dims win).
 # A tile is a small finished piece (~30–60 cm face, ~1–2 cm thick), NOT a slab — sources often
@@ -57,8 +58,10 @@ def _parse_measure(text: str, ref: ReferenceData) -> float | None:
     match = _NUM_UNIT.search(text)
     if not match:
         return None
-    value = float(match.group(1))
-    token = (match.group(2) or "m").lower().strip("\"'")
+    value = parse_number(match.group(1))
+    if value is None:
+        return None
+    token = normalize_unit(match.group(2))   # quote marks -> in/ft; empty -> m
     converted = ref.units.convert(value, token)
     return converted if converted is not None else value
 
@@ -117,12 +120,17 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     else:
         methods.append("width:parsed")
 
-    weight = _parse_measure(row.raw_weight, ref) if row.raw_weight else None
-    if weight is None or weight <= 0:
+    # units.csv converts weight to KILOGRAMS, but the synthetic ranges and the emitted
+    # "Product Weight" are TONNES (a block is ~20 t, not 20 kg). Convert kg->t so a scraped
+    # weight and a synthetic one are the same unit (else a source that supplies weight ships a
+    # 1000x-too-large value). Dimensions stay in metres (this /1000 is weight-only).
+    weight_kg = _parse_measure(row.raw_weight, ref) if row.raw_weight else None
+    if weight_kg is not None and weight_kg > 0:
+        weight = weight_kg / 1000.0
+        methods.append("weight:parsed")
+    else:
         weight = round(ids.seeded_uniform(row.surrogate_key, "weight", *ranges["weight"]), 3)
         methods.append("weight:synthetic")
-    else:
-        methods.append("weight:parsed")
 
     # range sanity: flag out-of-range parsed dims (section 6 Stage 6)
     for name, value in (("length", length), ("width", width), ("height", height)):
@@ -155,11 +163,11 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
             row.add_flag(ReviewFlag(field="bundle_size", code=flag_code, best_guess=str(value),
                                     confidence=conf, method=method, src_url=row.src_url))
 
-    # 2. explicit bundle size
-    if row.raw_bundle_size and row.raw_bundle_size.strip().isdigit():
+    # 2. explicit bundle size (a literal '0' is not a real count -- fall through)
+    if row.raw_bundle_size and row.raw_bundle_size.strip().isdigit() and int(row.raw_bundle_size) > 0:
         return _accept(int(row.raw_bundle_size), "explicit_bundle_size", Confidence.high)
-    # 3. explicit slab count
-    if row.raw_slab_count and row.raw_slab_count.strip().isdigit():
+    # 3. explicit slab count (likewise reject a non-positive count)
+    if row.raw_slab_count and row.raw_slab_count.strip().isdigit() and int(row.raw_slab_count) > 0:
         return _accept(int(row.raw_slab_count), "explicit_slab_count", Confidence.high)
     # 4. slabs array length
     if row.raw_slabs_array:
@@ -208,12 +216,7 @@ def _standard_area(type_name: str | None) -> float | None:
 
 
 def _to_float(text: str | None) -> float | None:
-    if not text:
-        return None
-    try:
-        return float(str(text).replace(",", ""))
-    except ValueError:
-        return None
+    return parse_number(text) if text else None
 
 
 # --- origin (section 7 Stage 6) -----------------------------------------------
@@ -225,7 +228,7 @@ def _to_iso(value: str, ref: ReferenceData) -> str | None:
     return ref.country_codes.get(" ".join(v.casefold().split())) or None
 
 
-def derive_origin(row: CanonicalRow, ref: ReferenceData) -> None:
+def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
     # 1. scraped country: an ISO code OR a country name (the real data when present)
     if row.raw_origin:
         iso = _to_iso(row.raw_origin, ref)
@@ -234,20 +237,44 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData) -> None:
             row.origin_source = "scrape_field"
             row.origin_confidence = _conf_name(Confidence.high)
             return
-    # 2. origin_map by variety or pattern — the accurate per-variety override
+    # 2. origin_map — the per-variety override built from the master variety reference. Two tiers:
+    #    an EXACT variety-name rule (trusted, the variety's known country), or a geographic name
+    #    PATTERN (e.g. 'carrara'->IT, 'persa'->BR) that generalises to a variety the exact tier has
+    #    never seen -- this is what carries origin onto a brand-new variant. A pattern hit is a strong
+    #    data-driven guess, so it's still emitted at medium confidence but FLAGGED, so it surfaces for
+    #    a one-time confirm; once confirmed into the raw reference it becomes an exact rule next build.
     rule = ref.origin_map.lookup(row.variation_name or row.raw_name or "")
     if rule:
         row.origin_country_code = rule.country_iso
         row.origin_city = rule.city
         row.origin_county = rule.county
-        row.origin_source = "origin_map"
         row.origin_confidence = _conf_name(Confidence.medium)
+        if rule.match_type == "pattern":
+            row.origin_source = "origin_pattern"
+            row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_pattern_guess,
+                                    raw_value=rule.pattern, best_guess=rule.country_iso,
+                                    confidence=Confidence.medium, method="origin_pattern",
+                                    src_url=row.src_url))
+        else:
+            row.origin_source = "origin_map"
         return
-    # 3. NO supplier fallback. The supplier's country is where the stone is SOLD FROM, not where it
-    #    was quarried -- a trader in one country sells stone from many (a UAE/Turkish supplier ships
-    #    Italian Carrara, Brazilian quartzite, ...). Country of origin is a property of the VARIETY
-    #    (origin_map) or the scraped field; if neither knows it, leave it UNRESOLVED and flag for
-    #    review so origin_map gets expanded -- never stamp the supplier's country as the origin.
+    # 3. supplier-country fallback. Strictly, the supplier's country is where the stone is SOLD FROM,
+    #    not necessarily where it was quarried (a trader can ship stone from many countries) -- so the
+    #    accurate origin is the scraped field or origin_map above. But Medusa REQUIRES an origin for
+    #    its pricing-rule lookup, so a blank breaks the import. We stamp the supplier's default country
+    #    as a LOW-confidence fallback and flag it for review, which both lets the product import and
+    #    queues it so origin_map gets expanded with the real per-variety origin.
+    iso = _to_iso(source_cfg.origin_default, ref)
+    if iso:
+        row.origin_country_code = iso
+        row.origin_source = "supplier_default"
+        row.origin_confidence = _conf_name(Confidence.low)
+        row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_supplier_default,
+                                raw_value=row.raw_origin, best_guess=iso, confidence=Confidence.low,
+                                method="supplier_default", src_url=row.src_url))
+        return
+    # 4. no scrape, no map, no supplier default: leave UNRESOLVED and flag. The Process gate rejects
+    #    such a row (origin is required downstream) rather than emit a Medusa-breaking blank.
     row.origin_source = "unresolved"
     row.origin_confidence = _conf_name(Confidence.none)
     row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_unresolved,
@@ -350,7 +377,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
         derive_category(row, ref)
         derive_dimensions(row, ref)
         derive_bundle_size(row, ref, source_cfg)
-        derive_origin(row, ref)
+        derive_origin(row, ref, source_cfg)
         derive_ports(row, ref, source_cfg)
         derive_title(row)
         derive_description(row)

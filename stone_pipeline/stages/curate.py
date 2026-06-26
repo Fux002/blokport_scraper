@@ -154,6 +154,9 @@ def _alias_list(raw: str) -> list[str]:
 # (the backbone dictates which combinations a product may be uploaded as)
 _DEFAULT_FINISHES = ["Polished", "Honed", "Leathered", "Brushed", "Flamed",
                      "Sandblasted", "Sawn Cut", "Raw"]
+# Generic fallback colour for a variety whose source supplies none (e.g. zucchi). Keeps the variety
+# + its products priceable. Must exist as a colour attribute in Medusa (see attributes_to_add.csv).
+_FALLBACK_COLOR = "Natural"
 
 
 # format words to strip from a variety name (singular + plural of every category)
@@ -486,8 +489,39 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # A variety is the same material in any format, so it is emitted into every
     # ACTIVE category's import file (the existing backbone is identical across
     # categories). Tiles are excluded until they are wired up (active_branches).
+    # Observed attributes per new variety: the UNION across EVERY product that maps to it, not just
+    # the one row that triggered the mint. Otherwise a variety is born with one product's colour/
+    # finish/quality and leaf-gaps every sibling that differs (Azzurra Bay), or gets an empty colour
+    # set when its trigger product had none -- nulling colour_id for all its products (Antibes).
+    obs_union: dict[str, dict[str, set]] = {}
+    for _r in rows:
+        _nm = (_r.variety_match_key or _r.raw_name or "").strip()
+        if not _nm:
+            continue
+        # Resolve the type with the SAME fallback chain the mint title uses (type_name -> raw_type ->
+        # the tree gap's suggested_type), or a row whose type is recovered only via suggested_type
+        # cleans to a different name here than at mint time -> this union misses and the variety is
+        # born with the Natural/default fallback instead of its observed colours/finishes/qualities.
+        _st = (_r.type_name or _r.raw_type
+               or next((g.suggested_type for g in _r.tree_gaps if g.suggested_type), "") or "")
+        _k = proj.norm(_clean_variety(_nm, _st))
+        u = obs_union.setdefault(_k, {"colors": set(), "qualities": set(), "finishes": set()})
+        if _r.color_name:
+            u["colors"].add(title_case(_r.color_name))
+        if _r.quality_name:
+            u["qualities"].add(_r.quality_name.strip())
+        if _r.finish_name:
+            u["finishes"].add(title_case(_r.finish_name))
+
     for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed in new_variant_rows:
-        finishes = list(dict.fromkeys([*([obs_finish] if obs_finish else []), *_DEFAULT_FINISHES]))
+        _u = obs_union.get(proj.norm(title), {"colors": set(), "qualities": set(), "finishes": set()})
+        # colour is REQUIRED for a Medusa product; a source like zucchi often supplies none, so a
+        # variety would be born colourless and null every product's colour_id. Fall back to the
+        # generic 'Multicolor' (a real attribute) so the variety + its products are always priceable.
+        colors = sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_FALLBACK_COLOR]
+        qualities = sorted(_u["qualities"]) or [obs_quality]
+        finishes = list(dict.fromkeys([*sorted(_u["finishes"]),
+                                       *([obs_finish] if obs_finish else []), *_DEFAULT_FINISHES]))
         # A cross-branch sibling's variety already exists in another branch carrying the scraped
         # spelling as an alias (alias_new). Carry that SAME alias onto the new sibling so its product
         # resolves in ONE upload, not two (mint the variety AND attach its alias in the same leg --
@@ -518,9 +552,9 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 "variant": title,
                 "category": category(branch).label,
                 "stone_type": stone_type,
-                "color": [obs_color] if obs_color else [],
+                "color": colors,
                 "finishes": finishes,
-                "qualities": [obs_quality],
+                "qualities": qualities,
                 "aliases": list(sib_aliases),
                 "image_file": fname,  # same name as the variant Image, for consistency
                 "exists": "no",
@@ -687,8 +721,12 @@ def write_curation(result: CurationResult) -> None:
         img = (row.get("Image") or "").strip()
         return bool(cur - e[0]) or (bool(img) and img != e[1])   # new alias OR new image
 
+    # never offer a variant that is flagged for deletion (mis-typed/junk) for (re)loading
+    _del = SETTINGS.paths.review_dir / "variants_to_delete.csv"
+    _delete_keys = ({(r.get("Key") or "").strip() for r in csv.DictReader(_del.open(encoding="utf-8-sig"))}
+                    if _del.exists() else set())
     before = len(upload_rows)
-    upload_rows = [r for r in upload_rows if _is_real_delta(r)]
+    upload_rows = [r for r in upload_rows if _is_real_delta(r) and r["Key"] not in _delete_keys]
     if before != len(upload_rows):
         log.info("update delta pruned", extra={"extra_fields": {"dropped_noops": before - len(upload_rows)}})
     if upload_rows:

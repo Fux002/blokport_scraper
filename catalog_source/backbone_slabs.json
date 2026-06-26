@@ -51763,55 +51763,6 @@
       "key": "slab_granite_blue_snake_c81e3962-9a0c-4abb-ad2f-ef1557714831"
     },
     {
-      "variant_id": 1320,
-      "variant": "Blue Sodalite",
-      "category": "Slabs",
-      "stone_type": "Granite",
-      "color": [
-        "Blue"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Blue Sodalite Granite",
-        "Azul Sodalite",
-        "Azul Sodalite Granite",
-        "Blu Sodalite",
-        "Blu Sodalite Granite",
-        "Bleu Sodalite",
-        "Bleu Sodalite Granite",
-        "Sodalite Blue",
-        "Sodalite Blue Granite"
-      ],
-      "image_file": "slab_rb_1320_granite_blue_sodalite.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_granite_blue_sodalite_f8505ee7-c8b3-4d4c-b1ab-9d000096f9d2"
-    },
-    {
       "variant_id": 1321,
       "variant": "Blue Sucuri",
       "category": "Slabs",
@@ -182870,7 +182821,7 @@
       "variant_id": 3956,
       "variant": "Sodalita",
       "category": "Slabs",
-      "stone_type": "Granite",
+      "stone_type": "Sodalite Syenite",
       "color": [
         "Blue"
       ],
@@ -182915,7 +182866,7 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_granite_sodalita_4615f386-dd2a-4f69-8445-c210cd9e9816"
+      "key": "slab_sodalite_syenite_sodalita_53f4e554-78aa-52f5-b9a2-9ed216d89f97"
     },
     {
       "variant_id": 3957,
@@ -460951,7 +460902,7 @@
       "variant_id": 9479,
       "variant": "Sodalite",
       "category": "Slabs",
-      "stone_type": "Marble",
+      "stone_type": "Sodalite Syenite",
       "color": [
         "Blue",
         "Grey"
@@ -460989,7 +460940,7 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_marble_sodalite_4e05374a-b1da-46f6-9f23-d6d2d63b2585"
+      "key": "slab_sodalite_syenite_sodalite_11a62ae3-0f46-50c3-a49b-6a5b7006286b"
     },
     {
       "variant_id": 9480,
@@ -508018,35 +507969,6 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "slab_quartz_rose_abc8c68a-4c77-4958-b9d8-8e837ab6bc1c"
-    },
-    {
-      "variant_id": 10516,
-      "variant": "Sodalita",
-      "category": "Slabs",
-      "stone_type": "Quartz",
-      "color": [
-        "Blue"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Sawn Cut",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Sodalita Quartz"
-      ],
-      "image_file": "slab_rb_10516_quartz_sodalita.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_quartz_sodalita_e6f46130-a147-4cb9-a4e1-7c9e20cac202"
     },
     {
       "variant_id": 196,
@@ -586671,6 +586593,545 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "slab_soapstone_alberene_soapstone_4bc6e2b0-fba1-44dd-9471-fa68bf7b845a"
+    },
+    {
+      "variant_id": 12194,
+      "variant": "Matarazzo",
+      "category": "Slabs",
+      "stone_type": "Dolomite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Matarazzo"
+      ],
+      "image_file": "slab_dolomite_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_dolomite_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7"
+    },
+    {
+      "variant_id": 12195,
+      "variant": "Antibes",
+      "category": "Slabs",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_quartzite_antibes_094239f0-dad0-5ba7-88c9-de19f1515f15.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_quartzite_antibes_094239f0-dad0-5ba7-88c9-de19f1515f15"
+    },
+    {
+      "variant_id": 12196,
+      "variant": "Blue Crystal",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "Blue"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_blue_crystal_9d0a581d-77fa-5c66-b56f-d56e8eeb204b.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_blue_crystal_9d0a581d-77fa-5c66-b56f-d56e8eeb204b"
+    },
+    {
+      "variant_id": 12197,
+      "variant": "Bonsai Crystal",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "Green"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_bonsai_crystal_58ddf54c-8ea6-597f-b6f5-054f7660b362.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_bonsai_crystal_58ddf54c-8ea6-597f-b6f5-054f7660b362"
+    },
+    {
+      "variant_id": 12198,
+      "variant": "Botanic Crystal",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "Green"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_botanic_crystal_3934b539-1b6d-5608-bfe9-bd0bb8ca1471.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_botanic_crystal_3934b539-1b6d-5608-bfe9-bd0bb8ca1471"
+    },
+    {
+      "variant_id": 12199,
+      "variant": "Cappadocia",
+      "category": "Slabs",
+      "stone_type": "Quartzite",
+      "color": [
+        "Beige"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Cappadocia"
+      ],
+      "image_file": "slab_quartzite_cappadocia_5abea2d7-cc74-5cd9-b9ae-0c3a2b143455.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_quartzite_cappadocia_5abea2d7-cc74-5cd9-b9ae-0c3a2b143455"
+    },
+    {
+      "variant_id": 12200,
+      "variant": "Celestial Frost",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_celestial_frost_1ee0e973-2722-57c2-b418-2aa293c21841.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_celestial_frost_1ee0e973-2722-57c2-b418-2aa293c21841"
+    },
+    {
+      "variant_id": 12201,
+      "variant": "Crystal Angelus",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_crystal_angelus_86347705-f52d-54c3-a147-61c223c7791f.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_crystal_angelus_86347705-f52d-54c3-a147-61c223c7791f"
+    },
+    {
+      "variant_id": 12202,
+      "variant": "Crystal Arborium",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_crystal_arborium_fd3e4632-d192-5740-baed-8cd159bd658a.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_crystal_arborium_fd3e4632-d192-5740-baed-8cd159bd658a"
+    },
+    {
+      "variant_id": 12203,
+      "variant": "Crystal Cave",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_crystal_cave_a07fcc59-318e-55c1-9c6e-978b9697571a.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_crystal_cave_a07fcc59-318e-55c1-9c6e-978b9697571a"
+    },
+    {
+      "variant_id": 12204,
+      "variant": "Crystal D'amore",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_crystal_d_amore_7308a749-4657-596e-8603-6fabf8cfc297.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_crystal_d_amore_7308a749-4657-596e-8603-6fabf8cfc297"
+    },
+    {
+      "variant_id": 12205,
+      "variant": "Crystal Frost",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_crystal_frost_b854e834-1e52-55c2-a118-b9c74072bcd2.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_crystal_frost_b854e834-1e52-55c2-a118-b9c74072bcd2"
+    },
+    {
+      "variant_id": 12206,
+      "variant": "Crystal Lake",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_crystal_lake_c3fee3ec-997e-50f4-94a4-31791bc800f9.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_crystal_lake_c3fee3ec-997e-50f4-94a4-31791bc800f9"
+    },
+    {
+      "variant_id": 12207,
+      "variant": "Crystal Quartzite",
+      "category": "Slabs",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_quartzite_crystal_quartzite_b9dfa7ab-2bbe-582c-9002-16010bfa0d25.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_quartzite_crystal_quartzite_b9dfa7ab-2bbe-582c-9002-16010bfa0d25"
+    },
+    {
+      "variant_id": 12208,
+      "variant": "Crystal Saint",
+      "category": "Slabs",
+      "stone_type": "Crystal",
+      "color": [
+        "Golden"
+      ],
+      "finishes": [
+        "Honed",
+        "Leathered",
+        "Polished",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_crystal_crystal_saint_787b9229-7477-5587-af8b-d40a988d70e1.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_crystal_crystal_saint_787b9229-7477-5587-af8b-d40a988d70e1"
+    },
+    {
+      "variant_id": 12209,
+      "variant": "Kronos",
+      "category": "Slabs",
+      "stone_type": "Dolomite",
+      "color": [
+        "Brown"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_dolomite_kronos_b9e7d092-4862-57a4-8fbb-5fc210b3f609.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_dolomite_kronos_b9e7d092-4862-57a4-8fbb-5fc210b3f609"
+    },
+    {
+      "variant_id": 12210,
+      "variant": "Meridian",
+      "category": "Slabs",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_quartzite_meridian_4d41e000-8c18-56dc-896e-400c25385ab9.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_quartzite_meridian_4d41e000-8c18-56dc-896e-400c25385ab9"
+    },
+    {
+      "variant_id": 12211,
+      "variant": "Mona Lisa",
+      "category": "Slabs",
+      "stone_type": "Dolomite",
+      "color": [
+        "Cream"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "MONALISA",
+        "Mona Lisa"
+      ],
+      "image_file": "slab_dolomite_mona_lisa_7ab01972-00b4-51fd-baa3-ad1eb7a9bc45.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_dolomite_mona_lisa_7ab01972-00b4-51fd-baa3-ad1eb7a9bc45"
+    },
+    {
+      "variant_id": 12212,
+      "variant": "Scandinavo",
+      "category": "Slabs",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "slab_quartzite_scandinavo_cba39d9c-5000-5031-b25c-09891a97986d.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_quartzite_scandinavo_cba39d9c-5000-5031-b25c-09891a97986d"
     }
   ]
 }

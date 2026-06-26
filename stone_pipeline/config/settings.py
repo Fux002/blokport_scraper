@@ -332,7 +332,14 @@ class ImagesConfig:
     concurrency: int = 8
     timeout: float = 20.0
     retries: int = 3
-    require_images: bool = False  # when true, a row with no image is rejected (Stage 9)
+    require_images: bool = True  # a product with no image is rejected (Stage 9) -- we only list
+    # products that have a picture, so 3_products_*.csv (and the inventory delta derived from the
+    # same emitted set) never carry an imageless product.
+    # Number of numbered "Product Image N" columns a slab/tile product can fill. The pipeline
+    # fills as many as the product actually has, up to this cap; the rest stay blank. Shared by
+    # the image-slotting stage and the emit columns so they can never drift (the template header
+    # must carry exactly this many Product Image columns -- asserted in tests).
+    product_image_slots: int = 15
     processing: ImageProcessingConfig = field(default_factory=ImageProcessingConfig)
 
 
@@ -483,10 +490,15 @@ CATEGORIES: tuple[Category, ...] = (
 
 _BY_NAME = {c.name: c for c in CATEGORIES}
 _BY_LABEL = {c.label: c for c in CATEGORIES}
+_BY_LABEL_CF = {c.label.casefold(): c for c in CATEGORIES}  # plural label, casefolded
 
 
 def category(name: str) -> "Category | None":
-    return _BY_NAME.get((name or "").strip().casefold())
+    # accept the singular name ('slab') OR the plural label ('Slabs') so a scraper that tags
+    # its format in the plural ('Blocks'/'Tiles') still resolves the explicit tag instead of
+    # silently falling through to the slab default.
+    key = (name or "").strip().casefold()
+    return _BY_NAME.get(key) or _BY_LABEL_CF.get(key)
 
 
 def category_by_label(label: str) -> "Category | None":

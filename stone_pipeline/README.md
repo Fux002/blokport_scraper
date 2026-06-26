@@ -8,8 +8,8 @@ source is one thin adapter.
 ## Status: all milestones M0 to M12 implemented
 
 The pipeline runs Stage 0 to Stage 10 front to back on all four sources and emits
-45-column import CSVs that validate against the real upload and the three
-reference maps. Fully tested (87 tests). Two integration points are intentionally
+55-column import CSVs (incl. Product Image 1…15) that validate against the real
+upload and the three reference maps. Fully tested (87 tests). Two integration points are intentionally
 left dry/unwired until real infrastructure exists: the S3 image backend (a local
 staging backend runs in its place now) and the Medusa API sink (the CSV emitter
 runs in its place now); both are one config/sink swap, not a redesign.

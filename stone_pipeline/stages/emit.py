@@ -65,11 +65,8 @@ COLUMN_MAP: dict[str, Callable[[CanonicalRow, SourceConfig], str]] = {
     "Right Image": lambda r, c: _slot(r.oriented_image_keys, 1),
     "Back Image": lambda r, c: _slot(r.oriented_image_keys, 2),
     "Left Image": lambda r, c: _slot(r.oriented_image_keys, 3),
-    "Product Image 1": lambda r, c: _slot(r.product_image_keys, 0),
-    "Product Image 2": lambda r, c: _slot(r.product_image_keys, 1),
-    "Product Image 3": lambda r, c: _slot(r.product_image_keys, 2),
-    "Product Image 4": lambda r, c: _slot(r.product_image_keys, 3),
-    "Product Image 5": lambda r, c: _slot(r.product_image_keys, 4),
+    # "Product Image 1".."Product Image N" are added below (see _add_product_image_columns),
+    # one per SETTINGS.images.product_image_slots, filled in order and blank beyond what exists.
     "Variant Title": lambda r, c: SETTINGS.backend.variant_title,
     "Variant Sku": _sku,
     "Variant Manage Inventory": lambda r, c: SETTINGS.backend.variant_manage_inventory,
@@ -95,6 +92,19 @@ COLUMN_MAP: dict[str, Callable[[CanonicalRow, SourceConfig], str]] = {
     "STN Bundle Size": lambda r, c: _num(r.bundle_size),
     "STN Specification File Ids": lambda r, c: "",
 }
+
+
+def _add_product_image_columns(column_map: dict, slots: int) -> None:
+    """Map 'Product Image 1'..'Product Image {slots}' to the row's product image keys in order.
+    A factory captures each index so the closures don't share the loop variable."""
+    def _mapper(index: int) -> Callable[[CanonicalRow, SourceConfig], str]:
+        return lambda r, c: _slot(r.product_image_keys, index)
+
+    for index in range(slots):
+        column_map[f"Product Image {index + 1}"] = _mapper(index)
+
+
+_add_product_image_columns(COLUMN_MAP, SETTINGS.images.product_image_slots)
 
 
 def read_template_columns(path: Path | None = None) -> list[str]:

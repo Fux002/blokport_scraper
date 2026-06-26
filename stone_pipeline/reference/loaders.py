@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -61,9 +62,19 @@ class Attributes:
     category_pcat: dict[str, str] = field(default_factory=dict)  # 'Slabs'/'Blocks' -> pcat id
 
     def resolve_id(self, category: str, name: str) -> Optional[tuple[str, str]]:
-        """Return (canonical_name, id) for an exact normalized name, else None."""
+        """Return (canonical_name, id) for an exact normalized name, else None. For types, a synonym
+        ('Sodalite' -> 'Sodalite Syenite') falls back to the canonical attribute so a commercial/short
+        name resolves without polluting the type vocabulary itself."""
         table = self.by_category.get(category, {})
-        return table.get(_norm(name))
+        hit = table.get(_norm(name))
+        if hit is not None:
+            return hit
+        if category == "type":
+            from stone_pipeline.adapters.tokens import TYPE_SYNONYMS
+            canonical = TYPE_SYNONYMS.get(_norm(name))
+            if canonical:
+                return table.get(_norm(canonical))
+        return None
 
     def canonical_names(self, category: str) -> list[str]:
         return [canon for canon, _ in self.by_category.get(category, {}).values()]
@@ -365,13 +376,21 @@ class OriginMap:
     rules: list[OriginRule] = field(default_factory=list)
 
     def lookup(self, name: str) -> Optional[OriginRule]:
+        # exact variety match first (O(1) via a lazily-built index -- there can be 10k+ rules), then
+        # a name PATTERN. Patterns are single tokens (e.g. 'oman', 'persa') and MUST match a whole
+        # word, never a substring -- else 'oman' matches "rOMANo" (Italian travertine -> Oman) and
+        # 'india' matches "INDIAna" (US limestone -> India). Tokenize with the same [a-z]+ rule the
+        # builder uses, so pattern membership is exact. The index is cached after the first call.
+        if not hasattr(self, "_variety_index"):
+            self._variety_index = {_norm(r.pattern): r for r in self.rules if r.match_type == "variety"}
+            self._pattern_rules = [(_norm(r.pattern), r) for r in self.rules if r.match_type == "pattern"]
         norm_name = _norm(name)
-        # exact variety match first, then substring pattern
-        for rule in self.rules:
-            if rule.match_type == "variety" and _norm(rule.pattern) == norm_name:
-                return rule
-        for rule in self.rules:
-            if rule.match_type == "pattern" and _norm(rule.pattern) in norm_name:
+        hit = self._variety_index.get(norm_name)
+        if hit is not None:
+            return hit
+        tokens = set(re.findall(r"[a-z]+", norm_name))
+        for pat, rule in self._pattern_rules:
+            if pat in tokens:
                 return rule
         return None
 

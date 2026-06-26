@@ -27,6 +27,8 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.layout import RunLayout, write_steps_md
 from stone_pipeline.core.manifest import Manifest, StageMetric, content_hash
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline import gates
+from stone_pipeline.gates import definitions as gate_defs
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.fingerprint import check_fingerprint
@@ -91,10 +93,30 @@ def _write_gap_queue(rows: list[CanonicalRow], path: Path) -> int:
 
 
 def find_scrape_file(source: str) -> Optional[Path]:
-    """The latest live scrape for a source at data/<source>/<timestamp>/products.csv
-    (written by the scrapers). Returns None if the source has never been scraped."""
-    live = sorted(SETTINGS.paths.data_dir.glob(f"{source}/*/products.csv"))
-    return live[-1] if live else None
+    """The latest USABLE live scrape for a source at data/<source>/<timestamp>/products.csv.
+    Skips a folder whose completion marker says the scrape was truncated/incomplete, so a crashed
+    or short scrape never becomes the authoritative input (legacy folders with no marker are still
+    accepted for backward compatibility). Returns None if the source has never been scraped."""
+    import json
+    for products in sorted(SETTINGS.paths.data_dir.glob(f"{source}/*/products.csv"), reverse=True):
+        marker = products.parent / "scrape_complete.json"
+        if marker.exists():
+            try:
+                if not json.loads(marker.read_text(encoding="utf-8")).get("complete", True):
+                    continue  # marker present and says incomplete -> skip this truncated run
+            except (ValueError, OSError):
+                pass
+        return products
+    return None
+
+
+def _apply_gate(rows, contract, manifest, run_log):
+    """Run one boundary gate, record its status on the manifest, and log a one-line summary.
+    Returns the GateReport so the caller can decide whether a FAILED status aborts the run."""
+    report = gates.apply(rows, contract)
+    manifest.gate_status[report.module] = report.status
+    run_log.info(f"{report.module} gate", extra={"extra_fields": {"summary": report.summary()}})
+    return report
 
 
 def run_source(
@@ -147,6 +169,20 @@ def run_source(
     )
     manifest.totals["backend_fingerprint_ok"] = 1
 
+    # SCRAPE-HEALTH GUARD (before any stage): an empty or catastrophically-short scrape -- auth/
+    # endpoint changed, or a truncated fetch that slipped past the completion marker -- must abort
+    # HERE. Proceeding would feed the discontinuation lane and stock-0 every product the scrape
+    # failed to fetch. The per-source floor is >=1 (so 0 rows always fails) and is the catastrophic
+    # threshold, NOT a tight bound on normal supplier inventory variation.
+    _floor = max(1, load_source(source).min_expected_rows)
+    if frame.height < _floor:
+        run_log.error("scrape below floor -- failed/empty scrape; aborting (NO delist)",
+                      extra={"extra_fields": {"rows": frame.height, "min_expected": _floor}})
+        manifest.write(layout.diagnostics / "manifest.json")
+        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
+                       gates=manifest.gate_status)
+        raise SystemExit(2)
+
     # Stage 0: health
     contract = contracts.load_contract(source) or adapter.generate_contract(frame)
     baseline = contracts.load_baselines().get(source)
@@ -156,7 +192,8 @@ def run_source(
     if report.status == health.FAILED:
         run_log.error("health FAILED; aborting before emit")
         manifest.write(layout.diagnostics / "manifest.json")
-        write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={})
+        write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
+                       gates=manifest.gate_status)
         raise SystemExit(2)
     health.update_baseline_if_ok(report, contract, health.now_iso())
     degraded = report.status == health.DEGRADED
@@ -166,6 +203,30 @@ def run_source(
     for row in rows:
         row.degraded = degraded
     manifest.add_stage(StageMetric(stage="ingest", rows_in=frame.height, rows_out=len(rows)))
+
+    # guard: a new/changed adapter that mis-maps a required field silently drops the rows missing
+    # it and would still "succeed" on the survivors. The ingest gate only sees rows that survived
+    # adapt, so catch a large adapt-time loss here -- almost always a wiring bug, not real data.
+    dropped = frame.height - len(rows)
+    if frame.height and dropped > 0.5 * frame.height:
+        run_log.error("ingest: adapter dropped >50% of rows -- likely a mis-mapped required field; aborting",
+                      extra={"extra_fields": {"rows_in": frame.height, "rows_out": len(rows), "dropped": dropped}})
+        manifest.write(layout.diagnostics / "manifest.json")
+        write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
+                       gates=manifest.gate_status)
+        raise SystemExit(2)
+
+    # Ingest gate: the post-scrape check -- report what the scrape is missing per the ingest
+    # contract before the generic pipeline runs. A field absent across most of the batch is a
+    # systemically incomplete scrape and aborts here, with the exact gap named.
+    ingest_gate = _apply_gate(rows, gate_defs.INGEST, manifest, run_log)
+    if ingest_gate.status == gates.FAILED:
+        run_log.error("ingest gate FAILED; aborting before clean -- scrape is missing required fields",
+                      extra={"extra_fields": {"violations": ingest_gate.violations}})
+        manifest.write(layout.diagnostics / "manifest.json")
+        write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
+                       gates=manifest.gate_status)
+        raise SystemExit(2)
 
     # Stage 2: keys and dedup
     dd = keys_dedupe.run(rows)
@@ -191,6 +252,11 @@ def run_source(
                                    gapped=stats.missing_variation + stats.missing_leaf,
                                    extra={"validated": stats.validated, "snapped": stats.snapped}))
 
+    # Clean gate: resolved attribute names must be the canonical spelling for their id (the safety
+    # net for the casing-leak bug class), and surface how many rows still carry an unresolved tree
+    # gap. Soft -- never rejects here; validate is the authority on what emits.
+    _apply_gate(rows, gate_defs.clean_contract(ref), manifest, run_log)
+
     # Stage 6: derivation
     source_cfg = load_source(source)
     derive.run(rows, ref, source_cfg)
@@ -206,6 +272,11 @@ def run_source(
             row.surrogate_key, row.variation_id, row.color_id, row.finish_id,
             row.quality_id, row.type_id, row.title, row.bundle_size, "|".join(row.image_keys),
         ])
+    # Process gate: enforce the Medusa-importable output contract (origin country code is required
+    # for Medusa's pricing-rule lookup). Runs before validate so any reject it stamps flows through
+    # validate's existing emit/review/reject routing.
+    _apply_gate(rows, gate_defs.PROCESS, manifest, run_log)
+
     # Stage 9: validation
     validation = validate.run(rows, emit_on_review=source_cfg.emit_on_review,
                               require_images=False if inventory_only else SETTINGS.images.require_images)
@@ -284,7 +355,7 @@ def run_source(
     report.write(layout.diagnostics / "health.json")
     # the per-source product checklist
     write_steps_md(layout, source=source, run_id=run_id, health=report.status,
-                   counts=manifest.totals)
+                   counts=manifest.totals, gates=manifest.gate_status)
 
     run_log.info(
         "run done",
@@ -295,9 +366,53 @@ def run_source(
             "rejected": len(validation.rejects),
             "distinct_gaps": gap_count,
             "health": report.status,
+            "gates": manifest.gate_status,
         }},
     )
     return manifest
+
+
+def _format_gate_status(gate_status: dict[str, str]) -> str:
+    """Render module gates in pipeline order, e.g. 'ingest=OK clean=OK process=OK'."""
+    order = ["ingest", "clean", "process", "images", "upgrade"]
+    ordered = [m for m in order if m in gate_status] + [m for m in gate_status if m not in order]
+    return " ".join(f"{m}={gate_status[m]}" for m in ordered) or "(none)"
+
+
+def gate_overview_lines(results: dict[str, Manifest], requested: list[str]) -> list[str]:
+    """A per-source gate table for a multi-source run: at a glance, which module each
+    source falls over in. A requested source absent from `results` aborted before emit."""
+    lines = ["", "  Gate overview (per source):"]
+    for source in requested:
+        if source in results:
+            status = _format_gate_status(results[source].gate_status)
+        else:
+            status = "ABORTED before emit"
+        lines.append(f"    {source:<14} {status:<34} [{load_source(source).mode}]")
+    lines.append("")
+    return lines
+
+
+def auto_sources_blocked(results: dict[str, Manifest], requested: list[str],
+                         mode_lookup=None) -> list[tuple[str, str]]:
+    """Sources declared `mode: auto` that did NOT cleanly pass their gates -- they must not
+    auto-load. A source aborted (absent from results) or with any FAILED gate is blocked. A
+    review-mode source that failed is already quarantined, so it is not blocked here.
+
+    `mode_lookup` is injectable for testing; it defaults to reading sources.yaml.
+    """
+    mode_of = mode_lookup or (lambda s: load_source(s).mode)
+    blocked: list[tuple[str, str]] = []
+    for source in requested:
+        if mode_of(source) != "auto":
+            continue
+        if source not in results:
+            blocked.append((source, "aborted before emit"))
+            continue
+        failed = [m for m, status in results[source].gate_status.items() if status == gates.FAILED]
+        if failed:
+            blocked.append((source, f"gate(s) FAILED: {', '.join(sorted(failed))}"))
+    return blocked
 
 
 def print_summary(manifest: Manifest) -> None:
@@ -307,6 +422,7 @@ def print_summary(manifest: Manifest) -> None:
         "",
         f"  source            {manifest.source}",
         f"  health            {manifest.health_status}",
+        f"  gates             {_format_gate_status(manifest.gate_status)}",
         f"  rows in           {t.get('rows', 0)}",
         f"  emitted           {t.get('emitted', 0)}",
         f"  rejected          {t.get('rejected', 0)}",
@@ -355,14 +471,22 @@ def main(argv: Optional[list[str]] = None) -> int:
             results = run_all(requested)
             for manifest in results.values():
                 print_summary(manifest)
+            print("\n".join(gate_overview_lines(results, requested)))
             # exit non-zero if a source that HAD data failed to produce output (run_all isolates a
             # failing source by omitting it from results) -- so a scheduler is alerted, not misled.
             missing = [s for s in requested if s not in results]
             if missing:
                 log.error("run all: source(s) with data failed to produce output",
                           extra={"extra_fields": {"failed": missing}})
-                return 1
-            return 0
+            # trust ladder: a source promoted to `mode: auto` may not auto-load if its gates did not
+            # pass. Keep it in review (or fix the source) -- a new/changed source can't silently push
+            # bad data live just because it's marked auto.
+            blocked = auto_sources_blocked(results, requested)
+            if blocked:
+                log.error("auto-mode source(s) did not pass their gates -- refusing to promote; "
+                          "keep them in review or fix the source",
+                          extra={"extra_fields": {"blocked": dict(blocked)}})
+            return 1 if (missing or blocked) else 0
         manifest = run_source(target)
         print_summary(manifest)
     except SystemExit as exc:

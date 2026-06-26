@@ -48,6 +48,30 @@ def test_bundle_defaults_with_flag(ref, cfg):
     assert any(f.code == FlagCode.bundle_default for f in row.review_flags)
 
 
+def test_parsed_weight_is_tonnes_not_kilograms(ref, cfg):
+    # units.csv converts weight to kg; the emitted Product Weight (and synthetic fill) is tonnes.
+    # A scraped '300 kg' slab must ship 0.3 t, not 300 -- so parsed and synthetic agree on unit.
+    row = _slab_row(raw_weight="300 kg")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert abs(row.weight - 0.3) < 1e-6
+    row2 = _slab_row(raw_weight="0.3 ton")
+    derive.derive_category(row2, ref)
+    derive.derive_dimensions(row2, ref)
+    assert abs(row2.weight - 0.3) < 1e-6  # 0.3 t == 300 kg -> same tonnes value
+
+
+def test_bundle_zero_count_falls_through_to_default(ref, cfg):
+    # A sold-out slab reports slab_count '0'; '0'.isdigit() is True but a bundle of
+    # zero is contradictory -- it must fall through, never emit sold_in_bundle + size 0.
+    row = _slab_row(raw_slab_count="0")
+    derive.derive_category(row, ref)
+    derive.derive_bundle_size(row, ref, cfg)
+    assert row.sold_in_bundle is True
+    assert row.bundle_size == cfg.default_bundle_size
+    assert row.bundle_size != 0
+
+
 def test_bundle_from_area_division(ref, cfg):
     row = _slab_row(raw_total_m2="55.0", raw_per_slab_m2="5.5")
     derive.derive_category(row, ref)
@@ -115,18 +139,49 @@ def test_ports_belong_to_supplier(ref, cfg):
     assert row.port_ids and all(pid in ref.ports.iso_by_port for pid in row.port_ids)
 
 
-def test_origin_unresolved_when_unknown_never_supplier(ref):
-    # no scraped country + variety not in origin_map -> UNRESOLVED (flagged for review), NEVER the
-    # supplier's country. The supplier is where the stone is sold from, not where it was quarried.
-    row = _slab_row(variation_name="Verde Ubatuba", raw_origin="")
-    derive.derive_origin(row, ref)
-    assert not row.origin_country_code              # blank, not the supplier's "IT"
+# a synthetic name no exact origin_map rule and no geographic pattern can resolve, so the
+# fallback tiers below are genuinely exercised even as the real map grows.
+_UNKNOWN_VARIETY = "Zzx Nowhere Fictional Stone"
+
+
+def test_origin_falls_back_to_supplier_default_flagged(ref, cfg):
+    # no scraped country + variety not in origin_map -> stamp the supplier's default country as a
+    # LOW-confidence fallback (Medusa requires an origin for pricing rules) and flag it for review
+    # so origin_map can be expanded with the real per-variety origin.
+    row = _slab_row(variation_name=_UNKNOWN_VARIETY, raw_origin="")
+    derive.derive_origin(row, ref, cfg)
+    assert row.origin_country_code == cfg.origin_default      # the supplier default ("IT")
+    assert row.origin_source == "supplier_default"
+    assert row.origin_confidence == "low"
+    assert any(f.code == FlagCode.origin_supplier_default for f in row.review_flags)
+
+
+def test_origin_unresolved_when_no_supplier_default(ref):
+    # a source with no origin_default and no scrape/map origin stays UNRESOLVED + flagged; the
+    # Process gate rejects it rather than emit a Medusa-breaking blank.
+    cfg = load_source("polonine")
+    cfg.origin_default = ""
+    row = _slab_row(variation_name=_UNKNOWN_VARIETY, raw_origin="")
+    derive.derive_origin(row, ref, cfg)
+    assert not row.origin_country_code
     assert row.origin_source == "unresolved"
+    assert any(f.code == FlagCode.origin_unresolved for f in row.review_flags)
 
 
-def test_origin_accepts_country_name(ref):
+def test_origin_pattern_generalizes_to_new_variety(ref, cfg):
+    # a brand-new variety the exact tier has never seen still resolves via a geographic name PATTERN
+    # ('persa' -> BR), carrying origin onto new variants -- emitted at medium confidence but FLAGGED
+    # so it surfaces for a one-time confirm into the master reference.
+    row = _slab_row(variation_name="Verde Persa Imperiale XL", raw_origin="")
+    derive.derive_origin(row, ref, cfg)
+    assert row.origin_country_code == "BR"
+    assert row.origin_source == "origin_pattern"
+    assert any(f.code == FlagCode.origin_pattern_guess for f in row.review_flags)
+
+
+def test_origin_accepts_country_name(ref, cfg):
     row = _slab_row(raw_origin="India")
-    derive.derive_origin(row, ref)
+    derive.derive_origin(row, ref, cfg)
     assert row.origin_country_code == "IN"      # name resolved via country_codes
     assert row.origin_source == "scrape_field"
 

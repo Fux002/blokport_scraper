@@ -38,6 +38,20 @@ and has an **adapter** mapping that CSV to the canonical schema. Adapters are
 - `test_every_adapter_has_a_fixture_and_config` fails if an adapter is missing its fixture or its
   `sources.yaml` entry — catching a half-wired source before release.
 - `python -m stone_pipeline.run <source>` raises a clear error if the source has no adapter.
+- **Certify's `vocab` check** (`python -m stone_pipeline.certify <source>`) catches a **swapped
+  attribute column** — if your `raw_finish` values resolve as colours (etc.), it fails. The
+  self-test alone can't catch this (the golden file is made by the same adapter), so this is the
+  real correctness gate. It skips an attribute with <5 values or values that resolve nowhere (novel
+  varieties never false-trip it).
+- **`source_code` must be unique** across sources (`test_source_codes_are_unique_across_sources`) —
+  a duplicate/typo'd code would alias another source's SKUs and delist scope.
+- **A >50% adapt-time row drop aborts the run** — a mis-mapped `required_canonical` can't silently
+  discard most of a batch and "succeed" on the survivors.
+- The **format tag is plural-tolerant**: `"Slabs"`/`"Blocks"`/`"Tiles"` resolve the same as the
+  singular, so a plural scraper tag still routes correctly instead of defaulting to slab.
+
+> The hand-eyeball of `expected.json` (step 4) still matters, but the `vocab` check now backstops
+> the most damaging mistake (a column swap) so it can't reach live data on `mode: auto`.
 
 That's it: **adapter + config + fixture**, no manual registry edits, and the name-cleanup +
 matching + tree stages all apply unchanged.

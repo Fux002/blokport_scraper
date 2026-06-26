@@ -193,11 +193,18 @@ def _resolve_type(key: str, name: str, attr: dict) -> str | None:
 
 def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: list[Path],
                        products_csv: Path | None,
-                       assigned_types: dict[str, str] | None = None) -> tuple[set, dict, list[dict]]:
+                       assigned_types: dict[str, str] | None = None,
+                       exclude_ids: set[str] | None = None) -> tuple[set, dict, list[dict]]:
     """Build the set of valid combinations (6-tuples). Returns (combinations, stats,
-    uncovered)."""
+    uncovered). exclude_ids = variation ids slated for deletion in Medusa (variants_to_delete) --
+    they get NO combinations, so a mis-typed junk variant can't ship a combination that breaks the
+    moment the variant is deleted."""
     attr = _load_attributes(attributes_csv)
+    # universal finish fallback: finishes are consistent per product category, so a variation in a
+    # category that declares NO finish is still priceable in 'Raw' rather than dropping uncovered.
+    _raw_finish = attr["finish"].get("raw")
     assigned_types = assigned_types or {}
+    exclude_ids = exclude_ids or set()
     by_key, by_cat_name, by_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
@@ -217,7 +224,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             name = (r.get("Name") or "").strip()
             # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
             # combination references a variation that will not exist after the Medusa cleanup.
-            if vid and not looks_like_artifact(name):
+            if vid and vid not in exclude_ids and not looks_like_artifact(name):
                 export_rows.append((r["Key"].strip(), vid, name))
                 name_of[vid] = name.lower()
     variety: dict[str, dict] = {}
@@ -279,7 +286,8 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         typ = typ or _resolve_type(key, name, attr) or assigned_types.get(nl)   # the variation's own Key, else user-assigned
         colors = colors or {default_color}                 # last resort: catalogue defaults
         quals = quals or {default_qual}
-        if add(cat_pcat.get(prefix), typ, vid, cat_finishes.get(prefix, []), colors, quals):
+        finishes = cat_finishes.get(prefix, []) or ([_raw_finish] if _raw_finish else [])
+        if add(cat_pcat.get(prefix), typ, vid, finishes, colors, quals):
             covered += 1
         else:
             uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix})
@@ -345,9 +353,12 @@ def run() -> Path:
     products = SETTINGS.paths.to_upload_dir / "3_products_all.csv"
     uncovered_file = SETTINGS.paths.review_dir / "tree_uncovered_variations.csv"
     assigned = _load_assigned_types(uncovered_file, _load_attributes(SETTINGS.paths.attributes_csv))
+    delete_file = SETTINGS.paths.review_dir / "variants_to_delete.csv"
+    exclude_ids = {(r.get("Id") or "").strip() for r in csv.DictReader(delete_file.open(encoding="utf-8-sig"))
+                   if (r.get("Id") or "").strip()} if delete_file.exists() else set()
     combinations, stats, uncovered = build_combinations(
         export, SETTINGS.paths.attributes_csv, _backbone_paths(),
-        products if products.exists() else None, assigned)
+        products if products.exists() else None, assigned, exclude_ids)
 
     to_upload = SETTINGS.paths.to_upload_dir
     path = to_upload / "2_valid_combinations.csv"

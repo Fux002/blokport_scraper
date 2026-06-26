@@ -33,13 +33,11 @@ from stone_pipeline.config.contracts import (
 )
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
+# The OK/DEGRADED/FAILED ladder is shared with every module gate (gates/report.py),
+# so the health gate and the boundary gates speak one status vocabulary.
+from stone_pipeline.gates.report import DEGRADED, FAILED, OK, RANK as _RANK
 
 log = logfmt.get_logger("health")
-
-OK = "OK"
-DEGRADED = "DEGRADED"
-FAILED = "FAILED"
-_RANK = {OK: 0, DEGRADED: 1, FAILED: 2}
 
 
 @dataclass

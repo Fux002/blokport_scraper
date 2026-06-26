@@ -76,6 +76,18 @@ def test_vocab_fuzzy_floor_rejects_low_score():
     assert resolver.resolve("Zxqw").value is None
 
 
+def test_name_over_tag_uses_canonical_casing(ref):
+    # 'Z B CREAM QUARTZITE' (varsha, all-caps) mis-tagged Onyx: the explicit name word
+    # wins, but the emitted type_name must be the canonical 'Quartzite', not the raw
+    # uppercase token leaked from the variety name.
+    resolvers = normalize.AttributeResolvers.build(ref)
+    row = CanonicalRow(src_site="varsha", raw_name="Cream QUARTZITE", raw_type="Onyx")
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.type_name == "Quartzite"
+    assert row.type_method == "name_explicit"
+    assert row.type_id is not None
+
+
 # --- Stage 2 keys / dedup -----------------------------------------------------
 def _row(site, key, name="Stone", color="Black"):
     return CanonicalRow(src_site=site, src_natural_key=key, raw_name=name, raw_color=color)

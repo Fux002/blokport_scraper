@@ -91,7 +91,12 @@ class ScraperBase:
             self.images_dir.mkdir(parents=True, exist_ok=True)
         self.products_csv = self.run_dir / "products.csv"
         self.failures_csv = self.run_dir / "failures.csv"
+        self.complete_marker = self.run_dir / "scrape_complete.json"
         self._failures: list[dict] = []
+        # Set True by a scraper that knows it terminated early (e.g. pagination stopped before the
+        # advertised total). The completion marker then records the scrape as INCOMPLETE so the
+        # pipeline refuses to treat this truncated folder as the authoritative latest scrape.
+        self._incomplete = False
         # follow_redirects=False: _request follows hops manually so the SSRF guard
         # validates every one (a public source must not 30x into an internal host).
         self._client = httpx.Client(timeout=self.timeout, follow_redirects=False)
@@ -233,7 +238,19 @@ class ScraperBase:
         self._write_csv(rows)
         self._write_failures()
         self._summary(rows)
+        # Written ONLY after a clean finish: a crash mid-scrape leaves no marker, so the pipeline
+        # falls back to the prior good folder instead of ingesting a half-written products.csv.
+        self.complete_marker.write_text(
+            json.dumps({"rows": len(rows), "complete": not self._incomplete,
+                        "timestamp": self.timestamp}),
+            encoding="utf-8")
         return self.products_csv
+
+    def mark_incomplete(self, reason: str = "") -> None:
+        """A scraper calls this when it knows it stopped short (e.g. pagination broke before the
+        advertised total) so the run is recorded as truncated and not ingested as authoritative."""
+        self._incomplete = True
+        self.log.warning("scrape marked INCOMPLETE: %s", reason or "(no reason given)")
 
     # --- the site-specific bits (subclass implements these) ------------------
     def list_products(self) -> Iterable[Any]:

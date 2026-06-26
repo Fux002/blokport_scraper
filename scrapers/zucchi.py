@@ -82,13 +82,21 @@ class ZucchiScraper(ScraperBase):
         self.log.info("zucchi: %d products", total)
         yield from items
         fetched = len(items)
+        # `pagination` is a PAGE INDEX (0,1,2,...), NOT a row offset -- page 0 is the first 12,
+        # page 1 the next 12. Advance the page number, not the cumulative item count, or the scrape
+        # samples every 12th page and quits early (~180 of 2036).
+        page = 1
         while fetched < total:
-            page = self._fetch_page(fetched)
-            batch = page.get("itens", []) or []
+            batch = self._fetch_page(page).get("itens", []) or []
             if not batch:
+                # ran out of items before the advertised total -> the catalog was truncated (a
+                # transient empty/blocked page, not a real end). Mark the run incomplete so the
+                # pipeline won't treat this short scrape as authoritative and delist the missing.
+                self.mark_incomplete(f"pagination stopped at {fetched}/{total} products")
                 break
             yield from batch
             fetched += len(batch)
+            page += 1
 
     def parse_product(self, item: dict) -> Optional[dict]:
         image_urls, video_url = [], ""

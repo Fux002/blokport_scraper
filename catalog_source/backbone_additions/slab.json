@@ -1,185 +1,41 @@
 [
   {
-    "key": "slab_quartzite_brazilian_white_f514e927-983d-50ae-9aaa-98118cdea823",
-    "variant": "Brazilian White",
+    "key": "slab_sodalite_syenite_sodalite_baia_7dd1c8a3-f2b7-55bf-b230-58c6bc729eaf",
+    "variant": "Sodalite Baia",
+    "category": "Slabs",
+    "stone_type": "Sodalite Syenite",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "SODALITE BAÍA"
+    ],
+    "image_file": "slab_sodalite_syenite_sodalite_baia_7dd1c8a3-f2b7-55bf-b230-58c6bc729eaf.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_quartzite_verdant_5d7cd6d2-217a-5c0c-bcae-f0e6fd502e25",
+    "variant": "Verdant",
     "category": "Slabs",
     "stone_type": "Quartzite",
     "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [
-      "Brazilian White Quartzite"
-    ],
-    "image_file": "slab_quartzite_brazilian_white_f514e927-983d-50ae-9aaa-98118cdea823.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "slab_quartzite_azul_white_401504e5-558d-5154-b228-9dbf693c69b3",
-    "variant": "Azul White",
-    "category": "Slabs",
-    "stone_type": "Quartzite",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [
-      "Azul White Quartzite"
-    ],
-    "image_file": "slab_quartzite_azul_white_401504e5-558d-5154-b228-9dbf693c69b3.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "slab_dolomite_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7",
-    "variant": "Matarazzo",
-    "category": "Slabs",
-    "stone_type": "Dolomite",
-    "color": [
-      "White"
-    ],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [
-      "Matarazzo"
-    ],
-    "image_file": "slab_dolomite_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "slab_quartzite_everest_quartzite_0531360a-137b-5711-94aa-4aa7e0813031",
-    "variant": "Everest Quartzite",
-    "category": "Slabs",
-    "stone_type": "Quartzite",
-    "color": [],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [
-      "Everest Quartzite"
-    ],
-    "image_file": "slab_quartzite_everest_quartzite_0531360a-137b-5711-94aa-4aa7e0813031.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "slab_quartzite_gaya_quartzite_9b702ab0-9f89-5e50-8d95-5d24e4fbb67a",
-    "variant": "Gaya Quartzite",
-    "category": "Slabs",
-    "stone_type": "QUARTZITE",
-    "color": [],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [
-      "GAYA QUARTZITE"
-    ],
-    "image_file": "slab_quartzite_gaya_quartzite_9b702ab0-9f89-5e50-8d95-5d24e4fbb67a.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "slab_quartzite_smoky_quartzite_dc1ffccd-f66a-5327-8b9e-dc8bb2bfe0f2",
-    "variant": "Smoky Quartzite",
-    "category": "Slabs",
-    "stone_type": "QUARTZITE",
-    "color": [],
-    "finishes": [
-      "Polished",
-      "Honed",
-      "Leathered",
-      "Brushed",
-      "Flamed",
-      "Sandblasted",
-      "Sawn Cut",
-      "Raw"
-    ],
-    "qualities": [
-      "A"
-    ],
-    "aliases": [
-      "SMOKY QUARTZITE"
-    ],
-    "image_file": "slab_quartzite_smoky_quartzite_dc1ffccd-f66a-5327-8b9e-dc8bb2bfe0f2.png",
-    "exists": "no",
-    "in_csv": "yes",
-    "product_backed": true,
-    "merged_from": []
-  },
-  {
-    "key": "slab_quartzite_cream_quartzite_968a0186-4863-5aeb-b4d1-89b920801c2c",
-    "variant": "Cream Quartzite",
-    "category": "Slabs",
-    "stone_type": "QUARTZITE",
-    "color": [
-      "Cream"
+      "Natural"
     ],
     "finishes": [
       "Polished",
@@ -195,7 +51,7 @@
       "A"
     ],
     "aliases": [],
-    "image_file": "slab_quartzite_cream_quartzite_968a0186-4863-5aeb-b4d1-89b920801c2c.png",
+    "image_file": "slab_quartzite_verdant_5d7cd6d2-217a-5c0c-bcae-f0e6fd502e25.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": true,

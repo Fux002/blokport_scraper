@@ -30,21 +30,36 @@ TYPE_TOKENS = [
     "Sandstone", "Schist", "Serpentine", "Slate", "Soapstone", "Travertine", "Tuff",
 ]
 
+# Commercial / short synonyms mapping a name token to a canonical backend type. Suppliers and buyers
+# say 'Sodalite'; the backend type is the geological 'Sodalite Syenite'. Registering the synonym lets
+# both the name-over-tag correction recognise it AND resolve_id map it to the real attribute type.
+TYPE_SYNONYMS = {
+    "sodalite": "Sodalite Syenite",
+    "sodalita": "Sodalite Syenite",        # Spanish/Portuguese spelling
+    "blue sodalite": "Sodalite Syenite",
+}
+
 # Type words that double as common variety-NAME descriptors -- never used to override a supplier's
 # type ('Spectra Crystal' is a quartzite; 'Crystal' is a descriptor, not the type).
 _AMBIGUOUS_TYPE_WORDS = {"crystal", "quartz", "agate", "amethyst", "coral"}
-_CLEAR_TYPE_WORDS = {t.casefold() for t in TYPE_TOKENS if " " not in t} - _AMBIGUOUS_TYPE_WORDS
+_CLEAR_TYPE_WORDS = {w.casefold() for w in (*TYPE_TOKENS, *TYPE_SYNONYMS)
+                     if " " not in w} - _AMBIGUOUS_TYPE_WORDS
 
 
 def explicit_type_word(name: str) -> str | None:
-    """The stone-TYPE word a variety name explicitly ends with (suppliers name '{Variety} {Type}'),
-    IF it is an unambiguous rock type. 'Azul White Quartzite' -> 'Quartzite', 'Grey Basalt' ->
-    'Basalt'. None for: a single-token name (a variety NAMED after a type, e.g. 'Agate'), a
-    descriptor-prone type word ('Spectra Crystal'), or no trailing type word ('Crystal White')."""
+    """The stone-TYPE word a variety name carries, IF it is an unambiguous rock type. A TRAILING type
+    word is the common '{Variety} {Type}' convention ('Azul White Quartzite' -> 'Quartzite'); a
+    LEADING type word covers '{Type} {Variety}' ('Sodalite Baia' -> 'Sodalite', 'Onyx Blue' ->
+    'Onyx'). None for: a single-token name (a variety NAMED after a type, e.g. 'Agate'), a
+    descriptor-prone type word ('Spectra Crystal'), or no clear type word at either end."""
     toks = (name or "").split()
     if len(toks) < 2:
         return None
-    return toks[-1] if toks[-1].casefold() in _CLEAR_TYPE_WORDS else None
+    if toks[-1].casefold() in _CLEAR_TYPE_WORDS:
+        return toks[-1]
+    if toks[0].casefold() in _CLEAR_TYPE_WORDS:
+        return toks[0]
+    return None
 
 
 # plural + singular title of every category (registry), plural first so e.g.

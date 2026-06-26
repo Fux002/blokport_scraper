@@ -26,7 +26,7 @@ def ref() -> loaders.ReferenceData:
 
 
 def test_all_reference_files_load(ref):
-    assert len(ref.attributes.by_category["color"]) == 25  # +Orchid
+    assert len(ref.attributes.by_category["color"]) == 26  # +Orchid +Natural (generic last-resort colour)
     assert len(ref.attributes.by_category["type"]) == 31   # +Dolomite Marble
     assert ref.attributes.category_pcat["Slabs"] == SETTINGS.backend.cat_slabs_pcat
     assert ref.attributes.category_pcat["Blocks"] == SETTINGS.backend.cat_blocks_pcat

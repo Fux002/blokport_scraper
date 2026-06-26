@@ -3,8 +3,8 @@
 Download each image, content-hash the bytes, dedup identical bytes, block known
 placeholders by content hash, then store via the configured backend with a
 content-addressed key. Slot by branch: blocks fill Front, Right, Back, Left;
-slabs fill Product Image 1..5; thumbnail is the first image either way. A re-run
-re-derives the same key and re-uploads nothing.
+slabs fill Product Image 1..N (N = SETTINGS.images.product_image_slots); thumbnail
+is the first image either way. A re-run re-derives the same key and re-uploads nothing.
 
 mode (config) selects the path:
   passthrough  use source URLs directly; no download, no storage backend.
@@ -37,7 +37,8 @@ from stone_pipeline.io import storage
 log = logfmt.get_logger("images")
 
 _BLOCK_SLOTS = 4  # Front, Right, Back, Left
-_SLAB_SLOTS = 5  # Product Image 1..5
+# slab/tile product-image cap; shared with emit via settings so the columns can't drift
+_SLAB_SLOTS = SETTINGS.images.product_image_slots
 
 Fetcher = Callable[[str], Optional[bytes]]
 

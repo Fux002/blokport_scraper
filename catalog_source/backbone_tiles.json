@@ -51710,55 +51710,6 @@
     },
     {
       "variant_id": null,
-      "key": "tile_granite_blue_sodalite_cb59f3bf-6e3f-59cb-8269-b03ddd8d04eb",
-      "variant": "Blue Sodalite",
-      "category": "Tiles",
-      "stone_type": "Granite",
-      "color": [
-        "Blue"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Blue Sodalite Granite",
-        "Azul Sodalite",
-        "Azul Sodalite Granite",
-        "Blu Sodalite",
-        "Blu Sodalite Granite",
-        "Bleu Sodalite",
-        "Bleu Sodalite Granite",
-        "Sodalite Blue",
-        "Sodalite Blue Granite"
-      ],
-      "image_file": "tile_granite_blue_sodalite_cb59f3bf-6e3f-59cb-8269-b03ddd8d04eb.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "variant_id": null,
       "key": "tile_granite_blue_sucuri_5ba09943-8aac-5ede-97d0-52279267bcf4",
       "variant": "Blue Sucuri",
       "category": "Tiles",
@@ -182814,10 +182765,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_granite_sodalita_fede23f2-1cef-504c-a43f-f17c0597a6d4",
+      "key": "tile_sodalite_syenite_sodalita_fede23f2-1cef-504c-a43f-f17c0597a6d4",
       "variant": "Sodalita",
       "category": "Tiles",
-      "stone_type": "Granite",
+      "stone_type": "Sodalite Syenite",
       "color": [
         "Blue"
       ],
@@ -460842,10 +460793,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_marble_sodalite_2eae6510-7395-531c-9747-23cd2099797e",
+      "key": "tile_sodalite_syenite_sodalite_2eae6510-7395-531c-9747-23cd2099797e",
       "variant": "Sodalite",
       "category": "Tiles",
-      "stone_type": "Marble",
+      "stone_type": "Sodalite Syenite",
       "color": [
         "Blue",
         "Grey"
@@ -507842,35 +507793,6 @@
         "Rose Crystal"
       ],
       "image_file": "tile_quartz_rose_59acef5f-979e-5a63-ac6c-39b06b2a32b9.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "variant_id": null,
-      "key": "tile_quartz_sodalita_fede23f2-1cef-504c-a43f-f17c0597a6d4",
-      "variant": "Sodalita",
-      "category": "Tiles",
-      "stone_type": "Quartz",
-      "color": [
-        "Blue"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Sawn Cut",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Sodalita Quartz"
-      ],
-      "image_file": "tile_quartz_sodalita_fede23f2-1cef-504c-a43f-f17c0597a6d4.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
@@ -586354,6 +586276,630 @@
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
+    },
+    {
+      "variant_id": null,
+      "variant": "Brazilian White",
+      "category": "Tiles",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Brazilian White Quartzite"
+      ],
+      "image_file": "tile_quartzite_brazilian_white_73bc5156-49fe-54f3-a1c2-3d7c1da75008.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_quartzite_brazilian_white_73bc5156-49fe-54f3-a1c2-3d7c1da75008"
+    },
+    {
+      "variant_id": null,
+      "variant": "Brown Onyx",
+      "category": "Tiles",
+      "stone_type": "Onyx",
+      "color": [
+        "Brown"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_onyx_brown_onyx_9c0c4257-fea3-5fb9-ab77-ecc8aceec501.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_onyx_brown_onyx_9c0c4257-fea3-5fb9-ab77-ecc8aceec501"
+    },
+    {
+      "variant_id": null,
+      "variant": "Grey Granite",
+      "category": "Tiles",
+      "stone_type": "Granite",
+      "color": [
+        "Grey"
+      ],
+      "finishes": [
+        "Textured",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_granite_grey_granite_fbe8f311-b47f-56aa-bd32-b5392acb5e15.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_granite_grey_granite_fbe8f311-b47f-56aa-bd32-b5392acb5e15"
+    },
+    {
+      "variant_id": null,
+      "variant": "Golden Silver",
+      "category": "Tiles",
+      "stone_type": "Travertine",
+      "color": [
+        "Cream"
+      ],
+      "finishes": [
+        "Leathered",
+        "Polished",
+        "Honed",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_travertine_golden_silver_2194cf24-5dc1-597e-b390-022bfa1d7d1e.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_travertine_golden_silver_2194cf24-5dc1-597e-b390-022bfa1d7d1e"
+    },
+    {
+      "variant_id": null,
+      "variant": "Infinity White",
+      "category": "Tiles",
+      "stone_type": "",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "INFINITY WHITE"
+      ],
+      "image_file": "tile_infinity_white_3edea7fa-6e7c-5d5f-a18a-3f8890d8f452.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_infinity_white_3edea7fa-6e7c-5d5f-a18a-3f8890d8f452"
+    },
+    {
+      "variant_id": null,
+      "variant": "Antibes",
+      "category": "Tiles",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_quartzite_antibes_546785f5-196d-50dd-b386-19e3d03ad134.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_quartzite_antibes_546785f5-196d-50dd-b386-19e3d03ad134"
+    },
+    {
+      "variant_id": null,
+      "variant": "Blue Crystal",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "Blue"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_blue_crystal_c78cca7c-1b03-5cb7-9bc5-334aecd0c934.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_blue_crystal_c78cca7c-1b03-5cb7-9bc5-334aecd0c934"
+    },
+    {
+      "variant_id": null,
+      "variant": "Bonsai Crystal",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "Green"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_bonsai_crystal_9d7a9e84-a49a-5e73-a3e9-b4ac5676bdb7.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_bonsai_crystal_9d7a9e84-a49a-5e73-a3e9-b4ac5676bdb7"
+    },
+    {
+      "variant_id": null,
+      "variant": "Botanic Crystal",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "Green"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_botanic_crystal_77e52264-4fcc-5f57-b004-3bd658a72b40.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_botanic_crystal_77e52264-4fcc-5f57-b004-3bd658a72b40"
+    },
+    {
+      "variant_id": null,
+      "variant": "Celestial Frost",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_celestial_frost_75af0c09-232e-524d-b50f-e09b45a0f033.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_celestial_frost_75af0c09-232e-524d-b50f-e09b45a0f033"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal Angelus",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_crystal_angelus_1e9f7754-e601-51b2-a2a1-b62fc440f00e.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_crystal_angelus_1e9f7754-e601-51b2-a2a1-b62fc440f00e"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal Arborium",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_crystal_arborium_b5b82e7f-689b-5d56-af39-3fcc75456891.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_crystal_arborium_b5b82e7f-689b-5d56-af39-3fcc75456891"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal Cave",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_crystal_cave_3d64be1e-d2f1-5349-896b-f1a8560f5ef6.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_crystal_cave_3d64be1e-d2f1-5349-896b-f1a8560f5ef6"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal D'amore",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_crystal_d_amore_273d573d-bd7a-52ae-97d3-8d243cb1ff88.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_crystal_d_amore_273d573d-bd7a-52ae-97d3-8d243cb1ff88"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal Frost",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_crystal_frost_2b7265c3-a81b-5b91-9c65-27799c90df06.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_crystal_frost_2b7265c3-a81b-5b91-9c65-27799c90df06"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal Lake",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_crystal_lake_a3f64283-f194-5f29-bbb5-a83a7c598095.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_crystal_lake_a3f64283-f194-5f29-bbb5-a83a7c598095"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal Quartzite",
+      "category": "Tiles",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_quartzite_crystal_quartzite_6b790407-b211-5bb6-8bfe-7229de890246.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_quartzite_crystal_quartzite_6b790407-b211-5bb6-8bfe-7229de890246"
+    },
+    {
+      "variant_id": null,
+      "variant": "Crystal Saint",
+      "category": "Tiles",
+      "stone_type": "Crystal",
+      "color": [
+        "Golden"
+      ],
+      "finishes": [
+        "Honed",
+        "Leathered",
+        "Polished",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_crystal_crystal_saint_d545fd5b-a338-58b5-81f2-f3e35d71df1d.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_crystal_crystal_saint_d545fd5b-a338-58b5-81f2-f3e35d71df1d"
+    },
+    {
+      "variant_id": null,
+      "variant": "Kronos",
+      "category": "Tiles",
+      "stone_type": "Dolomite",
+      "color": [
+        "Brown"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_dolomite_kronos_06278554-e9e9-5c13-a842-155f88fc17ab.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_dolomite_kronos_06278554-e9e9-5c13-a842-155f88fc17ab"
+    },
+    {
+      "variant_id": null,
+      "variant": "Meridian",
+      "category": "Tiles",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_quartzite_meridian_ff8445c1-fcc9-5e9e-976e-8c355c061f45.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_quartzite_meridian_ff8445c1-fcc9-5e9e-976e-8c355c061f45"
+    },
+    {
+      "variant_id": null,
+      "variant": "Mona Lisa",
+      "category": "Tiles",
+      "stone_type": "Dolomite",
+      "color": [
+        "Cream"
+      ],
+      "finishes": [
+        "Honed",
+        "Polished",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "MONALISA",
+        "Mona Lisa"
+      ],
+      "image_file": "tile_dolomite_mona_lisa_14b41cd8-4053-53ef-abfe-8f5e6c897a01.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_dolomite_mona_lisa_14b41cd8-4053-53ef-abfe-8f5e6c897a01"
+    },
+    {
+      "variant_id": null,
+      "variant": "Scandinavo",
+      "category": "Tiles",
+      "stone_type": "Quartzite",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [],
+      "image_file": "tile_quartzite_scandinavo_bb5d3d61-0435-5781-9d09-e6d64bce4b52.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "tile_quartzite_scandinavo_bb5d3d61-0435-5781-9d09-e6d64bce4b52"
     }
   ]
 }

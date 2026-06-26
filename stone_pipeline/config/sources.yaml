@@ -5,6 +5,8 @@
 # origin_default = ISO-2 country of the SUPPLIER, the origin fallback when the scrape
 # has no country and origin_map doesn't cover the variety. Backend ids are dev-staging
 # defaults; replace per source when real accounts exist. VERIFY each origin_default.
+# min_expected_rows = catastrophic-scrape floor: a run below it aborts and never delists (guards a
+# broken/empty/truncated fetch). Set well under the normal count (~recent ÷ 4), not a tight bound.
 polonine:
   adapter: polonine
   source_code: pol
@@ -14,6 +16,7 @@ polonine:
   emit_on_review: true
   origin_default: IT  # VERIFY supplier country
   default_bundle_size: 6
+  min_expected_rows: 75   # recent ~300
 marenostone:
   adapter: marenostone
   source_code: mar
@@ -22,6 +25,7 @@ marenostone:
   emit_on_review: true
   origin_default: IT  # VERIFY supplier country
   default_bundle_size: 6
+  min_expected_rows: 60   # recent ~260
 zucchi:
   adapter: zucchi
   source_code: zuc
@@ -30,6 +34,7 @@ zucchi:
   emit_on_review: true
   origin_default: IT  # Zucchi = Italian stone company
   default_bundle_size: 6
+  min_expected_rows: 500  # recent ~2000
 varsha:
   adapter: varsha
   source_code: var
@@ -38,4 +43,5 @@ varsha:
   emit_on_review: true
   origin_default: IN  # Varsha Stones, India
   default_bundle_size: 6
+  min_expected_rows: 125  # recent ~510
   watermarked: true   # varshastones.slabware.com burns a visible watermark into its photos

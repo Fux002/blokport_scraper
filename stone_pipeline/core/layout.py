@@ -52,15 +52,17 @@ class RunLayout:
 
 
 def write_steps_md(layout: RunLayout, *, source: str, run_id: str, health: str,
-                   counts: dict) -> Path:
+                   counts: dict, gates: dict | None = None) -> Path:
     """Per-source PRODUCTS checklist. The catalog (variants/backbone/tree) is
     shared and synced separately via `python -m stone_pipeline.catalog`; this
     folder is just this source's product list."""
     g = counts.get
+    gate_line = " · ".join(f"{m}: **{s}**" for m, s in (gates or {}).items()) or "—"
     lines = [
         f"# Products — {source}  ({run_id})",
         "",
-        f"Health: **{health}**. This folder holds ONLY this source's raw run output.",
+        f"Health: **{health}**. Module gates: {gate_line}.",
+        "This folder holds ONLY this source's raw run output.",
         "The products you actually upload are gathered (with every source) into",
         f"`to_upload/{ENV_NAME}/3_products_*.csv`; variants and combinations live there too.",
         "",
