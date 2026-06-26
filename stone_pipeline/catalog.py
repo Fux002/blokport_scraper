@@ -84,6 +84,9 @@ def run(outputs_root: Path | None = None) -> Path:
     to_delete = write_variants_to_delete()         # surface junk variants (bare-code + mis-typed) for deletion
     migrated = migrate_retyped_variant_images(ref) # a re-typed variant keeps its image at its new Key
     held = gate_on_images()                        # AFTER migration: hold only the genuinely-imageless new
+    # ONE list: the committed seed of truth is exactly the freshly-gated full upload (base == full).
+    from stone_pipeline.reference import sync_variants_base
+    sync_variants_base.sync()
     pruned = prune_superseded_runs(outputs_root)  # leave only the latest run folder per source
     # Build the valid combinations HERE, in the same step as the variants/products, so they are
     # always derived from the SAME export. They can never go stale by someone forgetting to run

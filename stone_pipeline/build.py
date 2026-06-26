@@ -39,17 +39,8 @@ def main(argv: list[str] | None = None) -> int:
         print("consistency gate: PASS" if not errors else "consistency gate: FAIL")
         return 1 if errors else 0
 
-    # 0. keep the dev seed (variants_export_base.csv) clean + correct: union the live export in (so
-    #    completed variants/aliases are never lost), drop the Id, re-stamp S3 image links, and exclude
-    #    variants flagged for deletion. Runs first so a just-returned export is captured. A sync hiccup
-    #    must NOT abort the whole build (it only maintains the seed), so log-and-continue on any error.
-    try:
-        from stone_pipeline.reference import sync_variants_base
-        s = sync_variants_base.sync()
-        if s["variants_added"] or s["aliases_added"] or s["dropped_flagged_for_deletion"]:
-            log.info("variants base seed updated from live export", extra={"extra_fields": s})
-    except Exception as exc:  # noqa: BLE001 -- seed maintenance is non-critical; never block the build
-        log.warning("base seed sync skipped", extra={"extra_fields": {"error": repr(exc)[:160]}})
+    # The dev seed (variants_export_base.csv) is maintained at the END of catalog.run as a copy of the
+    # freshly-built 1_variants_full -- base IS the full list, one source of truth, no second path here.
 
     # 1. scrape -> per-source products + canonical (matches against the current export)
     rc = run_mod.main(["all"])
