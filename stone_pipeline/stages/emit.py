@@ -18,7 +18,7 @@ from typing import Callable
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.stages.product_state import inventory_for
 
@@ -125,12 +125,9 @@ def write_import_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
                      columns: list[str] | None = None) -> Path:
     columns = columns or read_template_columns()
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row_to_cells(row, columns, cfg))
+    # atomic + formula-injection-safe: scraped Title/Description go to a file an operator opens in Excel
+    cells = [row_to_cells(row, columns, cfg) for row in rows]
+    csvio.write_dicts(path, columns, cells, sanitize=True)
     log.info("emit done", extra={"extra_fields": {"rows": len(rows), "columns": len(columns)}})
     return path
 

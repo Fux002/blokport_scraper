@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, category, category_for_key
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import clean_variety_name, looks_like_artifact, title_case
 
 log = logfmt.get_logger("emit_catalog")
@@ -37,11 +37,15 @@ def _s3_variation_keys():
     s3 = SETTINGS.s3
     try:
         import boto3
+        from botocore.config import Config
     except ImportError:
         return None
     try:
+        # bounded timeouts + capped retries so a network stall can't hang the build (boto3's default
+        # has no connect-timeout cap); standard retry mode for transient throttling.
+        cfg = Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 3, "mode": "standard"})
         client = boto3.Session(profile_name=s3.credentials_profile or None,
-                               region_name=s3.region).client("s3")
+                               region_name=s3.region).client("s3", config=cfg)
         prefix = f"{ENV_SEGMENT}/variations/"
         keys: set[str] = set()
         for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):
@@ -172,11 +176,8 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
         r["Aliases"] = "|".join(title_case(a) for a in r["Aliases"].split("|") if a.strip())
 
     path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=_COLS)
-        w.writeheader()
-        w.writerows({c: r.get(c, "") for c in _COLS} for r in rows)
+    # atomic + formula-injection-safe: variant Name/Aliases come from scraped text
+    csvio.write_dicts(path, _COLS, rows, sanitize=True)
     log.info("variants_full emitted", extra={"extra_fields": {
         "rows": len(rows), "existing": n_existing,
         "new": len(order) - n_existing, "mirror": len(mirror)}})

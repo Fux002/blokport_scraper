@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
 from stone_pipeline.core.text import (ascii_fold, looks_code_shaped, looks_codey,
                                       looks_like_artifact as _looks_like_artifact, title_case)
@@ -669,11 +669,8 @@ _IMPORT_COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
 
 
 def _write_csv(path: Path, cols: list[str], rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=cols, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    # atomic + formula-injection-safe: variant Name/Aliases come from scraped text
+    csvio.write_dicts(path, cols, rows, sanitize=True)
 
 
 def write_curation(result: CurationResult) -> None:

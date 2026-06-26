@@ -21,7 +21,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.adapters.tokens import explicit_type_word
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.layout import write_sync_md
 from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.io import staging
@@ -149,30 +149,14 @@ def _generate_queued_images() -> None:
 
 
 def _s3_image_checker():
-    """Return a callable Key -> bool that checks <env>/variations/{Key}.png on the staging bucket,
-    or None ONLY when S3/boto3 is genuinely unreachable (no boto3, no creds -- e.g. CI) so the gate
-    falls back to a no-op there. The check is READ-ONLY, so it MUST run even when s3.dry_run is set:
-    dry_run only suppresses image WRITES, but the variant images are uploaded by the image_pipeline
-    independently, so a new variant with no {Key}.png on S3 must still be held out of the upload."""
-    from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS as _S
-    s3 = _S.s3
-    try:
-        import boto3
-    except ImportError:
-        return None
-    try:
-        client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
-    except Exception:
-        return None
-    prefix = f"{ENV_SEGMENT}/variations/"
-
-    def exists(key: str) -> bool:
-        try:
-            client.head_object(Bucket=s3.bucket, Key=f"{prefix}{key}.png")
-            return True
-        except Exception:
-            return False
-    return exists
+    """Return a callable Key -> bool reporting whether <env>/variations/{Key}.png exists on S3, or
+    None when S3 is unreachable (no boto3/creds -- CI/sandbox) so the gate no-ops there. Backed by a
+    SINGLE list_objects_v2 of the variations prefix (one network round-trip TOTAL, shared with
+    emit_catalog), not a head_object per Key -- so the cost is O(1) network calls regardless of how
+    many variants are checked. The check is READ-ONLY, so it runs even under s3.dry_run."""
+    from stone_pipeline.stages.emit_catalog import _s3_variation_keys
+    keys = _s3_variation_keys()
+    return None if keys is None else (lambda key: key in keys)
 
 
 def _s3_image_copier():
@@ -183,7 +167,10 @@ def _s3_image_copier():
     s3 = _S.s3
     try:
         import boto3
-        client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+        from botocore.config import Config
+        cfg = Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 3, "mode": "standard"})
+        client = boto3.Session(profile_name=s3.credentials_profile or None,
+                               region_name=s3.region).client("s3", config=cfg)
     except Exception:
         return None
     prefix = f"{ENV_SEGMENT}/variations/"
@@ -265,9 +252,10 @@ def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Pat
             continue
         with p.open(encoding="utf-8-sig", newline="") as h:
             rows = list(csv.reader(h))
+        if not rows:
+            continue                                   # truncated/empty -> skip, never crash the run
         header, body = rows[0], [r for r in rows[1:] if r and r[0] not in drop]
-        with p.open("w", newline="", encoding="utf-8") as h:
-            csv.writer(h).writerows([header, *body])
+        csvio.atomic_write(p, lambda h, _rows=[header, *body]: csv.writer(h).writerows(_rows))
     if missing:
         log.warning("held new variants with no S3 image out of the upload (still queued)",
                     extra={"extra_fields": {"held": len(missing)}})

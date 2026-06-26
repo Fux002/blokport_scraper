@@ -30,15 +30,37 @@ from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.core.text import looks_code_shaped
 
 
+_TYPE_SLUGS: Optional[set[str]] = None
+
+
+def _type_slugs() -> set[str]:
+    """All backend type slugs (incl. multi-word 'Dolomite Marble' -> 'dolomite_marble' and the
+    Sodalite->Sodalite Syenite synonym targets), cached. Lets is_mistyped_variant find where the
+    Key's type ends instead of assuming it is a single segment."""
+    global _TYPE_SLUGS
+    if _TYPE_SLUGS is None:
+        from stone_pipeline.adapters.tokens import TYPE_SYNONYMS
+        names = [v for v, _ in load_attributes().by_category.get("type", {}).values()]
+        names += list(TYPE_SYNONYMS.values())
+        _TYPE_SLUGS = {"_".join(_norm(n).split()) for n in names if n}
+    return _TYPE_SLUGS
+
+
 def is_mistyped_variant(key: str, name: str) -> bool:
-    """An existing variant whose NAME ends in an unambiguous stone-type word different from its own
-    type (the Key's type segment) is mis-typed -- e.g. 'Azul White Quartzite' under a slab_ONYX_ key,
-    or 'Cream Quartzite' keyed type 'cream'. Excluded from matching + listed for deletion so the
-    cleaning flow re-mints it under the correct type."""
+    """An existing variant whose NAME carries an unambiguous stone-type word NOT present in its own
+    Key's type is mis-typed -- e.g. 'Azul White Quartzite' under a slab_ONYX_ key. Listed for
+    deletion so the cleaning flow re-mints it correctly. The Key's type may be MULTI-WORD
+    ('slab_dolomite_marble_...'), so we match the longest known type slug that prefixes the Key's
+    post-branch portion rather than taking parts[1] (which falsely flagged 'Dolomite Marble' /
+    'Sodalite Syenite' variants named with their second word)."""
     ntw = explicit_type_word(name)
     parts = (key or "").split("_")
-    key_type = parts[1].casefold() if len(parts) >= 3 else ""
-    return bool(ntw) and bool(key_type) and ntw.casefold() != key_type
+    if not ntw or len(parts) < 3:
+        return False
+    after_branch = "_".join(parts[1:])
+    key_type = max((t for t in _type_slugs() if after_branch == t or after_branch.startswith(t + "_")),
+                   key=len, default=parts[1].casefold())
+    return "_".join(_norm(ntw).split()) not in key_type.split("_")
 
 log = logfmt.get_logger("reference")
 

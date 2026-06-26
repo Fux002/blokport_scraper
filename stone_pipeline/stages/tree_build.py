@@ -26,7 +26,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact
 
 log = logfmt.get_logger("tree")
@@ -301,14 +301,11 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
 
 
 def write_combinations(combinations: set, path: Path) -> int:
-    """Write the valid-combination rows (sorted for a deterministic file). Returns the
-    row count."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as h:
-        w = csv.writer(h)
-        w.writerow(COMBINATION_COLUMNS)
-        w.writerows(sorted(combinations))
-    return len(combinations)
+    """Write the valid-combination rows (sorted for a deterministic file), ATOMICALLY -- a crash
+    mid-write must never leave a truncated file, because this same file is the baseline the next
+    run diffs against (a partial write would poison the next delta and crash the image gate).
+    Returns the row count."""
+    return csvio.write_rows(path, COMBINATION_COLUMNS, sorted(combinations))
 
 
 def _backbone_paths() -> list[Path]:
