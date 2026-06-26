@@ -229,15 +229,21 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
 
 
 def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Path | None = None) -> int:
-    """Enforce the invariant 'a variant is in the upload file ⟺ its image is on S3'. After image
-    generation, any genuinely-new variant (in 1_variants_update, not in the Medusa export) whose
-    {Key}.png is NOT on S3 is dropped from BOTH upload files — it stays queued and joins the upload
-    once its image exists. No-op when S3 can't be checked, so local/dry-run output is unchanged."""
+    """Keep BOTH upload files (1_variants_update + 1_variants_full) to variants that belong there:
+      * a genuinely-new variant (not in the Medusa export) whose {Key}.png is NOT on S3 is held out
+        until its image exists (the image-on-S3 invariant);
+      * a variant flagged in variants_to_delete is dropped so the full/seed file never re-imports
+        junk that is on its way out.
+    The image check no-ops when S3 is unreachable (local/CI), but the delete-exclusion always runs
+    since it needs no S3. Returns the count HELD for missing images."""
     to_upload = Path(to_upload or SETTINGS.paths.to_upload_dir)
     export_file = Path(export_file or SETTINGS.paths.export_file)
     upd = to_upload / "1_variants_update.csv"
     if not upd.exists():
         return 0
+    dele = SETTINGS.paths.review_dir / "variants_to_delete.csv"
+    delete_keys = ({(r.get("Key") or "").strip() for r in csv.DictReader(dele.open(encoding="utf-8-sig"))
+                    if (r.get("Key") or "").strip()} if dele.exists() else set())
     export_keys: set[str] = set()
     if export_file.exists():
         with export_file.open(encoding="utf-8-sig", newline="") as h:
@@ -246,10 +252,9 @@ def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Pat
         new_keys = {(r.get("Key") or "").strip() for r in csv.DictReader(h)
                     if (r.get("Key") or "").strip() and r["Key"] not in export_keys}
     checker = checker if checker is not None else _s3_image_checker()
-    if checker is None or not new_keys:
-        return 0
-    missing = {k for k in new_keys if not checker(k)}
-    if not missing:
+    missing = {k for k in new_keys if not checker(k)} if checker is not None else set()
+    drop = missing | delete_keys
+    if not drop:
         return 0
     for fname in ("1_variants_update.csv", "1_variants_full.csv"):
         p = to_upload / fname
@@ -257,11 +262,15 @@ def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Pat
             continue
         with p.open(encoding="utf-8-sig", newline="") as h:
             rows = list(csv.reader(h))
-        header, body = rows[0], [r for r in rows[1:] if r and r[0] not in missing]
+        header, body = rows[0], [r for r in rows[1:] if r and r[0] not in drop]
         with p.open("w", newline="", encoding="utf-8") as h:
             csv.writer(h).writerows([header, *body])
-    log.warning("held new variants with no S3 image out of the upload (still queued)",
-                extra={"extra_fields": {"held": len(missing)}})
+    if missing:
+        log.warning("held new variants with no S3 image out of the upload (still queued)",
+                    extra={"extra_fields": {"held": len(missing)}})
+    if delete_keys:
+        log.info("excluded to-delete variants from upload files",
+                 extra={"extra_fields": {"excluded": len(delete_keys)}})
     return len(missing)
 
 
