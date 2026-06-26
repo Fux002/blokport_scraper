@@ -34,8 +34,10 @@ def main(argv: list[str] | None = None) -> int:
         errors, warnings = catalog_mod.verify_consistency()
         for w in warnings:
             print(f"  ! {w}")
+            log.warning("consistency warning", extra={"extra_fields": {"warning": w}})
         for e in errors:
             print(f"  ✗ {e}")
+            log.error("consistency error", extra={"extra_fields": {"error": e}})  # visible in CloudWatch
         print("consistency gate: PASS" if not errors else "consistency gate: FAIL")
         return 1 if errors else 0
 

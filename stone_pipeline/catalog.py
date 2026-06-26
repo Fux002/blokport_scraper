@@ -142,10 +142,16 @@ def _generate_queued_images() -> None:
     """Run the existing image_pipeline chain (FLUX.2 max -> BEN2 -> S3) on the queued prompts.
     Reuses the committed scripts so the S3 step you set up elsewhere stays the single source."""
     import subprocess
+    import sys
     ip = SETTINGS.paths.workspace_root / "image_pipeline"
     for script in ("genetate_images.py", "rb_images.py"):
         if (ip / script).exists():
-            subprocess.run(["python", script], cwd=ip, check=False)
+            # sys.executable (not bare "python") so the venv interpreter is used; surface a non-zero
+            # exit instead of swallowing it -- a failed generation otherwise looks like a clean run.
+            rc = subprocess.run([sys.executable, script], cwd=ip, check=False).returncode
+            if rc != 0:
+                log.warning("image-pipeline script failed",
+                            extra={"extra_fields": {"script": script, "returncode": rc}})
 
 
 def _s3_image_checker():
@@ -242,6 +248,11 @@ def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Pat
         new_keys = {(r.get("Key") or "").strip() for r in csv.DictReader(h)
                     if (r.get("Key") or "").strip() and r["Key"] not in export_keys}
     checker = checker if checker is not None else _s3_image_checker()
+    if checker is None and new_keys:
+        # fail LOUD, not silent: the image-on-S3 invariant cannot run, so new variants are NOT
+        # verified to have an image. The operator must confirm {Key}.png exists before importing.
+        log.warning("S3 unreachable: image-on-S3 invariant NOT enforced; verify new-variant images "
+                    "exist before import", extra={"extra_fields": {"unverified_new_variants": len(new_keys)}})
     missing = {k for k in new_keys if not checker(k)} if checker is not None else set()
     drop = missing | delete_keys
     if not drop:
