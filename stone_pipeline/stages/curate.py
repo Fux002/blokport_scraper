@@ -179,6 +179,12 @@ def _clean_variety(name: str, stone_type: str) -> str:
     # review, NOT minted as a type-baked variety 'Mgt Onyx'. Keep the type only when the remainder is
     # a real word ('White Onyx' -> 'White Onyx', not 'White').
     chosen = no_type if (len(no_type) >= 2 or (len(no_type) == 1 and looks_codey(no_type[0]))) else no_fmt
+    # A trailing bare <=2-char token is almost always a supplier lot/region code, not part of the
+    # variety name ('White Super ES', ES = Espirito Santo). Drop it so the variety folds to its base
+    # name and the full scraped name is kept as an alias -- never minting a separate '... Es' variant.
+    # Only when >=2 real tokens remain, so a name is never reduced to a bare colour/type.
+    if len(chosen) >= 3 and len(chosen[-1]) <= 2 and chosen[-1].isalnum():
+        chosen = chosen[:-1]
     return " ".join(chosen) or " ".join(no_fmt) or (name or "").strip()
 
 

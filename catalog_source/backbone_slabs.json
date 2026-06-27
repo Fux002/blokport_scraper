@@ -314004,7 +314004,7 @@
     },
     {
       "variant_id": 6560,
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Slabs",
       "stone_type": "Marble",
       "color": [
@@ -485343,46 +485343,6 @@
       "key": "slab_marble_white_sunset_63efa841-cbbb-4bf5-aa00-b70321a1fd0b"
     },
     {
-      "variant_id": 9972,
-      "variant": "White Super ES",
-      "category": "Slabs",
-      "stone_type": "Marble",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Branco White Super ES"
-      ],
-      "image_file": "slab_rb_9972_marble_white_super_es.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_marble_white_super_es_766b5d96-2853-4680-9f62-a28d65f7d319"
-    },
-    {
       "variant_id": 9973,
       "variant": "White Swan",
       "category": "Slabs",
@@ -492668,7 +492628,7 @@
     },
     {
       "variant_id": 10124,
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Slabs",
       "stone_type": "Onyx",
       "color": [

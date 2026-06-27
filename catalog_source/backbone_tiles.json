@@ -313904,7 +313904,7 @@
     {
       "variant_id": null,
       "key": "tile_marble_brazilian_white_73bc5156-49fe-54f3-a1c2-3d7c1da75008",
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Tiles",
       "stone_type": "Marble",
       "color": [
@@ -485237,46 +485237,6 @@
     },
     {
       "variant_id": null,
-      "key": "tile_marble_white_super_es_9c6525b9-8618-5ca3-9414-69fdc8e9cbad",
-      "variant": "White Super ES",
-      "category": "Tiles",
-      "stone_type": "Marble",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Branco White Super ES"
-      ],
-      "image_file": "tile_marble_white_super_es_9c6525b9-8618-5ca3-9414-69fdc8e9cbad.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "variant_id": null,
       "key": "tile_marble_white_swan_56c9a7fb-bf8e-5ebd-8f81-537b7e50830c",
       "variant": "White Swan",
       "category": "Tiles",
@@ -492496,7 +492456,7 @@
     {
       "variant_id": null,
       "key": "tile_onyx_brazilian_white_73bc5156-49fe-54f3-a1c2-3d7c1da75008",
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Tiles",
       "stone_type": "Onyx",
       "color": [
@@ -586279,7 +586239,7 @@
     },
     {
       "variant_id": null,
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [

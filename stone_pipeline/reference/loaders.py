@@ -147,11 +147,23 @@ class VariantTable:
         return list(self.by_id.keys())
 
 
+def _delete_keys() -> set[str]:
+    """Keys flagged in variants_to_delete -- excluded from matching so a junk/phantom variant on its
+    way out can't intercept a product match or a fold-in (e.g. a phantom 'White Super ES' must not
+    capture the scrape now that it folds into 'Super White')."""
+    p = SETTINGS.paths.review_dir / "variants_to_delete.csv"
+    if not p.exists():
+        return set()
+    return {(r.get("Key") or "").strip() for r in csv.DictReader(p.open(encoding="utf-8-sig"))
+            if (r.get("Key") or "").strip()}
+
+
 def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> VariantTable:
     """Load a variants table. key_prefix filters rows by their Key's leading token
     (slab/block), so a single combined export can feed both branches: slab-keyed
     rows go to the slab table, block-keyed rows to the block table."""
     table = VariantTable(branch=branch)
+    delete_keys = _delete_keys()
     path = Path(path)
     if not path.exists():
         log.warning(f"variants file absent for branch {branch}: {path}")
@@ -167,7 +179,7 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
             # supplier code/brand abbreviation wrongly minted) OR a mis-typed one ('Azul White
             # Quartzite' under a slab_ONYX_ key). Both are surfaced in review/<env>/variants_to_delete.csv
             # for deletion from Medusa; the cleaning flow re-mints the mis-typed ones correctly.
-            if looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name):
+            if looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name) or key in delete_keys:
                 continue
             if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
                 continue

@@ -260156,7 +260156,7 @@
     },
     {
       "variant_id": 6560,
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
@@ -404233,38 +404233,6 @@
       "merged_from": []
     },
     {
-      "variant_id": 9972,
-      "variant": "White Super ES",
-      "category": "Blocks",
-      "stone_type": "Marble",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Branco White Super ES"
-      ],
-      "image_file": "block_rb_9972_marble_white_super_es.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": []
-    },
-    {
       "variant_id": 9973,
       "variant": "White Swan",
       "category": "Blocks",
@@ -410791,7 +410759,7 @@
     },
     {
       "variant_id": 10124,
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Blocks",
       "stone_type": "Onyx",
       "color": [
@@ -490875,7 +490843,7 @@
     },
     {
       "variant_id": 12194,
-      "variant": "Brazilian White",
+      "variant": "Super White",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
