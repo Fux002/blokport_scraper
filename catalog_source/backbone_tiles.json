@@ -539364,10 +539364,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_semi_precious_stone_agata_blue_spiral_0fd17070-0003-5a30-8286-241988bf08f4",
+      "key": "tile_agate_agata_blue_spiral_0fd17070-0003-5a30-8286-241988bf08f4",
       "variant": "Agata Blue Spiral",
       "category": "Tiles",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Blue"
       ],
@@ -539393,10 +539393,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_semi_precious_stone_agata_brown_6bbfc923-e399-58e5-83d6-9fb52c36d4b4",
+      "key": "tile_agate_agata_brown_6bbfc923-e399-58e5-83d6-9fb52c36d4b4",
       "variant": "Agata Brown",
       "category": "Tiles",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Brown"
       ],
@@ -539422,10 +539422,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_semi_precious_stone_agata_colors_36237841-9e18-52e4-a9ed-d19851aca9fc",
+      "key": "tile_agate_agata_colors_36237841-9e18-52e4-a9ed-d19851aca9fc",
       "variant": "Agata Colors",
       "category": "Tiles",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -539451,10 +539451,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_semi_precious_stone_agata_natural_768269e3-68ef-5e9c-adc4-6810db828766",
+      "key": "tile_agate_agata_natural_768269e3-68ef-5e9c-adc4-6810db828766",
       "variant": "Agata Natural",
       "category": "Tiles",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -539480,10 +539480,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_semi_precious_stone_agata_tropicalia_311b9a19-e88c-5c7c-aa63-4ccfbfe51838",
+      "key": "tile_agate_agata_tropicalia_311b9a19-e88c-5c7c-aa63-4ccfbfe51838",
       "variant": "Agata Tropicalia",
       "category": "Tiles",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Gold",
         "Green",
@@ -539512,10 +539512,10 @@
     },
     {
       "variant_id": null,
-      "key": "tile_semi_precious_stone_agata_white_cbe65dfe-0006-54ae-93a5-3860c4ebd22f",
+      "key": "tile_agate_agata_white_cbe65dfe-0006-54ae-93a5-3860c4ebd22f",
       "variant": "Agata White",
       "category": "Tiles",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],

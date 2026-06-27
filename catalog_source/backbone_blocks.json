@@ -452720,7 +452720,7 @@
       "variant_id": 11232,
       "variant": "Agata Blue Spiral",
       "category": "Blocks",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Blue"
       ],
@@ -452746,13 +452746,14 @@
       "image_file": "block_rb_11232_semi_precious_stone_agata_blue_spiral.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_agate_agata_blue_spiral_629082a1-e33d-565e-8417-ec1a7964e512"
     },
     {
       "variant_id": 11233,
       "variant": "Agata Brown",
       "category": "Blocks",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Brown"
       ],
@@ -452778,13 +452779,14 @@
       "image_file": "block_rb_11233_semi_precious_stone_agata_brown.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_agate_agata_brown_2dc4832d-1041-550d-afeb-1c6d3ad731a4"
     },
     {
       "variant_id": 11234,
       "variant": "Agata Colors",
       "category": "Blocks",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -452810,13 +452812,14 @@
       "image_file": "block_rb_11234_semi_precious_stone_agata_colors.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_agate_agata_colors_dcdcd7c0-e1f9-5019-a5c4-0a6444db6de5"
     },
     {
       "variant_id": 11235,
       "variant": "Agata Natural",
       "category": "Blocks",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -452842,13 +452845,14 @@
       "image_file": "block_rb_11235_semi_precious_stone_agata_natural.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_agate_agata_natural_37bb1729-deeb-5bc8-bf5f-e9bdf81ee8ab"
     },
     {
       "variant_id": 11236,
       "variant": "Agata Tropicalia",
       "category": "Blocks",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Gold",
         "Green",
@@ -452877,13 +452881,14 @@
       "image_file": "block_rb_11236_semi_precious_stone_agata_tropicalia.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_agate_agata_tropicalia_98a240d2-0366-53d7-90cc-5eccaf508f2c"
     },
     {
       "variant_id": 11237,
       "variant": "Agata White",
       "category": "Blocks",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -452909,7 +452914,8 @@
       "image_file": "block_rb_11237_semi_precious_stone_agata_white.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [],
+      "key": "block_agate_agata_white_2583c363-baf1-5164-b55d-ddc3761c900e"
     },
     {
       "variant_id": 11238,

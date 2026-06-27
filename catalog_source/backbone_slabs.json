@@ -539605,7 +539605,7 @@
       "variant_id": 11232,
       "variant": "Agata Blue Spiral",
       "category": "Slabs",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Blue"
       ],
@@ -539628,13 +539628,13 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_semi_precious_stone_agata_blue_spiral_f5748e14-820f-4f0f-a9b1-f62dfcf551b1"
+      "key": "slab_agate_agata_blue_spiral_6a49dbad-f8c5-58f1-97e4-0e887f193754"
     },
     {
       "variant_id": 11233,
       "variant": "Agata Brown",
       "category": "Slabs",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Brown"
       ],
@@ -539657,13 +539657,13 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_semi_precious_stone_agata_brown_1e3d5381-6a9c-4fd2-bd4a-0f0f8c86a1e0"
+      "key": "slab_agate_agata_brown_692ca4c8-6a4f-52fc-85a6-fa79b67d6a8b"
     },
     {
       "variant_id": 11234,
       "variant": "Agata Colors",
       "category": "Slabs",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -539686,13 +539686,13 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_semi_precious_stone_agata_colors_73d9b64f-0fe5-4f00-af96-233eb548cb97"
+      "key": "slab_agate_agata_colors_69566e58-5c0e-5af2-9853-320fd2bcdce9"
     },
     {
       "variant_id": 11235,
       "variant": "Agata Natural",
       "category": "Slabs",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -539715,13 +539715,13 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_semi_precious_stone_agata_natural_fa15e553-4e45-4a8c-8e3d-7f60ec64dbc0"
+      "key": "slab_agate_agata_natural_75de20a5-2ec1-5a72-9cca-192bbc883ce9"
     },
     {
       "variant_id": 11236,
       "variant": "Agata Tropicalia",
       "category": "Slabs",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "Gold",
         "Green",
@@ -539747,13 +539747,13 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_semi_precious_stone_agata_tropicalia_e9f74efb-514b-4bae-8b19-066e75b0527d"
+      "key": "slab_agate_agata_tropicalia_88d88ea1-982f-5ac7-8d72-f82e8e082f2c"
     },
     {
       "variant_id": 11237,
       "variant": "Agata White",
       "category": "Slabs",
-      "stone_type": "Semi-Precious Stone",
+      "stone_type": "Agate",
       "color": [
         "White"
       ],
@@ -539776,7 +539776,7 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_semi_precious_stone_agata_white_852991c5-58ff-4d18-868e-31f30abbca5d"
+      "key": "slab_agate_agata_white_90dae40c-9957-5efa-bae7-dc5738f7de5f"
     },
     {
       "variant_id": 11238,

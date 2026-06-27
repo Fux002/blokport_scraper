@@ -1,1 +1,182 @@
-[]
+[
+  {
+    "key": "slab_agate_agata_blue_spiral_6a49dbad-f8c5-58f1-97e4-0e887f193754",
+    "variant": "Agata Blue Spiral",
+    "category": "Slabs",
+    "stone_type": "Agate",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Agata Blue Spiral"
+    ],
+    "image_file": "slab_agate_agata_blue_spiral_6a49dbad-f8c5-58f1-97e4-0e887f193754.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_agate_agata_brown_692ca4c8-6a4f-52fc-85a6-fa79b67d6a8b",
+    "variant": "Agata Brown",
+    "category": "Slabs",
+    "stone_type": "Agate",
+    "color": [
+      "Brown"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Agata Brown"
+    ],
+    "image_file": "slab_agate_agata_brown_692ca4c8-6a4f-52fc-85a6-fa79b67d6a8b.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_agate_agata_colors_69566e58-5c0e-5af2-9853-320fd2bcdce9",
+    "variant": "Agata Colors",
+    "category": "Slabs",
+    "stone_type": "Agate",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Agata Colors"
+    ],
+    "image_file": "slab_agate_agata_colors_69566e58-5c0e-5af2-9853-320fd2bcdce9.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_agate_agata_natural_75de20a5-2ec1-5a72-9cca-192bbc883ce9",
+    "variant": "Agata Natural",
+    "category": "Slabs",
+    "stone_type": "Agate",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Agata Natural"
+    ],
+    "image_file": "slab_agate_agata_natural_75de20a5-2ec1-5a72-9cca-192bbc883ce9.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_agate_agata_tropicalia_88d88ea1-982f-5ac7-8d72-f82e8e082f2c",
+    "variant": "Agata Tropicalia",
+    "category": "Slabs",
+    "stone_type": "Agate",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Agata Tropicalia"
+    ],
+    "image_file": "slab_agate_agata_tropicalia_88d88ea1-982f-5ac7-8d72-f82e8e082f2c.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_agate_agata_white_90dae40c-9957-5efa-bae7-dc5738f7de5f",
+    "variant": "Agata White",
+    "category": "Slabs",
+    "stone_type": "Agate",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Agata White"
+    ],
+    "image_file": "slab_agate_agata_white_90dae40c-9957-5efa-bae7-dc5738f7de5f.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  }
+]

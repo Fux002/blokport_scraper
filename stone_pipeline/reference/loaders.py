@@ -60,7 +60,14 @@ def is_mistyped_variant(key: str, name: str) -> bool:
     after_branch = "_".join(parts[1:])
     key_type = max((t for t in _type_slugs() if after_branch == t or after_branch.startswith(t + "_")),
                    key=len, default=parts[1].casefold())
-    return "_".join(_norm(ntw).split()) not in key_type.split("_")
+    # Resolve the name's type word to its CANONICAL type before comparing (the same synonym map
+    # resolve_id uses), so 'Agata' -> 'Agate' and 'Sodalite' -> 'Sodalite Syenite' are judged against
+    # the canonical, not the literal foreign spelling -- else 'Agata Blue' keyed 'agate' would falsely
+    # flag ('agata' != 'agate'). Mis-typed iff the canonical type shares NO token with the Key's type
+    # (token overlap, so a name 'Marble' is consistent with a 'dolomite_marble' Key).
+    from stone_pipeline.adapters.tokens import TYPE_SYNONYMS
+    canonical = TYPE_SYNONYMS.get(_norm(ntw), ntw)
+    return set(_norm(canonical).split()).isdisjoint(key_type.split("_"))
 
 log = logfmt.get_logger("reference")
 

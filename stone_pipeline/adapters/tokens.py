@@ -37,11 +37,15 @@ TYPE_SYNONYMS = {
     "sodalite": "Sodalite Syenite",
     "sodalita": "Sodalite Syenite",        # Spanish/Portuguese spelling
     "blue sodalite": "Sodalite Syenite",
+    "agata": "Agate",                      # Italian/Portuguese spelling of Agate (the stone, not a descriptor)
 }
 
 # Type words that double as common variety-NAME descriptors -- never used to override a supplier's
 # type ('Spectra Crystal' is a quartzite; 'Crystal' is a descriptor, not the type).
 _AMBIGUOUS_TYPE_WORDS = {"crystal", "quartz", "agate", "amethyst", "coral"}
+# Negation prefixes that CANCEL a following type word -- 'Falsa Agata' (false agate) is genuinely an
+# onyx, not the Agate type, so the type word must not be read as the variety's type.
+_NEGATION_WORDS = {"falsa", "false", "falso", "fake", "faux", "imitation"}
 _CLEAR_TYPE_WORDS = {w.casefold() for w in (*TYPE_TOKENS, *TYPE_SYNONYMS)
                      if " " not in w} - _AMBIGUOUS_TYPE_WORDS
 
@@ -56,6 +60,8 @@ def explicit_type_word(name: str) -> str | None:
     if len(toks) < 2:
         return None
     if toks[-1].casefold() in _CLEAR_TYPE_WORDS:
+        if toks[-2].casefold() in _NEGATION_WORDS:          # 'Falsa Agata' -> not the Agate type
+            return None
         return toks[-1]
     if toks[0].casefold() in _CLEAR_TYPE_WORDS:
         return toks[0]
