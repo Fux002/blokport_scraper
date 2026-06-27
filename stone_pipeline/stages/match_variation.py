@@ -174,7 +174,10 @@ class VariationStage:
             return
 
         block_color = row.color_name or row.raw_color or ""
-        match = engine.match(query, block_type=row.raw_type or "", block_color=block_color)
+        # block by the CORRECTED canonical type (type_name), not the raw scrape tag -- candidate
+        # block_type is the canonical variety.stone_type, so the raw tag mis-blocks (a mis-tagged
+        # 'Azul White Quartzite' under an Onyx tag, or a name-corrected type).
+        match = engine.match(query, block_type=row.type_name or row.raw_type or "", block_color=block_color)
 
         if match.cid is not None and match.confidence >= Confidence.medium:
             row.variation_id = match.cid
@@ -218,7 +221,7 @@ class VariationStage:
         if not candidate_name:
             return False
         block_color = row.color_name or row.raw_color or ""
-        match = engine.match(candidate_name, block_type=row.raw_type or "", block_color=block_color)
+        match = engine.match(candidate_name, block_type=row.type_name or row.raw_type or "", block_color=block_color)
         # Name identity is the real safety check, not the match tier: when the matched
         # variant's name IS the colour+type candidate, it is that variety even if the
         # engine reached it via phonetic/fuzzy (e.g. "Silver Travertine"). A generic

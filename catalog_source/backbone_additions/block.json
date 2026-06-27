@@ -28,6 +28,36 @@
     "merged_from": []
   },
   {
+    "key": "block_quartzite_azul_white_62cb7497-bd26-5c42-8c7c-ce84b3f16d61",
+    "variant": "Azul White",
+    "category": "Blocks",
+    "stone_type": "Quartzite",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Azul White Quartzite"
+    ],
+    "image_file": "block_quartzite_azul_white_62cb7497-bd26-5c42-8c7c-ce84b3f16d61.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
     "key": "block_dolomite_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed",
     "variant": "Matarazzo",
     "category": "Blocks",

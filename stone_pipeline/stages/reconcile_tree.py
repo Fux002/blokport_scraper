@@ -106,7 +106,11 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
             )
         return
 
-    variety = ref.backbone.lookup(row.variation_name or "", stone_type=row.raw_type)
+    # Disambiguate same-name backbone varieties by the CORRECTED, canonical type (type_name), not
+    # the raw scrape tag. backbone.lookup compares _norm(variety.stone_type) == _norm(stone_type) and
+    # stone_type is canonical, so a raw tag ('Semiprecious' vs 'Semi-Precious Stone', or a name-
+    # corrected 'Agata'->'Agate') never matched and fell to candidates[0] nondeterministically.
+    variety = ref.backbone.lookup(row.variation_name or "", stone_type=row.type_name or row.raw_type)
     if variety is None:
         variety = ref.backbone.lookup(row.variation_name or "")
     if variety is None:
