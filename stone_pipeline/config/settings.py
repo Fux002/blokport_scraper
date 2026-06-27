@@ -157,7 +157,10 @@ class Paths:
     ports_csv: Path = WORKSPACE_ROOT / "catalog_source" / "ports.csv"
     ports_csv_fallback: Path = REPO_ROOT / "reference" / "ports.csv"
     units_csv: Path = REPO_ROOT / "reference" / "units.csv"
-    origin_map_csv: Path = REPO_ROOT / "reference" / "origin_map.csv"
+    # origin_map is HAND-MAINTAINED in catalog_source/ (variety -> country + geographic patterns),
+    # like ports.csv -- it is NOT generated from any export. Fallback to reference/ for back-compat.
+    origin_map_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_map.csv"
+    origin_map_csv_fallback: Path = REPO_ROOT / "reference" / "origin_map.csv"
     country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
     standard_slab_area_csv: Path = REPO_ROOT / "reference" / "standard_slab_area.csv"

@@ -1,10 +1,10 @@
 """Outbound write-back (section 8.4).
 
 A confirmed fuzzy/projection/review variation match appends the scraped spelling
-to that variation's alias list; a resolved origin review writes into origin_map;
-an approved attribute synonym writes into the synonym dict. This is what makes
-the system more consistent every run instead of re-reviewing the same names
-forever. Write-backs are append-only and recorded in the manifest.
+to that variation's alias list. This is what makes the system more consistent every
+run instead of re-reviewing the same names forever. Write-backs are append-only and
+recorded in the manifest. (Origin is NOT written back automatically -- origin_map.csv
+is hand-maintained in catalog_source/; the origin review flag is the worklist.)
 
 Rather than mutate the live backend exports (which can be re-pulled), confirmed
 aliases are appended to state/alias_writeback.csv. The variation index loader
@@ -21,7 +21,6 @@ from pathlib import Path
 from stone_pipeline.config.settings import SETTINGS
 
 ALIAS_WRITEBACK = "alias_writeback.csv"
-ORIGIN_WRITEBACK = "origin_map.csv"
 
 
 def _writeback_path(name: str) -> Path:

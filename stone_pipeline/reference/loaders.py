@@ -452,7 +452,10 @@ def load_country_codes(path: Path | None = None) -> dict[str, str]:
 
 
 def load_origin_map(path: Path | None = None) -> OriginMap:
-    path = Path(path or SETTINGS.paths.origin_map_csv)
+    # hand-maintained in catalog_source/; fall back to the reference stub if absent (mirrors ports).
+    path = Path(path) if path else SETTINGS.paths.origin_map_csv
+    if not path.exists():
+        path = SETTINGS.paths.origin_map_csv_fallback
     origin = OriginMap()
     if not path.exists():
         return origin
@@ -526,7 +529,9 @@ def load_all() -> ReferenceData:
                 paths.ports_csv if paths.ports_csv.exists() else paths.ports_csv_fallback
             ),
             "units": content_hash(paths.units_csv),
-            "origin_map": content_hash(paths.origin_map_csv),
+            "origin_map": content_hash(
+                paths.origin_map_csv if paths.origin_map_csv.exists() else paths.origin_map_csv_fallback
+            ),
         },
     )
     log.info(

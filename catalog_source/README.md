@@ -22,6 +22,19 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
 - `ports.csv` — the MASTER list of shipping ports (id, name, un_locode, country_iso, …).
   Assign which ports each supplier ships from in `config/sources.yaml` `ports_default`,
   by port NAME or UN/LOCODE (e.g. `Brindisi` / `ITBDS`) — resolved to ids against this file.
+- `origin_map.csv` — the per-VARIETY quarry country (origin is a property of the stone, NOT the
+  supplier — a trader in Italy sells Brazilian quartzite; origin is Brazil). Columns
+  `match_type,pattern,country_iso,city,county`, two rule kinds:
+  - `variety,<Variant Name>,<ISO>,…` — an EXACT name → country (type-independent). Add one row
+    per variety whose origin you know.
+  - `pattern,<token>,<ISO>,,` — a single name TOKEN that points at one country (`carrara`→IT,
+    `persa`→BR); matches a whole word, so it carries origin onto BRAND-NEW variants whose name
+    contains a known place/family token — no per-variant entry needed.
+  Resolution order (`derive_origin`): scraped country → this file (exact, then pattern) → the
+  supplier's `origin_default` as a LOW-confidence **flagged** fallback. That `origin_supplier_default`
+  flag in `products_review.csv` is the maintenance worklist: it lists exactly which new varieties
+  have no real origin yet — add a `variety,…` row here and the next build resolves them exactly.
+  (This file is hand-maintained — it is NOT generated from any export.)
 - `missing_variants.csv` — variants parked OUT of the tree (no/ambiguous image).
 - `image_model.csv` — which model made each variant's image (`flux-2-max` vs `legacy`);
   the redo-on-max worklist.
