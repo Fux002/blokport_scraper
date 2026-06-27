@@ -45,8 +45,16 @@ def _deleter(apply: bool):
     def delete(full_key: str) -> str:
         try:
             client.head_object(Bucket=s3.bucket, Key=full_key)
-        except Exception:
-            return "missing"
+        except Exception as exc:
+            resp = getattr(exc, "response", None)
+            code = str(resp.get("Error", {}).get("Code", "")) if isinstance(resp, dict) else ""
+            # only a genuine 404 means 'nothing to delete'. AccessDenied / throttling / network errors
+            # must surface as 'error' (not a clean 'missing'), else orphaned objects survive silently.
+            if code in ("404", "NoSuchKey", "NotFound"):
+                return "missing"
+            log.warning("head_object failed -- not a clean miss; image left undeleted",
+                        extra={"extra_fields": {"key": full_key, "code": code, "error": str(exc)}})
+            return "error"
         client.delete_object(Bucket=s3.bucket, Key=full_key)
         return "deleted"
     return delete
@@ -77,8 +85,10 @@ def main(argv: list[str] | None = None) -> int:
     keys = _keys_from(path)
     counts = run(keys, apply=apply)
     verb = "deleted" if apply else "would delete (dry-run; pass --apply)"
+    errors = counts.get("error", 0)
     print(f"{verb}: {counts.get('deleted', 0) + counts.get('would-delete', 0)} images "
-          f"({counts.get('missing', 0)} already absent) from {len(keys)} keys in {path.name}")
+          f"({counts.get('missing', 0)} already absent"
+          f"{f', {errors} ERRORS -- check logs' if errors else ''}) from {len(keys)} keys in {path.name}")
     return 0
 
 

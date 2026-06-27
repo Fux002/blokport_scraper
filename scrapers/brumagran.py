@@ -224,6 +224,10 @@ class BrumagranScraper(ScraperBase):
                                  label, attempt + 1, self.max_retries, e, wait)
                 time.sleep(wait)
         self.record_failure("http", url=url, error=str(last_err), label=label)
+        # a list/detail page that exhausted all retries returns empty, which list_products reads as
+        # end-of-pagination -> mark the run INCOMPLETE so a transient block can't silently truncate the
+        # catalog and delist its tail (the pipeline keeps the prior complete folder).
+        self.mark_incomplete(f"{label} fetch failed after {self.max_retries} retries")
         return {}
 
     @staticmethod

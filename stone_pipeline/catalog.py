@@ -131,27 +131,36 @@ def _auto_queue_images() -> int:
     items = items if isinstance(items, list) else items.get("items", [])
     if items and os.environ.get("FAL_KEY"):
         log.info("auto image generation: FAL_KEY present, generating", extra={"extra_fields": {"queued": len(items)}})
-        _generate_queued_images()
+        failed = _generate_queued_images()
+        if failed:
+            # distinct error-level signal: generation failed, so some {Key}.png will be absent. The
+            # image gate downstream HOLDS imageless variants, but only when S3 is reachable -- surface
+            # this loudly so a wholesale failure isn't mistaken for a clean run.
+            log.error("image generation failed -- expected images may be missing from this build",
+                      extra={"extra_fields": {"failed_scripts": failed, "queued": len(items)}})
     elif items:
         log.info("image prompt queue ready (set FAL_KEY + run image_pipeline to generate)",
                  extra={"extra_fields": {"queued": len(items)}})
     return len(items)
 
 
-def _generate_queued_images() -> None:
+def _generate_queued_images() -> list[str]:
     """Run the existing image_pipeline chain (FLUX.2 max -> BEN2 -> S3) on the queued prompts.
-    Reuses the committed scripts so the S3 step you set up elsewhere stays the single source."""
+    Reuses the committed scripts so the S3 step you set up elsewhere stays the single source.
+    Returns the list of scripts that exited non-zero (empty == all succeeded)."""
     import subprocess
     import sys
     ip = SETTINGS.paths.workspace_root / "image_pipeline"
+    failed: list[str] = []
     for script in ("genetate_images.py", "rb_images.py"):
         if (ip / script).exists():
-            # sys.executable (not bare "python") so the venv interpreter is used; surface a non-zero
-            # exit instead of swallowing it -- a failed generation otherwise looks like a clean run.
+            # sys.executable (not bare "python") so the venv interpreter is used.
             rc = subprocess.run([sys.executable, script], cwd=ip, check=False).returncode
             if rc != 0:
-                log.warning("image-pipeline script failed",
-                            extra={"extra_fields": {"script": script, "returncode": rc}})
+                log.error("image-pipeline script failed",
+                          extra={"extra_fields": {"script": script, "returncode": rc}})
+                failed.append(script)
+    return failed
 
 
 def _s3_image_checker():
@@ -322,12 +331,12 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
                 f"collect_products: source '{source}' product header differs from earlier sources -- "
                 "a column-schema mismatch would mis-align 3_products_all.csv; refusing to merge")
         counts[source] = len(body)
-        with (to_upload / f"3_products_{source}.csv").open("w", newline="", encoding="utf-8") as h:
-            csv.writer(h).writerows([header_row, *body])
+        # atomic (a half-written upload file would be read by verify_consistency right after); NOT
+        # sanitized -- this is the Medusa IMPORT file, where a leading "'" would corrupt the data.
+        csvio.write_rows(to_upload / f"3_products_{source}.csv", header_row, body)
         all_rows += body
     if header is not None:
-        with (to_upload / "3_products_all.csv").open("w", newline="", encoding="utf-8") as h:
-            csv.writer(h).writerows([header, *all_rows])
+        csvio.write_rows(to_upload / "3_products_all.csv", header, all_rows)
     return counts
 
 
@@ -348,10 +357,8 @@ def consolidate_inventory(inv_csvs: list[Path], to_upload: Path | None = None) -
         for r in rows[1:]:          # skip header
             if r and r[0].strip():
                 by_sku[r[0].strip().upper()] = r   # Variant Sku is column 0
-    with (to_upload / "4_inventory_update.csv").open("w", newline="", encoding="utf-8") as h:
-        writer = csv.writer(h)
-        writer.writerow(emit.INVENTORY_COLUMNS)
-        writer.writerows(by_sku.values())
+    # atomic, NOT sanitized -- Medusa import file.
+    csvio.write_rows(to_upload / "4_inventory_update.csv", emit.INVENTORY_COLUMNS, list(by_sku.values()))
     return len(by_sku)
 
 
@@ -378,10 +385,9 @@ def collect_discontinued(outputs_root: Path) -> int:
         for r in rows[1:]:
             if r and r[0].strip():
                 by_sku[r[0].strip().upper()] = r
-    with (review / "products_discontinued.csv").open("w", newline="", encoding="utf-8") as h:
-        writer = csv.writer(h)
-        writer.writerow(emit.DISCONTINUED_COLUMNS)
-        writer.writerows(by_sku.values())
+    # operator-opened review file built from scraped product rows -> sanitize each cell + atomic.
+    csvio.write_rows(review / "products_discontinued.csv", emit.DISCONTINUED_COLUMNS,
+                     [[csvio.safe_cell(c) for c in r] for r in by_sku.values()])
     return len(by_sku)
 
 

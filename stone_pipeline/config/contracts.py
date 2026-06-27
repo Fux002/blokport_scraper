@@ -21,6 +21,7 @@ import polars as pl
 import yaml
 
 from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.core import csvio
 
 
 # Columns every ScraperBase subclass emits (scrapers/base.py BASE_COLUMNS). They
@@ -101,7 +102,8 @@ def write_contract(contract: SourceContract, path: Path | None = None) -> Path:
     body = asdict(contract)
     body.pop("source")
     existing[contract.source] = body
-    path.write_text(yaml.safe_dump(existing, sort_keys=False), encoding="utf-8")
+    # atomic: a crash mid-write must not leave a truncated YAML the next run reads as a contract.
+    csvio.atomic_write(path, lambda h: h.write(yaml.safe_dump(existing, sort_keys=False)))
     return path
 
 
@@ -146,5 +148,6 @@ def save_baseline(baseline: Baseline, path: Path | None = None) -> Path:
     body = asdict(baseline)
     body.pop("source")
     data[baseline.source] = body
-    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    # atomic: a partial baselines.json would crash load_baselines (json.loads) on the next run.
+    csvio.atomic_write(path, lambda h: h.write(json.dumps(data, indent=2, sort_keys=True)))
     return path

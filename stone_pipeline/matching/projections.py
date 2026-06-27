@@ -40,7 +40,10 @@ def norm(value: str) -> str:
 
 
 def compact(value: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", (value or "").casefold())
+    # ascii_fold first (like norm) so an accented surface compacts to the SAME key as its unaccented
+    # spelling -- else compact('Porriño')='porrio' (ñ dropped) != compact('Porrino')='porrino', and the
+    # high-confidence exact tier fails to unite them.
+    return re.sub(r"[^a-z0-9]", "", ascii_fold(value or "").casefold())
 
 
 def tokenset(value: str) -> tuple[str, ...]:

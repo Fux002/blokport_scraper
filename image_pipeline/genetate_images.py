@@ -303,15 +303,19 @@ def build_arguments(raw_prompt: str, base_url: str, base_size=None, category: st
 
 
 def save_image(content: bytes, out_path: Path) -> None:
-    """Downscale to FINAL_SIZE locally (clean Lanczos) and save, or save as-is."""
+    """Downscale to FINAL_SIZE locally (clean Lanczos) and save, or save as-is. Atomic: write a .tmp
+    then os.replace, so a process killed mid-save never leaves a truncated {Key}.png that the resume
+    scan (out_path.exists()) would then skip forever, shipping a corrupt image."""
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     if not FINAL_SIZE:
-        out_path.write_bytes(content)
-        return
-    img = Image.open(BytesIO(content))
-    img = img.resize((FINAL_SIZE, FINAL_SIZE), Image.LANCZOS)
-    if OUTPUT_FORMAT in ("jpeg", "jpg") and img.mode != "RGB":
-        img = img.convert("RGB")
-    img.save(out_path)
+        tmp.write_bytes(content)
+    else:
+        img = Image.open(BytesIO(content))
+        img = img.resize((FINAL_SIZE, FINAL_SIZE), Image.LANCZOS)
+        if OUTPUT_FORMAT in ("jpeg", "jpg") and img.mode != "RGB":
+            img = img.convert("RGB")
+        img.save(tmp)
+    os.replace(tmp, out_path)
 
 
 def generate_one(item: dict, base_sizes: dict) -> bool:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import re
+import zlib
 from typing import Callable, Optional, Protocol
 
 Vector = list[float]
@@ -38,7 +39,9 @@ def hashing_embedder(dim: int = 64) -> Embedder:
             padded = f"  {norm}  "
             for i in range(len(padded) - 2):
                 tri = padded[i : i + 3]
-                vec[hash(tri) % dim] += 1.0
+                # crc32, NOT the builtin hash() -- str hashing is salted per process (PYTHONHASHSEED),
+                # which would make the "deterministic" embedder differ run-to-run.
+                vec[zlib.crc32(tri.encode("utf-8")) % dim] += 1.0
             length = math.sqrt(sum(v * v for v in vec)) or 1.0
             out.append([v / length for v in vec])
         return out

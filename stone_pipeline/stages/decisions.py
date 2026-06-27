@@ -75,10 +75,12 @@ def save_rejected(rejected: set[str], path: Path | None = None) -> None:
         [csvio.safe_cell(name)] for name in sorted(rejected)))
 
 
-def load_attribute_ids(path: Path | None = None) -> dict[tuple[str, str], str]:
-    """(kind, norm(value)) -> medusa_id, for rows where you filled in the id you created in Medusa."""
+def load_attribute_ids(path: Path | None = None) -> dict[tuple[str, str], tuple[str, str]]:
+    """(kind, norm(value)) -> (ORIGINAL value, medusa_id), for rows where you filled in the id you
+    created in Medusa. The original value (operator's casing/punctuation) is preserved so it becomes
+    the CANONICAL attribute name, not its lowercased normalization."""
     path = Path(path or SETTINGS.paths.review_dir / ATTR_FILE)
-    out: dict[tuple[str, str], str] = {}
+    out: dict[tuple[str, str], tuple[str, str]] = {}
     if not path.exists():
         return out
     with path.open(encoding="utf-8-sig", newline="") as h:
@@ -87,7 +89,7 @@ def load_attribute_ids(path: Path | None = None) -> dict[tuple[str, str], str]:
             kind = (r.get("kind") or "").strip().lower()
             value = (r.get("value") or "").strip()
             if mid and kind and value:
-                out[(kind, _norm(value))] = mid
+                out[(kind, _norm(value))] = (value, mid)
     return out
 
 
@@ -102,9 +104,10 @@ def write_attributes_to_add(pending: list[dict], path: Path | None = None) -> Pa
     return path
 
 
-def adopt_attribute_ids(filled: dict[tuple[str, str], str], attributes_csv: Path | None = None) -> int:
+def adopt_attribute_ids(filled: dict[tuple[str, str], tuple[str, str]], attributes_csv: Path | None = None) -> int:
     """Append the (kind, value, id) the user filled into the env's attributes.csv so the vocab
-    knows them on the next run. Returns how many were adopted (skips ones already present)."""
+    knows them on the next run. Returns how many were adopted (skips ones already present). Writes the
+    ORIGINAL value (operator casing) as the canonical name -- normalization is for the dedup key only."""
     path = Path(attributes_csv or SETTINGS.paths.attributes_csv)
     if not filled or not path.exists():
         return 0
@@ -112,13 +115,13 @@ def adopt_attribute_ids(filled: dict[tuple[str, str], str], attributes_csv: Path
     with path.open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
             existing.add(((r.get("category") or "").strip().lower(), _norm(r.get("value", ""))))
-    new = [(k, v, mid) for (k, v), mid in filled.items() if (k, v) not in existing]
+    new = [(k, raw_value, mid) for (k, vnorm), (raw_value, mid) in filled.items() if (k, vnorm) not in existing]
     if not new:
         return 0
     with path.open("a", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
-        for kind, value_norm, mid in new:
-            w.writerow([kind, value_norm, mid])
+        for kind, raw_value, mid in new:
+            w.writerow([kind, raw_value, mid])
     return len(new)
 
 

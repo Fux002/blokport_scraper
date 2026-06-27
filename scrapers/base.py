@@ -238,17 +238,13 @@ class ScraperBase:
         self._write_csv(rows)
         self._write_failures()
         self._summary(rows)
-        # A 0-row scrape, or one that reached a clean finish despite a page request exhausting ALL
-        # retries (a swallowed fetch failure -- base._request RAISES, but a scraper's own fetcher may
-        # return empty instead), is almost never a genuinely empty/complete catalog. Mark it INCOMPLETE
-        # so the pipeline keeps the prior good folder instead of treating the truncation as
-        # authoritative and delisting real inventory. (Additive: a scraper that already knows it
-        # truncated has set _incomplete; this is the safety net for the ones that don't.)
-        if not self._incomplete:
-            if not rows:
-                self.mark_incomplete("zero rows scraped -- treating as a failed run, not an empty catalog")
-            elif any(f.get("kind") == "http" for f in self._failures):
-                self.mark_incomplete("a page request failed after all retries -- scrape may be truncated")
+        # A 0-row scrape is almost never a genuinely empty catalog (a blocked/empty first page, a total
+        # block) -- mark it INCOMPLETE so the pipeline keeps the prior good folder instead of treating
+        # the wipe as authoritative and delisting the whole source. (A mid-pagination truncation that
+        # still yielded rows is signalled by the scraper itself via mark_incomplete -- e.g. a list-page
+        # fetch that exhausted retries -- and bounded downstream by the >30% delist guard.)
+        if not self._incomplete and not rows:
+            self.mark_incomplete("zero rows scraped -- treating as a failed run, not an empty catalog")
         # Written ONLY after a clean finish: a crash mid-scrape leaves no marker, so the pipeline
         # falls back to the prior good folder instead of ingesting a half-written products.csv.
         self.complete_marker.write_text(

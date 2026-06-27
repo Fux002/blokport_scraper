@@ -679,9 +679,10 @@ def write_attribute_curation(attr_rows: list[dict], outputs_dir: Path, run_id: s
 _IMPORT_COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
 
 
-def _write_csv(path: Path, cols: list[str], rows: list[dict]) -> None:
-    # atomic + formula-injection-safe: variant Name/Aliases come from scraped text
-    csvio.write_dicts(path, cols, rows, sanitize=True)
+def _write_csv(path: Path, cols: list[str], rows: list[dict], sanitize: bool = True) -> None:
+    # atomic always. sanitize=True (formula-injection-safe) for operator-opened files; sanitize=False
+    # for a MEDUSA IMPORT file, where a leading "'" prepended to a Name/Alias would corrupt the data.
+    csvio.write_dicts(path, cols, rows, sanitize=sanitize)
 
 
 def write_curation(result: CurationResult) -> None:
@@ -738,7 +739,7 @@ def write_curation(result: CurationResult) -> None:
     if before != len(upload_rows):
         log.info("update delta pruned", extra={"extra_fields": {"dropped_noops": before - len(upload_rows)}})
     if upload_rows:
-        _write_csv(to_upload / "1_variants_update.csv", _IMPORT_COLS, upload_rows)
+        _write_csv(to_upload / "1_variants_update.csv", _IMPORT_COLS, upload_rows, sanitize=False)  # Medusa import
     # the ONLY review file from curate: the decision ledger (uncertain new varieties, confirm
     # true/false). Always (re)written so applied/rejected rows drop out. Advisory sets (uncertain
     # alias spellings, code-like names, images) are logged as counts, not clutter files.

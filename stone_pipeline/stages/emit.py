@@ -125,9 +125,10 @@ def write_import_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
                      columns: list[str] | None = None) -> Path:
     columns = columns or read_template_columns()
     path = Path(path)
-    # atomic + formula-injection-safe: scraped Title/Description go to a file an operator opens in Excel
+    # atomic, NOT sanitized: this is the Medusa product IMPORT, where a leading "'" prepended to a
+    # Title/Description would corrupt the data. Operator review is the sanitized review files' job.
     cells = [row_to_cells(row, columns, cfg) for row in rows]
-    csvio.write_dicts(path, columns, cells, sanitize=True)
+    csvio.write_dicts(path, columns, cells, sanitize=False)
     log.info("emit done", extra={"extra_fields": {"rows": len(rows), "columns": len(columns)}})
     return path
 

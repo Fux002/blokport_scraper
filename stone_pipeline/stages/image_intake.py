@@ -74,9 +74,12 @@ def build_lookups():
                 key = (r.get("Key") or "").strip()
                 if not key:
                     continue
+                cat = category_for_key(key)        # None for a malformed/legacy Key prefix
+                if cat is None:
+                    continue                        # skip that row, don't crash the whole intake
                 img = (r.get("Image") or "").strip()
                 rec = variants.setdefault(key, {"Name": (r.get("Name") or "").strip(),
-                                                "branch": category_for_key(key).name, "has_image": False})
+                                                "branch": cat.name, "has_image": False})
                 by_stem[key_stem(key)].add(key)
                 if img:
                     by_basename[Path(img).name.lower()] = key

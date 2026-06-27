@@ -61,9 +61,15 @@ def _parse_measure(text: str, ref: ReferenceData) -> float | None:
     value = parse_number(match.group(1))
     if value is None:
         return None
+    raw_token = (match.group(2) or "").strip()
     token = normalize_unit(match.group(2))   # quote marks -> in/ft; empty -> m
     converted = ref.units.convert(value, token)
-    return converted if converted is not None else value
+    if converted is not None:
+        return converted
+    # convert failed: trust the bare number ONLY when no unit was given (already metres). An UNKNOWN
+    # unit token ('x' from a '120x60' dimension, a typo'd abbreviation) is NOT metres -> unparseable,
+    # so the caller synthesizes/flags instead of shipping a wildly wrong magnitude as a confident value.
+    return value if not raw_token else None
 
 
 # --- category (section 7 Stage 6) ---------------------------------------------
@@ -92,6 +98,8 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
                 if meters is not None:
                     parsed[key.strip().lower()] = meters
     width = _parse_measure(row.raw_thickness, ref) if row.raw_thickness else None
+    if width is None:                         # fall back to a width=/thickness= entry in raw_dimensions
+        width = parsed.get("width") or parsed.get("thickness")   # (was parsed but never read)
 
     fmt = (row.format_value or "").casefold()
     ranges = (_BLOCK_RANGES if (row.is_block or fmt == "block")

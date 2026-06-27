@@ -69,8 +69,12 @@ def sku_for(row: CanonicalRow, cfg: SourceConfig) -> str:
 
 def inventory_for(row: CanonicalRow) -> str:
     for candidate in (row.raw_slab_count, row.bundle_size, row.raw_inventory_quantity):
-        if candidate and str(candidate).strip().isdigit():
-            return str(int(str(candidate)))
+        text = str(candidate).strip() if candidate is not None else ""
+        # require > 0: a literal '0' slab count is not a real quantity (derive_bundle_size rejects it
+        # the same way) -> fall through to the next candidate / the in-stock '1' default, rather than
+        # shipping the product out-of-stock.
+        if text.isdigit() and int(text) > 0:
+            return text
     return "1"
 
 

@@ -180,8 +180,10 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
         r["Aliases"] = "|".join(title_case(a) for a in r["Aliases"].split("|") if a.strip())
 
     path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
-    # atomic + formula-injection-safe: variant Name/Aliases come from scraped text
-    csvio.write_dicts(path, _COLS, rows, sanitize=True)
+    # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
+    # Name/Alias would corrupt the catalog data. (Operator review of scraped names is the sanitized
+    # review files' job, not this machine-consumed deliverable.)
+    csvio.write_dicts(path, _COLS, rows, sanitize=False)
     log.info("variants_full emitted", extra={"extra_fields": {
         "rows": len(rows), "existing": n_existing,
         "new": len(order) - n_existing, "mirror": len(mirror)}})
