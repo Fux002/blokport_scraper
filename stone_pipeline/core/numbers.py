@@ -40,6 +40,10 @@ def parse_number(text: str | float | int | None) -> float | None:
     elif has_comma:
         frac = s.rsplit(",", 1)[1]
         s = s.replace(",", ".") if (s.count(",") == 1 and 1 <= len(frac) <= 2) else s.replace(",", "")
+    elif s.count(".") > 1:
+        # more than one dot cannot be a decimal point -> EU thousands grouping ('2.500.000' -> 2500000).
+        # A single dot stays a decimal point (the documented default), so '2.80'/'1.234' are unchanged.
+        s = s.replace(".", "")
     try:
         value = float(s)
     except ValueError:

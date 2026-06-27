@@ -38,7 +38,9 @@ def _deleter(apply: bool):
         import boto3
     except ImportError:
         return None
-    client = boto3.Session(profile_name=s3.credentials_profile, region_name=s3.region).client("s3")
+    # an empty profile (Fargate / ambient creds) must fall back to the default credential chain, not
+    # boto3.Session(profile_name="") which raises ProfileNotFound (mirrors io/storage.py).
+    client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
 
     def delete(full_key: str) -> str:
         try:

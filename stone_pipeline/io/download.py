@@ -19,6 +19,10 @@ from stone_pipeline.io.ssrf import url_allowed
 log = logfmt.get_logger("download")
 
 _MAX_REDIRECTS = 5
+# images come from semi-trusted scraped hosts; a body over this is not a catalog stone photo and is
+# rejected so a hostile/broken host can't OOM the run (read in capped chunks, so a chunked response
+# with no Content-Length is bounded too).
+_MAX_BYTES = 25 * 1024 * 1024
 
 
 def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5) -> Callable[[str], Optional[bytes]]:
@@ -40,18 +44,30 @@ def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5)
                         log.warning("blocked by SSRF guard (non-public host or scheme)",
                                     extra={"extra_fields": {"url": current}})
                         return None
-                    response = client.get(current)
-                    if response.is_redirect:
-                        loc = response.headers.get("location")
-                        if not loc:
+                    with client.stream("GET", current) as response:
+                        if response.is_redirect:
+                            loc = response.headers.get("location")
+                            if not loc:
+                                return None
+                            current = str(httpx.URL(current).join(loc))  # resolve relative -> revalidate
+                            continue
+                        if response.status_code in (404, 410):
+                            return None  # permanent, do not retry
+                        if response.status_code != 200:
+                            break  # other status -> retry with backoff
+                        clen = response.headers.get("content-length")
+                        if clen and clen.isdigit() and int(clen) > _MAX_BYTES:
+                            log.warning("image exceeds size cap (declared)",
+                                        extra={"extra_fields": {"url": current, "bytes": clen}})
                             return None
-                        current = str(httpx.URL(current).join(loc))  # resolve relative -> revalidate
-                        continue
-                    if response.status_code == 200 and response.content:
-                        return response.content
-                    if response.status_code in (404, 410):
-                        return None  # permanent, do not retry
-                    break  # other status -> retry with backoff
+                        buf = bytearray()
+                        for chunk in response.iter_bytes():
+                            buf += chunk
+                            if len(buf) > _MAX_BYTES:
+                                log.warning("image exceeds size cap (streamed)",
+                                            extra={"extra_fields": {"url": current}})
+                                return None
+                        return bytes(buf) if buf else None
                 else:
                     log.warning("too many redirects", extra={"extra_fields": {"url": url}})
                     return None

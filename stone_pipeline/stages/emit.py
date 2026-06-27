@@ -137,17 +137,15 @@ def write_review_csv(rows: list[CanonicalRow], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     columns = ["src_site", "surrogate_key", "raw_name", "field", "code", "raw_value",
                "best_guess", "confidence", "method", "src_url"]
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        for row in rows:
-            for flag in row.review_flags:
-                writer.writerow({
-                    "src_site": row.src_site, "surrogate_key": row.surrogate_key,
-                    "raw_name": row.raw_name, "field": flag.field, "code": flag.code,
-                    "raw_value": flag.raw_value, "best_guess": flag.best_guess,
-                    "confidence": flag.confidence, "method": flag.method, "src_url": flag.src_url,
-                })
+    cells = [{
+        "src_site": row.src_site, "surrogate_key": row.surrogate_key,
+        "raw_name": row.raw_name, "field": flag.field, "code": flag.code,
+        "raw_value": flag.raw_value, "best_guess": flag.best_guess,
+        "confidence": flag.confidence, "method": flag.method, "src_url": flag.src_url,
+    } for row in rows for flag in row.review_flags]
+    # operator-opened review file with scraped raw_name/raw_value -> sanitize against formula injection
+    # (and atomic). Matches the products-review writer above.
+    csvio.write_dicts(path, columns, cells, sanitize=True)
     return path
 
 
@@ -211,14 +209,10 @@ def write_rejects_csv(rows: list[CanonicalRow], path: Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     columns = ["src_site", "surrogate_key", "raw_name", "rule", "detail", "src_url"]
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        for row in rows:
-            for reason in row.reject_reasons:
-                writer.writerow({
-                    "src_site": row.src_site, "surrogate_key": row.surrogate_key,
-                    "raw_name": row.raw_name, "rule": reason.rule, "detail": reason.detail,
-                    "src_url": row.src_url,
-                })
+    cells = [{
+        "src_site": row.src_site, "surrogate_key": row.surrogate_key,
+        "raw_name": row.raw_name, "rule": reason.rule, "detail": reason.detail,
+        "src_url": row.src_url,
+    } for row in rows for reason in row.reject_reasons]
+    csvio.write_dicts(path, columns, cells, sanitize=True)   # scraped text, operator-opened -> sanitize + atomic
     return path

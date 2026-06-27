@@ -18,6 +18,7 @@ empty catalog skips image pruning entirely, so the pipeline never loses an input
 from __future__ import annotations
 
 import csv
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -29,12 +30,34 @@ from stone_pipeline.core import logfmt
 log = logfmt.get_logger("clean")
 
 
+def _scrape_is_complete(folder: Path) -> bool:
+    """Mirror run.find_scrape_file: a folder is usable unless its marker explicitly says incomplete
+    (a legacy folder with no marker is accepted)."""
+    marker = folder / "scrape_complete.json"
+    if not marker.exists():
+        return True
+    try:
+        return bool(json.loads(marker.read_text(encoding="utf-8")).get("complete", True))
+    except (ValueError, OSError):
+        return True
+
+
 def _superseded_scrapes(data_dir: Path) -> list[Path]:
-    """data/<source>/<ts>/ folders that are NOT the latest for their source."""
+    """data/<source>/<ts>/ folders that are NOT the latest for their source. Keeps the newest AND the
+    AUTHORITATIVE folder the pipeline actually ingests (run.find_scrape_file uses the latest COMPLETE
+    folder, skipping a truncated newest) -- so when the newest scrape is incomplete we never delete
+    the older complete folder the pipeline still depends on."""
     stale: list[Path] = []
     for src_dir in sorted(p for p in data_dir.glob("*") if p.is_dir()):
         runs = sorted(d for d in src_dir.glob("*") if d.is_dir())
-        stale.extend(runs[:-1])   # keep the newest
+        if not runs:
+            continue
+        keep = {runs[-1]}                                   # always keep the newest
+        for d in reversed(runs):                            # ...plus the latest usable (complete) one
+            if _scrape_is_complete(d):
+                keep.add(d)
+                break
+        stale.extend(d for d in runs if d not in keep)
     return stale
 
 

@@ -306,7 +306,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     #                          stone).
     #   PHASE 5  MINT          a new variety -- the LAST resort, only for a clean, product-backed name.
     # Uncertain at any resolve/mint step -> HOLD for human review (variants_to_confirm.csv), never guess.
-    seen_new: set[str] = set()
+    seen_new: set[tuple[str, str]] = set()  # (norm type, norm name) -- the gen_key identity
     suspicious: list[dict] = []          # names that look like supplier codes, not varieties
     new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches)
     for row in rows:
@@ -325,10 +325,14 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         clean = _clean_variety(name, stone_type)
 
         # PHASE 2 -- DEDUP: classify each cleaned identity once (two raw names that clean to the same
-        # variety must never mint duplicate Keys).
-        if proj.norm(clean) in seen_new:
+        # variety must never mint duplicate Keys). Keyed on (RESOLVED type, cleaned name) -- the SAME
+        # identity gen_key uses -- so two same-named varieties of DIFFERENT types ('Imperial White'
+        # Granite vs Quartzite) are EACH minted with their own Key, not silently collapsed to one by
+        # row order (which dropped a whole type non-deterministically).
+        identity = (proj.norm(stone_type), proj.norm(clean))
+        if identity in seen_new:
             continue
-        seen_new.add(proj.norm(clean))
+        seen_new.add(identity)
 
         # PHASE 3 -- REJECT / HOLD gates (never mint), cheapest + most decisive FIRST, before any
         # reuse-or-mint decision so junk can't be matched, aliased, or minted:
@@ -499,7 +503,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # the one row that triggered the mint. Otherwise a variety is born with one product's colour/
     # finish/quality and leaf-gaps every sibling that differs (Azzurra Bay), or gets an empty colour
     # set when its trigger product had none -- nulling colour_id for all its products (Antibes).
-    obs_union: dict[str, dict[str, set]] = {}
+    obs_union: dict[tuple[str, str], dict[str, set]] = {}   # (norm type, norm name) -> observed attrs
     for _r in rows:
         _nm = (_r.variety_match_key or _r.raw_name or "").strip()
         if not _nm:
@@ -510,7 +514,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # born with the Natural/default fallback instead of its observed colours/finishes/qualities.
         _st = (_r.type_name or _r.raw_type
                or next((g.suggested_type for g in _r.tree_gaps if g.suggested_type), "") or "")
-        _k = proj.norm(_clean_variety(_nm, _st))
+        _k = (proj.norm(_st), proj.norm(_clean_variety(_nm, _st)))
         u = obs_union.setdefault(_k, {"colors": set(), "qualities": set(), "finishes": set()})
         if _r.color_name:
             u["colors"].add(title_case(_r.color_name))
@@ -520,7 +524,8 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             u["finishes"].add(title_case(_r.finish_name))
 
     for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed in new_variant_rows:
-        _u = obs_union.get(proj.norm(title), {"colors": set(), "qualities": set(), "finishes": set()})
+        _u = obs_union.get((proj.norm(stone_type), proj.norm(title)),
+                           {"colors": set(), "qualities": set(), "finishes": set()})
         # colour is REQUIRED for a Medusa product; a source like zucchi often supplies none, so a
         # variety would be born colourless and null every product's colour_id. Fall back to the
         # generic 'Multicolor' (a real attribute) so the variety + its products are always priceable.

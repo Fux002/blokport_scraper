@@ -19,6 +19,7 @@ import csv
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.core import csvio
 from stone_pipeline.matching import projections as proj
 
 ATTR_FILE = "attributes_to_add.csv"
@@ -69,10 +70,9 @@ def load_rejected(path: Path | None = None) -> set[str]:
 def save_rejected(rejected: set[str], path: Path | None = None) -> None:
     path = _rejected_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as h:
-        w = csv.writer(h)
-        for name in sorted(rejected):
-            w.writerow([name])
+    # headerless (load_rejected reads col 0); atomic + formula-injection-safe on the scraped names.
+    csvio.atomic_write(path, lambda h: csv.writer(h).writerows(
+        [csvio.safe_cell(name)] for name in sorted(rejected)))
 
 
 def load_attribute_ids(path: Path | None = None) -> dict[tuple[str, str], str]:
@@ -96,11 +96,9 @@ def write_attributes_to_add(pending: list[dict], path: Path | None = None) -> Pa
     Medusa, paste the id, and next run the pipeline adopts it into attributes.csv and drops the row)."""
     path = Path(path or SETTINGS.paths.review_dir / ATTR_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=ATTR_COLUMNS)
-        w.writeheader()
-        for r in pending:
-            w.writerow({c: r.get(c, "") for c in ATTR_COLUMNS})
+    # operator-edited ledger (you paste Medusa ids) with scraped values -> sanitize + atomic.
+    csvio.write_dicts(path, ATTR_COLUMNS, [{c: r.get(c, "") for c in ATTR_COLUMNS} for r in pending],
+                      sanitize=True)
     return path
 
 
@@ -130,9 +128,7 @@ def write_confirm_file(pending: list[dict], path: Path | None = None) -> Path:
     confirm for you to decide next."""
     path = Path(path or SETTINGS.paths.review_dir / CONFIRM_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=CONFIRM_COLUMNS)
-        w.writeheader()
-        for row in pending:
-            w.writerow({c: row.get(c, "") for c in CONFIRM_COLUMNS})
+    # operator-edited decision ledger with scraped variety names -> sanitize + atomic.
+    csvio.write_dicts(path, CONFIRM_COLUMNS, [{c: row.get(c, "") for c in CONFIRM_COLUMNS} for row in pending],
+                      sanitize=True)
     return path

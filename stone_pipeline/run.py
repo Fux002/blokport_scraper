@@ -22,6 +22,7 @@ from stone_pipeline.adapters.base import AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
 from stone_pipeline.config.settings import COMPANY_ID, IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS
 from stone_pipeline.config.sources import load_source
+from stone_pipeline.core import csvio
 from stone_pipeline.core import ids as ids_mod
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.layout import RunLayout, write_steps_md
@@ -84,11 +85,9 @@ def _write_gap_queue(rows: list[CanonicalRow], path: Path) -> int:
         "suggested_color", "suggested_finish", "suggested_quality", "gap_kind",
         "nearest_existing", "nearest_score", "example_src_url",
     ]
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        for gap in gaps:
-            writer.writerow({c: gap.get(c, "") for c in columns})
+    # operator worklist opened in Excel/Sheets -> sanitize scraped text against formula injection
+    # (a scraped name like '=HYPERLINK(...)' or '+cmd' must not execute). write_dicts is also atomic.
+    csvio.write_dicts(path, columns, [{c: gap.get(c, "") for c in columns} for gap in gaps], sanitize=True)
     return len(gaps)
 
 

@@ -115,7 +115,11 @@ def _mirror_rows(by_key: dict[str, dict]) -> list[dict]:
     """One variant row per source variety for each active mirror category (tiles
     mirror slabs). The mirror's deterministic Key carries the source variant's
     Name and Aliases, so a tile stays identical to its slab."""
-    out: list[dict] = []
+    # keyed by the mirror Key so a Key is emitted ONCE even when two source varieties share the same
+    # (stone_type, variant) and both resolve to the same mirror post -- first source wins. A list-append
+    # here produced duplicate tile Keys (the downstream dedup only checks against existing variants,
+    # not among mirror rows).
+    out: dict[str, dict] = {}
     for cat in CATEGORIES:
         if not (cat.mirror_of and cat.active):
             continue
@@ -128,10 +132,10 @@ def _mirror_rows(by_key: dict[str, dict]) -> list[dict]:
         for sp in src_posts:
             s = by_key.get(sp.get("key"))
             mp = mir_by.get((sp.get("stone_type"), sp.get("variant")))
-            if s and mp:
-                out.append({"Key": mp["key"], "Name": s["Name"], "Image": "",
-                            "Aliases": s["Aliases"], "Volume per kg (m³/kg)": ""})
-    return out
+            if s and mp and mp["key"] not in out:
+                out[mp["key"]] = {"Key": mp["key"], "Name": s["Name"], "Image": "",
+                                  "Aliases": s["Aliases"], "Volume per kg (m³/kg)": ""}
+    return list(out.values())
 
 
 def build(existing_path: Path | None = None, image_keys: set[str] | None = None) -> Path:

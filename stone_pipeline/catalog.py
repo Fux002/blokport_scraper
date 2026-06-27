@@ -428,10 +428,9 @@ def write_variants_to_delete() -> int:
                              "Image": (src.get("Image") or prev.get("Image") or "").strip(),
                              "reason": prev.get("reason") or "flagged for deletion"})
     out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=["Key", "Name", "Id", "Image", "reason"])
-        w.writeheader()
-        w.writerows(sorted(rows, key=lambda r: r["Key"]))
+    # operator-opened delete list carrying scraped Names -> sanitize against formula injection + atomic.
+    csvio.write_dicts(out, ["Key", "Name", "Id", "Image", "reason"],
+                      sorted(rows, key=lambda r: r["Key"]), sanitize=True)
     if rows:
         log.warning("junk variants in the export -- delete in Medusa + S3",
                     extra={"extra_fields": {"count": len(rows), "file": str(out),
