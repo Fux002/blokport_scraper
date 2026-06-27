@@ -1,9 +1,9 @@
 [
   {
-    "key": "tile_quartzite_azul_white_3672d59f-ac86-5618-b4f2-fc29fe06f042",
-    "variant": "Azul White",
+    "key": "tile_marble_calcite_blue_5e07f228-027a-501b-b1b7-2a0b63b7d762",
+    "variant": "Calcite Blue",
     "category": "Tiles",
-    "stone_type": "Quartzite",
+    "stone_type": "Marble",
     "color": [
       "White"
     ],
@@ -20,10 +20,8 @@
     "qualities": [
       "A"
     ],
-    "aliases": [
-      "Azul White Quartzite"
-    ],
-    "image_file": "tile_quartzite_azul_white_3672d59f-ac86-5618-b4f2-fc29fe06f042.png",
+    "aliases": [],
+    "image_file": "tile_marble_calcite_blue_5e07f228-027a-501b-b1b7-2a0b63b7d762.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": false,

@@ -1,5 +1,33 @@
 [
   {
+    "key": "slab_marble_calcite_blue_ca51c1ed-fca9-5b81-bf5b-0537fe9395e7",
+    "variant": "Calcite Blue",
+    "category": "Slabs",
+    "stone_type": "Marble",
+    "color": [
+      "White"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [],
+    "image_file": "slab_marble_calcite_blue_ca51c1ed-fca9-5b81-bf5b-0537fe9395e7.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
     "key": "slab_agate_agata_blue_spiral_6a49dbad-f8c5-58f1-97e4-0e887f193754",
     "variant": "Agata Blue Spiral",
     "category": "Slabs",

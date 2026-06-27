@@ -154,7 +154,15 @@ class ScraperBase:
                     if r.status_code == 200:
                         return r
                     if r.status_code == 429:
-                        time.sleep(self.backoff_base ** attempt * 5)
+                        # record WHY (else the final raise reports last_exc=None for a pure-429 run) and
+                        # honor the server's Retry-After (seconds) when present, else exponential backoff.
+                        last_exc = RuntimeError(f"rate limited (HTTP 429): {url}")
+                        ra = r.headers.get("Retry-After")
+                        try:
+                            wait = float(ra) if ra else self.backoff_base ** attempt * 5
+                        except ValueError:
+                            wait = self.backoff_base ** attempt * 5   # HTTP-date form -> fall back
+                        time.sleep(wait)
                         break  # retry from the top
                     r.raise_for_status()
                     break

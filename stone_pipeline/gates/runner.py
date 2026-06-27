@@ -28,6 +28,8 @@ def apply(rows: list[CanonicalRow], contract: ModuleContract) -> GateReport:
         report.violations[inv.name] = len(violators)
         for row in violators:
             if inv.severity == HARD:
+                if not row.is_emittable:
+                    continue   # already rejected (this gate or an earlier one) -> don't add a duplicate
                 row.add_reject(RejectReason(rule=inv.name, detail=inv.field))
                 rejected.add(id(row))
             elif inv.flag_code is not None:

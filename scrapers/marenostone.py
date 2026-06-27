@@ -118,14 +118,23 @@ class MarenoStoneScraper(ScraperBase):
 
     def _page_dims(self, url: str) -> dict:
         """Fetch the product page and read its real Length/Width/Thickness from the attributes
-        table (the Store API does not expose these custom attributes)."""
+        table (the Store API does not expose these custom attributes). Cached per permalink (the same
+        product recurs across listing pages) so it is fetched at most once."""
         if not url:
             return {}
+        cache = self.__dict__.setdefault("_dims_cache", {})
+        if url in cache:
+            return cache[url]
         try:
-            return _dims_from_html(self.get(url).text)
+            dims = _dims_from_html(self.get(url).text)
         except Exception as exc:  # never let a missing page kill the row
+            # record_failure (not just a warning) so silently-blank dimensions are AUDITABLE rather
+            # than looking like a genuine source gap.
+            self.record_failure("dims", url=url, error=str(exc))
             self.log.warning("dimension fetch failed for %s: %s", url, exc)
-            return {}
+            dims = {}
+        cache[url] = dims
+        return dims
 
     def parse_product(self, p: dict) -> Optional[dict]:
         attributes = p.get("attributes") or []

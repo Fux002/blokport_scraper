@@ -28,7 +28,7 @@ from stone_pipeline.config.settings import CATEGORIES, SETTINGS
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import content_hash
-from stone_pipeline.core.text import looks_code_shaped
+from stone_pipeline.core.text import ascii_fold, looks_code_shaped
 
 log = logfmt.get_logger("reference.loaders")
 
@@ -79,9 +79,11 @@ VOCAB_CATEGORIES = ("color", "finish", "type", "quality")
 
 
 def _norm(value: str) -> str:
-    """The shared normalization used for every name lookup: casefold, collapse
-    whitespace. Matching projections (5A.1) extend this; this is the base key."""
-    return " ".join((value or "").strip().casefold().split())
+    """The shared normalization used for every name lookup: ascii-fold accents, casefold, collapse
+    whitespace. Matching projections (5A.1) extend this; this is the base key. Folding accents here
+    keeps backbone lookups consistent with the variation index (proj.norm), so a scraped 'Porrino'
+    resolves the same canonical variety whether the stored name is 'Porriño' or 'Porrino'."""
+    return " ".join(ascii_fold((value or "").strip()).casefold().split())
 
 
 # --- attributes.csv -----------------------------------------------------------
@@ -240,6 +242,11 @@ class Backbone:
             for variety in candidates:
                 if _norm(variety.stone_type) == _norm(stone_type):
                     return variety
+            # an explicit type was requested but NO same-name candidate has it: do NOT silently return
+            # a FOREIGN-type variety (its colours/finishes/validity would be checked against the wrong
+            # stone). Let the caller decide -- reconcile falls back to an untyped lookup, the variation
+            # index uses the Key-derived type.
+            return None
         return candidates[0]
 
     def is_valid_leaf(self, variety: BackboneVariety, color: str, finish: str, quality: str) -> bool:

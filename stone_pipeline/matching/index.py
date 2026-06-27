@@ -114,8 +114,12 @@ def build_variation_index(variant_table, backbone) -> "CandidateIndex":
 
     index = CandidateIndex()
     for variant in variant_table.by_id.values():
-        variety = backbone.lookup(variant.name)
-        block_type = variety.stone_type if variety else _type_from_key(variant.key)
+        # disambiguate same-name varieties by the variant's OWN Key type (authoritative), not an
+        # arbitrary first same-name backbone variety -- which (with the shared slab backbone used for
+        # every branch) could carry a different stone type and set the wrong block_type.
+        key_type = _type_from_key(variant.key)
+        variety = backbone.lookup(variant.name, stone_type=key_type)
+        block_type = (variety.stone_type if variety else "") or key_type
         block_colors = set(variety.colors) if variety and variety.colors else colors_from_name(variant.name)
         surfaces = set(variant.aliases)
         index.add(
