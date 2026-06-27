@@ -26,5 +26,245 @@
     "in_csv": "yes",
     "product_backed": false,
     "merged_from": []
+  },
+  {
+    "key": "tile_avocatus_fbf47030-c55a-5c14-a636-d5544f8ff795",
+    "variant": "Avocatus",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Leathered",
+      "Polished",
+      "Honed",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "AVOCATUS"
+    ],
+    "image_file": "tile_avocatus_fbf47030-c55a-5c14-a636-d5544f8ff795.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_capolavoro_5543fdcf-2132-52fa-a2fe-8de61d0d4638",
+    "variant": "Capolavoro",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "CAPOLAVORO"
+    ],
+    "image_file": "tile_capolavoro_5543fdcf-2132-52fa-a2fe-8de61d0d4638.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_crystallo_bianco_f431c380-30da-52c5-b6ed-fd627d1bc213",
+    "variant": "Crystallo Bianco",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Crystallo Bianco"
+    ],
+    "image_file": "tile_crystallo_bianco_f431c380-30da-52c5-b6ed-fd627d1bc213.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_crystallo_traslux_03325ea6-1b6b-58f6-aee5-0d459d3b81e6",
+    "variant": "Crystallo Traslux",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "CRYSTALLO TRASLUX"
+    ],
+    "image_file": "tile_crystallo_traslux_03325ea6-1b6b-58f6-aee5-0d459d3b81e6.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_da_vinci_0df0b812-61bb-5382-a185-bfb37201edad",
+    "variant": "Da Vinci",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "DA VINCI"
+    ],
+    "image_file": "tile_da_vinci_0df0b812-61bb-5382-a185-bfb37201edad.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_jasper_green_7fc658fd-f59a-5731-a126-fc81dcd5e4e5",
+    "variant": "Jasper Green",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Green"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "JASPER GREEN"
+    ],
+    "image_file": "tile_jasper_green_7fc658fd-f59a-5731-a126-fc81dcd5e4e5.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_monalisa_1179fa32-eef9-5181-affc-daa2c8c46163",
+    "variant": "Monalisa",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A",
+      "B",
+      "C"
+    ],
+    "aliases": [],
+    "image_file": "tile_monalisa_1179fa32-eef9-5181-affc-daa2c8c46163.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "tile_aqua_blue_1e5635be-4aae-5ab5-a043-01f4c5278072",
+    "variant": "Aqua Blue",
+    "category": "Tiles",
+    "stone_type": "",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "AQUA BLUE"
+    ],
+    "image_file": "tile_aqua_blue_1e5635be-4aae-5ab5-a043-01f4c5278072.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
   }
 ]

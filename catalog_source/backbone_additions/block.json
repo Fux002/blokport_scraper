@@ -59,6 +59,246 @@
     "merged_from": []
   },
   {
+    "key": "block_avocatus_0dd048a8-8cc3-54e5-b54f-c8721e4b2acc",
+    "variant": "Avocatus",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Leathered",
+      "Polished",
+      "Honed",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "AVOCATUS"
+    ],
+    "image_file": "block_avocatus_0dd048a8-8cc3-54e5-b54f-c8721e4b2acc.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_capolavoro_22b2e15b-0142-5e4a-8086-76daf294dbe5",
+    "variant": "Capolavoro",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "CAPOLAVORO"
+    ],
+    "image_file": "block_capolavoro_22b2e15b-0142-5e4a-8086-76daf294dbe5.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_crystallo_bianco_86d2c6a8-d35f-5814-85b5-9d0d29a4177b",
+    "variant": "Crystallo Bianco",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Crystallo Bianco"
+    ],
+    "image_file": "block_crystallo_bianco_86d2c6a8-d35f-5814-85b5-9d0d29a4177b.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_crystallo_traslux_3ce16dbc-fbc1-5a83-a8f8-d9724d46d27e",
+    "variant": "Crystallo Traslux",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "CRYSTALLO TRASLUX"
+    ],
+    "image_file": "block_crystallo_traslux_3ce16dbc-fbc1-5a83-a8f8-d9724d46d27e.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_da_vinci_ef6785fb-8f18-5fdd-9103-c5c1fc693abb",
+    "variant": "Da Vinci",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "DA VINCI"
+    ],
+    "image_file": "block_da_vinci_ef6785fb-8f18-5fdd-9103-c5c1fc693abb.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_jasper_green_5cbc2cab-8f84-5392-8d0f-cf663fba4b92",
+    "variant": "Jasper Green",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Green"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "JASPER GREEN"
+    ],
+    "image_file": "block_jasper_green_5cbc2cab-8f84-5392-8d0f-cf663fba4b92.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_monalisa_07b77260-ef22-5c01-a038-ebe266f6391f",
+    "variant": "Monalisa",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A",
+      "B",
+      "C"
+    ],
+    "aliases": [],
+    "image_file": "block_monalisa_07b77260-ef22-5c01-a038-ebe266f6391f.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_aqua_blue_267fad66-8a2e-53c6-84df-05dc7a9ee7a7",
+    "variant": "Aqua Blue",
+    "category": "Blocks",
+    "stone_type": "",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "AQUA BLUE"
+    ],
+    "image_file": "block_aqua_blue_267fad66-8a2e-53c6-84df-05dc7a9ee7a7.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
     "key": "block_agate_agata_blue_spiral_629082a1-e33d-565e-8417-ec1a7964e512",
     "variant": "Agata Blue Spiral",
     "category": "Blocks",
@@ -233,6 +473,36 @@
       "Agata White"
     ],
     "image_file": "block_agate_agata_white_2583c363-baf1-5164-b55d-ddc3761c900e.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": false,
+    "merged_from": []
+  },
+  {
+    "key": "block_quartzite_cappadocia_1576a970-b843-5061-bd6b-6a13d3b07b0b",
+    "variant": "Cappadocia",
+    "category": "Blocks",
+    "stone_type": "Quartzite",
+    "color": [
+      "Beige"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Cappadocia"
+    ],
+    "image_file": "block_quartzite_cappadocia_1576a970-b843-5061-bd6b-6a13d3b07b0b.png",
     "exists": "no",
     "in_csv": "yes",
     "product_backed": false,

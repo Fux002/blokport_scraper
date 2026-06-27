@@ -184,10 +184,12 @@ class VariationStage:
             row.variation_name = match.canonical
             row.variation_confidence = Confidence(match.confidence).name
             row.variation_method = match.method
-            # write-back: a non-exact confirmed match learns the scraped spelling,
-            # both in-memory (this run) and persisted (next run) (section 8.4)
+            # write-back: a non-exact confirmed match learns the scraped spelling, PERSISTED for the
+            # next run (section 8.4). NOT added to the live index mid-run: doing so made a later
+            # identical query resolve via 'exact'(high) instead of 'fuzzy'(medium) purely by batch
+            # order -- same cid, but an order-dependent method/confidence that skews review routing.
+            # Same-run repeats now resolve identically; the persisted alias takes effect next run.
             if match.method not in ("exact", "override"):
-                engine.index.add_surface_alias(match.cid, query)
                 self.writeback.add_alias(match.cid, query)
             return
 

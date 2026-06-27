@@ -153,6 +153,7 @@ class VariationEngine:
         confidence: Confidence,
         block_type: str = "",
         block_color: str = "",
+        ambiguous_to_review: bool = False,
     ) -> Optional[VariationMatch]:
         # a single id resolves directly; several ids for the same surface (the
         # reference has duplicate names) are disambiguated by type/colour blocking,
@@ -173,6 +174,21 @@ class VariationEngine:
                 score=100.0,
                 candidates=[],
             )
+        if len(ids) > 1 and ambiguous_to_review:
+            # Only TRUE duplicates -- 2+ candidates with an IDENTICAL canonical name -- are genuinely
+            # ambiguous (the fuzzy tier would score them equally and scored[0] picks one by arbitrary
+            # export-row order). Route those to review. Candidates that merely SHARE this surface as an
+            # alias but have DIFFERENT canonicals (e.g. 12 'Arabescato ...' varieties sharing the
+            # 'Arabescato' family alias) are NOT ambiguous -- let block + fuzzy resolve them normally.
+            canon = {}
+            for cid in ids:
+                c = self._candidate(cid)
+                if c:
+                    canon.setdefault(proj.norm(c.canonical), []).append(cid)
+            dup = next((cids for cids in canon.values() if len(cids) > 1), None)
+            if dup:
+                cands = [(cid, c.canonical if (c := self._candidate(cid)) else None, 100.0) for cid in dup[:3]]
+                return VariationMatch(None, None, Confidence.low, f"{method}_ambiguous", 100.0, cands)
         return None
 
     def match(
@@ -194,9 +210,10 @@ class VariationEngine:
                 cand = self._candidate(cid)
                 return VariationMatch(cid, cand.canonical if cand else None, Confidence.high, "override", 100.0, [])
 
-        # tier 2: exact on norm (canonical + aliases)
+        # tier 2: exact on norm (canonical + aliases). A genuine same-surface duplicate that blocking
+        # can't separate routes to review here, not to an arbitrary fuzzy-tier pick.
         match = self._resolve_single(self.index.lookup_norm(query), "exact", Confidence.high,
-                                     block_type, block_color)
+                                     block_type, block_color, ambiguous_to_review=True)
         if match:
             return match
 

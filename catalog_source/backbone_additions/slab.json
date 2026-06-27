@@ -28,6 +28,246 @@
     "merged_from": []
   },
   {
+    "key": "slab_avocatus_f0cd2d91-1c61-5de1-8c7a-317a608ce30e",
+    "variant": "Avocatus",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Leathered",
+      "Polished",
+      "Honed",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "AVOCATUS"
+    ],
+    "image_file": "slab_avocatus_f0cd2d91-1c61-5de1-8c7a-317a608ce30e.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_capolavoro_ab8866eb-6421-5cc0-a81c-af0f73f90857",
+    "variant": "Capolavoro",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "CAPOLAVORO"
+    ],
+    "image_file": "slab_capolavoro_ab8866eb-6421-5cc0-a81c-af0f73f90857.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_crystallo_bianco_89760042-63b9-5850-b9f9-b1fe4af2ce4f",
+    "variant": "Crystallo Bianco",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "Crystallo Bianco"
+    ],
+    "image_file": "slab_crystallo_bianco_89760042-63b9-5850-b9f9-b1fe4af2ce4f.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_crystallo_traslux_f1f0001e-c095-5c9b-91f0-ebcb589084ff",
+    "variant": "Crystallo Traslux",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "CRYSTALLO TRASLUX"
+    ],
+    "image_file": "slab_crystallo_traslux_f1f0001e-c095-5c9b-91f0-ebcb589084ff.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_da_vinci_6e8a94e0-5228-549b-adcd-f3a38ba4853a",
+    "variant": "Da Vinci",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "DA VINCI"
+    ],
+    "image_file": "slab_da_vinci_6e8a94e0-5228-549b-adcd-f3a38ba4853a.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_jasper_green_def31b80-05d3-5598-baeb-4dd8cb83069e",
+    "variant": "Jasper Green",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Green"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "JASPER GREEN"
+    ],
+    "image_file": "slab_jasper_green_def31b80-05d3-5598-baeb-4dd8cb83069e.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_monalisa_09a8d5f2-26d9-59d8-b754-7903ca409df2",
+    "variant": "Monalisa",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Natural"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A",
+      "B",
+      "C"
+    ],
+    "aliases": [],
+    "image_file": "slab_monalisa_09a8d5f2-26d9-59d8-b754-7903ca409df2.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
+    "key": "slab_aqua_blue_e186ca5c-e579-5e27-aa63-d52bf0982606",
+    "variant": "Aqua Blue",
+    "category": "Slabs",
+    "stone_type": "",
+    "color": [
+      "Blue"
+    ],
+    "finishes": [
+      "Polished",
+      "Honed",
+      "Leathered",
+      "Brushed",
+      "Flamed",
+      "Sandblasted",
+      "Sawn Cut",
+      "Raw"
+    ],
+    "qualities": [
+      "A"
+    ],
+    "aliases": [
+      "AQUA BLUE"
+    ],
+    "image_file": "slab_aqua_blue_e186ca5c-e579-5e27-aa63-d52bf0982606.png",
+    "exists": "no",
+    "in_csv": "yes",
+    "product_backed": true,
+    "merged_from": []
+  },
+  {
     "key": "slab_agate_agata_blue_spiral_6a49dbad-f8c5-58f1-97e4-0e887f193754",
     "variant": "Agata Blue Spiral",
     "category": "Slabs",
