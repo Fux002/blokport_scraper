@@ -98,10 +98,15 @@ def fill_colors(backbone_paths: list[Path] | None = None, texture_dir: Path | No
         c = post.get("color")
         return bool(post.get("key")) and (not c or c == [FALLBACK_COLOR])
 
+    def posts(doc):
+        # a backbone file is {"posts": [...]}; an additions file is a bare [...] list of posts. Both
+        # are edited in place, and json.dumps(doc) below preserves whichever shape it was.
+        return doc if isinstance(doc, list) else doc.get("posts", [])
+
     from_texture = 0
     # 1. texture-derived colour
     for doc in docs.values():
-        for post in doc["posts"]:
+        for post in posts(doc):
             if not is_blank(post):
                 continue
             tpath = tdir / f"{post['key']}.png"
@@ -113,13 +118,13 @@ def fill_colors(backbone_paths: list[Path] | None = None, texture_dir: Path | No
     #    the read-only reference backbones (already-merged siblings).
     known: dict[tuple[str, str], list[str]] = {}
     for doc in list(docs.values()) + ref_docs:
-        for post in doc["posts"]:
+        for post in posts(doc):
             c = post.get("color")
             if post.get("key") and c and c != [FALLBACK_COLOR]:
                 known.setdefault(_identity(post), c)
     propagated = 0
     for doc in docs.values():
-        for post in doc["posts"]:
+        for post in posts(doc):
             if is_blank(post):
                 c = known.get(_identity(post))
                 if c:
@@ -128,7 +133,7 @@ def fill_colors(backbone_paths: list[Path] | None = None, texture_dir: Path | No
     # 3. anything still colour-less -> the generic fallback
     fallback = 0
     for doc in docs.values():
-        for post in doc["posts"]:
+        for post in posts(doc):
             if is_blank(post):
                 post["color"] = [FALLBACK_COLOR]
                 fallback += 1

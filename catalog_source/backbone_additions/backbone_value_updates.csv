@@ -1,18 +1,19 @@
 variety,attribute,add_value,currently_allowed,match_method,match_confidence,verdict,example_url
-White Travertine,quality,B,A,exact_blocked,high,likely_real,https://marenostone.com/product/white-travertine-tile-2/
+White Travertine,quality,B,A,phonetic,medium,verify_match,https://marenostone.com/product/white-travertine-tile-2/
 Silver Waves,color,Black,"Grey, Silver",exact,high,likely_real,https://marenostone.com/product/black-wave-marble-slab-3/
 Storen,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",exact,high,likely_real,https://marenostone.com/product/crystal-white-granite-slab-2/
+Grey Granite,finish,Textured,"Natural Cleft, Sawn Cut, Flamed, Bush Hammered, Sandblasted",exact_blocked,high,likely_real,https://marenostone.com/product/grey-granite-slab/
 Classic Black,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",exact,high,likely_real,https://marenostone.com/product/dark-grey-granite-slab/
 Amazon White,color,Grey,White,exact,high,likely_real,https://marenostone.com/product/amazon-marble-slab/
 Grey Emperador,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/pietra-grey-marble-tile-2/
 Grigio Sardo,finish,Textured,"Polished, Honed, Leathered, Brushed, Flamed",fuzzy,medium,verify_match,https://marenostone.com/product/pearl-grey-granite-slab/
 Tiger Black,quality,B,A,exact,high,likely_real,https://marenostone.com/product/tiger-black-granite-tiles-5/
 Silver Mist,color,Grey,Silver,exact,high,likely_real,https://marenostone.com/product/silver-mist-marble-slab/
-Toros Black,quality,C,A,exact_blocked,high,likely_real,https://marenostone.com/product/black-marble/
+Toros Black,quality,C,A,fuzzy,medium,verify_match,https://marenostone.com/product/black-marble/
 Verde Guatemala,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/forest-green-marble-slab/
 Persian Asgard,quality,B,A,exact,high,likely_real,https://marenostone.com/product/persian-asgard-marble-slab/
 Iran White,quality,B,A,exact,high,likely_real,https://marenostone.com/product/super-white-travertine-slab-1-07/
-Silver Travertine,quality,B,A,phonetic,medium,verify_match,https://marenostone.com/product/silver-travertine/
+Silver Travertine,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/silver-travertine/
 Arcadia Grey,quality,B,A,fuzzy,medium,verify_match,https://marenostone.com/product/sky-marble/
 China Golden Black,color,Pink,"Black, Gold, Brown, White, Yellow",exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=470
 Matarazzo,color,White,Gold,exact,high,likely_real,https://polonine.slabware.com/Product-Details.aspx?ID=281
@@ -26,7 +27,6 @@ Andromeda White,quality,B,A,phonetic,medium,verify_match,
 Astoria Pink,quality,B,A,fuzzy,medium,verify_match,
 Black Forest Gold,quality,B,A,phonetic,medium,verify_match,
 Black Forest Gold,quality,C,A,phonetic,medium,verify_match,
-Amazon Blue,quality,B,A,fuzzy,medium,verify_match,
 Bordeaux,color,Bordeaux,"Brown, Red, Purple",exact,high,likely_real,
 Colonial White,quality,B,A,phonetic,medium,verify_match,
 Colonial White,quality,C,A,phonetic,medium,verify_match,
@@ -35,8 +35,6 @@ Grey Macaubus,quality,B,A,exact,high,likely_real,
 Indian Kinawa,quality,C,A,exact,high,likely_real,
 Kashmir Gold,quality,B,A,fuzzy,medium,verify_match,
 Massimo,quality,B,A,exact,high,likely_real,
-Mona Lisa,quality,B,A,fuzzy,medium,verify_match,
-Mona Lisa,quality,C,A,fuzzy,medium,verify_match,
 River White,quality,B,A,phonetic,medium,verify_match,
 River White,quality,C,A,fuzzy,medium,verify_match,
 Viscount White,quality,B,A,exact,high,likely_real,
@@ -45,6 +43,7 @@ Vizag Blue,quality,B,A,phonetic,medium,verify_match,
 Azzurra Bay,quality,B,A,exact,high,likely_real,
 Bacarat,quality,B,A,exact,high,likely_real,
 Bianco Impala,quality,C,A,exact,high,likely_real,
+Bianco Superiore,quality,B,A,exact_blocked,high,likely_real,
 Calacatta Columbus,color,Golden,"White, Gold",exact,high,likely_real,
 Chantilly,quality,C,A,exact_blocked,high,likely_real,
 Supreme,color,Golden,"White, Gold",exact,high,likely_real,

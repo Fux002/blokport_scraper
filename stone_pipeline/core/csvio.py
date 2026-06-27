@@ -49,19 +49,19 @@ def write_rows(path: Path | str, header: Sequence[str], rows: Iterable[Sequence]
 
 def write_dicts(path: Path | str, fieldnames: Sequence[str], rows: Iterable[dict],
                 sanitize: bool = False) -> int:
-    """Atomically write dict rows. sanitize=True escapes formula injection in every cell -- use it
-    for any file carrying SCRAPED text (variant Name/Aliases, product Title/Description) that an
-    operator may open in Excel."""
+    """Atomically write dict rows. Column-strict: writes EXACTLY `fieldnames`, projecting each row to
+    them -- so an extra internal key on a row (e.g. '_status'/'_added') is dropped, never crashes the
+    writer. sanitize=True additionally escapes formula injection in every cell -- use it for any file
+    carrying SCRAPED text (variant Name/Aliases, product Title/Description) that an operator may open
+    in Excel."""
     rows = list(rows)
     fields = list(fieldnames)
+    cell = safe_cell if sanitize else (lambda v: "" if v is None else v)
 
     def _w(handle):
         w = csv.DictWriter(handle, fieldnames=fields)
         w.writeheader()
-        if sanitize:
-            w.writerows({k: safe_cell(r.get(k, "")) for k in fields} for r in rows)
-        else:
-            w.writerows(rows)
+        w.writerows({k: cell(r.get(k, "")) for k in fields} for r in rows)
 
     atomic_write(path, _w)
     return len(rows)
