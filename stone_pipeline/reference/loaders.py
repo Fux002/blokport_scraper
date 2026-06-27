@@ -20,6 +20,7 @@ import csv
 import json
 import re
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +29,8 @@ from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.core.text import looks_code_shaped
+
+log = logfmt.get_logger("reference.loaders")
 
 
 _TYPE_SLUGS: Optional[set[str]] = None
@@ -424,7 +427,12 @@ class OriginMap:
         # builder uses, so pattern membership is exact. The index is cached after the first call.
         if not hasattr(self, "_variety_index"):
             self._variety_index = {_norm(r.pattern): r for r in self.rules if r.match_type == "variety"}
-            self._pattern_rules = [(_norm(r.pattern), r) for r in self.rules if r.match_type == "pattern"]
+            # MOST-SPECIFIC pattern wins, deterministically: longest token first, then alphabetic --
+            # so when a name carries two pattern tokens the result never depends on CSV row order.
+            self._pattern_rules = sorted(
+                ((_norm(r.pattern), r) for r in self.rules if r.match_type == "pattern"),
+                key=lambda pr: (-len(pr[0]), pr[0]),
+            )
         norm_name = _norm(name)
         hit = self._variety_index.get(norm_name)
         if hit is not None:
@@ -452,24 +460,42 @@ def load_country_codes(path: Path | None = None) -> dict[str, str]:
 
 
 def load_origin_map(path: Path | None = None) -> OriginMap:
-    # hand-maintained in catalog_source/; fall back to the reference stub if absent (mirrors ports).
+    # hand-maintained in catalog_source/; fall back to the reference stub only if it actually exists.
     path = Path(path) if path else SETTINGS.paths.origin_map_csv
-    if not path.exists():
+    if not path.exists() and SETTINGS.paths.origin_map_csv_fallback.exists():
         path = SETTINGS.paths.origin_map_csv_fallback
     origin = OriginMap()
     if not path.exists():
+        # NOT silent: a missing map degrades EVERY origin to supplier-default/unresolved -- loud so it
+        # surfaces in CloudWatch instead of shipping a catalog with no real origins.
+        log.warning("origin_map missing -- all origins fall back to supplier default / unresolved",
+                    extra={"extra_fields": {"path": str(path)}})
         return origin
+    seen: dict[str, str] = {}  # normalized variety name -> iso, to catch conflicting duplicates
+    skipped = 0
     with path.open(newline="", encoding="utf-8-sig") as handle:
         for record in csv.DictReader(handle):
-            origin.rules.append(
-                OriginRule(
-                    match_type=(record.get("match_type") or "pattern").strip(),
-                    pattern=(record.get("pattern") or "").strip(),
-                    country_iso=(record.get("country_iso") or "").strip().upper(),
-                    city=(record.get("city") or "").strip(),
-                    county=(record.get("county") or "").strip(),
-                )
-            )
+            mt = (record.get("match_type") or "").strip().casefold()
+            pat = (record.get("pattern") or "").strip()
+            iso = (record.get("country_iso") or "").strip().upper()
+            # A usable rule needs a known kind, a pattern, AND a country -- a row missing any of these
+            # must NOT become a hit that stamps a blank/garbage country at medium confidence.
+            if mt not in ("variety", "pattern") or not pat or not iso:
+                if pat or iso or record.get("match_type"):
+                    skipped += 1
+                continue
+            if mt == "variety":
+                prior = seen.get(_norm(pat))
+                if prior and prior != iso:
+                    log.warning("origin_map duplicate variety with conflicting country (last wins)",
+                                extra={"extra_fields": {"variety": pat, "iso": iso, "prior": prior}})
+                seen[_norm(pat)] = iso
+            origin.rules.append(OriginRule(match_type=mt, pattern=pat, country_iso=iso,
+                                           city=(record.get("city") or "").strip(),
+                                           county=(record.get("county") or "").strip()))
+    if skipped:
+        log.warning("origin_map rows skipped (need match_type variety|pattern + pattern + country_iso)",
+                    extra={"extra_fields": {"skipped": skipped, "path": str(path)}})
     return origin
 
 
@@ -489,6 +515,13 @@ class ReferenceData:
     synonyms: dict[str, dict[str, str]]
     versions: dict[str, str]
     overrides: object = None  # state.overrides.Overrides; lazy import to avoid cycle
+
+    @cached_property
+    def valid_iso_codes(self) -> frozenset:
+        """The real ISO-3166 alpha-2 codes we know (the values of country_codes), so a bare 2-letter
+        scraped token can be VALIDATED rather than blindly trusted (rejects 'XX'; lets 'UK' resolve
+        to GB via the name/alias path instead of passing through as a bogus code)."""
+        return frozenset(self.country_codes.values())
 
     @property
     def variants_slabs(self) -> VariantTable:

@@ -221,11 +221,19 @@ def _to_float(text: str | None) -> float | None:
 
 # --- origin (section 7 Stage 6) -----------------------------------------------
 def _to_iso(value: str, ref: ReferenceData) -> str | None:
-    """A 2-letter ISO passes through; a country NAME ('India') resolves via country_codes."""
+    """Resolve a country NAME or alias ('India', 'UK'->GB) via country_codes FIRST, then accept a
+    bare 2-letter token only if it is a real ISO-3166 alpha-2 code. Name-first so a common alias like
+    'UK' maps to GB instead of short-circuiting to the (invalid) literal 'UK'; the ISO-set check
+    rejects a bogus 'XX'/'EN' rather than passing it through as a confident country."""
     v = (value or "").strip()
-    if len(v) == 2 and v.isalpha():
+    if not v:
+        return None
+    hit = ref.country_codes.get(" ".join(v.casefold().split()))
+    if hit:
+        return hit
+    if len(v) == 2 and v.isalpha() and v.upper() in ref.valid_iso_codes:
         return v.upper()
-    return ref.country_codes.get(" ".join(v.casefold().split())) or None
+    return None
 
 
 def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
@@ -359,6 +367,9 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
         row.bundle_size, row.bundle_size_method, row.bundle_size_confidence = int(v), "override", "high"
     if v := get("origin_country_code"):
         row.origin_country_code, row.origin_source, row.origin_confidence = v.upper(), "override", "high"
+        # the derived city/county belonged to the OLD country -- drop them so an override can't leave
+        # e.g. country=BR with city='Carrara'; an explicit origin_city below re-sets it if intended.
+        row.origin_city = row.origin_county = ""
     if v := get("origin_city"):
         row.origin_city = v
     if v := get("title"):
