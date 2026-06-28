@@ -1,10 +1,11 @@
 name: Deploy
 
-# Build the scraper image and push it to its single ECR repo (blokport-scraper).
-# There is ONE deployment; which environment a RUN targets (dev/prod staging
-# bucket) is chosen at run time via BLOKPORT_ENV, not at build time. The Fargate
-# task definition references the ":core" tag, so the next run picks up the new
-# image automatically — no task-def re-registration needed.
+# Build the scraper image and push it to the SHARED ECR repo (blokport-scraper).
+# One image, two deployments: the dev + prod Fargate tasks both pull this repo.
+# Pushes both ":core" (dev tracks this for fast iteration) and ":<git-sha>" (the
+# immutable tag you PROMOTE to prod via `-var prod_image_tag=<sha>` — never point
+# prod at the mutable :core, or a dev push would move prod too). Dev's task def
+# references :core, so its next run picks up the new image with no re-register.
 #
 # Requires the repo secret AWS_DEPLOY_ROLE_ARN = the scraper stack's
 # `deploy_role_arn` Terraform output.

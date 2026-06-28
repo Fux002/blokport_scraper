@@ -91,27 +91,33 @@ terraform output deploy_role_arn           # copy for step 2
 # 3. First image: push to `main` (or run the Deploy workflow). CI builds the
 #    `core` image and pushes blokport-scraper:core.
 
-# 4. Run once manually (dev target) and watch the logs
+# 4. Run the DEV task once manually and watch the logs
 aws ecs run-task --cluster blokport-dev --launch-type FARGATE \
-  --task-definition blokport-scraper \
-  --network-configuration "awsvpcConfiguration={subnets=[$(terraform output -raw private_subnet_ids)],securityGroups=[$(terraform output -raw security_group_id)],assignPublicIp=DISABLED}"
+  --task-definition blokport-scraper-development \
+  --network-configuration "awsvpcConfiguration={subnets=[$(terraform output -json dev_private_subnet_ids | jq -r 'join(\",\")')],securityGroups=[$(terraform output -raw dev_security_group_id)],assignPublicIp=DISABLED}"
 
-# 5. When happy, enable the cron:
-terraform apply -var schedule_enabled=true
+# 5. When happy, enable the DEV cron:
+terraform apply -var dev_schedule_enabled=true
 ```
 
-## Running against PROD (once the prod bucket is shared)
+With `prod_staging_bucket` empty (the default), **only the dev task is created** — the
+prod instance is count-gated to zero, so nothing prod-side exists yet.
+
+## Standing PROD up LATER (after dev is proven AND the prod Medusa platform exists)
+Prod is a **separate task in the prod cluster** (`blokport-scraper-production`), not a
+runtime override of dev. It needs the prod platform stack (`blokport-prod-vpc`,
+`blokport/prod/terraform.tfstate`) and the prod bucket:
 ```bash
 cd infra
-# grant the task access to the prod bucket:
-terraform apply -var prod_staging_bucket=blokport-prod-staging-<hex>
-# then run with the prod target overridden:
-aws ecs run-task --cluster blokport-dev --launch-type FARGATE \
-  --task-definition blokport-scraper \
-  --overrides '{"containerOverrides":[{"name":"scraper","environment":[
-     {"name":"BLOKPORT_ENV","value":"production"},
-     {"name":"BLOKPORT_S3_BUCKET","value":"blokport-prod-staging-<hex>"}]}]}' \
-  --network-configuration "awsvpcConfiguration={subnets=[...],securityGroups=[...],assignPublicIp=DISABLED}"
+# promote the SAME dev-proven image (a git sha), do NOT rebuild for prod:
+terraform apply \
+  -var prod_staging_bucket=blokport-prod-staging-<hex> \
+  -var prod_image_tag=<the dev-proven git sha>
+aws ecs run-task --cluster blokport-prod --launch-type FARGATE \
+  --task-definition blokport-scraper-production \
+  --network-configuration "awsvpcConfiguration={subnets=[$(terraform output -json prod_private_subnet_ids | jq -r 'join(\",\")')],securityGroups=[$(terraform output -raw prod_security_group_id)],assignPublicIp=DISABLED}"
+# enable the prod cron when proven:
+terraform apply -var prod_staging_bucket=... -var prod_schedule_enabled=true
 ```
 
 ## Enabling de-watermarking (varsha) later
