@@ -120,18 +120,25 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
     return n
 
 
-def populate_discontinued(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
+def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]]) -> int:
     """Mark products the supplier dropped as out of stock (qty 0), the reversible
-    delist (design 5A). This is distinct from in-stock quantity, which floors at 1,
-    so a discontinued product can only become 0 through this path."""
+    delist (design 5A). `pairs` are the (sku, handle) tuples product_state.discontinued
+    produces. Distinct from in-stock quantity (which floors at 1), so a product can
+    only reach 0 through this path. A minimal product row is created if absent (the
+    dropped product is not in this run's emit), without clobbering an existing one."""
     now = now_iso()
     n = 0
-    for r in rows:
-        ledger.upsert("inventory", {
-            "sku": _sku(r, cfg),
-            "qty": 0,
-            "last_synced_qty": None,
-            "updated_at": now,
-        }, pk=("sku",))
+    for sku, handle in pairs:
+        sku = (sku or "").strip()
+        if not sku:
+            continue
+        src, _, _ = sku.partition("-")
+        ledger.execute(
+            "INSERT OR IGNORE INTO product (sku, source, handle, state, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (sku, src.lower(), handle or "", "synced", now, now),
+        )
+        ledger.upsert("inventory", {"sku": sku, "qty": 0, "last_synced_qty": None,
+                                    "updated_at": now}, pk=("sku",))
         n += 1
     return n

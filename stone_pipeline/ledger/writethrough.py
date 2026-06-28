@@ -5,11 +5,11 @@ records its emitted products and the inventory delta into the per-env ledger AFT
 the CSVs are written, so the ledger is a shadow mirror and the live CSV flow is
 unchanged. A ledger error is caught and logged, never failing the run.
 
-Scope of this phase (kept FK-safe and simple): full runs record products + changed
-inventory. Discontinued (cross-run, references products not in this run's emit),
-inventory-only refreshes, and seeding the full product set from products_export
-all need the product bootstrap (design 5B / M1) and are deliberately left for the
-next step. No em dashes (design principle 2).
+A run records its emitted products, the changed-stock inventory delta, and the
+discontinued delist. The id foundation plus the known product set are seeded on
+first use, so inventory and discontinued FKs resolve even for products not in this
+run's emit. The inventory and discontinued lanes are dormant until products_export
+exists (no known products to diff against). No em dashes (design principle 2).
 """
 
 from __future__ import annotations
@@ -53,23 +53,27 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
     if ledger.execute("SELECT COUNT(*) AS n FROM variation").fetchone()["n"] == 0:
         bootstrap.seed_attributes(ledger)
         bootstrap.seed_variations(ledger)
+        bootstrap.seed_products(ledger)   # dormant unless products_export exists
     return ledger
 
 
 def record_source(emit_rows: Sequence[CanonicalRow], changed: Sequence[CanonicalRow],
-                  cfg: SourceConfig, *, inventory_only: bool = False,
+                  discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *,
                   path: str | Path | None = None) -> None:
-    """Shadow-record one source's emitted products + inventory delta into the ledger.
-    No-op when the flag is off or in inventory-only mode; never raises (a shadow
-    failure must not fail a run)."""
-    if not enabled() or inventory_only:
+    """Shadow-record one source's emitted products, changed inventory, and discontinued
+    delist into the ledger. No-op when the flag is off; never raises (a shadow failure
+    must not fail a run). Recorded the same in full and inventory-only runs: the
+    emitted rows are valid products in both."""
+    if not enabled():
         return
     try:
         with open_ledger(path) as ledger:
             n_products = populate.populate_products(ledger, emit_rows, cfg)
             n_changed = populate.populate_inventory(ledger, changed, cfg)
+            n_gone = populate.populate_discontinued(ledger, discontinued)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
-            "source": cfg.source_code, "products": n_products, "inventory_changed": n_changed}})
+            "source": cfg.source_code, "products": n_products,
+            "inventory_changed": n_changed, "discontinued": n_gone}})
     except Exception:
         log.exception("ledger write-through failed (shadow only; run unaffected)",
                       extra={"extra_fields": {"source": cfg.source_code}})

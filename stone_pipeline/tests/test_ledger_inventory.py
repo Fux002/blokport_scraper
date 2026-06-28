@@ -56,7 +56,7 @@ def test_inventory_populate_render_equals_emit(tmp_path):
         _seed_variations(ledger)
         populate_products(ledger, rows, cfg)          # all exist in Medusa
         populate_inventory(ledger, changed, cfg)      # stock moved
-        populate_discontinued(ledger, discontinued, cfg)  # supplier dropped -> qty 0
+        populate_discontinued(ledger, [(sku3, discontinued[0].handle)])  # dropped -> qty 0
         render_inventory(ledger, cfg, via_ledger)
 
     assert via_ledger.read_bytes() == direct.read_bytes(), (

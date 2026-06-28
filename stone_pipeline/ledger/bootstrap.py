@@ -93,6 +93,34 @@ def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
     return n
 
 
+def seed_products(ledger: Ledger, path: str | Path | None = None) -> int:
+    """Seed minimal product rows for every known Medusa product (products_export:
+    SKU, Handle, Inventory), so inventory deltas and discontinued delists have their
+    FK rows (design 5B / M1). These carry NO variation_key, so they never render into
+    a product import CSV; a real run later enriches the row with the full data. Dormant
+    when products_export is absent (returns 0). INSERT OR IGNORE so an already-enriched
+    row from a run is never clobbered."""
+    from stone_pipeline.stages.product_state import load_known_products
+
+    known = load_known_products(Path(path) if path else None)
+    now = now_iso()
+    n = 0
+    for sku, info in known.by_sku.items():
+        src, _, surrogate = sku.partition("-")
+        inv = (info.get("inventory") or "").strip()
+        ledger.execute(
+            "INSERT OR IGNORE INTO product (sku, source, surrogate_key, handle, "
+            "inventory_quantity, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (sku, src.lower(), surrogate, info.get("handle") or "", inv or None, "synced", now, now),
+        )
+        qty = int(inv) if inv.isdigit() else 0
+        # last_synced_qty equals qty so the bootstrap itself produces no spurious delta
+        ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty,
+                                    "updated_at": now}, pk=("sku",))
+        n += 1
+    return n
+
+
 def attribute_id(ledger: Ledger, category: str, value: str) -> str | None:
     """Resolve a canonical attribute name to its Medusa id (the render-time lookup
     products and combinations use). Returns None if not seeded or not synced."""

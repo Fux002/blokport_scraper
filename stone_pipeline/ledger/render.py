@@ -95,12 +95,23 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
 
 
 def render_products(ledger: Ledger, cfg: SourceConfig, path: str | Path,
-                    columns: list[str] | None = None) -> int:
+                    columns: list[str] | None = None, *, source: str | None = None) -> int:
     """Render the `product` table into a medusa_import.csv-shaped file, by feeding
-    reconstructed canonical rows back through emit (same column map, same writer)."""
+    reconstructed canonical rows back through emit (same column map, same writer).
+
+    Only real, emittable products (those with a variety link) are rendered; minimal
+    rows bootstrapped from products_export for the inventory FK carry no
+    variation_key. Pass `source` to render one source's products (the SKU is
+    recomputed from `cfg.source_code`, so a multi-source render must be done per
+    source with the matching cfg)."""
     columns = columns or emit.read_template_columns()
-    shims = [_product_shim(ledger, p)
-             for p in ledger.execute("SELECT * FROM product ORDER BY rowid")]
+    sql = "SELECT * FROM product WHERE variation_key IS NOT NULL"
+    params: list = []
+    if source is not None:
+        sql += " AND source = ?"
+        params.append(source)
+    sql += " ORDER BY rowid"
+    shims = [_product_shim(ledger, p) for p in ledger.execute(sql, params)]
     emit.write_import_csv(shims, cfg, Path(path), columns)
     return len(shims)
 

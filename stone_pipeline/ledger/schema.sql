@@ -143,7 +143,11 @@ CREATE TABLE IF NOT EXISTS product (
     sku                  TEXT PRIMARY KEY,
     source               TEXT NOT NULL,                -- source_code
     surrogate_key        TEXT,                          -- reproduces the SKU via emit._sku
-    variation_key        TEXT NOT NULL REFERENCES variation (key),
+    -- nullable: a product bootstrapped from products_export (known SKU + handle +
+    -- stock, no variety link yet) carries no variation_key until a run emits it.
+    -- render_products renders only rows WITH a variation_key, so these minimal
+    -- rows back the inventory FK without leaking into a product import CSV.
+    variation_key        TEXT REFERENCES variation (key),
     -- design fields (names; ids resolved at render)
     color                TEXT,
     finish               TEXT,
