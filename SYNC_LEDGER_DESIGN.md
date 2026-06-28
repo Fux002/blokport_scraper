@@ -53,10 +53,13 @@ not of a person following a list.
 ## 1. Core principles
 
 1. **The Key is identity.** Every variety has a deterministic, Medusa
-   independent `Key` (`{branch}_{type}_{name}_{uuid5(path)}`, `core/ids.py` and
-   `stages/curate.py`). The Key is stable across runs and across dev and prod.
-   Everything joins on Key. Medusa stores the Key as `external_id` and never
-   changes it.
+   independent `Key` (`{branch}_{slug(type)}_{slug(name)}_{uuid5("branch:name")}`,
+   `core/ids.py` and `stages/curate.py`). The Key is stable for a fixed (branch,
+   type, name) across runs and across dev and prod, and Medusa stores it as
+   `external_id`. Because the type and name slugs are part of the Key, correcting
+   either is intentionally a NEW identity (a re-key), handled explicitly as a
+   retire plus create with a cascade, not a hash bump (section 5C). Everything
+   else joins on Key.
 2. **The ledger is the scraper-side system of record.** A small per-environment
    database holds every entity (variation, attribute, combination, product,
    inventory, image, gap), its last-known Medusa id, a content hash, and a sync
@@ -66,12 +69,13 @@ not of a person following a list.
    it applies a pull, and the scraper-side sync service performs the write into
    the ledger. Medusa has no connection to the ledger and does not know it exists.
    See the writer model (section 3).
-4. **Medusa pulls; the scraper never pushes into it.** Stages produce canonical
+4. **Medusa pulls; the scraper never WRITES into it.** Stages produce canonical
    rows and upsert them into the ledger. A read-only sync service exposes the
    ledger's desired state, and Medusa pulls and applies at its own pace, acking
-   the ids it mints back to the ledger. The scraper makes no write into Medusa;
-   its only outbound call is an optional read-only attribute refresh. This keeps
-   write pressure off the fragile system.
+   the ids it mints back to the ledger. The scraper performs no write to Medusa.
+   It makes at most two read-only calls: an optional attribute refresh (8.5) and
+   the startup fingerprint check (sections 2, 9). "Never pushes" means never
+   writes, not never reads. This keeps write pressure off the fragile system.
 5. **Ordering is enforced by entity state, not by a checklist.** The engine runs
    in dependency phases with barriers. A phase cannot start until every entity
    of the prior phase reached `synced`. This is the "each step completes before
@@ -183,13 +187,21 @@ Tables (columns abbreviated; every table has `created_at`, `updated_at`):
 
 `attribute`
 - `category` (color, finish, quality, type, category), `value` (PK with
-  category), `medusa_id`, `state`
-- this table is refreshed from Medusa, not minted by the pipeline; attributes
-  are a controlled vocabulary the backend owns
+  category), `medusa_id` (nullable until synced), `state`
+- existing values are refreshed from Medusa, but the pipeline also DISCOVERS new
+  values (a new color, finish, type, or quality; surfaced today in
+  `review/<env>/attributes_to_add.csv`). A discovered value starts `pending` with
+  a null `medusa_id`, exactly like a variation, and any entity that references it
+  is held until it is `synced` (section 8.4). Attributes are therefore a
+  first-class synced entity, not a read-only mirror (fixes C3).
 
 `combination`
-- `combo_key` (PK) = hash(`variation_key`, color, finish, quality)
-- `variation_key` (FK), `color`, `finish`, `quality`
+- `combo_key` (PK) = hash(`category_pcat`, `type`, `variation_key`, color, finish,
+  quality). Category and type are real pricing dimensions and MUST be in the key:
+  this matches `2_valid_combinations.csv` (product_category_id, type_id,
+  variation_id, finish_id, color_id, quality_id) built by `stages/tree_build.py`.
+  Omitting them collapses distinct priceable rows (fixes C1).
+- `category_pcat`, `type`, `variation_key` (FK), `color`, `finish`, `quality`
 - `medusa_id` (nullable), `state`
 
 `product`
@@ -202,15 +214,20 @@ Tables (columns abbreviated; every table has `created_at`, `updated_at`):
 - `sku` (PK, FK to product), `qty`, `last_synced_qty`, `updated_at`
 
 `image`
-- `sha256` (PK), `source_url`, `staging_key`, `live_key` (nullable)
-- `state` in {staged, promoted}
-- one row per unique image content; the product to image link lives on the
-  product row as an ordered list, never inferred from a filename
+- `sha256` (PK), `kind` in {scraped_photo, variant_texture}, `source_url`,
+  `staging_key`, `live_key` (nullable)
+- `state` in {staged, generating, promoted, failed}
+- one row per unique image content. The product-to-photo link and the
+  variation-to-texture link live on the owning row, never inferred from a
+  filename. Readiness gates per lane: a variation on its `variant_texture`
+  promoted, a product on its `scraped_photo` set promoted (fixes H1).
 
 `gap`
-- `kind` (missing_variation, missing_leaf_child, missing_attribute), `name`,
-  `nearest_existing`, `nearest_score`, `example_url`, `state` in {open, resolved}
-- the durable form of the per-run `tree_gaps.csv`, deduped across runs
+- `kind` (missing_variation, missing_leaf_child, missing_attribute,
+  image_generation_failed), `name`, `nearest_existing`, `nearest_score`,
+  `example_url`, `state` in {open, resolved}
+- the durable form of the per-run `tree_gaps.csv` and the review queues
+  (`attributes_to_add.csv`, `variants_to_confirm.csv`), deduped across runs
 
 `sync_run`
 - `id`, `env`, `fingerprint`, `started`, `finished`, per-phase counts, status
@@ -218,7 +235,23 @@ Tables (columns abbreviated; every table has `created_at`, `updated_at`):
 
 State enum, shared by `variation`, `combination`, `product`:
 `pending -> dirty -> syncing -> synced`, plus `needs_resync` (set on a fingerprint
-change, see section 9) and `gap_held` (cannot sync, an open gap blocks it).
+change, section 9), `gap_held` (cannot sync; an open gap OR an unsynced referenced
+attribute blocks it, sections 8.4, 5C), and `retiring` (an owned orphan, or the
+old side of a re-key, being delisted, sections 5A, 5C). A `failed` ack returns an
+entity to `dirty`; a persistently failing variant-texture generation escalates its
+variation to `gap_held` with an `image_generation_failed` gap (fixes H2,
+section 6A).
+
+**`payload_hash` inputs (fixes M3).** The dirty-vs-synced decision rests on this
+hash, so it covers exactly the fields in the entity's section 8.3 payload and only
+those: variation `(branch, type, name, sorted(aliases), image_url, volume)`;
+combination `(category_pcat, type, variation_key, color, finish, quality)`; product
+`(variation_key, color, finish, quality, title, description, handle, weight,
+length, width, height, origin_country_code, ordered(image_urls), company_id,
+sales_channel_id, category, bundle_size, ports)`. Inventory uses no hash: the
+`qty != last_synced_qty` compare drives it. A field Medusa applies must be in the
+hash or a real change never re-syncs; a volatile field must be out of it or every
+run churns.
 
 The per-run `canonical.parquet` checkpoint stays exactly as it is. The ledger
 replaces the cross-system CSV files, not the processing artifacts.
@@ -244,9 +277,13 @@ scrape or other ingest -> processing stages -> UPSERT entities into the ledger
 
 scraper sync service (read-only over the ledger, plus an ack writer):
   serves only entities that are ready, in dependency-safe order:
-    variations    ready immediately (attributes already exist in Medusa)
-    combinations  ready once their variation is synced
-    products      ready once variation + combination synced and images promoted
+    attributes    NEW values the pipeline discovered; ready immediately
+    variations    ready once every referenced attribute is synced AND the
+                  variant-texture image (if any) is promoted
+    combinations  ready once their variation is synced AND their category/type/
+                  color/finish/quality attributes are synced
+    products      ready once variation + combination synced, referenced attributes
+                  synced, and scraped photos promoted
     inventory     ready once its product is synced
   on each ack {key|sku, medusa_id}: write the ledger, mark the entity synced
 
@@ -274,6 +311,12 @@ Properties:
 - **Owned only.** The service only ever serves entities the scraper owns. Foreign,
   user-listed products are never in the desired state, so Medusa is never asked to
   touch them (section 5A).
+- **Autonomy boundary (what flows without a human).** "Autonomous" means the
+  proven, gate-passed, ungapped delta flows on its own. NEW varieties, NEW
+  attribute values, and low-confidence matches go to the gap and review queues
+  (`attributes_to_add.csv`, `variants_to_confirm.csv`) and wait for a human. That
+  hold is the safety: an uncertain entity is never auto-listed, so it can never
+  produce a faulty listing (fixes L1).
 - **Resumable.** A `failed` ack leaves the entity `dirty`; the next pull offers it
   again. One bad entity never blocks the batch.
 - **Dry-run and consistency are queries.** The service can report the full diff
@@ -309,6 +352,10 @@ Everything else in Medusa is foreign and invisible to the engine:
   catalog row can never cause the engine to touch a user-listed product.
 - The orphan action is the soft, reversible one: set the owned product to stock 0
   (the discontinued path, section 7), never a hard delete.
+- Orphaning applies to variations and combinations too, not only products. An owned
+  variation or combination with no remaining owned products (for example the old
+  side of a re-key, section 5C) is retired through the same owned-only path, so a
+  type or name correction never leaves a duplicate live variation behind.
 
 Before any delist or orphan step, the engine asserts the target carries our
 `external_id` or `company_id`. A target that fails the assertion is skipped and
@@ -323,12 +370,14 @@ This is the explicit contract for "load the full set once, then only update,"
 and for keeping the ledger and Medusa in sync without ever reloading everything.
 
 **Bootstrap (one time, per env).** The first sync is a full load. The ledger is
-seeded from the current Medusa state (the existing full variants and combinations
-export), so every owned entity starts `synced` with its real Medusa id. If a set
-is loaded fresh instead of seeded, the first reconcile pass pushes everything
-once: all entities are `pending`, the phases run in order, and the ledger captures
-the minted ids. Either way, after the bootstrap the ledger mirrors Medusa for
-every owned entity.
+seeded from the current Medusa state so every owned entity starts `synced` with its
+real Medusa id: variations and combinations from the full variants and combinations
+export, and existing owned PRODUCTS and INVENTORY by SKU from `products_export.csv`
+(seeding products and inventory too is required, fixes M1, or the first delta would
+re-create or orphan them). If a set is loaded fresh instead of seeded, the first
+pull applies everything once: all entities are `pending`, the eligibility order
+applies, and the acks capture the minted ids. Either way, after the bootstrap the
+ledger mirrors Medusa for every owned entity.
 
 **Steady state (every run after).** A scraper run does not reload anything. It
 recomputes each entity's `payload_hash` and marks only the changed ones `dirty`
@@ -338,20 +387,59 @@ never served: no load, no churn. This is what keeps the database and Medusa in
 sync without a full reload, and why steady-state sync is cheap. The full variant
 and combination set is loaded once at bootstrap and only ever updated thereafter.
 
-**Backward corrections.** A correction to an already-synced entity (a fixed
-alias, a corrected attribute or dimension, a manual override, a re-matched
-variation) recomputes its `payload_hash`. The new hash differs, so the entity
-flips `synced -> dirty` and the next reconcile pass re-pushes it as an update
-through the same upsert-by-Key path. Corrections use the exact same machinery as
-new data; there is no separate correction flow, and the `sync_run` audit records
-every update so a correction is traceable.
+**Backward corrections come in two kinds (fixes C2).** Split by whether the
+correction changes the Key:
 
-A correction that must remove an owned entity created in error (a wrong variant)
-is an explicit retire action: mark the ledger entity retired, and the engine
-applies the owned-only orphan action (stock 0, or a backend-confirmed delete only
-if that is ever brought into scope). Removal is never an implicit delete
-triggered by mere absence from a scrape, which protects against a partial scrape
-wiping good data (the same intent as the >30% delist guard, section 7).
+- **Key-PRESERVING** (alias, color, finish, quality, dimensions, origin, image,
+  title, description): the Key is unchanged, so the correction just recomputes
+  `payload_hash`, flips the entity `synced -> dirty`, and the next pull re-applies
+  it as an update on the same `external_id`. Same machinery as new data, no special
+  flow, and the `sync_run` audit records it.
+- **Key-CHANGING** (a corrected stone type or canonical name): because the type and
+  name slugs are in the Key, the Key itself changes, so this is NOT a hash bump on
+  the same `external_id`; it is a re-key (a new identity), handled by section 5C.
+  Treating it as a plain correction would leave a duplicate variant and an orphaned
+  old Key, i.e. faulty listings.
+
+A correction that must remove an owned entity created in error is an explicit
+retire action: mark the ledger entity `retiring`, and apply the owned-only orphan
+action (stock 0, or a backend-confirmed delete only if that is ever brought into
+scope). Removal is never an implicit delete triggered by mere absence from a
+scrape, which protects against a partial scrape wiping good data (the same intent
+as the >30% per-source delist guard, section 7).
+
+---
+
+## 5C. Re-keying: type and canonical-name corrections
+
+Correcting a variety's stone type or its canonical name changes its Key (section 1,
+C2), so the corrected variety is a NEW `external_id`, not an update of the old one.
+The pipeline already does the producing half today (it re-mints the variety under
+the new Key and flags the old one in `variants_to_delete`); the ledger must model
+the full re-key as one cascade so Medusa never ends up with a duplicate variant or
+products pointing at a retired variation.
+
+A re-key is detected when an ingest produces a variation whose lineage (the same
+source variety, now reclassified) maps to a new Key while the old Key is still
+`synced`. The cascade, in order:
+
+1. Create the new variation Key (`pending`), and re-key its combinations and
+   products onto the new variation `external_id`. The combinations get new
+   combo_keys, because the type is part of the combo_key (section 4, C1); product
+   SKUs are unchanged (they key on source plus surrogate, not on the variety Key),
+   so a product re-points, it is not recreated.
+2. Serve the new variation, then its combinations, then its products, in the normal
+   eligibility order, so Medusa creates the corrected identity and the products now
+   reference it.
+3. Only after the new side is `synced`, retire the old Key: its products have moved,
+   so the old variation and its old combinations are owned orphans (section 5A) and
+   are delisted (stock 0 / retire), never hard-deleted.
+
+New-before-old ordering means there is never a window where a product points at
+nothing: it is re-pointed to the live new variation before the old one is retired.
+The `sync_run` audit records the re-key as a paired retire-plus-create so it is
+traceable. Because SKUs are stable across a re-key, inventory and product identity
+survive the reclassification.
 
 ---
 
@@ -365,16 +453,17 @@ and a live bucket (what Medusa serves). The `image` table tracks the crossing.
   key is the content hash, so the same image is the same key and is never
   duplicated. This preserves the existing idempotency (manifest skip, content
   key dedup, exists backstop), now as a table instead of `_manifest.json`.
-- The scraper promotes an image (copy staging to live, set `live_key`,
-  `state = promoted`) just before it serves the product that references it as
-  `ready`. Promotion is a prerequisite for product readiness, so nothing reaches
-  the live bucket before the product that needs it is eligible to load, and the
-  product payload carries the live url.
+- Two lanes, two gates (fixes H1). A `scraped_photo` is promoted just before the
+  PRODUCT that references it is served `ready`; a `variant_texture` `{Key}.png` is
+  promoted just before the VARIATION that carries it is served `ready`. Promotion
+  is the readiness prerequisite for the matching owner, so the variation payload's
+  `image_url` and the product payload's `image_urls[]` always point at bytes
+  already in the live bucket, never a dead link.
 - A re-run with no image change is a no-op: the image is already `promoted`.
 
-Both image lanes (faithful scraped photos and generated variant textures) use
-the same staging then promote crossing, so the live bucket only ever holds
-images tied to a synced product.
+Both lanes use the same staging-then-promote crossing, but they gate different
+owners: the live bucket only holds a texture once its variation is ready and a
+photo once its product is ready.
 
 ---
 
@@ -428,6 +517,21 @@ This keeps three things true at once: generated images land in the runner's
 bucket, the expensive API is paid at most once per Key per model version, and the
 two environments never run as one combined system.
 
+### When generation fails: escalate, never silently drop (fixes H2)
+
+The fal.ai FLUX call can fail or hang (a missing timeout was found and fixed in
+`image_pipeline/genetate_images.py`). Generation is bounded (retry plus timeout),
+and the `image` row moves `staged -> generating -> promoted` on success. If
+generation keeps failing, the image goes `failed` and its variation escalates to
+`gap_held` with an `image_generation_failed` gap, visible in `GET /sync/status`
+and the run summary. A stuck texture therefore surfaces as an explicit signal, and
+its product is held with a reason, never left silently `pending` and absent from
+the catalog forever. Decided: a product is HELD until its variant texture exists;
+it never lists with scraped photos only. Every listing carries its uniform
+generated texture, so a failed generation holds the product (with the
+`image_generation_failed` gap as the signal) rather than degrade the catalog's
+visual consistency.
+
 ---
 
 ## 7. Inventory lane
@@ -440,8 +544,10 @@ re-import and no export download.
   the scraper sets `last_synced_qty = qty`. Unchanged stock is never served, so a
   stock refresh moves only the deltas.
 - The >30% delist guard becomes a count query the sync service applies before it
-  serves inventory, refusing to expose a mass delist from a partial scrape,
-  exactly as today but as a query instead of a CSV diff.
+  serves inventory, refusing to expose a mass delist from a partial scrape. It is
+  PER SOURCE (fixes L3), matching the current per-source guard in `run.py`, so one
+  source's partial scrape cannot be masked or amplified by another source in the
+  same env.
 - Discontinued products (supplier dropped them) set `qty = 0`, a reversible
   delist, recorded for audit.
 
@@ -485,7 +591,7 @@ All are authenticated with a token Medusa holds, env-scoped, and read-only excep
 the ack, which writes only the scraper's own ledger, never Medusa.
 
 `GET /sync/<type>?status=ready&limit=N&cursor=...`
-- `<type>` in `variations`, `combinations`, `products`, `inventory`.
+- `<type>` in `attributes`, `variations`, `combinations`, `products`, `inventory`.
 - Returns a page of entities of that type that are ready to load now: owned, not
   held by an open gap, and with every prerequisite already `synced`. Eligibility
   is computed server-side (section 8.4), so the caller does not reason about
@@ -493,6 +599,9 @@ the ack, which writes only the scraper's own ledger, never Medusa.
 - Each item carries its `Key` (or `SKU`), the full payload to load (section 8.3),
   and a `payload_hash` so Medusa can skip an entity it already applied at that
   hash.
+- Pages order by an immutable column (`created_at`, then Key), so a concurrent ack
+  flipping an entity to `synced` cannot make a page skip or duplicate an entity
+  (fixes L2). The cursor is over that stable order, never over the mutable `state`.
 
 `POST /sync/ack`
 - Body: a list of `{key|sku, medusa_id, status: created|updated|skipped|failed,
@@ -506,9 +615,10 @@ the ack, which writes only the scraper's own ledger, never Medusa.
 - Summary counts per type and state (pending, dirty, ready, synced, held, failed),
   for Medusa's job and for human monitoring.
 
-The scraper may also read Medusa's attribute list read-only to refresh attribute
-ids in the ledger (section 8.5). That is the only direction in which the scraper
-reads from Medusa, and it is read-only.
+The scraper reads Medusa in only two places, both read-only and never a write: the
+optional attribute-list refresh (section 8.5) and the startup fingerprint check
+(sections 2, 9). Everything else is the scraper exposing its ledger and Medusa
+pulling from it.
 
 ### 8.3 Entity payloads (keyed by Key, attributes by canonical name)
 
@@ -518,19 +628,26 @@ Medusa id. Medusa resolves names and Keys to its own ids at load time, because
 Medusa owns those ids. This is why the scraper does not need ids in advance and
 why a re-seed needs no special handling.
 
+- `attribute`: `category` (color, finish, quality, type, category) and the
+  canonical `value`. Sent only for values the pipeline discovered that Medusa does
+  not have yet; Medusa creates the value and acks its id (fixes C3). Existing
+  values are not re-sent.
 - `variation`: `external_id` = Key, `branch`, `type` (canonical name), `name`,
-  `aliases[]`, `image_url` (a live-bucket url), `volume`. Medusa upserts by
+  `aliases[]`, `image_url` (a live-bucket texture url), `volume`. Medusa upserts by
   `external_id`, mints or matches the variation id, acks it.
-- `combination`: `external_id` = combo_key, `variation_external_id` = variation
-  Key, and the canonical `color`, `finish`, `quality` names. Medusa resolves the
-  variation by Key and the attributes by name, upserts, acks its id. Served only
-  after the variation is `synced`.
+- `combination`: `external_id` = combo_key, the canonical `category` and `type`
+  names, `variation_external_id` = variation Key, and the canonical `color`,
+  `finish`, `quality` names (fixes C1: category and type are combination
+  dimensions, matching `2_valid_combinations.csv`). Medusa resolves the variation
+  by Key and category/type/color/finish/quality by name, upserts, acks its id.
+  Served only after the variation is `synced`.
 - `product`: `external_id` = SKU (`{source_code}-{surrogate_key}`),
   `variation_external_id` = variation Key, canonical `color`/`finish`/`quality`
   names, `title`, `description`, `handle`, dims (`weight,length,width,height`),
   `origin_country_code`, `image_urls[]` (ordered live-bucket urls), `company_id`,
   `sales_channel_id`, `category` (canonical), `bundle_size`, ports. Served only
-  after the variation and its combination are `synced` and its images promoted.
+  after the variation and its combination are `synced`, its referenced attributes
+  are `synced`, and its scraped photos are `promoted`.
 - `inventory`: `sku`, `quantity`. Served only after the product is `synced`. A
   `quantity` of 0 is the reversible delist for a discontinued product.
 
@@ -546,21 +663,29 @@ is served as `ready` only when all of its prerequisites are `synced`:
 
 | type | becomes ready when |
 |---|---|
-| variation | always (attributes already exist in Medusa) |
-| combination | its variation is `synced` |
-| product | its variation and combination are `synced`, images promoted |
+| attribute | a discovered value not yet in Medusa; ready immediately |
+| variation | every referenced attribute (its type) is `synced`, AND its variant-texture image (if any) is `promoted` (fixes C3, H1) |
+| combination | its variation is `synced`, and its category/type/color/finish/quality attributes are `synced` |
+| product | its variation and combination are `synced`, its color/finish/quality attributes are `synced`, and its scraped photos are `promoted` (fixes C3, H1) |
 | inventory | its product is `synced` |
 
 So Medusa can pull each type and apply, and it will never receive a combination
-whose variation is not yet in Medusa, or a product whose combination is missing.
+whose variation is not yet in Medusa, a product whose combination is missing, or
+an entity that references an attribute Medusa has not created yet (fixes C3).
 Acking a batch is what flips its entities to `synced`, which is what unlocks the
 dependents on the next pull. The "complete one step before the next" guarantee
 holds even though Medusa pulls at its own pace, because the gate is the data,
 served only when safe. A held entity (an open gap) is never served until the gap
 is resolved.
 
-### 8.5 Idempotency, ownership, re-seed, failure
+### 8.5 New attributes, idempotency, ownership, re-seed, failure
 
+- **New attribute values (fixes C3).** When a payload would reference a canonical
+  attribute value Medusa lacks, that value is served first as the `attribute` type
+  and Medusa creates it and acks its id, OR it is held in the operator queue
+  (`attributes_to_add.csv`) and its dependents stay `gap_held` until it exists.
+  Either way no variation or product is ever applied against a missing attribute,
+  so nothing lists with a null or unresolved attribute.
 - **Idempotency.** Every load is an upsert by `external_id`. Re-pulling and
   re-applying the same entity at the same `payload_hash` is a no-op Medusa can
   skip. The scraper never sends an insert that could duplicate.
@@ -581,13 +706,17 @@ is resolved.
 ### 8.6 What the backend builds (the checklist to hand over)
 
 1. A pull-and-apply job, on Medusa's own schedule, that for each type in order
-   (`variations`, `combinations`, `products`, `inventory`) pulls the ready batch
-   from `GET /sync/<type>`, upserts into Medusa by `external_id`, and acks the
-   minted ids back to `POST /sync/ack`.
+   (`attributes`, `variations`, `combinations`, `products`, `inventory`) pulls the
+   ready batch from `GET /sync/<type>`, applies it, and acks the minted ids back to
+   `POST /sync/ack`. `attributes` come FIRST: a discovered value is CREATED by its
+   canonical (category, value) and its id acked, so no later variation, combination,
+   or product references a value Medusa has not created yet (section 8.4, fixes C3).
+   The other four types are upserted by `external_id`.
 2. `external_id` storage and upsert-by-`external_id` for variations, combinations,
-   products, and inventory, resolving variation Keys and canonical attribute names
-   to Medusa ids server-side at load (server-side resolution is required in this
-   model, because Medusa is the one applying the load).
+   products, and inventory; create-by-canonical-(category, value) for attributes.
+   Resolve variation Keys and canonical attribute names to Medusa ids server-side at
+   load (server-side resolution is required in this model, because Medusa is the one
+   applying the load).
 3. Ownership enforcement: never overwrite or delete a product outside the
    scraper's ownership; honor stock 0 as the only delist.
 4. Idempotent skip when `payload_hash` is unchanged.
@@ -604,10 +733,11 @@ the scraper records acked ids.
 When a Medusa environment is re-seeded, every internal id changes but every Key
 survives. The ledger absorbs this without a manual re-pin.
 
-- `RunContext.backend_id_fingerprint` is checked against the live backend at
-  startup. On a mismatch, the engine does not abort. It marks all `medusa_id`
-  columns in that env's ledger stale and sets the affected entities to
-  `needs_resync`.
+- `RunContext.backend_id_fingerprint` is checked at startup. This is a read-only
+  call to Medusa (one of the two reads the scraper makes, principle 1.4, fixes M2),
+  or it can be derived from the acked ids already in the ledger to avoid any live
+  read. On a mismatch the scraper does not abort: it marks all `medusa_id` columns
+  in that env's ledger stale and the affected entities `needs_resync`.
 - The next pull re-resolves every id as Medusa applies each entity by Key and
   canonical name, and the acks repopulate the ledger. Keys carry the identity
   across the re-seed, so this is automatic.
@@ -615,7 +745,9 @@ survives. The ledger absorbs this without a manual re-pin.
 
 This is cleaner than today's abort and re-pin, and it is the same mechanism that
 promotes dev to prod: point `RunContext` at the prod ledger and prod sync service,
-and the first pull resolves prod ids by the same Keys.
+and the first pull resolves prod ids by the same Keys. Note the distinction (C2): a
+re-seed re-resolves the SAME Keys to new ids automatically, whereas a type or name
+correction is a re-key (a NEW Key) handled by section 5C, not by this path.
 
 ---
 
@@ -666,10 +798,12 @@ scraper, a supplier API, a manual CSV drop, an EDI feed, or a partner database.
 The writer model (section 3) is the deciding input, not whether Medusa supplies
 ids (it does, but only as response data the engine writes).
 
-- If ingest and the ack writer run serialized, one orchestrated run at a time per
-  env, an embedded single-file database (SQLite on EFS, mounted by the scraper
-  task) is safe, cheap, and zero-ops. It is the right substrate for the Phase 1
-  prototype, which is single-process and write-through with no Medusa calls.
+- For the Phase 1 prototype (single-process, write-through, no Medusa calls) an
+  embedded SQLite database is enough. But do NOT put the system-of-record SQLite
+  file on EFS/NFS (fixes M4): SQLite's own docs warn that POSIX advisory locking
+  over network filesystems is unreliable and fsync semantics differ, which can
+  corrupt the file even single-process. Run Phase 1 SQLite on the task's LOCAL
+  ephemeral disk with an S3 snapshot for durability, or go straight to RDS Postgres.
 - The corpus will grow and parallel ingest is a likely optimization, and the sync
   service's ack writes can land while an ingest is running. Concurrent
   scraper-side writers want a server database with row-level locking. A small RDS
@@ -677,8 +811,9 @@ ids (it does, but only as response data the engine writes).
   serving a pulling Medusa.
 
 Recommendation: build behind a thin data-access layer so the substrate is one
-swap. Prototype on SQLite on EFS (Phase 1 below). Graduate the same schema to RDS
-Postgres when the sync service goes live and concurrency appears. The schema and
+swap. Prototype on SQLite on local disk with an S3 snapshot (Phase 1 below), never
+on EFS. Graduate the same schema to RDS Postgres when the sync service goes live
+and concurrency appears. The schema and
 the code do not change across the swap; only the connection does. A server
 database also makes the sync service easier to expose as a small HTTPS endpoint in
 the scraper VPC.
@@ -788,6 +923,9 @@ Retired, in the phase order above:
    how many entities per page), and the authentication and network path for the
    inbound sync service per env (section 10). Confirm with the backend chat
    alongside decision 2.
+9. DECIDED (hold): a product with no available variant texture stays held until the
+   texture exists; it never lists with scraped photos only (section 6A). Kept here
+   as a record; no longer open.
 
 ---
 
@@ -803,6 +941,19 @@ each produce wrong listings as written. The model below them is sound and is not
 at the end so the backend chat knows what to trust.
 
 No em dashes here either, per the document convention.
+
+**Resolution status (folded into the body).** All findings below are now resolved
+in the design body; this section is kept as the audit trail and rationale.
+- C1 (combination schema) -> sections 4 (`combination`), 8.3, 8.4.
+- C2 (re-key) -> sections 1 (principle 1), 5B, the new 5C (re-key cascade), 5A, 9.
+- C3 (attribute gating) -> sections 4 (`attribute`), 5 (flow), 8.2 (type enum), 8.3,
+  8.4, 8.5, 8.6 (attributes pulled first).
+- H1 (texture promotion) -> sections 4 (`image`), 6, 8.4.
+- H2 (generation failure) -> sections 4 (state enum, `gap`), 6A, 15 decision 9.
+- M1 (bootstrap seeding) -> section 5B. M2 (fingerprint read) -> sections 1.4, 8.2, 9.
+  M3 (`payload_hash` inputs) -> section 4. M4 (SQLite on EFS) -> section 12.
+- L1 (autonomy boundary) -> section 5. L2 (cursor) -> section 8.2. L3 (per-source
+  delist guard) -> section 7.
 
 ### Critical (fix before building, each produces faulty listings)
 
