@@ -99,6 +99,10 @@ MAX_WORKERS = 12                        # raise to 8-12 if your fal plan allows 
 MAX_RETRIES = 4
 BASE_BACKOFF = 3                       # seconds; doubles each retry
 HEARTBEAT_SECONDS = 20                 # how often to print "still alive" status
+# Bound each FAL call so a single hung request can't stall the whole run (and, in the build, the whole
+# Fargate task) forever. A timeout raises -> caught by the retry loop -> eventually a recorded failure.
+GEN_START_TIMEOUT = 180                # max wait for the job to leave the FAL queue
+GEN_CLIENT_TIMEOUT = 300              # max total wait for a single generation result
 
 # Diffusion knobs — used ONLY by klein/turbo/dev (pro & max ignore them).
 NUM_INFERENCE_STEPS = 28              # lower (e.g. 20) = faster, slightly less detail
@@ -341,7 +345,8 @@ def generate_one(item: dict, base_sizes: dict) -> bool:
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            result = fal_client.subscribe(endpoint, arguments=arguments)
+            result = fal_client.subscribe(endpoint, arguments=arguments,
+                                          start_timeout=GEN_START_TIMEOUT, client_timeout=GEN_CLIENT_TIMEOUT)
             images = result.get("images") or []
             if not images:
                 raise ValueError(f"no images in response: {list(result.keys())}")
