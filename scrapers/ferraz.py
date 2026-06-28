@@ -51,10 +51,6 @@ DETAIL_API_URL = f"{BASE}/FullInventory.aspx/DetalheBundle"
 
 PAGE_SIZE = 40  # server-controlled, confirmed via probe
 
-# Confirmed image path pattern: <id>/<guid>.jpg is full-res, <id>/<guid>_crop_555x300.jpg the thumb.
-IMAGE_PATH_FULL = "/backendGranite/cadastros/Bundles/fotos/{bundle_id}/{filename}"
-IMAGE_PATH_THUMB = "/backendGranite/cadastros/Bundles/fotos/{bundle_id}/{stem}_crop_555x300{ext}"
-
 API_HEADERS = {
     "accept": "application/json, text/javascript, */*; q=0.01",
     "content-type": "application/json; charset=utf-8",
@@ -63,77 +59,18 @@ API_HEADERS = {
     "x-requested-with": "XMLHttpRequest",
 }
 
-DISPLAY_RE = re.compile(r"class='([^']+)'", re.IGNORECASE)
-# When unauthenticated, prices come back as '<a>Login for Price</a>' stubs.
-_LOGIN_STUB_RE = re.compile(r'<\s*a\s|login\s*for\s*price', re.IGNORECASE)
-
-
-def _get(d, key, default=''):
-    v = d.get(key)
-    if v is None or v == '':
-        return default
-    return v
-
-
-def parse_display_status(html):
-    """The displayProduct field is a tiny HTML span. Extract a clean status."""
-    if not html:
-        return ''
-    m = DISPLAY_RE.search(html)
-    if not m:
-        return ''
-    classes = m.group(1).lower()
-    if 'recommended-product' in classes and 'display: block' in html.lower():
-        return 'recommended'
-    if 'new-product' in classes and 'display: block' in html.lower():
-        return 'new'
-    return ''
-
-
-def clean_price(value):
-    """Return '' if the value is an HTML 'Login for Price' stub, else as-is."""
-    if not value:
-        return ''
-    s = str(value)
-    if _LOGIN_STUB_RE.search(s):
-        return ''
-    return s
-
-
-def join_slabs(chapas, key):
-    """Pipe-join a single field across all slabs, e.g. all widths."""
-    if not chapas:
-        return ''
-    return ' | '.join(str(c.get(key, '') or '') for c in chapas)
+# SlabWare response parsing + photo/price/status helpers are shared across tenants (slabware.py);
+# only `base` differs, bound here. Local names kept so the parse_product callsites are unchanged.
+from scrapers import slabware
+from scrapers.slabware import slab_get as _get, clean_price, join_slabs, parse_display_status
 
 
 def join_photos(fotos):
-    """Convert an array of photo paths to a list of full source URLs."""
-    out = []
-    for path in fotos or []:
-        if not path:
-            continue
-        if path.startswith('http'):
-            out.append(path)
-        elif path.startswith('/'):
-            out.append(BASE + path)
-        else:
-            out.append(BASE + '/' + path)
-    return out
+    return slabware.join_photos(fotos, BASE)
 
 
 def build_image_urls(bundle_id, filename):
-    """Return (full_url, thumb_url) for a bundle's primary photo."""
-    if not bundle_id or not filename:
-        return ('', '')
-    if '.' in filename:
-        stem, _dot, ext = filename.rpartition('.')
-        ext = '.' + ext
-    else:
-        stem, ext = filename, '.jpg'
-    full = BASE + IMAGE_PATH_FULL.format(bundle_id=bundle_id, filename=filename)
-    thumb = BASE + IMAGE_PATH_THUMB.format(bundle_id=bundle_id, stem=stem, ext=ext)
-    return (full, thumb)
+    return slabware.build_image_urls(bundle_id, filename, BASE)
 
 
 class FerrazScraper(ScraperBase):
