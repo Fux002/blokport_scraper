@@ -91,9 +91,12 @@ not of a person following a list.
 The module serves both dev and prod Medusa. The run must know which side it is
 on, with no silent default.
 
-- Today `BLOKPORT_ENV` defaults to `development` in `config/settings.py`. That
-  default is removed. Environment is a required input; an unset or unknown value
-  aborts before any work.
+- The deployment is already split per env: dev and prod run as separate ECS
+  deployments (not one runtime-toggled task, per the infra split), so each running
+  stack is pinned to one environment by its infrastructure. The residual footgun
+  is that `BLOKPORT_ENV` still defaults to `development` in `config/settings.py`.
+  That default is removed and environment becomes a required input, so a
+  misconfigured task aborts before any work rather than silently acting as dev.
 - Environment resolves once into a `RunContext` object that is the single source
   for everything env-specific. Every stage and the sync service reads from it.
   Nothing reads `BLOKPORT_ENV` ad hoc anywhere else.
@@ -697,7 +700,9 @@ automatable, not a judgment call.
 **Phase 1: write-through ledger (no Medusa calls).** Build the ledger schema and
 a write-through data-access layer. The pipeline keeps emitting the current CSVs
 and also upserts every entity into the per-env ledger. Seed the ledger once from
-the current `from_medusa/<env>` exports.
+the current `from_medusa/<env>` exports and the unified variant list
+(`variants_export_base.csv`, now kept identical to `1_variants_full.csv` by
+`sync_variants_base.py`, so it is the natural single seed for variations).
 
 Cutover test for Phase 1: render the ledger back out into the existing
 `to_upload` CSV shapes (`1_variants_*`, `2_valid_combinations`, `3_products_*`,

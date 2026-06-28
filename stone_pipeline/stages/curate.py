@@ -263,6 +263,20 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # --- 1. collect alias additions: scraped spellings to add to an EXISTING variety
     # variety norm-name -> set of new alias spellings ; confirmed vs needs-review
     from stone_pipeline.adapters.tokens import strip_format
+
+    def variety_identity(row: CanonicalRow) -> tuple[str, str, str]:
+        """The (name, resolved stone_type, cleaned name) a row's variety is minted under -- computed
+        ONE way so the dedup, variety_branches, obs_union and the mint all agree on the identity (and
+        its (type, name) key). Type: the corrected type_name, else the raw tag, else the first
+        missing_variation gap's suggested type (then any gap's). Name: the match key, else the raw
+        name MINUS its format word (so 'Brown Onyx Slab' is 'Brown Onyx' everywhere, not just at mint)."""
+        mv = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
+        suggested = (mv[0].suggested_type if mv else "") or next(
+            (g.suggested_type for g in row.tree_gaps if g.suggested_type), "")
+        stone_type = row.type_name or row.raw_type or suggested or ""
+        name = (row.variety_match_key or strip_format(row.raw_name or "")).strip()
+        return name, stone_type, _clean_variety(name, stone_type)
+
     alias_new: dict[str, set[str]] = {}
     review_candidates: dict[str, set[str]] = {}
     for row in rows:
@@ -286,13 +300,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # the new-variant dedup below even when two raw names clean to the same variety.
     variety_branches: dict[str, set[str]] = {}
     for row in rows:
-        g = next((g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation), None)
-        if not g:
+        if not any(g.gap_kind == GapKind.missing_variation for g in row.tree_gaps):
             continue
-        nm = (row.variety_match_key or row.raw_name or "").strip()
-        if nm:
-            # same canonical identity as the classify loop below: resolved type, not the raw tag
-            clean = _clean_variety(nm, row.type_name or row.raw_type or g.suggested_type or "")
+        _, _, clean = variety_identity(row)              # one identity, shared with dedup/obs_union/mint
+        if clean:
             variety_branches.setdefault(proj.norm(clean), set()).add(branch_of(row))
 
     # --- 2. classify each gapped variety, in STRICT PRIORITY ORDER (the cleaning/verification flow).
@@ -313,18 +324,13 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         if not gaps:
             continue
-        # strip the format word when there's no match key (same as the alias loop) so a typeless
-        # source 'Brown Onyx Slab' classifies/mints as 'Brown Onyx', not carrying 'Slab' into the name.
-        name = (row.variety_match_key or strip_format(row.raw_name or "")).strip()
+        gap = gaps[0]
+        # PHASE 1 -- CANONICALISE. variety_identity() resolves the name (match key, else raw name minus
+        # its format word) and the type (corrected type_name, not the raw tag), so 'Azul White Quartzite'
+        # (typed Quartzite) cleans to 'Azul White' and mints as quartzite, not under the wrong 'Onyx' tag.
+        name, stone_type, clean = variety_identity(row)
         if not name:
             continue
-        gap = gaps[0]
-        # PHASE 1 -- CANONICALISE. Use the RESOLVED type (normalize's name-over-tag correction), not
-        # the raw supplier tag, so the cleaned identity AND the mint are under the CORRECT type:
-        # 'Azul White Quartzite' (typed Quartzite) cleans to 'Azul White' and mints as quartzite, not
-        # under the supplier's wrong 'Onyx' tag.
-        stone_type = row.type_name or row.raw_type or gap.suggested_type or ""
-        clean = _clean_variety(name, stone_type)
 
         # PHASE 2 -- DEDUP: classify each cleaned identity once (two raw names that clean to the same
         # variety must never mint duplicate Keys). Keyed on (RESOLVED type, cleaned name) -- the SAME
@@ -507,16 +513,13 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # set when its trigger product had none -- nulling colour_id for all its products (Antibes).
     obs_union: dict[tuple[str, str], dict[str, set]] = {}   # (norm type, norm name) -> observed attrs
     for _r in rows:
-        _nm = (_r.variety_match_key or _r.raw_name or "").strip()
+        # SAME identity as the dedup/mint (variety_identity), so a row whose attrs we want to union
+        # keys to exactly the variety that gets minted -- else the variety is born with the default
+        # fallback instead of its observed colours/finishes/qualities.
+        _nm, _st, _clean = variety_identity(_r)
         if not _nm:
             continue
-        # Resolve the type with the SAME fallback chain the mint title uses (type_name -> raw_type ->
-        # the tree gap's suggested_type), or a row whose type is recovered only via suggested_type
-        # cleans to a different name here than at mint time -> this union misses and the variety is
-        # born with the Natural/default fallback instead of its observed colours/finishes/qualities.
-        _st = (_r.type_name or _r.raw_type
-               or next((g.suggested_type for g in _r.tree_gaps if g.suggested_type), "") or "")
-        _k = (proj.norm(_st), proj.norm(_clean_variety(_nm, _st)))
+        _k = (proj.norm(_st), proj.norm(_clean))
         u = obs_union.setdefault(_k, {"colors": set(), "qualities": set(), "finishes": set()})
         if _r.color_name:
             u["colors"].add(title_case(_r.color_name))
