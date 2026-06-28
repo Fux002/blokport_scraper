@@ -33,6 +33,8 @@ def atomic_write(path: Path | str, write_fn: Callable) -> None:
     try:
         with tmp.open("w", newline="", encoding="utf-8") as handle:
             write_fn(handle)
+            handle.flush()
+            os.fsync(handle.fileno())   # durable before the rename, so a crash can't leave a 0-byte/partial file
         os.replace(tmp, path)
     finally:
         if tmp.exists():

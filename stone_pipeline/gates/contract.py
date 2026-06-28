@@ -35,6 +35,9 @@ class Invariant:
 
 
 def _nonempty(field_name: str) -> Callable[[CanonicalRow], bool]:
+    # Intended for STRING required fields (today only origin_country_code). For a numeric/bool field a
+    # legitimate 0 / 0.0 / False would count as "present" here -- if you ever add such a required field,
+    # give it an explicit predicate rather than reusing this non-empty check.
     def _check(row: CanonicalRow) -> bool:
         value = getattr(row, field_name, None)
         if isinstance(value, str):

@@ -57,10 +57,19 @@ def test_unknown_value_flags_and_does_not_guess(ref):
 
 def test_multi_value_takes_first_and_flags(ref):
     resolvers = normalize.AttributeResolvers.build(ref)
-    row = CanonicalRow(src_site="polonine", raw_color="Black and White")
+    row = CanonicalRow(src_site="polonine", raw_color="Black | White")   # genuine separator
     normalize.normalize_row(row, resolvers, ref)
     assert row.color_name == "Black"
     assert any(f.code == FlagCode.multi_value for f in row.review_flags)
+
+
+def test_and_is_not_a_multi_separator(ref):
+    # 'Black and White' is a SINGLE colour descriptor, not two values -- ' and ' must not split it
+    # (that silently dropped the second word and mis-flagged multi_value).
+    resolvers = normalize.AttributeResolvers.build(ref)
+    row = CanonicalRow(src_site="polonine", raw_color="Black and White")
+    normalize.normalize_row(row, resolvers, ref)
+    assert not any(f.code == FlagCode.multi_value for f in row.review_flags)
 
 
 def test_vocab_fuzzy_floor_rejects_low_score():

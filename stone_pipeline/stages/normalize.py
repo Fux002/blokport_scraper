@@ -26,7 +26,10 @@ log = logfmt.get_logger("normalize")
 
 # vocab -> (raw field, code, multi-value allowed)
 VOCAB_FIELDS = ("type", "color", "finish", "quality")
-_MULTI_SPLIT = re.compile(r"\s*(?:\||/|,| and )\s*", flags=re.IGNORECASE)
+# Only unambiguous separators (pipe / slash / comma). ' and ' is NOT a separator: 'Black and Gold'
+# is a single colour descriptor, and splitting it silently dropped 'Gold' and mis-flagged multi_value.
+# A genuine 'X and Y' now stays one value -> it simply fails to resolve and is flagged for review.
+_MULTI_SPLIT = re.compile(r"\s*[|/,]\s*")
 
 
 @dataclass

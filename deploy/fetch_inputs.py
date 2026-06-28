@@ -32,6 +32,10 @@ def main() -> int:
             if not name:  # the prefix "folder" placeholder
                 continue
             target = dest / name
+            # guard against a key with '..' segments resolving outside dest (path traversal)
+            if not target.resolve().is_relative_to(dest.resolve()):
+                print(f"   ! skipped (key escapes {dest.name}/): {key}")
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             client.download_file(S3_BUCKET, key, str(target))
             print(f"   {name}")

@@ -313,7 +313,9 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         if not gaps:
             continue
-        name = (row.variety_match_key or row.raw_name or "").strip()
+        # strip the format word when there's no match key (same as the alias loop) so a typeless
+        # source 'Brown Onyx Slab' classifies/mints as 'Brown Onyx', not carrying 'Slab' into the name.
+        name = (row.variety_match_key or strip_format(row.raw_name or "")).strip()
         if not name:
             continue
         gap = gaps[0]

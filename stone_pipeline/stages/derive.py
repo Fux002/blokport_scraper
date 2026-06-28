@@ -140,8 +140,10 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
         weight = round(ids.seeded_uniform(row.surrogate_key, "weight", *ranges["weight"]), 3)
         methods.append("weight:synthetic")
 
-    # range sanity: flag out-of-range parsed dims (section 6 Stage 6)
-    for name, value in (("length", length), ("width", width), ("height", height)):
+    # range sanity: flag out-of-range parsed dims + weight (section 6 Stage 6). Synthetic values are
+    # within range by construction, so only a mis-scaled PARSED value (e.g. weight in grams, or a per-m2
+    # weight) trips this.
+    for name, value in (("length", length), ("width", width), ("height", height), ("weight", weight)):
         lo, hi = ranges.get(name, (0.0, 5.0))
         if value < lo * 0.3 or value > hi * 3:
             row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_out_of_range,

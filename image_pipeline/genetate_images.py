@@ -356,10 +356,12 @@ def generate_one(item: dict, base_sizes: dict) -> bool:
             msg = str(e)
             # Validation / bad-request errors are deterministic — retrying wastes
             # time and money. Fail immediately so you see the real problem.
+            # Specific, deterministic parameter rejections only. A bare 'validation' substring was too
+            # broad -- a transient gateway/proxy error whose body merely mentions 'validation' would be
+            # permanently failed without a retry.
             non_retryable = (
                 "less_than_equal" in msg or "greater_than_equal" in msg
                 or "unprocessable" in msg.lower() or "422" in msg
-                or "validation" in msg.lower()
             )
             if non_retryable:
                 log(f"❌ {name}: parameter rejected by {MODEL} — {msg}")
@@ -380,6 +382,10 @@ def main() -> None:
     if not key or key == "PASTE-YOUR-ROTATED-KEY-HERE":
         raise SystemExit("❌ FAL_KEY not set. Export it first: export FAL_KEY=\"<id>:<secret>\" "
                          "(on AWS it is injected from SSM /blokport-<env>/FAL_KEY).")
+
+    # start each run with a fresh failure log, else it accumulates stale (since-resolved) entries and
+    # the 're-run to retry' guidance reads old failures.
+    FAILURES_FILE.unlink(missing_ok=True)
 
     with open(PROMPTS_FILE) as f:
         all_items = json.load(f)

@@ -351,8 +351,10 @@ def run() -> Path:
     uncovered_file = SETTINGS.paths.review_dir / "tree_uncovered_variations.csv"
     assigned = _load_assigned_types(uncovered_file, _load_attributes(SETTINGS.paths.attributes_csv))
     delete_file = SETTINGS.paths.review_dir / "variants_to_delete.csv"
-    exclude_ids = {(r.get("Id") or "").strip() for r in csv.DictReader(delete_file.open(encoding="utf-8-sig"))
-                   if (r.get("Id") or "").strip()} if delete_file.exists() else set()
+    exclude_ids: set[str] = set()
+    if delete_file.exists():
+        with delete_file.open(encoding="utf-8-sig") as h:   # close the handle (was leaked in a comprehension)
+            exclude_ids = {(r.get("Id") or "").strip() for r in csv.DictReader(h) if (r.get("Id") or "").strip()}
     combinations, stats, uncovered = build_combinations(
         export, SETTINGS.paths.attributes_csv, _backbone_paths(),
         products if products.exists() else None, assigned, exclude_ids)

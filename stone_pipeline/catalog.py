@@ -56,12 +56,11 @@ def run(outputs_root: Path | None = None) -> Path:
         raise SystemExit(f"no source runs found under {outputs_root} (run `python -m stone_pipeline.run all` first)")
 
     rows = []
-    sources: list[str] = []
+    sources: set[str] = set()
     for p in parquets:
         src_rows = staging.read_canonical(p)
         rows.extend(src_rows)
-        if src_rows:
-            sources.append(src_rows[0].src_site)
+        sources.update(r.src_site for r in src_rows)   # union ALL src_sites, not just the first row's
 
     ref = loaders.load_all()
     result = curate.run(rows, ref)                # -> to_upload/1_variants_update.csv, review/, backbone_additions/

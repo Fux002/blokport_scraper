@@ -205,8 +205,9 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
                 aliases=aliases,
             )
             table.by_id[vid] = variant
-            for surface in [name, *aliases]:
-                table.surface_to_id.setdefault(_norm(surface), vid)
+            # NOTE: surface_to_id is intentionally NOT populated here -- production matching builds its
+            # own exact index in matching/index.py; this per-row normalize+insert over ~24k variants was
+            # pure wasted work (the field stays for the test that clears it).
     return table
 
 

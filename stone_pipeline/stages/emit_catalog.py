@@ -184,7 +184,12 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     # Name/Alias would corrupt the catalog data. (Operator review of scraped names is the sanitized
     # review files' job, not this machine-consumed deliverable.)
     csvio.write_dicts(path, _COLS, rows, sanitize=False)
+    # count GENUINELY new rows from the FINAL set (after artifact-filter + consolidation), not from
+    # the pre-filter `order` -- else dropped/folded rows inflate the 'new' metric.
+    existing_keys = set(order[:n_existing])
+    mirror_keys = {m["Key"] for m in mirror}
+    new_count = sum(1 for r in rows if r["Key"] not in existing_keys and r["Key"] not in mirror_keys)
     log.info("variants_full emitted", extra={"extra_fields": {
         "rows": len(rows), "existing": n_existing,
-        "new": len(order) - n_existing, "mirror": len(mirror)}})
+        "new": new_count, "mirror": len(mirror)}})
     return path
