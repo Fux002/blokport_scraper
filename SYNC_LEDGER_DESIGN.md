@@ -788,3 +788,174 @@ Retired, in the phase order above:
    how many entities per page), and the authentication and network path for the
    inbound sync service per env (section 10). Confirm with the backend chat
    alongside decision 2.
+
+---
+
+## 16. Review (correctness pass against the actual pipeline)
+
+This section was added by a review of the design against the code that produces the
+data it syncs (`stages/curate.py` `gen_key`, `stages/tree_build.py`,
+`stages/product_state.py`, the `to_upload/<env>/*.csv` shapes, and the
+gate/review flow). The goal is that the link works autonomously without faulty
+listings, so each finding states what the doc says, what the code actually does,
+why it matters, and the fix. Items C1 to C3 must be resolved before build; they
+each produce wrong listings as written. The model below them is sound and is noted
+at the end so the backend chat knows what to trust.
+
+No em dashes here either, per the document convention.
+
+### Critical (fix before building, each produces faulty listings)
+
+**C1. The combination schema is wrong (missing category and type).**
+The doc (sections 1, 4, 8.3) defines a combination as
+`combo_key = hash(variation_key, color, finish, quality)` and the combination
+payload as variation Key plus color/finish/quality. The actual combination the
+pipeline emits (`to_upload/<env>/2_valid_combinations.csv`, built by
+`stages/tree_build.py`) has columns:
+`product_category_id, type_id, variation_id, finish_id, color_id, quality_id`.
+So a combination is the tuple `(category, type, variation, finish, color,
+quality)`. The doc omits `product_category_id` and `type_id`, which ARE
+combination dimensions (pricing rules are keyed on the full tuple, including
+category and type). As written the backend would build a collapsed combination
+that merges distinct priceable rows, so prices and availability would be wrong.
+Fix: combo_key hashes over `(category_pcat, type, variation_key, finish, color,
+quality)`, and the combination payload (8.3) must carry the canonical category and
+type names (Medusa resolves them), not just variation plus color/finish/quality.
+
+**C2. The Key is NOT stable under a type or canonical-name correction.**
+Principle 1 and section 5B state the Key is stable, Medusa stores it as
+`external_id` and never changes it, and a backward correction recomputes
+`payload_hash` and re-pushes "as an update through the same upsert-by-Key path."
+But `gen_key` (curate.py) builds
+`key = {branch}_{slug(type)}_{slug(name)}_{uuid5("branch:name")}`. The TYPE and the
+NAME are part of the Key string, and the uuid5 is over `branch:name`. So correcting
+a variety's type changes the Key (this happened this session: re-typing Agata from
+Semi-Precious Stone to Agate turned
+`slab_semi_precious_stone_agata_brown_<uuid>` into
+`slab_agate_agata_brown_<uuid>`), and correcting a canonical name changes both the
+name slug and the uuid, so it changes the Key too. A Key change is therefore NOT a
+payload-hash update on the same external_id; it is a new external_id. If handled as
+the doc's "backward correction," the corrected variety is created in Medusa under
+the new Key while the OLD Key lingers, and that variety's combinations and products
+still reference the old variation Key. Result: a duplicate variant, an orphaned old
+Key, and products pointing at a retired variation, i.e. faulty listings.
+Fix: split corrections into Key-PRESERVING (alias, color, finish, quality, dims,
+origin, image, title, description) and Key-CHANGING (type, canonical name). A
+Key-changing correction is a first-class re-key event: retire the old Key (the
+owned orphan action, stock 0 / retire), re-key the variety's combinations and
+products onto the new variation `external_id`, and only then serve the new Key. The
+pipeline already does the retire half (`variants_to_delete` plus a re-mint under the
+new Key); the ledger must model the re-key and its cascade explicitly, not as a hash
+bump. Section 5B currently describes only the Key-preserving case.
+
+**C3. New attribute values are not gated; "attributes already exist in Medusa" is
+not always true.**
+Sections 4 and 8.4 treat the `attribute` table as "refreshed from Medusa, not
+minted," make variation readiness "always (attributes already exist in Medusa),"
+and do not gate a product on its attributes existing. But the pipeline DISCOVERS new
+attribute values (a new color, finish, type, or quality) and surfaces them in
+`review/<env>/attributes_to_add.csv` for the operator to create in Medusa, then
+adopts the id (`stages/decisions.adopt_attribute_ids`). So a variation or product
+can reference a canonical name Medusa does not yet have. A payload referencing a
+not-yet-created attribute name fails server-side name resolution at load, so the
+entity lists with a null or unresolved attribute, silently and autonomously.
+Fix: an attribute value that is not yet `synced` in the ledger (not yet created in
+Medusa) is a gap that HOLDS its dependents. A variation or product is not `ready`
+until every attribute it references (type, color, finish, quality, category) exists
+in Medusa. Either add attribute creation to the pull contract (Medusa mints a new
+value it lacks and acks its id) or hold the entity `gap_held` until the operator
+creates it. The eligibility table in 8.4 must add "and every referenced attribute is
+synced" to the variation and product rows.
+
+### High
+
+**H1. The variant-texture image is served before it is promoted.**
+The variation payload (8.3) carries `image_url` as a LIVE-bucket url and variation
+readiness (8.4) is "always," but section 6 promotes images "just before it serves
+the PRODUCT." So a variation is handed a live url for a `{Key}.png` that has not been
+copied to the live bucket yet, a dead link in Medusa. Section 6 conflates the two
+image lanes. Fix: gate VARIATION readiness on its variant-texture image being
+`promoted` (when it has one); gate PRODUCT readiness on its scraped photos being
+promoted. Two lanes, two gates.
+
+**H2. Image-generation failure has no escalation in the autonomous flow.**
+Product readiness requires "images promoted," and gaps hold entities, but the
+expensive variant-texture GENERATION step (the fal.ai FLUX call) is not modeled as a
+failure mode. Generation can fail or hang (a missing timeout was found and fixed in
+`image_pipeline/genetate_images.py` this session). A variety whose texture never
+generates keeps its product `pending` forever, silently absent from the catalog,
+with no gap and no signal. Fix: bound generation (retry plus timeout, now in code)
+and model a persistently failing generation as an explicit held/escalated state that
+shows in `GET /sync/status`, so a stuck image does not silently drop a product.
+Decide whether a product may list with its scraped photos only (degraded but visible)
+when the generated texture is unavailable.
+
+### Medium
+
+**M1. Product and inventory bootstrap seeding is under-specified.** Section 5B seeds
+the bootstrap from "the existing full variants and combinations export." Existing
+owned PRODUCTS and INVENTORY (seeded by SKU from `products_export.csv`) are not
+stated, so on the first delta they could be re-created or orphaned. State that
+products and inventory are also seeded by SKU at bootstrap, starting `synced` with
+their real Medusa ids.
+
+**M2. The cross-env fingerprint guard contradicts "the scraper never reads Medusa."**
+Sections 1.4 and 8.5 say the only read from Medusa is the optional attribute refresh,
+but the cross-env guard (2) and the re-seed check (9) compare against "the live
+backend fingerprint" at startup, which requires reading Medusa's id set. Reconcile:
+either acknowledge the fingerprint read as a second read-only Medusa call, or derive
+the fingerprint from the acked ids already in the ledger so no live read is needed.
+
+**M3. `payload_hash` inputs are unspecified.** The whole dirty/synced decision rests
+on `payload_hash`, but the doc never lists the fields it covers. Omit a field Medusa
+applies (the promoted image url, ports, bundle_size) and a real change is never
+re-pushed; include a volatile field and every run churns. Specify the exact ordered
+field set per entity that the hash covers (the same fields as the 8.3 payload, and
+only those).
+
+**M4. SQLite on EFS is a known reliability footgun.** Section 12 proposes "SQLite on
+EFS, mounted by the scraper task" for Phase 1. SQLite's own documentation warns
+against network filesystems: POSIX advisory locking over NFS/EFS is unreliable and
+can corrupt the database, and fsync semantics differ. For a system of record this is
+a real corruption risk even single-process. Fix: for Phase 1 run SQLite on the
+task's LOCAL ephemeral disk with an S3 snapshot for durability, or go straight to RDS
+Postgres. Do not put the system-of-record SQLite file on EFS.
+
+### Low and clarity
+
+**L1. Define the autonomy boundary explicitly.** The goal is autonomous operation,
+and the design correctly autosyncs gate-passed, non-held entities, but NEW varieties,
+NEW attribute values, and low-confidence matches go to `gap` / `needs_review`
+(`attributes_to_add.csv`, `variants_to_confirm.csv`) and wait for a human. State
+plainly that "autonomous" means the proven, gate-passed, ungapped delta flows without
+a human, while uncertain entities are held for review by design. That hold is exactly
+what prevents faulty listings: an uncertain entity is never auto-listed.
+
+**L2. Pagination cursor stability.** `GET /sync/<type>?cursor=...` pages over a ledger
+whose entities flip state mid-pull (an ack moves an entity to `synced`). Specify a
+stable order (by immutable Key or `created_at`) and snapshot/`updated_at` semantics so
+a concurrent ack cannot make a page skip or duplicate an entity.
+
+**L3. State the delist guard scope.** Section 7's mass-delist guard should say it is
+PER SOURCE, matching the current per-source 30 percent guard in `run.py`, so one
+source's partial scrape cannot be masked or amplified by other sources in the same
+env.
+
+### What is sound (trust these)
+
+- The ownership boundary (5A) and owned-only orphaning (stock 0, never a hard
+  delete, asserted by `external_id` or `company_id`) is correct and matches the
+  current >30 percent delist intent. This is the right protection for user-listed
+  products.
+- The pull-not-push model with a read-only sync API plus a scraper-side ack writer
+  is a sound way to keep write pressure off Medusa while still getting every id back.
+- Eligibility-as-barrier (serve only when prerequisites are `synced`) correctly
+  replaces the manual ordering checklist with a data property, with the C3 caveat
+  (add the attribute prerequisite).
+- Re-seed by Key plus canonical name, re-resolved on the next pull, is correct and
+  elegant, and reusing it for dev to prod promotion is a nice property, with the C2
+  caveat (a Key change is a re-key, not a re-resolve).
+- The deterministic Key as `external_id` is the right join for everything EXCEPT the
+  Key-change case (C2).
+- The generate-once / model-version image decision (6A) is sound and matches the
+  existing `image_model.csv` audit.
