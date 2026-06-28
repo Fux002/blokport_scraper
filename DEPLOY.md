@@ -1,17 +1,33 @@
 # Deploying the scraper on AWS
 
-**ONE deployment** — not a dev/prod pair. A single scheduled AWS Fargate task that
-runs inside the existing Medusa **dev** VPC/cluster (same account, `eu-west-1`).
-Which environment a *run* acts on is a **runtime choice**: you tell it whether to
-write the **dev** or **prod** staging S3 bucket via `BLOKPORT_ENV` /
-`BLOKPORT_S3_BUCKET`. The scraper is decoupled from Medusa — it writes
-cleaned/enhanced product images to the env's **private staging bucket** and pushes
-the produced CSVs to S3; Medusa's own import then reads the staging links and
-reworks/brands the images.
+**TWO deployments from ONE image** — a dedicated **dev** task and a dedicated
+**prod** task. The dev task runs in the Medusa **dev** VPC/cluster (`blokport-dev`)
+and writes only the **dev** staging bucket; the prod task runs in the **prod**
+VPC/cluster (`blokport-prod`) and writes only the **prod** staging bucket. Each
+task is **hard-wired** to its environment (`BLOKPORT_ENV` is fixed, no runtime
+toggle), and each task's IAM role is **scoped to its own bucket only** — so a dev
+run physically cannot write prod, and vice versa. The scraper is decoupled from
+Medusa: it writes cleaned/enhanced product images to that env's private staging
+bucket and pushes the CSVs to S3; Medusa's own import then reads the staging links.
 
-> The **prod S3 bucket is not configured yet**. Until its name is shared, leave
-> `prod_staging_bucket` empty — the task runs against dev. Set it later to grant
-> prod access; no redeploy of the app is needed.
+**Why the two can't get mixed up** (the guarantees, strongest first):
+1. **Per-bucket IAM** — `scraper-dev`'s task role can write *only* the dev bucket,
+   `scraper-prod`'s *only* the prod bucket. A misconfigured env var can't cross over.
+2. **No runtime toggle** — `BLOKPORT_ENV` is fixed per task (prod can never default
+   to dev). S3 keys are namespaced `dev/…` vs `prod/…`, Medusa ids are per-env.
+3. **Separate VPC/cluster** — the prod task runs in the prod platform, not dev.
+4. **Promote the SAME image** — both tasks pull from one ECR repo. Use an immutable
+   **git-sha tag** and set `prod_image_tag` to the dev-proven sha (do NOT leave both
+   on the mutable `core` tag, or pushing a new dev image silently moves prod too).
+
+> **Standing prod up** (the `scraper_prod` instance is created only when these are set):
+> 1. Set `prod_staging_bucket` to the prod bucket name (you provide it).
+> 2. Ensure the **prod platform stack exists** — `blokport-prod-vpc` (tagged
+>    `Tier=private` subnets) and remote state at `blokport/prod/terraform.tfstate`
+>    exposing `ecs_cluster_name`. The prod task reads these via `prod_home_env`
+>    (default `prod`). If the prod Medusa platform isn't stood up yet, the prod
+>    task can't be created — leave `prod_staging_bucket` empty until it is.
+> 3. `terraform apply` then `terraform plan` to confirm only the prod resources are added.
 
 ```
 EventBridge (cron) ─▶ Fargate task: scrape ─▶ pipeline (Stage 7 stages images to S3)
@@ -24,15 +40,20 @@ EventBridge (cron) ─▶ Fargate task: scrape ─▶ pipeline (Stage 7 stages i
 - `Dockerfile` — `core` (scrape+pipeline+CPU image enhancement) and `imageproc`
   (adds de-watermark torch stack) targets.
 - `deploy/run_pipeline.sh` — container entrypoint (`scrape → run → catalog → upload`).
-- `infra/` — Terraform: one stack + `modules/scraper` (see `infra/README.md`).
+- `infra/` — Terraform: one stack, shared ECR + CI role, and `modules/scraper`
+  instantiated twice (`scraper_dev`, `scraper_prod`); see `infra/README.md`.
 - `.github/workflows/` — `ci.yml` (pytest) + `deploy.yml` (OIDC → build → push to ECR).
 
-## Config is env-driven (the runtime toggle)
-The task bakes the **dev** target as its default (`BLOKPORT_ENV=development`, dev
-bucket, `BLOKPORT_IMAGE_MODE=s3`, `BLOKPORT_IMAGE_PROCESSING=true`). A run can flip
-to prod by overriding `BLOKPORT_ENV=production` + `BLOKPORT_S3_BUCKET=<prod>`.
-Images land at `s3://<staging>/<env>/products/improved/<source>/<hash>.jpg` and the
-product CSV links to that full https URL. See `config/settings.py` + `DEV_PROD_PIPELINE.md`.
+## Config is env-driven (fixed per task)
+Each task has its environment **baked in** by Terraform — `scraper-dev` runs
+`BLOKPORT_ENV=development` + the dev bucket, `scraper-prod` runs
+`BLOKPORT_ENV=production` + the prod bucket (both with `BLOKPORT_IMAGE_MODE=s3`,
+`BLOKPORT_IMAGE_PROCESSING=true`). There is **no runtime flip** anymore: the two are
+separate task definitions in separate clusters, each scoped by IAM to its own
+bucket. Images land at `s3://<staging>/<env>/products/improved/<source>/<hash>.jpg`
+and the product CSV links to that full https URL. See `config/settings.py` +
+`DEV_PROD_PIPELINE.md`. To run one by hand:
+`aws ecs run-task --cluster <env_cluster> --task-definition blokport-scraper-<env>`.
 
 ## Sequencing guarantee: images are ready before products load
 Image cleanup/upscale runs **synchronously inside the run, before the product CSV

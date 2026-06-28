@@ -1,3 +1,27 @@
+variable "target_env" {
+  type        = string
+  description = "The environment this instance IS, hard-wired as BLOKPORT_ENV (development | production)."
+  validation {
+    condition     = contains(["development", "production"], var.target_env)
+    error_message = "target_env must be 'development' or 'production'."
+  }
+}
+
+variable "home_env" {
+  type        = string
+  description = "Which Medusa platform VPC/cluster HOSTS this task (blokport-<home_env>): 'dev' or 'prod'. Resolves the VPC tag and the platform remote state key."
+}
+
+variable "staging_bucket" {
+  type        = string
+  description = "The single staging bucket this environment reads/writes. The task IAM role is scoped to ONLY this bucket."
+}
+
+variable "image_repo_url" {
+  type        = string
+  description = "Shared ECR repository URL (owned by the root stack). Both envs run the SAME image, promoted by tag."
+}
+
 variable "region" {
   type    = string
   default = "eu-west-1"
@@ -6,37 +30,13 @@ variable "region" {
 variable "state_bucket" {
   type        = string
   default     = "blokport-tfstate"
-  description = "S3 bucket holding the Medusa platform's Terraform state (read-only, for the cluster name)."
-}
-
-variable "home_env" {
-  type        = string
-  default     = "dev"
-  description = "Which Medusa platform's VPC/cluster HOSTS the task (blokport-<home_env>). The task can still write either staging bucket; this is only where it runs. Default dev."
-}
-
-variable "dev_staging_bucket" {
-  type        = string
-  default     = "blokport-dev-staging-3e58a6"
-  description = "Dev staging bucket (the scraper writes improved images here when targeting dev)."
-}
-
-variable "prod_staging_bucket" {
-  type        = string
-  default     = ""
-  description = "Prod staging bucket — TBD, fill in when the prod S3 details are shared. Empty = no prod access granted yet."
-}
-
-variable "default_target_env" {
-  type        = string
-  default     = "development"
-  description = "The BLOKPORT_ENV baked as the task default (development|production). A run can override it to flip the target bucket at run time."
+  description = "S3 bucket holding the Medusa platform Terraform state (read-only, for the cluster name)."
 }
 
 variable "image_tag" {
   type        = string
   default     = "core"
-  description = "ECR image tag the task runs (core | imageproc | a git sha)."
+  description = "ECR image tag this env runs (core | imageproc | a git sha). Promote the SAME tag dev -> prod."
 }
 
 variable "cpu" {
@@ -57,30 +57,18 @@ variable "schedule_expression" {
 variable "schedule_enabled" {
   type        = bool
   default     = false
-  description = "Start the default-target cron disabled — run the task manually first, enable when proven."
+  description = "Start the cron disabled — run the task manually first, enable when proven."
 }
 
 variable "keep_scraped" {
-  type        = string
-  default     = "true"
-  description = "BLOKPORT_KEEP_SCRAPED for the task (keep raw downloads alongside improved)."
-}
-
-variable "github_repo" {
   type    = string
-  default = "Fux002/blokport_scraper"
-}
-
-variable "github_deploy_ref" {
-  type        = string
-  default     = "refs/heads/main"
-  description = "Git ref allowed to assume the CI deploy role via OIDC."
+  default = "true"
 }
 
 variable "ssm_secret_arns" {
   type        = map(string)
   default     = {}
-  description = "Optional name -> existing SSM SecureString ARN to inject as container secrets (e.g. FAL_KEY). The scheduled run needs none."
+  description = "Optional name -> existing SSM SecureString ARN to inject as container secrets (e.g. FAL_KEY)."
 }
 
 variable "secrets_kms_key_arn" {
@@ -91,9 +79,4 @@ variable "secrets_kms_key_arn" {
 variable "log_retention_days" {
   type    = number
   default = 30
-}
-
-variable "keep_last_images" {
-  type    = number
-  default = 10
 }
