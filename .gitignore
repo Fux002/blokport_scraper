@@ -13,6 +13,10 @@ __pycache__/
 /to_upload/
 /review/
 /images/
+# the sync-ledger DATA file (repo-root /ledger/), NOT the code package
+# stone_pipeline/ledger/ (db.py, schema.sql, ...). Leading slash anchors to root.
+/ledger/
+*.ledger
 # runtime state/diagnostics that live INSIDE the code package (keep the .py code)
 stone_pipeline/state/*.csv
 stone_pipeline/state/*.json

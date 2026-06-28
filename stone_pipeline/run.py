@@ -12,6 +12,7 @@ later milestones.
 from __future__ import annotations
 
 import csv
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -347,6 +348,15 @@ def run_source(
     # NOTE: variants/backbone/tree/images are SHARED across sources and are
     # consolidated by `python -m stone_pipeline.catalog` (reads every run's
     # canonical.parquet), not written per source. This folder is products only.
+
+    # Phase 2 (flag-gated, shadow): also record this source's emitted products +
+    # inventory into the ledger, AFTER the CSVs are written. Fully inert unless
+    # BLOKPORT_LEDGER_WRITETHROUGH is set, and it never fails the run (the ledger is
+    # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
+    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
+        from stone_pipeline.ledger import writethrough
+        writethrough.record_source(validation.emit, changed, source_cfg, inventory_only=inventory_only)
+
     written = writeback.flush(writeback_path)
     if written:
         manifest.write_backs.append(f"alias_writeback:{written}")

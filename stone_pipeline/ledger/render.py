@@ -101,7 +101,8 @@ def render_products(ledger: Ledger, cfg: SourceConfig, path: str | Path,
     columns = columns or emit.read_template_columns()
     shims = [_product_shim(ledger, p)
              for p in ledger.execute("SELECT * FROM product ORDER BY rowid")]
-    return emit.write_import_csv(shims, cfg, Path(path), columns)
+    emit.write_import_csv(shims, cfg, Path(path), columns)
+    return len(shims)
 
 
 def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int:
@@ -129,7 +130,8 @@ def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int
     discontinued = tuple(
         (r["sku"], r["handle"] or "") for r in served if not (r["qty"] and int(r["qty"]) > 0)
     )
-    return emit.write_inventory_csv(changed, cfg, Path(path), discontinued=discontinued)
+    emit.write_inventory_csv(changed, cfg, Path(path), discontinued=discontinued)
+    return len(changed) + len(discontinued)
 
 
 # --- combinations (a sync-render, not a round-trip) ---------------------------
