@@ -23,16 +23,19 @@ Run:  python scrapers/ferraz.py
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Iterable, Optional
 
 try:  # allow both `python scrapers/ferraz.py` and `python -m scrapers.ferraz`
     from scrapers.base import ScraperBase
+    from scrapers import slabware
+    from scrapers.slabware import slab_get as _get, clean_price, join_slabs, parse_display_status
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from base import ScraperBase
+    import slabware                                            # noqa: F401 (used by the wrappers below)
+    from slabware import slab_get as _get, clean_price, join_slabs, parse_display_status
 
 # The S= token from the URL. SlabWare accepts an empty json filter regardless of
 # the token, but a fresh one is used to be safe.
@@ -59,11 +62,8 @@ API_HEADERS = {
     "x-requested-with": "XMLHttpRequest",
 }
 
-# SlabWare response parsing + photo/price/status helpers are shared across tenants (slabware.py);
+# SlabWare helpers are shared across tenants (slabware.py, imported in the dual-mode bootstrap above);
 # only `base` differs, bound here. Local names kept so the parse_product callsites are unchanged.
-from scrapers import slabware
-from scrapers.slabware import slab_get as _get, clean_price, join_slabs, parse_display_status
-
 
 def join_photos(fotos):
     return slabware.join_photos(fotos, BASE)

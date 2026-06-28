@@ -45,8 +45,24 @@ def _type_slugs() -> set[str]:
         from stone_pipeline.adapters.tokens import TYPE_SYNONYMS
         names = [v for v, _ in load_attributes().by_category.get("type", {}).values()]
         names += list(TYPE_SYNONYMS.values())
-        _TYPE_SLUGS = {"_".join(_norm(n).split()) for n in names if n}
+        # slugify the SAME way gen_key encodes a Key's type ([^a-z0-9]+ -> '_'), so a multi-word OR
+        # hyphenated type ('Semi-Precious Stone' -> 'semi_precious_stone') matches the underscore-keyed
+        # Key. Joining on whitespace alone kept the hyphen ('semi-precious_stone') and never matched.
+        _TYPE_SLUGS = {re.sub(r"[^a-z0-9]+", "_", _norm(n)).strip("_") for n in names if n}
     return _TYPE_SLUGS
+
+
+def type_slug_from_key(key: str) -> str:
+    """The stone-type SLUG embedded in a variant Key, MULTI-WORD aware: the longest known type slug
+    that == or prefixes the post-branch portion -- 'slab_dolomite_marble_angelus_..' -> 'dolomite_marble'
+    (not the truncated 'dolomite'), 'slab_semi_precious_stone_..' -> 'semi_precious_stone'. Falls back to
+    the single token after the branch when nothing matches (a brand-new/unknown type)."""
+    parts = (key or "").split("_")
+    if len(parts) < 2:
+        return ""
+    after_branch = "_".join(parts[1:])
+    return max((t for t in _type_slugs() if after_branch == t or after_branch.startswith(t + "_")),
+               key=len, default=parts[1].casefold())
 
 
 def is_mistyped_variant(key: str, name: str) -> bool:
@@ -60,9 +76,7 @@ def is_mistyped_variant(key: str, name: str) -> bool:
     parts = (key or "").split("_")
     if not ntw or len(parts) < 3:
         return False
-    after_branch = "_".join(parts[1:])
-    key_type = max((t for t in _type_slugs() if after_branch == t or after_branch.startswith(t + "_")),
-                   key=len, default=parts[1].casefold())
+    key_type = type_slug_from_key(key)   # multi-word aware (shared with the variation index)
     # Resolve the name's type word to its CANONICAL type before comparing (the same synonym map
     # resolve_id uses), so 'Agata' -> 'Agate' and 'Sodalite' -> 'Sodalite Syenite' are judged against
     # the canonical, not the literal foreign spelling -- else 'Agata Blue' keyed 'agate' would falsely

@@ -31,11 +31,15 @@ log = logfmt.get_logger("clean")
 
 
 def _scrape_is_complete(folder: Path) -> bool:
-    """Mirror run.find_scrape_file: a folder is usable unless its marker explicitly says incomplete
-    (a legacy folder with no marker is accepted)."""
+    """Mirror run.find_scrape_file: a folder is usable only if it actually CONTAINS products.csv (the
+    pipeline ingests `{source}/*/products.csv`) AND its marker doesn't say incomplete. A crashed run
+    leaves products.csv-less / markerless folders -- those must NOT be treated as the authoritative
+    keeper, or clean would delete the older complete folder the pipeline still ingests."""
+    if not (folder / "products.csv").exists():
+        return False
     marker = folder / "scrape_complete.json"
     if not marker.exists():
-        return True
+        return True   # legacy folder with products.csv but no marker is accepted
     try:
         return bool(json.loads(marker.read_text(encoding="utf-8")).get("complete", True))
     except (ValueError, OSError):

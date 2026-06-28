@@ -63,13 +63,15 @@ def test_multi_value_takes_first_and_flags(ref):
     assert any(f.code == FlagCode.multi_value for f in row.review_flags)
 
 
-def test_and_is_not_a_multi_separator(ref):
-    # 'Black and White' is a SINGLE colour descriptor, not two values -- ' and ' must not split it
-    # (that silently dropped the second word and mis-flagged multi_value).
+def test_compound_and_value_ships_via_first_conjunct(ref):
+    # ' and ' is NOT a primary separator (so a single descriptor that resolves WHOLE stays whole), but
+    # 'Black and White' isn't a vocab colour, so it falls back to the first resolvable conjunct ('Black')
+    # + a multi_value flag -- the product SHIPS instead of being hard-rejected for a null colour id.
     resolvers = normalize.AttributeResolvers.build(ref)
     row = CanonicalRow(src_site="polonine", raw_color="Black and White")
     normalize.normalize_row(row, resolvers, ref)
-    assert not any(f.code == FlagCode.multi_value for f in row.review_flags)
+    assert row.color_name == "Black"
+    assert any(f.code == FlagCode.multi_value for f in row.review_flags)
 
 
 def test_vocab_fuzzy_floor_rejects_low_score():

@@ -99,7 +99,9 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
                     parsed[key.strip().lower()] = meters
     width = _parse_measure(row.raw_thickness, ref) if row.raw_thickness else None
     if width is None:                         # fall back to a width=/thickness= entry in raw_dimensions
-        width = parsed.get("width") or parsed.get("thickness")   # (was parsed but never read)
+        # explicit membership (not `or`) so a PARSED width of 0 is KEPT (-> validate rejects the bad
+        # product) instead of silently falling through to thickness/synthetic.
+        width = parsed["width"] if "width" in parsed else parsed.get("thickness")
 
     fmt = (row.format_value or "").casefold()
     ranges = (_BLOCK_RANGES if (row.is_block or fmt == "block")

@@ -133,7 +133,8 @@ def build_variation_index(variant_table, backbone) -> "CandidateIndex":
 
 
 def _type_from_key(key: str) -> str:
-    """variants Key looks like 'slab_marble_arabescato_<uuid>'; the token after
-    the branch is the stone type."""
-    parts = (key or "").split("_")
-    return parts[1] if len(parts) >= 2 else ""
+    """The stone type embedded in a variants Key, MULTI-WORD aware ('slab_dolomite_marble_..' ->
+    'dolomite_marble', not the truncated 'dolomite') so block_type matches the canonical variety type.
+    proj.norm() turns the slug's underscores into spaces, so it lines up with proj.norm(stone_type)."""
+    from stone_pipeline.reference.loaders import type_slug_from_key   # lazy: avoid an import cycle
+    return type_slug_from_key(key)

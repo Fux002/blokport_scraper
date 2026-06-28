@@ -129,11 +129,12 @@ class MarenoStoneScraper(ScraperBase):
             dims = _dims_from_html(self.get(url).text)
         except Exception as exc:  # never let a missing page kill the row
             # record_failure (not just a warning) so silently-blank dimensions are AUDITABLE rather
-            # than looking like a genuine source gap.
+            # than looking like a genuine source gap. Do NOT cache the failure: a later row sharing this
+            # permalink can retry, instead of being permanently blanked by one transient miss.
             self.record_failure("dims", url=url, error=str(exc))
             self.log.warning("dimension fetch failed for %s: %s", url, exc)
-            dims = {}
-        cache[url] = dims
+            return {}
+        cache[url] = dims                         # cache only successful fetches
         return dims
 
     def parse_product(self, p: dict) -> Optional[dict]:

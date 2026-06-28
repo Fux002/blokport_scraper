@@ -197,7 +197,7 @@ class BrumagranScraper(ScraperBase):
             raise RuntimeError(f"warm-up GET failed: {r.status_code}")
         return sess
 
-    def _api_post(self, url: str, payload: dict, label: str) -> dict:
+    def _api_post(self, url: str, payload: dict, label: str, critical: bool = False) -> dict:
         """POST a SlabWare WebMethod with retry, backoff and 429 handling.
 
         Returns the inner `d` object, or {} after exhausting retries.
@@ -224,10 +224,12 @@ class BrumagranScraper(ScraperBase):
                                  label, attempt + 1, self.max_retries, e, wait)
                 time.sleep(wait)
         self.record_failure("http", url=url, error=str(last_err), label=label)
-        # a list/detail page that exhausted all retries returns empty, which list_products reads as
-        # end-of-pagination -> mark the run INCOMPLETE so a transient block can't silently truncate the
-        # catalog and delist its tail (the pipeline keeps the prior complete folder).
-        self.mark_incomplete(f"{label} fetch failed after {self.max_retries} retries")
+        # Only a LISTING fetch (critical=True) failing means truncation -- its empty result is read as
+        # end-of-pagination, so mark the run INCOMPLETE to keep the prior complete folder. A DETAIL fetch
+        # failing just leaves that one row's enrichment blank (the row still emits); do NOT discard the
+        # whole fully-paginated scrape for one transient detail miss.
+        if critical:
+            self.mark_incomplete(f"{label} fetch failed after {self.max_retries} retries")
         return {}
 
     @staticmethod
@@ -238,8 +240,8 @@ class BrumagranScraper(ScraperBase):
     def list_products(self) -> Iterable[Any]:
         """Paginate ObterListaBundles over the `inicio` offset, yielding raw
         listing bundle dicts. Enrichment happens in parse_product."""
-        # First batch (inicio=0).
-        d = self._api_post(API_URL, {"inicio": 0, "json": ""}, "listing inicio=0")
+        # First batch (inicio=0). critical=True: a listing-fetch failure means truncation.
+        d = self._api_post(API_URL, {"inicio": 0, "json": ""}, "listing inicio=0", critical=True)
         first_batch = json.loads(d.get("Bundles") or "[]")
         if not first_batch:
             self.log.error("first batch empty; aborting")
@@ -257,7 +259,7 @@ class BrumagranScraper(ScraperBase):
                 self._sleep_jitter(PAGE_DELAY_MIN, PAGE_DELAY_MAX)
 
             d = self._api_post(API_URL, {"inicio": inicio, "json": ""},
-                               f"listing inicio={inicio}")
+                               f"listing inicio={inicio}", critical=True)
             batch = json.loads(d.get("Bundles") or "[]")
             if not batch:
                 self.log.info("empty batch at inicio=%d; done paginating", inicio)

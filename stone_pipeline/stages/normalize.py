@@ -83,6 +83,19 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         raw_value = getattr(row, f"raw_{vocab}", "") or ""
         first, is_multi = _split_multi(raw_value)
         resolution = resolvers.resolvers[vocab].resolve(first)
+        if resolution.value is None and not is_multi and raw_value:
+            # The whole value didn't resolve. A compound joined by 'and'/'&' ('White and Grey') is tried
+            # WHOLE first (so a real single descriptor / synonym wins), then falls back to the first
+            # RESOLVABLE conjunct -- flagged multi_value -- so the product still ships instead of being
+            # hard-rejected for a null id. (A genuine single 'Black and Gold' that resolves whole never
+            # reaches here.)
+            conjuncts = re.split(r"\s+(?:and|&)\s+", raw_value, flags=re.IGNORECASE)
+            if len(conjuncts) > 1:
+                for cand in conjuncts:
+                    alt = resolvers.resolvers[vocab].resolve(cand.strip())
+                    if alt.value is not None:
+                        resolution, first, is_multi = alt, cand.strip(), True
+                        break
 
         canonical = resolution.value
         attr_id = None
