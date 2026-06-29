@@ -3,11 +3,12 @@ runnable on demand after a write-through run).
 
 For each artifact, render it from the ledger and compare to the correct CSV:
   - variants:     by content set vs 1_variants_full.csv (populated by record_catalog)
-  - products:     per source, byte-identical to 3_products_<source>.csv
+  - products:     by content set, per source, vs 3_products_<source>.csv
   - combinations: byte-identical to 2_valid_combinations.csv (sorted both sides)
-Variants are a set (not byte) comparison: the integrated ledger merges the
-export-seeded rows with the produced 1_variants_full, so order differs from the file
-even when every row matches.
+Variants and products are set (not byte) comparisons: a persistent ledger keeps each
+row's original order, so once content matches but order drifts across runs (a reordered
+listing, or export rows merged in) a byte compare would false-fail. Combinations are
+byte-identical because write_combinations sorts both sides.
 
     python -m stone_pipeline.ledger.verify
 
@@ -41,8 +42,10 @@ def _sources_with_products(to_upload: Path) -> list[str]:
 
 
 def verify_products(ledger: Ledger, to_upload: Path) -> list[str]:
-    """Per source, render its products from the ledger and assert byte-identity with
-    3_products_<source>.csv. Returns a list of mismatch messages (empty == all OK)."""
+    """Per source, render its products from the ledger and compare to 3_products_<source>.csv
+    by CONTENT (a set of rows). Set, not byte: a SKU keeps its original ledger rowid, so once
+    a supplier reorders its listing the ledger order no longer tracks the file order even though
+    every row matches (within a single run it is byte-identical; see the write-through test)."""
     problems: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
         for source in _sources_with_products(to_upload):
@@ -50,8 +53,11 @@ def verify_products(ledger: Ledger, to_upload: Path) -> list[str]:
             cfg = load_source(source)
             out = Path(tmp) / f"3_products_{source}.csv"
             render_products(ledger, cfg, out, source=cfg.source_code)
-            if not filecmp.cmp(str(out), str(correct), shallow=False):
-                problems.append(f"products mismatch for source '{source}' vs {correct.name}")
+            rendered, expected = _rowset(out), _rowset(correct)
+            if rendered != expected:
+                problems.append(f"products mismatch for source '{source}' "
+                                f"({len(rendered - expected)} only in ledger, "
+                                f"{len(expected - rendered)} only in csv)")
     return problems
 
 

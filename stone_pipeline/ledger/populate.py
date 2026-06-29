@@ -152,12 +152,14 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
         sku = _sku(r, cfg)
         resolved = inventory_for(r)
         qty = int(resolved) if str(resolved).isdigit() else 0
+        # keep last_synced_qty on update: it is owned by the ack, not the write-through.
+        # Overwriting it to NULL each run would re-serve every product as a delta forever.
         ledger.upsert("inventory", {
             "sku": sku,
             "qty": qty,
-            "last_synced_qty": None,
+            "last_synced_qty": None,   # only on insert (a never-synced row is a delta)
             "updated_at": now,
-        }, pk=("sku",))
+        }, pk=("sku",), keep_on_update=("last_synced_qty",))
         n += 1
     return n
 
@@ -180,7 +182,10 @@ def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]]) -> i
             "VALUES (?, ?, ?, ?, ?, ?)",
             (sku, src.lower(), handle or "", "synced", now, now),
         )
+        # keep last_synced_qty on update (ack-owned), so a still-discontinued product
+        # is not re-served as a delist on every run (same fix as populate_inventory).
         ledger.upsert("inventory", {"sku": sku, "qty": 0, "last_synced_qty": None,
-                                    "updated_at": now}, pk=("sku",))
+                                    "updated_at": now}, pk=("sku",),
+                      keep_on_update=("last_synced_qty",))
         n += 1
     return n

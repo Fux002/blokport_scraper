@@ -62,3 +62,21 @@ def test_inventory_populate_render_equals_emit(tmp_path):
     assert via_ledger.read_bytes() == direct.read_bytes(), (
         "inventory populate+render is NOT byte-identical to emit"
     )
+
+
+def test_reinventory_preserves_last_synced_qty(tmp_path):
+    # regression: a re-record after an ack must NOT reset last_synced_qty to NULL,
+    # or the product re-serves as a delta on every run forever.
+    cfg = load_source("polonine")
+    r = CanonicalRow(src_site="polonine", surrogate_key="AAA", variation_id="V1",
+                     handle="h", raw_slab_count="5")
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _seed_variations(ledger)               # provides V1
+        populate_products(ledger, [r], cfg)
+        populate_inventory(ledger, [r], cfg)   # first record -> last_synced_qty NULL (a delta)
+        sku = emit._sku(r, cfg)
+        ledger.execute("UPDATE inventory SET last_synced_qty = 5 WHERE sku = ?", (sku,))  # ack
+        populate_inventory(ledger, [r], cfg)   # next run, same stock
+        inv = ledger.get("inventory", "sku", sku)
+        assert inv["last_synced_qty"] == 5, "re-record clobbered the ack-owned last_synced_qty"
+        assert inv["qty"] == 5
