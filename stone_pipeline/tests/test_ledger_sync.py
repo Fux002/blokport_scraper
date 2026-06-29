@@ -7,10 +7,10 @@ from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import ack, ready, status
 
 
-def _variation(ledger, key, state, medusa_id=None, type_="Marble"):
+def _variation(ledger, key, state, medusa_id=None, type_="Marble", image_url="https://s3/tex.png"):
     now = now_iso()
     ledger.upsert("variation", {"key": key, "branch": "slab", "type": type_, "name": "x",
-                                "aliases": "[]", "image_url": "", "image_sha256": None,
+                                "aliases": "[]", "image_url": image_url, "image_sha256": None,
                                 "image_model": None, "volume": "", "medusa_id": medusa_id,
                                 "in_full": 1, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None,
@@ -142,6 +142,17 @@ def test_inventory_sync_serves_delta_for_synced_products_only(tmp_path):
         assert ready(ledger, "inventory") == []    # no longer a delta
         inv = ledger.get("inventory", "sku", "P-1")
         assert inv["last_synced_qty"] == 7 and inv["qty"] == 7
+
+
+def test_product_held_until_variation_has_texture(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        # variation synced but with NO live texture -> its product is held (H2 decision)
+        _variation(ledger, "slab_notex", state="synced", medusa_id="V1", image_url="")
+        _product(ledger, "P-1", "slab_notex", state="pending")
+        assert ready(ledger, "products") == [], "product must be held until its texture is live"
+        # the texture lands -> the product becomes eligible
+        ledger.execute("UPDATE variation SET image_url = 'https://s3/tex.png' WHERE key = 'slab_notex'")
+        assert [r["external_id"] for r in ready(ledger, "products")] == ["P-1"]
 
 
 def test_glue_full_sync_converges(tmp_path):

@@ -16,12 +16,11 @@ is no longer served. Re-running is therefore convergent: only the un-synced delt
 ever moves.
 
 Eligibility (8.4) is enforced server-side so the puller cannot load out of order: a
-product is served only once its variation is synced. Two gates are deferred until
-their ledger state exists (documented inline): every referenced attribute synced
-(all attributes are synced after bootstrap; NEW values are the dormant C3 case) and
-image promotion. The ready PAYLOADS carry the fields the ledger holds today; the
-canonical stone `type` on variations is the one field still to be filled (a known
-prerequisite). No em dashes (design principle 2).
+product is served only once its variation is synced AND that variety's texture is
+live (the H2 hold, via variation.image_url), and stock only once its product is
+synced. One gate is still deferred: every referenced attribute synced (all
+attributes are synced after bootstrap; NEW values are the dormant C3 case). No em
+dashes (design principle 2).
 """
 
 from __future__ import annotations
@@ -90,12 +89,17 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
 
 
 def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
-    """Products awaiting sync whose VARIATION is already synced (the real ordering
-    dependency). Attribute-synced and image-promotion gates are deferred (see the
-    module docstring)."""
+    """Products awaiting sync whose VARIATION is synced AND has a live variant texture.
+
+    The texture gate is the H2 hold decision: a product never lists until its variety's
+    {Key}.png exists, so it is not served with scraped photos only. variation.image_url
+    is non-empty exactly when that texture is live on S3 (emit_catalog only stamps the
+    link when the object exists), so the gate needs no extra S3 call. The attribute-synced
+    gate is still deferred (all attributes are synced after bootstrap; see the docstring)."""
     rows = ledger.execute(_limit(
         "SELECT p.* FROM product p JOIN variation v ON v.key = p.variation_key "
         "WHERE p.state IN ('pending', 'dirty') AND v.state = 'synced' "
+        "AND v.image_url IS NOT NULL AND v.image_url != '' "
         "ORDER BY p.created_at, p.sku", limit))
     return [{
         "external_id": p["sku"],
