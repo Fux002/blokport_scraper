@@ -35,6 +35,22 @@ def collapse_ws(text: str) -> str:
     return _WS.sub(" ", (text or "").strip())
 
 
+_BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")
+
+
+def split_bracket_alias(name: str) -> tuple[str, list[str]]:
+    """Pull any '(alternative)' or '[alternative]' out of a variety name and return
+    (clean_name, [aliases]). 'Black Galaxy (Star Galaxy)' -> ('Black Galaxy', ['Star Galaxy']),
+    'Verde Ubatuba (Ubatuba)' -> ('Verde Ubatuba', ['Ubatuba']). The bracketed part is a local or
+    alternative spelling that belongs in the alias list, not the display name. Returns the name
+    unchanged and [] when there is no bracket. Handles multiple brackets."""
+    text = name or ""
+    aliases = [m.strip() for m in _BRACKET_ALIAS_RE.findall(text) if m.strip()]
+    if not aliases:
+        return text.strip(), []
+    return collapse_ws(_BRACKET_ALIAS_RE.sub(" ", text)), aliases
+
+
 def _cap_word(word: str) -> str:
     """Capitalize the first alphabetic char, lowercase the rest — so 'ASTORIA' ->
     'Astoria', 'no.' -> 'No.', '(lasa' -> '(Lasa', '426' -> '426'."""

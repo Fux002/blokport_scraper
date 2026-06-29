@@ -131,6 +131,17 @@ def test_fuzzy_match_is_order_independent_within_run():
     assert first.method == second.method   # deterministic: both fuzzy, not first-fuzzy/second-exact
 
 
+def test_split_bracket_alias():
+    # a '(alternative)' in a variety Name moves to the alias list: 'Black Galaxy (Star Galaxy)' ->
+    # name 'Black Galaxy' + alias 'Star Galaxy'.
+    from stone_pipeline.core.text import split_bracket_alias
+    assert split_bracket_alias("Black Galaxy (Star Galaxy)") == ("Black Galaxy", ["Star Galaxy"])
+    assert split_bracket_alias("Verde Ubatuba (Ubatuba)") == ("Verde Ubatuba", ["Ubatuba"])
+    assert split_bracket_alias("Carrara [Bianco Carrara]") == ("Carrara", ["Bianco Carrara"])
+    assert split_bracket_alias("Plain Name") == ("Plain Name", [])      # untouched, no alias
+    assert split_bracket_alias("A (x) B (y)") == ("A B", ["x", "y"])    # multiple brackets
+
+
 # --- consolidate_inventory: cross-source SKU collision, newest wins ----------
 def _write_inv(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
