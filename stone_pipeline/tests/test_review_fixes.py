@@ -142,6 +142,21 @@ def test_split_bracket_alias():
     assert split_bracket_alias("A (x) B (y)") == ("A B", ["x", "y"])    # multiple brackets
 
 
+def test_clean_alias_list():
+    from stone_pipeline.core.text import clean_alias_list
+    # comma-joined blob -> separate aliases
+    assert clean_alias_list("X", ["Rain Forest Marble, Rain Forest"]) == ["Rain Forest Marble", "Rain Forest"]
+    # 'China market:' context prefix + brackets -> just the local name
+    assert clean_alias_list("X", ["In China Market:(bai Si Hui Wang)"]) == ["Bai Si Hui Wang"]
+    assert clean_alias_list("X", ["In China Stone Market Callled As (Caiyun Zhui Yue"]) == ["Caiyun Zhui Yue"]
+    # empty bracket pair + dangling paren cleaned
+    assert clean_alias_list("X", ["Dzhiltau () Granit"]) == ["Dzhiltau Granit"]
+    # junk (no alphanumeric), alias == Name, and dupes are dropped
+    assert clean_alias_list("Carrara", [")", "-", "Carrara", "Bianco Carrara", "bianco carrara"]) == ["Bianco Carrara"]
+    # a plain name that merely contains 'market' is NOT stripped
+    assert clean_alias_list("X", ["Black Market Granite"]) == ["Black Market Granite"]
+
+
 # --- consolidate_inventory: cross-source SKU collision, newest wins ----------
 def _write_inv(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)

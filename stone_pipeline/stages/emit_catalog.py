@@ -20,7 +20,13 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, category, category_for_key
 from stone_pipeline.core import csvio, logfmt
-from stone_pipeline.core.text import clean_variety_name, looks_like_artifact, split_bracket_alias, title_case
+from stone_pipeline.core.text import (
+    clean_alias_list,
+    clean_variety_name,
+    looks_like_artifact,
+    split_bracket_alias,
+    title_case,
+)
 
 log = logfmt.get_logger("emit_catalog")
 
@@ -175,20 +181,16 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
         r["Image"] = _image_link(r["Key"], bool((r.get("Image") or "").strip()),
                                   r["Key"] in backed, s3_keys, base)
         r["Volume per kg (m³/kg)"] = cat.volume_per_kg if cat else ""
-        # Pull a '(alternative)' out of the Name into the alias list: 'Black Galaxy (Star Galaxy)' ->
-        # Name 'Black Galaxy' + alias 'Star Galaxy'. The Key is unchanged (a Name/alias update on an
-        # existing variant, not a re-key), and matching improves because the scraped 'Black Galaxy' or
-        # 'Star Galaxy' now resolves to the clean name or the alias.
-        clean_name, bracket_aliases = split_bracket_alias(r["Name"])
-        aliases = [a for a in r["Aliases"].split("|") if a.strip()]
-        seen = {a.casefold() for a in aliases} | {clean_name.casefold()}
-        for ba in bracket_aliases:
-            if ba.casefold() not in seen:
-                aliases.append(ba)
-                seen.add(ba.casefold())
-        # consistent casing for the whole catalog regardless of how Medusa/source cased it
-        r["Name"] = title_case(clean_name)
-        r["Aliases"] = "|".join(title_case(a) for a in aliases if a.strip())
+        # Move a '(alternative)' out of the Name into the alias list ('Black Galaxy (Star Galaxy)' ->
+        # Name 'Black Galaxy' + alias 'Star Galaxy'), then normalize the whole alias list: split
+        # comma-joined blobs into separate aliases, drop 'market:' context prefixes / wrapping brackets
+        # / junk, drop any alias equal to the Name, title-case, and de-duplicate. The Key is unchanged
+        # (a Name/alias correction, not a re-key), and matching improves because both the clean name and
+        # each alternative spelling now resolve.
+        clean_name, name_bracket_aliases = split_bracket_alias(r["Name"])
+        raw_aliases = [a for a in r["Aliases"].split("|") if a.strip()] + name_bracket_aliases
+        r["Name"] = title_case(clean_name)               # consistent casing for the whole catalog
+        r["Aliases"] = "|".join(clean_alias_list(clean_name, raw_aliases))
 
     path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
