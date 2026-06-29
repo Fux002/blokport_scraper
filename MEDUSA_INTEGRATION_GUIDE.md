@@ -123,11 +123,14 @@ GET /sync/v1/variations?status=ready&limit=500
       "finishes": ["Polished", "Honed", "Brushed"],
       "qualities": ["First", "Commercial"],
       "image_url": "https://.../variations/block_marble_breccia_oniciata_5ca3...png",
-      "volume": "0.0014348"
+      "volume": 0.0014348
     }
   }]
 }
 ```
+
+`volume` is a **number** (m3 per kg), not a string. Dimensions and `weight` on products
+are numbers too. Names stay strings; ids never appear.
 
 Apply: upsert by `external_id` (store the `Key`); resolve `type` name to your id; ack
 with the variation id Medusa minted. `image_url` is an **ingestion source** (section 6),
@@ -252,16 +255,38 @@ POST can be retried safely.
 - **Convergent.** An acked entity stops being served; re-pulling moves only the delta.
 - **Idempotent.** Every apply is an upsert by `external_id`; `payload_hash` lets you skip
   an unchanged item.
-- **Observable.** `GET /sync/v1/status` -> per-type `pending` vs `synced` (+ inventory
-  `delta`). All zero means fully in sync.
+- **Observable.** `GET /sync/v1/status` is the monitoring surface, per type and state:
+  - `pending` / `dirty` = work waiting to be pulled.
+  - `gap_held` = entities the pipeline is deliberately holding back (a variety with no
+    resolvable type, a product whose texture is not live, a referenced value not created
+    yet). These need an operator action on the **pipeline** side, not a Medusa fix.
+  - `synced` = applied and acked.
+  - inventory `delta` = stock that moved since the last sync.
+
+  `pending`/`dirty`/`delta` all at zero means the two systems are in sync. Poll it to
+  confirm convergence, and alarm on a rising `gap_held` or a stuck `pending` (the signal
+  that a pull job stalled or a hold needs attention). The `ack` response returns
+  `{acked: N}`; per-item ack results can be added if you want finer failure visibility.
 
 ---
 
-## 9. Ownership and safety
+## 9. Ownership, safety, retirement
 
-- Only entities the pipeline owns are served (their `external_id` is our `Key`/`SKU`).
-  Products that website users listed in Medusa are never in the feeds, so neither flow
-  can touch them. The only delist is stock 0 (reversible); never a hard delete.
+- **Pipeline-owned products are read-only in Medusa.** Only entities the pipeline owns
+  are served (their `external_id` is our `Key`/`SKU`). Products that website users listed
+  are never in the feeds, so neither flow can touch them. Policy: Medusa **badges
+  pipeline-owned products read-only**, so a marketplace user cannot edit or override one
+  out from under the sync. Stating the policy is the pipeline's; enforcing the badge is
+  Medusa's build-time work.
+- **Retirement (stock-0 zombies).** A discontinued product is delisted by setting stock 0
+  (reversible). Policy: Medusa **archives** a product that has stayed stock 0 past a
+  retirement window, so the catalog does not accumulate permanently-zero zombies. The
+  pipeline never hard-deletes; archiving the stock-0 set is Medusa's build-time action.
+- **Product attributes are always within the variety's allowed sets.** A product's
+  `color`/`finish`/`quality` is guaranteed by the pipeline (its tree-reconcile stage) to
+  be a member of the variation's `colors`/`finishes`/`qualities` (section 4). Medusa can
+  rely on this, and may cross-check a product against the allowed sets it already received
+  on the variation.
 - Uncertain entities are held, not served (no resolvable type, texture not live), so
   nothing lists broken.
 

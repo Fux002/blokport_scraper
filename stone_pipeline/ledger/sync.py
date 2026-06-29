@@ -37,6 +37,16 @@ _ENTITY = {
 }
 _SERVABLE = ("pending", "dirty")
 
+
+def _as_number(text):
+    """Stored decimals are TEXT (for exact CSV round-trip); send them as JSON numbers."""
+    if text is None or str(text).strip() == "":
+        return None
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
 # tables that carry a sync `state` column (combination is empty until materialized)
 _STATE_TABLES = ("attribute", "variation", "combination", "product", "gap")
 
@@ -83,7 +93,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "name": v["name"],
             "aliases": json.loads(v["aliases"] or "[]"),
             "image_url": v["image_url"] or "",
-            "volume": v["volume"] or "",
+            "volume": _as_number(v["volume"]),   # m3/kg as a number, not a string
         },
     } for v in rows]
 
