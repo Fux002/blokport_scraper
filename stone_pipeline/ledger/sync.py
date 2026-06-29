@@ -109,14 +109,19 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
     is non-empty exactly when that texture is live on S3 (emit_catalog only stamps the
     link when the object exists), so the gate needs no extra S3 call.
 
+    The variation must also be TYPED: the product inherits its category and type from the
+    variation, so a synced-but-untyped variation (a bootstrap-synced export row that
+    fill_variation_types could not resolve) would make the product inherit an empty type
+    and list broken. Gating on `v.type` holds those products until the variety is typed.
+
     The payload carries ZERO Medusa ids (the review's red flag): everything is an
-    external reference Medusa resolves on its side, symmetric with color/finish/type.
-    `vendor` (the source) resolves to the company + sales channel; ports are derived by
-    Medusa from `origin_country_code`; `image_urls` are ingestion sources Medusa copies
-    into its own storage, never hot-linked at runtime."""
+    external reference Medusa resolves on its side. `vendor` (the source) resolves to the
+    company + sales channel; ports are derived by Medusa from `origin_country_code`;
+    `image_urls` are ingestion sources Medusa copies into its own storage."""
     rows = ledger.execute(_limit(
         "SELECT p.* FROM product p JOIN variation v ON v.key = p.variation_key "
         "WHERE p.state IN ('pending', 'dirty') AND v.state = 'synced' "
+        "AND v.type IS NOT NULL AND v.type != '' "
         "AND v.image_url IS NOT NULL AND v.image_url != '' "
         "ORDER BY p.created_at, p.sku", limit))
     return [{

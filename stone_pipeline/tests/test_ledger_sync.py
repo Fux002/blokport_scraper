@@ -173,6 +173,20 @@ def test_product_payload_carries_no_medusa_ids(tmp_path):
         assert "origin_country_code" in payload      # Medusa derives ports from this
 
 
+def test_product_held_when_variation_synced_but_untyped(tmp_path):
+    # the product inherits category+type from its variation, so a synced-but-untyped
+    # variation (e.g. a bootstrap-synced row fill_variation_types could not resolve) must
+    # not let its product list with an empty type.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_untyped", state="synced", medusa_id="V1", type_="")  # synced, texture live, NO type
+        ledger.upsert("product", {"sku": "P-1", "source": "s", "variation_key": "slab_untyped",
+                                  "state": "pending", "created_at": now_iso(), "updated_at": now_iso()},
+                      pk=("sku",))
+        assert ready(ledger, "products") == [], "product on an untyped variation must be held"
+        ledger.execute("UPDATE variation SET type = 'Marble' WHERE key = 'slab_untyped'")
+        assert [r["external_id"] for r in ready(ledger, "products")] == ["P-1"]
+
+
 def test_glue_full_sync_converges(tmp_path):
     # the capstone: drive the whole loop the way Medusa's pull job would, and assert
     # it converges with everything synced and the variation-before-product order held.
