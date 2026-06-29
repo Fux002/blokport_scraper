@@ -155,6 +155,24 @@ def test_product_held_until_variation_has_texture(tmp_path):
         assert [r["external_id"] for r in ready(ledger, "products")] == ["P-1"]
 
 
+def test_product_payload_carries_no_medusa_ids(tmp_path):
+    # the review's red flag: the scraper's payload must hold ZERO Medusa ids, only
+    # external references Medusa resolves (vendor, names), symmetric with color/type.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")   # synced + live texture
+        ledger.upsert("product", {"sku": "P-1", "source": "polonine", "variation_key": "slab_v1",
+                                  "color": "Black", "state": "pending",
+                                  "created_at": now, "updated_at": now}, pk=("sku",))
+        items = ready(ledger, "products")
+        assert len(items) == 1
+        payload = items[0]["payload"]
+        for forbidden in ("company_id", "sales_channel_id", "ports"):
+            assert forbidden not in payload, f"{forbidden} is a Medusa id and must not be in the payload"
+        assert payload["vendor"] == "polonine"       # the external reference Medusa resolves
+        assert "origin_country_code" in payload      # Medusa derives ports from this
+
+
 def test_glue_full_sync_converges(tmp_path):
     # the capstone: drive the whole loop the way Medusa's pull job would, and assert
     # it converges with everything synced and the variation-before-product order held.

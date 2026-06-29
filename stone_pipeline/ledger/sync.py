@@ -94,8 +94,13 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
     The texture gate is the H2 hold decision: a product never lists until its variety's
     {Key}.png exists, so it is not served with scraped photos only. variation.image_url
     is non-empty exactly when that texture is live on S3 (emit_catalog only stamps the
-    link when the object exists), so the gate needs no extra S3 call. The attribute-synced
-    gate is still deferred (all attributes are synced after bootstrap; see the docstring)."""
+    link when the object exists), so the gate needs no extra S3 call.
+
+    The payload carries ZERO Medusa ids (the review's red flag): everything is an
+    external reference Medusa resolves on its side, symmetric with color/finish/type.
+    `vendor` (the source) resolves to the company + sales channel; ports are derived by
+    Medusa from `origin_country_code`; `image_urls` are ingestion sources Medusa copies
+    into its own storage, never hot-linked at runtime."""
     rows = ledger.execute(_limit(
         "SELECT p.* FROM product p JOIN variation v ON v.key = p.variation_key "
         "WHERE p.state IN ('pending', 'dirty') AND v.state = 'synced' "
@@ -108,14 +113,13 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "variation_external_id": p["variation_key"],
             "color": p["color"], "finish": p["finish"], "quality": p["quality"],
             "type": p["type"], "category": p["category"],
+            "vendor": p["source"],   # Medusa resolves vendor -> company + sales channel
             "title": p["title"], "description": p["description"], "handle": p["handle"],
             "weight": p["weight"], "length": p["length"],
             "width": p["width"], "height": p["height"],
-            "origin_country_code": p["origin_country_code"],
-            "company_id": p["company_id"], "sales_channel_id": p["sales_channel_id"],
-            "bundle_size": p["bundle_size"],
-            "ports": json.loads(p["ports"] or "[]"),
-            "image_urls": json.loads(p["product_image_keys"] or "[]"),
+            "origin_country_code": p["origin_country_code"],   # Medusa derives ports from this
+            "bundle_size": p["bundle_size"],   # under coordination: pallet model is retiring the multiplier
+            "image_urls": json.loads(p["product_image_keys"] or "[]"),   # ingestion sources only
         },
     } for p in rows]
 

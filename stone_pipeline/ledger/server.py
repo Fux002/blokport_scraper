@@ -1,11 +1,11 @@
 """HTTP surface for the sync service (SYNC_LEDGER_DESIGN.md section 8.2, 10).
 
-A thin, dependency-free reference server that maps the three endpoints to the sync
-engine, so Medusa's pull job can talk to the ledger and ack ids back:
+A thin, dependency-free reference server that maps the versioned endpoints to the
+sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
 
-    GET  /sync/status
-    GET  /sync/<type>?status=ready&limit=N      type in {variations, products}
-    POST /sync/ack    body: [{type, external_id, medusa_id, status}, ...]
+    GET  /sync/v1/status
+    GET  /sync/v1/<type>?status=ready&limit=N   type in {variations, products, inventory}
+    POST /sync/v1/ack   body: [{type, external_id, medusa_id, status}, ...]
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the
 design calls for; the server refuses to start without it. This is the contract
@@ -75,9 +75,10 @@ class SyncHandler(BaseHTTPRequestHandler):
             return self._respond(401, {"error": "unauthorized"})
         parts = urlsplit(self.path)
         segments = [s for s in parts.path.split("/") if s]
-        if len(segments) != 2 or segments[0] != "sync":
-            return self._respond(404, {"error": "not found"})
-        resource = segments[1]
+        # versioned: /sync/v1/<resource> (two independently-evolving systems need a boundary)
+        if len(segments) != 3 or segments[0] != "sync" or segments[1] != "v1":
+            return self._respond(404, {"error": "not found; expected /sync/v1/<resource>"})
+        resource = segments[2]
         body = None
         if method == "POST":
             length = int(self.headers.get("Content-Length") or 0)

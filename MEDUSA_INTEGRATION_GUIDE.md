@@ -5,103 +5,128 @@ the pipeline, what to pull, what to send back, and why the two systems stay in s
 
 No em dashes anywhere in this document (repo convention).
 
+> Revision: folds in the backend review. Key changes: payloads carry ZERO Medusa ids
+> (everything is an external reference Medusa resolves); images are ingestion sources,
+> not runtime hot-links; the name-resolution and attribute behaviour is specified;
+> combinations ownership is called out as a decision, not deferred; `bundle_size` is
+> flagged against the in-flight pallet model; routes are versioned (`/sync/v1`).
+
 ---
 
 ## 0. The model in one paragraph
 
 The pipeline keeps a per-environment **ledger** of the desired catalog state, addressed
 by stable **external ids** (a `Key` for each variety, a `SKU` for each product). Medusa
-**pulls** what is ready from a small read-only HTTP API, applies it (creates or updates
-the entity), and **acks** back the id it minted. The pipeline never pushes into Medusa
-and never holds a transaction open against it. Once an entity is acked it stops being
-served, so re-pulling only ever moves the un-synced delta. That is the guarantee: the
-sync is **pull-driven, ordered, idempotent, and convergent**. Run it to empty and the
-two systems are in sync.
+**pulls** what is ready from a small read-only HTTP API, applies it, and **acks** back
+the id it minted. The pipeline never pushes into Medusa, and it holds **no Medusa ids**:
+every reference in a payload (vendor, colour, finish, type, country) is an external name
+or key that Medusa resolves on its side. Once an entity is acked it stops being served,
+so re-pulling only ever moves the un-synced delta. The sync is **pull-driven, ordered,
+idempotent, and convergent**.
 
 ---
 
 ## 1. How to connect
 
-- **Per environment.** Dev and prod are fully separate (separate ledger, separate ids,
-  separate base URL and token). Never mix them.
-- **Transport.** Inbound HTTPS to the scraper sync service. JSON in, JSON out
-  (`Content-Type: application/json`).
-- **Auth.** A bearer token per env: `Authorization: Bearer <token>`. The token is the
-  `BLOKPORT_SYNC_TOKEN` secret (held in SSM per env). A request without it gets `401`.
-- **Endpoints** (full reference in section 9):
-  - `GET /sync/status`
-  - `GET /sync/<type>?status=ready` where `<type>` is `variations`, `products`, or `inventory`
-  - `POST /sync/ack`
+- **Per environment.** Dev and prod are fully separate (ledger, ids, base URL, token).
+- **Transport.** Inbound HTTPS to the scraper sync service. JSON in, JSON out.
+- **Auth.** Bearer token per env: `Authorization: Bearer <token>` (`BLOKPORT_SYNC_TOKEN`,
+  from SSM). Missing or wrong -> `401`.
+- **Versioned routes.** Everything is under `/sync/v1/` so the two systems can evolve
+  behind a boundary:
+  - `GET /sync/v1/status`
+  - `GET /sync/v1/<type>?status=ready` where `<type>` is `variations`, `products`, `inventory`
+  - `POST /sync/v1/ack`
 
 ---
 
 ## 2. Two independent flows (run them separately)
-
-There are **two jobs**, on **two schedules**, that do not interfere:
 
 | Flow | Endpoints | What it does | Cadence |
 |---|---|---|---|
 | **A. Catalog sync** | `variations`, `products` | Creates and updates the products customers see | On change (after a scrape, or daily) |
 | **B. Inventory sync** | `inventory` | Updates the stock quantity of products **already listed** in Medusa | Frequent (e.g. hourly), independent |
 
-**The inventory flow never creates a product.** This is enforced server-side: the
-`inventory` endpoint only ever serves stock for products that are **already synced**
-(already in Medusa). A product that has not been created yet does not appear in the
-inventory feed at all. So you can run inventory sync as often as you like, on its own
-schedule, with no risk of it adding a listing. Adding and updating listings is only
-ever the catalog flow.
+**Inventory sync never creates a product.** Enforced server-side: the `inventory`
+endpoint only serves stock for products **already synced** (already in Medusa). A
+not-yet-created product does not appear in the inventory feed, so an inventory run
+cannot add a listing. Adding and updating listings is only ever the catalog flow.
 
 ---
 
-## 3. Flow A: catalog sync (variations, then products)
+## 3. No Medusa ids in payloads: the resolution contract
 
-Order matters, and the server enforces it: a product is only served once its variation
-exists in Medusa and its variety image is live. So you pull in two steps and loop until
-both are empty.
+Every reference the scraper sends is an **external name or key**, resolved by Medusa to
+its own id. The scraper holds no `company_id`, `sales_channel_id`, or port ids. This is
+symmetric across all fields:
+
+| payload field | what the scraper sends | Medusa resolves to |
+|---|---|---|
+| `type`, `color`, `finish`, `quality`, `category` | canonical name | the attribute id |
+| `vendor` | the source key (e.g. `polonine`) | the marketplace company + sales channel |
+| `origin_country_code` | ISO2 (e.g. `IT`) | the relevant port ids |
+| `variation_external_id` | the variety `Key` | the variation id (stored as `external_id`) |
+
+**Unknown names (the coupling point, decide and write down).** When Medusa cannot
+resolve a `color`/`finish`/`quality`/`category`/`type` name, it must do one of:
+- **Auto-create** the value and proceed (the pipeline only ever sends names it
+  validated as canonical, so this is safe), or
+- **Ack `failed`** for that entity, in which case the pipeline holds it until the name
+  exists (the same hold it already applies to an unresolvable type).
+
+Pick one and state it. The pipeline already guarantees it never invents a value, so
+auto-create is the low-friction default; `failed` is the strict option. Either is fine,
+but the behaviour must be agreed because it is a coupling point.
+
+**Attributes are not a push flow.** Medusa owns the attribute vocabulary. The scraper
+does not push attributes; it sends canonical names and Medusa resolves them (above). The
+`attribute` count in `/sync/v1/status` is just the pipeline's read-only mirror of that
+vocabulary (seeded from a one-time export, used for validation), not a feed you consume.
+When the pipeline discovers a brand-new value, it surfaces it for review and holds the
+dependent entity until the value exists; it never silently lists with a null attribute.
+
+---
+
+## 4. Flow A: catalog sync (variations, then products)
+
+The server enforces order: a product is only served once its variation is synced and its
+variety texture is live. Pull in two steps and loop until both are empty.
 
 ### Step 1: variations
 
 ```
-GET /sync/variations?status=ready&limit=500
+GET /sync/v1/variations?status=ready&limit=500
 ```
-
-Response:
 
 ```json
 {
   "type": "variations",
-  "items": [
-    {
-      "external_id": "block_marble_breccia_oniciata_5ca3e544-...",
-      "payload_hash": "9f3a...",
-      "payload": {
-        "branch": "block",
-        "type": "Marble",
-        "name": "Breccia Oniciata",
-        "aliases": ["Breccia Oniciata Marble", "Marmo Breccia Oniciata"],
-        "image_url": "https://.../variations/block_marble_breccia_oniciata_5ca3...png",
-        "volume": "0.0014348"
-      }
+  "items": [{
+    "external_id": "block_marble_breccia_oniciata_5ca3e544-...",
+    "payload_hash": "9f3a...",
+    "payload": {
+      "branch": "block",
+      "type": "Marble",
+      "name": "Breccia Oniciata",
+      "aliases": ["Breccia Oniciata Marble", "Marmo Breccia Oniciata"],
+      "image_url": "https://.../variations/block_marble_breccia_oniciata_5ca3...png",
+      "volume": "0.0014348"
     }
-  ]
+  }]
 }
 ```
 
-For each item:
-1. Upsert the variation in Medusa **by `external_id`** (store the `Key` as `external_id`).
-2. Resolve the `type` **name** to your stone-type id. Names are canonical; they resolve.
-3. Ack it (section 5) with the variation id Medusa minted or matched.
+Apply: upsert by `external_id` (store the `Key`); resolve `type` name to your id; ack
+with the variation id Medusa minted. `image_url` is an **ingestion source** (section 6),
+not a runtime link.
 
 ### Step 2: products
 
 ```
-GET /sync/products?status=ready&limit=500
+GET /sync/v1/products?status=ready&limit=500
 ```
 
-Only returns products whose variation is already `synced` **and** whose variety texture
-image is live (so a product never lists without its image).
-
-Response item payload:
+Only products whose variation is synced and whose texture is live.
 
 ```json
 {
@@ -111,68 +136,64 @@ Response item payload:
     "variation_external_id": "slab_travertine_walnut_8a1c...",
     "color": "Brown", "finish": "Honed", "quality": "First",
     "type": "Travertine", "category": "Slabs",
+    "vendor": "polonine",
     "title": "Walnut Travertine Honed Slab",
     "description": "Walnut Travertine is a brown travertine ...",
     "handle": "walnut-travertine-honed-slab-polonine-7f3a2b19",
     "weight": 0.3, "length": 2.5, "width": 0.2, "height": 2.0,
     "origin_country_code": "IT",
-    "company_id": "01KTV98X8RG743YR3QHCECZKKA",
-    "sales_channel_id": "sc_01KTM2B2DJNSW6WPS1Q8FN8B2R",
     "bundle_size": 7,
-    "ports": ["port_id_a", "port_id_b"],
-    "image_urls": ["https://.../products/improved/polonine/<sha>.jpg", "..."]
+    "image_urls": ["https://.../products/improved/polonine/<sha>.jpg"]
   }
 }
 ```
 
-For each item:
-1. Upsert the product **by `external_id`** (store the `SKU` as `external_id`).
-2. Resolve `variation_external_id` (a `Key`) to the variation id you stored in step 1.
-3. Resolve `color`/`finish`/`quality`/`category`/`type` **names** to your ids.
-4. Ack it with the product id Medusa minted.
+Apply: upsert by `external_id` (the `SKU`); resolve `variation_external_id` to the
+variation id from step 1; resolve the attribute names and `vendor`; derive ports from
+`origin_country_code`; copy `image_urls` into your own storage. Ack with the product id.
 
-**Loop.** Re-pull both until they return no items. Because variations sync first, a
-second pass picks up products that just became eligible. When both are empty, the
-catalog is in sync.
+> `bundle_size` is shipped pending coordination. The pallet model work is retiring the
+> bundle multiplier (selling unit decoupled from the logistics unit). Agree with the
+> pipeline team whether to drop it and rely on pieces + dimensions; the field is here as
+> a placeholder, not a commitment.
+
+Loop both until empty -> the catalog is in sync.
 
 ---
 
-## 4. Flow B: inventory sync (stock only, existing products only)
+## 5. Flow B: inventory sync (stock only, existing products only)
 
 ```
-GET /sync/inventory?status=ready&limit=1000
+GET /sync/v1/inventory?status=ready&limit=1000
 ```
-
-Returns only the stock that **moved since the last sync**, and only for products that
-are **already synced** (already in Medusa):
 
 ```json
-{
-  "type": "inventory",
-  "items": [
-    { "external_id": "POLONINE-7F3A2B19", "payload": { "sku": "POLONINE-7F3A2B19", "quantity": 7 } },
-    { "external_id": "VARSHA-1C2D3E4F",   "payload": { "sku": "VARSHA-1C2D3E4F",   "quantity": 0 } }
-  ]
-}
+{ "type": "inventory", "items": [
+  { "external_id": "POLONINE-7F3A2B19", "payload": { "sku": "POLONINE-7F3A2B19", "quantity": 7 } },
+  { "external_id": "VARSHA-1C2D3E4F",   "payload": { "sku": "VARSHA-1C2D3E4F",   "quantity": 0 } }
+]}
 ```
 
-For each item:
-1. Find the Medusa product by `SKU` (the `external_id`) and **set its inventory
-   quantity**. Do not create anything; if a SKU is not found, skip it (it should not
-   happen, because only synced products are served).
-2. Ack it (section 5). Inventory acks carry no `medusa_id`.
-
-A `quantity` of `0` is a **reversible delist** (out of stock): the product stays in the
-catalog, just unavailable. A later run that carries stock again simply sets it back.
+Apply: find the product by `SKU` and **set its quantity**. Never create. `0` is a
+reversible delist. Ack each (no `medusa_id`).
 
 ---
 
-## 5. What to send back: the ack (this is what keeps it in sync)
+## 6. Images are ingestion sources, never hot-links
 
-After applying an item, ack it:
+`image_url` (variations) and `image_urls` (products) point at the pipeline's storage.
+They are **ingestion sources**: on apply, Medusa **copies them into its own S3** (and
+runs its own watermark/thumbnail pipeline). Do **not** reference these URLs at runtime,
+or the storefront becomes permanently dependent on the pipeline's image host. The
+"texture must be live" gate exists only so the source image is present at ingestion time;
+after copy, Medusa owns the image.
+
+---
+
+## 7. What to send back: the ack
 
 ```
-POST /sync/ack
+POST /sync/v1/ack
 [
   { "type": "variations", "external_id": "block_marble_...", "medusa_id": "variation_01ABC...", "status": "created" },
   { "type": "products",   "external_id": "POLONINE-7F3A2B19", "medusa_id": "prod_01XYZ...",     "status": "updated" },
@@ -182,107 +203,100 @@ POST /sync/ack
 
 Response: `{ "acked": 3 }`.
 
-Fields:
-- `type`: `variations` | `products` | `inventory`.
-- `external_id`: the `Key` (variations) or `SKU` (products, inventory) you were served.
-- `medusa_id`: the id Medusa minted or matched. Required for `variations` and
-  `products`; omit for `inventory`.
-- `status`: `created` | `updated` | `skipped` (all treated as success) or `failed`.
+- `medusa_id` is required for `variations` and `products`; omit for `inventory`.
+- `status`: `created`/`updated`/`skipped` (success) or `failed` (returns the entity to
+  the queue for the next pull).
 
-What the ack does:
-- **success** -> the pipeline records the `medusa_id` and marks the entity `synced`. It
-  will not be served again unless its content changes. For inventory, success records
-  the new stock as the last-synced level, so it stops being a delta.
-- **failed** -> the entity is returned to the queue and offered again on the next pull.
+**Ack AFTER you commit.** Persist the `external_id -> entity` mapping in Medusa before
+you ack. If you ack and then crash before committing, the ledger marks it synced while
+Medusa lost it, so it would not be served again until its content changes. Upsert-by-
+external_id makes a re-pull safe, but only if the ack follows the commit.
 
-Ack in batches as you apply. You do not have to ack the whole page at once.
+**Acks are idempotent.** Re-acking the same `external_id` is a no-op, so a failed ack
+POST can be retried safely.
 
 ---
 
-## 6. The sync guarantee (why this stays in sync)
+## 8. The sync guarantee (why this stays in sync)
 
-- **Pull-only.** The pipeline never writes into Medusa. You pull when you are ready. If
-  Medusa is busy or down, the desired state simply waits in the ledger.
-- **Ordered.** The server only serves an entity once its prerequisites are synced:
-  a product after its variation is synced and its texture is live; stock after its
-  product is synced. You cannot load out of order even if you pull naively.
-- **Convergent.** An acked entity stops being served. Re-pulling moves only the delta.
-  Pull each type until it returns empty and the two systems are exactly in sync.
-- **Idempotent.** Every apply is an upsert **by `external_id`**, so re-applying the same
-  item is a no-op. Each item carries a `payload_hash`; if it matches what you last
-  applied, you may skip the write (optional, the upsert is already safe).
-- **Observable.** `GET /sync/status` returns per-type counts of `pending` vs `synced`
-  (and the inventory `delta` count), so you can confirm convergence and monitor drift:
-
-```json
-{
-  "variation":  { "synced": 24749 },
-  "product":    { "synced": 870, "pending": 12 },
-  "inventory":  { "total": 870, "delta": 4 },
-  "attribute":  { "synced": 115 }
-}
-```
-
-When `pending` is 0 for variation and product, and `delta` is 0 for inventory, you are
-fully in sync.
+- **Pull-only.** The pipeline never writes into Medusa; you pull when ready.
+- **Ordered.** Served only when prerequisites are synced: product after variation +
+  live texture; stock after product. You cannot load out of order.
+- **Convergent.** An acked entity stops being served; re-pulling moves only the delta.
+- **Idempotent.** Every apply is an upsert by `external_id`; `payload_hash` lets you skip
+  an unchanged item.
+- **Observable.** `GET /sync/v1/status` -> per-type `pending` vs `synced` (+ inventory
+  `delta`). All zero means fully in sync.
 
 ---
 
-## 7. Ownership and safety (what the pipeline will never ask you to do)
+## 9. Ownership and safety
 
-- Only entities the pipeline owns are ever served (their `external_id` is our `Key`/`SKU`).
-  **Products that website users listed in Medusa are never in these feeds**, so neither a
-  catalog run nor an inventory run can ever touch a user-listed product.
-- The only delist is **stock 0** (reversible). The pipeline never asks you to hard-delete.
-- Uncertain entities are held, not served: a variety with no resolvable type, or a
-  product whose texture is not live yet, is simply not in the feed until it is ready, so
+- Only entities the pipeline owns are served (their `external_id` is our `Key`/`SKU`).
+  Products that website users listed in Medusa are never in the feeds, so neither flow
+  can touch them. The only delist is stock 0 (reversible); never a hard delete.
+- Uncertain entities are held, not served (no resolvable type, texture not live), so
   nothing lists broken.
 
 ---
 
-## 8. Combinations (one decision to make together)
+## 10. Combinations: decide ownership before building (not "later")
 
-Valid combinations are the pre-computed priceable tuples (every `color x finish x quality`
-per variety), about 2 million rows. They are pure id-tuples and need no ack. Today they
-are delivered as a bulk file (`2_valid_combinations.csv`). Decide with the pipeline team
-whether to keep bulk-loading them or add a `/sync/combinations` pull. Either way they
-load after variations are synced (they reference variation ids).
+Valid combinations are the priceable `color x finish x quality` tuples per variety
+(~2 million rows). The review is right that this needs deciding up front, because
+**Blokport already builds `valid_combination` itself** (the tree to relational
+migration). Two builders of the same 2M-row table is a real conflict.
+
+Recommended resolution: **Blokport owns `valid_combination` generation.** It already has
+the machinery; combinations are relational backend data. The pipeline then does **not**
+send combinations through the sync at all (it still builds `2_valid_combinations.csv` for
+its own legacy CSV path, but that is not part of this integration). What Blokport needs
+from the pipeline to build them is only the variety tree (which colours/finishes/qualities
+each variety supports), which can be a separate, low-frequency input. If instead the
+pipeline is to own them, do it as a paged `/sync/v1/combinations` pull (no ack; they are
+pure id-tuples), sized deliberately for 2M rows, not a CSV side-channel. Either way, pick
+one owner now.
 
 ---
 
-## 9. Endpoint reference
+## 11. Endpoint reference
 
 | Method | Path | Purpose | Body / response |
 |---|---|---|---|
-| `GET` | `/sync/status` | per-type / per-state counts | response: `{type: {state: count}, ...}` |
-| `GET` | `/sync/variations?status=ready&limit=N` | varieties to create/update | response: `{type, items:[{external_id, payload_hash, payload}]}` |
-| `GET` | `/sync/products?status=ready&limit=N` | products to create/update (variation must be synced, texture live) | same shape |
-| `GET` | `/sync/inventory?status=ready&limit=N` | stock deltas for already-synced products only | response: `{type, items:[{external_id, payload:{sku, quantity}}]}` |
-| `POST` | `/sync/ack` | record minted ids, mark synced | body: `[{type, external_id, medusa_id?, status}]`; response: `{acked: N}` |
+| `GET` | `/sync/v1/status` | per-type / per-state counts | `{type: {state: count}, ...}` |
+| `GET` | `/sync/v1/variations?status=ready&limit=N` | varieties to create/update | `{type, items:[{external_id, payload_hash, payload}]}` |
+| `GET` | `/sync/v1/products?status=ready&limit=N` | products to create/update (variation synced, texture live) | same shape |
+| `GET` | `/sync/v1/inventory?status=ready&limit=N` | stock deltas for already-synced products only | `{type, items:[{external_id, payload:{sku, quantity}}]}` |
+| `POST` | `/sync/v1/ack` | record minted ids, mark synced | `[{type, external_id, medusa_id?, status}]` -> `{acked: N}` |
 
-All requests require `Authorization: Bearer <token>`. `limit` is optional (page size).
+All requests require `Authorization: Bearer <token>`. `limit` is optional.
 
 ---
 
-## 10. The two jobs, end to end
+## 12. The two jobs, end to end
 
 **Catalog job** (on change / daily):
 
 ```
 loop:
-  v = GET /sync/variations?status=ready
-  apply each, POST /sync/ack
-  p = GET /sync/products?status=ready
-  apply each, POST /sync/ack
-until v and p are both empty
+  apply GET /sync/v1/variations?status=ready, then POST /sync/v1/ack
+  apply GET /sync/v1/products?status=ready,   then POST /sync/v1/ack
+until both are empty
 ```
 
 **Inventory job** (frequent, independent):
 
 ```
-i = GET /sync/inventory?status=ready
-for each: set the product's stock by SKU (never create), POST /sync/ack
+apply GET /sync/v1/inventory?status=ready (set stock by SKU, never create), then ack
 ```
 
-Run them on whatever schedules suit you. They share nothing but the ledger, they are
-both idempotent, and they both converge. That is the whole contract.
+---
+
+## 13. The one thing for the Medusa side (symmetry)
+
+Independence cuts both ways. Implement the Medusa side as **one isolated sync-adapter
+module** (the swappable-provider pattern): a single place that knows this HTTP contract
+and translates it to Blokport entities (product / variation / inventory), and nothing
+else in the backend imports it. If the pipeline ever changes or is swapped, you rewrite
+that one module. Do not sprinkle `/sync` knowledge across the product or inventory
+services.
