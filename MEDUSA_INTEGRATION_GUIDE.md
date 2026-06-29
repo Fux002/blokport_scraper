@@ -209,7 +209,12 @@ Apply: find the product by `SKU` and **set its STOCKED quantity** (not its avail
 quantity). Never create. **Respect reservations**: a `0` delist on a product that has
 open-order reservations must drop available to 0 without breaking the reservation backing
 a live order, so set stocked-not-available and do not fight the reservation invariant.
-`0` is a reversible delist. Ack each (no `medusa_id`).
+
+`quantity: 0` is the explicit **discontinued** signal, not a transient stockout: in this
+feed an in-stock product never reports 0 (the pipeline floors a real stock to 1), so a 0
+always means the supplier **dropped** the product. Medusa can act on the 0 directly (no
+time-window guessing). It is reversible: a later scrape that carries the stone again sends
+a positive quantity and un-retires it. Ack each (no `medusa_id`).
 
 ---
 
@@ -282,10 +287,11 @@ POST can be retried safely.
   pipeline-owned products read-only**, so a marketplace user cannot edit or override one
   out from under the sync. Stating the policy is the pipeline's; enforcing the badge is
   Medusa's build-time work.
-- **Retirement (stock-0 zombies).** A discontinued product is delisted by setting stock 0
-  (reversible). Policy: Medusa **archives** a product that has stayed stock 0 past a
-  retirement window, so the catalog does not accumulate permanently-zero zombies. The
-  pipeline never hard-deletes; archiving the stock-0 set is Medusa's build-time action.
+- **Retirement signal = quantity 0.** A discontinued product is delisted by setting stock
+  0, which in this feed is the unambiguous "supplier dropped it" signal (an in-stock
+  product never reports 0; it floors to 1). So Medusa archives on the 0 directly, not on a
+  time-window guess. Reversible: a later scrape un-retires it with a positive quantity.
+  The pipeline never hard-deletes; archiving the stock-0 set is Medusa's build-time action.
 - **Product attributes are always within the variety's allowed sets.** A product's
   `color`/`finish`/`quality` is guaranteed by the pipeline (its tree-reconcile stage) to
   be a member of the variation's `colors`/`finishes`/`qualities` (section 4). Medusa can
@@ -296,29 +302,26 @@ POST can be retried safely.
 
 ---
 
-## 10. Combinations: decide ownership before building (not "later")
+## 10. Combinations: Blokport owns the table, fed by the variation allowed sets
 
 Valid combinations are the priceable `color x finish x quality` tuples per variety
 (~2 million rows). The review is right that this needs deciding up front, because
 **Blokport already builds `valid_combination` itself** (the tree to relational
 migration). Two builders of the same 2M-row table is a real conflict.
 
-Recommended resolution: **Blokport owns `valid_combination` generation.** It already has
-the JSONB-tree to `valid_combination` machinery; combinations are relational backend data,
-and 2M rows do not belong in a pull feed. The pipeline does **not** send combinations
-through the sync (it still builds `2_valid_combinations.csv` for its own legacy CSV path,
-outside this integration).
+**Decided (both sides agreed):** Blokport owns `valid_combination` generation. It has the
+JSONB-tree to `valid_combination` machinery, combinations are relational backend data, and
+2M rows do not belong in a pull feed. The pipeline does **not** send combinations through
+the sync (it still builds `2_valid_combinations.csv` for its own legacy CSV path, outside
+this integration).
 
-The input Blokport needs to build them is the per-variety **allowed sets**, and those now
-travel **in the variation payload** (`colors`/`finishes`/`qualities`, section 4), so there
-is no out-of-band side-channel: as Blokport ingests each variation it already has what it
-needs to generate that variety's combinations. The real question to settle is reconciling
-this with Blokport's existing tree source: does the pipeline's backbone become the source
-of truth for the allowed sets (Blokport builds from the variation feed), or does Blokport's
-tree stay authoritative (and the variation's `colors`/`finishes`/`qualities` are a
-cross-check)? Pick the one owner of the allowed-set truth now. (A paged
-`/sync/v1/combinations` pull remains the fallback if the pipeline must own the 2M rows, but
-it is not the recommended path.)
+**Source of truth for the allowed sets: the pipeline's backbone.** The per-variety allowed
+sets (`colors`/`finishes`/`qualities`) travel in the variation payload (section 4), so
+Blokport builds each variety's combinations directly from the variation feed, with no
+out-of-band side-channel and no second tree to reconcile. Blokport's tree machinery
+**consumes** our allowed sets rather than holding a competing definition. (A paged
+`/sync/v1/combinations` pull stays a fallback only if the pipeline ever has to own the 2M
+rows; not the path.)
 
 ---
 
