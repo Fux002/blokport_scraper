@@ -1,32 +1,53 @@
 """Sync service over the ledger (SYNC_LEDGER_DESIGN.md section 8), scraper side.
 
-This first slice is GET /sync/status: the per-type, per-state summary the backend
-pull job and operators read to see what the ledger holds and what is pending sync.
+The bidirectional sync loop, transport-free (an HTTP layer is a thin wrapper):
 
-The ready-payload (GET /sync/<type>) and ack (POST /sync/ack) endpoints (8.2 to 8.4)
-land next; they need the agreed backend contract plus a little more ledger
-groundwork (canonical stone type on variations, materialized combinations, and
-image-promotion state), none of which the shadow write-through populates yet. Kept
-transport-free here on purpose: this is the logic an HTTP layer will wrap once the
-transport is agreed. No em dashes (design principle 2).
+    Medusa pull job                          scraper sync engine (this module)
+    ---------------                          ---------------------------------
+    GET  /sync/<type>?status=ready   ----->  ready(ledger, type)   serve eligible entities
+    (apply each in Medusa)
+    POST /sync/ack {external_id, id} ----->  ack(ledger, ...)      Medusa talks back: record the
+                                                                   minted id, mark the entity synced
+    GET  /sync/status                ----->  status(ledger)        per-type / per-state summary
+
+`ack` is what keeps the two systems in sync: an entity is served while it is
+pending/dirty, and once Medusa acks the id it minted, the entity flips to synced and
+is no longer served. Re-running is therefore convergent: only the un-synced delta
+ever moves.
+
+Eligibility (8.4) is enforced server-side so the puller cannot load out of order: a
+product is served only once its variation is synced. Two gates are deferred until
+their ledger state exists (documented inline): every referenced attribute synced
+(all attributes are synced after bootstrap; NEW values are the dormant C3 case) and
+image promotion. The ready PAYLOADS carry the fields the ledger holds today; the
+canonical stone `type` on variations is the one field still to be filled (a known
+prerequisite). No em dashes (design principle 2).
 """
 
 from __future__ import annotations
 
-from stone_pipeline.ledger.db import Ledger
+import json
+
+from stone_pipeline.ledger.db import Ledger, now_iso
+
+# type name (the URL <type>) -> (table, single-column external_id)
+_ENTITY = {
+    "variations": ("variation", "key"),
+    "products": ("product", "sku"),
+    "combinations": ("combination", "combo_key"),
+}
+_SERVABLE = ("pending", "dirty")
 
 # tables that carry a sync `state` column (combination is empty until materialized)
 _STATE_TABLES = ("attribute", "variation", "combination", "product", "gap")
 
 
-def status(ledger: Ledger) -> dict[str, dict[str, int]]:
-    """Per-type state counts for GET /sync/status.
+# --- GET /sync/status ---------------------------------------------------------
 
-    State-bearing tables report their state histogram (pending/dirty/synced/...).
-    Inventory has no state: it reports total rows and the `delta` count (stock that
-    moved since the last sync, qty distinct from last_synced_qty), which is what the
-    inventory lane would serve.
-    """
+def status(ledger: Ledger) -> dict[str, dict[str, int]]:
+    """Per-type state counts. State-bearing tables report their state histogram;
+    inventory reports total rows and the `delta` count (stock that moved since the
+    last sync), which is what the inventory lane would serve."""
     out: dict[str, dict[str, int]] = {t: ledger.counts(t) for t in _STATE_TABLES}
     inv = ledger.execute(
         "SELECT COUNT(*) AS total, "
@@ -37,8 +58,102 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     return out
 
 
+# --- GET /sync/<type>?status=ready --------------------------------------------
+
+def _limit(sql: str, limit: int | None) -> str:
+    return sql + (f" LIMIT {int(limit)}" if limit else "")
+
+
+def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
+    """Variations awaiting sync (pending/dirty), in the produced set. Ordered by a
+    stable key so paging is repeatable (design L2)."""
+    rows = ledger.execute(_limit(
+        "SELECT key, branch, type, name, aliases, image_url, volume, payload_hash "
+        "FROM variation WHERE state IN ('pending', 'dirty') AND in_full = 1 "
+        "ORDER BY created_at, key", limit))
+    return [{
+        "external_id": v["key"],
+        "payload_hash": v["payload_hash"],
+        "payload": {
+            "branch": v["branch"],
+            "type": v["type"],   # prerequisite: fill the canonical stone type
+            "name": v["name"],
+            "aliases": json.loads(v["aliases"] or "[]"),
+            "image_url": v["image_url"] or "",
+            "volume": v["volume"] or "",
+        },
+    } for v in rows]
+
+
+def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
+    """Products awaiting sync whose VARIATION is already synced (the real ordering
+    dependency). Attribute-synced and image-promotion gates are deferred (see the
+    module docstring)."""
+    rows = ledger.execute(_limit(
+        "SELECT p.* FROM product p JOIN variation v ON v.key = p.variation_key "
+        "WHERE p.state IN ('pending', 'dirty') AND v.state = 'synced' "
+        "ORDER BY p.created_at, p.sku", limit))
+    return [{
+        "external_id": p["sku"],
+        "payload_hash": p["payload_hash"],
+        "payload": {
+            "variation_external_id": p["variation_key"],
+            "color": p["color"], "finish": p["finish"], "quality": p["quality"],
+            "type": p["type"], "category": p["category"],
+            "title": p["title"], "description": p["description"], "handle": p["handle"],
+            "weight": p["weight"], "length": p["length"],
+            "width": p["width"], "height": p["height"],
+            "origin_country_code": p["origin_country_code"],
+            "company_id": p["company_id"], "sales_channel_id": p["sales_channel_id"],
+            "bundle_size": p["bundle_size"],
+            "ports": json.loads(p["ports"] or "[]"),
+            "image_urls": json.loads(p["product_image_keys"] or "[]"),
+        },
+    } for p in rows]
+
+
+def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
+    """Serve the entities of `type_` that are eligible to load now (GET /sync/<type>)."""
+    if type_ == "variations":
+        return ready_variations(ledger, limit)
+    if type_ == "products":
+        return ready_products(ledger, limit)
+    raise ValueError(f"unsupported sync type {type_!r}; expected variations or products")
+
+
+# --- POST /sync/ack -----------------------------------------------------------
+
+def ack(ledger: Ledger, type_: str, external_id: str,
+        medusa_id: str | None, status_: str = "synced") -> None:
+    """Medusa talks back: record the id it minted or matched for one entity and mark
+    it synced, so it is no longer served. A `failed` ack returns the entity to dirty
+    (the next pull re-offers it). This is the write-back that keeps the two in sync."""
+    if type_ not in _ENTITY:
+        raise ValueError(f"unsupported sync type {type_!r}")
+    table, pk = _ENTITY[type_]
+    now = now_iso()
+    if status_ == "failed":
+        ledger.execute(f"UPDATE {table} SET state = 'dirty', updated_at = ? WHERE {pk} = ?",
+                       (now, external_id))
+        return
+    ledger.execute(
+        f"UPDATE {table} SET medusa_id = ?, state = 'synced', last_synced = ?, updated_at = ? "
+        f"WHERE {pk} = ?",
+        (medusa_id, now, now, external_id))
+
+
+def ack_batch(ledger: Ledger, acks: list[dict]) -> int:
+    """Apply a batch of acks (POST /sync/ack body). Each: {type, external_id,
+    medusa_id, status}. Returns the count applied."""
+    n = 0
+    for a in acks:
+        ack(ledger, a["type"], a["external_id"], a.get("medusa_id"), a.get("status", "synced"))
+        n += 1
+    return n
+
+
 def main(argv: list[str] | None = None) -> int:
-    import json
+    import json as _json
 
     from stone_pipeline.ledger import writethrough
 
@@ -47,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no ledger at {path} (run with BLOKPORT_LEDGER_WRITETHROUGH=1 first)")
         return 1
     with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
-        print(json.dumps(status(ledger), indent=2, sort_keys=True))
+        print(_json.dumps(status(ledger), indent=2, sort_keys=True))
     return 0
 
 
