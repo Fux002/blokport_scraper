@@ -62,8 +62,9 @@ symmetric across all fields:
 
 | payload field | what the scraper sends | Medusa resolves to |
 |---|---|---|
-| `type`, `color`, `finish`, `quality`, `category` | canonical name | the attribute id |
-| `vendor` | the source key (e.g. `polonine`) | the marketplace company + sales channel |
+| `category`, `type` (on the **variation**) | canonical name | the category / type id |
+| `color`, `finish`, `quality` (on the **product**) | canonical name | the attribute id |
+| `vendor` (on the product) | the source key (e.g. `polonine`) | the marketplace company + sales channel |
 | `origin_port` | a UN/LOCODE (e.g. `ITMDC`) | the specific port id (lane precision) |
 | `origin_country_code` | ISO2 (e.g. `IT`) | fallback only, when no port is resolved |
 | `variation_external_id` | the variety `Key` | the variation id (stored as `external_id`) |
@@ -115,7 +116,7 @@ GET /sync/v1/variations?status=ready&limit=500
     "external_id": "block_marble_breccia_oniciata_5ca3e544-...",
     "payload_hash": "9f3a...",
     "payload": {
-      "branch": "block",
+      "category": "Blocks",
       "type": "Marble",
       "name": "Breccia Oniciata",
       "aliases": ["Breccia Oniciata Marble", "Marmo Breccia Oniciata"],
@@ -132,9 +133,12 @@ GET /sync/v1/variations?status=ready&limit=500
 `volume` is a **number** (m3 per kg), not a string. Dimensions and `weight` on products
 are numbers too. Names stay strings; ids never appear.
 
-Apply: upsert by `external_id` (store the `Key`); resolve `type` name to your id; ack
-with the variation id Medusa minted. `image_url` is an **ingestion source** (section 6),
-not a runtime link.
+**A variation always belongs to a category (strict).** `category` and `type` are
+intrinsic to the variety: its identity is the (category, type, name) triple. They live on
+the variation, and a product **inherits both** from the variation it points at, so a
+product never sends `category` or `type`. Apply: upsert by `external_id` (store the
+`Key`); resolve the `category` and `type` names to your ids; ack with the variation id
+Medusa minted. `image_url` is an **ingestion source** (section 6), not a runtime link.
 
 `colors`/`finishes`/`qualities` are the variety's **allowed sets** (from the backbone
 tree): the colours, finishes, and qualities this variety can be priced in. They travel
@@ -156,7 +160,6 @@ Only products whose variation is synced and whose texture is live.
   "payload": {
     "variation_external_id": "slab_travertine_walnut_8a1c...",
     "color": "Brown", "finish": "Honed", "quality": "First",
-    "type": "Travertine", "category": "Slabs",
     "vendor": "polonine",
     "title": "Walnut Travertine Honed Slab",
     "description": "Walnut Travertine is a brown travertine ...",
@@ -170,9 +173,10 @@ Only products whose variation is synced and whose texture is live.
 ```
 
 Apply: upsert by `external_id` (the `SKU`); resolve `variation_external_id` to the
-variation id from step 1; resolve the attribute names and `vendor`; resolve `origin_port`
-(UN/LOCODE) to the port id (falling back to `origin_country_code`); copy `image_urls` into
-your own storage. Ack with the product id.
+variation id from step 1 and **inherit its category and type**; resolve the `color`/
+`finish`/`quality` names and `vendor`; resolve `origin_port` (UN/LOCODE) to the port id
+(falling back to `origin_country_code`); copy `image_urls` into your own storage. Ack
+with the product id.
 
 > Two fields are shipped pending coordination with the pallet-model work, so a sync
 > update never silently overrides it:

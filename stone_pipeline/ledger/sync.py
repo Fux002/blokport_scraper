@@ -36,6 +36,9 @@ _ENTITY = {
     "combinations": ("combination", "combo_key"),
 }
 _SERVABLE = ("pending", "dirty")
+# a variation always belongs to a category (strict): branch is NOT NULL and constrained,
+# so every served variation maps to one canonical category name.
+_CATEGORY = {"slab": "Slabs", "block": "Blocks", "tile": "Tiles"}
 
 
 def _as_number(text):
@@ -88,7 +91,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "external_id": v["key"],
         "payload_hash": v["payload_hash"],
         "payload": {
-            "branch": v["branch"],
+            "category": _CATEGORY.get(v["branch"], ""),   # strict: a variation belongs to a category
             "type": v["type"],
             "name": v["name"],
             "aliases": json.loads(v["aliases"] or "[]"),
@@ -120,9 +123,10 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "external_id": p["sku"],
         "payload_hash": p["payload_hash"],
         "payload": {
+            # category and type are intrinsic to the variation; Medusa inherits them via
+            # variation_external_id. The product only chooses color/finish/quality.
             "variation_external_id": p["variation_key"],
             "color": p["color"], "finish": p["finish"], "quality": p["quality"],
-            "type": p["type"], "category": p["category"],
             "vendor": p["source"],   # Medusa resolves vendor -> company + sales channel
             "title": p["title"], "description": p["description"], "handle": p["handle"],
             "weight": p["weight"], "length": p["length"],
