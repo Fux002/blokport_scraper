@@ -84,6 +84,33 @@ def _category_name_for(ledger: Ledger, pcat_id: str | None) -> str | None:
     return row["value"] if row else None
 
 
+def fill_variation_types(ledger: Ledger) -> int:
+    """Fill the canonical stone `type` name on variations that lack it, recovered from
+    the Key's type slug ({branch}_{slug(type)}_{slug(name)}_{uuid}) matched against the
+    seeded `type` attribute vocabulary, longest match first (the same recovery
+    tree_build uses). This is the variation payload's last empty field (sync prereq).
+    Returns the number filled."""
+    types = {r["value"].lower(): r["value"]
+             for r in ledger.execute("SELECT value FROM attribute WHERE category = 'type'")}
+    if not types:
+        return 0
+    now = now_iso()
+    n = 0
+    for v in ledger.execute("SELECT key FROM variation WHERE type IS NULL OR type = ''"):
+        parts = v["key"].split("_")[1:-1]   # drop the branch prefix and the trailing uuid
+        found = None
+        for i in range(len(parts), 0, -1):
+            cand = " ".join(parts[:i])      # slug uses '_'; the vocab is space-separated
+            if cand in types:
+                found = types[cand]
+                break
+        if found:
+            ledger.execute("UPDATE variation SET type = ?, updated_at = ? WHERE key = ?",
+                           (found, now, v["key"]))
+            n += 1
+    return n
+
+
 def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
     """Write canonical rows into the `product` table, in input order. New entities
     land `pending`; the equivalence test renders them straight back."""

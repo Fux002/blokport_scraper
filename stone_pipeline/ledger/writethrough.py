@@ -91,7 +91,8 @@ def record_catalog(path: str | Path | None = None) -> None:
             return
         with open_ledger(path) as ledger:
             n = populate.populate_variations_full(ledger, full)
+            typed = populate.fill_variation_types(ledger)
         log.info("ledger write-through recorded catalog variations",
-                 extra={"extra_fields": {"variants_full": n}})
+                 extra={"extra_fields": {"variants_full": n, "types_filled": typed}})
     except Exception:
         log.exception("ledger catalog write-through failed (shadow only; run unaffected)")

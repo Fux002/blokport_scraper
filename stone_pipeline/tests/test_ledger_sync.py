@@ -7,9 +7,9 @@ from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import ack, ready, status
 
 
-def _variation(ledger, key, state, medusa_id=None):
+def _variation(ledger, key, state, medusa_id=None, type_="Marble"):
     now = now_iso()
-    ledger.upsert("variation", {"key": key, "branch": "slab", "type": "", "name": "x",
+    ledger.upsert("variation", {"key": key, "branch": "slab", "type": type_, "name": "x",
                                 "aliases": "[]", "image_url": "", "image_sha256": None,
                                 "image_model": None, "volume": "", "medusa_id": medusa_id,
                                 "in_full": 1, "payload_hash": "", "state": state,
@@ -101,3 +101,27 @@ def test_dispatch_routes_status_ready_ack(tmp_path):
 
         assert dispatch(ledger, "GET", "bogus", {}, None)[0] == 404
         assert dispatch(ledger, "POST", "ack", {}, {"not": "a list"})[0] == 400
+
+
+def test_untyped_variation_is_held_not_served(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_typed_1", state="pending", type_="Granite")
+        _variation(ledger, "slab_untyped_2", state="pending", type_="")  # no canonical type
+        served = [r["external_id"] for r in ready(ledger, "variations")]
+        assert served == ["slab_typed_1"], "an untyped variation must be held, not served broken"
+
+
+def test_fill_variation_types_from_key(tmp_path):
+    from stone_pipeline.ledger.populate import fill_variation_types
+
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        for cat, val in [("type", "Marble"), ("type", "Granite")]:
+            ledger.upsert("attribute", {"category": cat, "value": val, "medusa_id": "x",
+                                        "state": "synced", "created_at": now, "updated_at": now},
+                          pk=("category", "value"))
+        _variation(ledger, "block_marble_carrara_uuid", state="pending", type_="")
+        _variation(ledger, "slab_granite_kashmir_white_uuid", state="pending", type_="")
+        assert fill_variation_types(ledger) == 2
+        assert ledger.get("variation", "key", "block_marble_carrara_uuid")["type"] == "Marble"
+        assert ledger.get("variation", "key", "slab_granite_kashmir_white_uuid")["type"] == "Granite"

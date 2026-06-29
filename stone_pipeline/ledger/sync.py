@@ -65,18 +65,22 @@ def _limit(sql: str, limit: int | None) -> str:
 
 
 def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
-    """Variations awaiting sync (pending/dirty), in the produced set. Ordered by a
-    stable key so paging is repeatable (design L2)."""
+    """Variations awaiting sync (pending/dirty), in the produced set, that have a
+    canonical type. An untyped variation is HELD, never served: Medusa could not
+    resolve its type and it would list broken (the autonomy boundary, design L1). The
+    pipeline already surfaces those for re-typing. Ordered by a stable key so paging
+    is repeatable (design L2)."""
     rows = ledger.execute(_limit(
         "SELECT key, branch, type, name, aliases, image_url, volume, payload_hash "
         "FROM variation WHERE state IN ('pending', 'dirty') AND in_full = 1 "
+        "AND type IS NOT NULL AND type != '' "
         "ORDER BY created_at, key", limit))
     return [{
         "external_id": v["key"],
         "payload_hash": v["payload_hash"],
         "payload": {
             "branch": v["branch"],
-            "type": v["type"],   # prerequisite: fill the canonical stone type
+            "type": v["type"],
             "name": v["name"],
             "aliases": json.loads(v["aliases"] or "[]"),
             "image_url": v["image_url"] or "",
