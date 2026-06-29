@@ -64,19 +64,29 @@ symmetric across all fields:
 |---|---|---|
 | `type`, `color`, `finish`, `quality`, `category` | canonical name | the attribute id |
 | `vendor` | the source key (e.g. `polonine`) | the marketplace company + sales channel |
-| `origin_country_code` | ISO2 (e.g. `IT`) | the relevant port ids |
+| `origin_port` | a UN/LOCODE (e.g. `ITMDC`) | the specific port id (lane precision) |
+| `origin_country_code` | ISO2 (e.g. `IT`) | fallback only, when no port is resolved |
 | `variation_external_id` | the variety `Key` | the variation id (stored as `external_id`) |
 
-**Unknown names (the coupling point, decide and write down).** When Medusa cannot
-resolve a `color`/`finish`/`quality`/`category`/`type` name, it must do one of:
-- **Auto-create** the value and proceed (the pipeline only ever sends names it
-  validated as canonical, so this is safe), or
-- **Ack `failed`** for that entity, in which case the pipeline holds it until the name
-  exists (the same hold it already applies to an unresolvable type).
+**Ports: send the origin port, not just the country.** Freight is priced on a specific
+origin lane (Carrara is not Naples), so country alone is too lossy. The precise,
+still-decoupled answer is `origin_port` as a **UN/LOCODE** that Medusa resolves to its
+port id. `origin_country_code` is a fallback for when a specific port cannot be resolved
+(and Medusa should treat that as approximate). One open item for the pipeline side: the
+origin resolution is country-level today, so populating `origin_port` to LOCODE precision
+is a reference-data enrichment (origin city/lane -> LOCODE), and we should confirm whether
+the origin port is product- or vendor-specific. Until then the pipeline sends
+`origin_country_code` and Medusa applies its default, flagged as approximate.
 
-Pick one and state it. The pipeline already guarantees it never invents a value, so
-auto-create is the low-friction default; `failed` is the strict option. Either is fine,
-but the behaviour must be agreed because it is a coupling point.
+**Unknown-name handling differs by field, and must be written down:**
+- **Attributes** (`color`/`finish`/`quality`/`category`/`type`): on an unresolved name,
+  Medusa may **auto-create** the value (the pipeline only ever sends names it validated
+  as canonical, so this is safe) or **ack `failed`** and the pipeline holds the entity.
+  Either is fine; pick one.
+- **`vendor`: strict, never auto-create.** An unseen source key resolving to a NEW
+  marketplace company + sales channel is a business-onboarding event, not a silent
+  create. On an unknown `vendor`, Medusa **acks `failed`** and surfaces it; the pipeline
+  holds those products until the vendor is onboarded. Do not auto-create a company.
 
 **Attributes are not a push flow.** Medusa owns the attribute vocabulary. The scraper
 does not push attributes; it sends canonical names and Medusa resolves them (above). The
@@ -109,6 +119,9 @@ GET /sync/v1/variations?status=ready&limit=500
       "type": "Marble",
       "name": "Breccia Oniciata",
       "aliases": ["Breccia Oniciata Marble", "Marmo Breccia Oniciata"],
+      "colors": ["White", "Beige", "Grey"],
+      "finishes": ["Polished", "Honed", "Brushed"],
+      "qualities": ["First", "Commercial"],
       "image_url": "https://.../variations/block_marble_breccia_oniciata_5ca3...png",
       "volume": "0.0014348"
     }
@@ -119,6 +132,11 @@ GET /sync/v1/variations?status=ready&limit=500
 Apply: upsert by `external_id` (store the `Key`); resolve `type` name to your id; ack
 with the variation id Medusa minted. `image_url` is an **ingestion source** (section 6),
 not a runtime link.
+
+`colors`/`finishes`/`qualities` are the variety's **allowed sets** (from the backbone
+tree): the colours, finishes, and qualities this variety can be priced in. They travel
+in the variation payload on purpose, so building `valid_combination` needs no out-of-band
+side-channel (section 10).
 
 ### Step 2: products
 
@@ -140,8 +158,8 @@ Only products whose variation is synced and whose texture is live.
     "title": "Walnut Travertine Honed Slab",
     "description": "Walnut Travertine is a brown travertine ...",
     "handle": "walnut-travertine-honed-slab-polonine-7f3a2b19",
-    "weight": 0.3, "length": 2.5, "width": 0.2, "height": 2.0,
-    "origin_country_code": "IT",
+    "length": 2.5, "width": 0.2, "height": 2.0, "weight": 0.3,
+    "origin_port": "ITMDC", "origin_country_code": "IT",
     "bundle_size": 7,
     "image_urls": ["https://.../products/improved/polonine/<sha>.jpg"]
   }
@@ -149,13 +167,19 @@ Only products whose variation is synced and whose texture is live.
 ```
 
 Apply: upsert by `external_id` (the `SKU`); resolve `variation_external_id` to the
-variation id from step 1; resolve the attribute names and `vendor`; derive ports from
-`origin_country_code`; copy `image_urls` into your own storage. Ack with the product id.
+variation id from step 1; resolve the attribute names and `vendor`; resolve `origin_port`
+(UN/LOCODE) to the port id (falling back to `origin_country_code`); copy `image_urls` into
+your own storage. Ack with the product id.
 
-> `bundle_size` is shipped pending coordination. The pallet model work is retiring the
-> bundle multiplier (selling unit decoupled from the logistics unit). Agree with the
-> pipeline team whether to drop it and rely on pieces + dimensions; the field is here as
-> a placeholder, not a commitment.
+> Two fields are shipped pending coordination with the pallet-model work, so a sync
+> update never silently overrides it:
+> - **`bundle_size`** is the bundle multiplier the pallet model is retiring (selling unit
+>   decoupled from logistics unit). Agree whether to drop it and rely on pieces +
+>   dimensions.
+> - **`weight`** is sent alongside `length/width/height`, but the pallet model computes
+>   weight from dimensions x density. Two sources for one number. Decide which wins; the
+>   recommendation is **dimensions are truth, Medusa recomputes weight** and ignores the
+>   sent `weight`, so the sync cannot override the pallet model's value.
 
 Loop both until empty -> the catalog is in sync.
 
@@ -174,8 +198,11 @@ GET /sync/v1/inventory?status=ready&limit=1000
 ]}
 ```
 
-Apply: find the product by `SKU` and **set its quantity**. Never create. `0` is a
-reversible delist. Ack each (no `medusa_id`).
+Apply: find the product by `SKU` and **set its STOCKED quantity** (not its available
+quantity). Never create. **Respect reservations**: a `0` delist on a product that has
+open-order reservations must drop available to 0 without breaking the reservation backing
+a live order, so set stocked-not-available and do not fight the reservation invariant.
+`0` is a reversible delist. Ack each (no `medusa_id`).
 
 ---
 
@@ -248,14 +275,21 @@ Valid combinations are the priceable `color x finish x quality` tuples per varie
 migration). Two builders of the same 2M-row table is a real conflict.
 
 Recommended resolution: **Blokport owns `valid_combination` generation.** It already has
-the machinery; combinations are relational backend data. The pipeline then does **not**
-send combinations through the sync at all (it still builds `2_valid_combinations.csv` for
-its own legacy CSV path, but that is not part of this integration). What Blokport needs
-from the pipeline to build them is only the variety tree (which colours/finishes/qualities
-each variety supports), which can be a separate, low-frequency input. If instead the
-pipeline is to own them, do it as a paged `/sync/v1/combinations` pull (no ack; they are
-pure id-tuples), sized deliberately for 2M rows, not a CSV side-channel. Either way, pick
-one owner now.
+the JSONB-tree to `valid_combination` machinery; combinations are relational backend data,
+and 2M rows do not belong in a pull feed. The pipeline does **not** send combinations
+through the sync (it still builds `2_valid_combinations.csv` for its own legacy CSV path,
+outside this integration).
+
+The input Blokport needs to build them is the per-variety **allowed sets**, and those now
+travel **in the variation payload** (`colors`/`finishes`/`qualities`, section 4), so there
+is no out-of-band side-channel: as Blokport ingests each variation it already has what it
+needs to generate that variety's combinations. The real question to settle is reconciling
+this with Blokport's existing tree source: does the pipeline's backbone become the source
+of truth for the allowed sets (Blokport builds from the variation feed), or does Blokport's
+tree stay authoritative (and the variation's `colors`/`finishes`/`qualities` are a
+cross-check)? Pick the one owner of the allowed-set truth now. (A paged
+`/sync/v1/combinations` pull remains the fallback if the pipeline must own the 2M rows, but
+it is not the recommended path.)
 
 ---
 
