@@ -127,25 +127,46 @@ def test_fill_variation_types_from_key(tmp_path):
         assert ledger.get("variation", "key", "slab_granite_kashmir_white_uuid")["type"] == "Granite"
 
 
+def test_inventory_sync_serves_delta_for_synced_products_only(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-1", "slab_v1", state="synced")    # in Medusa -> stock can sync
+        _product(ledger, "P-2", "slab_v1", state="pending")   # not yet -> stock held
+        for sku in ("P-1", "P-2"):
+            ledger.upsert("inventory", {"sku": sku, "qty": 7, "last_synced_qty": None,
+                                        "updated_at": now}, pk=("sku",))
+
+        assert [r["external_id"] for r in ready(ledger, "inventory")] == ["P-1"]
+        ack(ledger, "inventory", "P-1")            # Medusa now holds qty 7
+        assert ready(ledger, "inventory") == []    # no longer a delta
+        inv = ledger.get("inventory", "sku", "P-1")
+        assert inv["last_synced_qty"] == 7 and inv["qty"] == 7
+
+
 def test_glue_full_sync_converges(tmp_path):
     # the capstone: drive the whole loop the way Medusa's pull job would, and assert
     # it converges with everything synced and the variation-before-product order held.
     from stone_pipeline.ledger.simulate import simulate_sync
 
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
         _variation(ledger, "slab_v1", state="pending", type_="Marble")
         _variation(ledger, "slab_v2", state="pending", type_="Granite")
         _product(ledger, "P-1", "slab_v1", state="pending")
         _product(ledger, "P-2", "slab_v2", state="pending")
+        ledger.upsert("inventory", {"sku": "P-1", "qty": 7, "last_synced_qty": None,
+                                    "updated_at": now}, pk=("sku",))   # a stock delta
 
         report = simulate_sync(ledger)
 
         assert report["converged"] is True
-        assert report["applied"] == {"variations": 2, "products": 2}
+        assert report["applied"] == {"variations": 2, "products": 2, "inventory": 1}
         st = status(ledger)
         assert st["variation"].get("pending", 0) == 0
         assert st["product"].get("pending", 0) == 0
         assert ledger.get("product", "sku", "P-1")["state"] == "synced"
         assert ledger.get("product", "sku", "P-1")["medusa_id"] == "SIM-PRO-P-1"
-        # nothing left to serve in either direction
-        assert ready(ledger, "variations") == [] and ready(ledger, "products") == []
+        assert ledger.get("inventory", "sku", "P-1")["last_synced_qty"] == 7   # stock synced
+        # nothing left to serve in any lane
+        assert all(ready(ledger, t) == [] for t in ("variations", "products", "inventory"))

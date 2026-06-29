@@ -19,7 +19,7 @@ from typing import Callable
 from stone_pipeline.ledger import sync
 from stone_pipeline.ledger.db import Ledger
 
-_TYPES = ("variations", "products")
+_TYPES = ("variations", "products", "inventory")
 
 
 def simulate_sync(ledger: Ledger, mint: Callable[[str, str], str] | None = None,

@@ -116,26 +116,48 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
     } for p in rows]
 
 
+def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
+    """Stock deltas to push: rows whose qty moved since the last sync, for products
+    that are already synced (a product must exist in Medusa before its stock loads)."""
+    rows = ledger.execute(_limit(
+        "SELECT i.sku AS sku, i.qty AS qty FROM inventory i JOIN product p ON p.sku = i.sku "
+        "WHERE p.state = 'synced' AND (i.last_synced_qty IS NULL OR i.last_synced_qty != i.qty) "
+        "ORDER BY i.sku", limit))
+    return [{"external_id": r["sku"], "payload": {"sku": r["sku"], "quantity": r["qty"]}}
+            for r in rows]
+
+
 def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
     """Serve the entities of `type_` that are eligible to load now (GET /sync/<type>)."""
     if type_ == "variations":
         return ready_variations(ledger, limit)
     if type_ == "products":
         return ready_products(ledger, limit)
-    raise ValueError(f"unsupported sync type {type_!r}; expected variations or products")
+    if type_ == "inventory":
+        return ready_inventory(ledger, limit)
+    raise ValueError(f"unsupported sync type {type_!r}; expected variations, products or inventory")
 
 
 # --- POST /sync/ack -----------------------------------------------------------
 
 def ack(ledger: Ledger, type_: str, external_id: str,
-        medusa_id: str | None, status_: str = "synced") -> None:
+        medusa_id: str | None = None, status_: str = "synced") -> None:
     """Medusa talks back: record the id it minted or matched for one entity and mark
     it synced, so it is no longer served. A `failed` ack returns the entity to dirty
-    (the next pull re-offers it). This is the write-back that keeps the two in sync."""
+    (the next pull re-offers it). This is the write-back that keeps the two in sync.
+
+    Inventory is special: it has no id or state, so a successful ack means Medusa now
+    holds this stock level (last_synced_qty = qty), and the row stops being a delta."""
+    now = now_iso()
+    if type_ == "inventory":
+        if status_ != "failed":
+            ledger.execute(
+                "UPDATE inventory SET last_synced_qty = qty, updated_at = ? WHERE sku = ?",
+                (now, external_id))
+        return
     if type_ not in _ENTITY:
         raise ValueError(f"unsupported sync type {type_!r}")
     table, pk = _ENTITY[type_]
-    now = now_iso()
     if status_ == "failed":
         ledger.execute(f"UPDATE {table} SET state = 'dirty', updated_at = ? WHERE {pk} = ?",
                        (now, external_id))

@@ -37,7 +37,7 @@ def dispatch(ledger: Ledger, method: str, resource: str,
     `resource` is the last path segment (status, variations, products, ack)."""
     if method == "GET" and resource == "status":
         return 200, sync.status(ledger)
-    if method == "GET" and resource in ("variations", "products"):
+    if method == "GET" and resource in ("variations", "products", "inventory"):
         raw = (query.get("limit") or ["0"])[0]
         limit = int(raw) if raw.isdigit() and int(raw) > 0 else None
         return 200, {"type": resource, "items": sync.ready(ledger, resource, limit)}
