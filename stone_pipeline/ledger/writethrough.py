@@ -77,3 +77,21 @@ def record_source(emit_rows: Sequence[CanonicalRow], changed: Sequence[Canonical
     except Exception:
         log.exception("ledger write-through failed (shadow only; run unaffected)",
                       extra={"extra_fields": {"source": cfg.source_code}})
+
+
+def record_catalog(path: str | Path | None = None) -> None:
+    """Shadow-record the consolidated catalog: reflect the produced 1_variants_full
+    onto the variation table (mark the produced set, add new variants). Call after
+    catalog finalizes the file. No-op when the flag is off; never raises."""
+    if not enabled():
+        return
+    try:
+        full = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
+        if not full.exists():
+            return
+        with open_ledger(path) as ledger:
+            n = populate.populate_variations_full(ledger, full)
+        log.info("ledger write-through recorded catalog variations",
+                 extra={"extra_fields": {"variants_full": n}})
+    except Exception:
+        log.exception("ledger catalog write-through failed (shadow only; run unaffected)")

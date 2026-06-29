@@ -43,7 +43,8 @@ def render_variants_full(ledger: Ledger, path: str | Path) -> int:
     key_col, name_col, image_col, aliases_col, volume_col = VARIANTS_FULL_COLS
     rows = []
     for v in ledger.execute(
-        "SELECT key, name, image_url, aliases, volume FROM variation ORDER BY rowid"
+        "SELECT key, name, image_url, aliases, volume FROM variation "
+        "WHERE in_full = 1 ORDER BY rowid"
     ):
         rows.append({
             key_col: v["key"],

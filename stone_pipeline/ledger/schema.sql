@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS variation (
     image_model   TEXT,                                -- generator of the current texture, null if none
     volume        TEXT,                                -- "Volume per kg (m3/kg)", kept as text for exactness
     medusa_id     TEXT,                                -- null until synced
+    -- 1 when this variation is in the produced 1_variants_full set (the catalog
+    -- output), 0 for export-only rows kept for ids/FK (junk, consolidated-away).
+    -- render_variants_full renders only in_full rows; the export dump for
+    -- combinations uses ALL rows.
+    in_full       INTEGER NOT NULL DEFAULT 0,
     payload_hash  TEXT,
     state         TEXT NOT NULL DEFAULT 'pending'
                   CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),

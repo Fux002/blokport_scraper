@@ -9,14 +9,56 @@ needs. No em dashes (design principle 2).
 
 from __future__ import annotations
 
+import csv
 import json
+from pathlib import Path
 from typing import Iterable
 
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.db import Ledger, now_iso, payload_hash
 from stone_pipeline.stages.emit import _sku
+from stone_pipeline.stages.emit_catalog import _COLS as _VARIANTS_FULL_COLS
 from stone_pipeline.stages.product_state import inventory_for
+
+
+def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
+    """Reflect the produced 1_variants_full.csv onto the variation table: update each
+    variant's content (name, aliases, image, volume) and mark it in_full=1; insert
+    any new variant as pending (no Medusa id yet). Export-only rows (junk,
+    consolidated-away) are reset to in_full=0 so they never render. medusa_id, state,
+    branch, type and first_seen are preserved on existing rows (the bootstrap set
+    them from the export); only the produced content moves."""
+    _key, _name, _image, _aliases, _volume = _VARIANTS_FULL_COLS
+    now = now_iso()
+    ledger.execute("UPDATE variation SET in_full = 0")
+    n = 0
+    with Path(path).open(encoding="utf-8-sig", newline="") as handle:
+        for r in csv.DictReader(handle):
+            key = (r.get(_key) or "").strip()
+            if not key:
+                continue
+            name = r.get(_name) or ""
+            image_url = r.get(_image) or ""
+            aliases = [a for a in (r.get(_aliases) or "").split("|") if a]
+            volume = r.get(_volume) or ""
+            head = key.split("_", 1)[0]
+            branch = head if head in ("slab", "block", "tile") else ""
+            ph = payload_hash([branch, "", name, sorted(aliases), image_url, volume])
+            ledger.execute(
+                "INSERT INTO variation (key, branch, type, name, aliases, image_url, "
+                "image_sha256, image_model, volume, medusa_id, in_full, payload_hash, "
+                "state, first_seen, last_synced, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET name = excluded.name, "
+                "aliases = excluded.aliases, image_url = excluded.image_url, "
+                "volume = excluded.volume, in_full = 1, payload_hash = excluded.payload_hash, "
+                "updated_at = excluded.updated_at",
+                (key, branch, "", name, json.dumps(aliases), image_url, None, None, volume,
+                 None, ph, "pending", now, None, now, now),
+            )
+            n += 1
+    return n
 
 
 def _variation_key_for(ledger: Ledger, variation_id: str | None) -> str | None:

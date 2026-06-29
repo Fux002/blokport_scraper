@@ -2,11 +2,12 @@
 runnable on demand after a write-through run).
 
 For each artifact, render it from the ledger and compare to the correct CSV:
+  - variants:     by content set vs 1_variants_full.csv (populated by record_catalog)
   - products:     per source, byte-identical to 3_products_<source>.csv
   - combinations: byte-identical to 2_valid_combinations.csv (sorted both sides)
-Variants are NOT verified here: the ledger is seeded from variants_export, while
-1_variants_full is the produced output (export union new union mirror), so they
-differ until a catalog-level variation populate lands (a later step).
+Variants are a set (not byte) comparison: the integrated ledger merges the
+export-seeded rows with the produced 1_variants_full, so order differs from the file
+even when every row matches.
 
     python -m stone_pipeline.ledger.verify
 
@@ -27,7 +28,7 @@ from stone_pipeline.config.sources import load_source
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger import writethrough
 from stone_pipeline.ledger.db import Ledger
-from stone_pipeline.ledger.render import render_combinations, render_products
+from stone_pipeline.ledger.render import render_combinations, render_products, render_variants_full
 from stone_pipeline.stages import tree_build
 
 log = logfmt.get_logger("ledger.verify")
@@ -52,6 +53,31 @@ def verify_products(ledger: Ledger, to_upload: Path) -> list[str]:
             if not filecmp.cmp(str(out), str(correct), shallow=False):
                 problems.append(f"products mismatch for source '{source}' vs {correct.name}")
     return problems
+
+
+def _rowset(path: Path) -> set:
+    with path.open(encoding="utf-8-sig", newline="") as h:
+        rows = list(csv.reader(h))
+    return {tuple(r) for r in rows[1:] if r}
+
+
+def verify_variants(ledger: Ledger, to_upload: Path) -> list[str]:
+    """Render the produced variant set (in_full rows) from the ledger and compare to
+    1_variants_full.csv by CONTENT (a set of rows). Set, not byte: the integrated
+    ledger merges export-seeded rows with the produced file, so row order differs from
+    the file even when every row matches."""
+    correct = to_upload / "1_variants_full.csv"
+    if not correct.exists():
+        return []
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "1_variants_full.csv"
+        render_variants_full(ledger, out)
+        rendered, expected = _rowset(out), _rowset(correct)
+        if rendered != expected:
+            return [f"variants mismatch vs 1_variants_full.csv "
+                    f"({len(rendered - expected)} only in ledger, "
+                    f"{len(expected - rendered)} only in csv)"]
+    return []
 
 
 def verify_combinations(ledger: Ledger, to_upload: Path) -> list[str]:
@@ -89,6 +115,7 @@ def verify(ledger_path: Path | None = None, to_upload: Path | None = None,
         return [f"no ledger at {path} (run with BLOKPORT_LEDGER_WRITETHROUGH=1 first)"]
     problems: list[str] = []
     with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
+        problems += verify_variants(ledger, to_upload)
         problems += verify_products(ledger, to_upload)
         if combinations:
             problems += verify_combinations(ledger, to_upload)

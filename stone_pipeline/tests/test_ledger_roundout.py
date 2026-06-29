@@ -10,14 +10,24 @@ from __future__ import annotations
 
 import csv
 
+import pytest
+
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import verify as verify_mod
-from stone_pipeline.ledger.bootstrap import seed_products
+from stone_pipeline.ledger.bootstrap import seed_products, seed_variations
 from stone_pipeline.ledger.db import Ledger, now_iso
-from stone_pipeline.ledger.populate import populate_discontinued, populate_products
+from stone_pipeline.ledger.populate import (
+    populate_discontinued,
+    populate_products,
+    populate_variations_full,
+)
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
+
+EXPORT = SETTINGS.paths.variants_export_csv
+FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
 
 
 def _seed_ids(ledger: Ledger) -> None:
@@ -102,3 +112,15 @@ def test_verify_products_passes_and_detects_mismatch(tmp_path):
     target.write_bytes(target.read_bytes().replace(b"X Slab", b"Y Slab"))
     with Ledger.open(ledger_path, env="development") as ledger:
         assert verify_mod.verify_products(ledger, to_upload), "verify must detect the mismatch"
+
+
+@pytest.mark.skipif(not (EXPORT.exists() and FULL.exists()),
+                    reason="no variants_export.csv + 1_variants_full.csv to check against")
+def test_variants_verify_set_equal_after_bootstrap(tmp_path):
+    # the integrated case: export-seeded rows (some junk, in_full=0) merged with the
+    # produced 1_variants_full (in_full=1); verify_variants must be set-equal.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        seed_variations(ledger)                       # export: all rows, in_full=0
+        n = populate_variations_full(ledger, FULL)    # produced set: in_full=1
+        assert n > 20000
+        assert verify_mod.verify_variants(ledger, FULL.parent) == []

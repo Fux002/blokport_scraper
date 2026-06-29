@@ -15,6 +15,7 @@ once and de-duplicates a variant that several suppliers carry.
 from __future__ import annotations
 
 import csv
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -108,6 +109,14 @@ def run(outputs_root: Path | None = None) -> Path:
             log.error("consistency gate FAILED", extra={"extra_fields": {"error": e}})
         raise SystemExit("catalog consistency gate FAILED -- inconsistent upload set:\n  - "
                          + "\n  - ".join(errors))
+
+    # Phase 2 (flag-gated, shadow): reflect the produced 1_variants_full onto the
+    # ledger variation table. Fully inert unless BLOKPORT_LEDGER_WRITETHROUGH is set;
+    # never fails the build (the ledger is a shadow mirror, CSVs stay authoritative).
+    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
+        from stone_pipeline.ledger import writethrough
+        writethrough.record_catalog()
+
     return sync
 
 
