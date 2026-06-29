@@ -125,3 +125,27 @@ def test_fill_variation_types_from_key(tmp_path):
         assert fill_variation_types(ledger) == 2
         assert ledger.get("variation", "key", "block_marble_carrara_uuid")["type"] == "Marble"
         assert ledger.get("variation", "key", "slab_granite_kashmir_white_uuid")["type"] == "Granite"
+
+
+def test_glue_full_sync_converges(tmp_path):
+    # the capstone: drive the whole loop the way Medusa's pull job would, and assert
+    # it converges with everything synced and the variation-before-product order held.
+    from stone_pipeline.ledger.simulate import simulate_sync
+
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="pending", type_="Marble")
+        _variation(ledger, "slab_v2", state="pending", type_="Granite")
+        _product(ledger, "P-1", "slab_v1", state="pending")
+        _product(ledger, "P-2", "slab_v2", state="pending")
+
+        report = simulate_sync(ledger)
+
+        assert report["converged"] is True
+        assert report["applied"] == {"variations": 2, "products": 2}
+        st = status(ledger)
+        assert st["variation"].get("pending", 0) == 0
+        assert st["product"].get("pending", 0) == 0
+        assert ledger.get("product", "sku", "P-1")["state"] == "synced"
+        assert ledger.get("product", "sku", "P-1")["medusa_id"] == "SIM-PRO-P-1"
+        # nothing left to serve in either direction
+        assert ready(ledger, "variations") == [] and ready(ledger, "products") == []
