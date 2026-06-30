@@ -59,7 +59,10 @@ def _connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")   # many readers + one writer, no contention
-    conn.executescript(_SCHEMA)
+    # apply the DDL once per database, not on every connect (the admin API connects per request)
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+        conn.executescript(_SCHEMA)
+        conn.execute("PRAGMA user_version = 1")
     return conn
 
 

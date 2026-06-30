@@ -113,7 +113,13 @@ class Ledger:
         return conn
 
     def _apply_schema(self) -> None:
+        # Apply the DDL once per database, not on every open (the sync server opens a
+        # connection per request). PRAGMA user_version makes a reopen a no-op; the
+        # schema is all CREATE ... IF NOT EXISTS, so a one-time apply is sufficient.
+        if self.conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+            return
         self.conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
