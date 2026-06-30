@@ -22,7 +22,13 @@ class SourceConfig:
     source_code: str = ""
     # Optional per-scrape owner override; blank -> the general Blokport company (settings/env var).
     # The sales channel is env-level (one per env) and is NOT settable per scrape.
+    # (company_id is a Medusa id, used only by the legacy CSV path.)
     company_id: str = ""
+    # The COMPANY / vendor this source's products belong to (the marketplace seller). This is
+    # the AGNOSTIC reference sent as `vendor` in the sync payload; Medusa resolves it to its own
+    # company id. This is how you set "which scraper belongs to which company": set it per source
+    # here (several sources may share one company). Blank falls back to the source name.
+    vendor: str = ""
     ports_default: list[str] = field(default_factory=list)
     # ISO-2 country of the SUPPLIER (the scraped website's company). Used by derive_origin
     # as the LOW-confidence fallback (flagged origin_supplier_default) when the scrape has no

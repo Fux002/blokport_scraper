@@ -132,7 +132,7 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             # variation_external_id. The product only chooses color/finish/quality.
             "variation_external_id": p["variation_key"],
             "color": p["color"], "finish": p["finish"], "quality": p["quality"],
-            "vendor": p["source"],   # Medusa resolves vendor -> company + sales channel
+            "vendor": p["vendor"],   # the company this source belongs to (per-source config); Medusa resolves it
             "title": p["title"], "description": p["description"], "handle": p["handle"],
             "weight": p["weight"], "length": p["length"],
             "width": p["width"], "height": p["height"],

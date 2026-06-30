@@ -122,6 +122,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         record = {
             "sku": sku,
             "source": cfg.source_code,
+            "vendor": cfg.vendor or cfg.source,   # the company this source belongs to
             "surrogate_key": r.surrogate_key,
             "variation_key": variation_key,
             "color": r.color_name,

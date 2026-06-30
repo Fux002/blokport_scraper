@@ -64,7 +64,7 @@ symmetric across all fields:
 |---|---|---|
 | `category`, `type` (on the **variation**) | canonical name | the category / type id |
 | `color`, `finish`, `quality` (on the **product**) | canonical name | the attribute id |
-| `vendor` (on the product) | the source key (e.g. `polonine`) | the marketplace company + sales channel |
+| `vendor` (on the product) | the source's configured company name (e.g. `Polonine`), set per source in the pipeline | the marketplace company + sales channel |
 | `origin_port` | a UN/LOCODE (e.g. `ITMDC`) | the specific port id (lane precision) |
 | `origin_country_code` | ISO2 (e.g. `IT`) | fallback only, when no port is resolved |
 | `variation_external_id` | the variety `Key` | the variation id (stored as `external_id`) |

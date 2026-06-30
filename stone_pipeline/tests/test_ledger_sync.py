@@ -161,15 +161,16 @@ def test_product_payload_carries_no_medusa_ids(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         _variation(ledger, "slab_v1", state="synced", medusa_id="V1")   # synced + live texture
-        ledger.upsert("product", {"sku": "P-1", "source": "polonine", "variation_key": "slab_v1",
-                                  "color": "Black", "state": "pending",
+        ledger.upsert("product", {"sku": "P-1", "source": "pol", "vendor": "Polonine Stone Co",
+                                  "variation_key": "slab_v1", "color": "Black", "state": "pending",
                                   "created_at": now, "updated_at": now}, pk=("sku",))
         items = ready(ledger, "products")
         assert len(items) == 1
         payload = items[0]["payload"]
         for forbidden in ("company_id", "sales_channel_id", "ports"):
             assert forbidden not in payload, f"{forbidden} is a Medusa id and must not be in the payload"
-        assert payload["vendor"] == "polonine"       # the external reference Medusa resolves
+        # vendor is the configured company this source belongs to (not a Medusa id), Medusa resolves it
+        assert payload["vendor"] == "Polonine Stone Co"
         assert "origin_country_code" in payload      # Medusa derives ports from this
 
 

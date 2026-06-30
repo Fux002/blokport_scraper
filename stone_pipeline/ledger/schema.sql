@@ -147,6 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_combination_variation ON combination (variation_k
 CREATE TABLE IF NOT EXISTS product (
     sku                  TEXT PRIMARY KEY,
     source               TEXT NOT NULL,                -- source_code
+    vendor               TEXT,                          -- the company this source belongs to (sync `vendor`)
     surrogate_key        TEXT,                          -- reproduces the SKU via emit._sku
     -- nullable: a product bootstrapped from products_export (known SKU + handle +
     -- stock, no variety link yet) carries no variation_key until a run emits it.
