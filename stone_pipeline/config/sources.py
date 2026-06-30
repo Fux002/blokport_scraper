@@ -60,7 +60,8 @@ class SourceConfig:
             self.source_code = self.source[:3]
 
 
-def load_sources(path: Path | None = None) -> dict[str, SourceConfig]:
+def load_yaml_sources(path: Path | None = None) -> dict[str, SourceConfig]:
+    """The committed seed: sources straight from sources.yaml (no config store)."""
     path = Path(path or SETTINGS.paths.sources_yaml)
     if not path.exists():
         return {}
@@ -80,6 +81,17 @@ def load_sources(path: Path | None = None) -> dict[str, SourceConfig]:
                              f"set an explicit unique source_code in sources.yaml")
         by_code[cfg.source_code] = src
     return out
+
+
+def load_sources(path: Path | None = None) -> dict[str, SourceConfig]:
+    """Source config, preferring the durable config store (the control plane the admin
+    UI edits) and falling back to sources.yaml. An explicit `path` always reads YAML
+    (tests, the seed). The DB holds the same agnostic settings, env-independent."""
+    if path is None:
+        from stone_pipeline.config import store  # lazy: avoids an import cycle
+        if store.config_db_path().exists():
+            return store.read_sources()
+    return load_yaml_sources(path)
 
 
 def load_source(source: str, path: Path | None = None) -> SourceConfig:

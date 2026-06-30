@@ -450,6 +450,13 @@ def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = N
     """Multi-source run with source-level isolation (section 13A.3): one source
     failing does not affect the others."""
     sources = sources or list(adapter_registry.REGISTRY.keys())
+    # honour the config store's enabled flags (None == no store yet -> run everything)
+    from stone_pipeline.config import store
+    if (enabled := store.enabled_names()) is not None:
+        skipped = [s for s in sources if s not in enabled]
+        if skipped:
+            log.info("skipping disabled sources", extra={"extra_fields": {"disabled": skipped}})
+        sources = [s for s in sources if s in enabled]
     results: dict[str, Manifest] = {}
     for source in sources:
         try:

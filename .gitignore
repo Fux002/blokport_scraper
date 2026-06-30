@@ -17,6 +17,10 @@ __pycache__/
 # stone_pipeline/ledger/ (db.py, schema.sql, ...). Leading slash anchors to root.
 /ledger/
 *.ledger
+# the scraper config store (live, UI-edited); sources.yaml is the committed seed.
+/config.db
+/config.db-wal
+/config.db-shm
 # runtime state/diagnostics that live INSIDE the code package (keep the .py code)
 stone_pipeline/state/*.csv
 stone_pipeline/state/*.json
