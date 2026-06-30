@@ -38,8 +38,12 @@ def dispatch(ledger: Ledger, method: str, resource: str,
     if method == "GET" and resource == "status":
         return 200, sync.status(ledger)
     if method == "GET" and resource in ("variations", "products", "inventory"):
-        raw = (query.get("limit") or ["0"])[0]
-        limit = int(raw) if raw.isdigit() and int(raw) > 0 else None
+        # bound every page. An unbounded pull on a full delta builds the whole set in
+        # memory and writes it in one buffer (http.server has no backpressure): a
+        # 24k-item bootstrap delta is ~4.6 MB in a single response. Default + cap the page.
+        raw = (query.get("limit") or [""])[0]
+        default_page, max_page = 500, 2000
+        limit = int(raw) if raw.isdigit() and 0 < int(raw) <= max_page else default_page
         return 200, {"type": resource, "items": sync.ready(ledger, resource, limit)}
     if method == "POST" and resource == "ack":
         if not isinstance(body, list):
