@@ -97,6 +97,44 @@ def read_sources(path: str | Path | None = None) -> dict[str, SourceConfig]:
         return {r["source"]: _row_to_cfg(r) for r in conn.execute("SELECT * FROM source")}
 
 
+def _row_dict(r: sqlite3.Row) -> dict:
+    """JSON-friendly row for the admin API (includes enabled + schedule)."""
+    return {
+        "source": r["source"], "enabled": bool(r["enabled"]), "schedule": r["schedule"],
+        "adapter": r["adapter"], "source_code": r["source_code"], "vendor": r["vendor"],
+        "origin_default": r["origin_default"], "ports": json.loads(r["ports"] or "[]"),
+        "mode": r["mode"], "watermarked": bool(r["watermarked"]),
+        "emit_on_review": bool(r["emit_on_review"]),
+        "default_bundle_size": r["default_bundle_size"], "min_expected_rows": r["min_expected_rows"],
+    }
+
+
+def list_rows(path: str | Path | None = None) -> list[dict]:
+    with closing(open_store(path)) as conn:
+        return [_row_dict(r) for r in conn.execute("SELECT * FROM source ORDER BY source")]
+
+
+def get_row(source: str, path: str | Path | None = None) -> dict | None:
+    with closing(open_store(path)) as conn:
+        r = conn.execute("SELECT * FROM source WHERE source = ?", (source,)).fetchone()
+        return _row_dict(r) if r else None
+
+
+def upsert_row(data: dict, path: str | Path | None = None) -> None:
+    """Upsert from an admin-UI payload dict (the inverse of _row_dict)."""
+    cfg = SourceConfig(
+        source=data["source"], adapter=data.get("adapter", ""),
+        source_code=data.get("source_code", ""), vendor=data.get("vendor", ""),
+        origin_default=data.get("origin_default", ""), ports_default=data.get("ports") or [],
+        mode=data.get("mode", "review"), watermarked=bool(data.get("watermarked", False)),
+        emit_on_review=bool(data.get("emit_on_review", True)),
+        default_bundle_size=int(data.get("default_bundle_size", 6)),
+        min_expected_rows=int(data.get("min_expected_rows", 0)),
+    )
+    upsert_source(cfg, enabled=bool(data.get("enabled", True)),
+                  schedule=data.get("schedule"), path=path)
+
+
 def enabled_names(path: str | Path | None = None) -> set[str] | None:
     """The set of enabled source names, or None when there is no config store yet
     (so callers apply no filter and keep the pre-store behaviour)."""

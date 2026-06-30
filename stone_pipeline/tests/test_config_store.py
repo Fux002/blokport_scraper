@@ -60,3 +60,29 @@ def test_enabled_names_is_none_without_a_store(tmp_path, monkeypatch):
     # no config store -> enabled_names() is None so callers run everything (pre-store behaviour)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))
     assert store.enabled_names() is None
+
+
+def test_config_api_dispatch(tmp_path, monkeypatch):
+    from stone_pipeline.config import server
+
+    yaml_path = _seed_yaml(tmp_path)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+
+    # list every scraper
+    code, body = server.dispatch("GET", ["sources"], None)
+    assert code == 200 and {s["source"] for s in body["sources"]} == {"polonine", "varsha"}
+
+    # one scraper
+    code, body = server.dispatch("GET", ["sources", "polonine"], None)
+    assert code == 200 and body["vendor"] == "Polonine Stone Co"
+
+    # the UI disables a scraper + edits a setting (PUT replaces the row)
+    code, body = server.dispatch("PUT", ["sources", "varsha"],
+                                 {"enabled": False, "adapter": "varsha", "source_code": "var",
+                                  "vendor": "Varsha Stones"})
+    assert code == 200 and body["enabled"] is False
+    assert store.enabled_names() == {"polonine"}   # varsha no longer runs
+
+    assert server.dispatch("GET", ["sources", "nope"], None)[0] == 404
+    assert server.dispatch("PUT", ["sources", "x"], "not-a-dict")[0] == 400
