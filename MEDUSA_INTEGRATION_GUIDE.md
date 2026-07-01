@@ -120,9 +120,6 @@ GET /sync/v1/variations?status=ready&limit=500
       "type": "Marble",
       "name": "Breccia Oniciata",
       "aliases": ["Breccia Oniciata Marble", "Marmo Breccia Oniciata"],
-      "colors": ["White", "Beige", "Grey"],
-      "finishes": ["Polished", "Honed", "Brushed"],
-      "qualities": ["First", "Commercial"],
       "image_url": "https://.../variations/block_marble_breccia_oniciata_5ca3...png",
       "volume": 0.0014348
     }
@@ -140,10 +137,11 @@ product never sends `category` or `type`. Apply: upsert by `external_id` (store 
 `Key`); resolve the `category` and `type` names to your ids; ack with the variation id
 Medusa minted. `image_url` is an **ingestion source** (section 6), not a runtime link.
 
-`colors`/`finishes`/`qualities` are the variety's **allowed sets** (from the backbone
-tree): the colours, finishes, and qualities this variety can be priced in. They travel
-in the variation payload on purpose, so building `valid_combination` needs no out-of-band
-side-channel (section 10).
+The variation payload carries **no allowed-sets** (no `colors`/`finishes`/`qualities`).
+Blokport builds `valid_combination` from the actual product tuples it receives, not from a
+per-variety cross-product (section 10). So a variety is priceable in exactly the
+combinations its real products use, and the priced set can never explode past the listed
+products.
 
 ### Step 2: products
 
@@ -292,36 +290,40 @@ POST can be retried safely.
   product never reports 0; it floors to 1). So Medusa archives on the 0 directly, not on a
   time-window guess. Reversible: a later scrape un-retires it with a positive quantity.
   The pipeline never hard-deletes; archiving the stock-0 set is Medusa's build-time action.
-- **Product attributes are always within the variety's allowed sets.** A product's
-  `color`/`finish`/`quality` is guaranteed by the pipeline (its tree-reconcile stage) to
-  be a member of the variation's `colors`/`finishes`/`qualities` (section 4). Medusa can
-  rely on this, and may cross-check a product against the allowed sets it already received
-  on the variation.
+- **Product attributes define the priceable set.** A product's `color`/`finish`/`quality`
+  is validated by the pipeline (its tree-reconcile stage) against the variety's backbone, so
+  every product tuple is a real, sane combination. Blokport derives `valid_combination`
+  directly from these product tuples (section 10), so a variety is priceable in exactly the
+  combinations its listed products use.
 - Uncertain entities are held, not served (no resolvable type, texture not live), so
   nothing lists broken.
 
 ---
 
-## 10. Combinations: Blokport owns the table, fed by the variation allowed sets
+## 10. Combinations: Blokport owns the table, built from the product tuples
 
-Valid combinations are the priceable `color x finish x quality` tuples per variety
-(~2 million rows). The review is right that this needs deciding up front, because
-**Blokport already builds `valid_combination` itself** (the tree to relational
-migration). Two builders of the same 2M-row table is a real conflict.
+Valid combinations are the priceable `color x finish x quality` tuples per variety.
+**Blokport already builds `valid_combination` itself** (the tree to relational migration),
+so two builders of the same table would be a real conflict.
 
-**Decided (both sides agreed):** Blokport owns `valid_combination` generation. It has the
-JSONB-tree to `valid_combination` machinery, combinations are relational backend data, and
-2M rows do not belong in a pull feed. The pipeline does **not** send combinations through
-the sync (it still builds `2_valid_combinations.csv` for its own legacy CSV path, outside
-this integration).
+**Decided (both sides agreed):** Blokport owns `valid_combination` generation, and builds it
+from the **actual product tuples** it receives over the sync, not from a per-variety
+cross-product of allowed sets. Each synced product carries its full tuple
+(`category`/`type` inherited from the variation, plus `variation_external_id`/`color`/
+`finish`/`quality`); Blokport assembles `valid_combination` from the distinct tuples across
+the synced products. This is why:
+- **Accurate, not exploded.** A variety is priceable in exactly the combinations its real
+  products use, so the table never balloons to the ~2M-row cross-product the review flagged.
+  No priceable-but-unbuyable combos.
+- **No side-channel, no second tree.** The variation payload carries no allowed-sets; there
+  is nothing extra to send and nothing to reconcile against a competing definition.
+- **Ordering.** Build `valid_combination` after products are synced (variations ->
+  products -> combinations), since the tuples come from products. The sync serves variations
+  and products independently; Blokport orders the build.
 
-**Source of truth for the allowed sets: the pipeline's backbone.** The per-variety allowed
-sets (`colors`/`finishes`/`qualities`) travel in the variation payload (section 4), so
-Blokport builds each variety's combinations directly from the variation feed, with no
-out-of-band side-channel and no second tree to reconcile. Blokport's tree machinery
-**consumes** our allowed sets rather than holding a competing definition. (A paged
-`/sync/v1/combinations` pull stays a fallback only if the pipeline ever has to own the 2M
-rows; not the path.)
+The pipeline still builds `2_valid_combinations.csv` for its own legacy CSV path, outside
+this integration. (A paged `/sync/v1/combinations` pull stays a fallback only if Blokport
+ever needs the pipeline to own the table; not the path.)
 
 ---
 
