@@ -104,6 +104,9 @@ A single "Scrapers" admin screen that talks to the config API above. Concretely:
 
 2. **List view.** `GET /config/v1/sources` -> render a table of scrapers, one row each:
    name, `enabled` (a toggle), `vendor`, `source_code`, `mode`, `origin_default`.
+   **Guarantee:** each element of `sources` is the FULL `<source>` object (same shape as
+   `GET /sources/<name>`, same serializer), so Edit and toggle can PUT straight from the
+   list row without a second fetch. The list is never summarized.
 
 3. **Enable / disable.** The toggle does `PUT /config/v1/sources/<name>` with the full
    object and `enabled` flipped. A disabled scraper stops running on the next `run all`,
