@@ -91,3 +91,36 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json
   -d '{"adapter": "newco", "source_code": "new", "vendor": "New Stone Co", "origin_default": "TR"}' \
   http://127.0.0.1:8724/config/v1/sources/newco
 ```
+
+## Frontend (:4200) integration: what to build
+
+A single "Scrapers" admin screen that talks to the config API above. Concretely:
+
+1. **Connect (server-side).** The config API is at the config server (default
+   `http://<scraper-host>:8724`, put a real base URL behind your proxy) and needs
+   `Authorization: Bearer <BLOKPORT_CONFIG_TOKEN>`. Call it from the `:4200` **backend**,
+   never the browser: the browser talks to your `:4200` server, which holds the token and
+   proxies to the config API. Do not ship the token to the client.
+
+2. **List view.** `GET /config/v1/sources` -> render a table of scrapers, one row each:
+   name, `enabled` (a toggle), `vendor`, `source_code`, `mode`, `origin_default`.
+
+3. **Enable / disable.** The toggle does `PUT /config/v1/sources/<name>` with the full
+   object and `enabled` flipped. A disabled scraper stops running on the next `run all`,
+   no deploy.
+
+4. **Edit settings.** An edit form per scraper for the `<source>` fields (below). Save =
+   `PUT /config/v1/sources/<name>` with the FULL object. `PUT` REPLACES the row, so send
+   every field back (prefill from the `GET`, edit, submit the whole thing) or a missing
+   field falls to its default.
+
+5. **Add a scraper.** Same `PUT` to a name that does not exist yet. Require `adapter`,
+   `source_code` (unique across scrapers), and `vendor` at minimum.
+
+6. **Validation to enforce in the form:** `source_code` unique and short (it is the SKU
+   prefix and the delist scope); `mode` in {`review`, `auto`}; `origin_default` an ISO-2
+   country; `ports` a list of names or UN/LOCODEs; `vendor` the company name (not an id).
+
+The full `<source>` object schema and the endpoint table are above. That is the entire
+contract: three endpoints, one object, bearer auth. Nothing on the pipeline side changes
+when you build the UI; it already reads the same store.
