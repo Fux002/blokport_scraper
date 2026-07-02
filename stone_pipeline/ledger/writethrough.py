@@ -57,23 +57,29 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
     return ledger
 
 
-def record_source(emit_rows: Sequence[CanonicalRow], changed: Sequence[CanonicalRow],
+def record_source(emit_rows: Sequence[CanonicalRow],
                   discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *,
                   path: str | Path | None = None) -> None:
-    """Shadow-record one source's emitted products, changed inventory, and discontinued
+    """Shadow-record one source's emitted products, their stock, and the discontinued
     delist into the ledger. No-op when the flag is off; never raises (a shadow failure
-    must not fail a run). Recorded the same in full and inventory-only runs: the
-    emitted rows are valid products in both."""
+    must not fail a run). Recorded the same in full and inventory-only runs: the emitted
+    rows are valid products in both.
+
+    Inventory is seeded from the FULL emit set (every product's current stock), not a
+    pre-computed delta. The ledger tracks `last_synced_qty` per sku, so it derives the
+    true deltas itself: a never-synced row is a delta, an unchanged synced row is not. This
+    is what makes a first/baseline-less load (no products_export) carry initial stock -- the
+    old delta-only feed left the lane empty there, so Medusa loaded every product at qty 0."""
     if not enabled():
         return
     try:
         with open_ledger(path) as ledger:
             n_products = populate.populate_products(ledger, emit_rows, cfg)
-            n_changed = populate.populate_inventory(ledger, changed, cfg)
+            n_stock = populate.populate_inventory(ledger, emit_rows, cfg)
             n_gone = populate.populate_discontinued(ledger, discontinued)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
             "source": cfg.source_code, "products": n_products,
-            "inventory_changed": n_changed, "discontinued": n_gone}})
+            "inventory": n_stock, "discontinued": n_gone}})
     except Exception:
         log.exception("ledger write-through failed (shadow only; run unaffected)",
                       extra={"extra_fields": {"source": cfg.source_code}})

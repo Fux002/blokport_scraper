@@ -64,6 +64,25 @@ def test_inventory_populate_render_equals_emit(tmp_path):
     )
 
 
+def test_initial_load_seeds_inventory_without_a_baseline(tmp_path):
+    # regression: a first / baseline-less load (no products_export, so the old delta-only
+    # `changed` feed was empty) must STILL carry stock. record_source now seeds inventory
+    # from the FULL emit set, so every synced product serves its current stock as an
+    # initial delta -- otherwise Medusa loads every product at qty 0 (the bug this fixes).
+    from stone_pipeline.ledger.sync import ready
+    cfg = load_source("polonine")
+    rows = _rows()[:2]   # AAA qty 5, BBB qty 10 -- no prior baseline, nothing "changed"
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _seed_variations(ledger)
+        populate_products(ledger, rows, cfg)
+        populate_inventory(ledger, rows, cfg)          # the FULL set, not a precomputed delta
+        for r in rows:                                  # stock serves only for synced products
+            ledger.set_state("product", "sku", emit._sku(r, cfg), "synced")
+        served = {i["external_id"]: i["payload"]["quantity"] for i in ready(ledger, "inventory")}
+    assert served[emit._sku(rows[0], cfg)] == 5
+    assert served[emit._sku(rows[1], cfg)] == 10
+
+
 def test_reinventory_preserves_last_synced_qty(tmp_path):
     # regression: a re-record after an ack must NOT reset last_synced_qty to NULL,
     # or the product re-serves as a delta on every run forever.

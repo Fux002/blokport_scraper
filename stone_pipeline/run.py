@@ -355,7 +355,7 @@ def run_source(
     # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
     if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
         from stone_pipeline.ledger import writethrough
-        writethrough.record_source(validation.emit, changed, tuple(discontinued), source_cfg)
+        writethrough.record_source(validation.emit, tuple(discontinued), source_cfg)
 
     written = writeback.flush(writeback_path)
     if written:
