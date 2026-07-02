@@ -43,7 +43,7 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     if row.category_pcat_id not in valid_pcat:
         row.add_reject(RejectReason(rule="category_invalid", detail=str(row.category_pcat_id)))
     if not row.handle or not row.slug:
-        row.add_reject(RejectReason(rule="handle_missing", detail=""))
+        row.add_reject(RejectReason(rule="handle_missing", detail="handle" if not row.handle else "slug"))
     if require_images and not row.image_keys:
         row.add_reject(RejectReason(rule="no_image", detail=""))
     # Bad source data: a SIZE that was present in the scrape but invalid (<= 0, e.g. a "0cm" typo)

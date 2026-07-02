@@ -66,7 +66,9 @@ class AdapterBase:
         # decode HTML entities (&#8211; -> en-dash, &amp; -> &) so scraped names match
         # the reference, which stores decoded names — else 'Marjan &#8211; No. 426'
         # never matches the variant 'Marjan – No. 426' and the product is dropped.
-        return html.unescape(str(value)).strip()
+        text = html.unescape(str(value)).replace("\xa0", " ")   # non-breaking space -> normal space
+        text = re.sub("[​-‍﻿]", "", text)       # drop zero-width chars / BOM
+        return text.strip()
 
     @staticmethod
     def strip_trailing_token(value: Any, token: str = "/") -> str:

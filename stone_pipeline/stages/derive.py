@@ -393,10 +393,15 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
     if (v := get("bundle_size")) and str(v).isdigit():
         row.bundle_size, row.bundle_size_method, row.bundle_size_confidence = int(v), "override", "high"
     if v := get("origin_country_code"):
-        row.origin_country_code, row.origin_source, row.origin_confidence = v.upper(), "override", "high"
-        # the derived city/county belonged to the OLD country -- drop them so an override can't leave
-        # e.g. country=BR with city='Carrara'; an explicit origin_city below re-sets it if intended.
-        row.origin_city = row.origin_county = ""
+        iso = _to_iso(v, ref)   # validate the override to ISO-2 like a scraped value; don't stamp 'BRASIL'
+        if iso:
+            row.origin_country_code, row.origin_source, row.origin_confidence = iso, "override", "high"
+            # the derived city/county belonged to the OLD country -- drop them so an override can't leave
+            # e.g. country=BR with city='Carrara'; an explicit origin_city below re-sets it if intended.
+            row.origin_city = row.origin_county = ""
+        else:
+            log.warning("override origin_country_code did not resolve to a country; ignored",
+                        extra={"extra_fields": {"value": v, "surrogate": row.surrogate_key}})
     if v := get("origin_city"):
         row.origin_city = v
     if v := get("title"):
