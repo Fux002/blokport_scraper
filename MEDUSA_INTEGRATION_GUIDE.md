@@ -159,6 +159,7 @@ Only products whose variation is synced and whose texture is live.
     "variation_external_id": "slab_travertine_walnut_8a1c...",
     "color": "Brown", "finish": "Honed", "quality": "First",
     "vendor": "polonine",
+    "company_id": "comp_01J...",
     "title": "Walnut Travertine Honed Slab",
     "description": "Walnut Travertine is a brown travertine ...",
     "handle": "walnut-travertine-honed-slab-polonine-7f3a2b19",
@@ -172,9 +173,16 @@ Only products whose variation is synced and whose texture is live.
 
 Apply: upsert by `external_id` (the `SKU`); resolve `variation_external_id` to the
 variation id from step 1 and **inherit its category and type**; resolve the `color`/
-`finish`/`quality` names and `vendor`; resolve `origin_port` (UN/LOCODE) to the port id
-(falling back to `origin_country_code`); copy `image_urls` into your own storage. Ack
-with the product id.
+`finish`/`quality` names; allocate the seller by **`company_id`** when present (the one
+Medusa id in the payload, set per source in :4200), else resolve by `vendor` name;
+resolve `origin_port` (UN/LOCODE) to the port id (falling back to `origin_country_code`);
+copy `image_urls` into your own storage. Ack with the product id.
+
+> **`company_id`** is the single deliberate Medusa id in the payload: a small, hand-managed,
+> per-source seller id (the 4 companies), unlike the high-cardinality variation/attribute
+> ids which stay name-resolved. It is ENV-SPECIFIC (a dev company id differs from prod), so
+> the scraper's :4200 config is maintained per environment. Empty until pasted -> fall back
+> to `vendor`.
 
 > Two fields are shipped pending coordination with the pallet-model work, so a sync
 > update never silently overrides it:

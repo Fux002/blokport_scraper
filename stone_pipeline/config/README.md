@@ -60,7 +60,9 @@ To add a new scraper, `PUT` a name that does not exist yet. To disable one, `PUT
   "schedule": null,                // optional: how often / when (free text)
   "adapter": "polonine",           // which adapter parses it
   "source_code": "pol",            // SKU prefix and delist scope; keep unique
-  "vendor": "Polonine Stone Co",   // the COMPANY this scraper's products belong to (agnostic)
+  "vendor": "Polonine Stone Co",   // the COMPANY this scraper's products belong to (agnostic name)
+  "company_id": "",                // Medusa company id for this source. ENV-SPECIFIC (dev != prod),
+                                   // so keep dev ids in dev's config. Empty = Medusa resolves by vendor name.
   "origin_default": "IT",          // supplier ISO-2 country (origin fallback)
   "ports": ["Brindisi"],           // origin ports (names or UN/LOCODEs)
   "mode": "review",                // "review" (quarantine) or "auto" (load live)

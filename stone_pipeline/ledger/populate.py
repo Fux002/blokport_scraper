@@ -144,7 +144,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "thumbnail_key": r.thumbnail_key,
             "oriented_image_keys": json.dumps(r.oriented_image_keys or []),
             "product_image_keys": json.dumps(r.product_image_keys or []),
-            "company_id": r.company_id,
+            "company_id": cfg.company_id or r.company_id,   # per-source :4200 id wins; else the emit default
             "sales_channel_id": r.sales_channel_id,
             "ports": json.dumps(r.port_ids or []),
             "visibility": r.visibility,
@@ -157,7 +157,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
                 r.title, r.description, r.handle, r.weight, r.length, r.width, r.height,
                 r.origin_country_code, json.dumps(r.product_image_keys or []),
-                r.company_id, r.sales_channel_id, _category_name_for(ledger, r.category_pcat_id),
+                cfg.company_id or r.company_id,   # hash the STORED company_id so a :4200 change re-syncs
+                r.sales_channel_id, _category_name_for(ledger, r.category_pcat_id),
                 r.bundle_size, json.dumps(r.port_ids or []),
             ]),
             "state": "pending",

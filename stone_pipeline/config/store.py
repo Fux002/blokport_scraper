@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS source (
     schedule            TEXT,                          -- optional: how often / when (free text)
     adapter             TEXT NOT NULL DEFAULT '',
     source_code         TEXT NOT NULL DEFAULT '',
-    vendor              TEXT NOT NULL DEFAULT '',      -- the company this source belongs to (agnostic)
+    vendor              TEXT NOT NULL DEFAULT '',      -- the company this source belongs to (agnostic name)
+    company_id          TEXT NOT NULL DEFAULT '',      -- Medusa company id for this source (ENV-SPECIFIC; empty = resolve by vendor name)
     origin_default      TEXT NOT NULL DEFAULT '',      -- supplier ISO-2 country
     ports               TEXT,                          -- JSON array of port names / LOCODEs
     mode                TEXT NOT NULL DEFAULT 'review',
@@ -63,7 +64,17 @@ def _connect(path: Path) -> sqlite3.Connection:
     if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
         conn.executescript(_SCHEMA)
         conn.execute("PRAGMA user_version = 1")
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Idempotent column adds for config DBs created before a field existed (the dev
+    config.db predates company_id). Cheap PRAGMA check per connect, ALTER only once."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(source)")}
+    if "company_id" not in cols:
+        conn.execute("ALTER TABLE source ADD COLUMN company_id TEXT NOT NULL DEFAULT ''")
+        conn.commit()
 
 
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
@@ -73,7 +84,7 @@ def open_store(path: str | Path | None = None) -> sqlite3.Connection:
 def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
     return SourceConfig(
         source=r["source"], adapter=r["adapter"], source_code=r["source_code"],
-        vendor=r["vendor"], origin_default=r["origin_default"],
+        vendor=r["vendor"], company_id=r["company_id"], origin_default=r["origin_default"],
         ports_default=json.loads(r["ports"] or "[]"), mode=r["mode"],
         watermarked=bool(r["watermarked"]), emit_on_review=bool(r["emit_on_review"]),
         default_bundle_size=r["default_bundle_size"], min_expected_rows=r["min_expected_rows"],
@@ -84,6 +95,7 @@ def _params(cfg: SourceConfig, enabled: bool, schedule: str | None) -> dict:
     return {
         "source": cfg.source, "enabled": 1 if enabled else 0, "schedule": schedule,
         "adapter": cfg.adapter, "source_code": cfg.source_code, "vendor": cfg.vendor,
+        "company_id": cfg.company_id,
         "origin_default": cfg.origin_default, "ports": json.dumps(cfg.ports_default or []),
         "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0,
         "emit_on_review": 1 if cfg.emit_on_review else 0,
@@ -105,6 +117,7 @@ def _row_dict(r: sqlite3.Row) -> dict:
     return {
         "source": r["source"], "enabled": bool(r["enabled"]), "schedule": r["schedule"],
         "adapter": r["adapter"], "source_code": r["source_code"], "vendor": r["vendor"],
+        "company_id": r["company_id"],
         "origin_default": r["origin_default"], "ports": json.loads(r["ports"] or "[]"),
         "mode": r["mode"], "watermarked": bool(r["watermarked"]),
         "emit_on_review": bool(r["emit_on_review"]),
@@ -128,6 +141,7 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
     cfg = SourceConfig(
         source=data["source"], adapter=data.get("adapter", ""),
         source_code=data.get("source_code", ""), vendor=data.get("vendor", ""),
+        company_id=data.get("company_id", ""),
         origin_default=data.get("origin_default", ""), ports_default=data.get("ports") or [],
         mode=data.get("mode", "review"), watermarked=bool(data.get("watermarked", False)),
         emit_on_review=bool(data.get("emit_on_review", True)),

@@ -132,7 +132,11 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             # variation_external_id. The product only chooses color/finish/quality.
             "variation_external_id": p["variation_key"],
             "color": p["color"], "finish": p["finish"], "quality": p["quality"],
-            "vendor": p["vendor"],   # the company this source belongs to (per-source config); Medusa resolves it
+            "vendor": p["vendor"],   # agnostic company name; Medusa resolves it (kept for display + fallback)
+            # company_id: the per-source Medusa company id set in :4200 (empty until pasted). Medusa
+            # allocates by this id directly when present, else resolves by `vendor`. ENV-SPECIFIC:
+            # a dev company id differs from prod, so :4200's config is maintained per environment.
+            "company_id": p["company_id"] or "",
             "title": p["title"], "description": p["description"], "handle": p["handle"],
             "weight": p["weight"], "length": p["length"],
             "width": p["width"], "height": p["height"],
