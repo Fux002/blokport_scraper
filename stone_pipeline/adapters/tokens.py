@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 
 from stone_pipeline.config.settings import CATEGORIES
+from stone_pipeline.core.text import ascii_fold, match_key
 
 COLOR_TOKENS = [
     "Beige", "Black", "Blue", "Bordeaux", "Bronze", "Brown", "Copper", "Cream",
@@ -46,7 +47,8 @@ _AMBIGUOUS_TYPE_WORDS = {"crystal", "quartz", "agate", "amethyst", "coral"}
 # Negation prefixes that CANCEL a following type word -- 'Falsa Agata' (false agate) is genuinely an
 # onyx, not the Agate type, so the type word must not be read as the variety's type.
 _NEGATION_WORDS = {"falsa", "false", "falso", "fake", "faux", "imitation"}
-_CLEAR_TYPE_WORDS = {w.casefold() for w in (*TYPE_TOKENS, *TYPE_SYNONYMS)
+# keyed by the shared match_key so an accented scrape ('Quartzíte') matches the vocab ('Quartzite')
+_CLEAR_TYPE_WORDS = {match_key(w) for w in (*TYPE_TOKENS, *TYPE_SYNONYMS)
                      if " " not in w} - _AMBIGUOUS_TYPE_WORDS
 
 
@@ -59,11 +61,11 @@ def explicit_type_word(name: str) -> str | None:
     toks = (name or "").split()
     if len(toks) < 2:
         return None
-    if toks[-1].casefold() in _CLEAR_TYPE_WORDS:
-        if toks[-2].casefold() in _NEGATION_WORDS:          # 'Falsa Agata' -> not the Agate type
+    if match_key(toks[-1]) in _CLEAR_TYPE_WORDS:
+        if match_key(toks[-2]) in _NEGATION_WORDS:          # 'Falsa Agata' -> not the Agate type
             return None
         return toks[-1]
-    if toks[0].casefold() in _CLEAR_TYPE_WORDS:
+    if match_key(toks[0]) in _CLEAR_TYPE_WORDS:
         return toks[0]
     return None
 
@@ -81,8 +83,9 @@ def extract_color(text: str) -> str:
     """First backend colour word found in the text, canonicalized (Gray -> Grey)."""
     if not text:
         return ""
+    folded = ascii_fold(text)   # match colour words regardless of surrounding accents
     for token in COLOR_TOKENS:
-        if _word_re(token).search(text):
+        if _word_re(token).search(folded):
             return "Grey" if token == "Gray" else token
     return ""
 

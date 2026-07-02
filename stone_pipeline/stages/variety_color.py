@@ -15,6 +15,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.text import match_key
 
 log = logfmt.get_logger("variety_color")
 
@@ -76,7 +77,8 @@ def _texture_dir() -> Path:
 
 
 def _identity(post: dict) -> tuple[str, str]:
-    return (post.get("stone_type", "").strip().lower(), post.get("variant", "").strip().lower())
+    # canonical key both sides, so a slab and its mirror share identity despite accent/separator drift
+    return (match_key(post.get("stone_type", "")), match_key(post.get("variant", "")))
 
 
 def fill_colors(backbone_paths: list[Path] | None = None, texture_dir: Path | None = None,

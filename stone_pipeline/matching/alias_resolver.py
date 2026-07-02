@@ -19,10 +19,9 @@ import numpy as np
 from rapidfuzz import distance, fuzz, process
 
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.text import match_key
 
 log = logfmt.get_logger("alias_resolver")
-
-_WS = re.compile(r"[^a-z0-9]+")
 # words that, when they are the ONLY difference between two names, signal an alias rather than a
 # distinct variety (base + descriptor): 'Bardiglio Nuvolato' -> 'Marmo Bardiglio Nuvolato Apuano'.
 _GENERIC = frozenset({
@@ -37,7 +36,9 @@ _CHAR_REVIEW_FLOOR = 0.90
 
 
 def _norm(s: str) -> str:
-    return _WS.sub(" ", (s or "").lower()).strip()
+    # the shared canonical key: ascii-fold accents too, so 'Porriño'/'Porrino' don't look different
+    # to the alias-vs-mint model (which would otherwise mint a duplicate variety).
+    return match_key(s)
 
 
 def _toks(s: str) -> set[str]:

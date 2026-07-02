@@ -18,10 +18,8 @@ import re
 
 import jellyfish
 
-from stone_pipeline.core.text import ascii_fold
+from stone_pipeline.core.text import ascii_fold, match_key
 
-_PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
-_WS = re.compile(r"\s+")
 # inventory prefixes seen on supplier exports (Z, ZB, "Z B")
 _INV_PREFIX = re.compile(r"^(z\s?b|z)\s+", flags=re.IGNORECASE)
 # trailing render tags only: a trailing slash render/thickness tag or an explicit 'grade X'. A bare
@@ -34,12 +32,10 @@ _TRAIL_TAG = re.compile(r"\s*(/\s*(\d+\s?cm|polished|honed|leather(ed)?|brushed|
 
 
 def norm(value: str) -> str:
-    # Fold punctuation to space BEFORE ascii_fold, so a unicode dash (en/em) becomes a space
-    # instead of being stripped to nothing (which would glue the two words together). Underscore
-    # is a \w char that _PUNCT misses, so fold it explicitly: a separator must never fork identity.
-    text = _PUNCT.sub(" ", (value or "").strip())
-    text = ascii_fold(text).casefold().replace("_", " ")  # fold accents so 'Porriño' == 'Porrino'
-    return _WS.sub(" ", text).strip()
+    # The engine's base projection IS the one canonical match key (core.text.match_key): casefold,
+    # ascii-fold accents, fold every punctuation/separator run to one space. Kept as a thin alias so
+    # the matching index and the reference vocabulary (which both key on match_key) can never diverge.
+    return match_key(value)
 
 
 def compact(value: str) -> str:

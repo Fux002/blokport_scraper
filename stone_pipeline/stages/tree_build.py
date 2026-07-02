@@ -66,7 +66,7 @@ def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict, dict]:
     for post in _read_backbone(paths):
         if post.get("key"):
             by_key[post["key"]] = post
-        name = (post.get("variant") or "").strip().lower()
+        name = match_key(post.get("variant") or "")   # canonical name key (accent/separator/punct-proof)
         cat = (post.get("category") or "").strip().lower()
         if name:
             by_cat_name.setdefault((cat, name), post)
@@ -130,7 +130,7 @@ def _load_assigned_types(path: Path, attr: dict) -> dict[str, str]:
         with Path(path).open(encoding="utf-8-sig", newline="") as h:
             for r in csv.DictReader(h):
                 raw = (r.get("assign_type") or "").strip()
-                nm = (r.get("variant") or "").strip().lower()
+                nm = match_key(r.get("variant") or "")
                 if not (raw and nm):
                     continue
                 tid = attr["type"].get(match_key(raw))
@@ -151,7 +151,7 @@ def _write_uncovered(uncovered: list[dict], path: Path) -> None:
     if Path(path).exists():
         with Path(path).open(encoding="utf-8-sig", newline="") as h:
             for r in csv.DictReader(h):
-                nm = (r.get("variant") or "").strip().lower()
+                nm = match_key(r.get("variant") or "")
                 if nm:
                     prior[nm] = {"assign_type": (r.get("assign_type") or "").strip(),
                                  "variant": (r.get("variant") or "").strip(), "key": (r.get("key") or "").strip()}
@@ -162,7 +162,7 @@ def _write_uncovered(uncovered: list[dict], path: Path) -> None:
             rows.append(r)
             seen.add(nm)
     for u in uncovered:                                  # add still-uncovered varieties (blank -> needs you)
-        nm = u["Name"].strip().lower()
+        nm = match_key(u["Name"])
         if nm in seen:
             continue
         seen.add(nm)
@@ -228,7 +228,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             # combination references a variation that will not exist after the Medusa cleanup.
             if vid and vid not in exclude_ids and not looks_like_artifact(name):
                 export_rows.append((r["Key"].strip(), vid, name))
-                name_of[vid] = name.lower()
+                name_of[vid] = match_key(name)
     variety: dict[str, dict] = {}
     color_freq, qual_freq = Counter(), Counter()
     for vid, p in products.items():
@@ -263,7 +263,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     uncovered: list[dict] = []
     for key, vid, name in export_rows:
         prefix = key.split("_", 1)[0]
-        nl = name.lower()
+        nl = match_key(name)   # canonical: joins by_name/by_cat_name/variety/assigned_types keyed the same
         # UNION every source's colours/qualities for the widest valid set (max match):
         # the variety's backbone, the scraped product, and a same-variety product in
         # another category. Finishes = every finish the category supports. The PRODUCT's

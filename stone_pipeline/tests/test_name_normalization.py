@@ -33,3 +33,25 @@ def test_match_key_folds_separators_case_accents():
 def test_proj_norm_folds_the_same_way():
     # the matching-engine key must not diverge: underscore (a \w char) and unicode dashes included
     assert len({proj.norm(v) for v in _SAME}) == 1, "proj.norm forked the name on a separator"
+
+
+def test_match_key_folds_all_punctuation_to_agree_with_proj_norm():
+    # match_key must fold ALL punctuation (not just separators), so it agrees with proj.norm and the
+    # backbone/attribute vocab (match_key-keyed) joins the match index (proj.norm-keyed).
+    for a, b in [("Black & Gold", "Black Gold"), ("St. Laurent", "St Laurent"),
+                 ("Crema Marfil, Extra", "Crema Marfil Extra"), ("King's Blue", "King s Blue")]:
+        assert match_key(a) == match_key(b) == proj.norm(a), f"{a!r} must fold like {b!r}"
+
+
+def test_explicit_type_word_is_accent_insensitive():
+    # a scraped type word carrying an accent must still be recognized as the stone type
+    from stone_pipeline.adapters.tokens import explicit_type_word
+    assert explicit_type_word("Azul Quartzíte") == "Quartzíte"   # accented trailing type word
+    assert explicit_type_word("Sódalite Baia") == "Sódalite"     # accented leading type word
+
+
+def test_country_and_variety_keys_route_through_match_key():
+    # the whole system now shares one matcher: proj.norm (index), loaders._norm, match_key all equal
+    from stone_pipeline.reference.loaders import _norm as loaders_norm
+    for v in ["United-States", "United_States", "united  states"]:
+        assert loaders_norm(v) == match_key(v) == proj.norm(v) == "united states"

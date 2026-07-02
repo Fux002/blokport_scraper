@@ -28,6 +28,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, category_for_key
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.text import ascii_fold
 
 log = logfmt.get_logger("image_intake")
 
@@ -39,14 +40,14 @@ _INBOX_BRANCH = {c.plural: c.name for c in CATEGORIES}
 
 def key_stem(key: str) -> str:
     """The Key without its trailing uuid: slab_agate_agata_black_<uuid> -> slab_agate_agata_black."""
-    return re.sub(rf"_{_UUID}$", "", (key or "").strip().lower())
+    return re.sub(rf"_{_UUID}$", "", ascii_fold((key or "").strip()).lower())
 
 
 def file_stem(filename: str) -> str:
     """Reduce an old-style image filename to the same stem as a Key:
     slab_rb_318_agate_agata_black.png        -> slab_agate_agata_black
     variations/block_rb_5_marble_x-<uuid>.png -> block_marble_x"""
-    name = Path(filename).stem.lower()
+    name = ascii_fold(Path(filename).stem).lower()   # fold accents so an accented inbox filename matches the ASCII Key stem
     name = re.sub(r"_rb_\d+_", "_", name, count=1)     # drop the legacy rb_<id>
     name = re.sub(rf"[-_]{_UUID}$", "", name)          # drop a trailing -<uuid>/_<uuid>
     name = re.sub(r"_crop_\d+x\d+$", "", name)         # drop a thumbnail suffix

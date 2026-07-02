@@ -20,7 +20,7 @@ from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import ids, logfmt
 from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
-from stone_pipeline.core.text import slugify, title_case
+from stone_pipeline.core.text import match_key, slugify, title_case
 from stone_pipeline.reference.loaders import ReferenceData
 
 log = logfmt.get_logger("derive")
@@ -240,7 +240,7 @@ def _to_iso(value: str, ref: ReferenceData) -> str | None:
     v = (value or "").strip()
     if not v:
         return None
-    hit = ref.country_codes.get(" ".join(v.casefold().split()))
+    hit = ref.country_codes.get(match_key(v))   # same key the country table was built with (loaders._norm)
     if hit:
         return hit
     if len(v) == 2 and v.isalpha() and v.upper() in ref.valid_iso_codes:

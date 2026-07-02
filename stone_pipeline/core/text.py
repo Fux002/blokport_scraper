@@ -35,22 +35,26 @@ def collapse_ws(text: str) -> str:
     return _WS.sub(" ", (text or "").strip())
 
 
-# A run of separators: whitespace, underscore, slash, or any hyphen/dash (ASCII '-', the unicode
-# hyphen/dashes U+2010..U+2015). All fold to ONE space so a separator never forks identity.
-_SEP_RUN = re.compile(r"[\s_/\-‐-―]+")
+# Every non-alphanumeric character -- whitespace, underscore, AND all punctuation (hyphen/dash,
+# slash, '&', "'", '.', ',', '(', ')', '+', unicode dashes/punct, ...) -- folds to ONE space, so
+# NEITHER a separator NOR any punctuation ever forks identity. `\w` keeps unicode letters (folded
+# later by ascii_fold) and underscore, so underscore is added explicitly.
+_NON_ALNUM = re.compile(r"[^\w\s]|_", re.UNICODE)
 
 
 def match_key(text: str) -> str:
-    """The canonical key for matching any name -- stone type, colour, finish, quality, variety,
-    vendor. Folds accents to ASCII, casefolds, and collapses every run of separator punctuation
-    (whitespace, hyphen/dash, underscore, slash) to a single space. A separator, case, or accent
-    difference must NEVER split the same name in two, so every name lookup keys on this:
-    'Semi-Precious Stone' == 'semi_precious_stone' == 'semi  precious stone' == 'Semi Precious Stone'.
-    This is the one shared normalizer; per-module copies must delegate here, not diverge.
+    """The ONE canonical key for matching any name -- stone type, colour, finish, quality, variety,
+    vendor, country, port. Folds every non-alphanumeric run (whitespace, separators, AND all
+    punctuation) to a single space, then folds accents to ASCII and casefolds. A separator, case,
+    accent, OR punctuation difference must NEVER split the same name in two, so every name lookup
+    and index in the pipeline keys on this -- and it agrees with matching.projections.norm:
+    'Semi-Precious Stone' == 'semi_precious_stone' == 'Semi Precious Stone', and
+    'Black & Gold' == 'Black Gold', 'St. Laurent' == 'St Laurent', 'Rosa Porriño' == 'Rosa Porrino'.
 
-    Separators are folded BEFORE ascii_fold, so a unicode dash (en/em) becomes a space rather than
-    being stripped to nothing (which would glue the two words together)."""
-    return " ".join(ascii_fold(_SEP_RUN.sub(" ", text or "")).casefold().split())
+    Punctuation is folded BEFORE ascii_fold, so a unicode dash/punct becomes a space rather than
+    being stripped to nothing (which would glue the two words together). This is the one shared
+    normalizer; per-module copies MUST delegate here, not roll a weaker variant."""
+    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text or "")).casefold().split())
 
 
 _BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")

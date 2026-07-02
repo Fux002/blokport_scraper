@@ -14,9 +14,10 @@ testable offline without the heavy dependency and so the pipeline never hard
 from __future__ import annotations
 
 import math
-import re
 import zlib
 from typing import Callable, Optional, Protocol
+
+from stone_pipeline.core.text import match_key
 
 Vector = list[float]
 Embedder = Callable[[list[str]], list[Vector]]
@@ -35,7 +36,7 @@ def hashing_embedder(dim: int = 64) -> Embedder:
         out: list[Vector] = []
         for text in texts:
             vec = [0.0] * dim
-            norm = re.sub(r"\s+", " ", (text or "").casefold()).strip()
+            norm = match_key(text)   # shared canonical key: fold accents + punctuation before trigrams
             padded = f"  {norm}  "
             for i in range(len(padded) - 2):
                 tri = padded[i : i + 3]
