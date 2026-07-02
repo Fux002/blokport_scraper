@@ -34,8 +34,11 @@ _TRAIL_TAG = re.compile(r"\s*(/\s*(\d+\s?cm|polished|honed|leather(ed)?|brushed|
 
 
 def norm(value: str) -> str:
-    text = ascii_fold((value or "").strip()).casefold()  # fold accents so 'Porriño' == 'Porrino'
-    text = _PUNCT.sub(" ", text)
+    # Fold punctuation to space BEFORE ascii_fold, so a unicode dash (en/em) becomes a space
+    # instead of being stripped to nothing (which would glue the two words together). Underscore
+    # is a \w char that _PUNCT misses, so fold it explicitly: a separator must never fork identity.
+    text = _PUNCT.sub(" ", (value or "").strip())
+    text = ascii_fold(text).casefold().replace("_", " ")  # fold accents so 'Porriño' == 'Porrino'
     return _WS.sub(" ", text).strip()
 
 

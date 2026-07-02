@@ -28,7 +28,7 @@ from stone_pipeline.config.settings import CATEGORIES, SETTINGS
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import content_hash
-from stone_pipeline.core.text import ascii_fold, looks_code_shaped
+from stone_pipeline.core.text import ascii_fold, looks_code_shaped, match_key
 
 log = logfmt.get_logger("reference.loaders")
 
@@ -93,11 +93,12 @@ VOCAB_CATEGORIES = ("color", "finish", "type", "quality")
 
 
 def _norm(value: str) -> str:
-    """The shared normalization used for every name lookup: ascii-fold accents, casefold, collapse
-    whitespace. Matching projections (5A.1) extend this; this is the base key. Folding accents here
-    keeps backbone lookups consistent with the variation index (proj.norm), so a scraped 'Porrino'
-    resolves the same canonical variety whether the stored name is 'Porriño' or 'Porrino'."""
-    return " ".join(ascii_fold((value or "").strip()).casefold().split())
+    """The shared normalization for every name lookup -> delegates to core.text.match_key: ascii-fold
+    accents, casefold, AND fold every separator run (space/underscore/hyphen/dash/slash) to one space.
+    Folding separators too is what lets a hyphenated vocab value ('Semi-Precious Stone') match an
+    underscore/space slug, so a punctuation difference never splits the same name. Accent folding
+    keeps backbone lookups consistent with the variation index, so 'Porrino' == 'Porriño'."""
+    return match_key(value)
 
 
 # --- attributes.csv -----------------------------------------------------------

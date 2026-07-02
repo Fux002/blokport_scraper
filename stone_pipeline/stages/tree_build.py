@@ -27,7 +27,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS
 from stone_pipeline.core import csvio, logfmt
-from stone_pipeline.core.text import looks_like_artifact
+from stone_pipeline.core.text import looks_like_artifact, match_key
 
 log = logfmt.get_logger("tree")
 
@@ -37,11 +37,13 @@ COMBINATION_COLUMNS = ("product_category_id", "type_id", "variation_id",
 
 
 def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
-    """attributes.csv (category,value,sourceid) -> {kind: {value_lower: sourceId}}."""
+    """attributes.csv (category,value,sourceid) -> {kind: {match_key(value): sourceId}}.
+    Keyed by match_key so a lookup matches regardless of separator/case/accent (a hyphenated
+    'Semi-Precious Stone' resolves from an underscore/space slug); lookups must key the same way."""
     attr: dict[str, dict[str, str]] = defaultdict(dict)
     with Path(path).open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
-            attr[r["category"].strip().lower()][r["value"].strip().lower()] = r["sourceid"].strip()
+            attr[match_key(r["category"])][match_key(r["value"])] = r["sourceid"].strip()
     return attr
 
 
@@ -84,7 +86,7 @@ def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[st
         prefix = cat_to_prefix.get((post.get("category") or "").strip().lower())
         if prefix:
             for f in post.get("finishes") or []:
-                fid = attr["finish"].get((f or "").strip().lower())
+                fid = attr["finish"].get(match_key(f))
                 if fid:
                     out[prefix].add(fid)
     pcat_to_prefix = {attr["category"].get(_PREFIX_CATEGORY[p]): p for p in _PREFIX_CATEGORY}
@@ -131,7 +133,7 @@ def _load_assigned_types(path: Path, attr: dict) -> dict[str, str]:
                 nm = (r.get("variant") or "").strip().lower()
                 if not (raw and nm):
                     continue
-                tid = attr["type"].get(raw.lower())
+                tid = attr["type"].get(match_key(raw))
                 if tid:
                     out[nm] = tid
                 else:                                   # typo'd / unknown type -> don't fail silently
@@ -179,10 +181,10 @@ def _resolve_type(key: str, name: str, attr: dict) -> str | None:
     'Everest Quartzite' -> Quartzite)."""
     parts = key.split("_")[1:-1]  # drop branch prefix and trailing uuid
     for i in range(len(parts), 0, -1):
-        tid = attr["type"].get(" ".join(parts[:i]).lower())
+        tid = attr["type"].get(match_key(" ".join(parts[:i])))
         if tid:
             return tid
-    words = name.lower().replace("–", " ").replace("-", " ").split()
+    words = match_key(name).split()   # match_key folds hyphens/dashes, so no manual replace needed
     for n in (2, 1):  # a 2- or 1-word type name appearing anywhere in the Name
         for j in range(len(words) - n + 1):
             tid = attr["type"].get(" ".join(words[j:j + n]))
@@ -208,12 +210,12 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     by_key, by_cat_name, by_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
-    cat_pcat = {p: attr["category"].get(c) for p, c in _PREFIX_CATEGORY.items()}
+    cat_pcat = {p: attr["category"].get(match_key(c)) for p, c in _PREFIX_CATEGORY.items()}
 
     def combo(post) -> tuple:  # (type, colours, quals) from a backbone post, as ids
-        return (attr["type"].get((post.get("stone_type") or "").strip().lower()),
-                {attr["color"].get((x or "").strip().lower()) for x in (post.get("color") or [])},
-                {attr["quality"].get((x or "").strip().lower()) for x in (post.get("qualities") or [])})
+        return (attr["type"].get(match_key(post.get("stone_type") or "")),
+                {attr["color"].get(match_key(x)) for x in (post.get("color") or [])},
+                {attr["quality"].get(match_key(x)) for x in (post.get("qualities") or [])})
 
     # export rows + variety identity (Name) -> the colour/type a scrape gave it anywhere,
     # so fan-out mirrors in other categories inherit it, plus catalogue defaults.

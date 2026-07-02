@@ -35,6 +35,24 @@ def collapse_ws(text: str) -> str:
     return _WS.sub(" ", (text or "").strip())
 
 
+# A run of separators: whitespace, underscore, slash, or any hyphen/dash (ASCII '-', the unicode
+# hyphen/dashes U+2010..U+2015). All fold to ONE space so a separator never forks identity.
+_SEP_RUN = re.compile(r"[\s_/\-‐-―]+")
+
+
+def match_key(text: str) -> str:
+    """The canonical key for matching any name -- stone type, colour, finish, quality, variety,
+    vendor. Folds accents to ASCII, casefolds, and collapses every run of separator punctuation
+    (whitespace, hyphen/dash, underscore, slash) to a single space. A separator, case, or accent
+    difference must NEVER split the same name in two, so every name lookup keys on this:
+    'Semi-Precious Stone' == 'semi_precious_stone' == 'semi  precious stone' == 'Semi Precious Stone'.
+    This is the one shared normalizer; per-module copies must delegate here, not diverge.
+
+    Separators are folded BEFORE ascii_fold, so a unicode dash (en/em) becomes a space rather than
+    being stripped to nothing (which would glue the two words together)."""
+    return " ".join(ascii_fold(_SEP_RUN.sub(" ", text or "")).casefold().split())
+
+
 _BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")
 
 
