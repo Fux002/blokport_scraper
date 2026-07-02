@@ -171,27 +171,23 @@ def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
     carries the stone again simply sets it back)."""
     from stone_pipeline.stages.product_state import inventory_for, sku_for
 
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=INVENTORY_COLUMNS)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({
-                "Variant Sku": sku_for(row, cfg),          # read by importer
-                "Product Handle": row.handle or "",
-                "Variant Title": SETTINGS.backend.variant_title,
-                "Inventory Quantity": inventory_for(row),  # read by importer
-                "Reserved Quantity": "",
-            })
-        for sku, handle_val in discontinued:
-            writer.writerow({
-                "Variant Sku": sku, "Product Handle": handle_val,
-                "Variant Title": SETTINGS.backend.variant_title,
-                "Inventory Quantity": "0",                 # out of stock = reversible delist
-                "Reserved Quantity": "",
-            })
-    return path
+    cells = [{
+        "Variant Sku": sku_for(row, cfg),          # read by importer
+        "Product Handle": row.handle or "",
+        "Variant Title": SETTINGS.backend.variant_title,
+        "Inventory Quantity": inventory_for(row),  # read by importer
+        "Reserved Quantity": "",
+    } for row in rows]
+    cells += [{
+        "Variant Sku": sku, "Product Handle": handle_val,
+        "Variant Title": SETTINGS.backend.variant_title,
+        "Inventory Quantity": "0",                 # out of stock = reversible delist
+        "Reserved Quantity": "",
+    } for sku, handle_val in discontinued]
+    # atomic write (a crash mid-write must not leave a truncated file the next run reads as a
+    # baseline). SKUs/handles are derived, not scraped free-text, so no injection sanitize needed.
+    csvio.write_dicts(path, INVENTORY_COLUMNS, cells, sanitize=False)
+    return Path(path)
 
 
 DISCONTINUED_COLUMNS = ["Variant Sku", "Product Handle", "Action"]
@@ -201,15 +197,11 @@ def write_discontinued_csv(discontinued: list[tuple[str, str]], path: Path) -> P
     """The delete-loop report: products in Medusa that the supplier no longer carries. The
     inventory update already set them to stock 0 (out of stock); this lists them so they can be
     reviewed and optionally hard-deleted/archived in Medusa. The pipeline never auto-deletes."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=DISCONTINUED_COLUMNS)
-        writer.writeheader()
-        for sku, handle_val in discontinued:
-            writer.writerow({"Variant Sku": sku, "Product Handle": handle_val,
-                             "Action": "set to stock 0; review for delete/archive"})
-    return path
+    cells = [{"Variant Sku": sku, "Product Handle": handle_val,
+              "Action": "set to stock 0; review for delete/archive"}
+             for sku, handle_val in discontinued]
+    csvio.write_dicts(path, DISCONTINUED_COLUMNS, cells, sanitize=False)   # atomic
+    return Path(path)
 
 
 def write_rejects_csv(rows: list[CanonicalRow], path: Path) -> Path:

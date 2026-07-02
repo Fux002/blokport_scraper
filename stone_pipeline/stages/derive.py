@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import functools
+import json
 import re
 from dataclasses import dataclass
 
@@ -30,6 +31,21 @@ _NUM_UNIT = re.compile(r"(-?\d[\d.,]*\d|-?\d)\s*([a-zµ\"'″′’”]+)?", fla
 # the old first-number-only parse read '2-3 cm' as 2 (then metres). Average the endpoints and take
 # the trailing unit. Requires a digit before the dash, so a lone negative '-3' is NOT a range.
 _RANGE = re.compile(r"(\d[\d.,]*)\s*[-–—]\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
+# per-slab key in a scraped slabs-array, case/space/quote-insensitive ('"n":', "'N' :", '"Numero":')
+_SLAB_KEY = re.compile(r"""["']\s*(?:n|numero)\s*["']\s*:""", flags=re.IGNORECASE)
+
+
+def _count_slab_entries(raw: str) -> int:
+    """Number of slabs in a scraped slabs-array. Prefer a real JSON parse (count list items); fall
+    back to a case/space/quote-insensitive key count, so a spacing or casing variant of the per-slab
+    key ('"N" :', "'n'", '"Numero"') is not silently read as 0 (the old literal .count('\"n\"') bug)."""
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return len(data)
+    except (ValueError, TypeError):
+        pass
+    return len(_SLAB_KEY.findall(raw or ""))
 
 # section 10.2 branch dimension/weight ranges in METRES/tonnes (fallback only; parsed dims win).
 # A tile is a small finished piece (~30–60 cm face, ~1–2 cm thick), NOT a slab — sources often
@@ -198,7 +214,7 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
         return _accept(int(row.raw_slab_count), "explicit_slab_count", Confidence.high)
     # 4. slabs array length
     if row.raw_slabs_array:
-        count = row.raw_slabs_array.count('"n"') or row.raw_slabs_array.count('"Numero"')
+        count = _count_slab_entries(row.raw_slabs_array)
         if count > 0:
             return _accept(count, "slabs_array_length", Confidence.high)
     # 5. area division
@@ -359,18 +375,21 @@ def derive_description(row: CanonicalRow) -> None:
         row.description_method = "passthrough"
         return
     variety = title_case(_primary_variety_name(row.variation_name or row.raw_name or "This stone"))
-    color = (row.color_name or "natural").lower()
-    stone_type = (row.type_name or "stone").lower()
+    stone_type = (row.type_name or "stone").lower()     # 'stone' is a safe generic noun
+    color = (row.color_name or "").lower()               # OMIT when unresolved -- never invent 'natural'
+    material = f"{color} {stone_type}".strip()           # 'black marble', or just 'marble'
     if row.origin_city and row.origin_country_code:
         origin_clause = f"extracted in {row.origin_city}, {row.origin_country_code}"
     else:
         origin_clause = "natural stone"
-    fmt = _FORMAT_WORD.get((row.format_value or "").strip().casefold(), "slab").lower()
+    # the RESOLVED format word (format_resolve ran already); a neutral 'piece' beats mislabelling a
+    # block as a 'slab' when the format is genuinely unresolved.
+    fmt = _FORMAT_WORD.get((row.format_value or "").strip().casefold(), "").lower() or "piece"
     finish = (row.finish_name or "").lower()
     phrase = _FINISH_PHRASE.get(finish, "a refined natural surface")
     finish_clause = f"a {finish} {fmt}" if finish else f"a {fmt}"
     row.description = (
-        f"{variety} is a {color} {stone_type} {origin_clause}. "
+        f"{variety} is a {material} {origin_clause}. "
         f"Supplied as {finish_clause}, it presents {phrase}."
     )
     row.description_method = "template"

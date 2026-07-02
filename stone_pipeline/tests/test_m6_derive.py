@@ -120,6 +120,27 @@ def test_dimension_range_uses_midpoint_not_low_metres(ref, cfg):
     assert row.width == 0.025, f"range thickness should be the 2.5 cm midpoint, got {row.width}"
 
 
+def test_bundle_count_from_slabs_array_is_robust():
+    # regression: the per-slab key count must survive spacing/case/quote variants and prefer a real
+    # JSON parse, not a literal .count('"n"') that a spacing/case variant silently read as 0.
+    from stone_pipeline.stages.derive import _count_slab_entries
+    assert _count_slab_entries('[{"n":1},{"n":2},{"n":3}]') == 3
+    assert _count_slab_entries('{"x":[{ "N" : 1},{ "n":2}]}') == 2
+    assert _count_slab_entries('[{"Numero": 5},{"Numero": 6}]') == 2
+    assert _count_slab_entries("not json at all") == 0
+
+
+def test_description_uses_resolved_format_not_slab_default(ref, cfg):
+    # regression: a block must be described as a 'block', never defaulted to 'slab'; and an
+    # unresolved colour must not be invented as 'a natural <type>'.
+    row = _slab_row(raw_format="Block")
+    derive.derive_category(row, ref)
+    derive.derive_description(row)
+    d = row.description.lower()
+    assert "block" in d and " slab" not in d, f"block mislabelled: {row.description}"
+    assert "is a natural " not in d, f"invented a colour: {row.description}"
+
+
 def test_tile_dimensions_are_tile_sized(ref, cfg):
     # a tile with no scraped dimensions must get TILE-sized synthetic dims (~0.3-0.6m face,
     # ~1-2cm thick), NOT slab-sized (1.5-3m) -- sources often ship tiles with no dimensions.
