@@ -28,7 +28,13 @@ log = logfmt.get_logger("emit")
 def _num(value) -> str:
     if value is None:
         return ""
-    return f"{value:g}" if isinstance(value, float) else str(value)
+    if isinstance(value, float):
+        # NEVER '%g': it caps at 6 significant figures and flips to scientific notation past 1e6 /
+        # below 1e-4, so a large weight ('1.23457e+06') or a high-precision dimension would ship
+        # truncated or in a form Medusa can't parse. Fixed decimals (plenty for m/kg/m3), trailing
+        # zeros stripped, no exponent ever.
+        return f"{value:.10f}".rstrip("0").rstrip(".") or "0"
+    return str(value)
 
 
 def _bool(value) -> str:

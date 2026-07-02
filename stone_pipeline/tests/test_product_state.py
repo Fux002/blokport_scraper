@@ -14,6 +14,26 @@ def _row(surrogate, slab_count="5"):
     return CanonicalRow(src_site="polonine", surrogate_key=surrogate, raw_slab_count=slab_count)
 
 
+def test_inventory_for_coerces_messy_stock_strings():
+    # regression: '1,000' / '1.0' / '12 pcs' must NOT silently floor to the in-stock '1' default;
+    # the shared parse_number coerces them. A literal 0 (or unparseable) still floors to 1 (in stock).
+    assert product_state.inventory_for(_row("a", slab_count="1,000")) == "1000"
+    assert product_state.inventory_for(_row("a", slab_count="1.0")) == "1"
+    assert product_state.inventory_for(_row("a", slab_count="12 pcs")) == "12"
+    assert product_state.inventory_for(_row("a", slab_count="7")) == "7"
+    assert product_state.inventory_for(_row("a", slab_count="0")) == "1"    # 0 is not a real qty
+
+
+def test_emit_num_never_scientific_or_truncated():
+    # regression: %g truncated to 6 sig figs and flipped to scientific notation; a large weight or a
+    # high-precision dimension must ship as a plain fixed-decimal Medusa can parse.
+    from stone_pipeline.stages.emit import _num
+    assert _num(1234567.0) == "1234567"          # no '1.23457e+06'
+    assert _num(0.0014348) == "0.0014348"        # small volume precision kept
+    assert _num(3.14159265) == "3.14159265"      # not capped at 6 sig figs
+    assert _num(2.5) == "2.5" and _num(0.02) == "0.02" and _num(None) == ""
+
+
 def test_known_loader_is_column_tolerant(tmp_path):
     path = tmp_path / "known.csv"
     path.write_text("Product Handle,Variant Sku,Variant Inventory Quantity\n"

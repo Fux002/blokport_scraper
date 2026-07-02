@@ -111,6 +111,15 @@ def test_dimensions_prefer_parsed(ref, cfg):
     assert "length:parsed" in row.dimension_method
 
 
+def test_dimension_range_uses_midpoint_not_low_metres(ref, cfg):
+    # regression: '2-3 cm' must parse to the 2.5 cm midpoint (0.025 m), NOT the low endpoint '2'
+    # read as 2 metres (the old first-number-only parse made a 2 cm slab 2 m thick).
+    row = _slab_row(raw_dimensions="length=2.80m;height=1.97m", raw_thickness="2-3 cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.width == 0.025, f"range thickness should be the 2.5 cm midpoint, got {row.width}"
+
+
 def test_tile_dimensions_are_tile_sized(ref, cfg):
     # a tile with no scraped dimensions must get TILE-sized synthetic dims (~0.3-0.6m face,
     # ~1-2cm thick), NOT slab-sized (1.5-3m) -- sources often ship tiles with no dimensions.

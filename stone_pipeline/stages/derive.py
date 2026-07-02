@@ -26,6 +26,10 @@ from stone_pipeline.reference.loaders import ReferenceData
 log = logfmt.get_logger("derive")
 
 _NUM_UNIT = re.compile(r"(-?\d[\d.,]*\d|-?\d)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
+# a range 'lo - hi [unit]' ('2-3 cm', '2 - 3 cm', '20–30 mm'): the unit trails the WHOLE range, so
+# the old first-number-only parse read '2-3 cm' as 2 (then metres). Average the endpoints and take
+# the trailing unit. Requires a digit before the dash, so a lone negative '-3' is NOT a range.
+_RANGE = re.compile(r"(\d[\d.,]*)\s*[-–—]\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
 
 # section 10.2 branch dimension/weight ranges in METRES/tonnes (fallback only; parsed dims win).
 # A tile is a small finished piece (~30–60 cm face, ~1–2 cm thick), NOT a slab — sources often
@@ -55,6 +59,17 @@ def _parse_measure(text: str, ref: ReferenceData) -> float | None:
     """Parse a single '2cm' / '2.80m' measure to metres via units.csv."""
     if not text:
         return None
+    # a range ('2-3 cm') resolves to the midpoint with the trailing unit, NOT the low endpoint as
+    # unit-less metres. Checked first so '2-3 cm' can't fall through to the single-number branch.
+    rng = _RANGE.search(text)
+    if rng:
+        lo, hi = parse_number(rng.group(1)), parse_number(rng.group(2))
+        if lo is not None and hi is not None:
+            raw_token = (rng.group(3) or "").strip()
+            converted = ref.units.convert((lo + hi) / 2.0, normalize_unit(rng.group(3)))
+            if converted is not None:
+                return converted
+            return (lo + hi) / 2.0 if not raw_token else None
     match = _NUM_UNIT.search(text)
     if not match:
         return None

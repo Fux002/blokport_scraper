@@ -20,6 +20,7 @@ from pathlib import Path
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.core.schema import CanonicalRow
 
 log = logfmt.get_logger("product_state")
@@ -70,11 +71,12 @@ def sku_for(row: CanonicalRow, cfg: SourceConfig) -> str:
 def inventory_for(row: CanonicalRow) -> str:
     for candidate in (row.raw_slab_count, row.bundle_size, row.raw_inventory_quantity):
         text = str(candidate).strip() if candidate is not None else ""
-        # require > 0: a literal '0' slab count is not a real quantity (derive_bundle_size rejects it
-        # the same way) -> fall through to the next candidate / the in-stock '1' default, rather than
-        # shipping the product out-of-stock.
-        if text.isdigit() and int(text) > 0:
-            return text
+        # parse_number (the shared numeric front door) coerces messy stock that a bare .isdigit()
+        # silently dropped to the '1' default: '1,000' -> 1000, '1.0' -> 1, '12 pcs' -> 12. require
+        # > 0: a literal 0 (or unparseable) is not a real quantity -> next candidate / in-stock '1'.
+        n = parse_number(text)
+        if n is not None and int(n) > 0:
+            return str(int(n))
     return "1"
 
 
