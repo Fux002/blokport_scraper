@@ -90,3 +90,30 @@ def test_products_populate_render_equals_emit(tmp_path):
     assert via_ledger.read_bytes() == direct.read_bytes(), (
         "product populate+render is NOT byte-identical to emit"
     )
+
+
+def test_repopulate_preserves_synced_products(tmp_path):
+    # regression: a write-through re-run must NOT reset a synced product to pending or wipe its
+    # acked medusa_id. NEW -> pending; UNCHANGED re-run -> stays synced (untouched); a real content
+    # CHANGE -> dirty (re-serve) with the id preserved. The old code stomped all three.
+    cfg = load_source("polonine")
+    rows = _fixture_rows()
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _seed_ids(ledger)
+        populate_products(ledger, rows, cfg)                       # NEW
+        sku = emit._sku(rows[0], cfg)
+        assert ledger.get("product", "sku", sku)["state"] == "pending"
+
+        # Medusa acks an id
+        ledger.execute("UPDATE product SET state='synced', medusa_id='prod_1', last_synced=? "
+                       "WHERE sku=?", (now_iso(), sku))
+        # UNCHANGED re-run: stays synced, id intact
+        populate_products(ledger, rows, cfg)
+        row = ledger.get("product", "sku", sku)
+        assert row["state"] == "synced" and row["medusa_id"] == "prod_1", "re-run stomped a synced product"
+
+        # CHANGED re-run: dirty (re-serve), id preserved
+        changed = [rows[0].model_copy(update={"title": "Carrara White Polished Slab v2"})] + rows[1:]
+        populate_products(ledger, changed, cfg)
+        row = ledger.get("product", "sku", sku)
+        assert row["state"] == "dirty" and row["medusa_id"] == "prod_1", "a change must dirty, keep id"

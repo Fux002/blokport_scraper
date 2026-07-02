@@ -54,6 +54,10 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "ON CONFLICT(key) DO UPDATE SET name = excluded.name, "
                 "aliases = excluded.aliases, image_url = excluded.image_url, "
                 "volume = excluded.volume, in_full = 1, payload_hash = excluded.payload_hash, "
+                # a content change re-serves (synced -> dirty); unchanged keeps its state. medusa_id
+                # and first_seen are never touched, so an acked id survives a re-run.
+                "state = CASE WHEN variation.payload_hash != excluded.payload_hash "
+                "THEN 'dirty' ELSE variation.state END, "
                 "updated_at = excluded.updated_at",
                 (key, branch, "", name, json.dumps(aliases), image_url, None, None, volume,
                  None, ph, "pending", now, None, now, now),
@@ -155,20 +159,27 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "sold_in_bundle": 1 if r.sold_in_bundle else 0,
             "bundle_size": r.bundle_size,
             "inventory_quantity": inventory_for(r),
-            "medusa_id": None,
-            "payload_hash": payload_hash([
+            "payload_hash": (ph := payload_hash([
                 variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
                 r.title, r.description, r.handle, r.weight, r.length, r.width, r.height,
                 r.origin_country_code, json.dumps(r.product_image_keys or []),
                 r.company_id, r.sales_channel_id, _category_name_for(ledger, r.category_pcat_id),
                 r.bundle_size, json.dumps(r.port_ids or []),
-            ]),
-            "state": "pending",
-            "last_synced": None,
+            ])),
             "created_at": now,
             "updated_at": now,
         }
-        ledger.upsert("product", record, pk=("sku",))
+        # Convergent sync state (design db.py header): NEW -> pending, CHANGED -> dirty, UNCHANGED
+        # -> untouched. CRITICAL: preserve a synced product's medusa_id + state on re-run. The old
+        # code hardcoded state='pending', medusa_id=None, so every write-through run reset the whole
+        # catalog to pending and wiped the acked Medusa ids -> Medusa re-ingested everything nightly.
+        prev = ledger.get("product", "sku", sku)
+        if prev is None:
+            record.update(medusa_id=None, state="pending", last_synced=None)
+        else:
+            record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"],
+                          state="dirty" if prev["payload_hash"] != ph else prev["state"])
+        ledger.upsert("product", record, pk=("sku",), keep_on_update=("created_at", "first_seen"))
         n += 1
     return n
 
