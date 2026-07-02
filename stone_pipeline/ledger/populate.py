@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -90,7 +91,13 @@ def fill_variation_types(ledger: Ledger) -> int:
     seeded `type` attribute vocabulary, longest match first (the same recovery
     tree_build uses). This is the variation payload's last empty field (sync prereq).
     Returns the number filled."""
-    types = {r["value"].lower(): r["value"]
+    # Fold case AND any run of hyphen/underscore/space to a single space, so a Key slug
+    # (semi_precious_stone) matches a hyphenated vocab value (Semi-Precious Stone). Without
+    # this the multi-word hyphenated types never type, and their variations hold forever.
+    def _norm(s: str) -> str:
+        return re.sub(r"[\s_-]+", " ", s.lower()).strip()
+
+    types = {_norm(r["value"]): r["value"]
              for r in ledger.execute("SELECT value FROM attribute WHERE category = 'type'")}
     if not types:
         return 0
@@ -100,7 +107,7 @@ def fill_variation_types(ledger: Ledger) -> int:
         parts = v["key"].split("_")[1:-1]   # drop the branch prefix and the trailing uuid
         found = None
         for i in range(len(parts), 0, -1):
-            cand = " ".join(parts[:i])      # slug uses '_'; the vocab is space-separated
+            cand = _norm("_".join(parts[:i]))   # normalize the slug the same way as the vocab
             if cand in types:
                 found = types[cand]
                 break

@@ -127,6 +127,23 @@ def test_fill_variation_types_from_key(tmp_path):
         assert ledger.get("variation", "key", "slab_granite_kashmir_white_uuid")["type"] == "Granite"
 
 
+def test_fill_variation_types_hyphenated_multiword(tmp_path):
+    # regression: a hyphenated multi-word type (Semi-Precious Stone) must type from a Key slug
+    # that uses underscores (slab_semi_precious_stone_...). The vocab hyphen vs the slug
+    # underscore/space mismatch previously left every such variation untyped -> held forever.
+    from stone_pipeline.ledger.populate import fill_variation_types
+
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("attribute", {"category": "type", "value": "Semi-Precious Stone",
+                                    "medusa_id": "x", "state": "synced",
+                                    "created_at": now, "updated_at": now}, pk=("category", "value"))
+        _variation(ledger, "slab_semi_precious_stone_agata_brown_uuid", state="pending", type_="")
+        assert fill_variation_types(ledger) == 1
+        assert ledger.get("variation", "key",
+                          "slab_semi_precious_stone_agata_brown_uuid")["type"] == "Semi-Precious Stone"
+
+
 def test_inventory_sync_serves_delta_for_synced_products_only(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
