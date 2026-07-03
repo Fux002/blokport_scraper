@@ -5,9 +5,11 @@
     python -m stone_pipeline.build --sources zucchi         # ONE source -> catalog -> verify
     python -m stone_pipeline.build --stage scrape --sources zucchi   # that source's products+stock ONLY
     python -m stone_pipeline.build --stage catalog          # re-consolidate the SHARED catalog + verify
+    python -m stone_pipeline.build --stage inventory        # cheap stock-only refresh, all sources
+    python -m stone_pipeline.build --stage inventory --sources zucchi   # one source's stock only
 
 The two axes are independent: `--sources` picks WHICH scrapers (default: all enabled), `--stage`
-picks HOW FAR (scrape / catalog / all, the default). A per-source scrape is safe on live data --
+picks HOW FAR (scrape / catalog / inventory / all, the default). A per-source scrape is safe on live data --
 products, stock and the delist are all SKU-prefix scoped to that source, and the shared catalog is
 rebuilt only by the catalog stage, which always consolidates every source's latest run.
 
@@ -29,12 +31,13 @@ from __future__ import annotations
 import sys
 
 from stone_pipeline import catalog as catalog_mod
+from stone_pipeline import inventory as inventory_mod
 from stone_pipeline import run as run_mod
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("build")
 
-STAGES = ("scrape", "catalog", "all")
+STAGES = ("scrape", "catalog", "inventory", "all")
 
 
 def _arg(argv: list[str], flag: str) -> str | None:
@@ -78,6 +81,14 @@ def _catalog() -> int:
         return code or 1
 
 
+def _inventory(sources: list[str] | None) -> int:
+    """Stage 'inventory': the lightweight stock clock. Same scrape -> match path but emits ONLY the
+    stock delta into the ledger -- no product import, images, or catalog. All enabled sources, or a
+    subset; source-scoped like the rest, so refreshing one supplier's stock never touches another's.
+    (A full scrape already refreshes stock as part of its emit; this is the cheap stock-only path.)"""
+    return inventory_mod.main(sources or [])
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
 
@@ -97,6 +108,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown --stage {stage!r}; expected one of {', '.join(STAGES)}")
         log.error("build: unknown stage", extra={"extra_fields": {"stage": stage}})
         return 2
+
+    # inventory is a standalone stage: the cheap stock-only refresh, no catalog/gate.
+    if stage == "inventory":
+        rc = _inventory(sources)
+        scope = ", ".join(sources) if sources else "all enabled sources"
+        if rc != 0:
+            log.error("inventory refresh failed", extra={"extra_fields": {"rc": rc, "sources": sources}})
+        else:
+            print(f"\ninventory refresh complete ({scope}) -- stock delta written to the ledger")
+        return rc
 
     # The dev seed (variants_export_base.csv) is maintained at the END of catalog.run as a copy of the
     # freshly-built 1_variants_full -- base IS the full list, one source of truth, no second path here.

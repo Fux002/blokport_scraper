@@ -24,6 +24,7 @@ def _stub_stages(monkeypatch):
     calls = []
     monkeypatch.setattr(build, "_scrape", lambda sources: calls.append(("scrape", sources)) or 0)
     monkeypatch.setattr(build, "_catalog", lambda: calls.append(("catalog", None)) or 0)
+    monkeypatch.setattr(build, "_inventory", lambda sources: calls.append(("inventory", sources)) or 0)
     return calls
 
 
@@ -43,6 +44,18 @@ def test_stage_catalog_only_never_scrapes(monkeypatch):
     calls = _stub_stages(monkeypatch)
     assert build.main(["--stage", "catalog"]) == 0
     assert calls == [("catalog", None)]
+
+
+def test_stage_inventory_only_is_standalone(monkeypatch):
+    calls = _stub_stages(monkeypatch)
+    assert build.main(["--stage", "inventory", "--sources", "zucchi"]) == 0
+    assert calls == [("inventory", ["zucchi"])]          # no scrape, no catalog
+
+
+def test_stage_inventory_all_sources(monkeypatch):
+    calls = _stub_stages(monkeypatch)
+    assert build.main(["--stage", "inventory"]) == 0
+    assert calls == [("inventory", None)]
 
 
 def test_unknown_stage_exits_nonzero_and_runs_nothing(monkeypatch):

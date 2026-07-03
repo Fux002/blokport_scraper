@@ -38,7 +38,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-STAGES = ("scrape", "catalog", "all")
+STAGES = ("scrape", "catalog", "inventory", "all")
 
 
 def _public(rec: dict) -> dict:

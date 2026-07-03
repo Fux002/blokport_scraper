@@ -59,6 +59,13 @@ def test_catalog_stage_carries_no_sources():
     assert "--sources" not in runner._build_command(seen["rec"])
 
 
+def test_inventory_stage_scopes_to_one_source():
+    seen, launch = _capture()
+    rec, code = runner.start_run(sources=["zucchi"], stage="inventory", launch=launch)
+    assert code == 202 and rec["stage"] == "inventory"
+    assert runner._build_command(seen["rec"])[-4:] == ["--stage", "inventory", "--sources", "zucchi"]
+
+
 def test_unknown_stage_is_rejected():
     rec, code = runner.start_run(stage="bogus", launch=lambda r: None)
     assert code == 400 and "bogus" in rec["error"]
