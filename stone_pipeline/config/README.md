@@ -46,10 +46,37 @@ Every request needs `Authorization: Bearer <BLOKPORT_CONFIG_TOKEN>`. JSON in, JS
 | `GET` | `/config/v1/sources` | list every scraper | `{ "sources": [ <source>, ... ] }` |
 | `GET` | `/config/v1/sources/<name>` | one scraper | `<source>` or `404` |
 | `PUT` | `/config/v1/sources/<name>` | create or update one | body: `<source>` -> the saved `<source>` |
+| `POST` | `/config/v1/run` | trigger a scrape ("produce") of the ENABLED sources | `202` + run record, or `409` (in-flight run) |
+| `GET` | `/config/v1/run` | the current / latest run | `{ "current": <run> \| null }` |
+| `GET` | `/config/v1/run/<run_id>` | one run by id | `<run>` or `404` |
 
 `PUT` replaces the row, so send the full object (a missing field falls to its default).
 To add a new scraper, `PUT` a name that does not exist yet. To disable one, `PUT` it with
 `"enabled": false` (or include it in any edit).
+
+### The "Run scraper" button (the produce step)
+
+`POST /config/v1/run` is the **produce** trigger, distinct from Medusa's **import** (`catalog`/
+`inventory` on the backend). It runs `run all` for the **enabled** sources, asynchronously, and
+fills the sync ledger. Then Medusa's `catalog`/`inventory` pulls that ledger into the shop:
+
+```
+POST /config/v1/run   ->   (Medusa) Run catalog   ->   products live
+  scrape the vendors         import from ledger
+  fills the ledger           empties the ledger
+```
+
+- a **run** is `{ run_id, status, mode, started_at, finished_at, sources, progress, error }`;
+  **status** = `queued` -> `running` -> `succeeded` | `failed`. Poll `GET /config/v1/run/<run_id>`.
+- **single-run guarded**: a second `POST` while one is in progress returns `409` with the in-flight run.
+- optional `POST` body `{ "sources": ["polonine"] }` overrides the enabled set for one run.
+- **backend**: `local` (dev default) runs the pipeline as a subprocess on the scraper host;
+  `ecs` (set `BLOKPORT_RUN_MODE=ecs`) triggers the scheduled Fargate task on demand (needs
+  `BLOKPORT_ECS_CLUSTER` / `BLOKPORT_ECS_SUBNETS` / `BLOKPORT_ECS_SG`). The nightly schedule is
+  unchanged -- this is the manual "scrape now" path alongside it.
+
+For `:4200`: one button, `POST /config/v1/run` (server-side, with the token), then poll `GET
+/config/v1/run` to show running/done. Disable the button while `status == "running"`.
 
 ### The `<source>` object
 

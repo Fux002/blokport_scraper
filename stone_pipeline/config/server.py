@@ -29,8 +29,22 @@ log = logfmt.get_logger("config.server")
 def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
     """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
     or ['sources', 'polonine']). Pure: returns (status_code, json body)."""
+    if segments and segments[0] == "run":
+        # the 'produce' trigger: kick off a scrape of the ENABLED sources into the ledger.
+        from stone_pipeline.config import runner
+        if len(segments) == 1:
+            if method == "POST":
+                srcs = body.get("sources") if isinstance(body, dict) else None
+                return runner.start_run(srcs)   # (record, 202) or (in-flight, 409)
+            if method == "GET":
+                return 200, runner.current()
+            return 405, {"error": "POST /config/v1/run to trigger, GET for the current run"}
+        if len(segments) == 2 and method == "GET":     # /run/<run_id>
+            rec = runner.get_run(segments[1])
+            return (200, rec) if rec else (404, {"error": f"no run {segments[1]!r}"})
+        return 404, {"error": "expected /config/v1/run or /config/v1/run/<run_id>"}
     if not segments or segments[0] != "sources":
-        return 404, {"error": "not found; expected /config/v1/sources[/<name>]"}
+        return 404, {"error": "not found; expected /config/v1/sources[/<name>] or /config/v1/run"}
     if len(segments) == 1:
         if method == "GET":
             return 200, {"sources": store.list_rows()}
@@ -77,10 +91,10 @@ class ConfigHandler(BaseHTTPRequestHandler):
         if len(seg) < 2 or seg[0] != "config" or seg[1] != "v1":
             return self._respond(404, {"error": "not found; expected /config/v1/..."})
         body = None
-        if method == "PUT":
+        if method in ("PUT", "POST"):
             length = int(self.headers.get("Content-Length") or 0)
             try:
-                body = json.loads(self.rfile.read(length) or b"null")
+                body = json.loads(self.rfile.read(length) or b"null") if length else None
             except json.JSONDecodeError:
                 return self._respond(400, {"error": "invalid JSON body"})
         try:
@@ -95,6 +109,9 @@ class ConfigHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         self._handle("PUT")
+
+    def do_POST(self) -> None:
+        self._handle("POST")
 
     def log_message(self, *args) -> None:
         log.info("config request", extra={"extra_fields": {"client": self.address_string()}})

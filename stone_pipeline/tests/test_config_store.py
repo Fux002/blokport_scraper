@@ -86,3 +86,31 @@ def test_config_api_dispatch(tmp_path, monkeypatch):
 
     assert server.dispatch("GET", ["sources", "nope"], None)[0] == 404
     assert server.dispatch("PUT", ["sources", "x"], "not-a-dict")[0] == 400
+
+
+def test_run_trigger_matches_the_admin_contract(tmp_path, monkeypatch):
+    # the 'produce' button: POST /config/v1/run scrapes the ENABLED sources, async, single-run
+    # guarded; GET /run = current, GET /run/<id> = by id. Contract the :4200 admin consumes.
+    from stone_pipeline.config import runner, server
+
+    yaml_path = _seed_yaml(tmp_path)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+    store.set_enabled("varsha", False)                        # only polonine enabled
+    runner._runs.clear(); runner._current_id = None
+    try:
+        rec, code = runner.start_run(launch=lambda r: None)   # launcher leaves it 'queued'
+        assert code == 202 and rec["status"] == "queued" and rec["mode"] == "local"
+        assert rec["sources"] == ["polonine"]                 # enabled sources only
+        assert set(rec) >= {"run_id", "status", "started_at", "finished_at", "sources", "progress", "error"}
+        rid = rec["run_id"]
+        assert runner.start_run(launch=lambda r: None)[1] == 409                    # single-run guard
+        assert server.dispatch("GET", ["run"], None)[1]["current"]["run_id"] == rid  # current
+        assert server.dispatch("GET", ["run", rid], None) == (200, rec)              # by id
+        assert server.dispatch("GET", ["run", "nope"], None)[0] == 404
+        # a completed run frees the guard
+        runner._runs.clear(); runner._current_id = None
+        assert runner.start_run(launch=lambda r: r.update(status="succeeded"))[1] == 202
+        assert runner.start_run(launch=lambda r: r.update(status="succeeded"))[1] == 202
+    finally:
+        runner._runs.clear(); runner._current_id = None
