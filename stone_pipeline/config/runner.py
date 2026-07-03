@@ -45,7 +45,30 @@ STAGES = ("scrape", "catalog", "inventory", "all")
 def _public(rec: dict) -> dict:
     return {k: rec.get(k) for k in
             ("run_id", "status", "mode", "started_at", "finished_at",
-             "sources", "scope", "stage", "progress", "error")}
+             "sources", "scope", "stage", "counts", "progress", "error")}
+
+
+def _capture_counts() -> dict | None:
+    """Ledger totals per entity after a run, for the run record's `counts` (what's now in the ledger).
+    Best-effort: a failure here must not affect the run."""
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
+    try:
+        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+            return {t: lg.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"]
+                    for t in ("variation", "product", "inventory")}
+    except Exception:
+        log.exception("failed to capture run counts (non-fatal)")
+        return None
+
+
+def _persist_run(rec: dict) -> None:
+    """Durably store a terminal run record so GET /run can return `last` across a restart."""
+    try:
+        from stone_pipeline.config import store
+        store.record_run_log(_public(rec))
+    except Exception:
+        log.exception("failed to persist run record (non-fatal)")
 
 
 def _stamp_last_run(rec: dict, status: str) -> None:
@@ -81,12 +104,15 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     with _lock:
         rec["status"] = "running"
     rc = proc.wait()
+    counts = _capture_counts()                          # ledger totals after the run
     with _lock:
         rec["status"] = "succeeded" if rc == 0 else "failed"
         rec["finished_at"] = _now()
+        rec["counts"] = counts
         if rc != 0:
             rec["error"] = f"pipeline exited {rc}"
     _stamp_last_run(rec, rec["status"])
+    _persist_run(rec)                                   # durable `last` across a restart
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
 
 
@@ -136,8 +162,10 @@ def _launch_ecs(rec: dict) -> None:
         # 'dispatched' (a terminal-for-us state the run/reset gate ignores) and free the slot; follow
         # the actual task in CloudWatch. 'one run at a time' for ECS is enforced by the cluster.
         rec["status"] = "dispatched"
+        rec["finished_at"] = _now()   # our terminal event (we can't watch Fargate); counts stay None
         global _current_id
         _current_id = None
+    _persist_run(rec)                 # so it shows as `last` (dispatched, no counts)
 
 
 _LAUNCHERS = {"local": _launch_local, "ecs": _launch_ecs}
@@ -184,6 +212,7 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
             rec["finished_at"] = _now()
             rec["error"] = str(exc)
         _stamp_last_run(rec, "failed")
+        _persist_run(rec)
         log.exception("scraper run failed to launch")
         return _public(rec), 500
     return _public(rec), 202
@@ -247,6 +276,15 @@ def get_run(run_id: str) -> dict | None:
 
 
 def current() -> dict:
+    """GET /config/v1/run: the in-flight run (or null when idle) AND the last finished run. `last` is
+    read from the durable run_log, so it survives a config-server restart (the in-memory dict does not)."""
     with _lock:
         rec = _runs.get(_current_id) if _current_id else None
-        return {"current": _public(rec) if rec else None}
+        cur = _public(rec) if rec and rec["status"] in ("queued", "running") else None
+    try:
+        from stone_pipeline.config import store
+        last = store.last_run_log()
+    except Exception:
+        log.exception("failed to read last run (non-fatal)")
+        last = None
+    return {"current": cur, "last": last}

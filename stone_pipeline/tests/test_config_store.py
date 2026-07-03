@@ -47,6 +47,25 @@ def test_record_run_stamps_last_run_per_source(tmp_path, monkeypatch):
     assert store.get_row("polonine")["last_run_status"] == "succeeded"
 
 
+def test_run_log_persists_the_last_finished_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    assert store.last_run_log() is None
+    store.record_run_log({"run_id": "r1", "status": "succeeded", "stage": "all",
+                          "finished_at": "2026-07-03T10:00:00+00:00",
+                          "counts": {"variation": 5, "product": 2, "inventory": 2}})
+    store.record_run_log({"run_id": "r2", "status": "failed", "stage": "scrape",
+                          "finished_at": "2026-07-03T11:00:00+00:00"})
+    last = store.last_run_log()
+    assert last["run_id"] == "r2"                            # most recent FINISHED
+    # a still-running record (no finished_at) is never 'last'
+    store.record_run_log({"run_id": "r3", "status": "running", "finished_at": None})
+    assert store.last_run_log()["run_id"] == "r2"
+    # upsert by run_id (a completing run overwrites its own earlier record)
+    store.record_run_log({"run_id": "r2", "status": "succeeded",
+                          "finished_at": "2026-07-03T11:00:00+00:00", "counts": {"variation": 9}})
+    assert store.last_run_log()["counts"] == {"variation": 9}
+
+
 def test_seed_pipeline_read_and_enable(tmp_path, monkeypatch):
     yaml_path = _seed_yaml(tmp_path)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))

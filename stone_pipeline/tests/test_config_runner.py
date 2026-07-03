@@ -188,6 +188,33 @@ def test_dispatch_routes_reset_with_hard_and_sources(monkeypatch):
     assert code == 200 and seen == {"sources": ["zucchi"], "hard": True}
 
 
+def test_current_returns_current_and_last_and_survives_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    out = runner.current()
+    assert set(out) == {"current", "last"} and out["current"] is None and out["last"] is None  # idle, none yet
+
+    from stone_pipeline.config import store
+    store.record_run_log({"run_id": "r1", "status": "succeeded", "stage": "all",
+                          "sources": ["polonine"], "finished_at": "2026-07-03T10:00:00+00:00",
+                          "counts": {"variation": 3, "product": 1, "inventory": 1}})
+    runner._runs.clear(); runner._current_id = None          # simulate a config-server RESTART
+    out = runner.current()
+    assert out["current"] is None                            # nothing in flight after restart
+    assert out["last"]["run_id"] == "r1"                     # ...but `last` survives, from the store
+    assert out["last"]["counts"] == {"variation": 3, "product": 1, "inventory": 1}
+
+
+def test_capture_counts_shape(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    assert runner._capture_counts() == {"variation": 0, "product": 0, "inventory": 0}   # fresh ledger
+
+
+def test_public_record_carries_counts_field():
+    seen, launch = _capture()
+    rec, _ = runner.start_run(stage="inventory", launch=launch)
+    assert "counts" in rec and "stage" in rec and "sources" in rec   # the fields Medusa reads
+
+
 def test_second_trigger_while_running_is_refused_409():
     # a launcher that leaves the run 'running' (does not finish it)
     rec1, code1 = runner.start_run(launch=lambda r: r.update(status="running"))

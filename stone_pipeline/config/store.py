@@ -82,6 +82,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if col not in cols:
             conn.execute(f"ALTER TABLE source ADD COLUMN {col} TEXT")
             conn.commit()
+    # durable run records so GET /config/v1/run can return `last` across a config-server restart
+    # (the in-memory run dict is lost on restart).
+    conn.execute("CREATE TABLE IF NOT EXISTS run_log ("
+                 "run_id TEXT PRIMARY KEY, record TEXT NOT NULL, finished_at TEXT)")
+    conn.commit()
 
 
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
@@ -192,6 +197,27 @@ def set_enabled(source: str, enabled: bool, path: str | Path | None = None) -> N
         conn.execute("UPDATE source SET enabled = ?, updated_at = ? WHERE source = ?",
                      (1 if enabled else 0, _now(), source))
         conn.commit()
+
+
+def record_run_log(record: dict, path: str | Path | None = None) -> None:
+    """Persist one run's public record (JSON) so `last` survives a config-server restart. Keyed by
+    run_id (upsert), bounded to the most recent 50 by finished_at."""
+    with closing(open_store(path)) as conn:
+        conn.execute(
+            "INSERT INTO run_log (run_id, record, finished_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(run_id) DO UPDATE SET record = excluded.record, finished_at = excluded.finished_at",
+            (record.get("run_id"), json.dumps(record), record.get("finished_at")))
+        conn.execute("DELETE FROM run_log WHERE run_id NOT IN "
+                     "(SELECT run_id FROM run_log ORDER BY finished_at DESC LIMIT 50)")
+        conn.commit()
+
+
+def last_run_log(path: str | Path | None = None) -> dict | None:
+    """The most recent FINISHED run record, or None if none has completed yet."""
+    with closing(open_store(path)) as conn:
+        r = conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL "
+                         "ORDER BY finished_at DESC LIMIT 1").fetchone()
+        return json.loads(r["record"]) if r else None
 
 
 def record_run(sources, status: str, stage: str, at: str | None = None,
