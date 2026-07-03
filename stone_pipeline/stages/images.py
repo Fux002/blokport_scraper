@@ -137,8 +137,10 @@ def _slot_row(row: CanonicalRow, public_urls: list[str]) -> None:
     row.image_keys = public_urls
     row.thumbnail_key = public_urls[0] if public_urls else None
     if row.is_block:
+        # a block's first images fill the oriented faces (Front/Right/Back/Left); ANY MORE go into
+        # the product/"other" images rather than being dropped -- use every image the scrape gave.
         row.oriented_image_keys = public_urls[:_BLOCK_SLOTS]
-        row.product_image_keys = []
+        row.product_image_keys = public_urls[_BLOCK_SLOTS:_BLOCK_SLOTS + _SLAB_SLOTS]
     else:
         row.product_image_keys = public_urls[:_SLAB_SLOTS]
         row.oriented_image_keys = []

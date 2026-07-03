@@ -46,7 +46,18 @@ def test_block_slots_oriented(local_cfg):
     fetch = _fake_fetch({f"http://x/{i}.jpg": bytes([i]) * 10 for i in range(4)})
     images.run([row], fetch=fetch, cfg=local_cfg)
     assert len(row.oriented_image_keys) == 4
-    assert row.product_image_keys == []
+    assert row.product_image_keys == []          # exactly 4 -> no extras
+
+
+def test_block_extras_go_to_product_images(local_cfg):
+    # a block with MORE than the 4 oriented faces: the extras go to product/"other" images, not dropped.
+    row = CanonicalRow(src_site="x", surrogate_key="7", is_block=True,
+                       raw_image_urls=[f"http://x/{i}.jpg" for i in range(6)])
+    fetch = _fake_fetch({f"http://x/{i}.jpg": bytes([i]) * 10 for i in range(6)})
+    images.run([row], fetch=fetch, cfg=local_cfg)
+    assert len(row.oriented_image_keys) == 4     # Front/Right/Back/Left
+    assert len(row.product_image_keys) == 2      # the 2 extras kept, not dropped
+    assert row.thumbnail_key == row.oriented_image_keys[0]
 
 
 def test_identical_bytes_dedup(local_cfg):
