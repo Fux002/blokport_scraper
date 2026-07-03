@@ -74,12 +74,12 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
 
 
 def _launch_local(rec: dict) -> None:
-    # run only the requested sources: `run all` (enabled) when the whole set, else one target each.
-    # a single explicit source runs that source; the pipeline's own enabled-filter still applies to 'all'.
-    target = "all" if set(rec["sources"]) == set(_resolve_sources(None)) or len(rec["sources"]) != 1 \
-        else rec["sources"][0]
+    # FULL produce = stone_pipeline.build (run all for the ENABLED sources -> products, THEN catalog
+    # -> variants/combinations + record_catalog, then a consistency gate). Not bare `run all`: that
+    # refreshes products against a STALE variation table (a new variety never enters it), which was a
+    # source of the produce-vs-build divergence. build is one atomic, self-verifying produce step.
     proc = subprocess.Popen(
-        [sys.executable, "-m", "stone_pipeline.run", target],
+        [sys.executable, "-m", "stone_pipeline.build"],
         env={**os.environ, "BLOKPORT_LEDGER_WRITETHROUGH": "1"},
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     threading.Thread(target=_watch_local, args=(rec, proc), daemon=True).start()
