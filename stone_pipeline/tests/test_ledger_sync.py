@@ -3,6 +3,8 @@ ledger and Medusa in sync."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from stone_pipeline.ledger.db import Ledger, now_iso
@@ -317,6 +319,23 @@ def test_ack_refuses_product_ahead_of_its_variation(tmp_path):
         ledger.execute("UPDATE variation SET state='synced' WHERE key='slab_v1'")      # variation catches up
         assert ack(ledger, "products", "P-1", medusa_id="M1", status_="synced") == 1   # now applies
         assert ledger.get("product", "sku", "P-1")["state"] == "synced"
+
+
+def test_product_payload_carries_thumbnail_and_all_image_lanes(tmp_path):
+    # the pull must send the SAME image set the working CSV import did: thumbnail (main image) +
+    # oriented (Front/Right/Back/Left) + gallery. Missing the thumbnail = a product with no main image.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")   # synced + typed + textured
+        ledger.upsert("product", {"sku": "P-1", "source": "pol", "variation_key": "slab_v1",
+                                  "state": "pending", "thumbnail_key": "https://s3/thumb.jpg",
+                                  "oriented_image_keys": json.dumps(["https://s3/front.png", "https://s3/right.png"]),
+                                  "product_image_keys": json.dumps(["https://s3/g1.jpg", "https://s3/g2.jpg"]),
+                                  "created_at": now, "updated_at": now}, pk=("sku",))
+        payload = ready(ledger, "products")[0]["payload"]
+        assert payload["thumbnail"] == "https://s3/thumb.jpg"
+        assert payload["oriented_images"] == ["https://s3/front.png", "https://s3/right.png"]
+        assert payload["image_urls"] == ["https://s3/g1.jpg", "https://s3/g2.jpg"]
 
 
 def test_product_held_until_variation_has_texture(tmp_path):

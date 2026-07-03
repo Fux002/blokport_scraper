@@ -210,7 +210,15 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "width": p["width"], "height": p["height"],
             "origin_country_code": p["origin_country_code"],   # Medusa derives ports from this
             "bundle_size": p["bundle_size"],   # under coordination: pallet model is retiring the multiplier
-            "image_urls": json.loads(p["product_image_keys"] or "[]"),   # ingestion sources only
+            # Images -- the SAME set the working CSV import carried, so Medusa builds the same media:
+            #   thumbnail      = the CSV 'Product Thumbnail' (the product's MAIN display image)
+            #   oriented_images= the CSV 'Front/Right/Back/Left Image' (a block's oriented shots)
+            #   image_urls     = the CSV 'Product Image 1..N' (the gallery)
+            # All are S3 ingestion sources Medusa copies into its own storage. The variety's texture
+            # ({Key}.png) rides on the VARIATION payload separately.
+            "thumbnail": p["thumbnail_key"] or "",
+            "oriented_images": json.loads(p["oriented_image_keys"] or "[]"),
+            "image_urls": json.loads(p["product_image_keys"] or "[]"),
         },
     } for p in rows]
 
