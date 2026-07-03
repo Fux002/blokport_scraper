@@ -332,26 +332,67 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
     return n
 
 
-def reset_sync_state(ledger: Ledger, tables: tuple[str, ...] | None = None) -> dict[str, int]:
-    """CLEAN START: return every entity to 'pending' and DROP its Medusa id + sync bookkeeping, so the
-    ledger matches a freshly-wiped Medusa and re-syncs from scratch with fresh ids. Inventory has no
-    state; its last_synced_qty is cleared so every stock level re-serves as a delta.
+def serve_in_flight(ledger: Ledger) -> bool:
+    """True if a pull is mid-flight: any variation/product is leased ('syncing'). A reset MUST refuse
+    while this holds, or it would race an in-flight ack and re-open the ledger drift (coordination)."""
+    for t in ("variation", "product"):
+        if ledger.execute(f"SELECT 1 FROM {t} WHERE state = 'syncing' LIMIT 1").fetchone():
+            return True
+    return False
 
-    This is destructive and must be COORDINATED: pause Medusa's pull, reset here, have Medusa clear its
-    own scraper_sync_ref, then resume -- otherwise an in-flight ack races the reset. Content (names,
-    types, images, prices) is untouched; only the sync overlay is cleared. Returns {table: rows_reset}."""
+
+def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params: tuple = ()) -> int:
+    """Reset ONE table's sync overlay: state -> 'pending', drop medusa_id/last_synced/sync bookkeeping.
+    Content columns (name, type, image, price...) are untouched. `where`/`params` scope the rows."""
+    cols = {r["name"] for r in ledger.execute(f"PRAGMA table_info({table})")}
+    sets = ["state = 'pending'", "updated_at = ?"]
+    sets += [f"{c} = NULL" for c in ("medusa_id", "last_synced", "sync_error") if c in cols]
+    if "sync_attempts" in cols:
+        sets.append("sync_attempts = 0")
+    return ledger.execute(f"UPDATE {table} SET {', '.join(sets)}{where}", (now, *params)).rowcount
+
+
+def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
+                     hard: bool = False) -> dict[str, int]:
+    """CLEAN START of the sync overlay, so the ledger stops drifting from a wiped Medusa.
+
+    soft (default): every entity -> 'pending' and all Medusa ids + sync bookkeeping dropped; inventory
+      baseline cleared. Re-serves the whole catalog from zero WITHOUT re-scraping.
+    hard: additionally DELETE the scraped products + inventory (the scraper's per-source output), so a
+      re-scrape rebuilds them from scratch.
+
+    INVARIANT: variation/backbone rows are NEVER deleted -- they are your base config (also held in git
+    as variants_export_base + backbone_*), and re-seeding them from the live export would re-introduce
+    stale synced ids (the drift we are fixing). Only their sync OVERLAY is cleared.
+
+    `source_codes` scopes products (+ their stock) to those sources; the shared base layer
+    (variations/attributes/combinations) is reset only on a GLOBAL (unscoped) reset. Returns row counts.
+    """
     now, out = now_iso(), {}
-    for t in (tables or ("attribute", "variation", "combination", "product")):
-        cols = {r["name"] for r in ledger.execute(f"PRAGMA table_info({t})")}
-        sets = ["state = 'pending'", "updated_at = ?"]
-        sets += [f"{c} = NULL" for c in ("medusa_id", "last_synced", "sync_error") if c in cols]
-        if "sync_attempts" in cols:
-            sets.append("sync_attempts = 0")
-        out[t] = ledger.execute(f"UPDATE {t} SET {', '.join(sets)}", (now,)).rowcount
-    # inventory carries no state/id -- clear the synced baseline so all stock re-serves as a delta.
-    out["inventory"] = ledger.execute(
-        "UPDATE inventory SET last_synced_qty = NULL, updated_at = ?", (now,)).rowcount
-    log.warning("ledger sync state RESET (clean start)", extra={"extra_fields": {"reset": out}})
+    scoped = bool(source_codes)
+    where, params = ("", ())
+    if scoped:
+        marks = ",".join("?" * len(source_codes))
+        where, params = (f" WHERE source IN ({marks})", tuple(source_codes))
+
+    # shared base layer: overlay reset only on a global reset (a per-source reset leaves it alone).
+    for t in ("attribute", "variation", "combination"):
+        out[t] = 0 if scoped else _reset_overlay(ledger, t, now)
+
+    if hard:                                   # drop the scraper output; re-scrape rebuilds it
+        out["inventory"] = ledger.execute(
+            f"DELETE FROM inventory WHERE sku IN (SELECT sku FROM product{where})", params).rowcount \
+            if scoped else ledger.execute("DELETE FROM inventory").rowcount
+        out["product"] = ledger.execute(f"DELETE FROM product{where}", params).rowcount
+    else:                                      # keep the rows, just re-serve them from zero
+        out["product"] = _reset_overlay(ledger, "product", now, where, params)
+        inv_where = " WHERE sku IN (SELECT sku FROM product%s)" % where if scoped else ""
+        out["inventory"] = ledger.execute(
+            f"UPDATE inventory SET last_synced_qty = NULL, updated_at = ?{inv_where}",
+            (now, *params)).rowcount
+
+    log.warning("ledger sync state RESET", extra={"extra_fields": {
+        "mode": "hard" if hard else "soft", "sources": source_codes or "all", "reset": out}})
     return out
 
 

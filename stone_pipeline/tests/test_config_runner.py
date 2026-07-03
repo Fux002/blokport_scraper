@@ -122,6 +122,56 @@ def _min_yaml(tmp_path):
     return p
 
 
+def test_reset_refused_while_a_run_is_active():
+    # coordination guard: never reset the ledger mid-run.
+    runner._runs["x"] = {"status": "running", "run_id": "x"}
+    runner._current_id = "x"
+    body, code = runner.reset()
+    assert code == 409 and "run is in progress" in body["error"]
+
+
+def test_reset_bad_source_is_400():
+    body, code = runner.reset(sources=["not_a_scraper"])
+    assert code == 400
+
+
+def test_reset_soft_and_hard_through_the_ledger(tmp_path, monkeypatch):
+    # end to end against an ISOLATED ledger: soft re-serves (keeps rows), hard drops scraper output.
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger, now_iso
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        now = now_iso()
+        lg.upsert("variation", {"key": "slab_v1", "branch": "slab", "type": "Marble", "name": "x",
+                                "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
+                                "volume": "", "medusa_id": "VID", "in_full": 1, "payload_hash": "",
+                                "state": "synced", "first_seen": now, "last_synced": now,
+                                "created_at": now, "updated_at": now}, pk=("key",))
+        lg.upsert("product", {"sku": "POL-1", "source": "pol", "variation_key": "slab_v1", "medusa_id": "PID",
+                              "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
+
+    body, code = runner.reset()                       # soft
+    assert code == 200 and body["mode"] == "soft" and body["reset"]["variation"] >= 1
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        assert lg.get("product", "sku", "POL-1")["state"] == "pending"   # kept, re-served
+        assert lg.get("variation", "key", "slab_v1")["medusa_id"] is None
+
+    body, code = runner.reset(hard=True)              # hard
+    assert code == 200 and body["mode"] == "hard"
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        assert lg.get("product", "sku", "POL-1") is None                 # scraper output dropped
+        assert lg.get("variation", "key", "slab_v1") is not None         # base config kept
+
+
+def test_dispatch_routes_reset_with_hard_and_sources(monkeypatch):
+    from stone_pipeline.config.server import dispatch
+    seen = {}
+    monkeypatch.setattr(runner, "reset",
+                        lambda sources=None, hard=False: seen.update(sources=sources, hard=hard) or ({"ok": 1}, 200))
+    code, body = dispatch("POST", ["reset"], {"hard": True, "sources": ["zucchi"]})
+    assert code == 200 and seen == {"sources": ["zucchi"], "hard": True}
+
+
 def test_second_trigger_while_running_is_refused_409():
     # a launcher that leaves the run 'running' (does not finish it)
     rec1, code1 = runner.start_run(launch=lambda r: r.update(status="running"))

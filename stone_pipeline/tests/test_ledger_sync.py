@@ -107,6 +107,48 @@ def test_reset_sync_state_clean_start(tmp_path):
         assert [r["external_id"] for r in ready(ledger, "variations")] == ["slab_v1"]
 
 
+def test_reset_hard_drops_scraper_output_but_keeps_base_variations(tmp_path):
+    # hard reset wipes the SCRAPER output (products + stock) so a re-scrape rebuilds it, but the
+    # variation/backbone rows (the base config) are NEVER deleted -- only their sync overlay clears.
+    from stone_pipeline.ledger.sync import reset_sync_state
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="VID")
+        _product(ledger, "P-1", "slab_v1", state="synced")
+        ledger.upsert("inventory", {"sku": "P-1", "qty": 5, "last_synced_qty": 5,
+                                    "updated_at": now_iso()}, pk=("sku",))
+        out = reset_sync_state(ledger, hard=True)
+        assert ledger.get("product", "sku", "P-1") is None            # scraper output deleted
+        assert ledger.get("inventory", "sku", "P-1") is None
+        v = ledger.get("variation", "key", "slab_v1")                 # base config KEPT
+        assert v is not None and v["state"] == "pending" and v["medusa_id"] is None
+        assert v["type"] == "Marble" and v["image_url"] == "https://s3/tex.png"   # content intact
+        assert out["product"] == 1 and out["inventory"] == 1
+
+
+def test_reset_scoped_to_one_source_leaves_the_others(tmp_path):
+    # a per-source reset touches only that source's products; the shared base layer is left alone.
+    from stone_pipeline.ledger.sync import reset_sync_state
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="VID")
+        now = now_iso()
+        for sku, src in (("A-1", "aaa"), ("B-1", "bbb")):
+            ledger.upsert("product", {"sku": sku, "source": src, "variation_key": "slab_v1",
+                                      "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
+        reset_sync_state(ledger, source_codes=["aaa"], hard=True)
+        assert ledger.get("product", "sku", "A-1") is None            # aaa dropped
+        assert ledger.get("product", "sku", "B-1") is not None        # bbb untouched
+        assert ledger.get("variation", "key", "slab_v1")["state"] == "synced"   # shared layer untouched
+
+
+def test_serve_in_flight_detects_a_lease(tmp_path):
+    from stone_pipeline.ledger.sync import serve_in_flight, ready
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="pending")
+        assert serve_in_flight(ledger) is False        # nothing leased
+        ready(ledger, "variations")                    # leases slab_v1 -> 'syncing'
+        assert serve_in_flight(ledger) is True          # a pull is in flight
+
+
 def test_serving_leases_so_overlapping_pulls_never_double_serve(tmp_path):
     # D5 in-flight guard: a pull LEASES its rows to 'syncing'. A second, overlapping pull (Medusa's
     # job paginating, or two triggers) must get NOTHING for those rows -- never the same entity twice.

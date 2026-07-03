@@ -176,6 +176,49 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
     return _public(rec), 202
 
 
+def _source_codes(names) -> list[str]:
+    """Resolve source NAMES (polonine) to the product SKU prefixes / source_codes (pol) the ledger
+    stores, dropping any unknown name. Empty result for an all-unknown request (caller returns 400)."""
+    from stone_pipeline.config.sources import load_source
+    codes = []
+    for n in names or []:
+        try:
+            codes.append(load_source(n).source_code)
+        except Exception:
+            pass
+    return codes
+
+
+def reset(sources=None, hard=False) -> tuple[dict, int]:
+    """Clean-start the ledger sync state (the ① half of the coordinated ①②③ reset). Guarded, per the
+    coordination contract: 409 if a produce run is active OR a pull is in flight -- never reset mid-run.
+    soft (default) re-serves the catalog from zero without re-scraping; hard also drops the scraped
+    products+inventory. Variation/backbone rows (your base config) are never deleted. Returns
+    ({mode, reset:{...}}, http_status): 200 done, 409 busy, 400 bad scope, 500 error."""
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    codes = None
+    if sources:
+        known = _resolve_sources(sources)          # intersect with the registry (rejects unknown names)
+        if not known:
+            return {"error": f"no known source in {sources!r}"}, 400
+        codes = _source_codes(known)
+    with _lock:
+        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
+            return {"error": "a run is in progress; refusing to reset mid-run"}, 409
+        try:
+            with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
+                if sync.serve_in_flight(ledger):
+                    return {"error": "a pull is in flight; refusing to reset mid-serve"}, 409
+                result = sync.reset_sync_state(ledger, source_codes=codes, hard=bool(hard))
+        except Exception as exc:
+            log.exception("ledger reset failed")
+            return {"error": str(exc)}, 500
+    log.warning("ledger reset via config API", extra={"extra_fields": {
+        "mode": "hard" if hard else "soft", "sources": sources or "all", "result": result}})
+    return {"mode": "hard" if hard else "soft", "reset": result}, 200
+
+
 def get_run(run_id: str) -> dict | None:
     with _lock:
         rec = _runs.get(run_id)

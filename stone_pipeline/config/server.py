@@ -47,8 +47,19 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             rec = runner.get_run(segments[1])
             return (200, rec) if rec else (404, {"error": f"no run {segments[1]!r}"})
         return 404, {"error": "expected /config/v1/run or /config/v1/run/<run_id>"}
+    if segments and segments[0] == "reset":
+        # clean-start the ledger sync state (the coordinated ①②③ reset, our ① half). Body (optional):
+        #   {"hard": true, "sources": ["zucchi", ...]}   hard also drops scraped products; sources scopes.
+        # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted.
+        from stone_pipeline.config import runner
+        if method == "POST":
+            srcs = body.get("sources") if isinstance(body, dict) else None
+            hard = bool(body.get("hard")) if isinstance(body, dict) else False
+            result, code = runner.reset(srcs, hard)
+            return code, result
+        return 405, {"error": "POST /config/v1/reset to reset the ledger"}
     if not segments or segments[0] != "sources":
-        return 404, {"error": "not found; expected /config/v1/sources[/<name>] or /config/v1/run"}
+        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run or /reset"}
     if len(segments) == 1:
         if method == "GET":
             return 200, {"sources": store.list_rows()}
