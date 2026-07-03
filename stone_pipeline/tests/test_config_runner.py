@@ -215,6 +215,40 @@ def test_public_record_carries_counts_field():
     assert "counts" in rec and "stage" in rec and "sources" in rec   # the fields Medusa reads
 
 
+def test_clean_deletes_a_sources_scraped_data(tmp_path, monkeypatch):
+    import types
+    import stone_pipeline.clean as clean_mod
+    monkeypatch.setattr(clean_mod, "SETTINGS",
+                        types.SimpleNamespace(paths=types.SimpleNamespace(data_dir=tmp_path)))
+    (tmp_path / "zucchi" / "20260625_222931").mkdir(parents=True)
+    (tmp_path / "zucchi" / "20260601_090000").mkdir(parents=True)
+    (tmp_path / "polonine" / "20260621_104529").mkdir(parents=True)
+    body, code = runner.clean(sources=["zucchi"])
+    assert code == 200 and body["deleted_scrapes"] == {"zucchi": 2}
+    assert list((tmp_path / "zucchi").glob("*")) == []          # zucchi scrapes gone
+    assert (tmp_path / "polonine" / "20260621_104529").exists()  # polonine untouched
+
+
+def test_clean_refused_while_a_run_is_active():
+    runner._runs["x"] = {"status": "running", "run_id": "x"}
+    runner._current_id = "x"
+    body, code = runner.clean(sources=["zucchi"])       # sources path -> guard returns before any fs work
+    assert code == 409
+
+
+def test_clean_unknown_source_is_400():
+    body, code = runner.clean(sources=["not_a_scraper"])
+    assert code == 400
+
+
+def test_dispatch_routes_clean(monkeypatch):
+    from stone_pipeline.config.server import dispatch
+    seen = {}
+    monkeypatch.setattr(runner, "clean", lambda sources=None: seen.update(sources=sources) or ({"ok": 1}, 200))
+    code, body = dispatch("POST", ["clean"], {"sources": ["zucchi"]})
+    assert code == 200 and seen == {"sources": ["zucchi"]}
+
+
 def test_second_trigger_while_running_is_refused_409():
     # a launcher that leaves the run 'running' (does not finish it)
     rec1, code1 = runner.start_run(launch=lambda r: r.update(status="running"))

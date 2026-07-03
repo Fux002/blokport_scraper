@@ -269,6 +269,29 @@ def reset(sources=None, hard=False) -> tuple[dict, int]:
     return {"mode": "hard" if hard else "soft", "reset": result}, 200
 
 
+def clean(sources=None) -> tuple[dict, int]:
+    """Housekeeping for the :4200 buttons. `sources` given -> DELETE those sources' raw scraped data
+    (data/<source>/*) for a fresh re-scrape; none -> prune superseded scrapes/runs/orphan images.
+    Guarded like reset: 409 if a run or reset is active. Base config + ledger are never touched."""
+    from stone_pipeline import clean as clean_mod
+    with _lock:
+        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
+            return {"error": "a run is in progress; refusing to clean mid-run"}, 409
+        if _reset_active:
+            return {"error": "a reset is in progress"}, 409
+    try:
+        if sources:
+            known = _resolve_sources(sources)
+            unknown = [s for s in sources if s not in set(known)]
+            if unknown:
+                return {"error": f"unknown source(s): {unknown}"}, 400
+            return {"deleted_scrapes": clean_mod.delete_source_data(known)}, 200
+        return {"pruned": clean_mod.run(dry_run=False)}, 200
+    except Exception as exc:
+        log.exception("clean failed")
+        return {"error": str(exc)}, 500
+
+
 def get_run(run_id: str) -> dict | None:
     with _lock:
         rec = _runs.get(run_id)

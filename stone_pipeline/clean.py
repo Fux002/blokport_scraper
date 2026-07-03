@@ -133,6 +133,21 @@ def run(dry_run: bool = False, data_dir: Path | None = None, outputs: Path | Non
     return counts
 
 
+def delete_source_data(sources: list[str]) -> dict[str, int]:
+    """Delete ALL raw scraped data for the given sources (data/<source>/*) -- a full wipe so the next
+    scrape starts fresh. Returns {source: scrape_folders_removed}. Base config + ledger are untouched
+    (the ledger has its own reset); only the raw scrape inputs go."""
+    out: dict[str, int] = {}
+    for s in sources:
+        d = SETTINGS.paths.data_dir / s
+        folders = [f for f in d.glob("*") if f.is_dir()] if d.exists() else []
+        for f in folders:
+            shutil.rmtree(f, ignore_errors=True)
+        out[s] = len(folders)
+        log.info("deleted scraped data", extra={"extra_fields": {"source": s, "removed": len(folders)}})
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     dry = "--dry-run" in argv or "-n" in argv
