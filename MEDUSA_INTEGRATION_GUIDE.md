@@ -157,6 +157,7 @@ Only products whose variation is synced and whose texture is live.
   "payload_hash": "1c80...",
   "payload": {
     "variation_external_id": "slab_travertine_walnut_8a1c...",
+    "category": "Slabs", "type": "Travertine",
     "color": "Brown", "finish": "Honed", "quality": "First",
     "vendor": "polonine",
     "company_id": "comp_01J...",
@@ -171,8 +172,15 @@ Only products whose variation is synced and whose texture is live.
 }
 ```
 
+`category` and `type` are the variety's identity, OWNED by the variation -- resolve the
+product's identity from `variation_external_id` (step 1), not from these. They are ALSO sent
+here as **denormalized display names** (they always equal the variation's), so you can populate
+a product's `metadata.type_name` / category label for display and filtering WITHOUT joining
+product -> variation. Do not treat them as the source of truth; the variation is.
+
 Apply: upsert by `external_id` (the `SKU`); resolve `variation_external_id` to the
-variation id from step 1 and **inherit its category and type**; resolve the `color`/
+variation id from step 1 and **inherit its category and type** (and write the sent `type`/
+`category` names into the product's display metadata); resolve the `color`/
 `finish`/`quality` names; allocate the seller by **`company_id`** when present (the one
 Medusa id in the payload, set per source in :4200), else resolve by `vendor` name;
 resolve `origin_port` (UN/LOCODE) to the port id (falling back to `origin_country_code`);

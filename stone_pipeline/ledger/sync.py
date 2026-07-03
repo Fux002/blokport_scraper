@@ -128,9 +128,13 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "external_id": p["sku"],
         "payload_hash": p["payload_hash"],
         "payload": {
-            # category and type are intrinsic to the variation; Medusa inherits them via
-            # variation_external_id. The product only chooses color/finish/quality.
+            # category + type are OWNED by the variation (identity = category/type/name); the product
+            # INHERITS them via variation_external_id -- resolve identity from the variation, not here.
+            # We ALSO send the NAMES, denormalized, purely for display/filtering, so Medusa never has
+            # to join product -> variation just to show the stone type. They always equal the
+            # variation's by construction (a product is a physical instance of its variety).
             "variation_external_id": p["variation_key"],
+            "category": p["category"] or "", "type": p["type"] or "",
             "color": p["color"], "finish": p["finish"], "quality": p["quality"],
             "vendor": p["vendor"],   # agnostic company name; Medusa resolves it (kept for display + fallback)
             # company_id: the per-source Medusa company id set in :4200 (empty until pasted). Medusa

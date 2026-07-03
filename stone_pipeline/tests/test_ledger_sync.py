@@ -181,7 +181,8 @@ def test_product_payload_carries_only_the_company_id(tmp_path):
         _variation(ledger, "slab_v1", state="synced", medusa_id="V1")   # synced + live texture
         ledger.upsert("product", {"sku": "P-1", "source": "pol", "vendor": "Polonine Stone Co",
                                   "company_id": "comp_dev_pol", "variation_key": "slab_v1",
-                                  "color": "Black", "state": "pending",
+                                  "color": "Black", "type": "Marble", "category": "Slabs",
+                                  "state": "pending",
                                   "created_at": now, "updated_at": now}, pk=("sku",))
         items = ready(ledger, "products")
         assert len(items) == 1
@@ -192,6 +193,9 @@ def test_product_payload_carries_only_the_company_id(tmp_path):
         assert payload["vendor"] == "Polonine Stone Co"
         assert payload["company_id"] == "comp_dev_pol"
         assert "origin_country_code" in payload      # Medusa derives ports from this
+        # type + category are denormalized display copies of the variation's identity (name, for
+        # metadata.type_name display); resolve identity from variation_external_id, not these.
+        assert payload["type"] == "Marble" and payload["category"] == "Slabs"
 
 
 def test_product_held_when_variation_synced_but_untyped(tmp_path):
