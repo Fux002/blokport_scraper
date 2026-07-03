@@ -162,7 +162,8 @@ class CanonicalRow(BaseModel):
     quality_method: str = ""
 
     # variation (Stage 4)
-    variation_id: Optional[str] = None
+    variation_id: Optional[str] = None       # the matched variety's Medusa id (from the export)
+    variation_key: Optional[str] = None      # the matched variety's STABLE Key -- the durable link
     variation_name: Optional[str] = None
     variation_confidence: str = "none"
     variation_method: str = ""

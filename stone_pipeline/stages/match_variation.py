@@ -95,6 +95,18 @@ class VariationStage:
         # category is loaded); the fallback is a defensive default, registry-agnostic.
         return self.engines.get(branch) or next(iter(self.engines.values()))
 
+    def _key_for(self, cid: str | None) -> str | None:
+        """The matched variety's STABLE Key for a Medusa variation id. The product links to its
+        variety by this Key, NOT by the id: variation.medusa_id churns (export id -> minted id on
+        ack), so an id-based link orphans a later scrape's products. The Key never changes."""
+        if not cid:
+            return None
+        for table in self.ref.variants.values():
+            v = table.by_id.get(cid)
+            if v is not None:
+                return v.key
+        return None
+
     def resolve_row(self, row: CanonicalRow) -> None:
         # branch comes from the Format Resolver (run before this stage). Fall back
         # to the raw tag only when the format stage has not run (unit tests).
@@ -154,6 +166,7 @@ class VariationStage:
             if forced:
                 cand = engine.index.candidates.get(forced)
                 row.variation_id = forced
+                row.variation_key = self._key_for(forced)
                 row.variation_name = cand.canonical if cand else (row.variety_match_key or "")
                 row.variation_confidence = Confidence.high.name
                 row.variation_method = "override"
@@ -181,6 +194,7 @@ class VariationStage:
 
         if match.cid is not None and match.confidence >= Confidence.medium:
             row.variation_id = match.cid
+            row.variation_key = self._key_for(match.cid)
             row.variation_name = match.canonical
             row.variation_confidence = Confidence(match.confidence).name
             row.variation_method = match.method
@@ -232,6 +246,7 @@ class VariationStage:
         name_match = match.canonical is not None and proj.norm(match.canonical) == proj.norm(candidate_name)
         if match.cid is not None and name_match and match.confidence >= Confidence.medium:
             row.variation_id = match.cid
+            row.variation_key = self._key_for(match.cid)
             row.variation_name = match.canonical
             row.variation_confidence = Confidence(match.confidence).name
             row.variation_method = f"descriptor_{match.method}"

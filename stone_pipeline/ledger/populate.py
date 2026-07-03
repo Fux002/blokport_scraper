@@ -126,11 +126,13 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
     for r in rows:
         sku = _sku(r, cfg)
         prev = ledger.get("product", "sku", sku)
-        # the product's variation KEY is stable once resolved (a SKU is always the same variety).
-        # _variation_key_for maps the scrape's Medusa variation_id -> Key via variation.medusa_id,
-        # which CHURNS (export id -> new ack id after a clean-start re-sync). So resolve, but fall
-        # back to the already-stored Key rather than stomping a good link with NULL on a re-populate.
-        variation_key = _variation_key_for(ledger, r.variation_id) or (prev["variation_key"] if prev else None)
+        # Link the product to its variety by the STABLE Key. The canonical row now carries
+        # variation_key, stamped at match time (match_variation._key_for) -- it never churns. Fall
+        # back to the legacy id->Key lookup (via variation.medusa_id, which DOES churn: export id ->
+        # minted id on ack) and then to the already-stored Key, so a row missing the stamp (older
+        # data, bootstrap) still resolves and a re-populate never stomps a good link with NULL.
+        variation_key = r.variation_key or _variation_key_for(ledger, r.variation_id) \
+            or (prev["variation_key"] if prev else None)
         record = {
             "sku": sku,
             "source": cfg.source_code,

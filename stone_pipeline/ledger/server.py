@@ -52,7 +52,7 @@ def dispatch(ledger: Ledger, method: str, resource: str,
         if not isinstance(body, list):
             return 400, {"error": "ack body must be a JSON list of acks"}
         result = sync.ack_batch(ledger, body)
-        return 200, {"acked": result["applied"], "skipped": result["skipped"]}
+        return 200, {"acked": result["applied"], "missed": result["missed"], "skipped": result["skipped"]}
     return 404, {"error": f"no route for {method} /sync/{resource}"}
 
 

@@ -184,22 +184,26 @@ def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
 # --- POST /sync/ack -----------------------------------------------------------
 
 def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = None,
-        status_: str = "synced", reason: str | None = None) -> None:
-    """Medusa talks back for ONE entity:
+        status_: str = "synced", reason: str | None = None) -> int:
+    """Medusa talks back for ONE entity. Returns the number of ledger rows changed (0 = the
+    external_id was not found, or the ack was REFUSED as out-of-order -- see the eligibility guard).
       synced -> record the minted/matched id, mark synced, clear the failure counter+reason.
-      failed -> record the reason and re-serve (dirty) for a retry; but after _MAX_SYNC_ATTEMPTS
-                consecutive failures the entity is DEAD-LETTERED to 'gap_held' -- it stops being
-                served (no infinite poison-pill loop) and surfaces in /status for a human to fix.
+      failed -> record the reason and re-serve (dirty); after _MAX_SYNC_ATTEMPTS consecutive failures
+                the entity is DEAD-LETTERED to 'gap_held' (stops serving, surfaces in /status).
 
-    Inventory is special: no id or state, so a non-failed ack means Medusa now holds this stock
-    level (last_synced_qty = qty) and the row stops being a delta; a failed one leaves it a delta."""
+    ELIGIBILITY GUARD (defense in depth): a product is only marked synced if its variation is
+    already synced, and stock only if its product is synced -- so a duplicate/out-of-order ack can
+    never load a product ahead of its variation (which the serve gate already prevents, but the ack
+    path must not trust the caller). Inventory has no id/state; a non-failed ack means Medusa holds
+    this stock (last_synced_qty = qty)."""
     now = now_iso()
     if type_ == "inventory":
-        if status_ != "failed":
-            ledger.execute(
-                "UPDATE inventory SET last_synced_qty = qty, updated_at = ? WHERE sku = ?",
-                (now, external_id))
-        return
+        if status_ == "failed":
+            return 0                                    # leaves it a delta -> re-serves
+        cur = ledger.execute(                            # only for a synced product (F2)
+            "UPDATE inventory SET last_synced_qty = qty, updated_at = ? WHERE sku = ? "
+            "AND sku IN (SELECT sku FROM product WHERE state = 'synced')", (now, external_id))
+        return cur.rowcount
     if type_ not in _ENTITY:
         raise ValueError(f"unsupported sync type {type_!r}")
     table, pk = _ENTITY[type_]
@@ -208,36 +212,47 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
                              (external_id,)).fetchone()
         attempts = ((row["sync_attempts"] if row else 0) or 0) + 1
         state = "gap_held" if attempts >= _MAX_SYNC_ATTEMPTS else "dirty"   # dead-letter at the cap
-        ledger.execute(
+        cur = ledger.execute(
             f"UPDATE {table} SET state = ?, sync_attempts = ?, sync_error = ?, updated_at = ? "
             f"WHERE {pk} = ?",
             (state, attempts, (reason or "apply failed")[:500], now, external_id))
-        if state == "gap_held":
+        if state == "gap_held" and cur.rowcount:
             log.warning("entity dead-lettered after repeated Medusa failures",
                         extra={"extra_fields": {"type": type_, "external_id": external_id,
                                                 "attempts": attempts, "reason": reason}})
-        return
-    ledger.execute(
+        return cur.rowcount
+    # synced: a PRODUCT is only marked synced if its variation is synced (the eligibility guard).
+    guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced')" \
+        if type_ == "products" else ""
+    cur = ledger.execute(
         f"UPDATE {table} SET medusa_id = ?, state = 'synced', sync_attempts = 0, sync_error = NULL, "
-        f"last_synced = ?, updated_at = ? WHERE {pk} = ?",
+        f"last_synced = ?, updated_at = ? WHERE {pk} = ?{guard}",
         (medusa_id, now, now, external_id))
+    if cur.rowcount == 0 and type_ == "products":
+        log.warning("refused a product ack ahead of its variation (out-of-order / not resolvable)",
+                    extra={"extra_fields": {"sku": external_id}})
+    return cur.rowcount
 
 
 def ack_batch(ledger: Ledger, acks: list[dict]) -> dict[str, int]:
     """Apply a batch of acks (POST /sync/ack body). Each: {type, external_id, medusa_id, status,
-    error?}. Per-ack ISOLATED: a malformed or unsupported ack is skipped and logged, the rest still
-    apply -- one bad ack never drops the whole batch. Returns {applied, skipped}."""
-    applied = skipped = 0
+    error?}. Per-ack ISOLATED: a malformed/unsupported ack is skipped and logged, the rest still
+    apply -- one bad ack never drops the batch. Returns {applied, missed, skipped}: applied changed a
+    row; missed = external_id not found or ack refused (out-of-order); skipped = malformed."""
+    applied = missed = skipped = 0
     for a in acks:
         try:
-            ack(ledger, a["type"], a["external_id"], a.get("medusa_id"),
-                a.get("status", "synced"), a.get("error") or a.get("reason"))
-            applied += 1
+            changed = ack(ledger, a["type"], a["external_id"], a.get("medusa_id"),
+                          a.get("status", "synced"), a.get("error") or a.get("reason"))
+            if changed:
+                applied += 1
+            else:
+                missed += 1
         except Exception as exc:
             skipped += 1
             log.warning("skipped a malformed ack (batch continues)",
                         extra={"extra_fields": {"ack": str(a)[:200], "error": str(exc)}})
-    return {"applied": applied, "skipped": skipped}
+    return {"applied": applied, "missed": missed, "skipped": skipped}
 
 
 def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
@@ -257,12 +272,12 @@ def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
 def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
     """Recovery: reset dead-lettered ('gap_held') entities back to 'dirty' so they are re-served --
     used after the underlying Medusa issue is fixed (e.g. a transient outage that hit the cap).
-    Clears the counter. Returns the number requeued. type_ None = variations + products."""
+    Clears the counter AND the stale error. Returns the number requeued. type_ None = variations + products."""
     tables = [_ENTITY[type_][0]] if type_ else ["variation", "product"]
     now, n = now_iso(), 0
     for table in tables:
         cur = ledger.execute(
-            f"UPDATE {table} SET state = 'dirty', sync_attempts = 0, updated_at = ? "
+            f"UPDATE {table} SET state = 'dirty', sync_attempts = 0, sync_error = NULL, updated_at = ? "
             f"WHERE state = 'gap_held'", (now,))
         n += cur.rowcount
     return n

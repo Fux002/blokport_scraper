@@ -194,8 +194,22 @@ def test_ack_batch_isolates_a_bad_ack(tmp_path):
         _product(ledger, "P-1", "slab_v1", state="pending")
         res = ack_batch(ledger, [{"type": "products", "external_id": "P-1", "medusa_id": "M1",
                                   "status": "synced"}, {"malformed": True}])
-        assert res == {"applied": 1, "skipped": 1}
+        assert res == {"applied": 1, "missed": 0, "skipped": 1}
         assert ledger.get("product", "sku", "P-1")["state"] == "synced"   # the good ack still applied
+
+
+def test_ack_refuses_product_ahead_of_its_variation(tmp_path):
+    # F2 eligibility guard: a duplicate/out-of-order ack must NOT mark a product synced before its
+    # variation is synced (which would then let its inventory load for a variety Medusa may not hold).
+    from stone_pipeline.ledger.sync import ack
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="pending", medusa_id="V1")    # variation NOT synced yet
+        _product(ledger, "P-1", "slab_v1", state="pending")
+        assert ack(ledger, "products", "P-1", medusa_id="M1", status_="synced") == 0   # refused (0 rows)
+        assert ledger.get("product", "sku", "P-1")["state"] == "pending"               # not marked synced
+        ledger.execute("UPDATE variation SET state='synced' WHERE key='slab_v1'")      # variation catches up
+        assert ack(ledger, "products", "P-1", medusa_id="M1", status_="synced") == 1   # now applies
+        assert ledger.get("product", "sku", "P-1")["state"] == "synced"
 
 
 def test_product_held_until_variation_has_texture(tmp_path):
