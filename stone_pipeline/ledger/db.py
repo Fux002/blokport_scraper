@@ -27,7 +27,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -119,8 +119,21 @@ class Ledger:
         if self.conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
             return
         self.conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._migrate()   # add columns to tables created before a field existed (CREATE IF NOT
+                          # EXISTS never alters an existing table). Keeps ledger_meta in step.
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self.conn.execute("UPDATE ledger_meta SET schema_version = ? WHERE id = 1", (SCHEMA_VERSION,))
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Idempotent ALTERs for a ledger that predates a column (v1 -> v2 added the sync
+        dead-letter fields). A fresh ledger already has them from schema.sql, so these are no-ops."""
+        for table in ("variation", "product"):
+            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            if "sync_attempts" not in cols:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0")
+            if "sync_error" not in cols:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_error TEXT")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

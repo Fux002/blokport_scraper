@@ -161,6 +161,43 @@ def test_inventory_sync_serves_delta_for_synced_products_only(tmp_path):
         assert inv["last_synced_qty"] == 7 and inv["qty"] == 7
 
 
+def test_failed_ack_dead_letters_after_cap_then_requeues(tmp_path):
+    # error handling when Medusa keeps rejecting an entity: it must NOT re-serve forever. After the
+    # attempt cap it dead-letters (gap_held) -> stops serving, stores the reason, surfaces in status
+    # + failures(); an explicit requeue (or a success) recovers it.
+    from stone_pipeline.ledger.sync import (ack, ready, requeue_dead_lettered, failures, status,
+                                            _MAX_SYNC_ATTEMPTS)
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-1", "slab_v1", state="pending")
+        assert [i["external_id"] for i in ready(ledger, "products")] == ["P-1"]
+        for _ in range(_MAX_SYNC_ATTEMPTS):
+            ack(ledger, "products", "P-1", status_="failed", reason="Medusa 400: bad company")
+        row = ledger.get("product", "sku", "P-1")
+        assert row["state"] == "gap_held" and row["sync_attempts"] == _MAX_SYNC_ATTEMPTS
+        assert "bad company" in row["sync_error"]
+        assert ready(ledger, "products") == []                       # no infinite poison-pill loop
+        assert status(ledger)["product"].get("gap_held") == 1        # visible in status
+        assert failures(ledger)[0]["external_id"] == "P-1"           # drill-down: WHY
+        assert requeue_dead_lettered(ledger) == 1                    # recovery
+        assert [i["external_id"] for i in ready(ledger, "products")] == ["P-1"]
+        ack(ledger, "products", "P-1", medusa_id="M1", status_="synced")   # a success clears it
+        r = ledger.get("product", "sku", "P-1")
+        assert r["state"] == "synced" and r["sync_attempts"] == 0 and r["sync_error"] is None
+
+
+def test_ack_batch_isolates_a_bad_ack(tmp_path):
+    # one malformed ack in a batch must NOT drop the whole batch: it's skipped+logged, the rest apply.
+    from stone_pipeline.ledger.sync import ack_batch
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-1", "slab_v1", state="pending")
+        res = ack_batch(ledger, [{"type": "products", "external_id": "P-1", "medusa_id": "M1",
+                                  "status": "synced"}, {"malformed": True}])
+        assert res == {"applied": 1, "skipped": 1}
+        assert ledger.get("product", "sku", "P-1")["state"] == "synced"   # the good ack still applied
+
+
 def test_product_held_until_variation_has_texture(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         # variation synced but with NO live texture -> its product is held (H2 decision)

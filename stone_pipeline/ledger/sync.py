@@ -27,7 +27,15 @@ from __future__ import annotations
 
 import json
 
+from stone_pipeline.core import logfmt
 from stone_pipeline.ledger.db import Ledger, now_iso
+
+log = logfmt.get_logger("ledger.sync")
+
+# After this many CONSECUTIVE failed Medusa applies, an entity is dead-lettered (state 'gap_held'):
+# it stops being served (no infinite poison-pill retry) and surfaces in /status for a human. A later
+# populate with changed data, or an explicit requeue, un-quarantines it.
+_MAX_SYNC_ATTEMPTS = 5
 
 # type name (the URL <type>) -> (table, single-column external_id)
 _ENTITY = {
@@ -175,14 +183,16 @@ def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
 
 # --- POST /sync/ack -----------------------------------------------------------
 
-def ack(ledger: Ledger, type_: str, external_id: str,
-        medusa_id: str | None = None, status_: str = "synced") -> None:
-    """Medusa talks back: record the id it minted or matched for one entity and mark
-    it synced, so it is no longer served. A `failed` ack returns the entity to dirty
-    (the next pull re-offers it). This is the write-back that keeps the two in sync.
+def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = None,
+        status_: str = "synced", reason: str | None = None) -> None:
+    """Medusa talks back for ONE entity:
+      synced -> record the minted/matched id, mark synced, clear the failure counter+reason.
+      failed -> record the reason and re-serve (dirty) for a retry; but after _MAX_SYNC_ATTEMPTS
+                consecutive failures the entity is DEAD-LETTERED to 'gap_held' -- it stops being
+                served (no infinite poison-pill loop) and surfaces in /status for a human to fix.
 
-    Inventory is special: it has no id or state, so a successful ack means Medusa now
-    holds this stock level (last_synced_qty = qty), and the row stops being a delta."""
+    Inventory is special: no id or state, so a non-failed ack means Medusa now holds this stock
+    level (last_synced_qty = qty) and the row stops being a delta; a failed one leaves it a delta."""
     now = now_iso()
     if type_ == "inventory":
         if status_ != "failed":
@@ -194,22 +204,67 @@ def ack(ledger: Ledger, type_: str, external_id: str,
         raise ValueError(f"unsupported sync type {type_!r}")
     table, pk = _ENTITY[type_]
     if status_ == "failed":
-        ledger.execute(f"UPDATE {table} SET state = 'dirty', updated_at = ? WHERE {pk} = ?",
-                       (now, external_id))
+        row = ledger.execute(f"SELECT sync_attempts FROM {table} WHERE {pk} = ?",
+                             (external_id,)).fetchone()
+        attempts = ((row["sync_attempts"] if row else 0) or 0) + 1
+        state = "gap_held" if attempts >= _MAX_SYNC_ATTEMPTS else "dirty"   # dead-letter at the cap
+        ledger.execute(
+            f"UPDATE {table} SET state = ?, sync_attempts = ?, sync_error = ?, updated_at = ? "
+            f"WHERE {pk} = ?",
+            (state, attempts, (reason or "apply failed")[:500], now, external_id))
+        if state == "gap_held":
+            log.warning("entity dead-lettered after repeated Medusa failures",
+                        extra={"extra_fields": {"type": type_, "external_id": external_id,
+                                                "attempts": attempts, "reason": reason}})
         return
     ledger.execute(
-        f"UPDATE {table} SET medusa_id = ?, state = 'synced', last_synced = ?, updated_at = ? "
-        f"WHERE {pk} = ?",
+        f"UPDATE {table} SET medusa_id = ?, state = 'synced', sync_attempts = 0, sync_error = NULL, "
+        f"last_synced = ?, updated_at = ? WHERE {pk} = ?",
         (medusa_id, now, now, external_id))
 
 
-def ack_batch(ledger: Ledger, acks: list[dict]) -> int:
-    """Apply a batch of acks (POST /sync/ack body). Each: {type, external_id,
-    medusa_id, status}. Returns the count applied."""
-    n = 0
+def ack_batch(ledger: Ledger, acks: list[dict]) -> dict[str, int]:
+    """Apply a batch of acks (POST /sync/ack body). Each: {type, external_id, medusa_id, status,
+    error?}. Per-ack ISOLATED: a malformed or unsupported ack is skipped and logged, the rest still
+    apply -- one bad ack never drops the whole batch. Returns {applied, skipped}."""
+    applied = skipped = 0
     for a in acks:
-        ack(ledger, a["type"], a["external_id"], a.get("medusa_id"), a.get("status", "synced"))
-        n += 1
+        try:
+            ack(ledger, a["type"], a["external_id"], a.get("medusa_id"),
+                a.get("status", "synced"), a.get("error") or a.get("reason"))
+            applied += 1
+        except Exception as exc:
+            skipped += 1
+            log.warning("skipped a malformed ack (batch continues)",
+                        extra={"extra_fields": {"ack": str(a)[:200], "error": str(exc)}})
+    return {"applied": applied, "skipped": skipped}
+
+
+def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
+    """The dead-lettered entities and WHY (external_id, attempts, last error) -- the drill-down
+    behind the /status gap_held count, so an operator can see what Medusa rejected and fix it."""
+    out: list[dict] = []
+    for type_, table in (("variations", "variation"), ("products", "product")):
+        pk = _ENTITY[type_][1]
+        for r in ledger.execute(
+            f"SELECT {pk} AS xid, sync_attempts, sync_error FROM {table} "
+            f"WHERE state = 'gap_held' ORDER BY updated_at DESC LIMIT ?", (limit,)):
+            out.append({"type": type_, "external_id": r["xid"],
+                        "attempts": r["sync_attempts"], "error": r["sync_error"]})
+    return out
+
+
+def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
+    """Recovery: reset dead-lettered ('gap_held') entities back to 'dirty' so they are re-served --
+    used after the underlying Medusa issue is fixed (e.g. a transient outage that hit the cap).
+    Clears the counter. Returns the number requeued. type_ None = variations + products."""
+    tables = [_ENTITY[type_][0]] if type_ else ["variation", "product"]
+    now, n = now_iso(), 0
+    for table in tables:
+        cur = ledger.execute(
+            f"UPDATE {table} SET state = 'dirty', sync_attempts = 0, updated_at = ? "
+            f"WHERE state = 'gap_held'", (now,))
+        n += cur.rowcount
     return n
 
 

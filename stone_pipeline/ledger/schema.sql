@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS variation (
     payload_hash  TEXT,
     state         TEXT NOT NULL DEFAULT 'pending'
                   CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
+    sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive failed Medusa applies (dead-letter counter)
+    sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
     first_seen    TEXT NOT NULL,
     last_synced   TEXT,
     created_at    TEXT NOT NULL,
@@ -187,6 +189,8 @@ CREATE TABLE IF NOT EXISTS product (
     payload_hash         TEXT,
     state                TEXT NOT NULL DEFAULT 'pending'
                          CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
+    sync_attempts        INTEGER NOT NULL DEFAULT 0,    -- consecutive failed Medusa applies (dead-letter counter)
+    sync_error           TEXT,                          -- last Medusa failure reason; null once synced
     last_synced          TEXT,
     created_at           TEXT NOT NULL,
     updated_at           TEXT NOT NULL

@@ -37,6 +37,9 @@ def dispatch(ledger: Ledger, method: str, resource: str,
     `resource` is the last path segment (status, variations, products, ack)."""
     if method == "GET" and resource == "status":
         return 200, sync.status(ledger)
+    if method == "GET" and resource == "failures":
+        # drill-down behind the status gap_held count: what Medusa rejected and why.
+        return 200, {"failures": sync.failures(ledger)}
     if method == "GET" and resource in ("variations", "products", "inventory"):
         # bound every page. An unbounded pull on a full delta builds the whole set in
         # memory and writes it in one buffer (http.server has no backpressure): a
@@ -48,7 +51,8 @@ def dispatch(ledger: Ledger, method: str, resource: str,
     if method == "POST" and resource == "ack":
         if not isinstance(body, list):
             return 400, {"error": "ack body must be a JSON list of acks"}
-        return 200, {"acked": sync.ack_batch(ledger, body)}
+        result = sync.ack_batch(ledger, body)
+        return 200, {"acked": result["applied"], "skipped": result["skipped"]}
     return 404, {"error": f"no route for {method} /sync/{resource}"}
 
 
