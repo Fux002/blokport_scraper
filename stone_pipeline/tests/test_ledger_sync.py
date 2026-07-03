@@ -81,6 +81,29 @@ def test_sync_loop_serve_ack_converges(tmp_path):
         assert [r["external_id"] for r in ready(ledger, "products")] == ["S-1"]
 
 
+def test_serving_leases_so_overlapping_pulls_never_double_serve(tmp_path):
+    # D5 in-flight guard: a pull LEASES its rows to 'syncing'. A second, overlapping pull (Medusa's
+    # job paginating, or two triggers) must get NOTHING for those rows -- never the same entity twice.
+    from stone_pipeline.ledger.sync import count_ready, reap_stale_syncing
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        for i in range(3):
+            _product(ledger, f"P-{i}", "slab_v1", state="pending")
+
+        assert count_ready(ledger, "products") == 3            # peek: 3 eligible, NOT leased
+        first = {i["external_id"] for i in ready(ledger, "products")}   # pull 1 leases all three
+        assert first == {"P-0", "P-1", "P-2"}
+        assert ready(ledger, "products") == []                 # pull 2 (overlapping): nothing to re-serve
+        assert count_ready(ledger, "products") == 0            # all in-flight
+        assert ledger.counts("product") == {"syncing": 3}
+
+        # a crashed puller never acks -> the lease must be reclaimed so the rows are not lost forever.
+        assert reap_stale_syncing(ledger) == 0                 # nothing stale yet (fresh lease)
+        ledger.execute("UPDATE product SET updated_at = '2000-01-01T00:00:00+00:00'")   # time passes
+        assert reap_stale_syncing(ledger) == 3                 # leases expire -> back to 'dirty'
+        assert {i["external_id"] for i in ready(ledger, "products")} == {"P-0", "P-1", "P-2"}   # re-served
+
+
 def test_dispatch_routes_status_ready_ack(tmp_path):
     from stone_pipeline.ledger.server import dispatch
 

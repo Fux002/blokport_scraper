@@ -42,7 +42,9 @@ def simulate_sync(ledger: Ledger, mint: Callable[[str, str], str] | None = None,
                 moved += 1
         if moved == 0:
             break
-    converged = all(not sync.ready(ledger, t) for t in _TYPES)
+    # count_ready is the NON-leasing peek: ready() would mark rows 'syncing' as a side effect and
+    # falsely report "not converged" next call. Convergence = nothing left eligible to serve.
+    converged = all(sync.count_ready(ledger, t) == 0 for t in _TYPES)
     return {"rounds": rounds, "applied": applied, "converged": converged}
 
 

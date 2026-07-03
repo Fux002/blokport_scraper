@@ -62,10 +62,10 @@ def test_cold_start_converges_with_invariants(tmp_path):
 
         assert _no_orphans(lg) == 0                                   # every product resolves
         assert lg.counts("product") == {"pending": 3}
-        assert len(sync.ready(lg, "products")) == 3                   # variations already synced -> servable
-        rep = simulate.simulate_sync(lg)
+        assert sync.count_ready(lg, "products") == 3                  # variations already synced -> servable
+        rep = simulate.simulate_sync(lg)                              # (count_ready PEEKS; does not lease)
         assert rep["converged"] and lg.counts("product") == {"synced": 3}
-        assert sync.ready(lg, "products") == [] and sync.ready(lg, "inventory") == []   # fixed point
+        assert sync.count_ready(lg, "products") == 0 and sync.count_ready(lg, "inventory") == 0   # fixed point
 
 
 # --- HOT RE-PRODUCE (idempotent / convergent) --------------------------------
@@ -154,12 +154,18 @@ def test_partial_ack_then_restart_serves_only_the_unacked(tmp_path):
         for i in range(4):
             _variety(lg, f"slab_marble_v{i}_0001", medusa_id=f"V{i}")
         populate_products(lg, [_row(f"A{i}", f"slab_marble_v{i}_0001") for i in range(4)], cfg)
-        served = [i["external_id"] for i in sync.ready(lg, "products")]
+        served = [i["external_id"] for i in sync.ready(lg, "products")]   # LEASES all four -> 'syncing'
         assert len(served) == 4
-        # ack only HALF (a crash / interruption after two)
+        assert lg.counts("product") == {"syncing": 4}                     # in-flight, not yet acked
+        # ack only HALF (a crash / interruption after two): those settle to synced, the other two
+        # stay leased ('syncing') -- a second overlapping pull would NOT re-serve them (D5 guard).
         for sku in served[:2]:
             sync.ack(lg, "products", sku, medusa_id="M-" + sku, status_="synced")
-        # RESTART: re-serve returns exactly the two un-acked, none of the acked
+        assert {i["external_id"] for i in sync.ready(lg, "products")} == set(), \
+            "leased-but-unacked rows must not double-serve to a concurrent pull"
+        # RESTART after the lease expires: age the in-flight rows past the lease window, so the next
+        # pull reaps them back to servable and re-serves EXACTLY the two un-acked, none of the acked.
+        lg.execute("UPDATE product SET updated_at = '2000-01-01T00:00:00+00:00' WHERE state = 'syncing'")
         reserved = {i["external_id"] for i in sync.ready(lg, "products")}
         assert reserved == set(served[2:])
         assert all(lg.get("product", "sku", s)["state"] == "synced" for s in served[:2])

@@ -26,6 +26,7 @@ dashes (design principle 2).
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger.db import Ledger, now_iso
@@ -36,6 +37,25 @@ log = logfmt.get_logger("ledger.sync")
 # it stops being served (no infinite poison-pill retry) and surfaces in /status for a human. A later
 # populate with changed data, or an explicit requeue, un-quarantines it.
 _MAX_SYNC_ATTEMPTS = 5
+
+# A served-but-not-yet-acked entity is leased in state 'syncing' (the in-flight guard) so two
+# overlapping pulls can NEVER double-serve the same rows. If Medusa pulls but never acks (crash /
+# lost response), the lease is reclaimed to 'dirty' after this many seconds and re-served.
+_SYNCING_LEASE_SECONDS = 900   # 15 min -- comfortably longer than a pull->apply->ack cycle
+
+
+def reap_stale_syncing(ledger: Ledger, table: str | None = None) -> int:
+    """Return dead leases ('syncing' older than _SYNCING_LEASE_SECONDS) to 'dirty' so they re-serve.
+    Called lazily at the head of every serve, so a crashed puller's in-flight rows recover on the
+    next pull without a background job. Returns the number reclaimed."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=_SYNCING_LEASE_SECONDS)).isoformat()
+    now, n = now_iso(), 0
+    for t in ([table] if table else ["variation", "product"]):
+        cur = ledger.execute(
+            f"UPDATE {t} SET state = 'dirty', updated_at = ? WHERE state = 'syncing' AND updated_at < ?",
+            (now, cutoff))
+        n += cur.rowcount
+    return n
 
 # type name (the URL <type>) -> (table, single-column external_id)
 _ENTITY = {
@@ -80,21 +100,48 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
 
 # --- GET /sync/<type>?status=ready --------------------------------------------
 
-def _limit(sql: str, limit: int | None) -> str:
-    return sql + (f" LIMIT {int(limit)}" if limit else "")
+def _sub_limit(limit: int | None) -> str:
+    return f" LIMIT {int(limit)}" if (limit and int(limit) > 0) else ""
+
+
+# ONE source of truth for "eligible to serve", reused by the lease (ready_*) AND the non-leasing
+# peek (count_ready) so the two can never diverge -- a variation is servable once produced + typed;
+# a product once its variation is LIVE (synced, typed, textured). `v` is the joined variation alias.
+_ELIGIBLE_VARIATION = "state IN ('pending', 'dirty') AND in_full = 1 AND type IS NOT NULL AND type != ''"
+_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') AND v.state = 'synced' "
+                     "AND v.type IS NOT NULL AND v.type != '' "
+                     "AND v.image_url IS NOT NULL AND v.image_url != ''")
+
+
+def count_ready(ledger: Ledger, type_: str) -> int:
+    """Non-leasing PEEK: how many rows COULD serve right now, WITHOUT leasing them. ready() would
+    mark the rows 'syncing' and consume them, so use this for convergence checks, monitoring, and
+    any assertion that must not have a side effect. Same eligibility predicates as ready()."""
+    if type_ in ("variations", "variation"):
+        return ledger.execute("SELECT COUNT(*) n FROM variation WHERE " + _ELIGIBLE_VARIATION).fetchone()["n"]
+    if type_ in ("products", "product"):
+        return ledger.execute(
+            "SELECT COUNT(*) n FROM product p JOIN variation v ON v.key = p.variation_key "
+            "WHERE " + _ELIGIBLE_PRODUCT).fetchone()["n"]
+    if type_ == "inventory":
+        return len(ready_inventory(ledger))
+    raise ValueError(f"unsupported sync type {type_!r}")
 
 
 def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
-    """Variations awaiting sync (pending/dirty), in the produced set, that have a
-    canonical type. An untyped variation is HELD, never served: Medusa could not
-    resolve its type and it would list broken (the autonomy boundary, design L1). The
-    pipeline already surfaces those for re-typing. Ordered by a stable key so paging
-    is repeatable (design L2)."""
-    rows = ledger.execute(_limit(
-        "SELECT key, branch, type, name, aliases, image_url, volume, payload_hash "
-        "FROM variation WHERE state IN ('pending', 'dirty') AND in_full = 1 "
-        "AND type IS NOT NULL AND type != '' "
-        "ORDER BY created_at, key", limit))
+    """Variations awaiting sync (pending/dirty), in the produced set, that have a canonical type.
+    An untyped variation is HELD, never served (design L1). Ordered by a stable key (design L2).
+
+    Serving atomically LEASES the rows to 'syncing' via UPDATE...RETURNING, so two overlapping pulls
+    can never double-serve the same rows (the second's subquery no longer sees them as pending/dirty).
+    ack flips 'syncing'->'synced'/'dirty'; an un-acked lease is reclaimed by reap_stale_syncing."""
+    reap_stale_syncing(ledger, "variation")
+    rows = ledger.execute(
+        "UPDATE variation SET state = 'syncing', updated_at = ? WHERE key IN ("
+        "  SELECT key FROM variation WHERE " + _ELIGIBLE_VARIATION +
+        "  ORDER BY created_at, key" + _sub_limit(limit) + ") "
+        "RETURNING key, branch, type, name, aliases, image_url, volume, payload_hash",
+        (now_iso(),)).fetchall()
     return [{
         "external_id": v["key"],
         "payload_hash": v["payload_hash"],
@@ -126,12 +173,14 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
     external reference Medusa resolves on its side. `vendor` (the source) resolves to the
     company + sales channel; ports are derived by Medusa from `origin_country_code`;
     `image_urls` are ingestion sources Medusa copies into its own storage."""
-    rows = ledger.execute(_limit(
-        "SELECT p.* FROM product p JOIN variation v ON v.key = p.variation_key "
-        "WHERE p.state IN ('pending', 'dirty') AND v.state = 'synced' "
-        "AND v.type IS NOT NULL AND v.type != '' "
-        "AND v.image_url IS NOT NULL AND v.image_url != '' "
-        "ORDER BY p.created_at, p.sku", limit))
+    # atomically LEASE the eligible products to 'syncing' (in-flight guard, same as variations).
+    reap_stale_syncing(ledger, "product")
+    rows = ledger.execute(
+        "UPDATE product SET state = 'syncing', updated_at = ? WHERE sku IN ("
+        "  SELECT p.sku FROM product p JOIN variation v ON v.key = p.variation_key "
+        "  WHERE " + _ELIGIBLE_PRODUCT +
+        "  ORDER BY p.created_at, p.sku" + _sub_limit(limit) + ") RETURNING *",
+        (now_iso(),)).fetchall()
     return [{
         "external_id": p["sku"],
         "payload_hash": p["payload_hash"],
@@ -162,10 +211,10 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
 def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
     """Stock deltas to push: rows whose qty moved since the last sync, for products
     that are already synced (a product must exist in Medusa before its stock loads)."""
-    rows = ledger.execute(_limit(
+    rows = ledger.execute(
         "SELECT i.sku AS sku, i.qty AS qty FROM inventory i JOIN product p ON p.sku = i.sku "
         "WHERE p.state = 'synced' AND (i.last_synced_qty IS NULL OR i.last_synced_qty != i.qty) "
-        "ORDER BY i.sku", limit))
+        "ORDER BY i.sku" + _sub_limit(limit))
     return [{"external_id": r["sku"], "payload": {"sku": r["sku"], "quantity": r["qty"]}}
             for r in rows]
 
