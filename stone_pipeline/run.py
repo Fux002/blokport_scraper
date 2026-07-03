@@ -482,8 +482,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if target == "all":
             # only sources that actually HAVE a scrape this run are expected to produce output; a
-            # registered adapter with no scrape file is absent, not failed (don't alert on it).
-            requested = [s for s in adapter_registry.REGISTRY if find_scrape_file(s)]
+            # registered adapter with no scrape file is absent, not failed (don't alert on it). A
+            # DISABLED source is also not expected -- run_all skips it, so exclude it here too or the
+            # missing-check below would flag every disabled-but-has-data source as a failure (exit 1).
+            from stone_pipeline.config import store
+            _enabled = store.enabled_names()
+            requested = [s for s in adapter_registry.REGISTRY
+                         if find_scrape_file(s) and (_enabled is None or s in _enabled)]
             results = run_all(requested)
             for manifest in results.values():
                 print_summary(manifest)

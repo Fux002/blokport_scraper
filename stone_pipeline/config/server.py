@@ -35,7 +35,8 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         if len(segments) == 1:
             if method == "POST":
                 srcs = body.get("sources") if isinstance(body, dict) else None
-                return runner.start_run(srcs)   # (record, 202) or (in-flight, 409)
+                rec, code = runner.start_run(srcs)   # start_run returns (record, status)
+                return code, rec                     # dispatch returns (status, body)
             if method == "GET":
                 return 200, runner.current()
             return 405, {"error": "POST /config/v1/run to trigger, GET for the current run"}
