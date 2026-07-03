@@ -112,8 +112,13 @@ def fill_variation_types(ledger: Ledger) -> int:
                 found = types[cand]
                 break
         if found:
-            ledger.execute("UPDATE variation SET type = ?, updated_at = ? WHERE key = ?",
-                           (found, now, v["key"]))
+            # a synced-but-untyped variation was HELD (ready_variations gates on a non-empty type),
+            # so filling the type must RE-SERVE it: flip synced -> dirty. pending/dirty stay as-is.
+            # (type is not in the variation payload_hash, so a re-populate alone would miss this.)
+            ledger.execute(
+                "UPDATE variation SET type = ?, "
+                "state = CASE WHEN state = 'synced' THEN 'dirty' ELSE state END, "
+                "updated_at = ? WHERE key = ?", (found, now, v["key"]))
             n += 1
     return n
 
@@ -133,6 +138,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         # data, bootstrap) still resolves and a re-populate never stomps a good link with NULL.
         variation_key = r.variation_key or _variation_key_for(ledger, r.variation_id) \
             or (prev["variation_key"] if prev else None)
+        category = _category_name_for(ledger, r.category_pcat_id)   # once: used in the record AND the hash
         record = {
             "sku": sku,
             "source": cfg.source_code,
@@ -143,7 +149,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "finish": r.finish_name,
             "quality": r.quality_name,
             "type": r.type_name,
-            "category": _category_name_for(ledger, r.category_pcat_id),
+            "category": category,
             "title": r.title,
             "description": r.description,
             "handle": r.handle,
@@ -170,7 +176,10 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
                 r.title, r.description, r.handle, r.weight, r.length, r.width, r.height,
                 r.origin_country_code, json.dumps(r.product_image_keys or []),
-                r.company_id, r.sales_channel_id, _category_name_for(ledger, r.category_pcat_id),
+                # oriented image keys carry a BLOCK's images (Front/Right/Back/Left); without them a
+                # re-shot block never flips dirty and its new images never re-serve.
+                json.dumps(r.oriented_image_keys or []),
+                r.company_id, r.sales_channel_id, category,
                 r.bundle_size, json.dumps(r.port_ids or []),
             ])),
             "created_at": now,

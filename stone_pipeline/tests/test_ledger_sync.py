@@ -3,6 +3,8 @@ ledger and Medusa in sync."""
 
 from __future__ import annotations
 
+import pytest
+
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import ack, ready, status
 
@@ -147,6 +149,20 @@ def test_serve_in_flight_detects_a_lease(tmp_path):
         assert serve_in_flight(ledger) is False        # nothing leased
         ready(ledger, "variations")                    # leases slab_v1 -> 'syncing'
         assert serve_in_flight(ledger) is True          # a pull is in flight
+
+
+def test_reset_refuses_atomically_while_a_lease_is_held(tmp_path):
+    # the real cross-process guard: reset_sync_state itself refuses (raises) if a pull holds a lease,
+    # not just the caller -- so the CLI path is guarded too, and there's no check-then-act window.
+    from stone_pipeline.ledger.sync import reset_sync_state, ServeInFlight, ready
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="pending")
+        _variation(ledger, "slab_v2", state="synced", medusa_id="V2")
+        ready(ledger, "variations")                    # leases the pending one -> 'syncing'
+        with pytest.raises(ServeInFlight):
+            reset_sync_state(ledger)
+        # nothing was reset -- the synced one keeps its id (the canary write rolled back on raise)
+        assert ledger.get("variation", "key", "slab_v2")["medusa_id"] == "V2"
 
 
 def test_serving_leases_so_overlapping_pulls_never_double_serve(tmp_path):

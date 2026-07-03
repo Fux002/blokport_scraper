@@ -33,6 +33,10 @@ from stone_pipeline.ledger.db import Ledger, now_iso
 
 log = logfmt.get_logger("ledger.sync")
 
+
+class ServeInFlight(Exception):
+    """A reset was attempted while a pull holds a lease ('syncing' rows). The caller maps it to 409."""
+
 # After this many CONSECUTIVE failed Medusa applies, an entity is dead-lettered (state 'gap_held'):
 # it stops being served (no infinite poison-pill retry) and surfaces in /status for a human. A later
 # populate with changed data, or an explicit requeue, un-quarantines it.
@@ -61,7 +65,10 @@ def reap_stale_syncing(ledger: Ledger, table: str | None = None) -> int:
 _ENTITY = {
     "variations": ("variation", "key"),
     "products": ("product", "sku"),
-    "combinations": ("combination", "combo_key"),
+    # NB: no 'combinations' -- that lane is dormant (no write-through populates it, no ready_* serves
+    # it, and the combination table lacks the sync_attempts/sync_error columns the ack fail-path uses,
+    # so wiring it here would make ack('combinations','failed') raise). Combinations are CSV-rendered
+    # from the export and Medusa resolves priceable tuples itself. Re-add only with a full serve lane.
 }
 _SERVABLE = ("pending", "dirty")
 # a variation always belongs to a category (strict): branch is NOT NULL and constrained,
@@ -369,14 +376,22 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     (variations/attributes/combinations) is reset only on a GLOBAL (unscoped) reset. Returns row counts.
     """
     now, out = now_iso(), {}
-    scoped = bool(source_codes)
+    # Take the write lock up front (a no-op write) and re-check in-flight WITHIN this transaction, so a
+    # concurrent pull (the sync server is a separate process) cannot lease/ack between the check and
+    # the reset; with the connection's busy_timeout it waits for our commit. This is the real guard;
+    # the caller's earlier check is only a fast fail. Raises ServeInFlight -> the caller maps it to 409.
+    ledger.execute("UPDATE ledger_meta SET updated_at = ? WHERE id = 1", (now,))
+    if serve_in_flight(ledger):
+        raise ServeInFlight("a pull is in flight; refusing to reset mid-serve")
+
+    scoped = source_codes is not None          # empty list -> scope-to-nothing, NOT a global reset
     where, params = ("", ())
     if scoped:
-        marks = ",".join("?" * len(source_codes))
+        marks = ",".join("?" * len(source_codes)) or "NULL"   # source IN (NULL) matches no row
         where, params = (f" WHERE source IN ({marks})", tuple(source_codes))
 
     # shared base layer: overlay reset only on a global reset (a per-source reset leaves it alone).
-    for t in ("attribute", "variation", "combination"):
+    for t in ("attribute", "variation"):
         out[t] = 0 if scoped else _reset_overlay(ledger, t, now)
 
     if hard:                                   # drop the scraper output; re-scrape rebuilds it

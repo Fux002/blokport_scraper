@@ -26,16 +26,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no ledger at {path}")
         return 1
 
-    with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
-        before = sync.status(ledger)
-        if "--yes" not in argv:
-            print(f"DRY RUN (no changes). Ledger: {path}")
-            print(json.dumps({"current_status": before}, indent=2, sort_keys=True))
-            print("\nre-run with --yes to reset every entity to 'pending' and drop all Medusa ids.")
-            print("COORDINATE FIRST: pause Medusa's pull, then reset, then have Medusa clear scraper_sync_ref.")
-            return 0
-        result = sync.reset_sync_state(ledger)
-        after = sync.status(ledger)
+    try:
+        with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
+            before = sync.status(ledger)
+            if "--yes" not in argv:
+                print(f"DRY RUN (no changes). Ledger: {path}")
+                print(json.dumps({"current_status": before}, indent=2, sort_keys=True))
+                print("\nre-run with --yes to reset every entity to 'pending' and drop all Medusa ids.")
+                print("COORDINATE FIRST: pause Medusa's pull, then reset, then have Medusa clear scraper_sync_ref.")
+                return 0
+            result = sync.reset_sync_state(ledger)
+            after = sync.status(ledger)
+    except sync.ServeInFlight as exc:
+        print(f"refused: {exc}. Pause Medusa's pull first, then retry.")
+        return 2
 
     print(json.dumps({"reset_rows": result, "status_before": before, "status_after": after},
                      indent=2, sort_keys=True))

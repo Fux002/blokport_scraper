@@ -58,6 +58,10 @@ class SourceConfig:
         # become "-{surrogate}" and cross-source delist scoping (+ the 30% cap denominator) break.
         if not (self.source_code or "").strip():
             self.source_code = self.source[:3]
+        # normalize once at the boundary: the SKU prefix is uppercased at emit but the `source` column
+        # (populate) and the delist/seed prefix (.lower()) and the reset scope key must all agree, so a
+        # non-lowercase config can never split a source's rows across two `source` values.
+        self.source_code = self.source_code.strip().lower()
 
 
 def load_yaml_sources(path: Path | None = None) -> dict[str, SourceConfig]:

@@ -32,6 +32,7 @@ log = logfmt.get_logger("config.runner")
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}      # run_id -> record (kept so GET /run/{id} works after it finishes)
 _current_id: str | None = None   # the in-flight run, if any
+_reset_active: bool = False      # a reset is running (run and reset are mutually exclusive)
 
 
 def _now() -> str:
@@ -130,7 +131,13 @@ def _launch_ecs(rec: dict) -> None:
             "assignPublicIp": "DISABLED"}})
     with _lock:
         rec["task_arn"] = (resp.get("tasks") or [{}])[0].get("taskArn")
-        rec["status"] = "running"   # runs on the cluster; follow it in CloudWatch
+        # ECS is fire-and-forget: nobody in THIS process watches the Fargate task, so it must NOT
+        # occupy the single-run slot forever (that would 409 every future run + reset). Mark it
+        # 'dispatched' (a terminal-for-us state the run/reset gate ignores) and free the slot; follow
+        # the actual task in CloudWatch. 'one run at a time' for ECS is enforced by the cluster.
+        rec["status"] = "dispatched"
+        global _current_id
+        _current_id = None
 
 
 _LAUNCHERS = {"local": _launch_local, "ecs": _launch_ecs}
@@ -146,15 +153,21 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
     stage = (stage or "all").strip().lower()
     if stage not in STAGES:
         return {"error": f"unknown stage {stage!r}; expected one of {', '.join(STAGES)}"}, 400
-    # An explicit request is validated against the registry: a subset with no KNOWN source is a 400
-    # (not a silent fall-through to "run everything"); None/empty means every enabled source (scope None).
-    scope = _resolve_sources(sources) if sources else None
-    if sources and not scope:
-        return {"error": f"no known source in {sources!r}"}, 400
+    scope = None
+    if sources:
+        known = _resolve_sources(sources)
+        unknown = [s for s in sources if s not in set(known)]
+        if unknown:                            # reject ANY unknown, never silently drop it
+            return {"error": f"unknown source(s): {unknown}"}, 400
+        # catalog is a SHARED, all-source consolidation: a source scope is meaningless there (build
+        # ignores --sources for catalog), so drop it -- else the 'last run' label would credit one source.
+        scope = None if stage == "catalog" else known
     global _current_id
     with _lock:
         if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
             return _public(_runs[_current_id]), 409
+        if _reset_active:
+            return {"error": "a reset is in progress; refusing to run"}, 409
         run_id = _now().translate({ord(c): None for c in ":-.T"})[:17]
         rec = {"run_id": run_id, "status": "queued", "mode": _mode(),
                "started_at": _now(), "finished_at": None, "error": None,
@@ -199,21 +212,29 @@ def reset(sources=None, hard=False) -> tuple[dict, int]:
     from stone_pipeline.ledger.db import Ledger
     codes = None
     if sources:
-        known = _resolve_sources(sources)          # intersect with the registry (rejects unknown names)
-        if not known:
-            return {"error": f"no known source in {sources!r}"}, 400
+        known = _resolve_sources(sources)
+        unknown = [s for s in sources if s not in set(known)]
+        if unknown:                                 # reject ANY unknown, never silently drop it
+            return {"error": f"unknown source(s): {unknown}"}, 400
         codes = _source_codes(known)
-    with _lock:
+    global _reset_active
+    with _lock:                                     # claim the slot (mutually exclusive with a run)...
         if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
             return {"error": "a run is in progress; refusing to reset mid-run"}, 409
-        try:
-            with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
-                if sync.serve_in_flight(ledger):
-                    return {"error": "a pull is in flight; refusing to reset mid-serve"}, 409
-                result = sync.reset_sync_state(ledger, source_codes=codes, hard=bool(hard))
-        except Exception as exc:
-            log.exception("ledger reset failed")
-            return {"error": str(exc)}, 500
+        if _reset_active:
+            return {"error": "a reset is already in progress"}, 409
+        _reset_active = True
+    try:                                            # ...then do the DB work WITHOUT holding _lock, so
+        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:  # status reads never stall
+            result = sync.reset_sync_state(ledger, source_codes=codes, hard=bool(hard))
+    except sync.ServeInFlight as exc:               # a pull started/held a lease -> refuse (the real, atomic guard)
+        return {"error": str(exc)}, 409
+    except Exception as exc:
+        log.exception("ledger reset failed")
+        return {"error": str(exc)}, 500
+    finally:
+        with _lock:
+            _reset_active = False
     log.warning("ledger reset via config API", extra={"extra_fields": {
         "mode": "hard" if hard else "soft", "sources": sources or "all", "result": result}})
     return {"mode": "hard" if hard else "soft", "reset": result}, 200

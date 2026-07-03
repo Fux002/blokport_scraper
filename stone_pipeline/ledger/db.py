@@ -110,6 +110,9 @@ class Ledger:
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        # two processes share this file (sync server + config server). Wait for a lock instead of
+        # erroring 'database is locked' immediately, so an ack and a reset serialize rather than fail.
+        conn.execute("PRAGMA busy_timeout = 5000")
         return conn
 
     def _apply_schema(self) -> None:

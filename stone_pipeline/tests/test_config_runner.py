@@ -77,11 +77,27 @@ def test_a_subset_with_no_known_source_is_rejected_not_run_all():
     assert runner._current_id is None                          # no run was claimed
 
 
-def test_bogus_source_alongside_a_real_one_is_dropped():
+def test_bogus_source_alongside_a_real_one_is_rejected():
+    # one unknown source in the request is a 400 -- never silently dropped (that would skip a scraper
+    # the operator asked for, with no signal).
+    rec, code = runner.start_run(sources=["zucchi", "not_a_scraper"], stage="scrape", launch=lambda r: None)
+    assert code == 400 and "not_a_scraper" in str(rec["error"])
+    assert runner._current_id is None                          # no run claimed
+
+
+def test_catalog_stage_ignores_a_source_scope():
+    # catalog is a SHARED all-source consolidation: a source scope is dropped so the command + the
+    # 'last run' label don't credit one source for work that touched every source.
     seen, launch = _capture()
-    rec, code = runner.start_run(sources=["zucchi", "not_a_scraper"], stage="scrape", launch=launch)
-    assert code == 202 and rec["sources"] == ["zucchi"]        # only the known one survives
-    assert seen["rec"]["scope"] == ["zucchi"]                  # and only it reaches the subprocess
+    rec, code = runner.start_run(sources=["zucchi"], stage="catalog", launch=launch)
+    assert code == 202 and seen["rec"]["scope"] is None        # scope ignored for catalog
+    assert "--sources" not in runner._build_command(seen["rec"])
+
+
+def test_run_refused_while_a_reset_is_active(monkeypatch):
+    monkeypatch.setattr(runner, "_reset_active", True)
+    rec, code = runner.start_run(launch=lambda r: None)
+    assert code == 409 and "reset is in progress" in rec["error"]
 
 
 def test_dispatch_passes_sources_and_stage_through(monkeypatch):
