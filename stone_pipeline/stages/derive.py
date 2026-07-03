@@ -408,7 +408,8 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
     """Override is the top strategy for the derived fields too (section 8.4)."""
     if ref.overrides is None:
         return
-    get = lambda f: ref.overrides.get(row.src_site, row.surrogate_key or "", f)
+    def get(f):
+        return ref.overrides.get(row.src_site, row.surrogate_key or "", f)
     if (v := get("bundle_size")) and str(v).isdigit():
         row.bundle_size, row.bundle_size_method, row.bundle_size_confidence = int(v), "override", "high"
     if v := get("origin_country_code"):

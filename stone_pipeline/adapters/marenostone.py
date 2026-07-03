@@ -50,7 +50,7 @@ class MarenostoneAdapter(AdapterBase):
         "raw_format": lambda r: AdapterBase.clean(r.get("attr_format")),
         # the scraper puts the depth (Thickness) in dimensions_width -> our thickness/width
         "raw_thickness": lambda r: _na(r.get("dimensions_width")),
-        "raw_dimensions": lambda r: _dims(r),
+        "raw_dimensions": lambda r: _dims(r),   # lambda defers to _dims defined below
         "raw_weight": lambda r: _na(r.get("weight")),
         "raw_description": lambda r: AdapterBase.clean(r.get("description")) or AdapterBase.clean(r.get("short_description")),
         # full-size images: current scraper emits `image_urls`, the legacy format (kept in the

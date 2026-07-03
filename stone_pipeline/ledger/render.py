@@ -41,18 +41,15 @@ def render_variants_full(ledger: Ledger, path: str | Path) -> int:
     "Volume per kg (m3/kg)") can never drift from the producer's.
     """
     key_col, name_col, image_col, aliases_col, volume_col = VARIANTS_FULL_COLS
-    rows = []
-    for v in ledger.execute(
+    rows = [{
+        key_col: v["key"],
+        name_col: v["name"],
+        image_col: v["image_url"] or "",
+        aliases_col: _aliases_cell(v["aliases"]),
+        volume_col: v["volume"] or "",
+    } for v in ledger.execute(
         "SELECT key, name, image_url, aliases, volume FROM variation "
-        "WHERE in_full = 1 ORDER BY rowid"
-    ):
-        rows.append({
-            key_col: v["key"],
-            name_col: v["name"],
-            image_col: v["image_url"] or "",
-            aliases_col: _aliases_cell(v["aliases"]),
-            volume_col: v["volume"] or "",
-        })
+        "WHERE in_full = 1 ORDER BY rowid")]
     return csvio.write_dicts(path, VARIANTS_FULL_COLS, rows, sanitize=False)
 
 

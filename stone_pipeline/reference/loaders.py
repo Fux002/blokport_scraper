@@ -129,10 +129,8 @@ class Attributes:
         return [canon for canon, _ in self.by_category.get(category, {}).values()]
 
     def all_ids(self) -> list[str]:
-        ids: list[str] = list(self.category_pcat.values())
-        for table in self.by_category.values():
-            ids.extend(i for _, i in table.values())
-        return ids
+        return list(self.category_pcat.values()) + [
+            i for table in self.by_category.values() for _, i in table.values()]
 
 
 def load_attributes(path: Path | None = None) -> Attributes:
@@ -343,10 +341,7 @@ class Ports:
         return self.by_locode.get(t.upper()) or self.by_name.get(_norm(t))
 
     def all_ids(self) -> list[str]:
-        ids: list[str] = []
-        for lst in self.by_country.values():
-            ids.extend(lst)
-        return ids
+        return [pid for lst in self.by_country.values() for pid in lst]
 
 
 def load_ports(path: Path | None = None) -> Ports:

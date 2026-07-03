@@ -24,6 +24,7 @@ longer folded into Slabs).
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from stone_pipeline.config.settings import CATEGORIES, Confidence, category
@@ -127,12 +128,12 @@ class FormatStats:
 
 
 def run(rows: list[CanonicalRow], ref: ReferenceData) -> FormatStats:
-    counts: dict[str, int] = {}
+    counts: Counter[str] = Counter()
     unresolved = 0
     for row in rows:
         resolve_format(row, ref)
-        counts[row.format_value or "?"] = counts.get(row.format_value or "?", 0) + 1
+        counts[row.format_value or "?"] += 1
         if row.format_method == "unresolved_default":
             unresolved += 1
-    log.info("format resolved", extra={"extra_fields": {"by_value": counts, "unresolved": unresolved}})
-    return FormatStats(rows=len(rows), unresolved=unresolved, by_value=counts)
+    log.info("format resolved", extra={"extra_fields": {"by_value": dict(counts), "unresolved": unresolved}})
+    return FormatStats(rows=len(rows), unresolved=unresolved, by_value=dict(counts))

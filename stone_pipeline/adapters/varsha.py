@@ -35,8 +35,8 @@ class VarshaAdapter(AdapterBase):
     field_map = {
         "src_natural_key": lambda r: AdapterBase.clean(r.get("bundle_id")),
         "scrape_timestamp": lambda r: AdapterBase.clean(r.get("scrape_timestamp")),
-        "raw_name": lambda r: _variety(r),
-        "variety_match_key": lambda r: _variety(r),
+        "raw_name": _variety,
+        "variety_match_key": _variety,
         # composition is a classification tag, not a stone type; leave type to the
         # matched variety (Stage 5 is authoritative)
         "raw_type": lambda r: "",
@@ -45,7 +45,7 @@ class VarshaAdapter(AdapterBase):
         "raw_quality": lambda r: AdapterBase.clean(r.get("quality")),
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
-        "raw_dimensions": lambda r: _dims(r),
+        "raw_dimensions": lambda r: _dims(r),   # lambda defers to _dims defined below
         "raw_total_m2": lambda r: AdapterBase.clean(r.get("total_sqmt")),
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
         "raw_origin": lambda r: AdapterBase.clean(r.get("country_code")),

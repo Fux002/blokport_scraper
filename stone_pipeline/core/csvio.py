@@ -45,7 +45,13 @@ def write_rows(path: Path | str, header: Sequence[str], rows: Iterable[Sequence]
     """Atomically write raw sequence rows (e.g. combination tuples). No sanitising -- callers that
     emit only ids/keys use this; it avoids the per-cell cost on the multi-million-row files."""
     rows = list(rows)
-    atomic_write(path, lambda h: (lambda w: (w.writerow(header), w.writerows(rows)))(csv.writer(h)))
+
+    def _w(handle):
+        w = csv.writer(handle)
+        w.writerow(header)
+        w.writerows(rows)
+
+    atomic_write(path, _w)
     return len(rows)
 
 

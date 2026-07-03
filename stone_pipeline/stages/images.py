@@ -186,8 +186,10 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             # defaulted to its raw supplier url (no `else srcs` fallback that would leak source urls).
             urls = [manifest[u] for u in srcs if u in manifest]
             _slot_row(row, urls)
-            stats.staged += 1 if urls else 0
-            stats.no_image += 0 if urls else 1
+            if urls:
+                stats.staged += 1
+            else:
+                stats.no_image += 1
         log.info("images done (passthrough -> improved S3)", extra={"extra_fields": {
             "staged": stats.staged, "no_image": stats.no_image, "manifest_entries": len(manifest)}})
         return stats

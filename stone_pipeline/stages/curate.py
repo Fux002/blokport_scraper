@@ -737,8 +737,10 @@ def write_curation(result: CurationResult) -> None:
 
     # never offer a variant that is flagged for deletion (mis-typed/junk) for (re)loading
     _del = SETTINGS.paths.review_dir / "variants_to_delete.csv"
-    _delete_keys = ({(r.get("Key") or "").strip() for r in csv.DictReader(_del.open(encoding="utf-8-sig"))}
-                    if _del.exists() else set())
+    _delete_keys: set[str] = set()
+    if _del.exists():
+        with _del.open(encoding="utf-8-sig") as _handle:   # close the handle (was leaked in a comprehension)
+            _delete_keys = {(r.get("Key") or "").strip() for r in csv.DictReader(_handle)}
     before = len(upload_rows)
     upload_rows = [r for r in upload_rows if _is_real_delta(r) and r["Key"] not in _delete_keys]
     if before != len(upload_rows):

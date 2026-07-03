@@ -120,11 +120,8 @@ def read_template_columns(path: Path | None = None) -> list[str]:
 
 
 def row_to_cells(row: CanonicalRow, columns: list[str], cfg: SourceConfig) -> dict[str, str]:
-    cells: dict[str, str] = {}
-    for col in columns:
-        mapper = COLUMN_MAP.get(col)
-        cells[col] = mapper(row, cfg) if mapper else ""
-    return cells
+    return {col: (COLUMN_MAP[col](row, cfg) if col in COLUMN_MAP else "")
+            for col in columns}
 
 
 def write_import_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,

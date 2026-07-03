@@ -35,7 +35,7 @@ class ZucchiAdapter(AdapterBase):
         "raw_quality": lambda r: AdapterBase.clean(r.get("classification")),
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
-        "raw_dimensions": lambda r: _dims(r),
+        "raw_dimensions": lambda r: _dims(r),   # lambda defers to _dims defined below
         "raw_weight": lambda r: AdapterBase.clean(r.get("weight_kg_net")),
         "raw_total_m2": lambda r: AdapterBase.clean(r.get("area_m2")),
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
