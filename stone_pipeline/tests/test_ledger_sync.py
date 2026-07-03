@@ -81,6 +81,32 @@ def test_sync_loop_serve_ack_converges(tmp_path):
         assert [r["external_id"] for r in ready(ledger, "products")] == ["S-1"]
 
 
+def test_reset_sync_state_clean_start(tmp_path):
+    # Medusa was wiped -> the ledger must follow: every entity back to 'pending', all Medusa ids +
+    # sync bookkeeping dropped, but the scraped CONTENT (name/type/image) untouched.
+    from stone_pipeline.ledger.sync import reset_sync_state
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="OLD-VID")
+        _product(ledger, "P-1", "slab_v1", state="synced")
+        ledger.execute("UPDATE product SET medusa_id='OLD-PID', last_synced='x' WHERE sku='P-1'")
+        ledger.execute("UPDATE variation SET last_synced='x' WHERE key='slab_v1'")
+        ledger.upsert("inventory", {"sku": "P-1", "qty": 7, "last_synced_qty": 7,
+                                    "updated_at": now_iso()}, pk=("sku",))
+
+        out = reset_sync_state(ledger)
+        assert out["variation"] >= 1 and out["product"] >= 1 and out["inventory"] >= 1
+
+        v = ledger.get("variation", "key", "slab_v1")
+        p = ledger.get("product", "sku", "P-1")
+        assert v["state"] == "pending" and v["medusa_id"] is None and v["last_synced"] is None
+        assert p["state"] == "pending" and p["medusa_id"] is None and p["last_synced"] is None
+        assert ledger.get("inventory", "sku", "P-1")["last_synced_qty"] is None   # stock re-serves
+        # CONTENT preserved -- only the sync overlay was cleared
+        assert v["type"] == "Marble" and v["image_url"] == "https://s3/tex.png"
+        # and it is now servable again from scratch
+        assert [r["external_id"] for r in ready(ledger, "variations")] == ["slab_v1"]
+
+
 def test_serving_leases_so_overlapping_pulls_never_double_serve(tmp_path):
     # D5 in-flight guard: a pull LEASES its rows to 'syncing'. A second, overlapping pull (Medusa's
     # job paginating, or two triggers) must get NOTHING for those rows -- never the same entity twice.

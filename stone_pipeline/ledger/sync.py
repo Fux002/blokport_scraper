@@ -332,6 +332,29 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
     return n
 
 
+def reset_sync_state(ledger: Ledger, tables: tuple[str, ...] | None = None) -> dict[str, int]:
+    """CLEAN START: return every entity to 'pending' and DROP its Medusa id + sync bookkeeping, so the
+    ledger matches a freshly-wiped Medusa and re-syncs from scratch with fresh ids. Inventory has no
+    state; its last_synced_qty is cleared so every stock level re-serves as a delta.
+
+    This is destructive and must be COORDINATED: pause Medusa's pull, reset here, have Medusa clear its
+    own scraper_sync_ref, then resume -- otherwise an in-flight ack races the reset. Content (names,
+    types, images, prices) is untouched; only the sync overlay is cleared. Returns {table: rows_reset}."""
+    now, out = now_iso(), {}
+    for t in (tables or ("attribute", "variation", "combination", "product")):
+        cols = {r["name"] for r in ledger.execute(f"PRAGMA table_info({t})")}
+        sets = ["state = 'pending'", "updated_at = ?"]
+        sets += [f"{c} = NULL" for c in ("medusa_id", "last_synced", "sync_error") if c in cols]
+        if "sync_attempts" in cols:
+            sets.append("sync_attempts = 0")
+        out[t] = ledger.execute(f"UPDATE {t} SET {', '.join(sets)}", (now,)).rowcount
+    # inventory carries no state/id -- clear the synced baseline so all stock re-serves as a delta.
+    out["inventory"] = ledger.execute(
+        "UPDATE inventory SET last_synced_qty = NULL, updated_at = ?", (now,)).rowcount
+    log.warning("ledger sync state RESET (clean start)", extra={"extra_fields": {"reset": out}})
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     import json as _json
 
