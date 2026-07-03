@@ -62,7 +62,11 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run or /reset"}
     if len(segments) == 1:
         if method == "GET":
-            return 200, {"sources": store.list_rows()}
+            # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)
+            # and how many products reached the ledger (ledger_products) -- so :4200 shows what's there
+            # and how old, not just the last run.
+            from stone_pipeline.config import scrape_status
+            return 200, {"sources": scrape_status.enrich(store.list_rows())}
         return 405, {"error": "use PUT /config/v1/sources/<name> to create"}
     name = segments[1]
     if method == "GET":
