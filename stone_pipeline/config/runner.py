@@ -38,9 +38,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+STAGES = ("scrape", "catalog", "all")
+
+
 def _public(rec: dict) -> dict:
     return {k: rec.get(k) for k in
-            ("run_id", "status", "mode", "started_at", "finished_at", "sources", "progress", "error")}
+            ("run_id", "status", "mode", "started_at", "finished_at", "sources", "stage", "progress", "error")}
 
 
 def _mode() -> str:
@@ -73,13 +76,20 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
 
 
+def _build_command(rec: dict) -> list[str]:
+    """The produce subprocess for this run. FULL produce = stone_pipeline.build (scrape -> catalog ->
+    consistency gate), NOT bare `run all`: that refreshes products against a STALE variation table (a
+    new variety never enters it), the produce-vs-build divergence. `--stage` scopes HOW FAR (scrape /
+    catalog / all) and `--sources` scopes WHICH scrapers (omitted -> every enabled source)."""
+    cmd = [sys.executable, "-m", "stone_pipeline.build", "--stage", rec.get("stage", "all")]
+    if rec.get("scope"):
+        cmd += ["--sources", ",".join(rec["scope"])]
+    return cmd
+
+
 def _launch_local(rec: dict) -> None:
-    # FULL produce = stone_pipeline.build (run all for the ENABLED sources -> products, THEN catalog
-    # -> variants/combinations + record_catalog, then a consistency gate). Not bare `run all`: that
-    # refreshes products against a STALE variation table (a new variety never enters it), which was a
-    # source of the produce-vs-build divergence. build is one atomic, self-verifying produce step.
     proc = subprocess.Popen(
-        [sys.executable, "-m", "stone_pipeline.build"],
+        _build_command(rec),
         env={**os.environ, "BLOKPORT_LEDGER_WRITETHROUGH": "1"},
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     threading.Thread(target=_watch_local, args=(rec, proc), daemon=True).start()
@@ -89,10 +99,18 @@ def _launch_ecs(rec: dict) -> None:
     import boto3
     ecs = boto3.client("ecs", region_name=os.environ.get("BLOKPORT_S3_REGION", "eu-west-1"))
     env = os.environ.get("BLOKPORT_ENV", "development")
+    # scope the task the same way the local launcher does: override the container's command with the
+    # run's stage + sources. The container name must match the task definition's (BLOKPORT_ECS_CONTAINER,
+    # default blokport-scraper-<env>). Without stage/scope the taskdef's default command (full build) runs.
+    container = os.environ.get("BLOKPORT_ECS_CONTAINER", f"blokport-scraper-{env}")
+    command = ["python", "-m", "stone_pipeline.build", "--stage", rec.get("stage", "all")]
+    if rec.get("scope"):
+        command += ["--sources", ",".join(rec["scope"])]
     resp = ecs.run_task(
         cluster=os.environ["BLOKPORT_ECS_CLUSTER"],
         taskDefinition=os.environ.get("BLOKPORT_ECS_TASKDEF", f"blokport-scraper-{env}"),
         launchType="FARGATE", count=1,
+        overrides={"containerOverrides": [{"name": container, "command": command}]},
         networkConfiguration={"awsvpcConfiguration": {
             "subnets": os.environ["BLOKPORT_ECS_SUBNETS"].split(","),
             "securityGroups": os.environ["BLOKPORT_ECS_SG"].split(","),
@@ -107,9 +125,19 @@ _LAUNCHERS = {"local": _launch_local, "ecs": _launch_ecs}
 
 # -- public API ---------------------------------------------------------------
 
-def start_run(sources=None, launch=None) -> tuple[dict, int]:
-    """Kick off a scraper run for the enabled sources (or an explicit `sources` list). Returns
-    (record, http_status): 202 started, or 409 with the in-flight run if one is already going."""
+def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
+    """Kick off a produce. `sources` None -> every enabled source, else an explicit subset; `stage`
+    is scrape / catalog / all (how far to run). Returns (record, http_status): 202 started, 409 if a
+    run is already in flight, 400 on a bad stage. `scope` (the explicit subset, internal) is what
+    actually scopes the subprocess; `sources` is the resolved list shown to the caller."""
+    stage = (stage or "all").strip().lower()
+    if stage not in STAGES:
+        return {"error": f"unknown stage {stage!r}; expected one of {', '.join(STAGES)}"}, 400
+    # An explicit request is validated against the registry: a subset with no KNOWN source is a 400
+    # (not a silent fall-through to "run everything"); None/empty means every enabled source (scope None).
+    scope = _resolve_sources(sources) if sources else None
+    if sources and not scope:
+        return {"error": f"no known source in {sources!r}"}, 400
     global _current_id
     with _lock:
         if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
@@ -117,7 +145,8 @@ def start_run(sources=None, launch=None) -> tuple[dict, int]:
         run_id = _now().translate({ord(c): None for c in ":-.T"})[:17]
         rec = {"run_id": run_id, "status": "queued", "mode": _mode(),
                "started_at": _now(), "finished_at": None, "error": None,
-               "sources": _resolve_sources(sources), "progress": {}}
+               "sources": scope if scope is not None else _resolve_sources(None),
+               "stage": stage, "scope": scope, "progress": {}}
         _runs[run_id] = rec
         _current_id = run_id
     try:

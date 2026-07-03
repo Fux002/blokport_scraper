@@ -30,13 +30,16 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
     """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
     or ['sources', 'polonine']). Pure: returns (status_code, json body)."""
     if segments and segments[0] == "run":
-        # the 'produce' trigger: kick off a scrape of the ENABLED sources into the ledger.
+        # the 'produce' trigger: kick a scrape/catalog into the ledger. Body (all optional):
+        #   {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"}
+        # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate).
         from stone_pipeline.config import runner
         if len(segments) == 1:
             if method == "POST":
                 srcs = body.get("sources") if isinstance(body, dict) else None
-                rec, code = runner.start_run(srcs)   # start_run returns (record, status)
-                return code, rec                     # dispatch returns (status, body)
+                stage = body.get("stage") if isinstance(body, dict) else None
+                rec, code = runner.start_run(srcs, stage or "all")   # (record, status)
+                return code, rec                                     # dispatch returns (status, body)
             if method == "GET":
                 return 200, runner.current()
             return 405, {"error": "POST /config/v1/run to trigger, GET for the current run"}
