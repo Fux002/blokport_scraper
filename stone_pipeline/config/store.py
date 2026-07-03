@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS source (
     emit_on_review      INTEGER NOT NULL DEFAULT 1,
     default_bundle_size INTEGER NOT NULL DEFAULT 6,
     min_expected_rows   INTEGER NOT NULL DEFAULT 0,
+    last_run_at         TEXT,                          -- when this source was last produced (ISO), for the admin list
+    last_run_status     TEXT,                          -- running | succeeded | failed
+    last_run_stage      TEXT,                          -- scrape | catalog | inventory | all
     updated_at          TEXT NOT NULL
 );
 """
@@ -75,6 +78,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "company_id" not in cols:
         conn.execute("ALTER TABLE source ADD COLUMN company_id TEXT NOT NULL DEFAULT ''")
         conn.commit()
+    for col in ("last_run_at", "last_run_status", "last_run_stage"):   # added for the admin 'last run' label
+        if col not in cols:
+            conn.execute(f"ALTER TABLE source ADD COLUMN {col} TEXT")
+            conn.commit()
 
 
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
@@ -122,6 +129,9 @@ def _row_dict(r: sqlite3.Row) -> dict:
         "mode": r["mode"], "watermarked": bool(r["watermarked"]),
         "emit_on_review": bool(r["emit_on_review"]),
         "default_bundle_size": r["default_bundle_size"], "min_expected_rows": r["min_expected_rows"],
+        # last run (for the admin list's "last run" label); null until this source has ever been produced.
+        "last_run_at": r["last_run_at"], "last_run_status": r["last_run_status"],
+        "last_run_stage": r["last_run_stage"],
     }
 
 
@@ -181,6 +191,20 @@ def set_enabled(source: str, enabled: bool, path: str | Path | None = None) -> N
     with closing(open_store(path)) as conn:
         conn.execute("UPDATE source SET enabled = ?, updated_at = ? WHERE source = ?",
                      (1 if enabled else 0, _now(), source))
+        conn.commit()
+
+
+def record_run(sources, status: str, stage: str, at: str | None = None,
+               path: str | Path | None = None) -> None:
+    """Stamp each named source with its most recent run (time, status, stage) for the admin list's
+    'last run' label. Durable in config.db, so it survives a config-server restart (unlike the
+    in-memory run record). An unknown source name simply matches no row (no-op)."""
+    at = at or _now()
+    with closing(open_store(path)) as conn:
+        conn.executemany(
+            "UPDATE source SET last_run_at = ?, last_run_status = ?, last_run_stage = ?, "
+            "updated_at = ? WHERE source = ?",
+            [(at, status, stage, at, s) for s in sources])
         conn.commit()
 
 

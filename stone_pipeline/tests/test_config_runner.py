@@ -94,6 +94,34 @@ def test_dispatch_passes_sources_and_stage_through(monkeypatch):
     assert code == 202 and body["stage"] == "scrape" and body["sources"] == ["polonine"]
 
 
+def test_run_record_exposes_scope_for_the_ui():
+    _, launch = _capture()
+    scoped, _ = runner.start_run(sources=["zucchi"], stage="scrape", launch=launch)
+    assert scoped["scope"] == ["zucchi"]         # UI can spin ONLY this row (not every button)
+    _, launch = _capture()
+    all_run, _ = runner.start_run(launch=launch)  # prior run finished (_capture marks succeeded)
+    assert all_run["scope"] is None              # an all-run -> UI spins "Run all"
+
+
+def test_start_run_stamps_the_source_as_running(tmp_path, monkeypatch):
+    # the durable 'last run' label: triggering a run marks its source running immediately, in config.db.
+    from stone_pipeline.config import store
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=_min_yaml(tmp_path))
+    _, launch = _capture()
+    runner.start_run(sources=["polonine"], stage="scrape", launch=launch)
+    row = store.get_row("polonine")
+    assert row["last_run_status"] == "running" and row["last_run_stage"] == "scrape"
+    assert row["last_run_at"] is not None
+
+
+def _min_yaml(tmp_path):
+    p = tmp_path / "sources.yaml"
+    p.write_text("polonine:\n  adapter: polonine\n  source_code: pol\n  vendor: Polonine Stone Co\n",
+                 encoding="utf-8")
+    return p
+
+
 def test_second_trigger_while_running_is_refused_409():
     # a launcher that leaves the run 'running' (does not finish it)
     rec1, code1 = runner.start_run(launch=lambda r: r.update(status="running"))

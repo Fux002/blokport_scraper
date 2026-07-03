@@ -26,6 +26,27 @@ def _seed_yaml(tmp_path):
     return yaml_path
 
 
+def test_record_run_stamps_last_run_per_source(tmp_path, monkeypatch):
+    yaml_path = _seed_yaml(tmp_path)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+
+    # a fresh source has never run -> null label
+    assert {r["source"]: r["last_run_at"] for r in store.list_rows()} == {"polonine": None, "varsha": None}
+
+    # stamp ONE source; the other must be untouched (source-scoped label)
+    store.record_run(["polonine"], "succeeded", "scrape", at="2026-07-03T15:24:13+00:00")
+    rows = {r["source"]: r for r in store.list_rows()}
+    assert rows["polonine"]["last_run_at"] == "2026-07-03T15:24:13+00:00"
+    assert rows["polonine"]["last_run_status"] == "succeeded"
+    assert rows["polonine"]["last_run_stage"] == "scrape"
+    assert rows["varsha"]["last_run_at"] is None                 # not in scope -> untouched
+
+    # an unknown source name is a harmless no-op
+    store.record_run(["ghost"], "succeeded", "all")
+    assert store.get_row("polonine")["last_run_status"] == "succeeded"
+
+
 def test_seed_pipeline_read_and_enable(tmp_path, monkeypatch):
     yaml_path = _seed_yaml(tmp_path)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))

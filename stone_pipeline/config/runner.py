@@ -43,7 +43,19 @@ STAGES = ("scrape", "catalog", "inventory", "all")
 
 def _public(rec: dict) -> dict:
     return {k: rec.get(k) for k in
-            ("run_id", "status", "mode", "started_at", "finished_at", "sources", "stage", "progress", "error")}
+            ("run_id", "status", "mode", "started_at", "finished_at",
+             "sources", "scope", "stage", "progress", "error")}
+
+
+def _stamp_last_run(rec: dict, status: str) -> None:
+    """Persist this run against each of its sources (the admin list's 'last run' label). Best-effort:
+    a store failure must never affect the run. `scope` (the explicit subset) is what actually ran when
+    set; otherwise every enabled source in `sources` did (stage all/catalog/inventory over the lot)."""
+    try:
+        from stone_pipeline.config import store
+        store.record_run(rec.get("scope") or rec.get("sources") or [], status, rec.get("stage", "all"))
+    except Exception:
+        log.exception("last-run stamp failed (non-fatal)")
 
 
 def _mode() -> str:
@@ -73,6 +85,7 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         rec["finished_at"] = _now()
         if rc != 0:
             rec["error"] = f"pipeline exited {rc}"
+    _stamp_last_run(rec, rec["status"])
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
 
 
@@ -149,6 +162,7 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
                "stage": stage, "scope": scope, "progress": {}}
         _runs[run_id] = rec
         _current_id = run_id
+    _stamp_last_run(rec, "running")                # list shows this source as running immediately
     try:
         (launch or _LAUNCHERS[rec["mode"]])(rec)
     except Exception as exc:                       # a failed launch is a completed (failed) run
@@ -156,6 +170,7 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
             rec["status"] = "failed"
             rec["finished_at"] = _now()
             rec["error"] = str(exc)
+        _stamp_last_run(rec, "failed")
         log.exception("scraper run failed to launch")
         return _public(rec), 500
     return _public(rec), 202
