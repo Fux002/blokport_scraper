@@ -125,7 +125,12 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
     n = 0
     for r in rows:
         sku = _sku(r, cfg)
-        variation_key = _variation_key_for(ledger, r.variation_id)
+        prev = ledger.get("product", "sku", sku)
+        # the product's variation KEY is stable once resolved (a SKU is always the same variety).
+        # _variation_key_for maps the scrape's Medusa variation_id -> Key via variation.medusa_id,
+        # which CHURNS (export id -> new ack id after a clean-start re-sync). So resolve, but fall
+        # back to the already-stored Key rather than stomping a good link with NULL on a re-populate.
+        variation_key = _variation_key_for(ledger, r.variation_id) or (prev["variation_key"] if prev else None)
         record = {
             "sku": sku,
             "source": cfg.source_code,
@@ -173,8 +178,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         # -> untouched. CRITICAL: preserve a synced product's medusa_id + state on re-run. The old
         # code hardcoded state='pending', medusa_id=None, so every write-through run reset the whole
         # catalog to pending and wiped the acked Medusa ids -> Medusa re-ingested everything nightly.
-        prev = ledger.get("product", "sku", sku)
-        if prev is None:
+        if prev is None:                                     # `prev` fetched above (variation_key fallback)
             record.update(medusa_id=None, state="pending", last_synced=None)
         else:
             record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"],
