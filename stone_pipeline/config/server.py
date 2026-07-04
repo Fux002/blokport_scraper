@@ -58,6 +58,15 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             result, code = runner.reset(srcs, hard)
             return code, result
         return 405, {"error": "POST /config/v1/reset to reset the ledger"}
+    if segments and segments[0] == "purge":
+        # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
+        # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
+        from stone_pipeline.config import runner
+        if method == "POST":
+            srcs = body.get("sources") if isinstance(body, dict) else None
+            result, code = runner.purge(srcs)
+            return code, result
+        return 405, {"error": "POST /config/v1/purge to hard-delete qty-0 products"}
     if segments and segments[0] == "clean":
         # housekeeping for the admin: POST {} prunes superseded scrapes/runs; POST {"sources":[...]}
         # DELETES those sources' raw scraped data (fresh re-scrape). Base config + ledger untouched.
@@ -68,7 +77,7 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             return code, result
         return 405, {"error": "POST /config/v1/clean to prune (or delete a source's scraped data)"}
     if not segments or segments[0] != "sources":
-        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset or /clean"}
+        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge or /clean"}
     if len(segments) == 1:
         if method == "GET":
             # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)

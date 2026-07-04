@@ -348,12 +348,22 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
 
 
 def serve_in_flight(ledger: Ledger) -> bool:
-    """True if a pull is mid-flight: any variation/product is leased ('syncing'). A reset MUST refuse
-    while this holds, or it would race an in-flight ack and re-open the ledger drift (coordination)."""
+    """True if a pull is mid-flight: any variation/product is leased ('syncing'). A reset/purge MUST
+    refuse while this holds, or it would race an in-flight ack and re-open the ledger drift."""
     for t in ("variation", "product"):
         if ledger.execute(f"SELECT 1 FROM {t} WHERE state = 'syncing' LIMIT 1").fetchone():
             return True
     return False
+
+
+def _lock_and_check_in_flight(ledger: Ledger) -> None:
+    """Take the ledger write lock up front (a no-op write) and re-check in-flight WITHIN this
+    transaction, so a concurrent pull (separate process) cannot lease/ack between the check and the
+    mutation; with busy_timeout it waits for our commit. Raises ServeInFlight -> caller maps to 409.
+    Shared by reset_sync_state and purge_discontinued (both are destructive, both must not race a pull)."""
+    ledger.execute("UPDATE ledger_meta SET updated_at = ? WHERE id = 1", (now_iso(),))
+    if serve_in_flight(ledger):
+        raise ServeInFlight("a pull is in flight; refusing to mutate mid-serve")
 
 
 def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params: tuple = ()) -> int:
@@ -384,14 +394,7 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     (variations/attributes/combinations) is reset only on a GLOBAL (unscoped) reset. Returns row counts.
     """
     now, out = now_iso(), {}
-    # Take the write lock up front (a no-op write) and re-check in-flight WITHIN this transaction, so a
-    # concurrent pull (the sync server is a separate process) cannot lease/ack between the check and
-    # the reset; with the connection's busy_timeout it waits for our commit. This is the real guard;
-    # the caller's earlier check is only a fast fail. Raises ServeInFlight -> the caller maps it to 409.
-    ledger.execute("UPDATE ledger_meta SET updated_at = ? WHERE id = 1", (now,))
-    if serve_in_flight(ledger):
-        raise ServeInFlight("a pull is in flight; refusing to reset mid-serve")
-
+    _lock_and_check_in_flight(ledger)          # atomic guard: refuse if a pull holds a lease
     scoped = source_codes is not None          # empty list -> scope-to-nothing, NOT a global reset
     where, params = ("", ())
     if scoped:
@@ -417,6 +420,32 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     log.warning("ledger sync state RESET", extra={"extra_fields": {
         "mode": "hard" if hard else "soft", "sources": source_codes or "all", "reset": out}})
     return out
+
+
+def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None) -> dict:
+    """Hard-delete the qty-0 (delisted / dead-stock) products and their inventory rows, so the
+    graveyard of never-returning products stops accumulating. A product that reappears in a later
+    scrape recreates cleanly (no prior ledger row -> populate treats it as NEW). Variation/backbone
+    rows are untouched. `source_codes` scopes to those sources. Returns
+    {product, inventory, external_ids}: the external_ids are exactly the SKUs deleted, so Medusa
+    deletes the same set (product + scraper_sync_ref) -- the coordinated both-sides purge."""
+    _lock_and_check_in_flight(ledger)          # same atomic guard as reset -- never purge mid-serve
+    scope = ""
+    params: tuple = ()
+    if source_codes is not None:
+        marks = ",".join("?" * len(source_codes)) or "NULL"
+        scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
+    # dead stock = a product whose inventory qty is 0 (populate_discontinued / a drop set it there)
+    skus = [r["sku"] for r in ledger.execute(
+        f"SELECT p.sku FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.qty = 0{scope}", params)]
+    if not skus:
+        return {"product": 0, "inventory": 0, "external_ids": []}
+    q = ",".join("?" * len(skus))
+    inv = ledger.execute(f"DELETE FROM inventory WHERE sku IN ({q})", tuple(skus)).rowcount   # child first (FK)
+    prod = ledger.execute(f"DELETE FROM product WHERE sku IN ({q})", tuple(skus)).rowcount
+    log.warning("ledger PURGE discontinued (qty-0) products", extra={"extra_fields": {
+        "sources": source_codes or "all", "product": prod, "inventory": inv}})
+    return {"product": prod, "inventory": inv, "external_ids": skus}
 
 
 def main(argv: list[str] | None = None) -> int:

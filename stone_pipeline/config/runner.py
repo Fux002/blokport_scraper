@@ -269,6 +269,43 @@ def reset(sources=None, hard=False) -> tuple[dict, int]:
     return {"mode": "hard" if hard else "soft", "reset": result}, 200
 
 
+def purge(sources=None) -> tuple[dict, int]:
+    """Coordinated dead-stock purge (the ① half): hard-delete the qty-0 products so the delisted
+    graveyard stops accumulating. Guarded like reset (409 if a run/pull is active). Returns
+    {external_ids:[...], product, inventory} -- Medusa deletes the SAME external_ids (product + ref),
+    the ②③ half. A purged product recreates cleanly if it reappears in a later scrape."""
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    codes = None
+    if sources:
+        known = _resolve_sources(sources)
+        unknown = [s for s in sources if s not in set(known)]
+        if unknown:
+            return {"error": f"unknown source(s): {unknown}"}, 400
+        codes = _source_codes(known)
+    global _reset_active
+    with _lock:
+        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
+            return {"error": "a run is in progress; refusing to purge mid-run"}, 409
+        if _reset_active:
+            return {"error": "a reset/purge is already in progress"}, 409
+        _reset_active = True
+    try:
+        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
+            result = sync.purge_discontinued(ledger, source_codes=codes)
+    except sync.ServeInFlight as exc:
+        return {"error": str(exc)}, 409
+    except Exception as exc:
+        log.exception("ledger purge failed")
+        return {"error": str(exc)}, 500
+    finally:
+        with _lock:
+            _reset_active = False
+    log.warning("dead-stock purge via config API", extra={"extra_fields": {
+        "sources": sources or "all", "purged": result["product"]}})
+    return result, 200
+
+
 def clean(sources=None) -> tuple[dict, int]:
     """Housekeeping for the :4200 buttons. `sources` given -> DELETE those sources' raw scraped data
     (data/<source>/*) for a fresh re-scrape; none -> prune superseded scrapes/runs/orphan images.

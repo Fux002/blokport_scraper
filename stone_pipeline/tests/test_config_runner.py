@@ -241,6 +241,22 @@ def test_clean_unknown_source_is_400():
     assert code == 400
 
 
+def test_purge_refused_while_a_run_is_active():
+    runner._runs["x"] = {"status": "running", "run_id": "x"}
+    runner._current_id = "x"
+    body, code = runner.purge()
+    assert code == 409
+
+
+def test_dispatch_routes_purge(monkeypatch):
+    from stone_pipeline.config.server import dispatch
+    seen = {}
+    monkeypatch.setattr(runner, "purge",
+                        lambda sources=None: seen.update(sources=sources) or ({"external_ids": []}, 200))
+    code, body = dispatch("POST", ["purge"], {"sources": ["polonine"]})
+    assert code == 200 and seen == {"sources": ["polonine"]}
+
+
 def test_dispatch_routes_clean(monkeypatch):
     from stone_pipeline.config.server import dispatch
     seen = {}
