@@ -445,3 +445,19 @@ def test_glue_full_sync_converges(tmp_path):
         assert ledger.get("inventory", "sku", "P-1")["last_synced_qty"] == 7   # stock synced
         # nothing left to serve in any lane
         assert all(ready(ledger, t) == [] for t in ("variations", "products", "inventory"))
+
+
+def test_server_self_seeds_a_missing_ledger(tmp_path, monkeypatch):
+    # a fresh host (ECS on a new EFS volume) has no ledger -- the sync server must CREATE one and start,
+    # not refuse. bootstrap_ledger_if_missing leaves a servable ledger; a produce populates it later.
+    from stone_pipeline.ledger import server, writethrough
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "development.db"))
+    monkeypatch.setenv("BLOKPORT_ENV", "development")
+    path = writethrough.ledger_path()
+    assert not path.exists()
+    server.bootstrap_ledger_if_missing(path)
+    assert path.exists()
+    with Ledger.open(path, env="development") as lg:
+        assert "variation" in status(lg)          # a real, servable ledger
+    server.bootstrap_ledger_if_missing(path)       # idempotent: a no-op second time
+    assert path.exists()

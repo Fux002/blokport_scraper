@@ -114,23 +114,29 @@ class SyncHandler(BaseHTTPRequestHandler):
                                                           "request": args[0] % args[1:] if args else ""}})
 
 
+def bootstrap_ledger_if_missing(path) -> None:
+    """Create (and best-effort seed) the ledger when it does not exist, so the sync server is
+    self-sufficient on a fresh host (e.g. ECS on a new EFS volume) instead of refusing to start.
+    Seeds the id foundation when the exports are present; otherwise leaves an empty ledger that the
+    first produce populates. Idempotent: a no-op once the ledger exists."""
+    if path.exists():
+        return
+    log.info("no ledger yet; bootstrapping", extra={"extra_fields": {"ledger": str(path)}})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with writethrough.open_ledger():   # create schema + seed; __exit__ commits
+            pass
+    except Exception:
+        log.exception("ledger seed skipped; starting empty (a produce will populate it)")
+        Ledger.open(path, env=writethrough.ENV_NAME).close()   # ensure the file exists to serve
+
+
 def serve(host: str | None = None, port: int = 8723) -> None:
     # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so Medusa (over the
     # VPC) can reach it. The bearer token still gates every request.
     host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
     path = writethrough.ledger_path()
-    if not path.exists():
-        # Fresh host (e.g. ECS on a new EFS volume): create the ledger so the server is self-sufficient
-        # instead of refusing to start. Seed the id foundation when the exports are present
-        # (best-effort); otherwise start empty and the first produce populates it.
-        log.info("no ledger yet; bootstrapping", extra={"extra_fields": {"ledger": str(path)}})
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with writethrough.open_ledger():   # create schema + seed; __exit__ commits
-                pass
-        except Exception:
-            log.exception("ledger seed skipped; starting empty (a produce will populate it)")
-            Ledger.open(path, env=writethrough.ENV_NAME).close()   # ensure the file exists to serve
+    bootstrap_ledger_if_missing(path)
     httpd = ThreadingHTTPServer((host, port), SyncHandler)
     httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
     httpd.ledger_path = path                   # type: ignore[attr-defined]

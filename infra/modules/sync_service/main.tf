@@ -184,11 +184,9 @@ resource "aws_ecs_task_definition" "this" {
       image = "${var.image_repo_url}:${var.image_tag}"
       essential = true
       # override the Dockerfile ENTRYPOINT (run_pipeline.sh) -- an empty array is treated as "unset"
-      # by ECS. Seed the EFS ledger from the in-image exports if empty (open_ledger is idempotent),
-      # then exec the sync server, which otherwise refuses on a missing ledger. (The proper fix --
-      # the server self-seeding -- lands with the main merge.)
-      entryPoint = ["sh", "-c",
-        "python -c \"import stone_pipeline.ledger.writethrough as w; lg=w.open_ledger(); lg.conn.commit(); lg.close()\" && exec python -m stone_pipeline.ledger.server"]
+      # by ECS. The server self-seeds a missing ledger on a fresh EFS volume (bootstrap_ledger_if_missing),
+      # so no wrapper is needed.
+      entryPoint   = ["python", "-m", "stone_pipeline.ledger.server"]
       portMappings = [{ containerPort = 8723, protocol = "tcp" }]
       environment  = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
       secrets      = [{ name = "BLOKPORT_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
