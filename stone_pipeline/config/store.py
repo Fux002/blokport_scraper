@@ -199,6 +199,16 @@ def set_enabled(source: str, enabled: bool, path: str | Path | None = None) -> N
         conn.commit()
 
 
+def delete_source(source: str, path: str | Path | None = None) -> bool:
+    """Remove a scraper from the config store entirely (the ':4200' Remove-permanently button, after its
+    ledger products have been purged). Returns True if a row was deleted, False if the source was already
+    gone. Config only -- it never touches the ledger; the caller purges the products first."""
+    with closing(open_store(path)) as conn:
+        n = conn.execute("DELETE FROM source WHERE source = ?", (source,)).rowcount
+        conn.commit()
+    return n > 0
+
+
 def record_run_log(record: dict, path: str | Path | None = None) -> None:
     """Persist one run's public record (JSON) so `last` survives a config-server restart. Keyed by
     run_id (upsert), bounded to the most recent 50 by finished_at."""

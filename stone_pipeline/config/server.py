@@ -76,8 +76,18 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             result, code = runner.clean(srcs)
             return code, result
         return 405, {"error": "POST /config/v1/clean to prune (or delete a source's scraped data)"}
+    if segments and segments[0] == "delist":
+        # stage 1 of a vendor removal ('Take offline'): {"sources": ["zucchi", ...]} sets those sources'
+        # products to qty 0 (Medusa pulls them out of sale) AND disables them so a scrape never re-stocks
+        # an offline vendor. Reversible: re-enable + re-scrape. Guarded (409 if a run/pull is active).
+        from stone_pipeline.config import runner
+        if method == "POST":
+            srcs = body.get("sources") if isinstance(body, dict) else None
+            result, code = runner.delist(srcs)
+            return code, result
+        return 405, {"error": "POST /config/v1/delist to take sources offline (qty 0 + disable)"}
     if not segments or segments[0] != "sources":
-        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge or /clean"}
+        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, /delist or /clean"}
     if len(segments) == 1:
         if method == "GET":
             # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)
@@ -96,6 +106,12 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         body = {**body, "source": name}   # the path name is authoritative
         store.upsert_row(body)
         return 200, store.get_row(name)
+    if method == "DELETE":
+        # stage 2 of a vendor removal ('Remove permanently'): purge the source's qty-0 products and drop
+        # its config row. 409 if the source still has LIVE products (take it offline via /delist first).
+        from stone_pipeline.config import runner
+        result, code = runner.remove_source(name)
+        return code, result
     return 405, {"error": f"method {method} not allowed on a source"}
 
 
@@ -149,6 +165,9 @@ class ConfigHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self._handle("POST")
+
+    def do_DELETE(self) -> None:
+        self._handle("DELETE")
 
     def log_message(self, *args) -> None:
         log.info("config request", extra={"extra_fields": {"client": self.address_string()}})

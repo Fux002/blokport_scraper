@@ -448,6 +448,42 @@ def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None) ->
     return {"product": prod, "inventory": inv, "external_ids": skus}
 
 
+def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict:
+    """Stage 1 of a vendor removal ('Take offline'): set every one of a source's products to qty 0, so
+    the next pull serves a qty-0 inventory delta and Medusa takes them out of sale. Reversible -- a
+    later re-scrape restocks them at qty > 0 -- so the caller ALSO disables the source, or a scrape
+    would silently re-stock a vendor you took offline. Products and their sync ids stay in place; only
+    the stock changes. `source_codes` scopes to those sources. Returns {delisted, external_ids}."""
+    _lock_and_check_in_flight(ledger)          # same atomic guard as reset/purge -- never mutate mid-serve
+    scope, params = "", ()
+    if source_codes is not None:
+        marks = ",".join("?" * len(source_codes)) or "NULL"
+        scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
+    skus = [r["sku"] for r in ledger.execute(
+        f"SELECT p.sku FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.qty != 0{scope}", params)]
+    if not skus:
+        return {"delisted": 0, "external_ids": []}
+    q = ",".join("?" * len(skus))
+    ledger.execute(f"UPDATE inventory SET qty = 0, updated_at = ? WHERE sku IN ({q})", (now_iso(), *skus))
+    log.warning("ledger DELIST source (qty -> 0)", extra={"extra_fields": {
+        "sources": source_codes or "all", "delisted": len(skus)}})
+    return {"delisted": len(skus), "external_ids": skus}
+
+
+def live_products(ledger: Ledger, source_codes: list[str] | None = None) -> int:
+    """How many of a source's products are still LIVE (inventory qty > 0). The vendor-removal DELETE
+    guard uses this: a source with live products must be taken offline (delisted to qty 0, pulled by
+    Medusa) before it can be removed, so nothing is left orphaned-live in the shop."""
+    scope, params = "", ()
+    if source_codes is not None:
+        marks = ",".join("?" * len(source_codes)) or "NULL"
+        scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
+    row = ledger.execute(
+        f"SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.qty > 0{scope}",
+        params).fetchone()
+    return int(row["n"]) if row else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     import json as _json
 

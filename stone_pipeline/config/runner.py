@@ -330,6 +330,88 @@ def clean(sources=None) -> tuple[dict, int]:
         return {"error": str(exc)}, 500
 
 
+def delist(sources) -> tuple[dict, int]:
+    """Stage 1 of a vendor removal ('Take offline'): set every product of the given sources to qty 0 (so
+    the next pull takes them out of sale) AND disable the sources, so a scrape never silently re-stocks a
+    vendor you took offline. Reversible: re-enable + re-scrape restores stock. Guarded like reset (409 if
+    a run/pull is active). Returns {delisted, external_ids, disabled}, 200; 400 on a bad/empty scope."""
+    from stone_pipeline.config import store
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    if not sources:
+        return {"error": "delist requires an explicit sources list"}, 400
+    known = _resolve_sources(sources)
+    unknown = [s for s in sources if s not in set(known)]
+    if unknown:                                     # reject ANY unknown, never silently drop it
+        return {"error": f"unknown source(s): {unknown}"}, 400
+    codes = _source_codes(known)
+    global _reset_active
+    with _lock:
+        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
+            return {"error": "a run is in progress; refusing to delist mid-run"}, 409
+        if _reset_active:
+            return {"error": "a reset/purge is already in progress"}, 409
+        _reset_active = True
+    try:
+        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
+            result = sync.delist_source(ledger, source_codes=codes)
+    except sync.ServeInFlight as exc:
+        return {"error": str(exc)}, 409
+    except Exception as exc:
+        log.exception("delist failed")
+        return {"error": str(exc)}, 500
+    finally:
+        with _lock:
+            _reset_active = False
+    for name in known:                              # disable so a scrape never re-stocks an offline vendor
+        store.set_enabled(name, False)
+    log.warning("source(s) taken offline (delist + disable)", extra={"extra_fields": {
+        "sources": known, "delisted": result["delisted"]}})
+    return {**result, "disabled": known}, 200
+
+
+def remove_source(name: str) -> tuple[dict, int]:
+    """Stage 2 of a vendor removal ('Remove permanently'): purge the source's (already qty-0) products
+    from the ledger and delete its config row, so it leaves the :4200 list. GUARDED: refuses (409) while
+    the source still has LIVE products (qty > 0) -- take it offline first, so nothing is orphaned-live in
+    the shop. Returns {removed_source, config_removed, purged, external_ids}, 200; 400 unknown, 409 busy
+    or still-live. Medusa deletion of external_ids rides the tombstone lane (pending its consumer)."""
+    from stone_pipeline.config import store
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    known = _resolve_sources([name])
+    if name not in set(known):
+        return {"error": f"unknown source {name!r}"}, 400
+    codes = _source_codes([name])
+    global _reset_active
+    with _lock:
+        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
+            return {"error": "a run is in progress; refusing to remove mid-run"}, 409
+        if _reset_active:
+            return {"error": "a reset/purge is already in progress"}, 409
+        _reset_active = True
+    try:
+        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
+            live = sync.live_products(ledger, source_codes=codes)
+            if live:
+                return {"error": f"{name!r} still has {live} live product(s); take it offline first",
+                        "live_products": live}, 409
+            result = sync.purge_discontinued(ledger, source_codes=codes)
+    except sync.ServeInFlight as exc:
+        return {"error": str(exc)}, 409
+    except Exception as exc:
+        log.exception("remove source failed")
+        return {"error": str(exc)}, 500
+    finally:
+        with _lock:
+            _reset_active = False
+    config_removed = store.delete_source(name)
+    log.warning("source REMOVED (purge + delete config)", extra={"extra_fields": {
+        "source": name, "purged": result["product"], "config_removed": config_removed}})
+    return {"removed_source": name, "config_removed": config_removed,
+            "purged": result["product"], "external_ids": result["external_ids"]}, 200
+
+
 def get_run(run_id: str) -> dict | None:
     with _lock:
         rec = _runs.get(run_id)
