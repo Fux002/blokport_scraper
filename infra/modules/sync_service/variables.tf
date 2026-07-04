@@ -70,3 +70,9 @@ variable "config_token_ssm_arn" {
   type        = string
   description = "SSM SecureString ARN for BLOKPORT_CONFIG_TOKEN."
 }
+
+variable "produce_secret_arns" {
+  type        = map(string)
+  default     = {}
+  description = "ENV_NAME -> SSM ARN for the produce subprocess (e.g. BLOKPORT_SCRAPER_PROXY for the Cloudflare-fronted scrapers, FAL_KEY for image gen). Injected on the config container, which runs the live scrape. Empty when not configured."
+}

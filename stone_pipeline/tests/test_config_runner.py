@@ -40,9 +40,9 @@ def test_default_run_is_all_sources_full_stage():
     seen, launch = _capture()
     rec, code = runner.start_run(launch=launch)
     assert code == 202 and rec["stage"] == "all"
-    assert seen["rec"]["scope"] is None                       # no subset -> build runs every enabled source
+    assert seen["rec"]["scope"] is None                       # no subset -> produce runs every enabled source
     assert runner._build_command(seen["rec"]) == [
-        sys.executable, "-m", "stone_pipeline.build", "--stage", "all"]   # no --sources
+        sys.executable, "-m", "stone_pipeline.produce", "--stage", "all"]   # full produce (fetch -> scrape -> build)
 
 
 def test_single_source_scrape_scopes_the_command():

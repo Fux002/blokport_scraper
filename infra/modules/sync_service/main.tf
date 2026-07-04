@@ -106,7 +106,7 @@ data "aws_iam_policy_document" "execution_secrets" {
   statement {
     sid       = "ReadTokens"
     actions   = ["ssm:GetParameters"]
-    resources = [var.sync_token_ssm_arn, var.config_token_ssm_arn]
+    resources = concat([var.sync_token_ssm_arn, var.config_token_ssm_arn], values(var.produce_secret_arns))
   }
 }
 
@@ -202,7 +202,11 @@ resource "aws_ecs_task_definition" "this" {
       entryPoint   = ["python", "-m", "stone_pipeline.config.server"]
       portMappings = [{ containerPort = 8724, protocol = "tcp" }]
       environment  = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
-      secrets      = [{ name = "BLOKPORT_CONFIG_TOKEN", valueFrom = var.config_token_ssm_arn }]
+      # the config container runs the produce subprocess (fetch -> live scrape -> build), so it also
+      # carries the scraper's runtime secrets (proxy, fal key) when configured.
+      secrets = concat(
+        [{ name = "BLOKPORT_CONFIG_TOKEN", valueFrom = var.config_token_ssm_arn }],
+        [for k, v in var.produce_secret_arns : { name = k, valueFrom = v }])
       mountPoints  = local.ledger_mount
       logConfiguration = { logDriver = "awslogs", options = local.log_options }
     },

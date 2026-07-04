@@ -170,7 +170,9 @@ module "sync_service_dev" {
 
   target_env     = "development"
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
-  image_tag      = var.image_tag
+  # DEV: pin to the branch-built sha, NOT :core (which means 'what's on main'). This avoids a window
+  # where :core = an unmerged branch build. Flip back to var.image_tag ("core") after the main merge.
+  image_tag      = "8bc2a49"
   region         = var.region
   staging_bucket = var.dev_staging_bucket
 
@@ -182,4 +184,7 @@ module "sync_service_dev" {
 
   sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_dev.arn
   config_token_ssm_arn = data.aws_ssm_parameter.config_token_dev.arn
+  # the produce subprocess (live scrape + image gen) carries the same runtime secrets as the batch
+  # scraper -- proxy for the Cloudflare-fronted sites, fal key for images -- when they're configured.
+  produce_secret_arns = local.ssm_secrets
 }

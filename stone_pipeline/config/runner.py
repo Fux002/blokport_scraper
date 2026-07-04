@@ -117,11 +117,12 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
 
 
 def _build_command(rec: dict) -> list[str]:
-    """The produce subprocess for this run. FULL produce = stone_pipeline.build (scrape -> catalog ->
-    consistency gate), NOT bare `run all`: that refreshes products against a STALE variation table (a
-    new variety never enters it), the produce-vs-build divergence. `--stage` scopes HOW FAR (scrape /
-    catalog / all) and `--sources` scopes WHICH scrapers (omitted -> every enabled source)."""
-    cmd = [sys.executable, "-m", "stone_pipeline.build", "--stage", rec.get("stage", "all")]
+    """The produce subprocess for this run. FULL produce = stone_pipeline.produce (fetch export inputs
+    -> LIVE scrape -> build), NOT bare `stone_pipeline.build`: build assumes data/ is already scraped
+    (the laptop path), so on a fresh host (a new ECS task with empty data/) it would produce nothing.
+    produce guarantees the inputs first. `--stage` scopes HOW FAR (scrape / catalog / all) and
+    `--sources` scopes WHICH scrapers (omitted -> every enabled source)."""
+    cmd = [sys.executable, "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
     if rec.get("scope"):
         cmd += ["--sources", ",".join(rec["scope"])]
     return cmd
@@ -143,7 +144,7 @@ def _launch_ecs(rec: dict) -> None:
     # run's stage + sources. The container name must match the task definition's (BLOKPORT_ECS_CONTAINER,
     # default blokport-scraper-<env>). Without stage/scope the taskdef's default command (full build) runs.
     container = os.environ.get("BLOKPORT_ECS_CONTAINER", f"blokport-scraper-{env}")
-    command = ["python", "-m", "stone_pipeline.build", "--stage", rec.get("stage", "all")]
+    command = ["python", "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
     if rec.get("scope"):
         command += ["--sources", ",".join(rec["scope"])]
     resp = ecs.run_task(
