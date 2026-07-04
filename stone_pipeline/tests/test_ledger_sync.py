@@ -461,3 +461,16 @@ def test_server_self_seeds_a_missing_ledger(tmp_path, monkeypatch):
         assert "variation" in status(lg)          # a real, servable ledger
     server.bootstrap_ledger_if_missing(path)       # idempotent: a no-op second time
     assert path.exists()
+
+
+def test_gate_state_counts_held_and_untyped(tmp_path):
+    # the produce catalog-gate reconciliation reads these from the ledger (schema owned here, not in
+    # produce): held = new-pending variations, untyped = held ones lacking a type. No dangling count:
+    # variation_key is a FK (foreign_keys=ON), so a variation-less product cannot exist.
+    from stone_pipeline.ledger.sync import gate_state
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        _variation(lg, "slab_held_1", "pending", medusa_id=None, type_="Marble")   # held, typed
+        _variation(lg, "slab_untyped_2", "pending", medusa_id=None, type_="")       # held + untyped
+        _variation(lg, "slab_synced_3", "synced", medusa_id="M1", type_="Marble")   # not held (has id)
+        _product(lg, "SKU-2", "slab_held_1", "pending")                             # a normal product
+        assert gate_state(lg) == (2, 1)

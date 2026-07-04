@@ -105,6 +105,24 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     return out
 
 
+def gate_state(ledger: Ledger) -> tuple[int, int]:
+    """(held, untyped) for the produce's pull-model catalog-gate reconciliation. The ledger owns these
+    schema queries; produce owns only the decision made from them:
+      held     produced variations with NO Medusa id yet -- awaiting the first pull (the ack assigns
+               medusa_id + flips them synced). EXPECTED, not an error.
+      untyped  a SUBSET of held still lacking a canonical type: the sync engine holds these until typed
+               (never serves an untyped variation), so it is informational, NOT fatal.
+    (No `dangling` count: a product's variation_key is a FK to variation.key with foreign_keys=ON, so a
+    product with no variation is structurally impossible -- it can never exist to be a fatal fault.)"""
+    def n(sql: str) -> int:
+        return ledger.execute(sql).fetchone()["n"]
+    new_pending = "in_full = 1 AND medusa_id IS NULL AND state IN ('pending', 'dirty')"
+    return (
+        n(f"SELECT COUNT(*) n FROM variation WHERE {new_pending}"),
+        n(f"SELECT COUNT(*) n FROM variation WHERE {new_pending} AND (type IS NULL OR type = '')"),
+    )
+
+
 # --- GET /sync/<type>?status=ready --------------------------------------------
 
 def _sub_limit(limit: int | None) -> str:

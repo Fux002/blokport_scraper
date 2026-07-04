@@ -53,26 +53,14 @@ def _live_scrape(sources: list[str] | None) -> int:
 _NEW_VARIETY_MARKERS = ("NOT in the current export", "NO valid-combination row")
 
 
-def _ledger_gate_state() -> tuple[int, int, int]:
-    """(held, untyped, dangling) from the ledger -- the pull-model source of truth (NOT the stale CSV
-    export), which is why pass-2 needs no refreshed Medusa export:
-      held     produced variations with NO Medusa id yet -- awaiting the first pull, whose ack assigns
-               medusa_id + flips them synced. EXPECTED, not an error.
-      untyped  a SUBSET of held that still lacks a canonical type: the sync engine holds these until
-               typed (never serves an untyped variation), so it is informational, NOT fatal.
-      dangling products whose variation_key has no variation row: a real structural orphan -> fatal.
-    Only `dangling` is a genuine fault; `held`/`untyped` are the expected two-pass state."""
-    from stone_pipeline.ledger import writethrough
+def _ledger_gate_state() -> tuple[int, int]:
+    """(held, untyped) from the ledger -- the pull-model source of truth (NOT the stale CSV export),
+    which is why pass-2 needs no refreshed Medusa export. The schema queries live in the ledger layer
+    (sync.gate_state); produce owns only the held-vs-fatal DECISION made from them."""
+    from stone_pipeline.ledger import sync, writethrough
     from stone_pipeline.ledger.db import Ledger
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
-        def n(sql: str) -> int:
-            return lg.execute(sql).fetchone()["n"]
-        held = n("SELECT COUNT(*) n FROM variation WHERE in_full = 1 AND medusa_id IS NULL "
-                 "AND state IN ('pending', 'dirty')")
-        untyped = n("SELECT COUNT(*) n FROM variation WHERE in_full = 1 AND medusa_id IS NULL "
-                    "AND state IN ('pending', 'dirty') AND (type IS NULL OR type = '')")
-        dangling = n("SELECT COUNT(*) n FROM product WHERE variation_key NOT IN (SELECT key FROM variation)")
-    return held, untyped, dangling
+        return sync.gate_state(lg)
 
 
 def _reconcile_gate(rc: int) -> int:
@@ -80,17 +68,17 @@ def _reconcile_gate(rc: int) -> int:
     keys off variants_export.csv, so it fails on varieties minted this produce (no Medusa id yet). But
     the sync engine already gates each product on its variation being synced (_ELIGIBLE_PRODUCT), and
     the pull ack IS the round-trip that mints the id -- so this is the expected pass-1 checkpoint, not a
-    real fault. When the gate's ONLY failures are that class, new varieties explain them (held > 0), and
-    nothing is structurally orphaned (dangling == 0), exit 0 reporting the held count; else stay fatal."""
+    real fault. When the gate's ONLY failures are that class and new varieties explain them (held > 0),
+    exit 0 reporting the held count; else stay fatal."""
     from stone_pipeline import catalog as catalog_mod
     errors, _ = catalog_mod.verify_consistency()
     if not errors:
         return rc                                   # gate isn't why build failed -- keep the failure
     if any(not any(m in e for m in _NEW_VARIETY_MARKERS) for e in errors):
         return rc                                   # an error outside the new-variety class -> fatal
-    held, untyped, dangling = _ledger_gate_state()
-    if dangling or not held:
-        return rc                                   # a structural orphan, or nothing new explains it -> fatal
+    held, untyped = _ledger_gate_state()
+    if not held:
+        return rc                                   # nothing new explains the failure -> stay fatal
     msg = f"held: {held} new variations awaiting pull round-trip"
     if untyped:
         msg += f" ({untyped} still need a type -- the sync holds them until then)"
