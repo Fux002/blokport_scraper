@@ -210,6 +210,8 @@ CREATE TABLE IF NOT EXISTS inventory (
     sku              TEXT PRIMARY KEY REFERENCES product (sku),
     qty              INTEGER NOT NULL,
     last_synced_qty  INTEGER,                           -- null until first inventory sync
+    reason           TEXT,                              -- why qty is 0: 'delisted' (admin take-offline, Medusa
+                                                        -- hides it) vs null (ordinary out-of-stock, stays listed)
     updated_at       TEXT NOT NULL
 );
 -- served when qty IS DISTINCT FROM last_synced_qty; this index supports that scan.

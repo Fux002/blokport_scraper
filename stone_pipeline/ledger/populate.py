@@ -218,6 +218,8 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
             "sku": sku,
             "qty": qty,
             "last_synced_qty": None,   # only on insert (a never-synced row is a delta)
+            "reason": None,            # a normal scrape write clears any 'delisted' marker: re-scraping a
+                                       # re-enabled vendor republishes it (restock delta, no reason).
             "updated_at": now,
         }, pk=("sku",), keep_on_update=("last_synced_qty",))
         n += 1

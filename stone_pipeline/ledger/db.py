@@ -27,7 +27,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3   # v3: `removed` tombstone lane + inventory.reason (delist marker)
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -129,14 +129,19 @@ class Ledger:
         self.conn.commit()
 
     def _migrate(self) -> None:
-        """Idempotent ALTERs for a ledger that predates a column (v1 -> v2 added the sync
-        dead-letter fields). A fresh ledger already has them from schema.sql, so these are no-ops."""
+        """Idempotent ALTERs for a ledger that predates a column (v1 -> v2 added the sync dead-letter
+        fields; v2 -> v3 added inventory.reason, the delist marker -- the `removed` table itself is a
+        CREATE IF NOT EXISTS in schema.sql, applied by the re-run above). Fresh ledgers already have
+        these from schema.sql, so every branch here is a no-op on them."""
         for table in ("variation", "product"):
             cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
             if "sync_attempts" not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0")
             if "sync_error" not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_error TEXT")
+        inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
+        if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
+            self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

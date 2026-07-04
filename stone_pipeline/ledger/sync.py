@@ -227,11 +227,16 @@ def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
     """Stock deltas to push: rows whose qty moved since the last sync, for products
     that are already synced (a product must exist in Medusa before its stock loads)."""
     rows = ledger.execute(
-        "SELECT i.sku AS sku, i.qty AS qty FROM inventory i JOIN product p ON p.sku = i.sku "
+        "SELECT i.sku AS sku, i.qty AS qty, i.reason AS reason FROM inventory i JOIN product p ON p.sku = i.sku "
         "WHERE p.state = 'synced' AND (i.last_synced_qty IS NULL OR i.last_synced_qty != i.qty) "
         "ORDER BY i.sku" + _sub_limit(limit))
-    return [{"external_id": r["sku"], "payload": {"sku": r["sku"], "quantity": r["qty"]}}
-            for r in rows]
+    out = []
+    for r in rows:
+        payload = {"sku": r["sku"], "quantity": r["qty"]}
+        if r["reason"]:                                  # 'delisted' -> Medusa hides; absent -> plain out-of-stock
+            payload["reason"] = r["reason"]
+        out.append({"external_id": r["sku"], "payload": payload})
+    return out
 
 
 def ready_removed(ledger: Ledger, limit: int | None = None) -> list[dict]:
@@ -517,7 +522,10 @@ def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict
     if not skus:
         return {"delisted": 0, "external_ids": []}
     q = ",".join("?" * len(skus))
-    ledger.execute(f"UPDATE inventory SET qty = 0, updated_at = ? WHERE sku IN ({q})", (now_iso(), *skus))
+    # reason='delisted' rides the inventory delta so Medusa can HIDE (status->draft) exactly these SKUs,
+    # provenance-safe, and tell them apart from an ordinary out-of-stock (qty 0, reason null -> stays listed).
+    ledger.execute(f"UPDATE inventory SET qty = 0, reason = 'delisted', updated_at = ? WHERE sku IN ({q})",
+                   (now_iso(), *skus))
     log.warning("ledger DELIST source (qty -> 0)", extra={"extra_fields": {
         "sources": source_codes or "all", "delisted": len(skus)}})
     return {"delisted": len(skus), "external_ids": skus}

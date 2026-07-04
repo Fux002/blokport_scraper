@@ -124,6 +124,36 @@ def test_repopulating_a_sku_clears_its_tombstone(tmp_path):
         assert ready(ledger, "removed") == []                    # tombstone cleared, product stays live
 
 
+def test_delist_flags_inventory_reason_ordinary_oos_does_not(tmp_path):
+    # Medusa hides (status->draft) a qty-0 that carries reason='delisted'; a qty-0 with no reason is an
+    # ordinary out-of-stock and stays listed. The marker rides the inventory delta, scoped by SKU.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _prod(ledger, "DEL-1", "aaa", qty=5, last=5)          # will be delisted (take offline)
+        _prod(ledger, "OOS-1", "bbb", qty=0, last=5)          # ordinary out-of-stock (no reason)
+        delist_source(ledger, source_codes=["aaa"])
+        served = {i["external_id"]: i["payload"] for i in ready(ledger, "inventory")}
+        assert served["DEL-1"] == {"sku": "DEL-1", "quantity": 0, "reason": "delisted"}
+        assert served["OOS-1"] == {"sku": "OOS-1", "quantity": 0}     # no reason key -> stays listed
+
+        # a re-scrape restocks (qty>0) and clears the marker -> Medusa republishes
+        ledger.execute("UPDATE inventory SET qty = 8, reason = NULL WHERE sku = 'DEL-1'")
+        back = {i["external_id"]: i["payload"] for i in ready(ledger, "inventory")}
+        assert back["DEL-1"] == {"sku": "DEL-1", "quantity": 8}       # back in stock, no reason
+
+
+def test_reopen_migrates_an_old_ledger_to_the_tombstone_lane(tmp_path):
+    # a ledger created before v3 has no `removed` table; reopening must re-apply the schema (recreate it
+    # via CREATE IF NOT EXISTS) and run _migrate (inventory.reason), or removal silently breaks in prod.
+    p = tmp_path / "old.ledger"
+    with Ledger.open(p, env="development") as ledger:
+        ledger.execute("DROP TABLE removed")
+        ledger.execute("PRAGMA user_version = 2")             # pretend this is a pre-v3 ledger
+    with Ledger.open(p, env="development") as ledger:
+        assert ledger.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='removed'").fetchone() is not None
+        assert "reason" in {r["name"] for r in ledger.execute("PRAGMA table_info(inventory)")}
+
+
 def test_delete_source_removes_only_that_config_row(tmp_path):
     from stone_pipeline.config import store
     db = tmp_path / "config.db"
