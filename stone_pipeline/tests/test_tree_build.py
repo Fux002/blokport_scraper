@@ -88,6 +88,10 @@ def test_combination_tuple_shape_and_csv(tmp_path):
     exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
     combos, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], _products(tmp_path, [_prow()]))
     assert combos and all(len(c) == 6 for c in combos)
+    # every field is a string id -- run() relies on this to reuse the built set as the CSV-diff baseline
+    # WITHOUT re-copying 2M rows (the produce memory optimisation). If this ever regresses, run()'s
+    # defensive normalisation still keeps it correct, but the common no-copy path depends on it.
+    assert all(isinstance(x, str) for c in combos for x in c)
     out = tmp_path / "combos.csv"
     n = tree_build.write_combinations(combos, out)
     rows = list(csv.reader(out.open(encoding="utf-8-sig")))

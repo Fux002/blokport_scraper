@@ -363,18 +363,27 @@ def run() -> Path:
 
     to_upload = SETTINGS.paths.to_upload_dir
     path = to_upload / "2_valid_combinations.csv"
-    # The PREVIOUS full file is the baseline. Normalise to string-tuples so the in-memory build diffs
-    # cleanly against the CSV-read baseline.
-    current = {tuple(str(x) for x in c) for c in combinations}
-    previous = _load_combination_set(path)
+    # build_combinations already emits string-id tuples, so the set IS the string-tuple set the CSV
+    # baseline diffs against -- reuse it, don't materialise a second 2M-row copy (that duplicate was a
+    # big slice of the produce memory peak). Defensive: if a non-str id ever slips in, normalise once so
+    # the diff stays correct -- an O(1) check on one element, not a full re-copy in the common case.
+    current = combinations
+    if current and not all(isinstance(x, str) for x in next(iter(current))):
+        current = {tuple(str(x) for x in c) for c in current}
+    previous = _load_combination_set(path)                              # empty on a fresh host -> no 2M baseline
     write_combinations(current, path)                                   # FULL: bulk load / resync
 
     # INCREMENTAL delta -- only the combinations NEW vs the last build, so the daily upload adds into
     # the existing Medusa set instead of re-sending ~2M rows. First build (no baseline) -> delta is
-    # the full set. If a daily delta is ever skipped, re-upload the FULL file once to resync.
+    # the full set. If a daily delta is ever skipped, re-upload the FULL file once to resync. Count the
+    # removed set (not retained) and free the baseline right after the diff, so current + previous +
+    # additions are never all live together.
     additions = current - previous
-    removed = previous - current
+    removed_count = len(previous - current)
+    del previous
     write_combinations(additions, to_upload / "2_valid_combinations_update.csv")
+    added_count = len(additions)
+    del additions
 
     # TESTING one-off (drops off in production): combinations for ONLY the product sheet's variations.
     vidx = COMBINATION_COLUMNS.index("variation_id")
@@ -386,7 +395,7 @@ def run() -> Path:
     # dropped -- the user fills 'assign_type' and they get allocated next run.
     _write_uncovered(uncovered, uncovered_file)
     stats.update(uncovered_variations=len(uncovered), combinations_total=len(current),
-                 combinations_added=len(additions), combinations_removed=len(removed),
+                 combinations_added=added_count, combinations_removed=removed_count,
                  combinations_products_only=len(products_only))
     log.info("valid combinations built", extra={"extra_fields": stats})
     return path
