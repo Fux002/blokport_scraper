@@ -86,7 +86,7 @@ def _as_number(text):
         return None
 
 # tables that carry a sync `state` column (combination is empty until materialized)
-_STATE_TABLES = ("attribute", "variation", "combination", "product", "gap")
+_STATE_TABLES = ("attribute", "variation", "combination", "product", "gap", "removed")
 
 
 # --- GET /sync/status ---------------------------------------------------------
@@ -234,6 +234,17 @@ def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
             for r in rows]
 
 
+def ready_removed(ledger: Ledger, limit: int | None = None) -> list[dict]:
+    """Tombstones to deliver: SKUs purged from the ledger that Medusa must delete on its side. Served
+    while 'pending'; retired on a 'done' ack, dead-lettered after repeated 'blocked' (open reservation)."""
+    rows = ledger.execute(
+        "SELECT external_id, source, reason FROM removed WHERE state = 'pending' "
+        f"ORDER BY created_at, rowid{_sub_limit(limit)}")
+    return [{"external_id": r["external_id"],
+             "payload": {"sku": r["external_id"], "source": r["source"], "reason": r["reason"]}}
+            for r in rows]
+
+
 def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
     """Serve the entities of `type_` that are eligible to load now (GET /sync/<type>)."""
     if type_ == "variations":
@@ -242,7 +253,9 @@ def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
         return ready_products(ledger, limit)
     if type_ == "inventory":
         return ready_inventory(ledger, limit)
-    raise ValueError(f"unsupported sync type {type_!r}; expected variations, products or inventory")
+    if type_ == "removed":
+        return ready_removed(ledger, limit)
+    raise ValueError(f"unsupported sync type {type_!r}; expected variations, products, inventory or removed")
 
 
 # --- POST /sync/ack -----------------------------------------------------------
@@ -261,6 +274,25 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     path must not trust the caller). Inventory has no id/state; a non-failed ack means Medusa holds
     this stock (last_synced_qty = qty)."""
     now = now_iso()
+    if type_ == "removed":
+        # tombstone ack: 'done' = Medusa deleted it -> retire the tombstone; 'blocked' = an open
+        # reservation blocks the hard-delete -> keep it, count the attempt, re-serve, and dead-letter
+        # to 'dead' after _MAX_SYNC_ATTEMPTS so a permanently-reserved id stops re-serving forever.
+        if status_ == "done":
+            return ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
+        row = ledger.execute("SELECT sync_attempts FROM removed WHERE external_id = ?",
+                             (external_id,)).fetchone()
+        if not row:
+            return 0
+        attempts = ((row["sync_attempts"] or 0)) + 1
+        state = "dead" if attempts >= _MAX_SYNC_ATTEMPTS else "pending"
+        cur = ledger.execute(
+            "UPDATE removed SET state = ?, sync_attempts = ?, sync_error = ?, updated_at = ? "
+            "WHERE external_id = ?", (state, attempts, (reason or "blocked")[:500], now, external_id))
+        if state == "dead" and cur.rowcount:
+            log.warning("tombstone dead-lettered after repeated blocks (open reservation?)",
+                        extra={"extra_fields": {"external_id": external_id, "attempts": attempts}})
+        return cur.rowcount
     if type_ == "inventory":
         if status_ == "failed":
             return 0                                    # leaves it a delta -> re-serves
@@ -330,6 +362,11 @@ def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
             f"WHERE state = 'gap_held' ORDER BY updated_at DESC LIMIT ?", (limit,)):
             out.append({"type": type_, "external_id": r["xid"],
                         "attempts": r["sync_attempts"], "error": r["sync_error"]})
+    for r in ledger.execute(                             # tombstones stuck 'dead' (Medusa kept blocking)
+        "SELECT external_id AS xid, sync_attempts, sync_error FROM removed "
+        "WHERE state = 'dead' ORDER BY updated_at DESC LIMIT ?", (limit,)):
+        out.append({"type": "removed", "external_id": r["xid"],
+                    "attempts": r["sync_attempts"], "error": r["sync_error"]})
     return out
 
 
@@ -422,13 +459,26 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     return out
 
 
-def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None) -> dict:
+def record_tombstones(ledger: Ledger, pairs: list[tuple], reason: str = "discontinued") -> int:
+    """Record a tombstone per removed SKU (the `removed` lane), so Medusa pulls the deletion on
+    GET /sync/removed, deletes its own product + scraper_sync_ref, and acks. `pairs` is
+    [(external_id, source), ...]. Resets an existing tombstone to 'pending' so a re-purge re-serves."""
+    now = now_iso()
+    for sku, source in pairs:
+        ledger.upsert("removed", {"external_id": sku, "source": source, "reason": reason,
+                                  "state": "pending", "sync_attempts": 0, "sync_error": None,
+                                  "created_at": now, "updated_at": now}, pk=("external_id",))
+    return len(pairs)
+
+
+def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None,
+                       reason: str = "discontinued") -> dict:
     """Hard-delete the qty-0 (delisted / dead-stock) products and their inventory rows, so the
     graveyard of never-returning products stops accumulating. A product that reappears in a later
-    scrape recreates cleanly (no prior ledger row -> populate treats it as NEW). Variation/backbone
-    rows are untouched. `source_codes` scopes to those sources. Returns
-    {product, inventory, external_ids}: the external_ids are exactly the SKUs deleted, so Medusa
-    deletes the same set (product + scraper_sync_ref) -- the coordinated both-sides purge."""
+    scrape recreates cleanly (no prior ledger row -> populate treats it as NEW, and clears any leftover
+    tombstone). Variation/backbone rows are untouched. `source_codes` scopes to those sources. Records a
+    tombstone per deleted SKU (`reason` tags why: discontinued vs vendor_removed) so Medusa deletes the
+    same set (product + scraper_sync_ref) via the pull lane. Returns {product, inventory, external_ids}."""
     _lock_and_check_in_flight(ledger)          # same atomic guard as reset -- never purge mid-serve
     scope = ""
     params: tuple = ()
@@ -436,15 +486,18 @@ def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None) ->
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
     # dead stock = a product whose inventory qty is 0 (populate_discontinued / a drop set it there)
-    skus = [r["sku"] for r in ledger.execute(
-        f"SELECT p.sku FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.qty = 0{scope}", params)]
+    rows = ledger.execute(
+        f"SELECT p.sku AS sku, p.source AS source FROM product p JOIN inventory i ON i.sku = p.sku "
+        f"WHERE i.qty = 0{scope}", params).fetchall()
+    skus = [r["sku"] for r in rows]
     if not skus:
         return {"product": 0, "inventory": 0, "external_ids": []}
+    record_tombstones(ledger, [(r["sku"], r["source"]) for r in rows], reason)   # deliver the delete to Medusa
     q = ",".join("?" * len(skus))
     inv = ledger.execute(f"DELETE FROM inventory WHERE sku IN ({q})", tuple(skus)).rowcount   # child first (FK)
     prod = ledger.execute(f"DELETE FROM product WHERE sku IN ({q})", tuple(skus)).rowcount
     log.warning("ledger PURGE discontinued (qty-0) products", extra={"extra_fields": {
-        "sources": source_codes or "all", "product": prod, "inventory": inv}})
+        "sources": source_codes or "all", "reason": reason, "product": prod, "inventory": inv}})
     return {"product": prod, "inventory": inv, "external_ids": skus}
 
 

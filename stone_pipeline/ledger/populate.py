@@ -196,6 +196,9 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                           state="dirty" if prev["payload_hash"] != ph else prev["state"])
         ledger.upsert("product", record, pk=("sku",), keep_on_update=("created_at", "first_seen"))
         n += 1
+    # A re-created SKU must not carry a stale tombstone: a re-added vendor reuses deterministic SKUs, so
+    # clear any tombstone whose product now exists, or Medusa's /removed pull would delete a live product.
+    ledger.execute("DELETE FROM removed WHERE external_id IN (SELECT sku FROM product)")
     return n
 
 

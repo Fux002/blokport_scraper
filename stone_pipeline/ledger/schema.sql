@@ -257,6 +257,29 @@ CREATE TABLE IF NOT EXISTS gap (
 CREATE INDEX IF NOT EXISTS idx_gap_state ON gap (state);
 
 -- ---------------------------------------------------------------------------
+-- removed: the tombstone lane. When purge hard-deletes a product from the ledger
+-- (dead-stock, or a vendor removal), it records the deleted SKU here so Medusa can
+-- pull the deletion on GET /sync/removed, delete its own product + scraper_sync_ref,
+-- and ack. Medusa acks 'done' (the delete happened -> the tombstone row is removed)
+-- or 'blocked' (an open reservation blocks the hard-delete -> keep it, re-serve, and
+-- dead-letter to 'dead' after _MAX_SYNC_ATTEMPTS blocks). Served while state='pending'.
+-- No FK to product (the product row is gone); a re-created SKU clears its tombstone
+-- in populate so a live product and a pending tombstone never coexist.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS removed (
+    external_id   TEXT PRIMARY KEY,                     -- the deleted product SKU (Medusa external_id)
+    source        TEXT,                                 -- source_code, for scope/audit
+    reason        TEXT,                                 -- 'vendor_removed' | 'discontinued'
+    state         TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (state IN ('pending','dead')),  -- pending serves; 'done' deletes the row; dead = blocked cap
+    sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive 'blocked' acks (dead-letter counter)
+    sync_error    TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_removed_serve ON removed (state, created_at, external_id);
+
+-- ---------------------------------------------------------------------------
 -- sync_run: the audit ledger, one row per reconcile pass. `counts` is a JSON blob
 -- of per-type / per-state tallies for GET /sync/status and the run summary.
 -- ---------------------------------------------------------------------------

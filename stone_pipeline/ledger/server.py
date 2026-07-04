@@ -4,8 +4,9 @@ A thin, dependency-free reference server that maps the versioned endpoints to th
 sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
 
     GET  /sync/v1/status
-    GET  /sync/v1/<type>?status=ready&limit=N   type in {variations, products, inventory}
+    GET  /sync/v1/<type>?status=ready&limit=N   type in {variations, products, inventory, removed}
     POST /sync/v1/ack   body: [{type, external_id, medusa_id, status}, ...]
+      (removed acks use status 'done' -> retire, or 'blocked' -> keep + retry, dead-letter after N)
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the
 design calls for; the server refuses to start without it. This is the contract
@@ -40,7 +41,7 @@ def dispatch(ledger: Ledger, method: str, resource: str,
     if method == "GET" and resource == "failures":
         # drill-down behind the status gap_held count: what Medusa rejected and why.
         return 200, {"failures": sync.failures(ledger)}
-    if method == "GET" and resource in ("variations", "products", "inventory"):
+    if method == "GET" and resource in ("variations", "products", "inventory", "removed"):
         # bound every page. An unbounded pull on a full delta builds the whole set in
         # memory and writes it in one buffer (http.server has no backpressure): a
         # 24k-item bootstrap delta is ~4.6 MB in a single response. Default + cap the page.
@@ -113,10 +114,23 @@ class SyncHandler(BaseHTTPRequestHandler):
                                                           "request": args[0] % args[1:] if args else ""}})
 
 
-def serve(host: str = "0.0.0.0", port: int = 8723) -> None:
+def serve(host: str | None = None, port: int = 8723) -> None:
+    # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so Medusa (over the
+    # VPC) can reach it. The bearer token still gates every request.
+    host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
     path = writethrough.ledger_path()
     if not path.exists():
-        raise SystemExit(f"no ledger at {path} (run with BLOKPORT_LEDGER_WRITETHROUGH=1 first)")
+        # Fresh host (e.g. ECS on a new EFS volume): create the ledger so the server is self-sufficient
+        # instead of refusing to start. Seed the id foundation when the exports are present
+        # (best-effort); otherwise start empty and the first produce populates it.
+        log.info("no ledger yet; bootstrapping", extra={"extra_fields": {"ledger": str(path)}})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with writethrough.open_ledger():   # create schema + seed; __exit__ commits
+                pass
+        except Exception:
+            log.exception("ledger seed skipped; starting empty (a produce will populate it)")
+            Ledger.open(path, env=writethrough.ENV_NAME).close()   # ensure the file exists to serve
     httpd = ThreadingHTTPServer((host, port), SyncHandler)
     httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
     httpd.ledger_path = path                   # type: ignore[attr-defined]

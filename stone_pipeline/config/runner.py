@@ -375,7 +375,8 @@ def remove_source(name: str) -> tuple[dict, int]:
     from the ledger and delete its config row, so it leaves the :4200 list. GUARDED: refuses (409) while
     the source still has LIVE products (qty > 0) -- take it offline first, so nothing is orphaned-live in
     the shop. Returns {removed_source, config_removed, purged, external_ids}, 200; 400 unknown, 409 busy
-    or still-live. Medusa deletion of external_ids rides the tombstone lane (pending its consumer)."""
+    or still-live. The purge records a tombstone per SKU (reason=vendor_removed) on the /sync/removed
+    lane, so Medusa pulls the deletion and acks it -- the coordinated both-sides removal."""
     from stone_pipeline.config import store
     from stone_pipeline.ledger import sync, writethrough
     from stone_pipeline.ledger.db import Ledger
@@ -396,7 +397,7 @@ def remove_source(name: str) -> tuple[dict, int]:
             if live:
                 return {"error": f"{name!r} still has {live} live product(s); take it offline first",
                         "live_products": live}, 409
-            result = sync.purge_discontinued(ledger, source_codes=codes)
+            result = sync.purge_discontinued(ledger, source_codes=codes, reason="vendor_removed")
     except sync.ServeInFlight as exc:
         return {"error": str(exc)}, 409
     except Exception as exc:
