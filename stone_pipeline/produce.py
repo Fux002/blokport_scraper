@@ -47,6 +47,54 @@ def _live_scrape(sources: list[str] | None) -> int:
     return scrapers_run.main(sources if sources else ["all"])
 
 
+# The catalog consistency gate keys off variants_export.csv, so it FALSE-ALARMS on varieties minted
+# THIS produce (no Medusa id yet). These two error classes are that expected two-pass checkpoint; any
+# error OUTSIDE them keeps the gate fatal.
+_NEW_VARIETY_MARKERS = ("NOT in the current export", "NO valid-combination row")
+
+
+def _ledger_gate_state() -> tuple[int, int, int]:
+    """(held, untyped, dangling) from the ledger -- the pull-model source of truth (NOT the stale CSV
+    export), which is why pass-2 needs no refreshed Medusa export:
+      held     new variations in the produced set that are servable but have NO Medusa id yet -- awaiting
+               the first pull, whose ack assigns medusa_id + flips them synced. EXPECTED, not an error.
+      untyped  produced variations with no canonical type: genuinely stuck (never servable).
+      dangling products whose variation_key has no variation row: a real structural orphan.
+    untyped/dangling are the real inconsistencies the gate must still catch fatally."""
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        def n(sql: str) -> int:
+            return lg.execute(sql).fetchone()["n"]
+        held = n("SELECT COUNT(*) n FROM variation WHERE in_full = 1 AND medusa_id IS NULL "
+                 "AND state IN ('pending', 'dirty') AND type IS NOT NULL AND type != ''")
+        untyped = n("SELECT COUNT(*) n FROM variation WHERE in_full = 1 AND (type IS NULL OR type = '')")
+        dangling = n("SELECT COUNT(*) n FROM product WHERE variation_key NOT IN (SELECT key FROM variation)")
+    return held, untyped, dangling
+
+
+def _reconcile_gate(rc: int) -> int:
+    """Pull-model reconciliation of the catalog consistency gate. The gate is a CSV-upload-era guard: it
+    keys off variants_export.csv, so it fails on varieties minted this produce (no Medusa id yet). But
+    the sync engine already gates each product on its variation being synced (_ELIGIBLE_PRODUCT), and
+    the pull ack IS the round-trip that mints the id -- so this is the expected pass-1 checkpoint, not a
+    real fault. When the gate's ONLY failures are that class AND the ledger shows nothing genuinely
+    stuck (untyped) or orphaned (dangling), exit 0 reporting the held count; anything else stays fatal."""
+    from stone_pipeline import catalog as catalog_mod
+    errors, _ = catalog_mod.verify_consistency()
+    if not errors:
+        return rc                                   # gate isn't why build failed -- keep the failure
+    if any(not any(m in e for m in _NEW_VARIETY_MARKERS) for e in errors):
+        return rc                                   # an error outside the new-variety class -> fatal
+    held, untyped, dangling = _ledger_gate_state()
+    if untyped or dangling or not held:
+        return rc                                   # a genuine structural problem -> stay fatal
+    log.warning("catalog gate held (non-fatal): the shortfall is new varieties awaiting the pull",
+                extra={"extra_fields": {"held_variations": held}})
+    print(f"held: {held} new variations awaiting pull round-trip (exit 0)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
 
@@ -65,7 +113,14 @@ def main(argv: list[str] | None = None) -> int:
             log.error("produce aborted: live scrape failed",
                       extra={"extra_fields": {"rc": rc, "sources": sources or "all"}})
             return rc
-    return build.main(argv)
+    rc = build.main(argv)
+    # Pull model (write-through on): a catalog-gate failure that is purely new-this-run varieties is the
+    # expected two-pass checkpoint, not an error -- reconcile against the ledger so pass-1 exits 0.
+    if rc != 0 and stage in ("catalog", "all"):
+        from stone_pipeline.ledger import writethrough
+        if writethrough.enabled():
+            return _reconcile_gate(rc)
+    return rc
 
 
 if __name__ == "__main__":

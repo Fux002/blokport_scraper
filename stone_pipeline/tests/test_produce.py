@@ -65,3 +65,45 @@ def test_fetch_inputs_failure_is_best_effort(monkeypatch):
     monkeypatch.setattr("deploy.fetch_inputs.main", boom, raising=False)
     # call the real _fetch_inputs (not the stub) to prove it swallows the error
     p._fetch_inputs()   # must not raise
+
+
+# -- pull-model gate reconciliation (Medusa's scoped non-fatal-for-new-varieties) -----------------
+
+NEW_VARIETY_ERRORS = ["225 product variation ids are NOT in the current export (stale products ...)",
+                      "225 product variations have NO valid-combination row (unpriceable ...)"]
+
+
+def _reconcile(monkeypatch, errors, held, untyped, dangling):
+    from stone_pipeline import catalog as catalog_mod
+    monkeypatch.setattr(catalog_mod, "verify_consistency", lambda: (errors, []))
+    monkeypatch.setattr(produce, "_ledger_gate_state", lambda: (held, untyped, dangling))
+    return produce._reconcile_gate(1)
+
+
+def test_gate_held_when_only_new_varieties(monkeypatch):
+    # only new-variety errors + ledger shows nothing stuck/orphaned -> held, exit 0
+    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=225, untyped=0, dangling=0) == 0
+
+
+def test_gate_stays_fatal_on_untyped_variation(monkeypatch):
+    # a genuinely-stuck (untyped) variation is a real fault -> keep the failure
+    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=225, untyped=3, dangling=0) == 1
+
+
+def test_gate_stays_fatal_on_dangling_product(monkeypatch):
+    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=225, untyped=0, dangling=2) == 1
+
+
+def test_gate_stays_fatal_when_no_new_varieties_explain_it(monkeypatch):
+    # gate failed but the ledger has no held new varieties -> not the two-pass checkpoint -> fatal
+    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=0, untyped=0, dangling=0) == 1
+
+
+def test_gate_stays_fatal_on_error_outside_the_new_variety_class(monkeypatch):
+    errs = NEW_VARIETY_ERRORS + ["12 inventory SKUs are NOT in the Medusa product export ..."]
+    assert _reconcile(monkeypatch, errs, held=225, untyped=0, dangling=0) == 1
+
+
+def test_gate_keeps_failure_if_no_errors_surface(monkeypatch):
+    # build failed for some non-gate reason (verify_consistency clean) -> keep the original failure
+    assert _reconcile(monkeypatch, [], held=225, untyped=0, dangling=0) == 1
