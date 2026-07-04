@@ -174,26 +174,35 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     stats = ImageStats()
 
     if cfg.mode == "passthrough":
-        # Link product images to the IMPROVED S3 versions via the imageproc manifest, never the raw
-        # source url. An image the imageproc hasn't processed yet (not in the manifest) is DROPPED,
-        # not defaulted to its scrape url -- so the upload only ever carries S3 image links.
+        # Link product images ONLY to their TREATED (improved) S3 version via the imageproc manifest.
+        # Two things are HELD, never linked: a source url the manifest doesn't know, AND a manifest
+        # entry that still points at an UNtreated upload (a source staged to S3 before enhancement ran).
+        # So the upload only ever carries enhanced/upscaled/compressed images -- and a later produce
+        # re-links each held image the moment its improved/ version lands in the manifest.
         manifest = _readonly_manifest()
         if not manifest:
-            log.warning("passthrough: imageproc manifest empty/unreachable -- product images are "
-                        "DROPPED, never linked to raw source urls. Run the image stage in s3 mode "
-                        "or restore S3 access to populate the manifest.")
+            log.warning("passthrough: imageproc manifest empty/unreachable -- product images are HELD, "
+                        "never linked to raw source urls. Run the image stage in s3 mode or restore S3 "
+                        "access to populate the manifest.")
+        improved_marker = f"/{cfg.processing.improved_subdir}/"   # a treated image lives under improved/
+        held_untreated = 0
         for row in rows:
             srcs = [u for u in dict.fromkeys(row.raw_image_urls or []) if u and u.strip()]
-            # map ONLY through the manifest -> improved S3; an unprocessed image is dropped, never
-            # defaulted to its raw supplier url (no `else srcs` fallback that would leak source urls).
-            urls = [manifest[u] for u in srcs if u in manifest]
+            urls = []
+            for u in srcs:
+                mapped = manifest.get(u)
+                if mapped and improved_marker in mapped:
+                    urls.append(mapped)                          # treated -> link it
+                elif mapped:
+                    held_untreated += 1                          # on S3 but not enhanced yet -> hold
             _slot_row(row, urls)
             if urls:
                 stats.staged += 1
             else:
                 stats.no_image += 1
-        log.info("images done (passthrough -> improved S3)", extra={"extra_fields": {
-            "staged": stats.staged, "no_image": stats.no_image, "manifest_entries": len(manifest)}})
+        log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
+            "staged": stats.staged, "no_image": stats.no_image,
+            "manifest_entries": len(manifest), "held_untreated": held_untreated}})
         return stats
 
     backend = _build_backend(cfg)
