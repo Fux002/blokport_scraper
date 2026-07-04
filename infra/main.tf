@@ -172,16 +172,15 @@ module "sync_service_dev" {
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
   # DEV: pin to the branch-built sha, NOT :core (which means 'what's on main'). This avoids a window
   # where :core = an unmerged branch build. Flip back to var.image_tag ("core") after the main merge.
-  image_tag      = "4ff47e9"
+  image_tag      = "a2433dd"
   region         = var.region
   staging_bucket = var.dev_staging_bucket
-  # The produce subprocess builds ~2M combinations + thousands of images in RAM (the catalog peak),
-  # and it shares the task with BOTH long-running servers -- 2 GB OOM-killed it (exit -9). Bump to
-  # 2 vCPU / 16 GB for headroom. Temporary: the durable fix is streaming the combinations build so we
-  # can shrink back (see ecs-produce-proxy notes). NOT a separate produce task -- that would put a
-  # second host on the EFS ledger and race the single-host SQLite invariant.
-  cpu    = 2048
-  memory = 16384
+  # The produce subprocess builds ~2M combinations in RAM (the catalog peak) sharing the task with BOTH
+  # servers -- 2 GB OOM-killed it (exit -9). tree_build no longer duplicates that 2M-row set (a2433dd),
+  # dropping the peak by a full copy, so 8 GB is comfortable (produce ~1.5 GB + servers ~0.5 GB) at 1
+  # vCPU (servers idle; only the occasional produce needs CPU). Can right-size lower once a real /run's
+  # peak is measured. NOT a separate produce task -- that races the single-host SQLite ledger invariant.
+  memory = 8192
 
   vpc_id                = data.terraform_remote_state.platform_dev.outputs.vpc_id
   private_subnet_ids    = data.terraform_remote_state.platform_dev.outputs.private_subnet_ids
