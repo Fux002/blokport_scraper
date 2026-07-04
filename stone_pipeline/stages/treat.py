@@ -61,8 +61,13 @@ def parse_raw_key(key: str) -> tuple[str, str] | None:
     return None
 
 
-def _improved_key(source: str, filename: str) -> str:
-    return f"{ENV_SEGMENT}/products/improved/{source}/{filename}"
+def improved_key(raw_key: str) -> str:
+    """The improved/ S3 key for a raw key, via the SAME path transform the manifest repoint uses, so
+    the treated object and the repointed URL can never disagree (and any sub-path is preserved):
+    products/<src>/... -> products/improved/<src>/...  and  products/scraped/<src>/... -> improved."""
+    if "/products/scraped/" in raw_key:
+        return raw_key.replace("/products/scraped/", "/products/improved/", 1)
+    return raw_key.replace("/products/", "/products/improved/", 1)
 
 
 def _is_watermarked(source: str) -> bool:
@@ -128,8 +133,7 @@ def treat_source(source: str, *, s3=None, processor=None, concurrency: int = 24,
     existing = set() if overwrite else set(_list(s3, f"{ENV_SEGMENT}/products/improved/{source}/"))
 
     def _one(key: str):
-        src, name = parse_raw_key(key)                       # raw_keys are pre-filtered, so never None
-        dst = _improved_key(src, name)
+        dst = improved_key(key)                              # path-consistent with the manifest repoint
         if not overwrite and dst in existing:
             return ("skip", key)
         try:
