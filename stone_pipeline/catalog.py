@@ -99,8 +99,20 @@ def run(outputs_root: Path | None = None) -> Path:
         "images_queued": images_queued, "variant_colors": color_stats,
         "variants_held_no_image": held, "variants_to_delete": to_delete,
         "retyped_images_migrated": migrated}})
+    # Reflect the produced 1_variants_full onto the ledger variation table (flag-gated). This runs
+    # BEFORE the consistency gate on purpose: in the pull model the ledger is the source of truth Medusa
+    # pulls, and a produce that mints new varieties trips the CSV gate ("not in the current export")
+    # even though those variations are valid and simply awaiting their first pull. The ledger must carry
+    # them regardless; the sync engine gates their products on the variation being synced, and produce
+    # reconciles the gate against the ledger (held vs fatal). Inert unless BLOKPORT_LEDGER_WRITETHROUGH.
+    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
+        from stone_pipeline.ledger import writethrough
+        writethrough.record_catalog()
+
     # Deterministic consistency gate: fail loudly if the upload set is internally inconsistent
-    # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check.
+    # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check. In the
+    # pull model produce reconciles this against the ledger: new-variety failures are the expected
+    # two-pass checkpoint (held), a genuine structural fault stays fatal.
     errors, warnings = verify_consistency()
     for w in warnings:
         log.warning("consistency warning", extra={"extra_fields": {"warning": w}})
@@ -109,13 +121,6 @@ def run(outputs_root: Path | None = None) -> Path:
             log.error("consistency gate FAILED", extra={"extra_fields": {"error": e}})
         raise SystemExit("catalog consistency gate FAILED -- inconsistent upload set:\n  - "
                          + "\n  - ".join(errors))
-
-    # Phase 2 (flag-gated, shadow): reflect the produced 1_variants_full onto the
-    # ledger variation table. Fully inert unless BLOKPORT_LEDGER_WRITETHROUGH is set;
-    # never fails the build (the ledger is a shadow mirror, CSVs stay authoritative).
-    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
-        from stone_pipeline.ledger import writethrough
-        writethrough.record_catalog()
 
     return sync
 

@@ -81,16 +81,17 @@ def _reconcile(monkeypatch, errors, held, untyped, dangling):
 
 
 def test_gate_held_when_only_new_varieties(monkeypatch):
-    # only new-variety errors + ledger shows nothing stuck/orphaned -> held, exit 0
+    # only new-variety errors + ledger shows nothing orphaned -> held, exit 0
     assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=225, untyped=0, dangling=0) == 0
 
 
-def test_gate_stays_fatal_on_untyped_variation(monkeypatch):
-    # a genuinely-stuck (untyped) variation is a real fault -> keep the failure
-    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=225, untyped=3, dangling=0) == 1
+def test_gate_held_even_with_untyped_new_varieties(monkeypatch):
+    # untyped new varieties are informational -- the sync engine holds them, not a produce failure
+    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=225, untyped=3, dangling=0) == 0
 
 
 def test_gate_stays_fatal_on_dangling_product(monkeypatch):
+    # a dangling product (variation_key with no variation row) is a real structural orphan -> fatal
     assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=225, untyped=0, dangling=2) == 1
 
 
