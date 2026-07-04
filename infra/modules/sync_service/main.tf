@@ -180,11 +180,15 @@ resource "aws_ecs_task_definition" "this" {
 
   container_definitions = jsonencode([
     {
-      name         = "sync"
-      image        = "${var.image_repo_url}:${var.image_tag}"
-      essential    = true
-      entryPoint   = []
-      command      = ["python", "-m", "stone_pipeline.ledger.server"]
+      name = "sync"
+      image = "${var.image_repo_url}:${var.image_tag}"
+      essential = true
+      # override the Dockerfile ENTRYPOINT (run_pipeline.sh) -- an empty array is treated as "unset"
+      # by ECS. Seed the EFS ledger from the in-image exports if empty (open_ledger is idempotent),
+      # then exec the sync server, which otherwise refuses on a missing ledger. (The proper fix --
+      # the server self-seeding -- lands with the main merge.)
+      entryPoint = ["sh", "-c",
+        "python -c \"import stone_pipeline.ledger.writethrough as w; lg=w.open_ledger(); lg.conn.commit(); lg.close()\" && exec python -m stone_pipeline.ledger.server"]
       portMappings = [{ containerPort = 8723, protocol = "tcp" }]
       environment  = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
       secrets      = [{ name = "BLOKPORT_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
@@ -192,11 +196,10 @@ resource "aws_ecs_task_definition" "this" {
       logConfiguration = { logDriver = "awslogs", options = local.log_options }
     },
     {
-      name         = "config"
-      image        = "${var.image_repo_url}:${var.image_tag}"
-      essential    = true
-      entryPoint   = []
-      command      = ["python", "-m", "stone_pipeline.config.server"]
+      name = "config"
+      image = "${var.image_repo_url}:${var.image_tag}"
+      essential = true
+      entryPoint   = ["python", "-m", "stone_pipeline.config.server"]
       portMappings = [{ containerPort = 8724, protocol = "tcp" }]
       environment  = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
       secrets      = [{ name = "BLOKPORT_CONFIG_TOKEN", valueFrom = var.config_token_ssm_arn }]
@@ -240,10 +243,10 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = false
   }
 
+  # A-record + awsvpc: ECS registers the task's ENI IP directly; container_name/port are only for
+  # SRV/bridge registries (AWS rejects containerPort here). Medusa reaches both ports at that IP.
   service_registries {
-    registry_arn   = aws_service_discovery_service.scraper.arn
-    container_name = "sync"
-    container_port = 8723
+    registry_arn = aws_service_discovery_service.scraper.arn
   }
 
   depends_on = [aws_efs_mount_target.ledger]   # EFS + Cloud Map exist before the service starts
