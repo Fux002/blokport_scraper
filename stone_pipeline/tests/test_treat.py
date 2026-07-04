@@ -6,9 +6,9 @@ from __future__ import annotations
 import io
 import json
 
+from stone_pipeline.config.settings import ENV_SEGMENT
 from stone_pipeline.io.image_processing import ProcessResult
 from stone_pipeline.stages import treat
-from stone_pipeline.stages.treat import ENV_SEGMENT
 
 
 class FakeS3:
@@ -42,22 +42,6 @@ class FakeProc:
 
 def _url(path: str) -> str:
     return f"https://bkt.s3.eu-west-1.amazonaws.com/{path}"
-
-
-def test_improved_key_is_path_consistent_with_repoint():
-    # the treated object key must match the URL the manifest repoint produces, for BOTH raw layouts
-    # and any sub-path -- otherwise the manifest points at an object that was written elsewhere.
-    assert treat.improved_key(f"{ENV_SEGMENT}/products/zucchi/aa.jpg") == f"{ENV_SEGMENT}/products/improved/zucchi/aa.jpg"
-    assert treat.improved_key(f"{ENV_SEGMENT}/products/scraped/marenostone/x.jpg") == f"{ENV_SEGMENT}/products/improved/marenostone/x.jpg"
-    assert treat.improved_key(f"{ENV_SEGMENT}/products/zucchi/sub/a.jpg") == f"{ENV_SEGMENT}/products/improved/zucchi/sub/a.jpg"  # sub-path preserved
-
-
-def test_parse_raw_key():
-    assert treat.parse_raw_key(f"{ENV_SEGMENT}/products/zucchi/abc.jpg") == ("zucchi", "abc.jpg")
-    assert treat.parse_raw_key(f"{ENV_SEGMENT}/products/scraped/marenostone/x.jpg") == ("marenostone", "x.jpg")
-    assert treat.parse_raw_key(f"{ENV_SEGMENT}/products/improved/zucchi/abc.jpg") is None   # already treated
-    assert treat.parse_raw_key(f"{ENV_SEGMENT}/products/_manifest.json") is None            # not an image
-    assert treat.parse_raw_key(f"{ENV_SEGMENT}/products/zucchi/abc.txt") is None            # not an image
 
 
 def test_treat_source_treats_raws_and_repoints_manifest():

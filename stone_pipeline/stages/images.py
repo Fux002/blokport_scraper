@@ -32,6 +32,7 @@ from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.io import download as dl
+from stone_pipeline.io import imagestore
 from stone_pipeline.io import storage
 
 log = logfmt.get_logger("images")
@@ -156,10 +157,9 @@ def _readonly_manifest() -> dict[str, str]:
     kept so a fully-offline run still works)."""
     try:
         import boto3
-        from stone_pipeline.config.settings import ENV_SEGMENT
         s3 = SETTINGS.s3
         client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
-        obj = client.get_object(Bucket=s3.bucket, Key=f"{ENV_SEGMENT}/products/{_MANIFEST_KEY}")
+        obj = client.get_object(Bucket=s3.bucket, Key=imagestore.MANIFEST_KEY)
         data = json.loads(obj["Body"].read().decode("utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception as exc:
@@ -184,7 +184,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             log.warning("passthrough: imageproc manifest empty/unreachable -- product images are HELD, "
                         "never linked to raw source urls. Run the image stage in s3 mode or restore S3 "
                         "access to populate the manifest.")
-        improved_marker = f"/{cfg.processing.improved_subdir}/"   # a treated image lives under improved/
+        improved_marker = imagestore.IMPROVED_MARKER              # a treated image lives under improved/
         held_untreated = 0
         for row in rows:
             srcs = [u for u in dict.fromkeys(row.raw_image_urls or []) if u and u.strip()]
@@ -273,8 +273,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         # When processing runs, the improved image lives in its own subfolder and
         # the raw scraped copy in a sibling folder; Medusa points at the improved
         # one (the URL we return). Without processing, the image stays at the root.
-        dest_key = f"{cfg.processing.improved_subdir}/{ck}" if (
-            processor is not None and cfg.processing.improved_subdir) else ck
+        dest_key = f"{imagestore.IMPROVED_SUBDIR}/{ck}" if processor is not None else ck
         # store via backend (idempotent; re-run re-derives same key, no re-upload).
         # If it already exists, reuse the URL and skip processing entirely — each
         # source image is only ever enhanced/de-watermarked once.
@@ -288,7 +287,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                 stats.processed += 1
                 # keep the raw download in the sibling scraped/ folder (same filename)
                 if cfg.processing.keep_scraped and out is not data:
-                    skey = f"{cfg.processing.scraped_subdir}/{ck}"
+                    skey = f"{imagestore.SCRAPED_SUBDIR}/{ck}"
                     if not backend.exists(skey):
                         backend.put(skey, data)
                         stats.bytes_uploaded += len(data)

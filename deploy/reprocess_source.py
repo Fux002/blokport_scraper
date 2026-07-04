@@ -17,7 +17,8 @@ import sys
 
 import boto3
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, ImageProcessingConfig
+from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, ImageProcessingConfig
+from stone_pipeline.io import imagestore
 from stone_pipeline.io.image_processing import ImageProcessor
 
 
@@ -26,8 +27,8 @@ def main() -> int:
     watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
     count = int(os.environ.get("SLICE_COUNT", "0"))  # 0 = to the end
-    src_prefix = f"{ENV_SEGMENT}/products/scraped/{src}/"
-    dst_prefix = f"{ENV_SEGMENT}/products/improved/{src}/"
+    src_prefix = imagestore.scraped_prefix(src)      # single source of truth for the S3 layout
+    dst_prefix = imagestore.improved_prefix(src)
     client = boto3.client("s3", region_name=S3_REGION)
 
     keys: list[str] = []

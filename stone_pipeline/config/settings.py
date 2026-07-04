@@ -307,9 +307,8 @@ class ImageProcessingConfig:
     #   <products>/scraped/<site>/<hash>.jpg    the raw download (audit / re-tuning)
     # Downloads are in-memory; the scraped copy is only persisted when keep_scraped
     # is on (the untouched original also still lives at the supplier URL). Handy in
-    # dev while testing, optional in prod.
-    improved_subdir: str = "improved"
-    scraped_subdir: str = "scraped"
+    # dev while testing, optional in prod. The improved/ + scraped/ folder names are
+    # part of the S3 layout and live in io.imagestore (single source of truth).
     keep_scraped: bool = _env_bool("BLOKPORT_KEEP_SCRAPED", False)
 
 

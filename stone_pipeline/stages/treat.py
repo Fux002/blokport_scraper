@@ -22,15 +22,12 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+from stone_pipeline.config.settings import S3_BUCKET, S3_REGION
 from stone_pipeline.core import logfmt
+from stone_pipeline.io import imagestore
 from stone_pipeline.io.image_processing import ImageProcessingConfig, ImageProcessor
 
 log = logfmt.get_logger("treat")
-
-_MANIFEST_KEY = f"{ENV_SEGMENT}/products/_manifest.json"
-_BACKUP_KEY = f"{ENV_SEGMENT}/products/_manifest.backup.json"
-_IMG_EXT = (".jpg", ".jpeg", ".png")
 
 
 @dataclass
@@ -40,34 +37,6 @@ class TreatStats:
     failed: int = 0
     manifest_repointed: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-def parse_raw_key(key: str) -> tuple[str, str] | None:
-    """(source, filename) from a raw products key, or None if it is already improved, the manifest, or
-    not a product image. Handles both layouts: products/<src>/<f> (s3 mode) and
-    products/scraped/<src>/<f> (keep_scraped)."""
-    if not key.lower().endswith(_IMG_EXT):
-        return None
-    parts = key.split("/")
-    if "products" not in parts:
-        return None
-    rest = parts[parts.index("products") + 1:]
-    if not rest or rest[0] == "improved":            # already treated
-        return None
-    if rest[0] == "scraped" and len(rest) >= 3:
-        return rest[1], rest[-1]
-    if len(rest) >= 2:
-        return rest[0], rest[-1]
-    return None
-
-
-def improved_key(raw_key: str) -> str:
-    """The improved/ S3 key for a raw key, via the SAME path transform the manifest repoint uses, so
-    the treated object and the repointed URL can never disagree (and any sub-path is preserved):
-    products/<src>/... -> products/improved/<src>/...  and  products/scraped/<src>/... -> improved."""
-    if "/products/scraped/" in raw_key:
-        return raw_key.replace("/products/scraped/", "/products/improved/", 1)
-    return raw_key.replace("/products/", "/products/improved/", 1)
 
 
 def _is_watermarked(source: str) -> bool:
@@ -87,33 +56,30 @@ def _list(s3, prefix: str) -> list[str]:
 
 def _load_manifest(s3) -> dict:
     try:
-        return json.loads(s3.get_object(Bucket=S3_BUCKET, Key=_MANIFEST_KEY)["Body"].read())
+        return json.loads(s3.get_object(Bucket=S3_BUCKET, Key=imagestore.MANIFEST_KEY)["Body"].read())
     except Exception:
         return {}
 
 
 def repoint_manifest(s3, source: str) -> int:
-    """Rewrite the manifest so `source` entries point at products/improved/<src>/ instead of the raw
-    location. Backs up the pre-change manifest. Returns how many entries changed. Idempotent: entries
-    already improved are left alone."""
+    """Rewrite the manifest so `source` entries point at improved/ instead of the raw location (via the
+    shared imagestore transform). Backs up the pre-change manifest. Returns how many entries changed.
+    Idempotent: entries already improved are left alone."""
     manifest = _load_manifest(s3)
     if not manifest:
         return 0
     backup = json.dumps(manifest).encode("utf-8")    # snapshot BEFORE modifying
-    already = f"/products/improved/{source}/"
-    markers = (f"/products/{source}/", f"/products/scraped/{source}/")
     changed = 0
     for k, v in list(manifest.items()):
-        if not isinstance(v, str) or already in v:
+        if not isinstance(v, str):
             continue
-        for marker in markers:
-            if marker in v:
-                manifest[k] = v.replace(marker, already)
-                changed += 1
-                break
+        repointed = imagestore.raw_to_improved_url(v, source)
+        if repointed != v:
+            manifest[k] = repointed
+            changed += 1
     if changed:
-        s3.put_object(Bucket=S3_BUCKET, Key=_BACKUP_KEY, Body=backup)
-        s3.put_object(Bucket=S3_BUCKET, Key=_MANIFEST_KEY,
+        s3.put_object(Bucket=S3_BUCKET, Key=imagestore.MANIFEST_BACKUP_KEY, Body=backup)
+        s3.put_object(Bucket=S3_BUCKET, Key=imagestore.MANIFEST_KEY,
                       Body=json.dumps(manifest).encode("utf-8"), ContentType="application/json")
     return changed
 
@@ -128,12 +94,12 @@ def treat_source(source: str, *, s3=None, processor=None, concurrency: int = 24,
     watermarked = _is_watermarked(source)
     stats = TreatStats()
 
-    raw_keys = [k for pre in (f"{ENV_SEGMENT}/products/{source}/", f"{ENV_SEGMENT}/products/scraped/{source}/")
-                for k in _list(s3, pre) if parse_raw_key(k)]
-    existing = set() if overwrite else set(_list(s3, f"{ENV_SEGMENT}/products/improved/{source}/"))
+    raw_keys = [k for pre in (imagestore.raw_prefix(source), imagestore.scraped_prefix(source))
+                for k in _list(s3, pre) if imagestore.parse_raw_key(k)]
+    existing = set() if overwrite else set(_list(s3, imagestore.improved_prefix(source)))
 
     def _one(key: str):
-        dst = improved_key(key)                              # path-consistent with the manifest repoint
+        dst = imagestore.improved_key(key)                   # path-consistent with the manifest repoint
         if not overwrite and dst in existing:
             return ("skip", key)
         try:
