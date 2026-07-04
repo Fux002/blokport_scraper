@@ -29,11 +29,23 @@ def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5)
     """Return a fetch(url) -> bytes | None using httpx, with retry and backoff.
 
     SSRF guard: redirects are followed MANUALLY so every hop is validated by
-    url_allowed (a public URL must not 302 into an internal/link-local one)."""
+    url_allowed (a public URL must not 302 into an internal/link-local one).
+
+    Proxy: supplier image CDNs block datacenter IPs (the AWS/ECS NAT egress), so downloads route
+    through the residential proxy when BLOKPORT_SCRAPER_PROXY is set -- the SAME lever the scraper uses.
+    Unset locally, so it connects directly. The SSRF guard still validates the TARGET host; the proxy is
+    a trusted egress, not the fetch target."""
+    import os
+
     import httpx
 
-    client = httpx.Client(timeout=timeout, follow_redirects=False,
-                          limits=httpx.Limits(max_connections=16, max_keepalive_connections=8))
+    opts: dict = {"timeout": timeout, "follow_redirects": False,
+                  "limits": httpx.Limits(max_connections=16, max_keepalive_connections=8)}
+    proxy = os.environ.get("BLOKPORT_SCRAPER_PROXY", "").strip()
+    if proxy:
+        opts["proxy"] = proxy
+        log.info("image fetcher routing through proxy")
+    client = httpx.Client(**opts)
 
     def fetch(url: str) -> Optional[bytes]:
         for attempt in range(retries):
