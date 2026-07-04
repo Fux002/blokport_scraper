@@ -154,7 +154,10 @@ class ConfigHandler(BaseHTTPRequestHandler):
         log.info("config request", extra={"extra_fields": {"client": self.address_string()}})
 
 
-def serve(host: str = "127.0.0.1", port: int = 8724) -> None:
+def serve(host: str | None = None, port: int = 8724) -> None:
+    # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so peer tasks
+    # (Medusa, over the VPC) can reach it. The bearer token still gates every request.
+    host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
     if not store.config_db_path().exists():
         store.seed_from_yaml()   # first run: seed from the committed yaml
     httpd = ThreadingHTTPServer((host, port), ConfigHandler)

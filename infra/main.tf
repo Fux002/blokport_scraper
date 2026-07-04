@@ -141,3 +141,45 @@ module "scraper_prod" {
   cpu                 = var.cpu
   memory              = var.memory
 }
+
+# =============================================================================
+# In-VPC sync/config SERVICE (dev) -- the long-running sync + config HTTP servers
+# run in the blokport-dev cluster so Medusa reaches them over Cloud Map (private
+# DNS), NOT a Cloudflare tunnel. One task (both servers + local produce), ledger on
+# EFS. Consumes the Medusa platform's remote-state outputs (published live to state).
+# =============================================================================
+data "terraform_remote_state" "platform_dev" {
+  backend = "s3"
+  config = {
+    bucket = "blokport-tfstate"
+    key    = "blokport/dev/terraform.tfstate"
+    region = var.region
+  }
+}
+
+data "aws_ssm_parameter" "sync_token_dev" { name = "/blokport-dev/BLOKPORT_SYNC_TOKEN" }
+data "aws_ssm_parameter" "config_token_dev" { name = "/blokport-dev/BLOKPORT_CONFIG_TOKEN" }
+
+# Reference the EXISTING shared ECR by name (data source, not the root resource) so this module can
+# apply with -target without depending on the root ECR -- which is currently drifted from state
+# (state has module.scraper.aws_ecr_repository; the repo config was refactored but never applied).
+data "aws_ecr_repository" "scraper" { name = "blokport-scraper" }
+
+module "sync_service_dev" {
+  source = "./modules/sync_service"
+
+  target_env     = "development"
+  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_tag      = var.image_tag
+  region         = var.region
+  staging_bucket = var.dev_staging_bucket
+
+  vpc_id                = data.terraform_remote_state.platform_dev.outputs.vpc_id
+  private_subnet_ids    = data.terraform_remote_state.platform_dev.outputs.private_subnet_ids
+  ecs_cluster_arn       = data.terraform_remote_state.platform_dev.outputs.ecs_cluster_arn
+  medusa_service_sg_id  = data.terraform_remote_state.platform_dev.outputs.service_sg_id
+  internal_namespace_id = data.terraform_remote_state.platform_dev.outputs.internal_namespace_id
+
+  sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_dev.arn
+  config_token_ssm_arn = data.aws_ssm_parameter.config_token_dev.arn
+}
