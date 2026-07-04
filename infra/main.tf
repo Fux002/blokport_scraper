@@ -172,7 +172,7 @@ module "sync_service_dev" {
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
   # DEV: pin to the branch-built sha, NOT :core (which means 'what's on main'). This avoids a window
   # where :core = an unmerged branch build. Flip back to var.image_tag ("core") after the main merge.
-  image_tag      = "8bc2a49"
+  image_tag      = "9f138f7"
   region         = var.region
   staging_bucket = var.dev_staging_bucket
 
