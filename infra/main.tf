@@ -172,7 +172,7 @@ module "sync_service_dev" {
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
   # DEV: pin to the branch-built sha, NOT :core (which means 'what's on main'). This avoids a window
   # where :core = an unmerged branch build. Flip back to var.image_tag ("core") after the main merge.
-  image_tag      = "46eb7ec"
+  image_tag      = "4b60ca8"
   region         = var.region
   staging_bucket = var.dev_staging_bucket
   # The produce subprocess builds ~2M combinations in RAM (the catalog peak) sharing the task with BOTH
