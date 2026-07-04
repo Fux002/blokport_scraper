@@ -175,6 +175,13 @@ module "sync_service_dev" {
   image_tag      = "4ff47e9"
   region         = var.region
   staging_bucket = var.dev_staging_bucket
+  # The produce subprocess builds ~2M combinations + thousands of images in RAM (the catalog peak),
+  # and it shares the task with BOTH long-running servers -- 2 GB OOM-killed it (exit -9). Bump to
+  # 2 vCPU / 16 GB for headroom. Temporary: the durable fix is streaming the combinations build so we
+  # can shrink back (see ecs-produce-proxy notes). NOT a separate produce task -- that would put a
+  # second host on the EFS ledger and race the single-host SQLite invariant.
+  cpu    = 2048
+  memory = 16384
 
   vpc_id                = data.terraform_remote_state.platform_dev.outputs.vpc_id
   private_subnet_ids    = data.terraform_remote_state.platform_dev.outputs.private_subnet_ids
