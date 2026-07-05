@@ -55,14 +55,21 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "aliases = excluded.aliases, image_url = excluded.image_url, "
                 "volume = excluded.volume, in_full = 1, payload_hash = excluded.payload_hash, "
                 # a content change re-serves (synced -> dirty); unchanged keeps its state. medusa_id
-                # and first_seen are never touched, so an acked id survives a re-run.
-                "state = CASE WHEN variation.payload_hash != excluded.payload_hash "
-                "THEN 'dirty' ELSE variation.state END, "
+                # and first_seen are never touched, so an acked id survives a re-run. E5/un-retire: a
+                # 'retiring' variety that reappears in the produced set (its exclusion was cleared) must
+                # re-serve, not stay retiring -- flip it back to dirty.
+                "state = CASE WHEN variation.state = 'retiring' THEN 'dirty' "
+                "WHEN variation.payload_hash != excluded.payload_hash THEN 'dirty' "
+                "ELSE variation.state END, "
                 "updated_at = excluded.updated_at",
                 (key, branch, "", name, json.dumps(aliases), image_url, None, None, volume,
                  None, ph, "pending", now, None, now, now),
             )
             n += 1
+    # E5: a re-minted variety must not carry a stale variation-tombstone, or Medusa's /removed pull would
+    # delete the freshly re-created variety. Clear any variation tombstone now back in the produced set.
+    ledger.execute("DELETE FROM removed WHERE kind = 'variation' AND external_id IN "
+                   "(SELECT key FROM variation WHERE in_full = 1)")
     return n
 
 
@@ -197,8 +204,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         ledger.upsert("product", record, pk=("sku",), keep_on_update=("created_at", "first_seen"))
         n += 1
     # A re-created SKU must not carry a stale tombstone: a re-added vendor reuses deterministic SKUs, so
-    # clear any tombstone whose product now exists, or Medusa's /removed pull would delete a live product.
-    ledger.execute("DELETE FROM removed WHERE external_id IN (SELECT sku FROM product)")
+    # clear any PRODUCT tombstone whose product now exists, or Medusa's /removed pull would delete a live product.
+    ledger.execute("DELETE FROM removed WHERE kind = 'product' AND external_id IN (SELECT sku FROM product)")
     return n
 
 

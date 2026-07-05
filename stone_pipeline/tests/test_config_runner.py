@@ -9,18 +9,21 @@ import sys
 
 import pytest
 
+from stone_pipeline import lifecycle
 from stone_pipeline.config import runner
 from stone_pipeline.config.server import dispatch
 
 
 @pytest.fixture(autouse=True)
 def _reset_runner():
-    # runner state is process-global (one control plane); reset it around every test.
+    # runner + lifecycle state is process-global (one control plane); reset it around every test.
     runner._runs.clear()
     runner._current_id = None
+    lifecycle._active = None
     yield
     runner._runs.clear()
     runner._current_id = None
+    lifecycle._active = None
 
 
 def _capture():
@@ -94,8 +97,8 @@ def test_catalog_stage_ignores_a_source_scope():
     assert "--sources" not in runner._build_command(seen["rec"])
 
 
-def test_run_refused_while_a_reset_is_active(monkeypatch):
-    monkeypatch.setattr(runner, "_reset_active", True)
+def test_run_refused_while_a_lifecycle_op_is_active(monkeypatch):
+    monkeypatch.setattr(lifecycle, "_active", "reset")     # a destructive op holds the slot
     rec, code = runner.start_run(launch=lambda r: None)
     assert code == 409 and "reset is in progress" in rec["error"]
 
@@ -142,12 +145,12 @@ def test_reset_refused_while_a_run_is_active():
     # coordination guard: never reset the ledger mid-run.
     runner._runs["x"] = {"status": "running", "run_id": "x"}
     runner._current_id = "x"
-    body, code = runner.reset()
+    body, code = lifecycle.reset()
     assert code == 409 and "run is in progress" in body["error"]
 
 
 def test_reset_bad_source_is_400():
-    body, code = runner.reset(sources=["not_a_scraper"])
+    body, code = lifecycle.reset(sources=["not_a_scraper"])
     assert code == 400
 
 
@@ -166,13 +169,13 @@ def test_reset_soft_and_hard_through_the_ledger(tmp_path, monkeypatch):
         lg.upsert("product", {"sku": "POL-1", "source": "pol", "variation_key": "slab_v1", "medusa_id": "PID",
                               "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
 
-    body, code = runner.reset()                       # soft
+    body, code = lifecycle.reset()                       # soft
     assert code == 200 and body["mode"] == "soft" and body["reset"]["variation"] >= 1
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         assert lg.get("product", "sku", "POL-1")["state"] == "pending"   # kept, re-served
         assert lg.get("variation", "key", "slab_v1")["medusa_id"] is None
 
-    body, code = runner.reset(hard=True)              # hard
+    body, code = lifecycle.reset(hard=True)              # hard
     assert code == 200 and body["mode"] == "hard"
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         assert lg.get("product", "sku", "POL-1") is None                 # scraper output dropped
@@ -182,7 +185,7 @@ def test_reset_soft_and_hard_through_the_ledger(tmp_path, monkeypatch):
 def test_dispatch_routes_reset_with_hard_and_sources(monkeypatch):
     from stone_pipeline.config.server import dispatch
     seen = {}
-    monkeypatch.setattr(runner, "reset",
+    monkeypatch.setattr(lifecycle, "reset",
                         lambda sources=None, hard=False: seen.update(sources=sources, hard=hard) or ({"ok": 1}, 200))
     code, body = dispatch("POST", ["reset"], {"hard": True, "sources": ["zucchi"]})
     assert code == 200 and seen == {"sources": ["zucchi"], "hard": True}
@@ -223,7 +226,7 @@ def test_clean_deletes_a_sources_scraped_data(tmp_path, monkeypatch):
     (tmp_path / "zucchi" / "20260625_222931").mkdir(parents=True)
     (tmp_path / "zucchi" / "20260601_090000").mkdir(parents=True)
     (tmp_path / "polonine" / "20260621_104529").mkdir(parents=True)
-    body, code = runner.clean(sources=["zucchi"])
+    body, code = lifecycle.clean(sources=["zucchi"])
     assert code == 200 and body["deleted_scrapes"] == {"zucchi": 2}
     assert list((tmp_path / "zucchi").glob("*")) == []          # zucchi scrapes gone
     assert (tmp_path / "polonine" / "20260621_104529").exists()  # polonine untouched
@@ -232,26 +235,26 @@ def test_clean_deletes_a_sources_scraped_data(tmp_path, monkeypatch):
 def test_clean_refused_while_a_run_is_active():
     runner._runs["x"] = {"status": "running", "run_id": "x"}
     runner._current_id = "x"
-    body, code = runner.clean(sources=["zucchi"])       # sources path -> guard returns before any fs work
+    body, code = lifecycle.clean(sources=["zucchi"])       # sources path -> guard returns before any fs work
     assert code == 409
 
 
 def test_clean_unknown_source_is_400():
-    body, code = runner.clean(sources=["not_a_scraper"])
+    body, code = lifecycle.clean(sources=["not_a_scraper"])
     assert code == 400
 
 
 def test_purge_refused_while_a_run_is_active():
     runner._runs["x"] = {"status": "running", "run_id": "x"}
     runner._current_id = "x"
-    body, code = runner.purge()
+    body, code = lifecycle.purge()
     assert code == 409
 
 
 def test_dispatch_routes_purge(monkeypatch):
     from stone_pipeline.config.server import dispatch
     seen = {}
-    monkeypatch.setattr(runner, "purge",
+    monkeypatch.setattr(lifecycle, "purge",
                         lambda sources=None: seen.update(sources=sources) or ({"external_ids": []}, 200))
     code, body = dispatch("POST", ["purge"], {"sources": ["polonine"]})
     assert code == 200 and seen == {"sources": ["polonine"]}
@@ -260,9 +263,92 @@ def test_dispatch_routes_purge(monkeypatch):
 def test_dispatch_routes_clean(monkeypatch):
     from stone_pipeline.config.server import dispatch
     seen = {}
-    monkeypatch.setattr(runner, "clean", lambda sources=None: seen.update(sources=sources) or ({"ok": 1}, 200))
+    monkeypatch.setattr(lifecycle, "clean", lambda sources=None: seen.update(sources=sources) or ({"ok": 1}, 200))
     code, body = dispatch("POST", ["clean"], {"sources": ["zucchi"]})
     assert code == 200 and seen == {"sources": ["zucchi"]}
+
+
+# -- pause / resume: freeze a source WITHOUT taking its products offline --------------------------
+
+def test_pause_freezes_a_source_config_only(tmp_path, monkeypatch):
+    # pause is config-only: lifecycle=paused + enabled=0 (so run_all skips it), and it must NEVER open
+    # the ledger (products stay live & buyable, untouched). Make Ledger.open explode to prove it.
+    from stone_pipeline.config import store
+    from stone_pipeline.ledger import db as ledger_db
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=_min_yaml(tmp_path))
+
+    def _boom(*a, **k):
+        raise AssertionError("pause/resume must not open the ledger")
+    monkeypatch.setattr(ledger_db.Ledger, "open", _boom)
+
+    body, code = lifecycle.pause(["polonine"])
+    assert code == 200 and body == {"paused": ["polonine"]}
+    row = store.get_row("polonine")
+    assert row["lifecycle"] == "paused" and row["enabled"] is False
+    assert store.enabled_names() == set()                    # paused -> not scraped next run
+
+    body, code = lifecycle.resume(["polonine"])
+    assert code == 200 and body == {"resumed": ["polonine"], "restock_required": []}  # paused, not delisted
+    row = store.get_row("polonine")
+    assert row["lifecycle"] == "active" and row["enabled"] is True
+    assert store.enabled_names() == {"polonine"}             # resumed -> scraped again
+
+
+def test_pause_resume_reject_empty_or_unknown_scope():
+    assert lifecycle.pause([])[1] == 400
+    assert lifecycle.pause(["not_a_scraper"])[1] == 400
+    assert lifecycle.resume([])[1] == 400
+    assert lifecycle.resume(["not_a_scraper"])[1] == 400
+
+
+def test_delist_stamps_lifecycle_delisted(tmp_path, monkeypatch):
+    # delist must set lifecycle=delisted (distinct from paused) so Medusa can tell offline from frozen.
+    from stone_pipeline.config import store
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    store.seed_from_yaml(yaml_path=_min_yaml(tmp_path))
+    body, code = lifecycle.delist(["polonine"])
+    assert code == 200
+    row = store.get_row("polonine")
+    assert row["lifecycle"] == "delisted" and row["enabled"] is False
+
+
+def test_clean_refused_on_a_paused_source(tmp_path, monkeypatch):
+    # a paused source's raw scrape is the frozen snapshot the catalog rebuilds from; refuse to wipe it.
+    from stone_pipeline.config import store
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=_min_yaml(tmp_path))
+    lifecycle.pause(["polonine"])
+    body, code = lifecycle.clean(sources=["polonine"])
+    assert code == 409 and "polonine" in str(body["error"])
+
+
+def test_dispatch_routes_pause_and_resume(monkeypatch):
+    from stone_pipeline.config.server import dispatch
+    seen = {}
+    monkeypatch.setattr(lifecycle, "pause",
+                        lambda sources=None: seen.update(pause=sources) or ({"paused": sources}, 200))
+    monkeypatch.setattr(lifecycle, "resume",
+                        lambda sources=None: seen.update(resume=sources) or ({"resumed": sources}, 200))
+    code, body = dispatch("POST", ["pause"], {"sources": ["zucchi"]})
+    assert code == 200 and seen["pause"] == ["zucchi"] and body == {"paused": ["zucchi"]}
+    code, body = dispatch("POST", ["resume"], {"sources": ["zucchi"]})
+    assert code == 200 and seen["resume"] == ["zucchi"]
+    assert dispatch("GET", ["pause"], None)[0] == 405           # wrong method
+
+
+def test_dispatch_routes_variation_retire_and_un_retire(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(lifecycle, "retire_variation",
+                        lambda key, force=False: seen.update(retire=(key, force)) or ({"retired": key}, 200))
+    monkeypatch.setattr(lifecycle, "un_retire",
+                        lambda key: seen.update(un_retire=key) or ({"un_retired": key}, 200))
+    code, _ = dispatch("POST", ["variations", "slab_marble_x_1", "retire"], {"force": True})
+    assert code == 200 and seen["retire"] == ("slab_marble_x_1", True)
+    code, _ = dispatch("POST", ["variations", "slab_marble_x_1", "un_retire"], None)
+    assert code == 200 and seen["un_retire"] == "slab_marble_x_1"
+    assert dispatch("GET", ["variations", "x", "retire"], None)[0] == 404      # wrong method
 
 
 def test_second_trigger_while_running_is_refused_409():

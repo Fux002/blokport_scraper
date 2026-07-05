@@ -70,3 +70,24 @@ def test_restore_returns_false_when_no_snapshot(tmp_path, monkeypatch):
 def test_save_of_missing_file_is_a_noop(tmp_path, monkeypatch):
     monkeypatch.setattr(snapshot, "_s3", lambda: _FakeS3())
     assert snapshot.save(tmp_path / "nope.db", env="development") is False
+
+
+def test_config_snapshot_round_trip_preserves_lifecycle(tmp_path, monkeypatch):
+    # E14: config.db (source lifecycle) is ephemeral on ECS; snapshot/restore it like the ledger so a
+    # redeploy does not lose a pause/delist and re-seed every source back to active.
+    from stone_pipeline.config import store
+    fake = _FakeS3()
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    src = tmp_path / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(src))
+    store.upsert_row({"source": "polonine", "adapter": "polonine", "source_code": "pol", "vendor": "P"})
+    store.set_state("polonine", lifecycle="paused", enabled=False)
+
+    assert snapshot.save_config(src, env="development") is True
+    assert snapshot.config_key("development") in {k for _, k in fake.store}
+
+    dest = tmp_path / "restored" / "config.db"       # a fresh, empty task disk
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(dest))
+    assert snapshot.restore_config(dest, env="development") is True
+    row = store.get_row("polonine")
+    assert row["lifecycle"] == "paused" and row["enabled"] is False   # pause survived the restart

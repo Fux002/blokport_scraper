@@ -82,6 +82,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if col not in cols:
             conn.execute(f"ALTER TABLE source ADD COLUMN {col} TEXT")
             conn.commit()
+    if "lifecycle" not in cols:   # active | paused | delisted -- the label Medusa reads (NULL == active)
+        conn.execute("ALTER TABLE source ADD COLUMN lifecycle TEXT")
+        conn.commit()
     # durable run records so GET /config/v1/run can return `last` across a config-server restart
     # (the in-memory run dict is lost on restart).
     conn.execute("CREATE TABLE IF NOT EXISTS run_log ("
@@ -137,6 +140,8 @@ def _row_dict(r: sqlite3.Row) -> dict:
         # last run (for the admin list's "last run" label); null until this source has ever been produced.
         "last_run_at": r["last_run_at"], "last_run_status": r["last_run_status"],
         "last_run_stage": r["last_run_stage"],
+        # lifecycle label Medusa reads: active | paused | delisted. NULL (legacy rows, never paused) == active.
+        "lifecycle": r["lifecycle"] or "active",
     }
 
 
@@ -192,10 +197,23 @@ def upsert_source(cfg: SourceConfig, *, enabled: bool = True, schedule: str | No
         conn.commit()
 
 
-def set_enabled(source: str, enabled: bool, path: str | Path | None = None) -> None:
+def set_state(source: str, *, lifecycle: str | None = None, enabled: bool | None = None,
+              path: str | Path | None = None) -> None:
+    """The ONE source-state mutation: set `lifecycle` ('active'|'paused'|'delisted', the label Medusa
+    reads) and/or `enabled` (the mechanical run flag) in a single write; either omitted leaves it
+    unchanged. The lifecycle verbs go through here."""
+    sets: list[str] = []
+    params: list = []
+    if lifecycle is not None:
+        sets.append("lifecycle = ?"); params.append(lifecycle)
+    if enabled is not None:
+        sets.append("enabled = ?"); params.append(1 if enabled else 0)
+    if not sets:
+        return
+    sets.append("updated_at = ?"); params.append(_now())
+    params.append(source)
     with closing(open_store(path)) as conn:
-        conn.execute("UPDATE source SET enabled = ?, updated_at = ? WHERE source = ?",
-                     (1 if enabled else 0, _now(), source))
+        conn.execute(f"UPDATE source SET {', '.join(sets)} WHERE source = ?", params)
         conn.commit()
 
 

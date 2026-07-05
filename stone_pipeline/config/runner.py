@@ -32,8 +32,14 @@ log = logfmt.get_logger("config.runner")
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}      # run_id -> record (kept so GET /run/{id} works after it finishes)
 _current_id: str | None = None   # the in-flight run, if any
-_reset_active: bool = False      # a reset is running (run and reset are mutually exclusive)
 _MAX_RUNS = 200                  # cap the in-memory history so a long-lived server never grows unbounded (M2)
+
+
+def run_in_progress() -> bool:
+    """True while a produce run is queued/running (status-based). stone_pipeline.lifecycle checks this so a
+    destructive op refuses to run mid-produce; the run <-> op exclusion lives in lifecycle (single lock)."""
+    with _lock:
+        return _current_id is not None and _runs.get(_current_id, {}).get("status") in ("queued", "running")
 
 
 def _now() -> str:
@@ -192,12 +198,13 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
         # catalog is a SHARED, all-source consolidation: a source scope is meaningless there (build
         # ignores --sources for catalog), so drop it -- else the 'last run' label would credit one source.
         scope = None if stage == "catalog" else known
+    from stone_pipeline import lifecycle
     global _current_id
+    if (busy := lifecycle.active()):                    # a destructive op is mid-flight (checked BEFORE
+        return {"error": f"a {busy} is in progress; refusing to run"}, 409   # our lock, so locks never nest)
     with _lock:
         if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
             return _public(_runs[_current_id]), 409
-        if _reset_active:
-            return {"error": "a reset is in progress; refusing to run"}, 409
         run_id = _now().translate({ord(c): None for c in ":-.T"})[:17]
         rec = {"run_id": run_id, "status": "queued", "mode": _mode(),
                "started_at": _now(), "finished_at": None, "error": None,
@@ -239,186 +246,6 @@ def _source_codes(names) -> list[str]:
             pass
     return codes
 
-
-def reset(sources=None, hard=False) -> tuple[dict, int]:
-    """Clean-start the ledger sync state (the ① half of the coordinated ①②③ reset). Guarded, per the
-    coordination contract: 409 if a produce run is active OR a pull is in flight -- never reset mid-run.
-    soft (default) re-serves the catalog from zero without re-scraping; hard also drops the scraped
-    products+inventory. Variation/backbone rows (your base config) are never deleted. Returns
-    ({mode, reset:{...}}, http_status): 200 done, 409 busy, 400 bad scope, 500 error."""
-    from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
-    codes = None
-    if sources:
-        known = _resolve_sources(sources)
-        unknown = [s for s in sources if s not in set(known)]
-        if unknown:                                 # reject ANY unknown, never silently drop it
-            return {"error": f"unknown source(s): {unknown}"}, 400
-        codes = _source_codes(known)
-    global _reset_active
-    with _lock:                                     # claim the slot (mutually exclusive with a run)...
-        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
-            return {"error": "a run is in progress; refusing to reset mid-run"}, 409
-        if _reset_active:
-            return {"error": "a reset is already in progress"}, 409
-        _reset_active = True
-    try:                                            # ...then do the DB work WITHOUT holding _lock, so
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:  # status reads never stall
-            result = sync.reset_sync_state(ledger, source_codes=codes, hard=bool(hard))
-    except sync.ServeInFlight as exc:               # a pull started/held a lease -> refuse (the real, atomic guard)
-        return {"error": str(exc)}, 409
-    except Exception as exc:
-        log.exception("ledger reset failed")
-        return {"error": str(exc)}, 500
-    finally:
-        with _lock:
-            _reset_active = False
-    log.warning("ledger reset via config API", extra={"extra_fields": {
-        "mode": "hard" if hard else "soft", "sources": sources or "all", "result": result}})
-    return {"mode": "hard" if hard else "soft", "reset": result}, 200
-
-
-def purge(sources=None) -> tuple[dict, int]:
-    """Coordinated dead-stock purge (the ① half): hard-delete the qty-0 products so the delisted
-    graveyard stops accumulating. Guarded like reset (409 if a run/pull is active). Returns
-    {external_ids:[...], product, inventory} -- Medusa deletes the SAME external_ids (product + ref),
-    the ②③ half. A purged product recreates cleanly if it reappears in a later scrape."""
-    from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
-    codes = None
-    if sources:
-        known = _resolve_sources(sources)
-        unknown = [s for s in sources if s not in set(known)]
-        if unknown:
-            return {"error": f"unknown source(s): {unknown}"}, 400
-        codes = _source_codes(known)
-    global _reset_active
-    with _lock:
-        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
-            return {"error": "a run is in progress; refusing to purge mid-run"}, 409
-        if _reset_active:
-            return {"error": "a reset/purge is already in progress"}, 409
-        _reset_active = True
-    try:
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
-            result = sync.purge_discontinued(ledger, source_codes=codes)
-    except sync.ServeInFlight as exc:
-        return {"error": str(exc)}, 409
-    except Exception as exc:
-        log.exception("ledger purge failed")
-        return {"error": str(exc)}, 500
-    finally:
-        with _lock:
-            _reset_active = False
-    log.warning("dead-stock purge via config API", extra={"extra_fields": {
-        "sources": sources or "all", "purged": result["product"]}})
-    return result, 200
-
-
-def clean(sources=None) -> tuple[dict, int]:
-    """Housekeeping for the :4200 buttons. `sources` given -> DELETE those sources' raw scraped data
-    (data/<source>/*) for a fresh re-scrape; none -> prune superseded scrapes/runs/orphan images.
-    Guarded like reset: 409 if a run or reset is active. Base config + ledger are never touched."""
-    from stone_pipeline import clean as clean_mod
-    with _lock:
-        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
-            return {"error": "a run is in progress; refusing to clean mid-run"}, 409
-        if _reset_active:
-            return {"error": "a reset is in progress"}, 409
-    try:
-        if sources:
-            known = _resolve_sources(sources)
-            unknown = [s for s in sources if s not in set(known)]
-            if unknown:
-                return {"error": f"unknown source(s): {unknown}"}, 400
-            return {"deleted_scrapes": clean_mod.delete_source_data(known)}, 200
-        return {"pruned": clean_mod.run(dry_run=False)}, 200
-    except Exception as exc:
-        log.exception("clean failed")
-        return {"error": str(exc)}, 500
-
-
-def delist(sources) -> tuple[dict, int]:
-    """Stage 1 of a vendor removal ('Take offline'): set every product of the given sources to qty 0 (so
-    the next pull takes them out of sale) AND disable the sources, so a scrape never silently re-stocks a
-    vendor you took offline. Reversible: re-enable + re-scrape restores stock. Guarded like reset (409 if
-    a run/pull is active). Returns {delisted, external_ids, disabled}, 200; 400 on a bad/empty scope."""
-    from stone_pipeline.config import store
-    from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
-    if not sources:
-        return {"error": "delist requires an explicit sources list"}, 400
-    known = _resolve_sources(sources)
-    unknown = [s for s in sources if s not in set(known)]
-    if unknown:                                     # reject ANY unknown, never silently drop it
-        return {"error": f"unknown source(s): {unknown}"}, 400
-    codes = _source_codes(known)
-    global _reset_active
-    with _lock:
-        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
-            return {"error": "a run is in progress; refusing to delist mid-run"}, 409
-        if _reset_active:
-            return {"error": "a reset/purge is already in progress"}, 409
-        _reset_active = True
-    try:
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
-            result = sync.delist_source(ledger, source_codes=codes)
-    except sync.ServeInFlight as exc:
-        return {"error": str(exc)}, 409
-    except Exception as exc:
-        log.exception("delist failed")
-        return {"error": str(exc)}, 500
-    finally:
-        with _lock:
-            _reset_active = False
-    for name in known:                              # disable so a scrape never re-stocks an offline vendor
-        store.set_enabled(name, False)
-    log.warning("source(s) taken offline (delist + disable)", extra={"extra_fields": {
-        "sources": known, "delisted": result["delisted"]}})
-    return {**result, "disabled": known}, 200
-
-
-def remove_source(name: str) -> tuple[dict, int]:
-    """Stage 2 of a vendor removal ('Remove permanently'): purge the source's (already qty-0) products
-    from the ledger and delete its config row, so it leaves the :4200 list. GUARDED: refuses (409) while
-    the source still has LIVE products (qty > 0) -- take it offline first, so nothing is orphaned-live in
-    the shop. Returns {removed_source, config_removed, purged, external_ids}, 200; 400 unknown, 409 busy
-    or still-live. The purge records a tombstone per SKU (reason=vendor_removed) on the /sync/removed
-    lane, so Medusa pulls the deletion and acks it -- the coordinated both-sides removal."""
-    from stone_pipeline.config import store
-    from stone_pipeline.ledger import sync, writethrough
-    from stone_pipeline.ledger.db import Ledger
-    known = _resolve_sources([name])
-    if name not in set(known):
-        return {"error": f"unknown source {name!r}"}, 400
-    codes = _source_codes([name])
-    global _reset_active
-    with _lock:
-        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
-            return {"error": "a run is in progress; refusing to remove mid-run"}, 409
-        if _reset_active:
-            return {"error": "a reset/purge is already in progress"}, 409
-        _reset_active = True
-    try:
-        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
-            live = sync.live_products(ledger, source_codes=codes)
-            if live:
-                return {"error": f"{name!r} still has {live} live product(s); take it offline first",
-                        "live_products": live}, 409
-            result = sync.purge_discontinued(ledger, source_codes=codes, reason="vendor_removed")
-    except sync.ServeInFlight as exc:
-        return {"error": str(exc)}, 409
-    except Exception as exc:
-        log.exception("remove source failed")
-        return {"error": str(exc)}, 500
-    finally:
-        with _lock:
-            _reset_active = False
-    config_removed = store.delete_source(name)
-    log.warning("source REMOVED (purge + delete config)", extra={"extra_fields": {
-        "source": name, "purged": result["product"], "config_removed": config_removed}})
-    return {"removed_source": name, "config_removed": config_removed,
-            "purged": result["product"], "external_ids": result["external_ids"]}, 200
 
 
 def get_run(run_id: str) -> dict | None:

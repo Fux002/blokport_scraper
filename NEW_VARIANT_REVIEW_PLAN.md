@@ -48,9 +48,13 @@ that flow; do not start until it proves out.
 
 ## 3. SCRAPER SIDE (this chat)
 
-### Phase 1 — Durable decision state on EFS
-- Env-drive `SETTINGS.paths.state_dir`, `review_dir`, and `catalog_source/backbone_additions` to an
-  EFS root (e.g. `BLOKPORT_STATE_ROOT=/ledger`), defaulting to the repo root on a laptop.
+### Phase 1 — Durable decision state (NOTE: EFS is gone; see PART III Phase 0)
+- SUPERSEDED WORDING: this phase originally said "on EFS". EFS was removed in bbf35a2 (the ledger moved
+  to a local `/ledger` volume + S3 snapshot). Decision state must persist the SAME way as the ledger
+  (local disk + `snapshot.save/restore`), NOT EFS. This is now folded into the shared persistence fix in
+  PART III / Phase 0, because config.db (pause/lifecycle) has the identical problem. Do that first.
+- Env-drive `SETTINGS.paths.state_dir`, `review_dir`, and `catalog_source/backbone_additions` to the
+  persistent `/ledger` root (e.g. `BLOKPORT_STATE_ROOT=/ledger`), defaulting to the repo root on a laptop.
 - Create the dirs on boot (config + produce both).
 - Verify: write a decision, restart the task, decision still there.
 - Note: the produce reads decisions ONCE at curate start; an edit made during a run applies to the
@@ -221,3 +225,101 @@ that the system is closed.
 2. Dimension correction (the likely-largest remaining bucket).
 3. Image resolution.
 4. Reconcile scorecard -> drive non-placed to zero.
+
+---
+
+# PART III — Alignment with source lifecycle (add / pause / resume / delist / remove)
+
+Companion to SOURCE_LIFECYCLE.md. Adding, pausing, and removing a scraper is the primary way review
+items are CREATED and RETIRED, so the two flows must be co-designed or they drift. This part pins the
+intersection and the ONE shared fix both features depend on. Same source-agnostic invariant throughout:
+lifecycle acts only via the adapter + config; review/closure is defined once at the canonical layer, so
+no lifecycle op fragments the review logic (see [[source-isolation-invariant]]).
+
+## 14. Phase 0 (BLOCKS BOTH FEATURES) — durable non-ledger state on the no-EFS task
+
+Confirmed finding (cited to code, 2026-07-05):
+- `config.db` resolves to `SETTINGS.paths.workspace_root / "config.db"` = **`/app/config.db`** on ECS
+  (`config/store.py:51-54`, `config/settings.py:24-25`); `BLOKPORT_CONFIG_DB` is NOT set in infra.
+- `state_dir` / `review_dir` / `catalog_source/backbone_additions` also resolve under **`/app`**
+  (`config/settings.py`), the ephemeral image filesystem.
+- `snapshot.py` snapshots ONLY the ledger; `config.server.serve()` merely `seed_from_yaml()` if config.db
+  is absent, then `snapshot.restore(ledger_path)`. `/ledger` is a name-only ephemeral volume
+  (`infra/modules/sync_service/main.tf:155-158`); only `ledger.db` is persisted to S3.
+
+Consequence (the reason this is Phase 0): **on any task restart, config.db and all decision state are
+lost and re-seeded from `sources.yaml`** (every source `enabled=1`, `lifecycle=active`, no learned
+rejects/aliases). So today:
+- **pause / delist / lifecycle / enabled do NOT survive a restart** — a paused or delisted vendor comes
+  back live and gets re-scraped. The lifecycle code (already built + tested) is CORRECT but not durable
+  in prod until this is fixed. (This is also a pre-existing latent bug for the existing delist-disable.)
+- every mint / reject / alias decision resets — the "learning" the review flow depends on evaporates.
+
+The fix (one mechanism, serves both features):
+- Point config.db and the decision/review/backbone dirs at the persistent `/ledger` volume
+  (`BLOKPORT_CONFIG_DB=/ledger/config.db`, `BLOKPORT_STATE_ROOT=/ledger`).
+- Extend the existing snapshot lane to include them: `snapshot.save/restore` already take a path arg and
+  `start_periodic` already runs a snapshot thread the sync server owns — add config.db and the decision
+  dir to the same save/restore/periodic set (S3 keys `{env}/scraper/config/...`, `.../review/...`). No
+  new infra, no EFS. Restore-on-boot must run BEFORE `seed_from_yaml` so a restored config.db is not
+  masked by a fresh seed (seed is INSERT-OR-IGNORE, so ordering matters).
+- Owner: Scraper (snapshot + a few env vars in `infra/modules/sync_service`). This is the true first
+  step of BOTH Part I Phase 1 and the lifecycle feature's production-readiness.
+
+## 15. Add a source <-> review (the biggest producer)
+
+- A new source's FIRST scrape floods the review queue with its whole variety set. `curate.py`'s
+  auto-RESOLVE already auto-aliases confident cross-vendor duplicates; only the uncertain ones surface
+  for review, and genuinely novel varieties mint. So **alias-to-existing (Phase 2) IS the cross-vendor
+  unification** that stops adding a source from duplicating shared varieties (vendor B's "Carrara" ->
+  alias to the existing Carrara, not a second variety). Adding a source is mostly alias decisions.
+- REQUIREMENT: the review API (`GET /config/v1/review/variants`) must carry **source provenance**
+  (`sources: [...]` per pending variety), so the operator can review the new source's batch as a group
+  and closure/reconcile attributes it correctly. Confirm the pending record retains which source(s)
+  proposed each spelling; add it if missing.
+- Already aligned: the two-pass gate makes a new source's new varieties non-fatal (held, not a produce
+  failure); `source_code` uniqueness prevents SKU-prefix collision; shared stages are source-agnostic.
+
+## 16. Remove a source <-> review (the consumer)
+
+- On delist -> remove/purge, **discard the PENDING (unreviewed) new-variant items proposed ONLY by the
+  removed source** (no surviving source proposes them), so the queue does not accumulate orphans. New
+  coordination item: the remove flow (`runner.remove_source`) prunes the source's pending review rows.
+- **KEEP the name-keyed learned memory** (`rejected_varieties`, `confirmed_aliases`): it is keyed by
+  spelling, not source, and must persist so a re-add or another vendor using the same spelling is never
+  re-asked. Do not delete learning on source removal.
+- Shared minted varieties SURVIVE a removal (base variations are never deleted; remove only tombstones
+  the source's SKUs). A variety left product-less after removal is harmless (not served) but should show
+  in the reconcile scorecard as zero-product -> park/flag, not silently linger.
+
+## 17. Pause / resume <-> review (neutral, one nuance)
+
+- Pause generates NO new review items (the source is not scraped); existing pending items stay
+  reviewable; decisions are recorded. Resume + a run applies anything that was pending.
+- Nuance: an alias/mint decision on a PAUSED source's pending variety applies at the **variety level
+  immediately** (catalog consolidation is all-source regardless of pause) but the paused source's
+  **product routing defers to resume + re-scrape** (its rows are frozen). Document this so an operator
+  is not surprised the product has not re-attached while the source is paused.
+
+## 18. Closure scorecard is lifecycle-aware (Part II)
+
+The per-source reconcile scorecard must read the lifecycle label: **active** = open work to drive to
+zero; **paused** = frozen/informational (do not nag about held items on a source you intentionally
+froze); **delisted/removed** = dropped from the open-work total. Otherwise a paused source's held rows
+read as unfinished work forever.
+
+## 19. Ownership additions (extends sections 6 + 12)
+| # | Item | Owner |
+|---|------|-------|
+| 16 | Phase 0: persist config.db + decision/review state via the snapshot lane (env + snapshot.save/restore) | Scraper (snapshot + infra) |
+| 17 | Source provenance (`sources[]`) in the review API + closure attribution | Scraper |
+| 18 | Remove flow prunes the source's pending review rows (keep learned memory) | Scraper |
+| 19 | Lifecycle-aware reconcile scorecard (active/paused/delisted) | Scraper (endpoint) + Medusa (UI) |
+| 20 | Review/closure UI shows + filters by source; "paused" not flagged as open work | Medusa/other chat |
+
+## 20. Rollout order (folds into sections 7 + 13)
+1. **Phase 0 first** (section 14): durable config.db + decision state. Without it, neither the lifecycle
+   feature nor the review learning is production-durable. This unblocks everything else.
+2. Then the review flow (Part I Phase 2-4) with source provenance (section 15) wired in from the start.
+3. Remove-prunes-pending (section 16) alongside the existing remove flow.
+4. Lifecycle-aware closure scorecard (section 18) as Part II lands.

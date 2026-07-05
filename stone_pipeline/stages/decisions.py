@@ -75,6 +75,45 @@ def save_rejected(rejected: set[str], path: Path | None = None) -> None:
         [csvio.safe_cell(name)] for name in sorted(rejected)))
 
 
+_RETIRED_STATE = "retired_keys.csv"
+
+
+def _retired_path(path: Path | None = None) -> Path:
+    return Path(path or SETTINGS.paths.state_dir / _RETIRED_STATE)
+
+
+def load_retired(path: Path | None = None) -> set[str]:
+    """Variation KEYS an operator explicitly retired -- never re-mint or re-serve them. Keyed by Key
+    (not name, unlike load_rejected) because a retire targets the canonical variation Key. This is the
+    ONE exclusion source for retired varieties (tree_build reads it into exclude_ids, E10); un-retire
+    removes the key so the next produce can re-mint it (mirrors source resume)."""
+    path = _retired_path(path)
+    if not path.exists():
+        return set()
+    with path.open(encoding="utf-8-sig", newline="") as h:
+        return {r[0].strip() for r in csv.reader(h) if r and r[0].strip()}
+
+
+def save_retired(retired: set[str], path: Path | None = None) -> None:
+    path = _retired_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    csvio.atomic_write(path, lambda h: csv.writer(h).writerows(
+        [csvio.safe_cell(key)] for key in sorted(retired)))
+
+
+def add_retired(key: str, path: Path | None = None) -> None:
+    retired = load_retired(path)
+    retired.add(key)
+    save_retired(retired, path)
+
+
+def remove_retired(key: str, path: Path | None = None) -> None:
+    retired = load_retired(path)
+    if key in retired:
+        retired.discard(key)
+        save_retired(retired, path)
+
+
 def load_attribute_ids(path: Path | None = None) -> dict[tuple[str, str], tuple[str, str]]:
     """(kind, norm(value)) -> (ORIGINAL value, medusa_id), for rows where you filled in the id you
     created in Medusa. The original value (operator's casing/punctuation) is preserved so it becomes

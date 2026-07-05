@@ -234,9 +234,16 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # canonical varieties that carry it. A scrape whose cleaned name is already a surface must
     # NEVER mint a duplicate (this is the alias-aware existence check); unambiguous -> confirm the
     # spelling as an alias, ambiguous across varieties -> review.
+    # E7: a RETIRED variety is not a resolution target -- its name/aliases must NOT be in the surface, or a
+    # scrape matching its spelling would resolve onto a retired Key and the product would get a null
+    # variation_key and silently never serve. Excluding it means such a scrape mints/holds for review.
+    from stone_pipeline.stages import decisions as _decisions
+    retired_keys = _decisions.load_retired()
     existing_surface: dict[str, set[str]] = {}
     for b in active_branches():
         for nrm, v in imports[b].by_name.items():
+            if v.get("Key") in retired_keys:
+                continue
             existing_surface.setdefault(nrm, set()).add(nrm)
             for al in _alias_list(v.get("Aliases", "")):
                 existing_surface.setdefault(proj.norm(al), set()).add(nrm)

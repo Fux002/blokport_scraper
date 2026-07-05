@@ -102,6 +102,14 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
         "FROM inventory"
     ).fetchone()
     out["inventory"] = {"total": inv["total"] or 0, "delta": inv["delta"] or 0}
+    # E13: variation reconcile signal. `retiring` already surfaces in out["variation"] (a state count);
+    # `orphaned` = synced, rendered varieties with 0 products (a source removal's shared orphan, or the old
+    # side of a re-key awaiting retire). A distinct bucket, NOT a state, so it never double-counts the
+    # histogram -- the operator can drive it toward zero by retiring the dead ones.
+    orphaned = ledger.execute(
+        "SELECT COUNT(*) AS n FROM variation v WHERE v.state = 'synced' AND v.in_full = 1 "
+        "AND NOT EXISTS (SELECT 1 FROM product p WHERE p.variation_key = v.key)").fetchone()
+    out["variation_reconcile"] = {"orphaned": orphaned["n"] or 0}
     return out
 
 
@@ -258,14 +266,21 @@ def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
 
 
 def ready_removed(ledger: Ledger, limit: int | None = None) -> list[dict]:
-    """Tombstones to deliver: SKUs purged from the ledger that Medusa must delete on its side. Served
-    while 'pending'; retired on a 'done' ack, dead-lettered after repeated 'blocked' (open reservation)."""
+    """Tombstones to deliver on the ONE removed lane: products AND variations Medusa must delete. Served
+    while 'pending'; retired on a 'done' ack, dead-lettered after repeated 'blocked' (open reservation).
+    E1: PRODUCT tombstones serve before VARIATION tombstones ('product' < 'variation' lexically), so
+    Medusa deletes a variety's products before the variety entity (a variant with children can't drop)."""
     rows = ledger.execute(
-        "SELECT external_id, source, reason FROM removed WHERE state = 'pending' "
-        f"ORDER BY created_at, rowid{_sub_limit(limit)}")
-    return [{"external_id": r["external_id"],
-             "payload": {"sku": r["external_id"], "source": r["source"], "reason": r["reason"]}}
-            for r in rows]
+        "SELECT external_id, kind, source, reason FROM removed WHERE state = 'pending' "
+        f"ORDER BY kind, created_at, rowid{_sub_limit(limit)}")
+    out = []
+    for r in rows:
+        if r["kind"] == "variation":
+            payload = {"kind": "variation", "key": r["external_id"], "reason": r["reason"]}
+        else:
+            payload = {"kind": "product", "sku": r["external_id"], "source": r["source"], "reason": r["reason"]}
+        out.append({"external_id": r["external_id"], "payload": payload})
+    return out
 
 
 def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
@@ -302,7 +317,13 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
         # reservation blocks the hard-delete -> keep it, count the attempt, re-serve, and dead-letter
         # to 'dead' after _MAX_SYNC_ATTEMPTS so a permanently-reserved id stops re-serving forever.
         if status_ == "done":
-            return ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
+            row = ledger.execute("SELECT kind FROM removed WHERE external_id = ?", (external_id,)).fetchone()
+            n = ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
+            if row and row["kind"] == "variation":
+                # E3: the variety was held in 'retiring' pending Medusa's confirm; its combinations and
+                # products were already removed at retire time, so the row is now FK-safe to hard-delete.
+                ledger.execute("DELETE FROM variation WHERE key = ?", (external_id,))
+            return n
         row = ledger.execute("SELECT sync_attempts FROM removed WHERE external_id = ?",
                              (external_id,)).fetchone()
         if not row:
@@ -430,7 +451,9 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
     """Reset ONE table's sync overlay: state -> 'pending', drop medusa_id/last_synced/sync bookkeeping.
     Content columns (name, type, image, price...) are untouched. `where`/`params` scope the rows."""
     cols = {r["name"] for r in ledger.execute(f"PRAGMA table_info({table})")}
-    sets = ["state = 'pending'", "updated_at = ?"]
+    # E4: a 'retiring' row is mid-removal (its variation-tombstone is pending) -- a reset must NOT flip it
+    # back to 'pending' and re-serve it as live. Keep retiring; everything else re-serves from zero.
+    sets = ["state = CASE WHEN state = 'retiring' THEN 'retiring' ELSE 'pending' END", "updated_at = ?"]
     sets += [f"{c} = NULL" for c in ("medusa_id", "last_synced", "sync_error") if c in cols]
     if "sync_attempts" in cols:
         sets.append("sync_attempts = 0")
@@ -482,15 +505,19 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     return out
 
 
-def record_tombstones(ledger: Ledger, pairs: list[tuple], reason: str = "discontinued") -> int:
-    """Record a tombstone per removed SKU (the `removed` lane), so Medusa pulls the deletion on
-    GET /sync/removed, deletes its own product + scraper_sync_ref, and acks. `pairs` is
-    [(external_id, source), ...]. Resets an existing tombstone to 'pending' so a re-purge re-serves."""
+def record_tombstones(ledger: Ledger, pairs: list[tuple], reason: str = "discontinued",
+                      kind: str = "product") -> int:
+    """Record a tombstone per removed entity on the ONE `removed` lane, so Medusa pulls the deletion on
+    GET /sync/removed, deletes its own entity, and acks. `kind` says what `external_id` addresses: a
+    product SKU (kind='product', default) or a variation Key (kind='variation'). `pairs` is
+    [(external_id, source), ...] (source is null for variation tombstones). Resets an existing tombstone
+    to 'pending' so a re-purge/re-retire re-serves."""
     now = now_iso()
-    for sku, source in pairs:
-        ledger.upsert("removed", {"external_id": sku, "source": source, "reason": reason,
-                                  "state": "pending", "sync_attempts": 0, "sync_error": None,
-                                  "created_at": now, "updated_at": now}, pk=("external_id",))
+    for external_id, source in pairs:
+        ledger.upsert("removed", {"external_id": external_id, "kind": kind, "source": source,
+                                  "reason": reason, "state": "pending", "sync_attempts": 0,
+                                  "sync_error": None, "created_at": now, "updated_at": now},
+                      pk=("external_id",))
     return len(pairs)
 
 
@@ -561,6 +588,58 @@ def live_products(ledger: Ledger, source_codes: list[str] | None = None) -> int:
         f"SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.qty > 0{scope}",
         params).fetchone()
     return int(row["n"]) if row else 0
+
+
+def variation_live_products(ledger: Ledger, key: str) -> int:
+    """How many LIVE (qty > 0) products a variety still has. retire_variation guards on this (E11): a
+    variety with live products must have them delisted/moved first, or `force` cascades them."""
+    row = ledger.execute("SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku "
+                         "WHERE p.variation_key = ? AND i.qty > 0", (key,)).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def retire_variation(ledger: Ledger, key: str, force: bool = False,
+                     reason: str = "variation_removed") -> dict:
+    """Cascade a variety's explicit removal (also the old side of a re-key). Its products (which belong to
+    it) are tombstoned + hard-deleted; its combinations (the dormant lane) are deleted so the variety row
+    is FK-safe to drop; then EITHER a variation tombstone is recorded and the row held 'retiring' until
+    Medusa acks the delete (only if it was ever synced -- E2), OR the row is dropped locally now (a
+    never-synced variety: Medusa never received it, so there is nothing to tell it to delete). The caller
+    (lifecycle) has already guarded existence + the live-product precondition. Serve-in-flight guarded."""
+    _lock_and_check_in_flight(ledger)
+    var = ledger.get("variation", "key", key)
+    prods = ledger.execute("SELECT sku, source FROM product WHERE variation_key = ?", (key,)).fetchall()
+    if prods:                                  # E1: product tombstones (serve before the variation one)
+        record_tombstones(ledger, [(p["sku"], p["source"]) for p in prods],
+                          reason="vendor_removed", kind="product")
+        skus = [p["sku"] for p in prods]
+        q = ",".join("?" * len(skus))
+        ledger.execute(f"DELETE FROM inventory WHERE sku IN ({q})", tuple(skus))   # child first (FK)
+        ledger.execute(f"DELETE FROM product WHERE sku IN ({q})", tuple(skus))
+    ledger.execute("DELETE FROM combination WHERE variation_key = ?", (key,))      # dormant lane, FK child
+    synced = bool(var and var["medusa_id"])
+    if synced:                                 # E2: only tell Medusa to delete what it actually received
+        record_tombstones(ledger, [(key, None)], reason=reason, kind="variation")
+        ledger.set_state("variation", "key", key, "retiring")   # hold until the delete is acked (E3)
+    else:
+        ledger.execute("DELETE FROM variation WHERE key = ?", (key,))              # never synced -> drop now
+    log.warning("variety RETIRED", extra={"extra_fields": {
+        "key": key, "products_removed": len(prods), "tombstoned_variation": synced, "force": force}})
+    return {"retired": key, "products_removed": len(prods), "tombstoned_variation": synced}
+
+
+def un_retire_variation(ledger: Ledger, key: str) -> dict:
+    """Reverse a retire: flip a 'retiring' variety back to serving and clear its pending variation
+    tombstone, so a re-mint / the operator's undo is not deleted by a stale tombstone (mirrors source
+    resume). A never-synced retire deleted the row already; the exclusion-memory clear (caller) lets the
+    next produce re-mint it fresh."""
+    _lock_and_check_in_flight(ledger)
+    var = ledger.get("variation", "key", key)
+    if var is not None and var["state"] == "retiring":
+        ledger.set_state("variation", "key", key, "dirty" if var["medusa_id"] else "pending")
+    cleared = ledger.execute("DELETE FROM removed WHERE kind = 'variation' AND external_id = ?",
+                             (key,)).rowcount
+    return {"un_retired": key, "tombstone_cleared": cleared}
 
 
 def main(argv: list[str] | None = None) -> int:

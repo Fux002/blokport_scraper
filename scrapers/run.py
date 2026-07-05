@@ -65,6 +65,24 @@ def run_one(source: str):
     return REGISTRY[source]().run()
 
 
+def _enabled_order() -> list[str]:
+    """Registry order for `all`, minus any source the config store has disabled (paused/delisted), so a
+    paused vendor is not pointlessly live-scraped. Mirrors stone_pipeline.run.run_all's filter. Falls back
+    to the full registry when there is no config store or it can't be read (standalone scraper use)."""
+    order = list(REGISTRY)
+    try:
+        from stone_pipeline.config import store
+        enabled = store.enabled_names()          # None == no store yet -> keep every source
+    except Exception:
+        return order
+    if enabled is None:
+        return order
+    skipped = [s for s in order if s not in enabled]
+    if skipped:
+        print(f"skipping disabled source(s): {skipped}")
+    return [s for s in order if s in enabled]
+
+
 def run_many(order: list[str]) -> dict[str, str]:
     results: dict[str, str] = {}
     for source in order:
@@ -83,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__)
         print("registered:", sorted(REGISTRY))
         return 0
-    order = list(REGISTRY) if argv == ["all"] else argv
+    order = _enabled_order() if argv == ["all"] else argv
     results = run_many(order)
     print(f"\nscraped {len(results)} source(s):")
     for src, path in results.items():

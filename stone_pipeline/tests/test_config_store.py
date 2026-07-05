@@ -82,7 +82,7 @@ def test_seed_pipeline_read_and_enable(tmp_path, monkeypatch):
 
     # all enabled by default; disabling one removes it from the run set
     assert store.enabled_names() == {"polonine", "varsha"}
-    store.set_enabled("varsha", False)
+    store.set_state("varsha", enabled=False)
     assert store.enabled_names() == {"polonine"}
 
     # re-seeding never clobbers a row the admin edited (insert-or-ignore)
@@ -94,6 +94,19 @@ def test_seed_pipeline_read_and_enable(tmp_path, monkeypatch):
     cfg.vendor = "Renamed Company"
     store.upsert_source(cfg)
     assert load_source("polonine").vendor == "Renamed Company"
+
+
+def test_lifecycle_defaults_to_active_and_round_trips(tmp_path, monkeypatch):
+    # `lifecycle` is added by _migrate (NOT in _SCHEMA), so a freshly-seeded store already has the
+    # column; legacy/never-paused rows (NULL) read as 'active'. set_lifecycle round-trips per source.
+    yaml_path = _seed_yaml(tmp_path)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+    assert {r["source"]: r["lifecycle"] for r in store.list_rows()} == {"polonine": "active", "varsha": "active"}
+    store.set_state("varsha", lifecycle="paused")
+    assert {r["source"]: r["lifecycle"] for r in store.list_rows()} == {"polonine": "active", "varsha": "paused"}
+    # a second connect re-runs _migrate (idempotent): the value persists, no error, no duplicate column
+    assert store.get_row("varsha")["lifecycle"] == "paused"
 
 
 def test_enabled_names_is_none_without_a_store(tmp_path, monkeypatch):
@@ -136,7 +149,7 @@ def test_run_trigger_matches_the_admin_contract(tmp_path, monkeypatch):
     yaml_path = _seed_yaml(tmp_path)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=yaml_path)
-    store.set_enabled("varsha", False)                        # only polonine enabled
+    store.set_state("varsha", enabled=False)                        # only polonine enabled
     runner._runs.clear(); runner._current_id = None
     try:
         rec, code = runner.start_run(launch=lambda r: None)   # launcher leaves it 'queued'

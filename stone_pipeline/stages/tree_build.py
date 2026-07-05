@@ -357,6 +357,10 @@ def run() -> Path:
     if delete_file.exists():
         with delete_file.open(encoding="utf-8-sig") as h:   # close the handle (was leaked in a comprehension)
             exclude_ids = {(r.get("Id") or "").strip() for r in csv.DictReader(h) if (r.get("Id") or "").strip()}
+    # E10: retired varieties (the operator's explicit removal / un-retire memory) also get no combinations,
+    # so a retired Key is never re-priced/re-served -- one exclusion source, never a runtime edit of the base.
+    from stone_pipeline.stages import decisions
+    exclude_ids |= decisions.load_retired()
     combinations, stats, uncovered = build_combinations(
         export, SETTINGS.paths.attributes_csv, _backbone_paths(),
         products if products.exists() else None, assigned, exclude_ids)
