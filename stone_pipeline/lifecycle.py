@@ -1,0 +1,306 @@
+"""The one entity-lifecycle module: every add/remove operation for BOTH sources and variations, over a
+single guarded operations layer. This replaces the per-verb duplication that used to live in
+config/runner.py (the same lock + run-guard + resolve + translate block copied across delist/purge/reset/
+remove). One `_exclusive` guard and one `_resolve` are the shared plumbing; each verb is then a few lines.
+
+Two mutual-exclusion layers, kept distinct:
+  - process level (`_exclusive`): a destructive lifecycle op, a produce run, and another lifecycle op are
+    mutually exclusive in this control-plane process. A run is tracked by config.runner; this module owns
+    the destructive-op flag. Cross-checks are lazy imports (runner <-> lifecycle) to avoid an import cycle.
+  - ledger level (`sync._lock_and_check_in_flight`, raised as ServeInFlight): a pull holds a lease -> the
+    op refuses atomically inside the DB transaction. Mapped to 409 here.
+
+Source verbs: pause / resume (config only), delist / purge / reset / remove_source (ledger), clean (fs).
+Variation verbs: retire_variation / un_retire (added in the variation-retire phase).
+No em dashes (design principle 2).
+"""
+
+from __future__ import annotations
+
+import threading
+from contextlib import contextmanager
+
+from stone_pipeline.core import logfmt
+
+log = logfmt.get_logger("lifecycle")
+
+_lock = threading.Lock()
+_active: str | None = None      # the in-flight DESTRUCTIVE lifecycle op (delist/purge/reset/remove/clean),
+                                # or None. Runs are tracked separately by config.runner (status-based); the
+                                # two never nest their locks: start_run checks active() BEFORE taking its
+                                # lock, and an op checks runner.run_in_progress() AFTER claiming here.
+
+
+class _Busy(Exception):
+    """A precondition that maps to HTTP 409 (something else holds the slot, or an entity is still live)."""
+
+
+class _NotFound(Exception):
+    """A missing target that maps to HTTP 404 (an unknown variation key)."""
+
+
+# -- shared exclusion ----------------------------------------------------------
+
+def _try_claim(name: str) -> str | None:
+    global _active
+    with _lock:
+        if _active:
+            return _active
+        _active = name
+        return None
+
+
+def _release(name: str) -> None:
+    global _active
+    with _lock:
+        if _active == name:
+            _active = None
+
+
+def active() -> str | None:
+    """The in-flight destructive lifecycle op, or None. config.runner.start_run checks this to refuse a
+    run while an op is mid-flight (checked before it takes its own lock, so the locks never nest)."""
+    with _lock:
+        return _active
+
+
+_snapshot_on_mutation = False   # set True ONLY by the config server (serve); off in tests, laptop, and the
+                                # produce subprocess, so a lifecycle op there never attempts a real S3 call.
+
+
+def enable_config_snapshots() -> None:
+    """The config server calls this at startup so a lifecycle mutation snapshots config.db immediately (on
+    top of the periodic + atexit snapshot). Everywhere else it stays off -- no S3 on a plain store write."""
+    global _snapshot_on_mutation
+    _snapshot_on_mutation = True
+
+
+def _snapshot_config() -> None:
+    """Best-effort: snapshot config.db to S3 right after a lifecycle mutation, so a pause/delist/remove is
+    durable even if the task crashes before the periodic snapshot. Only inside the config server (guarded),
+    and best-effort there (a snapshot failure never fails the op)."""
+    if not _snapshot_on_mutation:
+        return
+    try:
+        from stone_pipeline.config import store
+        from stone_pipeline.ledger import snapshot
+        snapshot.save_config(store.config_db_path())
+    except Exception:
+        log.debug("config snapshot after a lifecycle op skipped", exc_info=True)
+
+
+@contextmanager
+def _exclusive(name: str):
+    """Hold the destructive-op slot for the block. Raises _Busy if another op holds it, or (after
+    claiming) if a produce run is in progress -- so a run and an op are mutually exclusive without the
+    two locks ever nesting (claim, then check the run, then release on the way out)."""
+    busy = _try_claim(name)
+    if busy:
+        raise _Busy(f"a {busy} is in progress")
+    try:
+        from stone_pipeline.config import runner
+        if runner.run_in_progress():
+            raise _Busy("a run is in progress; refusing to run a lifecycle op mid-run")
+        yield
+    finally:
+        _release(name)
+
+
+def _resolve(sources, *, require_non_empty: bool = True):
+    """Validate + translate a sources request ONCE (replaces the copy in every verb). Returns
+    (names, codes, None) on success, or (None, None, (error, status)) to return directly.
+      names  = the known source names (registry-validated); an unknown name is a 400, never dropped.
+      codes  = their source_codes (SKU prefixes) for ledger scoping.
+      None sources -> global scope (names=[], codes=None) when require_non_empty is False."""
+    from stone_pipeline.config import runner
+    if not sources:
+        if require_non_empty:
+            return None, None, ({"error": "requires an explicit sources list"}, 400)
+        return [], None, None
+    known = runner._resolve_sources(sources)
+    unknown = [s for s in sources if s not in set(known)]
+    if unknown:
+        return None, None, ({"error": f"unknown source(s): {unknown}"}, 400)
+    return known, runner._source_codes(known), None
+
+
+def _ledger_op(name: str, work):
+    """Run `work(ledger, sync)` under the exclusive slot + the ledger lease guard, mapping the standard
+    failures to http codes. `work` returns the success dict (paired with 200). _Busy -> 409, an in-flight
+    pull (ServeInFlight) -> 409, anything else -> 500."""
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    try:
+        with _exclusive(name):
+            with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
+                return work(ledger, sync), 200
+    except _NotFound as exc:
+        return {"error": str(exc)}, 404
+    except _Busy as exc:
+        return {"error": str(exc)}, 409
+    except sync.ServeInFlight as exc:
+        return {"error": str(exc)}, 409
+    except Exception as exc:
+        log.exception("%s failed", name)
+        return {"error": str(exc)}, 500
+
+
+# -- source verbs: freeze/unfreeze (config only, no ledger, no exclusive slot) --
+
+def pause(sources) -> tuple[dict, int]:
+    """Freeze a source: stop scraping, products stay live and buyable at their last values. Config-only
+    (lifecycle=paused, enabled=0); run_all skips it next run. Reversible via resume."""
+    from stone_pipeline.config import store
+    names, _codes, err = _resolve(sources)
+    if err:
+        return err
+    for name in names:
+        store.set_state(name, lifecycle="paused", enabled=False)
+    log.info("source(s) paused (frozen, still live)", extra={"extra_fields": {"sources": names}})
+    _snapshot_config()
+    return {"paused": names}, 200
+
+
+def resume(sources) -> tuple[dict, int]:
+    """Re-enable a paused OR delisted source (lifecycle=active, enabled=1). A resumed PAUSED source is
+    already live; a resumed DELISTED source needs a Run to restock (its qty was zeroed) -- flagged as
+    restock_required so the UI can prompt one (fix: paused and delisted are no longer treated the same)."""
+    from stone_pipeline.config import store
+    names, _codes, err = _resolve(sources)
+    if err:
+        return err
+    restock = [n for n in names if (store.get_row(n) or {}).get("lifecycle") == "delisted"]
+    for name in names:
+        store.set_state(name, lifecycle="active", enabled=True)
+    log.info("source(s) resumed", extra={"extra_fields": {"sources": names, "restock_required": restock}})
+    _snapshot_config()
+    return {"resumed": names, "restock_required": restock}, 200
+
+
+# -- source verbs: offline / purge / reset / remove (ledger, exclusive slot) ---
+
+def delist(sources) -> tuple[dict, int]:
+    """Stage 1 vendor removal (Take offline): set the sources' products to qty 0 + reason=delisted, and
+    lifecycle=delisted + disable so a scrape never silently re-stocks an offline vendor. Reversible."""
+    from stone_pipeline.config import store
+    names, codes, err = _resolve(sources)
+    if err:
+        return err
+    result, code = _ledger_op("delist", lambda lg, sync: sync.delist_source(lg, source_codes=codes))
+    if code != 200:
+        return result, code
+    for name in names:
+        store.set_state(name, lifecycle="delisted", enabled=False)
+    log.warning("source(s) taken offline (delist)", extra={"extra_fields": {
+        "sources": names, "delisted": result.get("delisted")}})
+    _snapshot_config()
+    return {**result, "disabled": names}, 200
+
+
+def purge(sources=None) -> tuple[dict, int]:
+    """Dead-stock purge: hard-delete the qty-0 products and record a product tombstone per SKU so Medusa
+    deletes the same set. `sources` scopes; None = all. Returns {product, inventory, external_ids}."""
+    _names, codes, err = _resolve(sources, require_non_empty=False)
+    if err:
+        return err
+    return _ledger_op("purge", lambda lg, sync: sync.purge_discontinued(lg, source_codes=codes))
+
+
+def reset(sources=None, hard=False) -> tuple[dict, int]:
+    """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
+    re-scrape; hard also drops the scraped products. Variation/backbone rows are never deleted; a
+    'retiring' variety is preserved (not un-retired). `sources` scopes; None = global."""
+    _names, codes, err = _resolve(sources, require_non_empty=False)
+    if err:
+        return err
+    result, code = _ledger_op("reset", lambda lg, sync: sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard)))
+    if code != 200:
+        return result, code
+    return {"mode": "hard" if hard else "soft", "reset": result}, 200
+
+
+def remove_source(name: str) -> tuple[dict, int]:
+    """Stage 2 vendor removal (Remove permanently): guarded 409 while the source still has live (qty>0)
+    products (take it offline first), then purge its qty-0 products (tombstoned) and delete its config
+    row. Returns {removed_source, config_removed, purged, external_ids}."""
+    from stone_pipeline.config import store
+    names, codes, err = _resolve([name])
+    if err:
+        return err
+
+    def work(lg, sync):
+        live = sync.live_products(lg, source_codes=codes)
+        if live:
+            raise _Busy(f"{name!r} still has {live} live product(s); take it offline first")
+        return sync.purge_discontinued(lg, source_codes=codes, reason="vendor_removed")
+
+    result, code = _ledger_op("remove_source", work)
+    if code != 200:
+        return result, code
+    config_removed = store.delete_source(name)
+    log.warning("source REMOVED (purge + delete config)", extra={"extra_fields": {
+        "source": name, "purged": result["product"], "config_removed": config_removed}})
+    _snapshot_config()
+    return {"removed_source": name, "config_removed": config_removed,
+            "purged": result["product"], "external_ids": result["external_ids"]}, 200
+
+
+# -- variation verbs: retire / un-retire (explicit operator removal of a variety) ---
+
+def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
+    """Explicitly remove a variety (also the old side of a re-key). 404 unknown key; 409 if it still has
+    LIVE products from active sources (delist/move them first) unless `force` cascades them. Cascades its
+    products (tombstoned) + combinations, then tombstones the variety for Medusa iff it was ever synced,
+    and records the Key in the durable exclusion memory so a produce never re-mints it. Reversible via
+    un_retire."""
+    def work(lg, sync):
+        if lg.get("variation", "key", key) is None:
+            raise _NotFound(f"unknown variation {key!r}")
+        live = sync.variation_live_products(lg, key)
+        if live and not force:
+            raise _Busy(f"variety {key!r} has {live} live product(s); delist or move them first (or force)")
+        return sync.retire_variation(lg, key, force=force)
+
+    result, code = _ledger_op("retire_variation", work)
+    if code != 200:
+        return result, code
+    from stone_pipeline.stages import decisions
+    decisions.add_retired(key)          # exclusion memory: never re-mint a retired variety (E8/E10)
+    return result, 200
+
+
+def un_retire(key: str) -> tuple[dict, int]:
+    """Reverse a retire (mirrors source resume): clear the exclusion memory so the next produce can
+    re-mint the variety, flip a still-'retiring' row back to serving, and clear its pending tombstone so
+    Medusa does not delete the re-created variety (E5)."""
+    result, code = _ledger_op("un_retire", lambda lg, sync: sync.un_retire_variation(lg, key))
+    if code != 200:
+        return result, code
+    from stone_pipeline.stages import decisions
+    decisions.remove_retired(key)
+    return result, 200
+
+
+def clean(sources=None) -> tuple[dict, int]:
+    """Housekeeping: `sources` given -> DELETE those sources' raw scraped data (data/<source>/*) for a
+    fresh re-scrape; none -> prune superseded scrapes/runs/orphan images. Base config + ledger untouched.
+    Refuses (409) a paused/delisted source (its frozen scrape snapshot is what the catalog rebuilds from
+    -- resume first). Mutually exclusive with a run/op, but does no ledger work."""
+    from stone_pipeline import clean as clean_mod
+    from stone_pipeline.config import store
+    try:
+        with _exclusive("clean"):
+            if not sources:
+                return {"pruned": clean_mod.run(dry_run=False)}, 200
+            names, _codes, err = _resolve(sources)
+            if err:
+                return err
+            frozen = [n for n in names if (store.get_row(n) or {}).get("lifecycle") in ("paused", "delisted")]
+            if frozen:
+                return {"error": f"refusing to clean paused/delisted source(s): {frozen}; resume first"}, 409
+            return {"deleted_scrapes": clean_mod.delete_source_data(names)}, 200
+    except _Busy as exc:
+        return {"error": str(exc)}, 409
+    except Exception as exc:
+        log.exception("clean failed")
+        return {"error": str(exc)}, 500

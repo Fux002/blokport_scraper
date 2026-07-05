@@ -75,6 +75,25 @@ def save_rejected(rejected: set[str], path: Path | None = None) -> None:
         [csvio.safe_cell(name)] for name in sorted(rejected)))
 
 
+def load_retired() -> set[str]:
+    """The retired variation KEYS -- the ONE exclusion source, backed by config.db (durable: snapshotted +
+    restored, unlike a CSV under ephemeral /app, so a retired variety never re-mints after a restart).
+    Every produce stage that could re-introduce a variety (the matcher's `load_variants`, curate's surface,
+    tree_build's exclude_ids, emit_catalog's upload) reads this; un-retire removes the key."""
+    from stone_pipeline.config import store
+    return store.load_retired()
+
+
+def add_retired(key: str) -> None:
+    from stone_pipeline.config import store
+    store.add_retired(key)
+
+
+def remove_retired(key: str) -> None:
+    from stone_pipeline.config import store
+    store.remove_retired(key)
+
+
 def load_attribute_ids(path: Path | None = None) -> dict[tuple[str, str], tuple[str, str]]:
     """(kind, norm(value)) -> (ORIGINAL value, medusa_id), for rows where you filled in the id you
     created in Medusa. The original value (operator's casing/punctuation) is preserved so it becomes

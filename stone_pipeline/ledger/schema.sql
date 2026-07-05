@@ -259,19 +259,25 @@ CREATE TABLE IF NOT EXISTS gap (
 CREATE INDEX IF NOT EXISTS idx_gap_state ON gap (state);
 
 -- ---------------------------------------------------------------------------
--- removed: the tombstone lane. When purge hard-deletes a product from the ledger
--- (dead-stock, or a vendor removal), it records the deleted SKU here so Medusa can
--- pull the deletion on GET /sync/removed, delete its own product + scraper_sync_ref,
--- and ack. Medusa acks 'done' (the delete happened -> the tombstone row is removed)
--- or 'blocked' (an open reservation blocks the hard-delete -> keep it, re-serve, and
--- dead-letter to 'dead' after _MAX_SYNC_ATTEMPTS blocks). Served while state='pending'.
--- No FK to product (the product row is gone); a re-created SKU clears its tombstone
--- in populate so a live product and a pending tombstone never coexist.
+-- removed: the ONE tombstone lane for BOTH entity kinds. When a product is
+-- hard-deleted (dead-stock or a vendor removal) OR a variation is retired (an explicit
+-- operator removal / the old side of a re-key, design section 5C), a row is recorded
+-- here so Medusa can pull the deletion on GET /sync/removed, delete its own entity, and
+-- ack. `kind` says what `external_id` addresses: a product SKU or a variation Key.
+-- Medusa acks 'done' (the delete happened -> the tombstone row is removed) or 'blocked'
+-- (an open reservation blocks the hard-delete -> keep it, re-serve, and dead-letter to
+-- 'dead' after _MAX_SYNC_ATTEMPTS blocks). Served while state='pending', with PRODUCT
+-- tombstones ordered before VARIATION tombstones so Medusa deletes children before the
+-- parent (a variant with products cannot be deleted). No FK (the row is gone); a
+-- re-created SKU or re-minted Key clears its tombstone in populate so a live entity and
+-- a pending tombstone never coexist.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS removed (
-    external_id   TEXT PRIMARY KEY,                     -- the deleted product SKU (Medusa external_id)
-    source        TEXT,                                 -- source_code, for scope/audit
-    reason        TEXT,                                 -- 'vendor_removed' | 'discontinued'
+    external_id   TEXT PRIMARY KEY,                     -- the deleted product SKU or variation Key (Medusa external_id)
+    kind          TEXT NOT NULL DEFAULT 'product'
+                  CHECK (kind IN ('product','variation')),  -- what external_id addresses
+    source        TEXT,                                 -- source_code, for scope/audit (product tombstones)
+    reason        TEXT,                                 -- 'vendor_removed' | 'discontinued' | 'variation_removed' | 'rekey'
     state         TEXT NOT NULL DEFAULT 'pending'
                   CHECK (state IN ('pending','dead')),  -- pending serves; 'done' deletes the row; dead = blocked cap
     sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive 'blocked' acks (dead-letter counter)
@@ -279,6 +285,8 @@ CREATE TABLE IF NOT EXISTS removed (
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
 );
+-- serve scan by state; ready_removed adds the product-before-variation order in the query (E1) so
+-- this index does not reference `kind` (it is added by migrate AFTER schema.sql runs on old ledgers).
 CREATE INDEX IF NOT EXISTS idx_removed_serve ON removed (state, created_at, external_id);
 
 -- ---------------------------------------------------------------------------

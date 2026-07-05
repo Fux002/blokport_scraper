@@ -29,12 +29,25 @@ _SNAPSHOT_INTERVAL = int(os.environ.get("BLOKPORT_LEDGER_SNAPSHOT_SECONDS", "300
 
 def _s3():
     import boto3
-    return boto3.client("s3", region_name=S3_REGION)
+    from botocore.config import Config
+    # explicit timeouts + capped retries so a best-effort snapshot FAILS FAST instead of stalling. This
+    # matters on the SIGTERM/atexit stop path: a hung S3 call must not burn the whole ECS stopTimeout and
+    # get SIGKILLed with no snapshot at all. Without a Config, boto3 can also fall through to a slow IMDS
+    # credential probe off-ECS.
+    cfg = Config(connect_timeout=3, read_timeout=10, retries={"max_attempts": 2})
+    return boto3.client("s3", region_name=S3_REGION, config=cfg)
 
 
 def snapshot_key(env: str = ENV_NAME) -> str:
     """S3 key for the ledger snapshot, under the env's staging tree (alongside from_medusa/ and to_upload/)."""
     return f"{env}/scraper/ledger/{env}.db"
+
+
+def config_key(env: str = ENV_NAME) -> str:
+    """S3 key for the config-store snapshot. config.db holds the source lifecycle (pause/delist/enabled),
+    which is ephemeral on the task's /app disk -- snapshot it the same way as the ledger so a redeploy
+    does not silently re-seed every source back to active."""
+    return f"{env}/scraper/config/config.db"
 
 
 def _consistent_copy(src: Path, dest: Path) -> None:
@@ -49,9 +62,11 @@ def _consistent_copy(src: Path, dest: Path) -> None:
         src_conn.close()
 
 
-def save(ledger_path: str | Path, env: str = ENV_NAME) -> bool:
-    """Snapshot the ledger to S3. Best-effort: logs and returns False on any error, never raises into
-    the caller (a snapshot failure must not take down the server or a run)."""
+def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -> bool:
+    """Snapshot a SQLite db to S3 (the ledger by default; `key` targets another, e.g. config.db).
+    Best-effort: logs and returns False on any error, never raises into the caller (a snapshot failure
+    must not take down the server or a run)."""
+    key = key or snapshot_key(env)
     ledger_path = Path(ledger_path)
     if not ledger_path.exists():
         return False
@@ -60,9 +75,9 @@ def save(ledger_path: str | Path, env: str = ENV_NAME) -> bool:
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         _consistent_copy(ledger_path, tmp_path)
-        _s3().upload_file(str(tmp_path), S3_BUCKET, snapshot_key(env))
-        log.info("ledger snapshot uploaded", extra={"extra_fields": {
-            "key": snapshot_key(env), "bytes": tmp_path.stat().st_size}})
+        _s3().upload_file(str(tmp_path), S3_BUCKET, key)
+        log.info("db snapshot uploaded", extra={"extra_fields": {
+            "key": key, "bytes": tmp_path.stat().st_size}})
         return True
     except Exception:
         log.exception("ledger snapshot failed (non-fatal)")
@@ -72,14 +87,15 @@ def save(ledger_path: str | Path, env: str = ENV_NAME) -> bool:
             tmp_path.unlink(missing_ok=True)
 
 
-def restore(ledger_path: str | Path, env: str = ENV_NAME) -> bool:
-    """Restore the ledger from the latest S3 snapshot into `ledger_path`, IF the local file is absent
-    and a snapshot exists. Atomic (download to a temp then rename). Returns True if a restore happened;
-    False (leaving the caller to bootstrap fresh) when the file already exists or there is no snapshot."""
+def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -> bool:
+    """Restore a SQLite db from the latest S3 snapshot into `ledger_path` (the ledger by default; `key`
+    targets another, e.g. config.db), IF the local file is absent and a snapshot exists. Atomic (download
+    to a temp then rename). Returns True if a restore happened; False (leaving the caller to bootstrap
+    fresh) when the file already exists or there is no snapshot."""
     ledger_path = Path(ledger_path)
     if ledger_path.exists():
-        return False                       # a local ledger already wins -- never clobber it
-    key = snapshot_key(env)
+        return False                       # a local db already wins -- never clobber it
+    key = key or snapshot_key(env)
     try:
         _s3().head_object(Bucket=S3_BUCKET, Key=key)   # raises if there is no snapshot yet
     except Exception:
@@ -99,20 +115,32 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME) -> bool:
         return False
 
 
+def save_config(config_path: str | Path, env: str = ENV_NAME) -> bool:
+    """Snapshot the config store (source lifecycle) to S3. Best-effort, same as save()."""
+    return save(config_path, env, key=config_key(env))
+
+
+def restore_config(config_path: str | Path, env: str = ENV_NAME) -> bool:
+    """Restore config.db from its S3 snapshot if the local file is absent. Run BEFORE seed_from_yaml so a
+    restored config (with pause/delist state) is not masked by a fresh yaml seed."""
+    return restore(config_path, env, key=config_key(env))
+
+
 def start_periodic(ledger_path: str | Path, env: str = ENV_NAME,
-                   interval: int | None = None) -> threading.Event:
-    """Start a daemon thread that snapshots the ledger every `interval` seconds until the returned Event
-    is set. ONE server (the sync server) owns this; the shared local volume means it captures both
-    containers' writes (serve leases, acks, and the config server's produce write-through)."""
+                   interval: int | None = None, key: str | None = None) -> threading.Event:
+    """Start a daemon thread that snapshots a db (the ledger by default; `key` targets another, e.g.
+    config.db) every `interval` seconds until the returned Event is set. The shared local volume means a
+    ledger snapshot captures both containers' writes (serve leases, acks, and produce write-through)."""
     stop = threading.Event()
     every = interval or _SNAPSHOT_INTERVAL
+    label = "config" if key == config_key(env) else "ledger"
 
     def _loop():
         while not stop.wait(every):
-            save(ledger_path, env)
+            save(ledger_path, env, key=key)
 
-    threading.Thread(target=_loop, name="ledger-snapshot", daemon=True).start()
-    log.info("ledger periodic snapshot started", extra={"extra_fields": {"interval_s": every}})
+    threading.Thread(target=_loop, name=f"{label}-snapshot", daemon=True).start()
+    log.info(f"{label} periodic snapshot started", extra={"extra_fields": {"interval_s": every}})
     return stop
 
 

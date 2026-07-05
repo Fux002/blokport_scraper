@@ -15,9 +15,11 @@ em dashes (design principle 2).
 
 from __future__ import annotations
 
+import atexit
 import hmac
 import json
 import os
+import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -52,43 +54,69 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         # clean-start the ledger sync state (the coordinated ①②③ reset, our ① half). Body (optional):
         #   {"hard": true, "sources": ["zucchi", ...]}   hard also drops scraped products; sources scopes.
         # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted.
-        from stone_pipeline.config import runner
+        from stone_pipeline import lifecycle
         if method == "POST":
             srcs = body.get("sources") if isinstance(body, dict) else None
             hard = bool(body.get("hard")) if isinstance(body, dict) else False
-            result, code = runner.reset(srcs, hard)
+            result, code = lifecycle.reset(srcs, hard)
             return code, result
         return 405, {"error": "POST /config/v1/reset to reset the ledger"}
     if segments and segments[0] == "purge":
         # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
         # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
-        from stone_pipeline.config import runner
+        from stone_pipeline import lifecycle
         if method == "POST":
             srcs = body.get("sources") if isinstance(body, dict) else None
-            result, code = runner.purge(srcs)
+            result, code = lifecycle.purge(srcs)
             return code, result
         return 405, {"error": "POST /config/v1/purge to hard-delete qty-0 products"}
     if segments and segments[0] == "clean":
         # housekeeping for the admin: POST {} prunes superseded scrapes/runs; POST {"sources":[...]}
         # DELETES those sources' raw scraped data (fresh re-scrape). Base config + ledger untouched.
-        from stone_pipeline.config import runner
+        from stone_pipeline import lifecycle
         if method == "POST":
             srcs = body.get("sources") if isinstance(body, dict) else None
-            result, code = runner.clean(srcs)
+            result, code = lifecycle.clean(srcs)
             return code, result
         return 405, {"error": "POST /config/v1/clean to prune (or delete a source's scraped data)"}
     if segments and segments[0] == "delist":
         # stage 1 of a vendor removal ('Take offline'): {"sources": ["zucchi", ...]} sets those sources'
         # products to qty 0 (Medusa pulls them out of sale) AND disables them so a scrape never re-stocks
         # an offline vendor. Reversible: re-enable + re-scrape. Guarded (409 if a run/pull is active).
-        from stone_pipeline.config import runner
+        from stone_pipeline import lifecycle
         if method == "POST":
             srcs = body.get("sources") if isinstance(body, dict) else None
-            result, code = runner.delist(srcs)
+            result, code = lifecycle.delist(srcs)
             return code, result
         return 405, {"error": "POST /config/v1/delist to take sources offline (qty 0 + disable)"}
+    if segments and segments[0] in ("pause", "resume"):
+        # freeze / unfreeze a source WITHOUT touching its stock: {"sources": ["zucchi", ...]}. Pause stops
+        # scraping (lifecycle=paused, disabled) but leaves products live & buyable at their last values;
+        # resume re-enables (lifecycle=active) so the next run scrapes again. Config-only, no ledger work.
+        from stone_pipeline import lifecycle
+        if method == "POST":
+            srcs = body.get("sources") if isinstance(body, dict) else None
+            verb = lifecycle.pause if segments[0] == "pause" else lifecycle.resume
+            result, code = verb(srcs)
+            return code, result
+        return 405, {"error": f"POST /config/v1/{segments[0]} with a sources list"}
+    if segments and segments[0] == "variations":
+        # variation lifecycle (the variety half): explicit removal + undo.
+        #   POST /config/v1/variations/<key>/retire     {"force": true?}   remove a variety (E11 re-key old side)
+        #   POST /config/v1/variations/<key>/un_retire                     reverse it (mirrors source resume)
+        from stone_pipeline import lifecycle
+        if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "un_retire"):
+            key = segments[1]
+            if segments[2] == "retire":
+                force = bool(body.get("force")) if isinstance(body, dict) else False
+                result, code = lifecycle.retire_variation(key, force=force)
+            else:
+                result, code = lifecycle.un_retire(key)
+            return code, result
+        return 404, {"error": "expected POST /config/v1/variations/<key>/{retire,un_retire}"}
     if not segments or segments[0] != "sources":
-        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, /delist or /clean"}
+        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, "
+                     "/delist, /pause, /resume, /clean or /variations/<key>/{retire,un_retire}"}
     if len(segments) == 1:
         if method == "GET":
             # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)
@@ -110,8 +138,8 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
     if method == "DELETE":
         # stage 2 of a vendor removal ('Remove permanently'): purge the source's qty-0 products and drop
         # its config row. 409 if the source still has LIVE products (take it offline via /delist first).
-        from stone_pipeline.config import runner
-        result, code = runner.remove_source(name)
+        from stone_pipeline import lifecycle
+        result, code = lifecycle.remove_source(name)
         return code, result
     return 405, {"error": f"method {method} not allowed on a source"}
 
@@ -180,16 +208,34 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so peer tasks
     # (Medusa, over the VPC) can reach it. The bearer token still gates every request.
     host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
-    if not store.config_db_path().exists():
-        store.seed_from_yaml()   # first run: seed from the committed yaml
+    from stone_pipeline.ledger import snapshot, writethrough
+    # E14: restore config.db (the durable source lifecycle: pause/delist/enabled) from its S3 snapshot
+    # BEFORE seeding, so a redeploy does not lose it and re-seed every source back to active. Restore is a
+    # no-op when a local config.db already exists; the seed then only fills a genuinely first-ever run.
+    config_db = store.config_db_path()
+    snapshot.restore_config(config_db)
+    if not config_db.exists():
+        store.seed_from_yaml()   # first run only: seed from the committed yaml
     # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
     # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
-    from stone_pipeline.ledger import snapshot, writethrough
     snapshot.restore(writethrough.ledger_path())
+    # keep config.db durable: a periodic snapshot backstop + a best-effort snapshot on clean shutdown
+    # (the lifecycle verbs also snapshot immediately after a pause/delist so a crash never loses one).
+    snapshot.start_periodic(config_db, key=snapshot.config_key())
+    # snapshot config.db on stop. ECS stops a task with SIGTERM, which by default terminates WITHOUT
+    # running atexit -- so a SIGTERM handler is REQUIRED (mirrors the sync server), or a pause/delist set
+    # in the last snapshot window is lost on redeploy. atexit is kept as the clean-exit backstop.
+    def _snapshot_on_term(*_):
+        snapshot.save_config(config_db)
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, _snapshot_on_term)
+    atexit.register(lambda: snapshot.save_config(config_db))
+    from stone_pipeline import lifecycle
+    lifecycle.enable_config_snapshots()   # now a pause/delist also snapshots immediately (server context only)
     httpd = ThreadingHTTPServer((host, port), ConfigHandler)
     httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
     log.info("config server listening", extra={"extra_fields": {
-        "host": host, "port": port, "db": str(store.config_db_path())}})
+        "host": host, "port": port, "db": str(config_db)}})
     httpd.serve_forever()
 
 

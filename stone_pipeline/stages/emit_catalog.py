@@ -164,6 +164,12 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
             order.append(r["Key"])                            # genuinely new variant
     mirror = [m for m in _mirror_rows(by_key) if m["Key"] not in by_key]  # tiles for existing varieties
     rows = [by_key[k] for k in order] + mirror
+    # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
+    # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
+    from stone_pipeline.stages import decisions
+    retired = decisions.load_retired()
+    if retired:
+        rows = [r for r in rows if r["Key"] not in retired]
     # keep code-like names (e.g. a stale 'Z Astoria' still in the export) OUT of the upload
     # file -- only clean variety names ever reach Medusa. Their varieties are to be deleted there.
     rows = [r for r in rows if not looks_like_artifact(r["Name"])]

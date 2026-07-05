@@ -82,7 +82,7 @@ def test_seed_pipeline_read_and_enable(tmp_path, monkeypatch):
 
     # all enabled by default; disabling one removes it from the run set
     assert store.enabled_names() == {"polonine", "varsha"}
-    store.set_enabled("varsha", False)
+    store.set_state("varsha", enabled=False)
     assert store.enabled_names() == {"polonine"}
 
     # re-seeding never clobbers a row the admin edited (insert-or-ignore)
@@ -94,6 +94,40 @@ def test_seed_pipeline_read_and_enable(tmp_path, monkeypatch):
     cfg.vendor = "Renamed Company"
     store.upsert_source(cfg)
     assert load_source("polonine").vendor == "Renamed Company"
+
+
+def test_lifecycle_defaults_to_active_and_round_trips(tmp_path, monkeypatch):
+    # `lifecycle` is added by _migrate (NOT in _SCHEMA), so a freshly-seeded store already has the
+    # column; legacy/never-paused rows (NULL) read as 'active'. set_lifecycle round-trips per source.
+    yaml_path = _seed_yaml(tmp_path)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+    assert {r["source"]: r["lifecycle"] for r in store.list_rows()} == {"polonine": "active", "varsha": "active"}
+    store.set_state("varsha", lifecycle="paused")
+    assert {r["source"]: r["lifecycle"] for r in store.list_rows()} == {"polonine": "active", "varsha": "paused"}
+    # a second connect re-runs _migrate (idempotent): the value persists, no error, no duplicate column
+    assert store.get_row("varsha")["lifecycle"] == "paused"
+
+
+def test_retired_keys_are_durable_in_config_db(tmp_path, monkeypatch):
+    # the retired-variety exclusion lives in config.db (snapshotted), not a CSV under ephemeral /app, so a
+    # retired variety never re-mints after a restart. Round-trip + idempotent add + un-retire remove.
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    assert store.load_retired() == set()
+    store.add_retired("slab_marble_x_1")
+    store.add_retired("slab_marble_x_1")               # idempotent
+    store.add_retired("block_granite_y_2")
+    assert store.load_retired() == {"slab_marble_x_1", "block_granite_y_2"}
+    store.remove_retired("slab_marble_x_1")            # un-retire
+    assert store.load_retired() == {"block_granite_y_2"}
+    # decisions.load_retired is the produce-side reader and must return the same durable set
+    from stone_pipeline.stages import decisions
+    assert decisions.load_retired() == {"block_granite_y_2"}
+
+
+def test_retired_is_empty_without_a_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))
+    assert store.load_retired() == set()               # no store -> empty, never raises
 
 
 def test_enabled_names_is_none_without_a_store(tmp_path, monkeypatch):
@@ -136,7 +170,7 @@ def test_run_trigger_matches_the_admin_contract(tmp_path, monkeypatch):
     yaml_path = _seed_yaml(tmp_path)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=yaml_path)
-    store.set_enabled("varsha", False)                        # only polonine enabled
+    store.set_state("varsha", enabled=False)                        # only polonine enabled
     runner._runs.clear(); runner._current_id = None
     try:
         rec, code = runner.start_run(launch=lambda r: None)   # launcher leaves it 'queued'

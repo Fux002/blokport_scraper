@@ -27,7 +27,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 3   # v3: `removed` tombstone lane + inventory.reason (delist marker)
+SCHEMA_VERSION = 4   # v4: one removed lane for both kinds (`removed.kind` product|variation) + variation retire
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -136,9 +136,10 @@ class Ledger:
 
     def _migrate(self) -> None:
         """Idempotent ALTERs for a ledger that predates a column (v1 -> v2 added the sync dead-letter
-        fields; v2 -> v3 added inventory.reason, the delist marker -- the `removed` table itself is a
-        CREATE IF NOT EXISTS in schema.sql, applied by the re-run above). Fresh ledgers already have
-        these from schema.sql, so every branch here is a no-op on them."""
+        fields; v2 -> v3 added inventory.reason, the delist marker; v3 -> v4 added removed.kind, the
+        product|variation discriminator -- the `removed` table itself is a CREATE IF NOT EXISTS in
+        schema.sql, applied by the re-run above). Fresh ledgers already have these from schema.sql, so
+        every branch here is a no-op on them. `retiring` needed no migration (already in the CHECK)."""
         for table in ("variation", "product"):
             cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
             if "sync_attempts" not in cols:
@@ -148,6 +149,14 @@ class Ledger:
         inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
+        removed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(removed)")}
+        if "kind" not in removed_cols:   # v4: existing tombstones are all products (that was the only lane)
+            self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")
+        # covering index for the serve order (products before variations, E1). Created HERE, not in
+        # schema.sql, because schema.sql runs BEFORE this ALTER on an old ledger, where an index on the
+        # not-yet-added `kind` column would fail. Idempotent, so fresh ledgers pick it up here too.
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_removed_serve_kind "
+                          "ON removed (state, kind, created_at, external_id)")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

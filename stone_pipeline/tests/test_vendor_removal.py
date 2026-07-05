@@ -86,7 +86,118 @@ def test_purge_records_tombstones_served_on_the_removed_lane(tmp_path):
         # the delete is delivered to Medusa as a pulled tombstone, not a call-response
         served = ready(ledger, "removed")
         assert served == [{"external_id": "AAA-1",
-                           "payload": {"sku": "AAA-1", "source": "aaa", "reason": "vendor_removed"}}]
+                           "payload": {"kind": "product", "sku": "AAA-1", "source": "aaa",
+                                       "reason": "vendor_removed"}}]
+
+
+def test_variation_tombstone_lane_orders_before_products_and_deletes_the_row(tmp_path):
+    # the ONE removed lane carries product AND variation tombstones (kind), products serve FIRST (E1),
+    # and a 'done' ack on a variation tombstone hard-deletes the (childless, retiring) variety row (E3).
+    from stone_pipeline.ledger.sync import record_tombstones
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("variation", {"key": "slab_marble_x_1", "branch": "slab", "type": "Marble",
+                                    "name": "X", "aliases": "[]", "image_url": "u", "image_sha256": None,
+                                    "image_model": None, "volume": "", "medusa_id": "VID", "in_full": 0,
+                                    "payload_hash": "", "state": "retiring", "first_seen": now,
+                                    "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
+        record_tombstones(ledger, [("AAA-1", "aaa")], reason="vendor_removed", kind="product")
+        record_tombstones(ledger, [("slab_marble_x_1", None)], reason="variation_removed", kind="variation")
+        served = ready(ledger, "removed")
+        assert [t["payload"]["kind"] for t in served] == ["product", "variation"]        # E1 order
+        assert served[1]["payload"] == {"kind": "variation", "key": "slab_marble_x_1",
+                                        "reason": "variation_removed"}
+        assert ack(ledger, "removed", "slab_marble_x_1", status_="done") == 1
+        assert ledger.get("variation", "key", "slab_marble_x_1") is None                 # variety row gone
+        assert [t["external_id"] for t in ready(ledger, "removed")] == ["AAA-1"]          # product tombstone remains
+
+
+def test_retire_variation_cascades_and_tombstones_a_synced_variety(tmp_path):
+    # explicit variety removal: force-cascade its live product (tombstoned), delete its combinations,
+    # tombstone the variety (E2 synced) + hold it 'retiring', and on ack-done hard-delete the row (E3).
+    from stone_pipeline.ledger.sync import retire_variation, variation_live_products
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X",
+                                    "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
+                                    "volume": "", "medusa_id": "VID", "in_full": 1, "payload_hash": "",
+                                    "state": "synced", "first_seen": now, "last_synced": now,
+                                    "created_at": now, "updated_at": now}, pk=("key",))
+        ledger.upsert("product", {"sku": "ZUC-1", "source": "zuc", "variation_key": "K", "state": "synced",
+                                  "medusa_id": "P", "created_at": now, "updated_at": now}, pk=("sku",))
+        ledger.upsert("inventory", {"sku": "ZUC-1", "qty": 5, "last_synced_qty": 5, "updated_at": now}, pk=("sku",))
+        ledger.execute("INSERT INTO combination (combo_key, category, type, variation_key, color, finish, "
+                       "quality, state, created_at, updated_at) VALUES ('c1','Slabs','Marble','K','White',"
+                       "'Polished','A','synced',?,?)", (now, now))
+        assert variation_live_products(ledger, "K") == 1
+        out = retire_variation(ledger, "K", force=True)
+        assert out["products_removed"] == 1 and out["tombstoned_variation"] is True
+        assert ledger.get("variation", "key", "K")["state"] == "retiring"
+        assert ledger.get("product", "sku", "ZUC-1") is None
+        assert ledger.execute("SELECT COUNT(*) n FROM combination WHERE variation_key='K'").fetchone()["n"] == 0
+        served = ready(ledger, "removed")
+        assert [t["payload"]["kind"] for t in served] == ["product", "variation"]      # E1 order
+        assert ack(ledger, "removed", "ZUC-1", status_="done") == 1
+        assert ack(ledger, "removed", "K", status_="done") == 1
+        assert ledger.get("variation", "key", "K") is None                             # row gone (E3)
+
+
+def test_ack_done_keeps_tombstone_if_variety_re_acquired_a_child(tmp_path):
+    # self-heal (F5): a raced produce could re-link a product onto a 'retiring' Key before the retired-key
+    # exclusion caught up. ack-done must NOT blindly DELETE the variety (FK-fail -> orphaned row, lost
+    # tombstone); it keeps the pending tombstone until the variety is childless again, then completes.
+    from stone_pipeline.ledger.sync import retire_variation
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X",
+                                    "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
+                                    "volume": "", "medusa_id": "VID", "in_full": 0, "payload_hash": "",
+                                    "state": "synced", "first_seen": now, "last_synced": now,
+                                    "created_at": now, "updated_at": now}, pk=("key",))
+        retire_variation(ledger, "K")                                          # no products -> retiring + tombstone
+        assert ledger.get("variation", "key", "K")["state"] == "retiring"
+        ledger.upsert("product", {"sku": "ZUC-9", "source": "zuc", "variation_key": "K", "state": "pending",
+                                  "created_at": now, "updated_at": now}, pk=("sku",))   # raced re-link
+        assert ack(ledger, "removed", "K", status_="done") == 0                # refused: kept, not deleted
+        assert ledger.get("variation", "key", "K") is not None                 # variety NOT orphan-deleted
+        assert [t["external_id"] for t in ready(ledger, "removed")] == ["K"]   # tombstone survives to re-serve
+        ledger.execute("DELETE FROM product WHERE sku = 'ZUC-9'")              # next produce moved the child off
+        assert ack(ledger, "removed", "K", status_="done") == 1                # now childless -> completes
+        assert ledger.get("variation", "key", "K") is None
+
+
+def test_retire_never_synced_variety_drops_it_without_a_tombstone(tmp_path):
+    # a variety Medusa never received (medusa_id NULL) has nothing to delete -> drop locally, no tombstone (E2)
+    from stone_pipeline.ledger.sync import retire_variation
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("variation", {"key": "NS", "branch": "slab", "type": "Marble", "name": "Y",
+                                    "aliases": "[]", "image_url": "", "image_sha256": None, "image_model": None,
+                                    "volume": "", "medusa_id": None, "in_full": 1, "payload_hash": "",
+                                    "state": "pending", "first_seen": now, "last_synced": None,
+                                    "created_at": now, "updated_at": now}, pk=("key",))
+        out = retire_variation(ledger, "NS")
+        assert out["tombstoned_variation"] is False
+        assert ledger.get("variation", "key", "NS") is None
+        assert ready(ledger, "removed") == []
+
+
+def test_un_retire_clears_the_tombstone_and_re_serves(tmp_path):
+    from stone_pipeline.ledger.sync import retire_variation, un_retire_variation
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X",
+                                    "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
+                                    "volume": "", "medusa_id": "VID", "in_full": 1, "payload_hash": "",
+                                    "state": "synced", "first_seen": now, "last_synced": now,
+                                    "created_at": now, "updated_at": now}, pk=("key",))
+        retire_variation(ledger, "K")
+        assert ledger.get("variation", "key", "K")["state"] == "retiring"
+        assert [t["external_id"] for t in ready(ledger, "removed")] == ["K"]
+        out = un_retire_variation(ledger, "K")
+        assert out["tombstone_cleared"] == 1
+        assert ready(ledger, "removed") == []                                          # E5: tombstone cleared
+        assert ledger.get("variation", "key", "K")["state"] == "dirty"                 # re-serves
 
 
 def test_tombstone_done_retires_blocked_retries_and_dead_letters(tmp_path):
@@ -152,6 +263,22 @@ def test_reopen_migrates_an_old_ledger_to_the_tombstone_lane(tmp_path):
         assert ledger.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='removed'").fetchone() is not None
         assert "reason" in {r["name"] for r in ledger.execute("PRAGMA table_info(inventory)")}
+
+
+def test_reopen_migrates_removed_kind_column_v4(tmp_path):
+    # a pre-v4 ledger has a `removed` table WITHOUT the `kind` discriminator; reopening must ADD it
+    # (default 'product', the only lane before v4) so the generalized product+variation lane works.
+    p = tmp_path / "old4.ledger"
+    with Ledger.open(p, env="development") as ledger:
+        ledger.execute("DROP TABLE removed")
+        ledger.execute("CREATE TABLE removed (external_id TEXT PRIMARY KEY, source TEXT, reason TEXT, "
+                       "state TEXT NOT NULL DEFAULT 'pending', sync_attempts INTEGER NOT NULL DEFAULT 0, "
+                       "sync_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        ledger.execute("PRAGMA user_version = 3")             # pretend this is a pre-v4 ledger
+    with Ledger.open(p, env="development") as ledger:
+        assert "kind" in {r["name"] for r in ledger.execute("PRAGMA table_info(removed)")}
+        ledger.execute("INSERT INTO removed (external_id, created_at, updated_at) VALUES ('X-1','t','t')")
+        assert ledger.get("removed", "external_id", "X-1")["kind"] == "product"   # existing rows default product
 
 
 def test_delete_source_removes_only_that_config_row(tmp_path):
