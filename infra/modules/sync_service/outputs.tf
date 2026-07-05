@@ -3,11 +3,6 @@ output "service_sg_id" {
   description = "The service's security group (Medusa->scraper ingress lives here)."
 }
 
-output "ledger_efs_id" {
-  value       = aws_efs_file_system.ledger.id
-  description = "EFS holding the ledger."
-}
-
 output "cloud_map_service" {
   value       = aws_service_discovery_service.scraper.name
   description = "Cloud Map service name; internal host is <this>.<namespace>."

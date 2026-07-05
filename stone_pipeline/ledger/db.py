@@ -110,6 +110,12 @@ class Ledger:
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        # WAL lets readers run concurrently with the single writer, so a pull-serve (which LEASES rows,
+        # i.e. writes) no longer blocks a concurrent ack/status and vice versa. REQUIRES local disk, not
+        # NFS/EFS (WAL's shared-memory index is unreliable over a network FS) -- the ledger is on the
+        # task's local volume (design section 12 / M4), snapshotted to S3 for persistence.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")   # safe under WAL; far fewer fsyncs than FULL
         # two processes share this file (sync server + config server). Wait for a lock instead of
         # erroring 'database is locked' immediately, so an ack and a reset serialize rather than fail.
         conn.execute("PRAGMA busy_timeout = 5000")

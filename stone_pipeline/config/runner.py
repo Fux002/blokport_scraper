@@ -33,6 +33,7 @@ _lock = threading.Lock()
 _runs: dict[str, dict] = {}      # run_id -> record (kept so GET /run/{id} works after it finishes)
 _current_id: str | None = None   # the in-flight run, if any
 _reset_active: bool = False      # a reset is running (run and reset are mutually exclusive)
+_MAX_RUNS = 200                  # cap the in-memory history so a long-lived server never grows unbounded (M2)
 
 
 def _now() -> str:
@@ -204,6 +205,13 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
                "stage": stage, "scope": scope, "progress": {}}
         _runs[run_id] = rec
         _current_id = run_id
+        # M2: keep only the newest _MAX_RUNS in memory (durable history is in the run_log). Evict the
+        # oldest first (dicts preserve insertion order); never evict the in-flight run.
+        while len(_runs) > _MAX_RUNS:
+            oldest = next(iter(_runs))
+            if oldest == _current_id:
+                break
+            del _runs[oldest]
     _stamp_last_run(rec, "running")                # list shows this source as running immediately
     try:
         (launch or _LAUNCHERS[rec["mode"]])(rec)

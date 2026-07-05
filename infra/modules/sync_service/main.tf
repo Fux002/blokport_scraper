@@ -1,10 +1,13 @@
 # The long-running scraper SERVICE (sync + config HTTP servers), in the platform's dev/prod VPC so
 # Medusa reaches it VPC-internally over Cloud Map -- NO tunnel. One env per module instance (like the
 # batch scraper module). ONE task runs BOTH servers + the local produce subprocess, so all SQLite
-# ledger access stays on one host (EFS is persistence only); two tasks would race NFS locks.
+# ledger access stays on ONE host. The ledger lives on the task's LOCAL ephemeral volume (shared by
+# both containers), NOT EFS/NFS: SQLite over NFS is a reliability footgun and WAL needs local disk
+# (design section 12 / M4). Persistence across task restarts is an S3 snapshot the sync server writes
+# periodically + on stop, and restores on a cold task (stone_pipeline.ledger.snapshot).
 #
-# Scope: this module owns ONLY its own resources (EFS, task-def, service, its SG + rules, one Cloud
-# Map registration in the platform namespace). It never mutates platform-owned resources.
+# Scope: this module owns ONLY its own resources (task-def, service, its SG + rules, one Cloud Map
+# registration in the platform namespace). It never mutates platform-owned resources.
 
 locals {
   name = "blokport-scraper-svc-${var.target_env}"
@@ -13,21 +16,10 @@ locals {
 
 data "aws_region" "current" {}
 
-# --- EFS for the ledger (persists across task restarts; single-host access) ---
-resource "aws_efs_file_system" "ledger" {
-  creation_token = "${local.name}-ledger"
-  encrypted      = true
-  tags           = merge(local.tags, { Name = "${local.name}-ledger" })
-}
+# The ledger is NOT on EFS anymore (see header): it lives on the task's local ephemeral volume and is
+# persisted to S3 by the snapshot lane. So there is no EFS file system, mount target, or NFS SG rule.
 
-resource "aws_efs_mount_target" "ledger" {
-  for_each        = toset(var.private_subnet_ids)
-  file_system_id  = aws_efs_file_system.ledger.id
-  subnet_id       = each.value
-  security_groups = [aws_security_group.this.id]
-}
-
-# --- Security group: egress open; ingress from Medusa on the two ports + NFS to the EFS mount ---
+# --- Security group: egress open; ingress from Medusa on the two ports ---
 resource "aws_security_group" "this" {
   name        = "${local.name}-sg"
   description = "Scraper sync/config service (${var.target_env})"
@@ -62,16 +54,7 @@ resource "aws_security_group_rule" "config_from_medusa" {
   description              = "Medusa to scraper config 8724"
 }
 
-# the task reaches its own EFS mount targets over NFS (same SG on both sides).
-resource "aws_security_group_rule" "nfs_self" {
-  type              = "ingress"
-  from_port         = 2049
-  to_port           = 2049
-  protocol          = "tcp"
-  security_group_id = aws_security_group.this.id
-  self              = true
-  description       = "NFS to the ledger EFS mount targets"
-}
+# (No NFS self-rule: the ledger is on the task's local volume, not an EFS mount.)
 
 # --- Logs --------------------------------------------------------------------
 resource "aws_cloudwatch_log_group" "this" {
@@ -142,7 +125,7 @@ resource "aws_iam_role_policy" "task" {
   policy = data.aws_iam_policy_document.task.json
 }
 
-# --- Task definition: ONE task, TWO containers (sync + config), shared EFS ledger ---
+# --- Task definition: ONE task, TWO containers (sync + config), shared local-disk ledger ---
 locals {
   common_env = [
     { name = "BLOKPORT_ENV", value = var.target_env },
@@ -169,13 +152,10 @@ resource "aws_ecs_task_definition" "this" {
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
 
+  # Ephemeral task-scoped volume (name only, no efs_volume_configuration): local disk shared by BOTH
+  # containers at /ledger. Lost on task stop -- the S3 snapshot lane is what persists the ledger.
   volume {
     name = "ledger"
-    efs_volume_configuration {
-      file_system_id     = aws_efs_file_system.ledger.id
-      root_directory     = "/"
-      transit_encryption = "ENABLED"
-    }
   }
 
   container_definitions = jsonencode([
@@ -184,8 +164,8 @@ resource "aws_ecs_task_definition" "this" {
       image = "${var.image_repo_url}:${var.image_tag}"
       essential = true
       # override the Dockerfile ENTRYPOINT (run_pipeline.sh) -- an empty array is treated as "unset"
-      # by ECS. The server self-seeds a missing ledger on a fresh EFS volume (bootstrap_ledger_if_missing),
-      # so no wrapper is needed.
+      # by ECS. On a cold task the server restores the ledger from its S3 snapshot, else self-seeds a
+      # fresh one (snapshot.restore + bootstrap_ledger_if_missing), so no wrapper is needed.
       entryPoint   = ["python", "-m", "stone_pipeline.ledger.server"]
       portMappings = [{ containerPort = 8723, protocol = "tcp" }]
       environment  = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
@@ -251,6 +231,6 @@ resource "aws_ecs_service" "this" {
     registry_arn = aws_service_discovery_service.scraper.arn
   }
 
-  depends_on = [aws_efs_mount_target.ledger]   # EFS + Cloud Map exist before the service starts
+  depends_on = [aws_service_discovery_service.scraper]   # Cloud Map registration exists before the service starts
   tags       = local.tags
 }

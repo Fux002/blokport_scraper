@@ -15,6 +15,7 @@ em dashes (design principle 2).
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -134,7 +135,9 @@ class ConfigHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _authorized(self) -> bool:
-        return self.headers.get("Authorization", "") == f"Bearer {self.server.expected_token}"  # type: ignore[attr-defined]
+        # constant-time compare so the token can't be recovered by response-timing (L1)
+        return hmac.compare_digest(
+            self.headers.get("Authorization", ""), f"Bearer {self.server.expected_token}")  # type: ignore[attr-defined]
 
     def _handle(self, method: str) -> None:
         if not self._authorized():
@@ -179,6 +182,10 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
     if not store.config_db_path().exists():
         store.seed_from_yaml()   # first run: seed from the committed yaml
+    # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
+    # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
+    from stone_pipeline.ledger import snapshot, writethrough
+    snapshot.restore(writethrough.ledger_path())
     httpd = ThreadingHTTPServer((host, port), ConfigHandler)
     httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
     log.info("config server listening", extra={"extra_fields": {

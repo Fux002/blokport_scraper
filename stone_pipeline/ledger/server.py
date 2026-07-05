@@ -19,13 +19,15 @@ without sockets. No em dashes (design principle 2).
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
+import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from stone_pipeline.core import logfmt
-from stone_pipeline.ledger import sync, writethrough
+from stone_pipeline.ledger import snapshot, sync, writethrough
 from stone_pipeline.ledger.db import Ledger
 
 log = logfmt.get_logger("ledger.server")
@@ -76,8 +78,9 @@ class SyncHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _authorized(self) -> bool:
+        # constant-time compare so the token can't be recovered by response-timing (L1)
         auth = self.headers.get("Authorization", "")
-        return auth == f"Bearer {self.server.expected_token}"  # type: ignore[attr-defined]
+        return hmac.compare_digest(auth, f"Bearer {self.server.expected_token}")  # type: ignore[attr-defined]
 
     def _handle(self, method: str) -> None:
         if not self._authorized():
@@ -136,7 +139,16 @@ def serve(host: str | None = None, port: int = 8723) -> None:
     # VPC) can reach it. The bearer token still gates every request.
     host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
     path = writethrough.ledger_path()
+    # C1: the ledger is on LOCAL (ephemeral) disk. On a cold task, restore the last S3 snapshot BEFORE
+    # anything can create a fresh empty file (which would lose the acked ids); only then seed if still
+    # absent. This server owns the periodic + on-stop snapshot (it shares the local volume with config).
+    snapshot.restore(path)
     bootstrap_ledger_if_missing(path)
+    snapshot.start_periodic(path)
+    def _snapshot_on_term(*_):                  # ECS sends SIGTERM before stopping the task
+        snapshot.save(path)
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, _snapshot_on_term)
     httpd = ThreadingHTTPServer((host, port), SyncHandler)
     httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
     httpd.ledger_path = path                   # type: ignore[attr-defined]
