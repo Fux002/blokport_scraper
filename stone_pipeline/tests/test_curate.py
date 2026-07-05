@@ -188,6 +188,39 @@ def test_code_like_name_flagged_not_minted(ref):
     assert result.counts["suspicious_names"] >= 1
 
 
+def test_alias_decision_routes_spelling_onto_target_and_mints_nothing(ref):
+    # 'White G' is a lone-letter code whose base ('White') is generic, so with no decision it HOLDS for
+    # review (lands in pending_confirm). An operator 'alias -> Alpine' decision must instead route the
+    # spelling onto Alpine (an existing variety) as a confirmed alias, mint nothing, and clear the hold.
+    from stone_pipeline.config import decisions_store
+    from stone_pipeline.stages import decisions
+
+    def curate_white_g():
+        row = CanonicalRow(src_site="varsha", surrogate_key="wg1", variety_match_key="White G",
+                           raw_type="Granite")
+        row.add_gap(TreeGap(src_site="varsha", surrogate_key="wg1", raw_name="White G",
+                            gap_kind=GapKind.missing_variation, nearest_existing="Something",
+                            nearest_score=40.0))
+        return curate.build_curation([row], ref)
+
+    # baseline: no decision -> held for review, not minted, not aliased
+    base = curate_white_g()
+    assert "White G" in [p["variant"] for p in base.pending_confirm]
+    assert not any(r["Name"] == "White G" for b in base.new_variants.values() for r in b)
+
+    # decide: alias 'White G' onto the existing variety 'Alpine'
+    decisions_store.set_variety_decision("White G", "alias", alias_of="Alpine")
+    assert decisions.load_alias_decisions() == {"white g": "Alpine"}
+
+    result = curate_white_g()
+    # no longer held, never minted
+    assert "White G" not in [p["variant"] for p in result.pending_confirm]
+    assert not any(r["Name"] == "White G" for b in result.new_variants.values() for r in b)
+    # routed onto Alpine as a confirmed alias (so Alpine's payload gains the spelling -> re-serves)
+    entry = next(e for e in result.alias_additions["slab"] if e["Name"] == "Alpine")
+    assert "White G" in entry["_added"] and entry["_status"] == "confirmed"
+
+
 def test_curation_does_not_modify_reference_files(ref, tmp_path):
     # build_curation only READS the immutable export; it must not write to catalog_source/from_medusa
     import os

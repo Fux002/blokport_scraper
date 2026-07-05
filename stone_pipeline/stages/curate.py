@@ -258,6 +258,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # human decisions read back from the ledger (variants_to_confirm.csv) + the persistent reject memory
     from stone_pipeline.stages import decisions
     confirm_decisions = decisions.load_confirm_decisions()
+    alias_decisions = decisions.load_alias_decisions()   # norm(spelling) -> existing variety NAME to alias onto
     rejected = decisions.load_rejected()
     pending_confirm: list[dict] = []
     result = CurationResult(
@@ -373,6 +374,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 continue
         if code_why:
             base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
+            alias_to = alias_decisions.get(proj.norm(clean))
+            if alias_to:                               # operator: this code-shaped name is a spelling of X
+                alias_new.setdefault(proj.norm(alias_to), set()).add(name)
+                continue
             dec = confirm_decisions.get(proj.norm(clean))
             if dec == "no":                            # honour 'no' so the code stops re-appearing
                 rejected.add(proj.norm(clean))
@@ -429,7 +434,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     alias_new.setdefault(proj.norm(nearest), set()).add(name)   # confident -> confirmed
                     continue
                 if d.verdict == "review":
-                    # uncertain -> the human decides via variants_to_confirm.csv
+                    # uncertain -> the human decides (mint / reject / alias) via the review API
+                    alias_to = alias_decisions.get(proj.norm(clean))
+                    if alias_to:                       # operator: this spelling is really variety X
+                        alias_new.setdefault(proj.norm(alias_to), set()).add(name)
+                        continue
                     dec = confirm_decisions.get(proj.norm(clean))
                     if dec == "no":
                         rejected.add(proj.norm(clean))
