@@ -95,6 +95,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # re-minted or re-matched; un-retire removes the key.
     conn.execute("CREATE TABLE IF NOT EXISTS retired_variation ("
                  "key TEXT PRIMARY KEY, created_at TEXT NOT NULL)")
+    # sources an operator PERMANENTLY removed (Remove-permanently). Durable, so seed_from_yaml does NOT
+    # re-add a removed vendor on the next boot (which would silently re-list it). Cleared when the source
+    # is re-added via PUT. Without this, reconcile-seeding a partial config.db would resurrect a removal.
+    conn.execute("CREATE TABLE IF NOT EXISTS removed_source ("
+                 "source TEXT PRIMARY KEY, removed_at TEXT NOT NULL)")
     conn.commit()
 
 
@@ -176,6 +181,10 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
     )
     upsert_source(cfg, enabled=bool(data.get("enabled", True)),
                   schedule=data.get("schedule"), path=path)
+    # re-adding a source clears any prior removal tombstone, so a re-added vendor seeds normally again.
+    with closing(open_store(path)) as conn:
+        conn.execute("DELETE FROM removed_source WHERE source = ?", (cfg.source,))
+        conn.commit()
 
 
 def enabled_names(path: str | Path | None = None) -> set[str] | None:
@@ -252,6 +261,10 @@ def delete_source(source: str, path: str | Path | None = None) -> bool:
     gone. Config only -- it never touches the ledger; the caller purges the products first."""
     with closing(open_store(path)) as conn:
         n = conn.execute("DELETE FROM source WHERE source = ?", (source,)).rowcount
+        # tombstone the removal so a later reconcile-seed never resurrects this vendor (re-adding it via
+        # PUT clears the tombstone -- see upsert_row). Durable in config.db, so it survives a redeploy.
+        conn.execute("INSERT OR REPLACE INTO removed_source (source, removed_at) VALUES (?, ?)",
+                     (source, _now()))
         conn.commit()
     return n > 0
 
@@ -292,12 +305,18 @@ def record_run(sources, status: str, stage: str, at: str | None = None,
 
 
 def seed_from_yaml(yaml_path: str | Path | None = None, path: str | Path | None = None) -> int:
-    """Seed the store from sources.yaml, INSERT-OR-IGNORE so it never clobbers a row
-    the admin already edited. Returns the number of rows inserted."""
+    """RECONCILE the store's source LIST with sources.yaml, INSERT-OR-IGNORE so it never clobbers a row
+    the admin already edited (a pause/delist/last-run stays put). Safe to run on EVERY boot: it re-adds
+    any yaml source missing from the store -- e.g. after restoring a partial/stale config.db snapshot, so
+    the source list can never silently shrink. Sources an operator PERMANENTLY removed are skipped (their
+    removed_source tombstone), so a removal is never resurrected. Returns the number of rows inserted."""
     from stone_pipeline.config.sources import load_yaml_sources
     inserted = 0
     with closing(open_store(path)) as conn:
+        removed = {r["source"] for r in conn.execute("SELECT source FROM removed_source")}
         for cfg in load_yaml_sources(yaml_path).values():
+            if cfg.source in removed:
+                continue                              # explicitly removed -> do NOT re-seed it
             p = _params(cfg, enabled=True, schedule=None)
             cols = ", ".join(p)
             placeholders = ", ".join(f":{c}" for c in p)
