@@ -214,8 +214,11 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # no-op when a local config.db already exists; the seed then only fills a genuinely first-ever run.
     config_db = store.config_db_path()
     snapshot.restore_config(config_db)
-    if not config_db.exists():
-        store.seed_from_yaml()   # first run only: seed from the committed yaml
+    # RECONCILE the source list from yaml on EVERY boot (INSERT OR IGNORE, minus removed sources), not only
+    # when config.db is absent. A restored partial/stale snapshot must NOT leave configured sources missing
+    # (that returned an inconsistent /config/v1/sources); seed re-adds any missing yaml source while keeping
+    # each source's restored lifecycle state, and never resurrects a permanently-removed one.
+    store.seed_from_yaml()
     # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
     # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
     snapshot.restore(writethrough.ledger_path())

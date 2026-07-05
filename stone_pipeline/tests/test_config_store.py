@@ -130,6 +130,38 @@ def test_retired_is_empty_without_a_store(tmp_path, monkeypatch):
     assert store.load_retired() == set()               # no store -> empty, never raises
 
 
+def test_seed_reconciles_a_partial_config_db_keeping_state(tmp_path, monkeypatch):
+    # the config.db divergence bug: a restored PARTIAL snapshot must be reconciled with sources.yaml on the
+    # next boot -- the missing source re-added (active), an edited source's lifecycle state preserved.
+    yaml_path = _seed_yaml(tmp_path)                         # polonine + varsha
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+    store.set_state("polonine", lifecycle="paused", enabled=False)
+    conn = store.open_store()                                # simulate a partial snapshot: varsha's row vanished
+    conn.execute("DELETE FROM source WHERE source = 'varsha'"); conn.commit(); conn.close()
+    assert {r["source"] for r in store.list_rows()} == {"polonine"}
+
+    store.seed_from_yaml(yaml_path=yaml_path)                # reconcile
+    rows = {r["source"]: r for r in store.list_rows()}
+    assert set(rows) == {"polonine", "varsha"}              # missing source re-added
+    assert rows["polonine"]["lifecycle"] == "paused" and rows["polonine"]["enabled"] is False  # state kept
+    assert rows["varsha"]["lifecycle"] == "active" and rows["varsha"]["enabled"] is True        # re-added active
+
+
+def test_removed_source_is_not_resurrected_by_reconcile_seed(tmp_path, monkeypatch):
+    # a PERMANENTLY removed vendor must NOT come back on the next reconcile-seed (that would silently
+    # re-list it); re-adding it via PUT clears the tombstone so it seeds normally again.
+    yaml_path = _seed_yaml(tmp_path)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+    assert store.delete_source("varsha") is True
+    store.seed_from_yaml(yaml_path=yaml_path)
+    assert {r["source"] for r in store.list_rows()} == {"polonine"}   # stays removed
+    store.upsert_row({"source": "varsha", "adapter": "varsha", "source_code": "var", "vendor": "V"})
+    store.seed_from_yaml(yaml_path=yaml_path)
+    assert "varsha" in {r["source"] for r in store.list_rows()}       # re-add cleared the tombstone
+
+
 def test_enabled_names_is_none_without_a_store(tmp_path, monkeypatch):
     # no config store -> enabled_names() is None so callers run everything (pre-store behaviour)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))
