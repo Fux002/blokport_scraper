@@ -63,6 +63,7 @@ def _connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")   # many readers + one writer, no contention
+    conn.execute("PRAGMA busy_timeout=5000")  # ThreadingHTTPServer: two concurrent admin writes wait, not 500
     # apply the DDL once per database, not on every connect (the admin API connects per request)
     if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
         conn.executescript(_SCHEMA)
@@ -89,6 +90,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # (the in-memory run dict is lost on restart).
     conn.execute("CREATE TABLE IF NOT EXISTS run_log ("
                  "run_id TEXT PRIMARY KEY, record TEXT NOT NULL, finished_at TEXT)")
+    # retired variation KEYS: the durable exclusion memory (lives in config.db so it is snapshotted +
+    # restored, not a CSV under ephemeral /app). The produce reads it so a retired variety is never
+    # re-minted or re-matched; un-retire removes the key.
+    conn.execute("CREATE TABLE IF NOT EXISTS retired_variation ("
+                 "key TEXT PRIMARY KEY, created_at TEXT NOT NULL)")
     conn.commit()
 
 
@@ -214,6 +220,29 @@ def set_state(source: str, *, lifecycle: str | None = None, enabled: bool | None
     params.append(source)
     with closing(open_store(path)) as conn:
         conn.execute(f"UPDATE source SET {', '.join(sets)} WHERE source = ?", params)
+        conn.commit()
+
+
+def load_retired(path: str | Path | None = None) -> set[str]:
+    """The retired variation KEYS -- the ONE durable exclusion source (in config.db, so snapshotted +
+    restored, never a CSV under ephemeral /app). Empty when there is no store yet."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        return set()
+    with closing(open_store(p)) as conn:
+        return {r["key"] for r in conn.execute("SELECT key FROM retired_variation")}
+
+
+def add_retired(key: str, path: str | Path | None = None) -> None:
+    with closing(open_store(path)) as conn:
+        conn.execute("INSERT OR IGNORE INTO retired_variation (key, created_at) VALUES (?, ?)",
+                     (key, _now()))
+        conn.commit()
+
+
+def remove_retired(key: str, path: str | Path | None = None) -> None:
+    with closing(open_store(path)) as conn:
+        conn.execute("DELETE FROM retired_variation WHERE key = ?", (key,))
         conn.commit()
 
 

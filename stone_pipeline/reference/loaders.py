@@ -188,7 +188,13 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
     (slab/block), so a single combined export can feed both branches: slab-keyed
     rows go to the slab table, block-keyed rows to the block table."""
     table = VariantTable(branch=branch)
-    delete_keys = _delete_keys()
+    # CRITICAL: a RETIRED variety must not be a resolution target here either. The matcher stamps a
+    # product's variation_key from THIS reference (built off the lagging Medusa export, which still lists a
+    # retired-but-not-yet-deleted variety), and the catalog-side surface exclusion runs too late to undo
+    # that stamp. Excluding retired keys at the matcher (like delete_keys) is what actually stops a product
+    # re-linking onto a retiring Key (which would FK-fail the eventual ack-done). One durable source: config.db.
+    from stone_pipeline.stages import decisions
+    delete_keys = _delete_keys() | decisions.load_retired()
     path = Path(path)
     if not path.exists():
         log.warning(f"variants file absent for branch {branch}: {path}")

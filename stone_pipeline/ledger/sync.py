@@ -318,12 +318,22 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
         # to 'dead' after _MAX_SYNC_ATTEMPTS so a permanently-reserved id stops re-serving forever.
         if status_ == "done":
             row = ledger.execute("SELECT kind FROM removed WHERE external_id = ?", (external_id,)).fetchone()
-            n = ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
             if row and row["kind"] == "variation":
-                # E3: the variety was held in 'retiring' pending Medusa's confirm; its combinations and
-                # products were already removed at retire time, so the row is now FK-safe to hard-delete.
+                # E3 + self-heal: hard-delete the variety only once it is FK-safe (no product/combination
+                # re-acquired it). A raced produce with a stale retired-key exclusion could re-link a product
+                # onto the retiring Key; if so, KEEP the pending tombstone (return without deleting) so it
+                # re-serves and self-heals once the next (properly-excluding) produce moves those children
+                # off -- never a blind DELETE that would FK-fail and orphan the row with no tombstone.
+                child = ledger.execute(
+                    "SELECT 1 FROM product WHERE variation_key = ? "
+                    "UNION ALL SELECT 1 FROM combination WHERE variation_key = ? LIMIT 1",
+                    (external_id, external_id)).fetchone()
+                if child:
+                    log.warning("retiring variety re-acquired children; keeping its tombstone to re-serve",
+                                extra={"extra_fields": {"key": external_id}})
+                    return 0
                 ledger.execute("DELETE FROM variation WHERE key = ?", (external_id,))
-            return n
+            return ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
         row = ledger.execute("SELECT sync_attempts FROM removed WHERE external_id = ?",
                              (external_id,)).fetchone()
         if not row:
@@ -451,12 +461,15 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
     """Reset ONE table's sync overlay: state -> 'pending', drop medusa_id/last_synced/sync bookkeeping.
     Content columns (name, type, image, price...) are untouched. `where`/`params` scope the rows."""
     cols = {r["name"] for r in ledger.execute(f"PRAGMA table_info({table})")}
-    # E4: a 'retiring' row is mid-removal (its variation-tombstone is pending) -- a reset must NOT flip it
-    # back to 'pending' and re-serve it as live. Keep retiring; everything else re-serves from zero.
+    # E4/E6: a 'retiring' row is mid-removal (its variation-tombstone is pending). A reset must NOT flip it
+    # back to 'pending' (re-serving a removed variety) AND must keep its medusa_id + bookkeeping -- the
+    # medusa_id is load-bearing for the retire/ack/un_retire state machine (it says "Medusa has this, delete
+    # it"). Everything NOT retiring re-serves from zero.
     sets = ["state = CASE WHEN state = 'retiring' THEN 'retiring' ELSE 'pending' END", "updated_at = ?"]
-    sets += [f"{c} = NULL" for c in ("medusa_id", "last_synced", "sync_error") if c in cols]
+    sets += [f"{c} = CASE WHEN state = 'retiring' THEN {c} ELSE NULL END"
+             for c in ("medusa_id", "last_synced", "sync_error") if c in cols]
     if "sync_attempts" in cols:
-        sets.append("sync_attempts = 0")
+        sets.append("sync_attempts = CASE WHEN state = 'retiring' THEN sync_attempts ELSE 0 END")
     return ledger.execute(f"UPDATE {table} SET {', '.join(sets)}{where}", (now, *params)).rowcount
 
 

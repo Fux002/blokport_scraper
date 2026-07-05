@@ -142,6 +142,30 @@ def test_retire_variation_cascades_and_tombstones_a_synced_variety(tmp_path):
         assert ledger.get("variation", "key", "K") is None                             # row gone (E3)
 
 
+def test_ack_done_keeps_tombstone_if_variety_re_acquired_a_child(tmp_path):
+    # self-heal (F5): a raced produce could re-link a product onto a 'retiring' Key before the retired-key
+    # exclusion caught up. ack-done must NOT blindly DELETE the variety (FK-fail -> orphaned row, lost
+    # tombstone); it keeps the pending tombstone until the variety is childless again, then completes.
+    from stone_pipeline.ledger.sync import retire_variation
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X",
+                                    "aliases": "[]", "image_url": "u", "image_sha256": None, "image_model": None,
+                                    "volume": "", "medusa_id": "VID", "in_full": 0, "payload_hash": "",
+                                    "state": "synced", "first_seen": now, "last_synced": now,
+                                    "created_at": now, "updated_at": now}, pk=("key",))
+        retire_variation(ledger, "K")                                          # no products -> retiring + tombstone
+        assert ledger.get("variation", "key", "K")["state"] == "retiring"
+        ledger.upsert("product", {"sku": "ZUC-9", "source": "zuc", "variation_key": "K", "state": "pending",
+                                  "created_at": now, "updated_at": now}, pk=("sku",))   # raced re-link
+        assert ack(ledger, "removed", "K", status_="done") == 0                # refused: kept, not deleted
+        assert ledger.get("variation", "key", "K") is not None                 # variety NOT orphan-deleted
+        assert [t["external_id"] for t in ready(ledger, "removed")] == ["K"]   # tombstone survives to re-serve
+        ledger.execute("DELETE FROM product WHERE sku = 'ZUC-9'")              # next produce moved the child off
+        assert ack(ledger, "removed", "K", status_="done") == 1                # now childless -> completes
+        assert ledger.get("variation", "key", "K") is None
+
+
 def test_retire_never_synced_variety_drops_it_without_a_tombstone(tmp_path):
     # a variety Medusa never received (medusa_id NULL) has nothing to delete -> drop locally, no tombstone (E2)
     from stone_pipeline.ledger.sync import retire_variation

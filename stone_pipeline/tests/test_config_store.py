@@ -109,6 +109,27 @@ def test_lifecycle_defaults_to_active_and_round_trips(tmp_path, monkeypatch):
     assert store.get_row("varsha")["lifecycle"] == "paused"
 
 
+def test_retired_keys_are_durable_in_config_db(tmp_path, monkeypatch):
+    # the retired-variety exclusion lives in config.db (snapshotted), not a CSV under ephemeral /app, so a
+    # retired variety never re-mints after a restart. Round-trip + idempotent add + un-retire remove.
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    assert store.load_retired() == set()
+    store.add_retired("slab_marble_x_1")
+    store.add_retired("slab_marble_x_1")               # idempotent
+    store.add_retired("block_granite_y_2")
+    assert store.load_retired() == {"slab_marble_x_1", "block_granite_y_2"}
+    store.remove_retired("slab_marble_x_1")            # un-retire
+    assert store.load_retired() == {"block_granite_y_2"}
+    # decisions.load_retired is the produce-side reader and must return the same durable set
+    from stone_pipeline.stages import decisions
+    assert decisions.load_retired() == {"block_granite_y_2"}
+
+
+def test_retired_is_empty_without_a_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))
+    assert store.load_retired() == set()               # no store -> empty, never raises
+
+
 def test_enabled_names_is_none_without_a_store(tmp_path, monkeypatch):
     # no config store -> enabled_names() is None so callers run everything (pre-store behaviour)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))

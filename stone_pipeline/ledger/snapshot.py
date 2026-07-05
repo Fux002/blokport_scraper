@@ -29,7 +29,13 @@ _SNAPSHOT_INTERVAL = int(os.environ.get("BLOKPORT_LEDGER_SNAPSHOT_SECONDS", "300
 
 def _s3():
     import boto3
-    return boto3.client("s3", region_name=S3_REGION)
+    from botocore.config import Config
+    # explicit timeouts + capped retries so a best-effort snapshot FAILS FAST instead of stalling. This
+    # matters on the SIGTERM/atexit stop path: a hung S3 call must not burn the whole ECS stopTimeout and
+    # get SIGKILLed with no snapshot at all. Without a Config, boto3 can also fall through to a slow IMDS
+    # credential probe off-ECS.
+    cfg = Config(connect_timeout=3, read_timeout=10, retries={"max_attempts": 2})
+    return boto3.client("s3", region_name=S3_REGION, config=cfg)
 
 
 def snapshot_key(env: str = ENV_NAME) -> str:

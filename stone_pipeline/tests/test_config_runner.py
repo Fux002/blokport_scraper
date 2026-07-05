@@ -149,6 +149,29 @@ def test_reset_refused_while_a_run_is_active():
     assert code == 409 and "run is in progress" in body["error"]
 
 
+def test_soft_reset_preserves_a_retiring_variety(tmp_path, monkeypatch):
+    # F6: a global soft reset must keep a 'retiring' variety fully intact -- state AND medusa_id (which is
+    # load-bearing: it says "Medusa has this, delete it"). NULLing it would corrupt the retire/ack machine.
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger, now_iso
+    from stone_pipeline.ledger.sync import retire_variation
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        now = now_iso()
+        lg.upsert("variation", {"key": "K", "branch": "slab", "type": "Marble", "name": "X", "aliases": "[]",
+                                "image_url": "u", "image_sha256": None, "image_model": None, "volume": "",
+                                "medusa_id": "VID", "in_full": 0, "payload_hash": "", "state": "synced",
+                                "first_seen": now, "last_synced": now, "created_at": now, "updated_at": now},
+                  pk=("key",))
+        retire_variation(lg, "K")
+        assert lg.get("variation", "key", "K")["state"] == "retiring"
+    body, code = lifecycle.reset()                     # global soft reset
+    assert code == 200
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        row = lg.get("variation", "key", "K")
+        assert row["state"] == "retiring" and row["medusa_id"] == "VID"   # both preserved
+
+
 def test_reset_bad_source_is_400():
     body, code = lifecycle.reset(sources=["not_a_scraper"])
     assert code == 400

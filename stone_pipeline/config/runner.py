@@ -107,10 +107,22 @@ def _resolve_sources(requested) -> list[str]:
 
 # -- launchers (injectable for tests) -----------------------------------------
 
+_RUN_TIMEOUT = int(os.environ.get("BLOKPORT_RUN_TIMEOUT_SECONDS", "7200"))   # 2h: kill a wedged produce so
+                                                                            # a hung scraper never wedges the
+                                                                            # control plane (409s all runs/ops)
+
+
 def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     with _lock:
         rec["status"] = "running"
-    rc = proc.wait()
+    try:
+        rc = proc.wait(timeout=_RUN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        proc.kill()                                     # a hung produce must not hold the run slot forever
+        proc.wait()
+        rc = -1
+        log.error("produce run exceeded timeout; killed", extra={"extra_fields": {
+            "run_id": rec["run_id"], "timeout_s": _RUN_TIMEOUT}})
     counts = _capture_counts()                          # ledger totals after the run
     with _lock:
         rec["status"] = "succeeded" if rc == 0 else "failed"
@@ -200,8 +212,6 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
         scope = None if stage == "catalog" else known
     from stone_pipeline import lifecycle
     global _current_id
-    if (busy := lifecycle.active()):                    # a destructive op is mid-flight (checked BEFORE
-        return {"error": f"a {busy} is in progress; refusing to run"}, 409   # our lock, so locks never nest)
     with _lock:
         if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
             return _public(_runs[_current_id]), 409
@@ -211,7 +221,7 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
                "sources": scope if scope is not None else _resolve_sources(None),
                "stage": stage, "scope": scope, "progress": {}}
         _runs[run_id] = rec
-        _current_id = run_id
+        _current_id = run_id                       # claim the run slot FIRST -> run_in_progress() is now True
         # M2: keep only the newest _MAX_RUNS in memory (durable history is in the run_log). Evict the
         # oldest first (dicts preserve insertion order); never evict the in-flight run.
         while len(_runs) > _MAX_RUNS:
@@ -219,6 +229,17 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
             if oldest == _current_id:
                 break
             del _runs[oldest]
+    # Check the peer AFTER claiming (mirrors the op's claim-then-check). Claiming first closes the TOCTOU
+    # window: an op that starts now will see run_in_progress()==True and back off; if instead an op already
+    # holds the slot, we roll our claim back and refuse. One of the two always sees the other -- they can
+    # never both proceed (worst case both back off and retry).
+    if (busy := lifecycle.active()):
+        with _lock:
+            rec["status"] = "failed"
+            rec["finished_at"] = _now()
+            rec["error"] = f"a {busy} is in progress; refusing to run"
+            _current_id = None
+        return {"error": f"a {busy} is in progress; refusing to run"}, 409
     _stamp_last_run(rec, "running")                # list shows this source as running immediately
     try:
         (launch or _LAUNCHERS[rec["mode"]])(rec)

@@ -19,6 +19,7 @@ import atexit
 import hmac
 import json
 import os
+import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
@@ -221,6 +222,13 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # keep config.db durable: a periodic snapshot backstop + a best-effort snapshot on clean shutdown
     # (the lifecycle verbs also snapshot immediately after a pause/delist so a crash never loses one).
     snapshot.start_periodic(config_db, key=snapshot.config_key())
+    # snapshot config.db on stop. ECS stops a task with SIGTERM, which by default terminates WITHOUT
+    # running atexit -- so a SIGTERM handler is REQUIRED (mirrors the sync server), or a pause/delist set
+    # in the last snapshot window is lost on redeploy. atexit is kept as the clean-exit backstop.
+    def _snapshot_on_term(*_):
+        snapshot.save_config(config_db)
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, _snapshot_on_term)
     atexit.register(lambda: snapshot.save_config(config_db))
     from stone_pipeline import lifecycle
     lifecycle.enable_config_snapshots()   # now a pause/delist also snapshots immediately (server context only)
