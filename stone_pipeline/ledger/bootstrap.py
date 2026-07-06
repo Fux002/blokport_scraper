@@ -123,7 +123,8 @@ def seed_products(ledger: Ledger, path: str | Path | None = None) -> int:
 
 def attribute_id(ledger: Ledger, category: str, value: str) -> str | None:
     """Resolve a canonical attribute name to its Medusa id (the render-time lookup
-    products and combinations use). Returns None if not seeded or not synced."""
+    products and combinations use). Returns None if the attribute is not seeded (the query applies no
+    state filter -- attributes are never moved out of 'synced', so a seeded id is always resolvable)."""
     row = ledger.execute(
         "SELECT medusa_id FROM attribute WHERE category = ? AND value = ?",
         (category, value),

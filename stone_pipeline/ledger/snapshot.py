@@ -145,9 +145,8 @@ def start_periodic(ledger_path: str | Path, env: str = ENV_NAME,
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Ops/migration CLI: `python -m stone_pipeline.ledger.snapshot save|restore`. `save` is the one to
-    run on the CURRENT (EFS) task before the volume cutover, so the fresh local-disk task can restore
-    the acked ids."""
+    """Ops/migration CLI: `python -m stone_pipeline.ledger.snapshot save|restore`. `save` snapshots the
+    ledger to S3; `restore` reseeds a fresh local-disk task from that snapshot (the acked ids)."""
     import sys
 
     from stone_pipeline.ledger import writethrough
