@@ -23,7 +23,10 @@ from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("sync_variants_base")
 
-BASE = SETTINGS.paths.workspace_root / "from_medusa" / "development" / "variants_export_base.csv"
+# FND-04: derive the env folder like every other from_medusa file (from_medusa/<env>/), never a
+# hardcoded 'development' -- else a production run reads/writes this committed source-of-truth seed under
+# the dev folder. from_medusa_dir follows ENV_NAME, so dev and prod each use their own base.
+BASE = SETTINGS.paths.from_medusa_dir / "variants_export_base.csv"
 FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
 # base carries exactly the upload columns and NO Medusa Id (Medusa mints ids on import)
 COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
