@@ -7,8 +7,13 @@ slugs are stable functions of the surrogate key, so the API client upserts on th
 external id (the handle), never blind-inserts, which makes a re-scrape idempotent.
 
 The HTTP client is the documented integration point; it is dry-run by default and
-imported lazily so the package runs without backend credentials. Wiring it is a
-later milestone, not a redesign.
+imported lazily so the package runs without backend credentials.
+
+SUPERSEDED: the live Medusa integration is now the PULL-model ledger sync (ledger/sync.py
++ the /sync/v1 server) -- Medusa pulls deltas and acks ids back. This push-based ImportSink
+is kept only as the documented API-sink seam (and its M12 test); the production emit writes
+CSVs and the ledger serves them. Do not wire the push path without first confirming push is
+still wanted over pull.
 """
 
 from __future__ import annotations
