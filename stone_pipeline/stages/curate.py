@@ -621,6 +621,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 seen_leaf.add(key)
                 result.backbone_updates.append({
                     "variety": row.variation_name or "",
+                    "stone_type": row.type_name or "",   # disambiguates same-named varieties (granite vs quartzite)
                     "attribute": attribute,
                     "add_value": value,
                     "currently_allowed": g.nearest_existing or "",
@@ -769,10 +770,11 @@ def write_curation(result: CurationResult) -> None:
     from stone_pipeline.stages import decisions
     decisions.write_confirm_file(result.pending_confirm)
     decisions.save_rejected(result.rejected)
-    if result.backbone_updates:   # value changes to apply to the backbones (apply artifact, not review)
-        _write_csv(additions / "backbone_value_updates.csv",
-                   ["variety", "attribute", "add_value", "currently_allowed", "match_method",
-                    "match_confidence", "verdict", "example_url"], result.backbone_updates)
+    if result.backbone_updates:   # human-readable audit of the leaf additions (the queue below is the surface)
+        _write_csv(additions / "backbone_value_updates.csv", decisions.LEAF_COLUMNS, result.backbone_updates)
+    # surface the leaf additions for operator review (:4200) -> approve grows the backbone overlay next run.
+    # Always called (empty clears the queue) so a resolved suggestion drops off, like the variety queue.
+    decisions.write_backbone_leaf_pending(result.backbone_updates)
     result.counts["uncertain_aliases"] = len(needs_review)
     result.counts["suspicious_names_skipped"] = len(result.suspicious_names)
     log.info("curation written", extra={"extra_fields": result.counts})

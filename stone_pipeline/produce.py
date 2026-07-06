@@ -11,9 +11,12 @@ produce guarantees it. No em dashes (design principle 2).
     python -m stone_pipeline.produce --sources zucchi     # ...that source only
     python -m stone_pipeline.produce --stage inventory    # fetch -> scrape -> stock-only refresh
     python -m stone_pipeline.produce --stage catalog      # NO scrape: just re-consolidate outputs
+    python -m stone_pipeline.produce --stage republish    # NO scrape: re-run pipeline + catalog from cache
 
-`--stage` / `--sources` pass straight through to build; only catalog-only skips the live scrape (it
-re-consolidates existing outputs). Ledger write-through is the caller's job (the runner sets it).
+`--stage` / `--sources` pass straight through to build; `catalog` and `republish` skip the live scrape
+and reuse the last scrape (catalog only consolidates; republish re-runs the whole pipeline + catalog, so
+an operator decision like a backbone-leaf approval releases the products it just made valid without a
+supplier re-fetch). Ledger write-through is the caller's job (the runner sets it).
 """
 
 from __future__ import annotations
@@ -24,6 +27,12 @@ from stone_pipeline import build
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("produce")
+
+
+# Stages that skip the live supplier fetch and reuse the last scrape in data/.
+_NO_SCRAPE_STAGES = ("catalog", "republish")
+# Stages that produced a catalog (so the cold-start + consistency reconcile guard applies).
+_CATALOG_STAGES = ("catalog", "all", "republish")
 
 
 def _fetch_inputs() -> None:
@@ -120,14 +129,16 @@ def main(argv: list[str] | None = None) -> int:
         return build.main(argv)   # let build report the unknown stage consistently
 
     _fetch_inputs()
-    # catalog-only re-consolidates existing outputs/; every other stage reads fresh scrape data.
-    if stage != "catalog":
+    # Stages that REUSE the last scrape instead of re-fetching suppliers: `catalog` (consolidate only) and
+    # `republish` (re-run the pipeline + catalog from cache, e.g. to release products a backbone-leaf
+    # approval just made valid). Every other stage pulls fresh supplier data first.
+    if stage not in _NO_SCRAPE_STAGES:
         if (rc := _live_scrape(sources)) != 0:
             log.error("produce aborted: live scrape failed",
                       extra={"extra_fields": {"rc": rc, "sources": sources or "all"}})
             return rc
     rc = build.main(argv)
-    if stage in ("catalog", "all"):
+    if stage in _CATALOG_STAGES:
         from stone_pipeline.ledger import writethrough
         if writethrough.enabled():
             # Cold-start stall guard (fail loud, not silent): if nothing typed, the whole catalogue is

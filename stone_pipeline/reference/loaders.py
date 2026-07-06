@@ -267,6 +267,31 @@ class Backbone:
             return None
         return candidates[0]
 
+    def apply_leaf_overlay(self, overlay: dict[tuple[str, str], dict[str, list[str]]]) -> int:
+        """Grow varieties' allowed sets from an operator-approved overlay, keyed by (norm name, norm
+        stone_type) -> {attribute: [values]}. Additive + idempotent: a value already allowed is skipped.
+        The committed backbone seed is never touched -- this only widens the in-memory sets, so dropping
+        the overlay restores the pristine tree. Returns how many (variety, value) pairs were added."""
+        fields = {"color": "colors", "finish": "finishes", "quality": "qualities"}
+        added = 0
+        for varieties in self.by_norm_name.values():   # every variety lives here; aliases point to the same objects
+            for variety in varieties:
+                adds = overlay.get((_norm(variety.variant), _norm(variety.stone_type)))
+                if not adds:
+                    continue
+                for attribute, values in adds.items():
+                    field_name = fields.get(attribute)
+                    if not field_name:
+                        continue
+                    target = getattr(variety, field_name)
+                    have = {_norm(x) for x in target}
+                    for value in values:
+                        if _norm(value) not in have:
+                            target.append(value)
+                            have.add(_norm(value))
+                            added += 1
+        return added
+
     def is_valid_leaf(self, variety: BackboneVariety, color: str, finish: str, quality: str) -> bool:
         """Set-membership validity (section 6A): a PRESENT colour, finish, or quality must each be in
         the variety's allowed set (an empty value passes). Names compared normalized so case never
@@ -560,8 +585,13 @@ class ReferenceData:
 
 def load_all() -> ReferenceData:
     from stone_pipeline.state.overrides import load_overrides
+    from stone_pipeline.config import decisions_store
 
     paths = SETTINGS.paths
+    # The effective backbone = the committed seed grown by the operator-approved leaf overlay (config.db).
+    # The seed file is never mutated; the overlay is applied in memory, here, in the one place ref is built.
+    backbone = load_backbone()
+    backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
     ref = ReferenceData(
         attributes=load_attributes(),
         # ONE combined export for every category; the category is the Key prefix, so
@@ -569,7 +599,7 @@ def load_all() -> ReferenceData:
         # that shares the stone-variety vocabulary.
         variants={c.name: load_variants(paths.export_file, c.name, key_prefix=c.name)
                   for c in CATEGORIES if c.shares_variety_vocab},
-        backbone=load_backbone(),
+        backbone=backbone,
         ports=load_ports(),
         units=load_units(),
         origin_map=load_origin_map(),

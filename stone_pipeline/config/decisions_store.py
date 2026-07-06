@@ -31,6 +31,11 @@ from stone_pipeline.config import store
 from stone_pipeline.matching import projections as proj
 
 _ACTIONS = ("mint", "reject", "alias")
+_PENDING_KINDS = ("variety", "attribute", "backbone_leaf")
+# The three vocabularies a backbone variety carries an allowed SET of; each maps to a leaf-decision
+# `attribute`. Value additions to these are what the backbone-leaf loop grows (all already in Medusa).
+_LEAF_ATTRIBUTES = ("color", "finish", "quality")
+_LEAF_ACTIONS = ("approve", "reject")
 
 
 def _now() -> str:
@@ -148,14 +153,108 @@ def set_attribute_id(kind: str, value: str, medusa_id: str) -> None:
         conn.commit()
 
 
+# -- backbone leaf-growth decisions (produce READS the overlay + decided set) --
+
+def backbone_leaf_overlay() -> dict[tuple[str, str], dict[str, list[str]]]:
+    """(variety_norm, stone_type_norm) -> {attribute: [display values]} for APPROVED leaf additions only.
+    This is the load-time overlay the backbone is grown with (loaders.Backbone.apply_leaf_overlay); the
+    committed seed JSON is never touched. Empty for a fresh store (no side effect: does not create the DB),
+    and rejected rows are absent (a reject is just 'do not add')."""
+    if not store.config_db_path().exists():
+        return {}
+    out: dict[tuple[str, str], dict[str, list[str]]] = {}
+    with closing(store.open_store()) as conn:
+        for r in conn.execute("SELECT variety_norm, stone_type_norm, attribute, value_display "
+                              "FROM backbone_leaf_decision WHERE action = 'approve'"):
+            key = (r["variety_norm"], r["stone_type_norm"])
+            out.setdefault(key, {}).setdefault(r["attribute"], []).append(r["value_display"])
+    return out
+
+
+def leaf_decided() -> set[tuple[str, str, str, str]]:
+    """(variety_norm, stone_type_norm, attribute, value_norm) for every DECIDED leaf suggestion (approve
+    OR reject), so the produce drops them from the pending queue -- a decided item stops reappearing."""
+    if not store.config_db_path().exists():
+        return set()
+    with closing(store.open_store()) as conn:
+        return {(r["variety_norm"], r["stone_type_norm"], r["attribute"], r["value_norm"])
+                for r in conn.execute("SELECT variety_norm, stone_type_norm, attribute, value_norm "
+                                      "FROM backbone_leaf_decision")}
+
+
+def _leaf_actions_by_ref() -> dict[str, str]:
+    """ref ('variety_norm|stone_type_norm|attribute|value_norm') -> action, for the UI to reflect a
+    between-runs decision on a still-pending row (mirrors variety `current_action`)."""
+    with closing(store.open_store()) as conn:
+        return {"|".join((r["variety_norm"], r["stone_type_norm"], r["attribute"], r["value_norm"])): r["action"]
+                for r in conn.execute("SELECT variety_norm, stone_type_norm, attribute, value_norm, action "
+                                      "FROM backbone_leaf_decision")}
+
+
+def set_backbone_leaf_decision(variety: str, stone_type: str, attribute: str, value: str,
+                               action: str) -> None:
+    """Record the operator's verdict on adding `value` (a colour/finish/quality Medusa already has) onto
+    `variety` (disambiguated by stone_type). approve -> the value joins the variety's allowed set as a
+    load-time overlay; reject -> never propose it again. The committed backbone seed is never touched."""
+    attribute = (attribute or "").strip().lower()
+    action = (action or "").strip().lower()
+    if attribute not in _LEAF_ATTRIBUTES:
+        raise InvalidDecision(f"leaf attribute must be one of {_LEAF_ATTRIBUTES}, got {attribute!r}")
+    if action not in _LEAF_ACTIONS:
+        raise InvalidDecision(f"leaf action must be approve|reject, got {action!r}")
+    if not (variety.strip() and value.strip()):
+        raise InvalidDecision("leaf decision needs a variety and a value")
+    with closing(store.open_store()) as conn:
+        conn.execute(
+            "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
+            "value_display, action, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(variety_norm, stone_type_norm, attribute, value_norm) DO UPDATE SET "
+            "value_display = excluded.value_display, action = excluded.action, decided_at = excluded.decided_at",
+            (_norm(variety), _norm(stone_type), attribute, _norm(value), value.strip(), action, _now()))
+        conn.commit()
+
+
+def _decide_leaf_from_payload(payload: dict, action: str) -> None:
+    set_backbone_leaf_decision(payload.get("variety", ""), payload.get("stone_type", ""),
+                               payload.get("attribute", ""), payload.get("add_value", ""), action)
+
+
+def approve_leaf_pending(verdict: str | None = None) -> int:
+    """Bulk-approve the still-UNDECIDED pending backbone-leaf suggestions, optionally only those with
+    `verdict` (e.g. 'likely_real'). Never re-flips a row the operator already decided (approve or reject).
+    Returns the count approved. The approvals apply to the tree on the next produce (the standard
+    'applies next produce' contract), and the decided rows drop off the queue on that run."""
+    n = 0
+    for item in list_pending("backbone_leaf"):
+        if item.get("current_action") is not None:      # already decided; do not re-flip
+            continue
+        if verdict and item.get("verdict") != verdict:
+            continue
+        _decide_leaf_from_payload(item, "approve")
+        n += 1
+    return n
+
+
+def decide_leaf_pending(ref: str, action: str) -> bool:
+    """Record one operator verdict (approve|reject) on the pending backbone-leaf suggestion identified by
+    `ref`. Reads the queued payload so the client need not resend the display fields. Returns False if no
+    such pending item (already decided or unknown ref)."""
+    payload = pending_payload("backbone_leaf", ref)
+    if payload is None:
+        return False
+    _decide_leaf_from_payload(payload, action)
+    return True
+
+
 # -- the pending review queue (produce WRITES it, the API READS it) -------------
 
 def replace_pending(kind: str, rows: list[dict]) -> None:
-    """Wholly replace the pending queue for `kind` ('variety'|'attribute') with this produce's undecided
-    items. A decided item simply is not in `rows`, so it stops appearing. Each row must carry `ref` (the
-    stable key) and `payload` (the JSON-able dict the UI renders); `sources` (list) is optional provenance."""
-    if kind not in ("variety", "attribute"):
-        raise InvalidDecision(f"pending kind must be variety|attribute, got {kind!r}")
+    """Wholly replace the pending queue for `kind` ('variety'|'attribute'|'backbone_leaf') with this
+    produce's undecided items. A decided item simply is not in `rows`, so it stops appearing. Each row must
+    carry `ref` (the stable key) and `payload` (the JSON-able dict the UI renders); `sources` (list) is
+    optional provenance."""
+    if kind not in _PENDING_KINDS:
+        raise InvalidDecision(f"pending kind must be one of {_PENDING_KINDS}, got {kind!r}")
     now = _now()
     # Two surfaced items can share a ref: norm(name) collides (e.g. 'Imperial White' typed granite AND
     # quartzite clean to the same name; 'Blue-Carara' vs 'Blue Carara' likewise). A decision is keyed by
@@ -172,10 +271,20 @@ def replace_pending(kind: str, rows: list[dict]) -> None:
         conn.commit()
 
 
+def pending_payload(kind: str, ref: str) -> dict | None:
+    """The stored payload for one pending item, or None. Lets the API act on a queued suggestion by its
+    ref without the client resending the display fields."""
+    with closing(store.open_store()) as conn:
+        r = conn.execute("SELECT payload FROM review_pending WHERE kind = ? AND ref = ?",
+                         (kind, ref)).fetchone()
+    return json.loads(r["payload"]) if r else None
+
+
 def list_pending(kind: str) -> list[dict]:
     """The pending items for `kind`, each = its payload plus `sources` and the `current_action` already
     recorded for it (so the UI can show a decision made between runs, applied on the next produce)."""
     actions = variety_actions() if kind == "variety" else {}
+    leaf_actions = _leaf_actions_by_ref() if kind == "backbone_leaf" else {}
     with closing(store.open_store()) as conn:
         rows = conn.execute(
             "SELECT ref, payload, sources FROM review_pending WHERE kind = ? ORDER BY ref", (kind,)
@@ -187,5 +296,7 @@ def list_pending(kind: str) -> list[dict]:
         if kind == "variety":
             item["current_action"] = actions.get(r["ref"], {}).get("action")
             item["current_alias_of"] = actions.get(r["ref"], {}).get("alias_of")
+        elif kind == "backbone_leaf":
+            item["current_action"] = leaf_actions.get(r["ref"])
         out.append(item)
     return out

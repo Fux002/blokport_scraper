@@ -46,7 +46,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-STAGES = ("scrape", "catalog", "inventory", "all")
+# Kept in sync with build.STAGES (a test locks the two together). Duplicated here on purpose: the config
+# server validates the :4200 trigger WITHOUT importing the heavy pipeline (build pulls catalog/run/inventory).
+# `republish` = re-run pipeline + catalog from the last scrape, no supplier re-fetch (release approved products).
+STAGES = ("scrape", "catalog", "republish", "inventory", "all")
 
 
 def _public(rec: dict) -> dict:
