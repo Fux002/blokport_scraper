@@ -131,6 +131,23 @@ def gate_state(ledger: Ledger) -> tuple[int, int]:
     )
 
 
+def typing_health(ledger: Ledger) -> tuple[int, int, int]:
+    """(vocab, produced, typed) for the cold-start stall guard. Typing is a HARD serve gate (an untyped
+    variety never serves, and neither do its products), so a produce that typed NOTHING has silently
+    stalled the whole catalogue:
+      vocab     seeded `type` attribute values (from the Medusa attributes export). 0 -> nothing types.
+      produced  variations in this produce's full set (in_full = 1).
+      typed     of those, how many carry a canonical type.
+    typed == 0 with produced > 0 (or vocab == 0) is a broken cold start, NOT the expected pass-1 hold."""
+    def n(sql: str) -> int:
+        return ledger.execute(sql).fetchone()["n"]
+    return (
+        n("SELECT COUNT(*) n FROM attribute WHERE category = 'type'"),
+        n("SELECT COUNT(*) n FROM variation WHERE in_full = 1"),
+        n("SELECT COUNT(*) n FROM variation WHERE in_full = 1 AND type IS NOT NULL AND type != ''"),
+    )
+
+
 # --- GET /sync/<type>?status=ready --------------------------------------------
 
 def _sub_limit(limit: int | None) -> str:

@@ -222,13 +222,26 @@ def reset(sources=None, hard=False) -> tuple[dict, int]:
 def remove_source(name: str) -> tuple[dict, int]:
     """Stage 2 vendor removal (Remove permanently): guarded 409 while the source still has live (qty>0)
     products (take it offline first), then purge its qty-0 products (tombstoned) and delete its config
-    row. Returns {removed_source, config_removed, purged, external_ids}."""
+    row. Returns {removed_source, config_removed, purged, external_ids}.
+
+    ISS-4: removal tombstones the products; to bring the source BACK, re-add it AND run a `reset` (soft)
+    before the next produce. A plain re-run + re-pull does NOT rebuild -- the removed products are already
+    acked/synced, so nothing re-serves until a reset re-marks them dirty. The re-serve happens via reset,
+    never automatically off a re-scrape."""
     from stone_pipeline.config import store
-    names, codes, err = _resolve([name])
-    if err:
-        return err
+    # ISS-2: resolve from the CONFIG STORE, not the adapter registry. A config-only source (added via PUT,
+    # or a stale row whose coded adapter is gone) still has a config.db row + SKU code, so it must be
+    # removable even though it is not in the runnable adapter registry that _resolve keys on. 404 only when
+    # there is genuinely no config row for it.
+    row = store.get_row(name)
+    if not row:
+        return {"error": f"unknown source {name!r}"}, 404
+    src_code = (row["source_code"] or "").strip()
+    codes = [src_code] if src_code else []
 
     def work(lg, sync):
+        if not codes:                        # no SKU code -> no products to scope; pure config teardown
+            return {"product": 0, "external_ids": []}
         live = sync.live_products(lg, source_codes=codes)
         if live:
             raise _Busy(f"{name!r} still has {live} live product(s); take it offline first")

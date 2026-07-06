@@ -380,3 +380,25 @@ def test_second_trigger_while_running_is_refused_409():
     assert code1 == 202
     rec2, code2 = runner.start_run(launch=lambda r: r.update(status="running"))
     assert code2 == 409 and rec2["run_id"] == rec1["run_id"]
+
+
+def test_remove_config_only_source_is_deletable(tmp_path, monkeypatch):
+    # ISS-2: a source with a config row but NO coded adapter (added via PUT, or a stale row whose adapter
+    # was removed) must be REMOVABLE. remove_source resolves its code from config.db, not the runnable
+    # adapter registry, so it no longer 400s "unknown source" the way /run correctly does.
+    from stone_pipeline.config import store
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    store.upsert_row({"source": "zztest", "adapter": "zztest", "source_code": "zzt", "vendor": "Junk"})
+    assert store.get_row("zztest") is not None
+    body, code = lifecycle.remove_source("zztest")
+    assert code == 200 and body["config_removed"] is True            # not 400 'unknown source'
+    assert store.get_row("zztest") is None                           # config row gone
+
+
+def test_remove_unknown_source_is_404(tmp_path, monkeypatch):
+    from stone_pipeline.config import store  # noqa: F401  (ensures the isolated config db is used)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    body, code = lifecycle.remove_source("does_not_exist")
+    assert code == 404
