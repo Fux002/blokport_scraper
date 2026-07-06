@@ -255,20 +255,6 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
     return _public(rec), 202
 
 
-def _source_codes(names) -> list[str]:
-    """Resolve source NAMES (polonine) to the product SKU prefixes / source_codes (pol) the ledger
-    stores, dropping any unknown name. Empty result for an all-unknown request (caller returns 400)."""
-    from stone_pipeline.config.sources import load_source
-    codes = []
-    for n in names or []:
-        try:
-            codes.append(load_source(n).source_code)
-        except Exception:
-            pass
-    return codes
-
-
-
 def get_run(run_id: str) -> dict | None:
     with _lock:
         rec = _runs.get(run_id)

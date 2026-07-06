@@ -107,21 +107,26 @@ def _exclusive(name: str):
 
 
 def _resolve(sources, *, require_non_empty: bool = True):
-    """Validate + translate a sources request ONCE (replaces the copy in every verb). Returns
-    (names, codes, None) on success, or (None, None, (error, status)) to return directly.
-      names  = the known source names (registry-validated); an unknown name is a 400, never dropped.
+    """Validate + translate a sources request ONCE against the CONFIG STORE -- the single authority for
+    'does this source exist'. Every lifecycle op (reset / purge / delist / remove) resolves identically,
+    so a config-only source (one with no coded adapter, e.g. an admin-added or junk row) is uniformly
+    addressable and removable, with no per-endpoint special case. The adapter registry stays ONLY in
+    runner._resolve_sources for RUNNING -- you cannot scrape without an adapter, which is a genuinely
+    separate capability check, not a second identity layer. Returns (names, codes, None) on success, or
+    (None, None, (error, status)) to return directly.
+      names  = the requested source names (all exist in the store; an unknown one is a 404, never dropped).
       codes  = their source_codes (SKU prefixes) for ledger scoping.
       None sources -> global scope (names=[], codes=None) when require_non_empty is False."""
-    from stone_pipeline.config import runner
+    from stone_pipeline.config import store
     if not sources:
         if require_non_empty:
             return None, None, ({"error": "requires an explicit sources list"}, 400)
         return [], None, None
-    known = runner._resolve_sources(sources)
-    unknown = [s for s in sources if s not in set(known)]
+    rows = store.read_sources()
+    unknown = [s for s in sources if s not in rows]
     if unknown:
-        return None, None, ({"error": f"unknown source(s): {unknown}"}, 400)
-    return known, runner._source_codes(known), None
+        return None, None, ({"error": f"unknown source(s): {unknown}"}, 404)
+    return list(sources), [rows[s].source_code for s in sources], None
 
 
 def _ledger_op(name: str, work):
@@ -229,19 +234,14 @@ def remove_source(name: str) -> tuple[dict, int]:
     acked/synced, so nothing re-serves until a reset re-marks them dirty. The re-serve happens via reset,
     never automatically off a re-scrape."""
     from stone_pipeline.config import store
-    # ISS-2: resolve from the CONFIG STORE, not the adapter registry. A config-only source (added via PUT,
-    # or a stale row whose coded adapter is gone) still has a config.db row + SKU code, so it must be
-    # removable even though it is not in the runnable adapter registry that _resolve keys on. 404 only when
-    # there is genuinely no config row for it.
-    row = store.get_row(name)
-    if not row:
-        return {"error": f"unknown source {name!r}"}, 404
-    src_code = (row["source_code"] or "").strip()
-    codes = [src_code] if src_code else []
+    # ISS-5: resolve via the ONE store-based _resolve (same as reset/purge/delist), so a config-only
+    # source (no coded adapter) is removable. Every store row carries a source_code (SourceConfig
+    # back-fills it), so `codes` is always the source's SKU prefix. 404 when there is no config row.
+    names, codes, err = _resolve([name])
+    if err:
+        return err
 
     def work(lg, sync):
-        if not codes:                        # no SKU code -> no products to scope; pure config teardown
-            return {"product": 0, "external_ids": []}
         live = sync.live_products(lg, source_codes=codes)
         if live:
             raise _Busy(f"{name!r} still has {live} live product(s); take it offline first")
