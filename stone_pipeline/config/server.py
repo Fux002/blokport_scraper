@@ -133,6 +133,9 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         if not isinstance(body, dict):
             return 400, {"error": "body must be a JSON object of source settings"}
         body = {**body, "source": name}   # the path name is authoritative
+        err = _validate_source_put(name, body)
+        if err:
+            return err
         store.upsert_row(body)
         return 200, store.get_row(name)
     if method == "DELETE":
@@ -142,6 +145,24 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         result, code = lifecycle.remove_source(name)
         return code, result
     return 405, {"error": f"method {method} not allowed on a source"}
+
+
+def _validate_source_put(name: str, body: dict) -> tuple[int, dict] | None:
+    """Guard the admin 'add/edit source' PUT so it can only create a RUNNABLE, non-colliding source.
+    A source with no coded adapter can neither run nor be scoped (ISS-3), so it must never become a
+    live-looking config row; a duplicate source_code collides SKU provenance for clear/remove (ISS-1).
+    Returns an (status, error) tuple to short-circuit, or None when the source is valid."""
+    from stone_pipeline import adapters
+    if name not in adapters.REGISTRY:
+        return 400, {"error": f"no coded adapter for source {name!r}; a runnable source needs a coded "
+                     f"adapter (fetcher + adapter map). Known adapters: {sorted(adapters.REGISTRY)}"}
+    code = (body.get("source_code") or "").strip()
+    if code:
+        for row in store.list_rows():
+            if row["source"] != name and (row["source_code"] or "").strip().casefold() == code.casefold():
+                return 400, {"error": f"source_code {code!r} already used by source {row['source']!r}; "
+                             "codes must be unique (they scope SKUs for removal)"}
+    return None
 
 
 def _expected_token() -> str:

@@ -220,3 +220,32 @@ def test_run_trigger_matches_the_admin_contract(tmp_path, monkeypatch):
         assert runner.start_run(launch=lambda r: r.update(status="succeeded"))[1] == 202
     finally:
         runner._runs.clear(); runner._current_id = None
+
+
+def test_put_rejects_a_source_with_no_coded_adapter(tmp_path, monkeypatch):
+    # ISS-3: an admin-added source whose name has no coded adapter can neither run nor be SKU-scoped, so
+    # it must be refused up front instead of becoming a dead, live-looking config row.
+    from stone_pipeline.config import server
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))
+    code, body = server.dispatch("PUT", ["sources", "ghost_vendor"],
+                                 {"adapter": "ghost", "source_code": "gho", "vendor": "Ghost"})
+    assert code == 400 and "coded adapter" in body["error"]
+    assert store.get_row("ghost_vendor") is None                     # never created
+
+
+def test_put_rejects_a_duplicate_source_code(tmp_path, monkeypatch):
+    # ISS-1: two sources sharing a source_code collide SKU provenance (clear/remove scope by code), so a
+    # duplicate is refused. 'varsha' is a real coded adapter; giving it polonine's code 'pol' must 400.
+    from stone_pipeline.config import server
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))              # polonine=pol, varsha=var
+    code, body = server.dispatch("PUT", ["sources", "varsha"],
+                                 {"adapter": "varsha", "source_code": "pol", "vendor": "V"})
+    assert code == 400 and "source_code" in body["error"]
+    assert store.get_row("varsha")["source_code"] == "var"           # unchanged
+
+    # editing a real coded source with its OWN (unique) code still works
+    code, body = server.dispatch("PUT", ["sources", "varsha"],
+                                 {"adapter": "varsha", "source_code": "var", "vendor": "Renamed"})
+    assert code == 200 and body["vendor"] == "Renamed"
