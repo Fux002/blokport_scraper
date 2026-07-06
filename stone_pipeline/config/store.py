@@ -116,13 +116,36 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("
                  "kind TEXT NOT NULL, value_norm TEXT NOT NULL, value_display TEXT NOT NULL DEFAULT '', "
                  "medusa_id TEXT NOT NULL, decided_at TEXT NOT NULL, PRIMARY KEY (kind, value_norm))")
-    # The pending review QUEUE: what the last produce surfaced as still-undecided (varieties + attributes),
-    # so the config API can serve it to the admin UI BETWEEN runs without reading the ephemeral review/
-    # dir. Fully rewritten each produce (a decided item just stops reappearing). `payload` is the enriched
-    # JSON row; `sources` is a JSON array of the source(s) that proposed it (provenance).
+    # The pending review QUEUE: what the last produce surfaced as still-undecided (varieties, attributes,
+    # backbone-leaf additions), so the config API can serve it to the admin UI BETWEEN runs without reading
+    # the ephemeral review/ dir. Fully rewritten each produce (a decided item just stops reappearing).
+    # `payload` is the enriched JSON row; `sources` is a JSON array of the source(s) that proposed it.
+    # `kind` is validated in the application (decisions_store.replace_pending), NOT pinned in a DB CHECK,
+    # so a new decision kind never needs a schema change.
     conn.execute("CREATE TABLE IF NOT EXISTS review_pending ("
-                 "kind TEXT NOT NULL CHECK (kind IN ('variety','attribute')), ref TEXT NOT NULL, "
+                 "kind TEXT NOT NULL, ref TEXT NOT NULL, "
                  "payload TEXT NOT NULL, sources TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (kind, ref))")
+    # migrate DBs created before the queue was generic: drop the legacy CHECK(kind IN ...) (SQLite cannot
+    # ALTER a CHECK, so rebuild the table carrying its rows across). No-op once the constraint is gone.
+    _pending = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'review_pending'").fetchone()
+    if _pending and "CHECK" in (_pending["sql"] or ""):
+        conn.executescript(
+            "CREATE TABLE review_pending__new (kind TEXT NOT NULL, ref TEXT NOT NULL, "
+            "payload TEXT NOT NULL, sources TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (kind, ref));"
+            "INSERT INTO review_pending__new SELECT kind, ref, payload, sources, updated_at FROM review_pending;"
+            "DROP TABLE review_pending;"
+            "ALTER TABLE review_pending__new RENAME TO review_pending;")
+    # Backbone leaf-growth decisions: the operator APPROVES adding a value Medusa already has (quality
+    # B/C/D, a colour/finish) onto a variety whose backbone does not allow it yet, disambiguated by
+    # stone_type. An approved row becomes a LOAD-TIME OVERLAY on the backbone (loaders.Backbone.
+    # apply_leaf_overlay); the committed seed JSON is NEVER mutated, so dropping these rows restores the
+    # pristine tree. reject == never propose it again. Durable in config.db, so approvals survive a restart.
+    conn.execute("CREATE TABLE IF NOT EXISTS backbone_leaf_decision ("
+                 "variety_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL DEFAULT '', "
+                 "attribute TEXT NOT NULL, value_norm TEXT NOT NULL, value_display TEXT NOT NULL DEFAULT '', "
+                 "action TEXT NOT NULL CHECK (action IN ('approve','reject')), decided_at TEXT NOT NULL, "
+                 "PRIMARY KEY (variety_norm, stone_type_norm, attribute, value_norm))")
     conn.commit()
 
 

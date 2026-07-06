@@ -5,6 +5,7 @@
     python -m stone_pipeline.build --sources zucchi         # ONE source -> catalog -> verify
     python -m stone_pipeline.build --stage scrape --sources zucchi   # that source's products+stock ONLY
     python -m stone_pipeline.build --stage catalog          # re-consolidate the SHARED catalog + verify
+    python -m stone_pipeline.build --stage republish        # re-run pipeline + catalog from the LAST scrape
     python -m stone_pipeline.build --stage inventory        # cheap stock-only refresh, all sources
     python -m stone_pipeline.build --stage inventory --sources zucchi   # one source's stock only
 
@@ -37,7 +38,12 @@ from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("build")
 
-STAGES = ("scrape", "catalog", "inventory", "all")
+# `republish` re-runs the pipeline + catalog against whatever data/ already holds (the last scrape). At
+# the BUILD level it is identical to `all` (build never fetches suppliers -- produce does); the two only
+# diverge in produce.py, where `republish` skips the live scrape. It exists so an operator decision (e.g.
+# a backbone-leaf approval) can release the products it just made valid without a costly supplier re-fetch.
+STAGES = ("scrape", "catalog", "republish", "inventory", "all")
+_FULL_STAGES = ("all", "republish")   # run BOTH the per-source pipeline and the shared catalog
 
 
 def _arg(argv: list[str], flag: str) -> str | None:
@@ -122,15 +128,16 @@ def main(argv: list[str] | None = None) -> int:
     # The dev seed (variants_export_base.csv) is maintained at the END of catalog.run as a copy of the
     # freshly-built 1_variants_full -- base IS the full list, one source of truth, no second path here.
 
-    # 1. scrape -> per-source products + canonical (matches against the current export)
-    if stage in ("scrape", "all"):
+    # 1. scrape -> per-source products + canonical (matches against the current export). Reads whatever is
+    #    in data/ -- the live supplier fetch is produce's job, not this stage's.
+    if stage in ("scrape",) + _FULL_STAGES:
         if (rc := _scrape(sources)) != 0:
             log.error("build aborted: scrape stage failed",
                       extra={"extra_fields": {"rc": rc, "sources": sources}})
             return rc
     # 2. consolidate variants + products + combinations, then run the consistency gate (catalog
     #    is SHARED across sources, so it always runs full even for a scoped scrape).
-    if stage in ("catalog", "all"):
+    if stage in ("catalog",) + _FULL_STAGES:
         if (rc := _catalog()) != 0:
             log.error("build aborted: catalog/consistency gate failed", extra={"extra_fields": {"rc": rc}})
             return rc

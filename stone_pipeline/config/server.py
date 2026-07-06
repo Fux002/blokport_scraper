@@ -21,7 +21,7 @@ import json
 import os
 import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from stone_pipeline.config import store
 from stone_pipeline.core import logfmt
@@ -122,6 +122,9 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?}
         #   GET /config/v1/review/attributes             pending attribute values (need a Medusa id)
         #   PUT /config/v1/review/attributes/<value>     {"kind":..., "medusa_id":...}
+        #   GET  /config/v1/review/backbone              pending leaf additions (value not yet on a variety)
+        #   POST /config/v1/review/backbone/approve_all  {"verdict"?: "likely_real"}  bulk-approve
+        #   PUT  /config/v1/review/backbone/<ref>        {"action":"approve"|"reject"}  one verdict
         from stone_pipeline.config import decisions_store, varieties
         if len(segments) == 2 and segments[1] == "variants" and method == "GET":
             return 200, {"variants": decisions_store.list_pending("variety")}
@@ -149,7 +152,23 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
             return 200, {"value": segments[2], "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
-        return 404, {"error": "expected GET/PUT /config/v1/review/{variants,attributes}[/<ref>]"}
+        if len(segments) == 2 and segments[1] == "backbone" and method == "GET":
+            return 200, {"backbone": decisions_store.list_pending("backbone_leaf")}
+        if len(segments) == 3 and segments[1] == "backbone" and segments[2] == "approve_all" and method == "POST":
+            # the primary UX: approve every pending leaf suggestion (or only one verdict, e.g. likely_real).
+            verdict = body.get("verdict") if isinstance(body, dict) else None
+            return 200, {"approved": decisions_store.approve_leaf_pending(verdict)}
+        if len(segments) == 3 and segments[1] == "backbone" and method == "PUT":
+            if not isinstance(body, dict):
+                return 400, {"error": "body must be a JSON object {action}"}
+            try:
+                ok = decisions_store.decide_leaf_pending(unquote(segments[2]), body.get("action", ""))
+            except decisions_store.InvalidDecision as e:
+                return 400, {"error": str(e)}
+            if not ok:
+                return 404, {"error": f"no pending backbone-leaf suggestion for ref {segments[2]!r}"}
+            return 200, {"ref": unquote(segments[2]), "action": body.get("action")}
+        return 404, {"error": "expected GET/PUT/POST /config/v1/review/{variants,attributes,backbone}[/<ref>]"}
     if segments and segments[0] == "varieties":
         # existing variety names (+ stone_type) for the review alias-to dropdown.
         if method == "GET":

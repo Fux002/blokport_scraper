@@ -28,6 +28,10 @@ from stone_pipeline.matching import projections as proj
 ATTR_COLUMNS = ["medusa_id", "kind", "value", "count", "suggested_value", "action"]
 CONFIRM_COLUMNS = ["confirm", "variant", "stone_type", "color", "nearest_existing", "score", "model_prob"]
 _PENDING_VARIETY_FIELDS = [c for c in CONFIRM_COLUMNS if c != "confirm"]   # 'confirm' now lives as `action`
+# The backbone-leaf suggestion: a value Medusa already has, not yet allowed on this variety. Same fields
+# in the CSV audit artifact and the review-queue payload, one source of truth.
+LEAF_COLUMNS = ["variety", "stone_type", "attribute", "add_value", "currently_allowed",
+                "match_method", "match_confidence", "verdict", "example_url"]
 
 
 def _norm(s: str) -> str:
@@ -103,6 +107,28 @@ def write_attributes_to_add(pending: list[dict]) -> int:
              "sources": r.get("sources")}
             for r in pending if (r.get("kind") and r.get("value"))]
     decisions_store.replace_pending("attribute", rows)
+    return len(rows)
+
+
+# -- backbone leaf-growth suggestions ------------------------------------------
+
+def write_backbone_leaf_pending(pending: list[dict]) -> int:
+    """Replace the pending BACKBONE-LEAF queue with this run's still-undecided value additions (a value
+    Medusa already has, not yet allowed on the variety). A tuple the operator already approved or rejected
+    is dropped, so it stops appearing (mirrors the variety/attribute queues). Returns the count."""
+    decided = decisions_store.leaf_decided()
+    rows = []
+    for r in pending:
+        variety, attribute, value = r.get("variety", ""), r.get("attribute", ""), r.get("add_value", "")
+        if not (variety and attribute and value):
+            continue
+        keytuple = (_norm(variety), _norm(r.get("stone_type", "")), attribute, _norm(value))
+        if keytuple in decided:
+            continue
+        rows.append({"ref": "|".join(keytuple),
+                     "payload": {c: r.get(c, "") for c in LEAF_COLUMNS},
+                     "sources": r.get("sources")})
+    decisions_store.replace_pending("backbone_leaf", rows)
     return len(rows)
 
 
