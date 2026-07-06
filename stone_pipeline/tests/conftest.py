@@ -34,6 +34,19 @@ _DATA_DEPENDENT_MODULES = {
     "test_m8_emit", "test_m12_production", "test_spine_end_to_end", "test_tiles",  # need a real local scrape
 }
 
+# Modules that are MOSTLY pure unit tests but hold a FEW export/scrape-dependent tests. Skipping the whole
+# module (above) would drop real unit coverage (e.g. test_m11_adapters is 16 tests, one needs a scrape;
+# test_curate is 13, two need the export), so skip JUST the data-dependent tests by name and keep the rest
+# running as a real CI gate. Node id = "module::test_name". Extend as new such tests land.
+_DATA_DEPENDENT_TESTS = {
+    "test_curate::test_alias_addition_preserves_and_augments",
+    "test_curate::test_borderline_gap_becomes_alias_candidate_not_new_variant",
+    "test_curate::test_alias_decision_routes_spelling_onto_target_and_mints_nothing",
+    "test_inventory::test_inventory_only_run_skips_images_products_and_canonical",
+    "test_ledger_writethrough::test_writethrough_products_match_emitted_csv",
+    "test_m11_adapters::test_marenostone_routes_generic_to_gaps_not_guesses",
+}
+
 
 def _pipeline_data_present() -> bool:
     """True when the operator's local pipeline data is present: the from_medusa variants export AND at
@@ -49,5 +62,6 @@ def pytest_collection_modifyitems(config, items):
         return
     skip = pytest.mark.skip(reason="needs local from_medusa export + a scrape (gitignored, absent in CI)")
     for item in items:
-        if item.module.__name__.rsplit(".", 1)[-1] in _DATA_DEPENDENT_MODULES:
+        mod = item.module.__name__.rsplit(".", 1)[-1]
+        if mod in _DATA_DEPENDENT_MODULES or f"{mod}::{item.originalname}" in _DATA_DEPENDENT_TESTS:
             item.add_marker(skip)
