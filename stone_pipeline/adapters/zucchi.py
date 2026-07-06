@@ -36,7 +36,7 @@ class ZucchiAdapter(AdapterBase):
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
         "raw_dimensions": lambda r: _dims(r),   # lambda defers to _dims defined below
-        "raw_weight": lambda r: AdapterBase.clean(r.get("weight_kg_net")),
+        "raw_weight": lambda r: _per_piece_kg(r),   # per-BUNDLE net -> canonical PER-PIECE (see below)
         "raw_total_m2": lambda r: AdapterBase.clean(r.get("area_m2")),
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
         "raw_description": lambda r: AdapterBase.clean(r.get("description")),
@@ -50,6 +50,21 @@ def _dims(r: dict) -> str:
     if not length and not height:
         return ""
     return f"length={length}m;height={height}m"
+
+
+def _per_piece_kg(r: dict) -> str:
+    """Zucchi reports weight_kg_net for the whole BUNDLE; normalize to the canonical PER-PIECE weight by
+    dividing by slab_count. This is the ONLY place that knows zucchi's per-bundle format, so the shared
+    pipeline stays agnostic (source-isolation invariant). Blank when slab_count is missing/0 -> derive
+    synthesizes a per-piece value. The health gate bounds weight_kg_net + slab_count, so a source drift
+    that would break this per-bundle assumption aborts before ingest rather than silently mis-scaling."""
+    net = AdapterBase.clean(r.get("weight_kg_net"))
+    count = AdapterBase.clean(r.get("slab_count"))
+    try:
+        n, c = float(net), float(count)
+    except (TypeError, ValueError):
+        return ""
+    return str(round(n / c, 3)) if (n > 0 and c > 0) else ""
 
 
 ADAPTER = ZucchiAdapter()
