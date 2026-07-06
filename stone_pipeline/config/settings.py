@@ -345,10 +345,10 @@ class ImagesConfig:
 
 @dataclass(frozen=True)
 class MatchingConfig:
-    """Advanced variation tiers (section 5A.2 tiers 7 and 8). Both off by default;
-    they are heavy optional dependencies and feed review only / the residual only."""
+    """Advanced variation tier (section 5A.2 tier 8, semantic). Off by default; a heavy optional
+    dependency that feeds review only. (Tier 7 / Splink retired -- the alias_resolver logistic model
+    fills the tier-7 role.)"""
 
-    enable_splink: bool = False  # tier 7, residual probabilistic linkage
     enable_semantic: bool = False  # tier 8, embedding nearest-neighbour suggestion
     semantic_review_floor: float = 60.0  # below this a semantic hit is not even suggested
     semantic_model: str = "all-MiniLM-L6-v2"
