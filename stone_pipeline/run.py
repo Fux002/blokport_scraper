@@ -12,6 +12,7 @@ later milestones.
 from __future__ import annotations
 
 import csv
+import json
 import os
 import sys
 from collections import Counter
@@ -43,6 +44,7 @@ from stone_pipeline.stages import (
     health,
     images,
     keys_dedupe,
+    magnitude_drift,
     match_variation,
     normalize,
     product_state,
@@ -260,6 +262,23 @@ def run_source(
     # Stage 6: derivation
     source_cfg = load_source(source)
     derive.run(rows, ref, source_cfg)
+
+    # Canonical magnitude-drift gate: after derive populates the physical fields (weight/dims), catch a
+    # unit/normalization rescale before it reaches the catalog. Source-agnostic (canonical fields only),
+    # self-tuning per-source baseline. Skipped for an inventory-only refresh (no product magnitudes move).
+    if not inventory_only:
+        mag_status, mag_report = magnitude_drift.check(rows, source)
+        manifest.magnitude_status = mag_status
+        (layout.diagnostics / "magnitude_drift.json").write_text(
+            json.dumps(mag_report, indent=2, sort_keys=True), encoding="utf-8")
+        if mag_status == magnitude_drift.FAILED:
+            run_log.error("magnitude drift FAILED; aborting before emit",
+                          extra={"extra_fields": {"drift": mag_report["drift"]}})
+            manifest.write(layout.diagnostics / "manifest.json")
+            write_steps_md(layout, source=source, run_id=run_id, health=manifest.health_status,
+                           counts={}, gates=manifest.gate_status)
+            raise SystemExit(2)
+
     # Stage 7: images  (skipped for an inventory-only refresh — stock never touches images)
     img_stats = images.ImageStats() if inventory_only else images.run(rows)
     # Stage 8: constants

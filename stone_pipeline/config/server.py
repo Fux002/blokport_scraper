@@ -156,9 +156,17 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             from stone_pipeline.config import varieties
             return 200, {"varieties": varieties.list_all()}
         return 405, {"error": "GET /config/v1/varieties"}
+    if segments and segments[0] == "adapters":
+        # the coded adapters available to run (the auto-discovered REGISTRY). The :4200 admin turns the
+        # source "adapter" field into a validated dropdown from this, so it can proactively block adding a
+        # source with no coded adapter (ISS-3) instead of relying on the PUT 400. Agnostic: just the list.
+        if method == "GET":
+            from stone_pipeline import adapters
+            return 200, {"adapters": sorted(adapters.REGISTRY)}
+        return 405, {"error": "GET /config/v1/adapters"}
     if not segments or segments[0] != "sources":
         return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, "
-                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties or "
+                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties, /adapters or "
                      "/variations/<key>/{retire,un_retire}"}
     if len(segments) == 1:
         if method == "GET":

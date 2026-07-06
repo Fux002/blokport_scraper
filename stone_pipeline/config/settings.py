@@ -180,6 +180,9 @@ class Paths:
 
     # State
     baselines_json: Path = REPO_ROOT / "state" / "scrape_baselines.json"
+    # per-source medians of the CANONICAL magnitude fields (weight/dims) at last-good, for the
+    # post-derive magnitude-drift gate (self-tuning, one layer below the raw scrape baseline above).
+    magnitude_baselines_json: Path = REPO_ROOT / "state" / "magnitude_baselines.json"
     overrides_csv: Path = REPO_ROOT / "state" / "manual_overrides.csv"
 
     @property
