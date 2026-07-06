@@ -152,8 +152,13 @@ def _auto_queue_images() -> int:
             log.error("image generation failed -- expected images may be missing from this build",
                       extra={"extra_fields": {"failed_scripts": failed, "queued": len(items)}})
     elif items:
-        log.info("image prompt queue ready (set FAL_KEY + run image_pipeline to generate)",
-                 extra={"extra_fields": {"queued": len(items)}})
+        # loud signal (risk 2): textures were queued but FAL_KEY is not set for the produce, so they are
+        # NOT generated here -- every one of these new variants' products stays HELD out of the catalogue
+        # until its {Key}.png exists. At cold-start scale that is thousands of products silently unserved,
+        # so warn (not info) rather than let an empty product lane look like a clean run.
+        log.warning("no FAL_KEY for the produce: %d new variant texture(s) queued but NOT generated -- "
+                    "their products stay HELD until the images exist (wire FAL_KEY, or run image_pipeline)",
+                    len(items), extra={"extra_fields": {"queued": len(items)}})
     return len(items)
 
 

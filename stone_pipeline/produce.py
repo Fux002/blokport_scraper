@@ -63,6 +63,26 @@ def _ledger_gate_state() -> tuple[int, int]:
         return sync.gate_state(lg)
 
 
+def _cold_start_stall() -> str | None:
+    """A reason string when this produce typed NOTHING it can serve, else None. Typing is a hard serve
+    gate, so an empty type vocabulary (attributes export absent/unseeded) or 0 typed of a non-empty
+    produced set means the WHOLE catalogue is held untyped forever -- a broken cold start, not the
+    expected pass-1 hold. produced == 0 (a no-op re-run) is not a stall."""
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        vocab, produced, typed = sync.typing_health(lg)
+    if produced == 0:
+        return None
+    if vocab == 0:
+        return (f"type attribute vocabulary is EMPTY (the Medusa attributes export is absent/unseeded); "
+                f"0 of {produced} variations could be typed, so NOTHING will serve")
+    if typed == 0:
+        return (f"0 of {produced} produced variations are typed; the catalogue would serve nothing "
+                f"(check the attribute vocabulary and the Key type slugs)")
+    return None
+
+
 def _reconcile_gate(rc: int) -> int:
     """Pull-model reconciliation of the catalog consistency gate. The gate is a CSV-upload-era guard: it
     keys off variants_export.csv, so it fails on varieties minted this produce (no Medusa id yet). But
@@ -107,12 +127,20 @@ def main(argv: list[str] | None = None) -> int:
                       extra={"extra_fields": {"rc": rc, "sources": sources or "all"}})
             return rc
     rc = build.main(argv)
-    # Pull model (write-through on): a catalog-gate failure that is purely new-this-run varieties is the
-    # expected two-pass checkpoint, not an error -- reconcile against the ledger so pass-1 exits 0.
-    if rc != 0 and stage in ("catalog", "all"):
+    if stage in ("catalog", "all"):
         from stone_pipeline.ledger import writethrough
         if writethrough.enabled():
-            return _reconcile_gate(rc)
+            # Cold-start stall guard (fail loud, not silent): if nothing typed, the whole catalogue is
+            # held untyped and no product will ever serve. Check REGARDLESS of rc -- a typed-0 run can even
+            # pass the consistency gate (0 products to check) and look clean. This is fatal, not a hold.
+            if (stall := _cold_start_stall()):
+                log.error("produce FATAL: cold-start stall -- " + stall)
+                print("produce FATAL: cold-start stall -- " + stall)
+                return rc or 1
+            # A catalog-gate failure that is purely new-this-run varieties is the expected two-pass
+            # checkpoint, not an error -- reconcile against the ledger so pass-1 exits 0.
+            if rc != 0:
+                return _reconcile_gate(rc)
     return rc
 
 
