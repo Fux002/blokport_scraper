@@ -1,16 +1,17 @@
 """Human decisions read back into the pipeline.
 
-The review files are no longer dead-end outputs: `variants_to_confirm.csv` is a decision ledger the
-catalog READS at the start of every run. For each uncertain variety the catalog proposes, you set
-the `confirm` column:
+The catalog READS operator decisions at the start of every run and REWRITES the pending review queue at
+the end. For each uncertain variety the catalog proposes, the operator chooses (in the :4200 admin, via
+the config review API) one of:
 
-    true   -> the catalog mints it (adds it to the upload + backbone) and drops the row
-    false  -> permanently rejected; remembered in state so it is never proposed again
-    (blank)-> still pending; stays in the file
+    mint   -> the catalog mints it (adds it to the upload + backbone) and it drops off the queue
+    reject -> permanently rejected; remembered so it is never proposed again
+    alias  -> it is really a spelling of an existing variety X; the product routes onto X
 
-So the pipeline learns your decisions without you hand-editing the backbone. `attributes_to_add.csv`
-works the same way for new colours/finishes/types/qualities: you paste the Medusa id you created and
-the catalog adopts it.
+Decisions live in config.db (see config/decisions_store.py) -- ONE durable, snapshotted store, not a CSV
+under ephemeral /app. This module is the produce-side FACADE over that store: it keeps the field names
+and function names the catalog stages already call, so the storage swap is invisible to them. New
+colours/finishes/types work the same way: the operator pastes the Medusa id and the catalog adopts it.
 """
 
 from __future__ import annotations
@@ -18,68 +19,61 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from stone_pipeline.config import decisions_store
 from stone_pipeline.config.settings import SETTINGS
-from stone_pipeline.core import csvio
 from stone_pipeline.matching import projections as proj
 
-ATTR_FILE = "attributes_to_add.csv"
+# Field names the catalog stages build/read. Kept here so curate.py and emit stay unchanged; the store
+# persists these same fields as the pending-queue payload.
 ATTR_COLUMNS = ["medusa_id", "kind", "value", "count", "suggested_value", "action"]
-CONFIRM_FILE = "variants_to_confirm.csv"
 CONFIRM_COLUMNS = ["confirm", "variant", "stone_type", "color", "nearest_existing", "score", "model_prob"]
-_REJECTED_STATE = "rejected_varieties.csv"
-_TRUE = {"true", "yes", "y", "1", "x"}
-_FALSE = {"false", "no", "n", "0"}
+_PENDING_VARIETY_FIELDS = [c for c in CONFIRM_COLUMNS if c != "confirm"]   # 'confirm' now lives as `action`
 
 
 def _norm(s: str) -> str:
     return proj.norm(s or "")
 
 
-def load_confirm_decisions(path: Path | None = None) -> dict[str, str]:
-    """norm(variant) -> 'yes' | 'no' for rows the user has marked; blank rows are omitted."""
-    path = Path(path or SETTINGS.paths.review_dir / CONFIRM_FILE)
-    out: dict[str, str] = {}
-    if not path.exists():
-        return out
-    with path.open(encoding="utf-8-sig", newline="") as h:
-        for r in csv.DictReader(h):
-            v = (r.get("confirm") or "").strip().lower()
-            name = _norm(r.get("variant", ""))
-            if not name:
-                continue
-            if v in _TRUE:
-                out[name] = "yes"
-            elif v in _FALSE:
-                out[name] = "no"
-    return out
+# -- variety decisions ---------------------------------------------------------
+
+def load_confirm_decisions() -> dict[str, str]:
+    """norm(variant) -> 'yes' | 'no' for decided varieties (mint -> yes, reject -> no). alias decisions
+    are consumed separately via load_alias_decisions."""
+    return decisions_store.confirm_map()
 
 
-def _rejected_path(path: Path | None = None) -> Path:
-    return Path(path or SETTINGS.paths.state_dir / _REJECTED_STATE)
+def load_alias_decisions() -> dict[str, str]:
+    """norm(spelling) -> the existing variety NAME it should alias onto."""
+    return decisions_store.alias_map()
 
 
-def load_rejected(path: Path | None = None) -> set[str]:
-    """Varieties the user has said 'no' to before — never propose them again."""
-    path = _rejected_path(path)
-    if not path.exists():
-        return set()
-    with path.open(encoding="utf-8-sig", newline="") as h:
-        return {_norm(r[0]) for r in csv.reader(h) if r and r[0].strip()}
+def load_rejected() -> set[str]:
+    """Varieties the operator said 'no' to before -- never propose them again."""
+    return decisions_store.rejected_names()
 
 
-def save_rejected(rejected: set[str], path: Path | None = None) -> None:
-    path = _rejected_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # headerless (load_rejected reads col 0); atomic + formula-injection-safe on the scraped names.
-    csvio.atomic_write(path, lambda h: csv.writer(h).writerows(
-        [csvio.safe_cell(name)] for name in sorted(rejected)))
+def save_rejected(rejected: set[str]) -> None:
+    """Persist runtime-learned rejects. Never overwrites an explicit mint/alias decision."""
+    decisions_store.learn_rejects(rejected)
 
+
+def write_confirm_file(pending: list[dict]) -> int:
+    """Replace the pending VARIETY queue with this run's still-undecided varieties. Returns the count.
+    A decided variety is simply absent from `pending`, so it stops appearing."""
+    rows = [{"ref": _norm(row.get("variant", "")),
+             "payload": {c: row.get(c, "") for c in _PENDING_VARIETY_FIELDS},
+             "sources": row.get("sources")}
+            for row in pending if _norm(row.get("variant", ""))]
+    decisions_store.replace_pending("variety", rows)
+    return len(rows)
+
+
+# -- retired variation keys (already durable in config.db) ---------------------
 
 def load_retired() -> set[str]:
     """The retired variation KEYS -- the ONE exclusion source, backed by config.db (durable: snapshotted +
-    restored, unlike a CSV under ephemeral /app, so a retired variety never re-mints after a restart).
-    Every produce stage that could re-introduce a variety (the matcher's `load_variants`, curate's surface,
-    tree_build's exclude_ids, emit_catalog's upload) reads this; un-retire removes the key."""
+    restored, so a retired variety never re-mints after a restart). Every produce stage that could
+    re-introduce a variety reads this; un-retire removes the key."""
     from stone_pipeline.config import store
     return store.load_retired()
 
@@ -94,39 +88,29 @@ def remove_retired(key: str) -> None:
     store.remove_retired(key)
 
 
-def load_attribute_ids(path: Path | None = None) -> dict[tuple[str, str], tuple[str, str]]:
-    """(kind, norm(value)) -> (ORIGINAL value, medusa_id), for rows where you filled in the id you
-    created in Medusa. The original value (operator's casing/punctuation) is preserved so it becomes
-    the CANONICAL attribute name, not its lowercased normalization."""
-    path = Path(path or SETTINGS.paths.review_dir / ATTR_FILE)
-    out: dict[tuple[str, str], tuple[str, str]] = {}
-    if not path.exists():
-        return out
-    with path.open(encoding="utf-8-sig", newline="") as h:
-        for r in csv.DictReader(h):
-            mid = (r.get("medusa_id") or "").strip()
-            kind = (r.get("kind") or "").strip().lower()
-            value = (r.get("value") or "").strip()
-            if mid and kind and value:
-                out[(kind, _norm(value))] = (value, mid)
-    return out
+# -- attribute decisions -------------------------------------------------------
+
+def load_attribute_ids() -> dict[tuple[str, str], tuple[str, str]]:
+    """(kind, norm(value)) -> (ORIGINAL value, medusa_id) for the ids the operator pasted. The original
+    value (operator casing) becomes the CANONICAL attribute name, not its normalization."""
+    return decisions_store.attribute_ids()
 
 
-def write_attributes_to_add(pending: list[dict], path: Path | None = None) -> Path:
-    """Rewrite the attribute ledger with values still missing a Medusa id (you create them in
-    Medusa, paste the id, and next run the pipeline adopts it into attributes.csv and drops the row)."""
-    path = Path(path or SETTINGS.paths.review_dir / ATTR_FILE)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # operator-edited ledger (you paste Medusa ids) with scraped values -> sanitize + atomic.
-    csvio.write_dicts(path, ATTR_COLUMNS, [{c: r.get(c, "") for c in ATTR_COLUMNS} for r in pending],
-                      sanitize=True)
-    return path
+def write_attributes_to_add(pending: list[dict]) -> int:
+    """Replace the pending ATTRIBUTE queue with values still missing a Medusa id. Returns the count."""
+    rows = [{"ref": f"{(r.get('kind') or '').strip().lower()}:{_norm(r.get('value', ''))}",
+             "payload": {c: r.get(c, "") for c in ATTR_COLUMNS},
+             "sources": r.get("sources")}
+            for r in pending if (r.get("kind") and r.get("value"))]
+    decisions_store.replace_pending("attribute", rows)
+    return len(rows)
 
 
-def adopt_attribute_ids(filled: dict[tuple[str, str], tuple[str, str]], attributes_csv: Path | None = None) -> int:
-    """Append the (kind, value, id) the user filled into the env's attributes.csv so the vocab
-    knows them on the next run. Returns how many were adopted (skips ones already present). Writes the
-    ORIGINAL value (operator casing) as the canonical name -- normalization is for the dedup key only."""
+def adopt_attribute_ids(filled: dict[tuple[str, str], tuple[str, str]],
+                        attributes_csv: Path | None = None) -> int:
+    """Append the (kind, value, id) the operator filled into the env's attributes.csv vocab so the next
+    run knows them. Returns how many were adopted (skips ones already present). Writes the ORIGINAL value
+    (operator casing) as the canonical name -- normalization is for the dedup key only."""
     path = Path(attributes_csv or SETTINGS.paths.attributes_csv)
     if not filled or not path.exists():
         return 0
@@ -134,7 +118,8 @@ def adopt_attribute_ids(filled: dict[tuple[str, str], tuple[str, str]], attribut
     with path.open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
             existing.add(((r.get("category") or "").strip().lower(), _norm(r.get("value", ""))))
-    new = [(k, raw_value, mid) for (k, vnorm), (raw_value, mid) in filled.items() if (k, vnorm) not in existing]
+    new = [(k, raw_value, mid) for (k, vnorm), (raw_value, mid) in filled.items()
+           if (k, vnorm) not in existing]
     if not new:
         return 0
     with path.open("a", newline="", encoding="utf-8") as h:
@@ -142,15 +127,3 @@ def adopt_attribute_ids(filled: dict[tuple[str, str], tuple[str, str]], attribut
         for kind, raw_value, mid in new:
             w.writerow([kind, raw_value, mid])
     return len(new)
-
-
-def write_confirm_file(pending: list[dict], path: Path | None = None) -> Path:
-    """Rewrite the decision ledger with the still-pending varieties (blank `confirm`). Applied
-    (true) and rejected (false) rows are gone; newly-discovered uncertain ones appear with a blank
-    confirm for you to decide next."""
-    path = Path(path or SETTINGS.paths.review_dir / CONFIRM_FILE)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # operator-edited decision ledger with scraped variety names -> sanitize + atomic.
-    csvio.write_dicts(path, CONFIRM_COLUMNS, [{c: row.get(c, "") for c in CONFIRM_COLUMNS} for row in pending],
-                      sanitize=True)
-    return path

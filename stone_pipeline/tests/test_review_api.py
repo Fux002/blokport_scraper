@@ -1,0 +1,83 @@
+"""The config server's review API: the :4200 admin reads the pending queue and writes mint/reject/alias
+decisions + attribute ids. Pure dispatch tests (no sockets), mirroring test_config_store.py. The variety
+vocabulary is monkeypatched so the alias-validation tests do not depend on the committed backbone."""
+
+from __future__ import annotations
+
+import pytest
+
+from stone_pipeline.config import server, varieties
+from stone_pipeline.stages import decisions
+
+
+@pytest.fixture
+def seeded_queue():
+    """A produce has surfaced one uncertain variety + one new attribute value."""
+    decisions.write_confirm_file([
+        {"confirm": "", "variant": "Zucchi Blue X", "stone_type": "granite", "color": "blue",
+         "nearest_existing": "Azul X", "score": 0.72, "model_prob": 0.61}])
+    decisions.write_attributes_to_add([
+        {"kind": "finish", "value": "Leathered", "count": 12, "suggested_value": "", "action": "",
+         "medusa_id": ""}])
+
+
+def test_get_pending_variants_and_attributes(seeded_queue):
+    code, body = server.dispatch("GET", ["review", "variants"], None)
+    assert code == 200
+    assert [v["variant"] for v in body["variants"]] == ["Zucchi Blue X"]
+    assert body["variants"][0]["nearest_existing"] == "Azul X"
+
+    code, body = server.dispatch("GET", ["review", "attributes"], None)
+    assert code == 200 and [a["value"] for a in body["attributes"]] == ["Leathered"]
+
+
+def test_put_mint_then_reject_decision(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "mint"})
+    assert code == 200 and body["action"] == "mint"
+    assert decisions.load_confirm_decisions() == {"zucchi blue x": "yes"}
+
+    code, _ = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "reject"})
+    assert code == 200
+    assert decisions.load_rejected() == {"zucchi blue x"}
+    # the pending row now reports the decision (applies on the next produce)
+    v = server.dispatch("GET", ["review", "variants"], None)[1]["variants"][0]
+    assert v["current_action"] == "reject"
+
+
+def test_put_bad_action_is_400():
+    code, body = server.dispatch("PUT", ["review", "variants", "Foo"], {"action": "frobnicate"})
+    assert code == 400 and "action" in body["error"]
+    assert server.dispatch("PUT", ["review", "variants", "Foo"], "not-a-dict")[0] == 400
+
+
+def test_put_alias_validates_the_target(monkeypatch):
+    # alias onto a NON-existent variety is refused loudly (would be a silent no-op at produce time)
+    monkeypatch.setattr(varieties, "exists", lambda name: name == "Bianco Carrara")
+    code, body = server.dispatch("PUT", ["review", "variants", "Blue Carara"],
+                                 {"action": "alias", "alias_of": "Nope Not Real"})
+    assert code == 400 and "not an existing variety" in body["error"]
+
+    code, _ = server.dispatch("PUT", ["review", "variants", "Blue Carara"],
+                              {"action": "alias", "alias_of": "Bianco Carrara"})
+    assert code == 200
+    assert decisions.load_alias_decisions() == {"blue carara": "Bianco Carrara"}
+
+
+def test_put_attribute_id(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "attributes", "Leathered"],
+                                 {"kind": "finish", "medusa_id": "pcol_9"})
+    assert code == 200 and body["medusa_id"] == "pcol_9"
+    assert decisions.load_attribute_ids() == {("finish", "leathered"): ("Leathered", "pcol_9")}
+    # missing id is refused
+    assert server.dispatch("PUT", ["review", "attributes", "Honed"], {"kind": "finish"})[0] == 400
+
+
+def test_get_varieties_route(monkeypatch):
+    monkeypatch.setattr(varieties, "list_all",
+                        lambda: [{"name": "Bianco Carrara", "stone_type": "Marble"}])
+    code, body = server.dispatch("GET", ["varieties"], None)
+    assert code == 200 and body["varieties"][0]["name"] == "Bianco Carrara"
+
+
+def test_unknown_review_subpath_is_404():
+    assert server.dispatch("GET", ["review", "nonsense"], None)[0] == 404

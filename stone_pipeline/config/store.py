@@ -100,6 +100,29 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # is re-added via PUT. Without this, reconcile-seeding a partial config.db would resurrect a removal.
     conn.execute("CREATE TABLE IF NOT EXISTS removed_source ("
                  "source TEXT PRIMARY KEY, removed_at TEXT NOT NULL)")
+    # -- new-variant review decisions (the durable decision ledger; see config/decisions_store.py) -------
+    # One operator decision per uncertain variety spelling, keyed by its NORMALIZED name. `action` unifies
+    # what used to be two ephemeral CSVs (variants_to_confirm.csv `confirm` + rejected_varieties.csv):
+    #   mint  -> the variety IS real; the next produce mints it
+    #   reject-> never propose it again (the learned 'no' memory)
+    #   alias -> it is really a spelling of `alias_of` (an existing variety); route the product there
+    # In config.db so it is snapshotted + restored (durable on ECS), never a CSV under ephemeral /app.
+    conn.execute("CREATE TABLE IF NOT EXISTS variety_decision ("
+                 "variant_norm TEXT PRIMARY KEY, variant_display TEXT NOT NULL DEFAULT '', "
+                 "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), "
+                 "alias_of TEXT, decided_at TEXT NOT NULL)")
+    # New colour/finish/type/quality VALUES the operator created in Medusa and pasted the id for, keyed
+    # by (kind, normalized value). The next produce adopts the id into the attribute vocab.
+    conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("
+                 "kind TEXT NOT NULL, value_norm TEXT NOT NULL, value_display TEXT NOT NULL DEFAULT '', "
+                 "medusa_id TEXT NOT NULL, decided_at TEXT NOT NULL, PRIMARY KEY (kind, value_norm))")
+    # The pending review QUEUE: what the last produce surfaced as still-undecided (varieties + attributes),
+    # so the config API can serve it to the admin UI BETWEEN runs without reading the ephemeral review/
+    # dir. Fully rewritten each produce (a decided item just stops reappearing). `payload` is the enriched
+    # JSON row; `sources` is a JSON array of the source(s) that proposed it (provenance).
+    conn.execute("CREATE TABLE IF NOT EXISTS review_pending ("
+                 "kind TEXT NOT NULL CHECK (kind IN ('variety','attribute')), ref TEXT NOT NULL, "
+                 "payload TEXT NOT NULL, sources TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (kind, ref))")
     conn.commit()
 
 

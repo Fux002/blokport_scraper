@@ -114,9 +114,52 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
                 result, code = lifecycle.un_retire(key)
             return code, result
         return 404, {"error": "expected POST /config/v1/variations/<key>/{retire,un_retire}"}
+    if segments and segments[0] == "review":
+        # the new-variant review queue for the :4200 admin. The produce SURFACES uncertain items; the
+        # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so
+        # an edit takes effect on the following run -- same "applies next run" contract as the run guard).
+        #   GET /config/v1/review/variants               pending varieties (+ current_action)
+        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?}
+        #   GET /config/v1/review/attributes             pending attribute values (need a Medusa id)
+        #   PUT /config/v1/review/attributes/<value>     {"kind":..., "medusa_id":...}
+        from stone_pipeline.config import decisions_store, varieties
+        if len(segments) == 2 and segments[1] == "variants" and method == "GET":
+            return 200, {"variants": decisions_store.list_pending("variety")}
+        if len(segments) == 3 and segments[1] == "variants" and method == "PUT":
+            if not isinstance(body, dict):
+                return 400, {"error": "body must be a JSON object {action, alias_of?}"}
+            action = body.get("action", "")
+            alias_of = body.get("alias_of")
+            # domain guard (server's job, not the store's): an alias MUST target a real variety, else it
+            # would resolve to nothing at produce time -- a silent no-op. Reject it loudly here instead.
+            if action == "alias" and not varieties.exists(alias_of or ""):
+                return 400, {"error": f"alias_of {alias_of!r} is not an existing variety"}
+            try:
+                decisions_store.set_variety_decision(segments[2], action, alias_of)
+            except decisions_store.InvalidDecision as e:
+                return 400, {"error": str(e)}
+            return 200, {"variant": segments[2], "action": action, "alias_of": alias_of}
+        if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
+            return 200, {"attributes": decisions_store.list_pending("attribute")}
+        if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
+            if not isinstance(body, dict):
+                return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
+            try:
+                decisions_store.set_attribute_id(body.get("kind", ""), segments[2], body.get("medusa_id", ""))
+            except decisions_store.InvalidDecision as e:
+                return 400, {"error": str(e)}
+            return 200, {"value": segments[2], "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
+        return 404, {"error": "expected GET/PUT /config/v1/review/{variants,attributes}[/<ref>]"}
+    if segments and segments[0] == "varieties":
+        # existing variety names (+ stone_type) for the review alias-to dropdown.
+        if method == "GET":
+            from stone_pipeline.config import varieties
+            return 200, {"varieties": varieties.list_all()}
+        return 405, {"error": "GET /config/v1/varieties"}
     if not segments or segments[0] != "sources":
         return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, "
-                     "/delist, /pause, /resume, /clean or /variations/<key>/{retire,un_retire}"}
+                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties or "
+                     "/variations/<key>/{retire,un_retire}"}
     if len(segments) == 1:
         if method == "GET":
             # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)
