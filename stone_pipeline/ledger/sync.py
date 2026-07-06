@@ -70,7 +70,6 @@ _ENTITY = {
     # so wiring it here would make ack('combinations','failed') raise). Combinations are CSV-rendered
     # from the export and Medusa resolves priceable tuples itself. Re-add only with a full serve lane.
 }
-_SERVABLE = ("pending", "dirty")
 # a variation always belongs to a category (strict): branch is NOT NULL and constrained,
 # so every served variation maps to one canonical category name.
 _CATEGORY = {"slab": "Slabs", "block": "Blocks", "tile": "Tiles"}

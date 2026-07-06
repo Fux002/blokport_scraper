@@ -100,10 +100,6 @@ class Confidence(IntEnum):
     medium = 2
     high = 3
 
-    @classmethod
-    def from_name(cls, name: str) -> "Confidence":
-        return cls[name.strip().lower()]
-
 
 @dataclass(frozen=True)
 class Paths:
@@ -198,7 +194,6 @@ class Thresholds:
     variation_auto_accept: float = 92.0
     variation_review_floor: float = 84.0  # band 84..92 routes to review
     attribute_fuzzy_floor: float = 90.0
-    derived_accept: Confidence = Confidence.medium
     health_fill_drop_warn: float = 0.15
     health_fill_drop_fail: float = 0.40
     health_rowcount_floor: float = 0.50
@@ -403,12 +398,6 @@ class CurationConfig:
     alias_model_lo: float = 0.20
 
 
-@dataclass(frozen=True)
-class EmitPolicy:
-    # Section 9.2. Default true for slabs bootstrap; configurable per source.
-    emit_on_review_default: bool = True
-
-
 # --- Category registry: the SINGLE source of truth for categories --------------
 @dataclass(frozen=True)
 class Category:
@@ -535,7 +524,6 @@ class Settings:
     images: ImagesConfig = field(default_factory=ImagesConfig)
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     curation: CurationConfig = field(default_factory=CurationConfig)
-    emit: EmitPolicy = field(default_factory=EmitPolicy)
 
     # The source proven first (section 14). develi is absent from the supplied
     # data, so polonine is the clean named-variety proving source.

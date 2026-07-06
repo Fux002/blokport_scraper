@@ -30,8 +30,6 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.core.text import ascii_fold, looks_code_shaped, match_key
 
-log = logfmt.get_logger("reference.loaders")
-
 
 _TYPE_SLUGS: Optional[set[str]] = None
 
