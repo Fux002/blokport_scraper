@@ -103,6 +103,34 @@ terraform apply -var dev_schedule_enabled=true
 With `prod_staging_bucket` empty (the default), **only the dev task is created** — the
 prod instance is count-gated to zero, so nothing prod-side exists yet.
 
+## Rolling a dev deploy (the mutable `:core` gotcha)
+Dev tracks the **mutable** `:core` tag, and the running service's task def points at `:core`.
+So a merge to `main` rebuilds and pushes a NEW `:core` image, but the task def does not change —
+ECS sees "no change" and **never restarts the running task**. The task keeps serving the image it
+pulled when it last started, so the new code ships to ECR but is **not live**. "Deploy succeeded"
+means "image pushed", NOT "task rolled".
+
+**After every dev-affecting merge, force the service to re-pull `:core`:**
+```bash
+aws ecs update-service --cluster blokport-dev-cluster \
+  --service blokport-scraper-svc-development --force-new-deployment
+# then confirm it actually rolled (not just "in progress"):
+aws ecs wait services-stable --cluster blokport-dev-cluster --service blokport-scraper-svc-development
+```
+This is safe: `config.db` (sources + review decisions) and the ledger restore from their S3 snapshots
+on restart, so nothing is lost. To verify the roll, compare the running task's image digest to `:core`
+in ECR — they must match:
+```bash
+aws ecr describe-images --repository-name blokport-scraper \
+  --query "imageDetails[?contains(imageTags,'core')].[imageDigest,imageTags]" --output json
+```
+
+The proper fix (a `--force-new-deployment` + wait step in `.github/workflows/deploy.yml`, so a merge
+auto-rolls) is prepared on the `fix/deploy-roll-dev-service` branch but **held**: it first needs the CI
+deploy role to gain `ecs:UpdateService` + `ecs:DescribeServices`, and that IAM change lives in the
+drifted root stack (`infra/main.tf`), so it must be applied via a reviewed `terraform plan` BEFORE that
+branch merges. Until then, the manual command above is the procedure.
+
 ## Standing PROD up LATER (after dev is proven AND the prod Medusa platform exists)
 Prod is a **separate task in the prod cluster** (`blokport-scraper-production`), not a
 runtime override of dev. It needs the prod platform stack (`blokport-prod-vpc`,
