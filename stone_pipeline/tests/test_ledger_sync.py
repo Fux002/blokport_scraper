@@ -474,3 +474,20 @@ def test_gate_state_counts_held_and_untyped(tmp_path):
         _variation(lg, "slab_synced_3", "synced", medusa_id="M1", type_="Marble")   # not held (has id)
         _product(lg, "SKU-2", "slab_held_1", "pending")                             # a normal product
         assert gate_state(lg) == (2, 1)
+
+
+def test_requeue_endpoint_recovers_dead_lettered(tmp_path):
+    # POST /sync/v1/requeue is the HTTP lever over requeue_dead_lettered: un-quarantine gap_held -> dirty
+    # so the entity re-serves after the Medusa-side cause is fixed. Mirrors GET /sync/v1/failures (observe).
+    from stone_pipeline.ledger import server
+    from stone_pipeline.ledger.sync import ack, _MAX_SYNC_ATTEMPTS
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-1", "slab_v1", state="pending")
+        for _ in range(_MAX_SYNC_ATTEMPTS):
+            ack(ledger, "products", "P-1", status_="failed", reason="Medusa 400: bad company")
+        assert ledger.get("product", "sku", "P-1")["state"] == "gap_held"
+        code, body = server.dispatch(ledger, "POST", "requeue", {}, {})
+        assert code == 200 and body["requeued"] == 1
+        assert ledger.get("product", "sku", "P-1")["state"] == "dirty"      # re-served
+        assert server.dispatch(ledger, "POST", "requeue", {}, {"type": "bogus"})[0] == 400  # bad type -> 400

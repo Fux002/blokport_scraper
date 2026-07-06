@@ -4,9 +4,12 @@ A thin, dependency-free reference server that maps the versioned endpoints to th
 sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
 
     GET  /sync/v1/status
+    GET  /sync/v1/failures                       drill-down behind the status gap_held count
     GET  /sync/v1/<type>?status=ready&limit=N   type in {variations, products, inventory, removed}
     POST /sync/v1/ack   body: [{type, external_id, medusa_id, status}, ...]
       (removed acks use status 'done' -> retire, or 'blocked' -> keep + retry, dead-letter after N)
+    POST /sync/v1/requeue   body (optional): {type: variations|products}  -- un-quarantine gap_held
+      entities back to dirty after the Medusa-side cause is fixed (the recovery lever behind failures)
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the
 design calls for; the server refuses to start without it. This is the contract
@@ -56,6 +59,14 @@ def dispatch(ledger: Ledger, method: str, resource: str,
             return 400, {"error": "ack body must be a JSON list of acks"}
         result = sync.ack_batch(ledger, body)
         return 200, {"acked": result["applied"], "missed": result["missed"], "skipped": result["skipped"]}
+    if method == "POST" and resource == "requeue":
+        # recovery lever: un-quarantine dead-lettered ('gap_held') entities back to 'dirty' so they
+        # re-serve, after the underlying Medusa issue is fixed. Body (optional): {"type":
+        # "variations"|"products"}; omitted -> both. Observed via GET /sync/v1/failures + /status.
+        type_ = body.get("type") if isinstance(body, dict) else None
+        if type_ is not None and type_ not in ("variations", "products"):
+            return 400, {"error": "type must be 'variations' or 'products' (or omitted for both)"}
+        return 200, {"requeued": sync.requeue_dead_lettered(ledger, type_=type_)}
     return 404, {"error": f"no route for {method} /sync/{resource}"}
 
 
