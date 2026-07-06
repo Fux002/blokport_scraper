@@ -172,9 +172,25 @@ def test_soft_reset_preserves_a_retiring_variety(tmp_path, monkeypatch):
         assert row["state"] == "retiring" and row["medusa_id"] == "VID"   # both preserved
 
 
-def test_reset_bad_source_is_400():
+def test_reset_unknown_source_is_404():
+    # ISS-5: lifecycle ops resolve identity via the config store, so an unknown source is a uniform 404
+    # (was 400 when reset keyed on the adapter registry).
     body, code = lifecycle.reset(sources=["not_a_scraper"])
-    assert code == 400
+    assert code == 404 and "not_a_scraper" in str(body["error"])
+
+
+def test_lifecycle_ops_address_a_config_only_source(tmp_path, monkeypatch):
+    # ISS-5: reset / delist / purge must resolve a config-only source (no coded adapter) the SAME way
+    # remove_source does -- via the store -- instead of the old 400 "unknown source(s)" from the registry.
+    from stone_pipeline.config import store
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
+    store.upsert_row({"source": "zzprobe", "adapter": "zzprobe", "source_code": "zzp", "vendor": "Junk"})
+    for verb in (lambda: lifecycle.reset(sources=["zzprobe"]),
+                 lambda: lifecycle.delist(["zzprobe"]),
+                 lambda: lifecycle.purge(["zzprobe"])):
+        _body, code = verb()
+        assert code == 200, f"config-only source should resolve, got {code}: {_body}"
 
 
 def test_reset_soft_and_hard_through_the_ledger(tmp_path, monkeypatch):
@@ -243,7 +259,12 @@ def test_public_record_carries_counts_field():
 
 def test_clean_deletes_a_sources_scraped_data(tmp_path, monkeypatch):
     import types
+    from stone_pipeline.config import store
     import stone_pipeline.clean as clean_mod
+    # ISS-5: lifecycle ops resolve identity via the config store, so the source must exist there (as it
+    # does in prod, seeded on boot) -- seed it rather than rely on the adapter registry.
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.upsert_row({"source": "zucchi", "adapter": "zucchi", "source_code": "zuc", "vendor": "Z"})
     monkeypatch.setattr(clean_mod, "SETTINGS",
                         types.SimpleNamespace(paths=types.SimpleNamespace(data_dir=tmp_path)))
     (tmp_path / "zucchi" / "20260625_222931").mkdir(parents=True)
@@ -262,9 +283,9 @@ def test_clean_refused_while_a_run_is_active():
     assert code == 409
 
 
-def test_clean_unknown_source_is_400():
+def test_clean_unknown_source_is_404():
     body, code = lifecycle.clean(sources=["not_a_scraper"])
-    assert code == 400
+    assert code == 404
 
 
 def test_purge_refused_while_a_run_is_active():
@@ -319,10 +340,10 @@ def test_pause_freezes_a_source_config_only(tmp_path, monkeypatch):
 
 
 def test_pause_resume_reject_empty_or_unknown_scope():
-    assert lifecycle.pause([])[1] == 400
-    assert lifecycle.pause(["not_a_scraper"])[1] == 400
+    assert lifecycle.pause([])[1] == 400                    # empty scope -> 400 (needs an explicit list)
+    assert lifecycle.pause(["not_a_scraper"])[1] == 404     # unknown source -> 404 (ISS-5, store identity)
     assert lifecycle.resume([])[1] == 400
-    assert lifecycle.resume(["not_a_scraper"])[1] == 400
+    assert lifecycle.resume(["not_a_scraper"])[1] == 404
 
 
 def test_delist_stamps_lifecycle_delisted(tmp_path, monkeypatch):

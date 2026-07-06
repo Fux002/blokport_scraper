@@ -219,3 +219,12 @@ def test_source_codes_are_unique_across_sources():
         assert code, f"{src} has an empty source_code"
         assert code not in seen, f"source_code {code!r} collides: {src} and {seen[code]}"
         seen[code] = src
+
+
+def test_zucchi_weight_normalized_to_per_piece():
+    # OBS-3: zucchi reports weight_kg_net for the whole BUNDLE; the adapter (the only source-format-aware
+    # layer) divides by slab_count so the shared pipeline receives canonical PER-PIECE weight.
+    from stone_pipeline.adapters.zucchi import _per_piece_kg
+    assert _per_piece_kg({"weight_kg_net": "3000", "slab_count": "6"}) == "500.0"
+    assert _per_piece_kg({"weight_kg_net": "3000", "slab_count": "0"}) == ""   # div0 -> blank (derive synthesizes)
+    assert _per_piece_kg({"weight_kg_net": "", "slab_count": "6"}) == ""       # missing weight -> blank
