@@ -29,7 +29,7 @@ artifacts). Run one source: `python -m stone_pipeline.run polonine`.
 | M7 | Stage 7 images: content-addressed keys, branch slotting, placeholder block (S3 dry-run; download/upload wired when creds exist) | done (dry-run) |
 | M8 | Stage 8 constants + Stage 9 validation + Stage 10 template-driven emit; emitted CSV validates against the real upload | done |
 | M9 | overrides (top-priority strategy) + alias write-back (persisted) + idempotent re-ingest loop | done |
-| M10 | splink (tier 7) + semantic (tier 8), config-gated, review-only; offline-testable embedder | done (gated) |
+| M10 | semantic tier (tier 8), config-gated, review-only; offline-testable embedder (tier-7 role: alias_resolver; Splink retired) | done (gated) |
 | M11 | marenostone, zucchi, varsha adapters with golden fixtures; generic-descriptor gap routing | done |
 | M12 | run summary, multi-source isolated runner, row fingerprints, Medusa API sink interface | done |
 

@@ -4,8 +4,8 @@ One alias-and-projection-aware tiered resolver. The attribute normalization
 (Stage 3) and origin lookup use the vocabulary resolver here; the full
 variation engine (Stage 4, section 5A.2 tiers 1 to 6) is also built here so a
 single module backs all matched fields (section 5A.4). The semantic tier (tier 8)
-is built here as a review-only suggester (gated by enable_semantic); only Splink
-(tier 7) is still an unwired integration point.
+is built here as a review-only suggester (gated by enable_semantic). Tier 7's residual
+role is filled by the alias_resolver logistic model (Splink was retired).
 """
 
 from __future__ import annotations

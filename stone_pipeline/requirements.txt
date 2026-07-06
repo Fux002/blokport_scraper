@@ -17,7 +17,6 @@ pillow>=10.0
 
 # Optional (lazy-imported, config-gated)
 browser_cookie3>=0.19   # only if a scraper needs browser cookie auth (none do today)
-# splink>=4.0            # variation tier 7 (matching.enable_splink)
 # sentence-transformers  # variation tier 8 (matching.enable_semantic)
 # fal-client>=0.4        # variant texture generation (image_pipeline/genetate_images.py)
 
