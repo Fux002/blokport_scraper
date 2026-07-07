@@ -119,20 +119,30 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     with _lock:
         rec["status"] = "running"
     try:
-        rc = proc.wait(timeout=_RUN_TIMEOUT)
+        _, stderr = proc.communicate(timeout=_RUN_TIMEOUT)   # drains the stderr pipe AND waits
+        rc = proc.returncode
     except subprocess.TimeoutExpired:
         proc.kill()                                     # a hung produce must not hold the run slot forever
-        proc.wait()
+        _, stderr = proc.communicate()
         rc = -1
         log.error("produce run exceeded timeout; killed", extra={"extra_fields": {
             "run_id": rec["run_id"], "timeout_s": _RUN_TIMEOUT}})
+    # The produce subprocess's stderr (its structured logs + any traceback) would otherwise be discarded,
+    # leaving a failed run as a bare rc:1 with no cause. Surface it verbatim on THIS process's stderr (so
+    # it reaches the task's CloudWatch stream) and keep the tail on the run record, so the :4200 /run API
+    # shows WHY a produce failed. Never a silent black hole.
+    tail = ""
+    if stderr:
+        sys.stderr.write(stderr)
+        sys.stderr.flush()
+        tail = "\n".join(stderr.strip().splitlines()[-40:])
     counts = _capture_counts()                          # ledger totals after the run
     with _lock:
         rec["status"] = "succeeded" if rc == 0 else "failed"
         rec["finished_at"] = _now()
         rec["counts"] = counts
         if rc != 0:
-            rec["error"] = f"pipeline exited {rc}"
+            rec["error"] = f"pipeline exited {rc}" + (f":\n{tail}" if tail else "")
     _stamp_last_run(rec, rec["status"])
     _persist_run(rec)                                   # durable `last` across a restart
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
@@ -154,7 +164,9 @@ def _launch_local(rec: dict) -> None:
     proc = subprocess.Popen(
         _build_command(rec),
         env={**os.environ, "BLOKPORT_LEDGER_WRITETHROUGH": "1"},
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # stdout is the image-progress print() noise (drop it); stderr carries the structured logfmt logs
+        # + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's cause.
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     threading.Thread(target=_watch_local, args=(rec, proc), daemon=True).start()
 
 
