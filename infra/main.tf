@@ -143,6 +143,34 @@ module "scraper_prod" {
 }
 
 # =============================================================================
+# GPU image enhancer (AWS Batch, on-demand, scales to 0). One per env, scoped to
+# that env's bucket. Runs the :gpu image (Real-ESRGAN). Dev tracks :gpu; prod uses
+# the promoted :gpu-<sha>. Only the CDN proxy secret is injected (no FAL_KEY needed).
+# =============================================================================
+module "gpu_enhance_dev" {
+  source = "./modules/gpu_enhance"
+
+  target_env     = "development"
+  home_env       = "dev"
+  staging_bucket = var.dev_staging_bucket
+  image_repo_url = data.aws_ecr_repository.scraper.repository_url # shared repo (data source; decoupled from ECR refactor)
+  image_tag      = var.gpu_image_tag
+  region         = var.region
+}
+
+module "gpu_enhance_prod" {
+  source = "./modules/gpu_enhance"
+  count  = local.prod_enabled ? 1 : 0
+
+  target_env     = "production"
+  home_env       = var.prod_home_env
+  staging_bucket = var.prod_staging_bucket
+  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_tag      = var.prod_gpu_image_tag
+  region         = var.region
+}
+
+# =============================================================================
 # In-VPC sync/config SERVICE (dev) -- the long-running sync + config HTTP servers
 # run in the blokport-dev cluster so Medusa reaches them over Cloud Map (private
 # DNS), NOT a Cloudflare tunnel. One task (both servers + local produce), ledger on
