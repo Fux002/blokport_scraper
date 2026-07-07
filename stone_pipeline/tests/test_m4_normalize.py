@@ -37,6 +37,19 @@ def test_exact_resolves_finish(ref):
     assert row.finish_id is not None
 
 
+def test_extracted_portuguese_colour_resolves_end_to_end(ref):
+    # the WHOLE colour path in one: extract_color recovers the colour from a zucchi Portuguese name, and
+    # the resolver then resolves that raw value to the canonical colour + id. Extractor and resolver share
+    # the one vocabulary, so what the extractor recovers is exactly what Stage 3 resolves.
+    from stone_pipeline.adapters.tokens import extract_color
+    resolvers = normalize.AttributeResolvers.build(ref)
+    raw_color = extract_color("CIN Granito Preto Rio Negro 2cm")   # zucchi has no colour column
+    assert raw_color == "Black"
+    row = CanonicalRow(src_site="zucchi", raw_color=raw_color)
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.color_name == "Black" and row.color_id is not None
+
+
 def test_synonym_none_is_clean_not_error(ref):
     # finish 'Other' -> none: resolves to no id, but is not an unresolved error.
     resolvers = normalize.AttributeResolvers.build(ref)

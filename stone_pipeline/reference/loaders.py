@@ -20,7 +20,7 @@ import csv
 import json
 import re
 from dataclasses import dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -40,9 +40,8 @@ def _type_slugs() -> set[str]:
     Key's type ends instead of assuming it is a single segment."""
     global _TYPE_SLUGS
     if _TYPE_SLUGS is None:
-        from stone_pipeline.adapters.tokens import TYPE_SYNONYMS
         names = [v for v, _ in load_attributes().by_category.get("type", {}).values()]
-        names += list(TYPE_SYNONYMS.values())
+        names += list(load_synonyms("type").values())
         # slugify the SAME way gen_key encodes a Key's type ([^a-z0-9]+ -> '_'), so a multi-word OR
         # hyphenated type ('Semi-Precious Stone' -> 'semi_precious_stone') matches the underscore-keyed
         # Key. Joining on whitespace alone kept the hyphen ('semi-precious_stone') and never matched.
@@ -80,8 +79,7 @@ def is_mistyped_variant(key: str, name: str) -> bool:
     # the canonical, not the literal foreign spelling -- else 'Agata Blue' keyed 'agate' would falsely
     # flag ('agata' != 'agate'). Mis-typed iff the canonical type shares NO token with the Key's type
     # (token overlap, so a name 'Marble' is consistent with a 'dolomite_marble' Key).
-    from stone_pipeline.adapters.tokens import TYPE_SYNONYMS
-    canonical = TYPE_SYNONYMS.get(_norm(ntw), ntw)
+    canonical = load_synonyms("type").get(_norm(ntw), ntw)
     return set(_norm(canonical).split()).isdisjoint(key_type.split("_"))
 
 log = logfmt.get_logger("reference")
@@ -117,8 +115,7 @@ class Attributes:
         if hit is not None:
             return hit
         if category == "type":
-            from stone_pipeline.adapters.tokens import TYPE_SYNONYMS
-            canonical = TYPE_SYNONYMS.get(_norm(name))
+            canonical = load_synonyms("type").get(_norm(name))
             if canonical:
                 return table.get(_norm(canonical))
         return None
@@ -435,9 +432,11 @@ def load_units(path: Path | None = None) -> Units:
 
 
 # --- synonyms/<vocab>.csv -----------------------------------------------------
+@lru_cache(maxsize=None)
 def load_synonyms(vocab: str, directory: Path | None = None) -> dict[str, str]:
     """raw (normalized) -> canonical backend value, or 'none' to resolve to no id
-    without an error (section 7, Stage 3). Missing file is an empty map."""
+    without an error (section 7, Stage 3). Missing file is an empty map. Cached: it is read once per
+    vocab and consulted per-row (resolver + name-detection), and synonyms are static within a run."""
     directory = Path(directory or SETTINGS.paths.synonyms_dir)
     path = directory / f"{vocab}.csv"
     mapping: dict[str, str] = {}

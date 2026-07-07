@@ -1,77 +1,74 @@
 """Light token extraction helpers for adapters (section 7 Stage 1).
 
-Some sources carry only a generic descriptor name (marenostone "Cream Marble
-Tile") and the adapter must strip known colour, type, and format tokens to find
-the candidate variety, leaving it empty when nothing remains. Others carry no
-colour column at all (zucchi, varsha) but embed a colour word in the stone name
-("Alaska Gold"); a light scan recovers it. This is light parsing, not
-normalization: the recovered value is still a raw_ input that Stage 3 resolves.
+Some sources carry only a generic descriptor name (marenostone "Cream Marble Tile") and the adapter must
+strip known colour/type/format tokens to find the candidate variety. Others carry no colour column at all
+(zucchi, varsha) but name the colour inside the stone name -- English ("Alaska Gold") or the source's own
+language ("Granito Preto ..."). A light scan recovers it as a raw_ input that Stage 3 then resolves.
 
-The token lists mirror the backend vocabulary but are kept here as plain data so
-adapters do not depend on a reference load at parse time.
+The recognition vocabulary is the SAME single source the Stage-3 resolver uses: the live Medusa export
+(`attributes.csv`) for canonical values, plus `reference/synonyms/<vocab>.csv` for spellings. It is loaded
+once and cached, keyed on the one shared normalizer (`core.text.match_key`). There is no hardcoded copy to
+drift from Medusa.
 """
 
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from stone_pipeline.config.settings import CATEGORIES
-from stone_pipeline.core.text import ascii_fold, match_key
+from stone_pipeline.core.text import match_key
 
-COLOR_TOKENS = [
-    "Beige", "Black", "Blue", "Bordeaux", "Bronze", "Brown", "Copper", "Cream",
-    "Golden", "Gold", "Green", "Grey", "Gray", "Ivory", "Lilac", "Multicolor",
-    "Orange", "Pink", "Purple", "Red", "Rose", "Silver", "White", "Yellow",
-]
 
-TYPE_TOKENS = [
-    "Agate", "Alabaster", "Amethyst", "Andesite", "Basalt", "Bluestone", "Cantera",
-    "Conglomerate", "Coral Stone", "Crystal", "Dolomite", "Gneiss", "Granite",
-    "Limestone", "Marble", "Onyx", "Porphyry", "Quartzite", "Quartz", "Rhyolite",
-    "Sandstone", "Schist", "Serpentine", "Slate", "Soapstone", "Travertine", "Tuff",
-]
+@lru_cache(maxsize=None)
+def known_values(vocab: str) -> tuple[str, ...]:
+    """The canonical vocabulary for `vocab` ('color', 'type', ...), sourced live from the Medusa attribute
+    export (`attributes.csv`) -- the single source shared with the resolver, so recognition can never drift
+    from what the operator has in Medusa. Cached (loaded once per process). A missing export raises (from
+    `load_attributes`): a real deploy error surfaced loudly, never masked behind a stale hardcoded list."""
+    from stone_pipeline.reference.loaders import load_attributes
+    return tuple(load_attributes().canonical_names(vocab))
 
-# Commercial / short synonyms mapping a name token to a canonical backend type. Suppliers and buyers
-# say 'Sodalite'; the backend type is the geological 'Sodalite Syenite'. Registering the synonym lets
-# both the name-over-tag correction recognise it AND resolve_id map it to the real attribute type.
-TYPE_SYNONYMS = {
-    "sodalite": "Sodalite Syenite",
-    "sodalita": "Sodalite Syenite",        # Spanish/Portuguese spelling
-    "blue sodalite": "Sodalite Syenite",
-    "agata": "Agate",                      # Italian/Portuguese spelling of Agate (the stone, not a descriptor)
-}
 
-# Type words that double as common variety-NAME descriptors -- never used to override a supplier's
-# type ('Spectra Crystal' is a quartzite; 'Crystal' is a descriptor, not the type).
+# Type words that double as common variety-NAME descriptors -- never used to override a supplier's type
+# ('Spectra Crystal' is a quartzite; 'Crystal' is a descriptor, not the type).
 _AMBIGUOUS_TYPE_WORDS = {"crystal", "quartz", "agate", "amethyst", "coral"}
-# Negation prefixes that CANCEL a following type word -- 'Falsa Agata' (false agate) is genuinely an
-# onyx, not the Agate type, so the type word must not be read as the variety's type.
+# Negation prefixes that CANCEL a following type word -- 'Falsa Agata' (false agate) is genuinely an onyx,
+# so the type word must not be read as the variety's type.
 _NEGATION_WORDS = {"falsa", "false", "falso", "fake", "faux", "imitation"}
-# keyed by the shared match_key so an accented scrape ('Quartzíte') matches the vocab ('Quartzite')
-_CLEAR_TYPE_WORDS = {match_key(w) for w in (*TYPE_TOKENS, *TYPE_SYNONYMS)
-                     if " " not in w} - _AMBIGUOUS_TYPE_WORDS
+
+
+@lru_cache(maxsize=None)
+def _clear_type_words() -> frozenset[str]:
+    """Single-word stone-type words that UNAMBIGUOUSLY name a type in a variety name, match_key-keyed:
+    every canonical type plus every type synonym, minus the descriptor-prone words. Multi-word types
+    (e.g. 'Sodalite Syenite') are excluded -- a name carries the short synonym ('Sodalite'), not the pair."""
+    from stone_pipeline.reference.loaders import load_synonyms
+    words = {match_key(v) for v in known_values("type")} | set(load_synonyms("type"))
+    return frozenset(w for w in words if " " not in w) - _AMBIGUOUS_TYPE_WORDS
 
 
 def explicit_type_word(name: str) -> str | None:
     """The stone-TYPE word a variety name carries, IF it is an unambiguous rock type. A TRAILING type
-    word is the common '{Variety} {Type}' convention ('Azul White Quartzite' -> 'Quartzite'); a
-    LEADING type word covers '{Type} {Variety}' ('Sodalite Baia' -> 'Sodalite', 'Onyx Blue' ->
-    'Onyx'). None for: a single-token name (a variety NAMED after a type, e.g. 'Agate'), a
-    descriptor-prone type word ('Spectra Crystal'), or no clear type word at either end."""
+    word is the common '{Variety} {Type}' convention ('Azul White Quartzite' -> 'Quartzite'); a LEADING
+    type word covers '{Type} {Variety}' ('Sodalite Baia' -> 'Sodalite', 'Onyx Blue' -> 'Onyx'). None for:
+    a single-token name (a variety NAMED after a type, e.g. 'Agate'), a descriptor-prone type word
+    ('Spectra Crystal'), or no clear type word at either end."""
     toks = (name or "").split()
     if len(toks) < 2:
         return None
-    if match_key(toks[-1]) in _CLEAR_TYPE_WORDS:
+    clear = _clear_type_words()
+    if match_key(toks[-1]) in clear:
         if match_key(toks[-2]) in _NEGATION_WORDS:          # 'Falsa Agata' -> not the Agate type
             return None
         return toks[-1]
-    if match_key(toks[0]) in _CLEAR_TYPE_WORDS:
+    if match_key(toks[0]) in clear:
         return toks[0]
     return None
 
 
-# plural + singular title of every category (registry), plural first so e.g.
-# "Slabs" is stripped before "Slab"
+# plural + singular title of every category (registry), plural first so e.g. "Slabs" is stripped before
+# "Slab". A scraper-side concept (the upload branch), not a Medusa attribute vocabulary.
 FORMAT_TOKENS = [t for c in CATEGORIES for t in (c.label, c.name.title())]
 
 
@@ -79,32 +76,59 @@ def _word_re(token: str) -> re.Pattern:
     return re.compile(rf"\b{re.escape(token)}\b", flags=re.IGNORECASE)
 
 
-def extract_color(text: str) -> str:
-    """First backend colour word found in the text, canonicalized (Gray -> Grey)."""
-    if not text:
-        return ""
-    folded = ascii_fold(text)   # match colour words regardless of surrounding accents
-    for token in COLOR_TOKENS:
-        if _word_re(token).search(folded):
-            return "Grey" if token == "Gray" else token
+@lru_cache(maxsize=None)
+def _colour_lookup() -> dict[str, str]:
+    """match_key(word) -> canonical colour, from the live canonical colours plus the colour synonyms. The
+    one recognition vocabulary for colour; it shares `match_key` with the resolver, so the extractor
+    recognises exactly what Stage 3 resolves. Synonym keys are already match_key-normalized by the loader."""
+    from stone_pipeline.reference.loaders import load_synonyms
+    lookup = {match_key(canon): canon for canon in known_values("color")}
+    for raw_key, canonical in load_synonyms("color").items():
+        lookup.setdefault(raw_key, canonical)
+    return lookup
+
+
+def _match_colour(text: str, lookup: dict[str, str]) -> str:
+    """The FIRST colour word by TEXT POSITION whose normalized form is a known colour, returned canonical.
+    Position-aware so a structured name '{type} {colour} {trade}' picks the colour, not a colour word that
+    happens to sit in a trade name ('... Cinza Blue Sky' -> Grey, not Blue). Pure: the vocabulary is
+    injected, so the logic is unit-testable without any file I/O."""
+    for word in match_key(text).split():
+        canonical = lookup.get(word)
+        if canonical:
+            return canonical
     return ""
 
 
+def extract_color(text: str) -> str:
+    """The colour named in `text`, recognised against the live colour vocabulary + synonyms (see
+    `_match_colour`). Empty when the text names no known colour."""
+    return _match_colour(text, _colour_lookup())
+
+
+@lru_cache(maxsize=None)
+def _strip_tokens() -> tuple[str, ...]:
+    """Every colour/type word to strip from a descriptor name -- canonical values AND their synonyms
+    (so 'Gray'/'Preto' strip like 'Grey'/'Black'), plus format words. One vocabulary, no hardcoding."""
+    from stone_pipeline.reference.loaders import load_synonyms
+    return (*known_values("color"), *load_synonyms("color"),
+            *known_values("type"), *load_synonyms("type"), *FORMAT_TOKENS)
+
+
 def strip_variety(name: str) -> str:
-    """Remove colour, type, and format tokens from a descriptor name, leaving the
-    candidate variety (often empty for a purely generic descriptor)."""
+    """Remove colour, type, and format tokens from a descriptor name, leaving the candidate variety
+    (often empty for a purely generic descriptor). Word-boundary matched, so 'Gold' never bites 'Golden'."""
     text = name or ""
-    for token in (*COLOR_TOKENS, *TYPE_TOKENS, *FORMAT_TOKENS):
+    for token in _strip_tokens():
         text = _word_re(token).sub(" ", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
 def strip_format(name: str) -> str:
-    """Remove only the format word, keeping colour and type. The result is matched
-    against the tree: a descriptor that is actually a real variety (White
-    Travertine, Pink Onyx) then resolves, while a purely generic one (Cream
-    Marble) finds no exact match and routes to review or gap rather than being
-    discarded before it is even tried."""
+    """Remove only the format word, keeping colour and type. The result is matched against the tree: a
+    descriptor that is actually a real variety (White Travertine, Pink Onyx) then resolves, while a purely
+    generic one (Cream Marble) finds no exact match and routes to review or gap rather than being discarded
+    before it is even tried."""
     text = name or ""
     for token in FORMAT_TOKENS:
         text = _word_re(token).sub(" ", text)
