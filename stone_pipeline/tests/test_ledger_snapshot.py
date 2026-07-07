@@ -91,3 +91,53 @@ def test_config_snapshot_round_trip_preserves_lifecycle(tmp_path, monkeypatch):
     assert snapshot.restore_config(dest, env="development") is True
     row = store.get_row("polonine")
     assert row["lifecycle"] == "paused" and row["enabled"] is False   # pause survived the restart
+
+
+# -- scrape-artifact TREE snapshot (outputs_dir + data/) -----------------------
+
+def test_tree_snapshot_round_trip(tmp_path, monkeypatch):
+    """A directory tree (canonical parquets / raw scrapes) survives a cold task via S3, so catalog/
+    republish do not find 'no source runs' after a redeploy."""
+    fake = _FakeS3()
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+
+    outputs = tmp_path / "outputs"
+    (outputs / "zucchi" / "run1").mkdir(parents=True)
+    (outputs / "zucchi" / "run1" / "canonical.parquet").write_bytes(b"parquet-bytes")
+    (outputs / "marenostone").mkdir()
+    (outputs / "marenostone" / "canonical.parquet").write_bytes(b"more")
+
+    key = snapshot.artifacts_key("outputs", "development")
+    assert snapshot.save_tree(outputs, key) is True
+
+    dest = tmp_path / "restored_outputs"
+    assert snapshot.restore_tree(dest, key) is True
+    assert (dest / "zucchi" / "run1" / "canonical.parquet").read_bytes() == b"parquet-bytes"
+    assert (dest / "marenostone" / "canonical.parquet").read_bytes() == b"more"
+
+
+def test_tree_restore_never_clobbers_a_live_scrape(tmp_path, monkeypatch):
+    fake = _FakeS3()
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    key = snapshot.artifacts_key("outputs", "development")
+
+    src = tmp_path / "outputs"
+    src.mkdir()
+    (src / "a.parquet").write_bytes(b"snapshot-version")
+    snapshot.save_tree(src, key)
+
+    live = tmp_path / "live"
+    live.mkdir()
+    (live / "fresh.parquet").write_bytes(b"on-disk")     # a scrape already present
+    assert snapshot.restore_tree(live, key) is False      # must NOT overwrite it
+    assert (live / "fresh.parquet").exists() and not (live / "a.parquet").exists()
+
+
+def test_tree_save_of_empty_or_missing_dir_is_a_noop(tmp_path, monkeypatch):
+    fake = _FakeS3()
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    key = snapshot.artifacts_key("data", "development")
+    assert snapshot.save_tree(tmp_path / "does-not-exist", key) is False
+    empty = tmp_path / "empty"; empty.mkdir()
+    assert snapshot.save_tree(empty, key) is False         # never overwrite a good snapshot with nothing
+    assert not fake.store

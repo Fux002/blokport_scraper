@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import tarfile
 import tempfile
 import threading
 from pathlib import Path
@@ -124,6 +125,90 @@ def restore_config(config_path: str | Path, env: str = ENV_NAME) -> bool:
     """Restore config.db from its S3 snapshot if the local file is absent. Run BEFORE seed_from_yaml so a
     restored config (with pause/delist state) is not masked by a fresh yaml seed."""
     return restore(config_path, env, key=config_key(env))
+
+
+# -- scrape-artifact trees (outputs_dir + data/) -------------------------------
+# catalog/republish consume the per-source canonical parquets (outputs_dir) and the raw scrapes (data/),
+# which live on the task's EPHEMERAL disk. Only the ledger + config.db were snapshotted, so a restart
+# (every deploy) wiped these and catalog/republish then found "no source runs" and aborted. Persist them
+# like the ledger so a cold task restores the last scrape -- this is what makes `republish` deliver
+# "release without re-scrape" durably (its whole reason to exist), not just within one task lifetime.
+_ARTIFACT_TREES = ("outputs", "data")
+
+
+def artifacts_key(name: str, env: str = ENV_NAME) -> str:
+    """S3 key for a scrape-artifact tree tarball (`name` in _ARTIFACT_TREES)."""
+    return f"{env}/scraper/artifacts/{name}.tar.gz"
+
+
+def save_tree(dir_path: str | Path, key: str) -> bool:
+    """Snapshot a directory tree to S3 as a gzipped tar. Best-effort (logs + returns False, never raises).
+    A missing or empty dir is a no-op -- there is nothing to persist, and it must never overwrite a good
+    snapshot with an empty one (e.g. a produce that failed before writing any outputs)."""
+    dir_path = Path(dir_path)
+    if not dir_path.exists() or not any(dir_path.iterdir()):
+        return False
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        with tarfile.open(tmp_path, "w:gz") as tar:
+            tar.add(dir_path, arcname=".")
+        _s3().upload_file(str(tmp_path), S3_BUCKET, key)
+        log.info("artifact tree snapshot uploaded", extra={"extra_fields": {
+            "key": key, "bytes": tmp_path.stat().st_size}})
+        return True
+    except Exception:
+        log.exception("artifact tree snapshot failed (non-fatal)")
+        return False
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def restore_tree(dir_path: str | Path, key: str) -> bool:
+    """Restore a directory tree from its S3 tarball IF the local dir is absent or empty (never clobber a
+    live scrape already on disk). Best-effort. Returns True if a restore happened."""
+    dir_path = Path(dir_path)
+    if dir_path.exists() and any(dir_path.iterdir()):
+        return False                         # a local tree already wins
+    try:
+        _s3().head_object(Bucket=S3_BUCKET, Key=key)
+    except Exception:
+        log.info("no artifact snapshot to restore; starting fresh", extra={"extra_fields": {"key": key}})
+        return False
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as t:
+            tmp = Path(t.name)
+        _s3().download_file(S3_BUCKET, key, str(tmp))
+        dir_path.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(tmp, "r:gz") as tar:
+            tar.extractall(dir_path)         # our own snapshot (trusted content)
+        log.info("artifact tree restored from snapshot", extra={"extra_fields": {"key": key}})
+        return True
+    except Exception:
+        log.exception("artifact tree restore failed (non-fatal); starting fresh")
+        return False
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def save_artifacts(env: str = ENV_NAME) -> None:
+    """Persist the scrape-artifact trees after a produce, so a fresh task restores the last scrape instead
+    of finding nothing to consolidate. Called once a produce has written them (config/runner)."""
+    from stone_pipeline.config.settings import SETTINGS
+    save_tree(SETTINGS.paths.outputs_dir, artifacts_key("outputs", env))
+    save_tree(SETTINGS.paths.data_dir, artifacts_key("data", env))
+
+
+def restore_artifacts(env: str = ENV_NAME) -> None:
+    """Restore the scrape-artifact trees onto a cold task BEFORE any produce, mirroring the ledger restore.
+    No-op when a local scrape already exists or no snapshot has been taken yet."""
+    from stone_pipeline.config.settings import SETTINGS
+    restore_tree(SETTINGS.paths.outputs_dir, artifacts_key("outputs", env))
+    restore_tree(SETTINGS.paths.data_dir, artifacts_key("data", env))
 
 
 def start_periodic(ledger_path: str | Path, env: str = ENV_NAME,

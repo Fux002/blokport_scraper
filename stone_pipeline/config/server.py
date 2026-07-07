@@ -313,6 +313,10 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
     # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
     snapshot.restore(writethrough.ledger_path())
+    # Restore the last scrape's artifact trees (outputs_dir + data/) too: catalog/republish consume them
+    # off the ephemeral disk, so without this a redeploy wipes the last scrape and they abort with "no
+    # source runs". No-op when a local scrape already exists or none has been snapshotted yet.
+    snapshot.restore_artifacts()
     # keep config.db durable: a periodic snapshot backstop + a best-effort snapshot on clean shutdown
     # (the lifecycle verbs also snapshot immediately after a pause/delist so a crash never loses one).
     snapshot.start_periodic(config_db, key=snapshot.config_key())

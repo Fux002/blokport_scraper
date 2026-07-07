@@ -143,6 +143,12 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         rec["counts"] = counts
         if rc != 0:
             rec["error"] = f"pipeline exited {rc}" + (f":\n{tail}" if tail else "")
+    if rc == 0:
+        # Persist the scrape-artifact trees (outputs_dir + data/) this produce just wrote, so the next
+        # (cold) task restores the last scrape instead of finding nothing to consolidate -- this is what
+        # lets catalog/republish (and so the backbone approve->republish->pull loop) survive a redeploy.
+        from stone_pipeline.ledger import snapshot
+        snapshot.save_artifacts()
     _stamp_last_run(rec, rec["status"])
     _persist_run(rec)                                   # durable `last` across a restart
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
