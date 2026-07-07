@@ -16,11 +16,11 @@ on:
   workflow_dispatch:
     inputs:
       build_imageproc:
-        description: "Also build + push the heavy imageproc image (torch + LaMa de-watermark)"
+        description: "Also build + push the heavy imageproc image (CPU torch: Real-ESRGAN + SDXL de-watermark)"
         type: boolean
         default: false
       build_gpu:
-        description: "Also build + push the GPU image (CUDA torch + Real-ESRGAN + LaMa) for the AWS Batch enhancer"
+        description: "Also build + push the GPU image (CUDA torch: Real-ESRGAN + SDXL de-watermark) for the AWS Batch enhancer"
         type: boolean
         default: false
 
