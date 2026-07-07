@@ -100,7 +100,6 @@ RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('madebyollin/sdxl-vae-fp16-fix', revision='207b116dae70ace3637169f1ddd2434b91b3a8cd')"
 # Sensible enhancement defaults baked in (Batch job overrides SRC / BLOKPORT_ENV / bucket).
 ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
-    BLOKPORT_IMAGE_ENGINE=esrgan \
     BLOKPORT_IMAGE_PROCESSING=true
 COPY . /app
 RUN chmod +x /app/deploy/run_pipeline.sh

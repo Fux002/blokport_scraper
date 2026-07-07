@@ -6,12 +6,9 @@ exposure, contrast, softness and small size — while keeping the picture a true
 record of the stone (the vein pattern and colour must stay faithful; only the
 watermark's footprint is reconstructed).
 
-Two enhancement engines, chosen by `ImageProcessingConfig.engine`:
-  - "esrgan" (default): Real-ESRGAN learned super-resolution, then a gentle exposure
-    lift + vibrance. Brighter, crisper and more natural than the classical chain,
-    and it preserves colour rather than desaturating it.
-  - "classical": the OpenCV chain (white balance + CLAHE + unsharp + Lanczos), the
-    zero-dependency fallback when the torch stack is unavailable.
+Enhancement is Real-ESRGAN (learned super-resolution — clean + sharpen + 4x), then
+a gentle exposure lift + vibrance: brighter, crisper and natural, preserving the
+stone's colour rather than desaturating it.
 
 De-watermark reconstructs the mark's footprint with SDXL-inpaint (the classical
 detect-then-copy approaches smeared patterned stone). Flagged sources only.
@@ -19,12 +16,12 @@ detect-then-copy approaches smeared patterned stone). Flagged sources only.
 Bytes in, bytes out, so the image stage can apply it during re-host and tests can
 inject a fake. Everything is gated by `ImageProcessingConfig` (off by default).
 
-Pipeline per image:  de-watermark (flagged sources only) -> enhance -> upscale.
+Pipeline per image:  de-watermark (flagged sources only) -> enhance (ESRGAN) -> beautify.
 
-The classical chain needs only OpenCV/numpy/Pillow (core deps). The esrgan engine
-and the SDXL de-watermark backend need the optional torch stack in
-requirements-imageproc.txt; when it is absent the step is skipped with a single
-warning and the rest of the chain still runs.
+Both the ESRGAN enhancer and the SDXL de-watermark backend need the torch stack in
+requirements-imageproc.txt (cv2/numpy/Pillow are core deps). When that stack is
+absent each step is skipped with a single warning and the image passes through
+un-enhanced — there is no classical fallback.
 """
 
 from __future__ import annotations
@@ -42,54 +39,15 @@ from stone_pipeline.core import logfmt
 
 # cv2/numpy/Pillow are core deps and this module is imported lazily (only when
 # processing is enabled), so importing them at module top is safe and keeps the
-# hot path free of repeated import statements. torch/transformers/LaMa stay lazy
-# inside _Dewatermarker (optional, heavy, requirements-imageproc.txt only).
+# hot path free of repeated import statements. torch/spandrel/diffusers stay lazy
+# inside the enhancer/de-watermarker (optional, heavy, requirements-imageproc.txt only).
 
 log = logfmt.get_logger("image_processing")
 
 
 # --------------------------------------------------------------------------- #
-#  Faithful enhancement (classical, OpenCV — no invented detail)
+#  Faithful beautify helpers (applied after Real-ESRGAN — no invented detail)
 # --------------------------------------------------------------------------- #
-
-def _gray_world_white_balance(bgr, max_shift: float = 0.15):
-    """Neutralise a colour cast (storage-unit lighting is rarely neutral) by
-    scaling each channel toward the overall grey mean. The per-channel scale is
-    CLAMPED to [1-max_shift, 1+max_shift] so a genuinely coloured stone (cream
-    marble, green quartzite) can't be washed grey — gray-world only corrects mild
-    casts, never strongly re-tints. Faithful: re-weights colour, adds no structure."""
-    means = bgr.reshape(-1, 3).mean(axis=0)
-    grey = means.mean()
-    scale = np.clip(grey / np.clip(means, 1e-6, None), 1.0 - max_shift, 1.0 + max_shift)
-    out = bgr.astype(np.float32) * scale
-    return np.clip(out, 0, 255).astype("uint8")
-
-
-def _clahe_contrast(bgr, clip: float):
-    """Even out exposure with contrast-limited adaptive histogram equalisation on
-    the L channel only (LAB), so colour is untouched and local areas that were
-    too dark/bright are normalised without blowing out the rest."""
-    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=max(0.1, clip), tileGridSize=(8, 8))
-    l = clahe.apply(l)
-    return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
-
-
-def _denoise(bgr, strength: int):
-    # Light non-local-means; low h preserves fine veining while killing sensor grain.
-    # searchWindowSize is the cost driver (NLM is ~O(searchWindow^2)); 11 instead of
-    # the default 21 is ~3-4x faster per image with negligible quality loss at low h.
-    return cv2.fastNlMeansDenoisingColored(bgr, None, h=strength, hColor=strength,
-                                           templateWindowSize=7, searchWindowSize=11)
-
-
-def _unsharp(bgr, amount: float):
-    """Measured unsharp mask — recovers crispness lost to soft focus / resampling
-    without the haloing of aggressive sharpening."""
-    blur = cv2.GaussianBlur(bgr, (0, 0), sigmaX=1.2)
-    return cv2.addWeighted(bgr, 1.0 + amount, blur, -amount, 0)
-
 
 def _fit_long_edge(bgr, target_long_edge: int):
     """Cap the long edge at target_long_edge by DOWNSCALING only; never enlarge.
@@ -341,8 +299,7 @@ class ImageProcessor:
         self.cfg = cfg
         self._dw = (_Dewatermarker(cfg.dewatermark_model, cfg.dewatermark_steps, cfg.dewatermark_guidance)
                     if cfg.dewatermark else None)
-        self._esr = (_ESRGANEnhancer(cfg.esrgan_model, cfg.esrgan_weights, cfg.esrgan_tile)
-                     if cfg.engine == "esrgan" else None)
+        self._esr = _ESRGANEnhancer(cfg.esrgan_model, cfg.esrgan_weights, cfg.esrgan_tile)
 
     def process(self, data: bytes, *, watermarked: bool = False) -> ProcessResult:
         if not self.cfg.enabled:
@@ -371,28 +328,16 @@ class ImageProcessor:
                 res.data = data
                 return res
 
-        # 2) enhancement engine
-        if self.cfg.engine == "esrgan" and self._esr is not None and self._esr.available():
-            # learned clean + sharpen + 4x, then cap, then a gentle faithful beautify
+        # 2) enhancement: Real-ESRGAN (learned clean + sharpen + 4x), then a gentle
+        #    faithful beautify. If the torch stack/weights are unavailable the image
+        #    passes through un-enhanced (available() logs one warning) — no fallback.
+        if self._esr.available():
             bgr = self._esr.enhance(bgr)
             bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)      # cap the 4x output
             bgr = _levels(bgr, self.cfg.levels_lo_pct, self.cfg.levels_hi_pct)  # exposure lift
             bgr = _vibrance(bgr, self.cfg.vibrance)                      # restore muted colour
             res.enhanced = True
             res.upscaled = True
-        else:
-            # classical fallback (OpenCV; no GPU, but distorts colour/texture more)
-            if self.cfg.enhance:
-                bgr = _gray_world_white_balance(bgr)
-                bgr = _clahe_contrast(bgr, self.cfg.clahe_clip)
-                res.enhanced = True
-            if self.cfg.denoise:
-                bgr = _denoise(bgr, self.cfg.denoise_strength)
-            if self.cfg.upscale:
-                bgr, resized = _fit_long_edge(bgr, self.cfg.upscale_target_long_edge)
-                res.upscaled = resized
-            if self.cfg.sharpen_amount > 0:
-                bgr = _unsharp(bgr, self.cfg.sharpen_amount)
 
         ok, enc = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, self.cfg.jpeg_quality])
         res.data = enc.tobytes() if ok else data

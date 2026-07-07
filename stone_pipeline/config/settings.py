@@ -256,33 +256,27 @@ class S3Config:
 
 @dataclass(frozen=True)
 class ImageProcessingConfig:
-    """Faithful enhancement + de-watermark applied to scraped product photos
-    during re-host (the local/s3 image modes; passthrough never downloads bytes
-    so it cannot process them).
+    """Enhancement + de-watermark applied to scraped product photos during
+    re-host (the local/s3 image modes; passthrough never downloads bytes so it
+    cannot process them).
 
     These are photos of the ACTUAL slabs a customer buys, usually shot in a
-    storage unit under poor, uneven light. The goal is to fix that — exposure,
-    white balance, local contrast, noise, softness — WITHOUT inventing detail
-    (no generative super-resolution): the picture must stay a true record of the
-    stone. Pixel upscaling uses high-quality Lanczos resampling, not a model.
+    storage unit under poor, uneven light. Enhancement is Real-ESRGAN (learned
+    clean + sharpen + 4x), then a gentle exposure lift + vibrance — brighter and
+    crisper while keeping the stone's true colour and vein pattern. It needs the
+    torch stack (requirements-imageproc.txt); if that is unavailable the step is
+    skipped with a warning (the image passes through un-enhanced — no fallback).
 
     De-watermark runs ONLY on sources flagged `watermarked: true` in sources.yaml
-    (e.g. varsha burns a visible mark into its photos). It needs the optional
-    torch stack (requirements-imageproc.txt); if those deps are absent the step
-    is skipped with a warning and enhancement still runs.
+    (e.g. varsha burns a visible mark into its photos), reconstructing the mark's
+    footprint with SDXL-inpaint. Same torch stack; skipped with a warning if absent.
 
     Disabled by default: until `enabled` is true the image stage behaves exactly
     as before (no processing, no new deps loaded). Enable per deployment with
     BLOKPORT_IMAGE_PROCESSING=true (the AWS image-processing container)."""
 
     enabled: bool = _env_bool("BLOKPORT_IMAGE_PROCESSING", False)
-    # --- enhancement engine ---------------------------------------------------
-    # "esrgan"   : Real-ESRGAN learned clean+sharpen+4x upscale, then a gentle exposure lift +
-    #              vibrance. Faithful (colour untouched, natural texture); needs the GPU extras
-    #              (torch + spandrel + the pinned weights). This is the intended production engine.
-    # "classical": the legacy OpenCV chain below (fast on CPU but distorts colour/texture). Used
-    #              as a graceful fallback when the ESRGAN model/torch is unavailable.
-    engine: str = os.environ.get("BLOKPORT_IMAGE_ENGINE", "esrgan").strip().lower()
+    # --- enhancement (Real-ESRGAN learned clean+sharpen+4x, then faithful beautify) ---
     esrgan_model: str = os.environ.get("BLOKPORT_ESRGAN_MODEL", "RealESRGAN_x4plus")
     esrgan_weights: str = os.environ.get("BLOKPORT_ESRGAN_WEIGHTS", "")  # path override; else models/<model>.pth
     esrgan_tile: int = 512            # per-tile input for large images (0 = whole image)
@@ -290,17 +284,6 @@ class ImageProcessingConfig:
     levels_lo_pct: float = 0.5        # exposure lift: black-point percentile
     levels_hi_pct: float = 99.6       # exposure lift: white-point percentile
     vibrance: float = 0.20            # restore colour muted by bad light (0 = off)
-    # --- faithful enhancement (classical engine) ---
-    enhance: bool = True              # white balance + CLAHE local contrast + exposure
-    denoise: bool = True              # gentle chroma/luma denoise
-    denoise_strength: int = 3         # cv2 fastNlMeans h; keep low to avoid smearing veins
-    clahe_clip: float = 2.0           # local-contrast strength; higher = punchier, riskier
-    sharpen_amount: float = 0.6       # unsharp-mask amount (0 = off)
-    # --- pixel upscaling (faithful, Lanczos — never generative) ---
-    upscale: bool = True
-    upscale_max_scale: float = 2.0    # never enlarge beyond this factor
-    upscale_target_long_edge: int = 1600  # stop upscaling once the long edge reaches this
-                                          # (1600 is crisp for web + retina; 2048 only helps deep zoom and ~2x the bytes)
     # --- de-watermark (flagged sources only; needs the GPU imageproc extras) ---
     # The mark is located by its (stone-absent) pink ink + text strokes, then its small central
     # footprint is REGENERATED with a learned inpainting model (SDXL-inpaint) — natural matching
