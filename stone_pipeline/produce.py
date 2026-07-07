@@ -46,6 +46,13 @@ def _fetch_inputs() -> None:
     except Exception:
         log.warning("fetch_inputs skipped; matching runs against whatever export is local",
                     exc_info=True)
+    # Realign the category registry with the export NOW on disk. The pcats were read once at import
+    # (bootstrap, BEFORE this fetch); a produce that just pulled a changed attributes.csv -- a new Medusa
+    # pcat id or a corrected category label -- would otherwise keep gating emit + new-variety fan-out on
+    # the stale import snapshot (symptom: every row category_invalid). Runs even when the fetch was
+    # skipped (re-reads the same local file the import used), so it can only ever correct, never regress.
+    from stone_pipeline.config import settings
+    settings.refresh_category_pcats()
 
 
 def _live_scrape(sources: list[str] | None) -> int:

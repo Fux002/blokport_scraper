@@ -16,7 +16,7 @@ run must confirm them against the live backend fingerprint.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from pathlib import Path
 
@@ -434,6 +434,8 @@ class Category:
     fan_out: bool               # a new variety is also created in this category
     mirror_of: str | None       # backbone mirrors this category's (tile -> slab) else None
     volume_per_kg: str = ""     # static "Volume per kg (m³/kg)" written into every variant
+    pcat_env_var: str | None = None  # env override for pcat_id (bootstrap); kept so a post-fetch refresh
+                                     # re-derives pcat_id the SAME way construction did (see refresh_category_pcats)
 
     @property
     def active(self) -> bool:
@@ -493,7 +495,8 @@ CATEGORIES: tuple[Category, ...] = (
              _pcat("Tiles", "BLOKPORT_CAT_TILES_PCAT"),
              "backbone_tiles.json",
              "https://v3b.fal.media/files/b/0a9f30f3/jdmNyxqelKJM4DxFi4jyG_base_tiles.png",
-             shares_variety_vocab=True, fan_out=True, mirror_of="slab", volume_per_kg="0.0014348"),
+             shares_variety_vocab=True, fan_out=True, mirror_of="slab", volume_per_kg="0.0014348",
+             pcat_env_var="BLOKPORT_CAT_TILES_PCAT"),
 )
 
 _BY_NAME = {c.name: c for c in CATEGORIES}
@@ -521,6 +524,26 @@ def category_for_key(key: str) -> "Category | None":
 def active_categories() -> tuple[Category, ...]:
     # iterate _BY_NAME (the runtime registry) so tests can flip a category's pcat
     return tuple(c for c in _BY_NAME.values() if c.active)
+
+
+def refresh_category_pcats() -> None:
+    """Re-read the category pcats from the from_medusa/<env>/attributes.csv now on disk and rebuild the
+    runtime registry (_BY_NAME et al., which the helpers read).
+
+    _ENV_PCATS is read ONCE at import, as a bootstrap from whatever export is on disk then. But a produce
+    downloads a FRESH attributes.csv AFTER import (produce._fetch_inputs), so a running task whose local
+    export changed meaning -- a new Medusa pcat id, or a corrected category label -- would otherwise keep
+    gating on the stale import snapshot: every row rejected category_invalid (validate) and new-variety
+    fan-out silently disabled (curate), both off the frozen active_categories(). Call this once the fresh
+    export is on disk so the registry reflects the live pcats. Each category's pcat_id is re-derived the
+    SAME way construction did (_pcat honours its env override), so the refresh is a faithful recompute,
+    not a second code path. Idempotent: a no-op when the export is unchanged."""
+    global _ENV_PCATS, _BY_NAME, _BY_LABEL, _BY_LABEL_CF
+    _ENV_PCATS = _env_category_pcats()
+    rebuilt = tuple(replace(c, pcat_id=_pcat(c.label, c.pcat_env_var)) for c in _BY_NAME.values())
+    _BY_NAME = {c.name: c for c in rebuilt}
+    _BY_LABEL = {c.label: c for c in rebuilt}
+    _BY_LABEL_CF = {c.label.casefold(): c for c in rebuilt}
 
 
 @dataclass(frozen=True)
