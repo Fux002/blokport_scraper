@@ -16,4 +16,4 @@ pillow>=10              # keep the modern cp312 wheel; stops pip backtracking to
 torch>=2.2
 torchvision>=0.17
 simple-lama-inpainting  # LaMa inpainting wrapper (downloads weights on first use)
-spandrel                # loads Real-ESRGAN (RRDBNet) weights for the enhancement engine
+spandrel==0.4.2         # loads Real-ESRGAN (RRDBNet) weights for the enhancement engine (pinned)
