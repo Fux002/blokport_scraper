@@ -83,8 +83,12 @@ def _catalog() -> int:
     try:
         return catalog_mod.main([])
     except SystemExit as exc:
-        code = exc.code if isinstance(exc.code, int) else 1
-        return code or 1
+        # catalog raises SystemExit with a REASON string (the consistency errors, or "no source runs
+        # found ..."). Surface it instead of collapsing to a bare rc:1 -- else a failed catalog is
+        # undiagnosable (a fresh task with no scrape on disk looks identical to a real gate failure).
+        if not isinstance(exc.code, int) and exc.code:
+            log.error("catalog stage aborted", extra={"extra_fields": {"reason": str(exc.code)}})
+        return (exc.code if isinstance(exc.code, int) else 1) or 1
 
 
 def _inventory(sources: list[str] | None) -> int:
@@ -139,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     #    is SHARED across sources, so it always runs full even for a scoped scrape).
     if stage in ("catalog",) + _FULL_STAGES:
         if (rc := _catalog()) != 0:
-            log.error("build aborted: catalog/consistency gate failed", extra={"extra_fields": {"rc": rc}})
+            log.error("build aborted: catalog stage failed", extra={"extra_fields": {"rc": rc}})
             return rc
 
     scope = ", ".join(sources) if sources else "all enabled sources"
