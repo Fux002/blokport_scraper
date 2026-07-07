@@ -301,15 +301,17 @@ class ImageProcessingConfig:
     upscale_max_scale: float = 2.0    # never enlarge beyond this factor
     upscale_target_long_edge: int = 1600  # stop upscaling once the long edge reaches this
                                           # (1600 is crisp for web + retina; 2048 only helps deep zoom and ~2x the bytes)
-    # --- de-watermark (flagged sources only; needs the imageproc extra) ---
+    # --- de-watermark (flagged sources only; needs the GPU imageproc extras) ---
+    # The mark is located by its (stone-absent) pink ink + text strokes, then its small central
+    # footprint is REGENERATED with a learned inpainting model (SDXL-inpaint) — natural matching
+    # stone texture, not the smear a classical fill leaves on patterned slabs. The exact pixels
+    # under a drifting, multi-position semi-transparent mark can't be recovered, so this small
+    # region is reconstructed; everything else is untouched.
     dewatermark: bool = True
-    # Comma-separated Florence-2 prompts, unioned: "logo" catches the centered branding,
-    # "watermark" the corner info-label — together they clear both.
-    dewatermark_prompt: str = "logo,watermark"
-    # OCR-with-region also removes text overlays (top info-banner) BUT leaves an empty box
-    # where bordered white labels were and misses some stickers — worse than leaving them.
-    # Off by default; the centered branding is removed by the logo/watermark prompts above.
-    dewatermark_ocr: bool = False
+    dewatermark_model: str = os.environ.get(
+        "BLOKPORT_DEWATERMARK_MODEL", "diffusers/stable-diffusion-xl-1.0-inpainting-0.1")
+    dewatermark_steps: int = 25
+    dewatermark_guidance: float = 7.5
     # --- output / audit ---
     jpeg_quality: int = 85  # 85 is visually identical to 92 for photos at ~30-40% smaller files
     write_preview: bool = True        # images/reports/processed_preview.csv (source -> processed)

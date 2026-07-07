@@ -4,11 +4,11 @@ Reads N watermarked originals already on S3 at <env>/products/scraped/varsha/, r
 the de-watermark + enhance chain, and writes before/after pairs to
 <env>/scraper/dewatermark-validation/. Lets you eyeball the result — especially the
 centered "Varsha Stone" mark, the hardest case for faithful inpainting — before
-committing to the full (slow) set. Run on the imageproc image:
+committing to the full (slow) set. Run on the imageproc or gpu image:
 
     RUN_MODE=validate-dewatermark   (the entrypoint dispatches here)
 
-Needs torch + Florence-2 + LaMa (the imageproc image). Tune the count with VALIDATE_N.
+Needs torch + diffusers (the SDXL-inpaint stack). Tune the count with VALIDATE_N.
 """
 
 from __future__ import annotations
@@ -47,12 +47,9 @@ def main() -> int:
         print(f"no originals at s3://{S3_BUCKET}/{src} — run the pipeline with keep_scraped first")
         return 1
 
-    # Detection prompt is overridable via VALIDATE_PROMPT so we can try "logo" / "text"
-    # / "watermark" on the sample without rebuilding the image each time.
-    prompt = os.environ.get("VALIDATE_PROMPT", "logo,watermark")
     proc = ImageProcessor(ImageProcessingConfig(
-        enabled=True, dewatermark=True, write_preview=False, dewatermark_prompt=prompt))
-    print(f"==> de-watermarking {len(keys)} varsha originals (prompt={prompt!r}) -> s3://{S3_BUCKET}/{out}/")
+        enabled=True, dewatermark=True, write_preview=False))
+    print(f"==> de-watermarking {len(keys)} varsha originals -> s3://{S3_BUCKET}/{out}/")
     hits = 0
     for i, key in enumerate(keys):
         data = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()

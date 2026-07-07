@@ -1,22 +1,30 @@
-"""Faithful enhancement + de-watermark for scraped product photos.
+"""Enhancement + de-watermark for scraped product photos.
 
 These are photographs of the ACTUAL slabs a customer buys, usually shot in a
-storage unit under poor, uneven light. The job here is to make them presentable
-— fix exposure, white balance, local contrast, noise and softness, and (faithfully)
-enlarge small images — WITHOUT inventing any detail. No generative super-resolution:
-the picture must remain a true record of the stone, or it misrepresents the
-merchandise. Every step is either classical (OpenCV) or, for de-watermarking,
-detect-then-inpaint — never a model that hallucinates texture.
+storage unit under poor, uneven light. The job is to make them presentable — fix
+exposure, contrast, softness and small size — while keeping the picture a true
+record of the stone (the vein pattern and colour must stay faithful; only the
+watermark's footprint is reconstructed).
+
+Two enhancement engines, chosen by `ImageProcessingConfig.engine`:
+  - "esrgan" (default): Real-ESRGAN learned super-resolution, then a gentle exposure
+    lift + vibrance. Brighter, crisper and more natural than the classical chain,
+    and it preserves colour rather than desaturating it.
+  - "classical": the OpenCV chain (white balance + CLAHE + unsharp + Lanczos), the
+    zero-dependency fallback when the torch stack is unavailable.
+
+De-watermark reconstructs the mark's footprint with SDXL-inpaint (the classical
+detect-then-copy approaches smeared patterned stone). Flagged sources only.
 
 Bytes in, bytes out, so the image stage can apply it during re-host and tests can
 inject a fake. Everything is gated by `ImageProcessingConfig` (off by default).
 
 Pipeline per image:  de-watermark (flagged sources only) -> enhance -> upscale.
 
-The enhancement chain needs only OpenCV/numpy/Pillow (already core deps). The
-de-watermark backend (Florence-2 detect + LaMa inpaint) needs the optional torch
-stack in requirements-imageproc.txt; when it is absent the step is skipped with a
-single warning and the rest of the chain still runs.
+The classical chain needs only OpenCV/numpy/Pillow (core deps). The esrgan engine
+and the SDXL de-watermark backend need the optional torch stack in
+requirements-imageproc.txt; when it is absent the step is skipped with a single
+warning and the rest of the chain still runs.
 """
 
 from __future__ import annotations
@@ -122,43 +130,58 @@ def _vibrance(bgr, amount: float):
 
 
 # --------------------------------------------------------------------------- #
-#  De-watermark (locate the fixed logo by colour, inpaint with LaMa) — optional
+#  De-watermark (locate the mark, reconstruct its footprint with SDXL inpaint)
 # --------------------------------------------------------------------------- #
 
 class _Dewatermarker:
-    """Removes a consistent, centred logo watermark. Florence-2 open-vocab detection
-    proved unreliable on a faint, semi-transparent logo over light stone (it missed an
-    unknown fraction of slabs), so we locate the mark by its distinctive HUE instead —
-    the 'VARSHA STONES' logo is pink/magenta, a colour natural stone never carries — with
-    a fixed central fallback that guarantees coverage when the mark is too faint to
-    colour-detect (every flagged slab carries the logo). The located region is inpainted
-    with LaMa so the stone behind it is reconstructed.
+    """Removes the consistent, semi-transparent supplier watermark from a slab photo.
 
-    Tuned for the varsha centred-logo style; the hue/region constants below are the knobs
-    to retune for a different consistent watermark. No Florence/transformers needed."""
+    The mark is LOCATED by what stone never carries — its pink/magenta ink plus the local
+    deviation of its text strokes — giving a tight central footprint. The exact stone under a
+    drifting, multi-position semi-transparent mark can't be recovered (classical subtraction
+    leaves artefacts, and a plain inpaint smears patterned stone), so that small footprint is
+    REGENERATED with a learned inpainting model (SDXL-inpaint): natural, matching stone texture.
+    A feathered composite blends it seamlessly; everything outside the footprint is untouched.
 
-    HUE_LO, HUE_HI, SAT_MIN, VAL_MIN = 148, 180, 40, 60   # magenta/pink in OpenCV HSV (0-180)
-    MIN_PINK = 25                        # pink px needed to trust a colour hit
-    BAND = (0.28, 0.74, 0.18, 0.82)      # y0,y1,x0,x1 fractions of the central search band
-    FALLBACK = (0.28, 0.38, 0.72, 0.62)  # x0,y0,x1,y1 fractions: fixed box when colour is faint
-    # Mask the watermark's INK (its strokes), not the whole box: a solid box forces LaMa to
-    # fill a large patch of clean stone, which reads as a cloudy smudge on uniform slabs.
-    INK_MEDIAN = 31                      # median window estimating the stone under the thin text
-    INK_DELTA = 10                       # gray deviation from that local stone = watermark ink
-    MIN_INK = 300                        # too little ink found -> fall back to the solid box
+    Lazy + graceful: without torch/diffusers/weights, available() is False and de-watermarking is
+    skipped (enhancement still runs). Runs fp16 on CUDA (deploy); fp32 on MPS/CPU (fp16 NaNs there)."""
 
-    def __init__(self, *_args, **_kwargs):  # *_args kept for call-site compatibility
+    SEARCH = (0.32, 0.68, 0.22, 0.78)     # y0,y1,x0,x1 fractions of the central search band
+    HUE_LO, HUE_HI, SAT_MIN = 148, 180, 35  # the mark's pink/magenta ink in OpenCV HSV
+    INK_MEDIAN, INK_DELTA = 31, 9         # text strokes deviate this much from the local stone
+    MIN_INK = 25                          # px of ink needed to trust that a mark is present
+    PAD, FEATHER = 16, 9                  # footprint padding (px) / composite feather radius (px)
+    TILE = 1024                           # SDXL native inpaint resolution
+    _PROMPT = ("natural polished stone slab, continuous seamless mineral veining, "
+               "photorealistic, high detail")
+    _NEG = "text, letters, words, watermark, logo, sign, seam, blur, smooth patch"
+
+    def __init__(self, model: str, steps: int, guidance: float):
+        self.model, self.steps, self.guidance = model, steps, guidance
         self._ok: Optional[bool] = None
-        self._lama = None
+        self._pipe = None
+        self._device = None
+
+    # SDXL's stock VAE decodes to black in fp16 — use the fp16-safe VAE when running fp16 (CUDA).
+    VAE_FP16 = "madebyollin/sdxl-vae-fp16-fix"
 
     def available(self) -> bool:
         if self._ok is not None:
             return self._ok
         try:
             import torch
-            from simple_lama_inpainting import SimpleLama
+            from diffusers import AutoencoderKL, AutoPipelineForInpainting
 
-            self._lama = SimpleLama(device="cuda" if torch.cuda.is_available() else "cpu")
+            mps = getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+            self._device = "cuda" if torch.cuda.is_available() else "mps" if mps else "cpu"
+            # fp16 only on CUDA; on MPS/CPU fp16 NaN-decodes to black, so run fp32 there.
+            dtype = torch.float16 if self._device == "cuda" else torch.float32
+            kwargs = {"torch_dtype": dtype}
+            if dtype == torch.float16:  # fp16-safe VAE, else the decode is black
+                kwargs["vae"] = AutoencoderKL.from_pretrained(self.VAE_FP16, torch_dtype=dtype)
+            self._pipe = AutoPipelineForInpainting.from_pretrained(self.model, **kwargs).to(self._device)
+            self._pipe.set_progress_bar_config(disable=True)
+            self._pipe.enable_attention_slicing()
             self._ok = True
         except Exception as exc:  # deps/weights absent — degrade gracefully
             log.warning("de-watermark unavailable; skipping (enhancement still runs)",
@@ -166,58 +189,54 @@ class _Dewatermarker:
             self._ok = False
         return self._ok
 
-    def _logo_box(self, bgr):
-        """(x0,y0,x1,y1) of the centred logo: located by hue, else a fixed central box."""
+    def _footprint(self, bgr):
+        """(x0,y0,x1,y1) bounding box of the watermark, or None if no mark is found. Located
+        by pink ink + local stroke deviation within the central band."""
         h, w = bgr.shape[:2]
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        H, S, V = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
-        pink = ((H >= self.HUE_LO) & (H <= self.HUE_HI) &
-                (S >= self.SAT_MIN) & (V >= self.VAL_MIN)).astype(np.uint8)
-        by0, by1, bx0, bx1 = self.BAND
-        band = np.zeros_like(pink)
-        band[int(h * by0):int(h * by1), int(w * bx0):int(w * bx1)] = 1
-        pink &= band
-        ys, xs = np.where(pink)
-        if len(xs) >= self.MIN_PINK:  # located by colour — tight box, expanded for the grey text
-            x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
-            bw, bh = max(x1 - x0, 1), max(y1 - y0, 1)
-            return (max(0, int(x0 - 0.15 * bw)), max(0, int(y0 - 0.35 * bh)),
-                    min(w, int(x1 + 0.60 * bw)), min(h, int(y1 + 1.6 * bh)))
-        fx0, fy0, fx1, fy1 = self.FALLBACK
-        return (int(w * fx0), int(h * fy0), int(w * fx1), int(h * fy1))
-
-    def _ink_mask(self, bgr):
-        """uint8 mask of the watermark's strokes inside the located region. Within that
-        region the underlying stone is estimated by a median blur; pixels that deviate
-        from it (the thin text) plus any pink ink are the mask, dilated to cover soft
-        edges. Tight, so LaMa repairs only the strokes and blends — no cloudy box-fill.
-        Falls back to the solid region when too little ink is found (a faint logo we must
-        still remove), where a slight cloud beats a visible watermark."""
-        h, w = bgr.shape[:2]
-        x0, y0, x1, y1 = self._logo_box(bgr)
-        mask = np.zeros((h, w), np.uint8)
-        roi = bgr[y0:y1, x0:x1]
-        if roi.size == 0:
-            return mask
+        sy0, sy1, sx0, sx1 = (int(h * self.SEARCH[0]), int(h * self.SEARCH[1]),
+                              int(w * self.SEARCH[2]), int(w * self.SEARCH[3]))
+        roi = bgr[sy0:sy1, sx0:sx1]
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        bg = cv2.medianBlur(gray, self.INK_MEDIAN)
-        ink = cv2.absdiff(gray, bg) > self.INK_DELTA
+        strokes = cv2.absdiff(gray, cv2.medianBlur(gray, self.INK_MEDIAN)) > self.INK_DELTA
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        pink = (hsv[:, :, 0] >= self.HUE_LO) & (hsv[:, :, 0] <= self.HUE_HI) & (hsv[:, :, 1] >= self.SAT_MIN - 5)
-        roi_mask = cv2.dilate(((ink | pink) * 255).astype(np.uint8),
-                              np.ones((5, 5), np.uint8), iterations=2)
-        if int((roi_mask > 0).sum()) >= self.MIN_INK:
-            mask[y0:y1, x0:x1] = roi_mask
-        else:  # too faint to isolate -> remove the whole region to be safe
-            mask[y0:y1, x0:x1] = 255
-        return mask
+        pink = ((hsv[:, :, 0] >= self.HUE_LO) & (hsv[:, :, 0] <= self.HUE_HI) & (hsv[:, :, 1] >= self.SAT_MIN))
+        ink = cv2.dilate(((strokes | pink) * 255).astype(np.uint8), np.ones((5, 5), np.uint8), iterations=2)
+        ys, xs = np.where(ink > 0)
+        if len(xs) < self.MIN_INK:
+            return None
+        return (max(0, sx0 + xs.min() - self.PAD), max(0, sy0 + ys.min() - self.PAD),
+                min(w, sx0 + xs.max() + self.PAD), min(h, sy0 + ys.max() + self.PAD))
 
     def process(self, pil_image):
-        """Return a watermark-free copy (the located logo strokes inpainted)."""
+        """Return a copy with the watermark footprint reconstructed, or the original if no mark."""
+        import torch
+
         bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
-        mask = Image.fromarray(self._ink_mask(bgr))
-        cleaned = self._lama(pil_image.convert("RGB"), mask)
-        return cleaned, True
+        box = self._footprint(bgr)
+        if box is None:
+            return pil_image, False
+        h, w = bgr.shape[:2]
+        cx, cy = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+        side = (min(h, w, self.TILE) // 8) * 8                # a square crop for SDXL, /8-aligned
+        x0 = int(np.clip(cx - side // 2, 0, w - side))
+        y0 = int(np.clip(cy - side // 2, 0, h - side))
+        crop = bgr[y0:y0 + side, x0:x0 + side]
+        mcrop = np.zeros((side, side), np.uint8)
+        cv2.rectangle(mcrop, (box[0] - x0, box[1] - y0), (box[2] - x0, box[3] - y0), 255, -1)
+
+        img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)).resize((self.TILE, self.TILE))
+        mask = Image.fromarray(mcrop).resize((self.TILE, self.TILE))
+        result = self._pipe(
+            prompt=self._PROMPT, negative_prompt=self._NEG, image=img, mask_image=mask,
+            num_inference_steps=self.steps, strength=0.99, guidance_scale=self.guidance,
+            generator=torch.Generator(self._device).manual_seed(0)).images[0]
+        inpainted = cv2.cvtColor(np.array(result.resize((side, side))), cv2.COLOR_RGB2BGR).astype(np.float32)
+
+        # feathered composite -> the reconstructed footprint blends with no seam
+        feather = cv2.GaussianBlur(mcrop.astype(np.float32) / 255.0, (0, 0), self.FEATHER)[..., None]
+        blended = crop.astype(np.float32) * (1 - feather) + inpainted * feather
+        bgr[y0:y0 + side, x0:x0 + side] = np.clip(blended, 0, 255).astype(np.uint8)
+        return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)), True
 
 
 # --------------------------------------------------------------------------- #
@@ -320,7 +339,8 @@ class ImageProcessor:
 
     def __init__(self, cfg: ImageProcessingConfig):
         self.cfg = cfg
-        self._dw = _Dewatermarker() if cfg.dewatermark else None  # hue-based; no prompt/OCR args
+        self._dw = (_Dewatermarker(cfg.dewatermark_model, cfg.dewatermark_steps, cfg.dewatermark_guidance)
+                    if cfg.dewatermark else None)
         self._esr = (_ESRGANEnhancer(cfg.esrgan_model, cfg.esrgan_weights, cfg.esrgan_tile)
                      if cfg.engine == "esrgan" else None)
 
