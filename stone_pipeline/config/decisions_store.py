@@ -260,6 +260,50 @@ def decide_leaf_pending(ref: str, action: str) -> bool:
     return True
 
 
+def list_decided_leaves() -> list[dict]:
+    """Every recorded backbone-leaf verdict (approve OR reject), newest first, each carrying the `ref` the
+    review PUT takes -- so an operator can find and revise a past decision (e.g. undo a spurious approval a
+    prior run already grew into the overlay). Empty for a fresh store, with no side effect (does not create
+    the DB)."""
+    if not store.config_db_path().exists():
+        return []
+    with closing(store.open_store()) as conn:
+        rows = conn.execute(
+            "SELECT variety_norm, stone_type_norm, attribute, value_norm, value_display, action, decided_at "
+            "FROM backbone_leaf_decision ORDER BY decided_at DESC, value_display").fetchall()
+    return [{"variety": r["variety_norm"], "stone_type": r["stone_type_norm"], "attribute": r["attribute"],
+             "add_value": r["value_display"], "action": r["action"], "decided_at": r["decided_at"],
+             "ref": "|".join((r["variety_norm"], r["stone_type_norm"], r["attribute"], r["value_norm"]))}
+            for r in rows]
+
+
+def revise_leaf_decision(ref: str, action: str) -> bool:
+    """Change or remove an ALREADY-decided backbone leaf, by `ref`. decide_leaf_pending only reaches a leaf
+    still in the pending queue; once decided, a leaf drops off that queue, so revising it works off the
+    recorded decision instead. `action`:
+      approve|reject -> flip the verdict (un-approving a grown leaf: approve -> reject drops it from the
+                        overlay AND keeps it decided, so it is never re-suggested);
+      clear          -> delete the verdict, returning the leaf to pristine (it stops growing the tree; the
+                        suggestion re-surfaces on a later produce only if a product still implies it).
+    Returns False if `ref` names no decided leaf. The change applies on the next produce, like every other
+    decision (the overlay is read at load_backbone)."""
+    action = (action or "").strip().lower()
+    if action not in ("approve", "reject", "clear"):
+        raise InvalidDecision(f"leaf revision must be approve|reject|clear, got {action!r}")
+    parts = ref.split("|")
+    if len(parts) != 4 or not store.config_db_path().exists():
+        return False
+    where = "WHERE variety_norm = ? AND stone_type_norm = ? AND attribute = ? AND value_norm = ?"
+    with closing(store.open_store()) as conn:
+        if action == "clear":
+            cur = conn.execute(f"DELETE FROM backbone_leaf_decision {where}", tuple(parts))
+        else:
+            cur = conn.execute(f"UPDATE backbone_leaf_decision SET action = ?, decided_at = ? {where}",
+                               (action, _now(), *parts))
+        conn.commit()
+    return cur.rowcount > 0
+
+
 # -- the pending review queue (produce WRITES it, the API READS it) -------------
 
 def replace_pending(kind: str, rows: list[dict]) -> None:
