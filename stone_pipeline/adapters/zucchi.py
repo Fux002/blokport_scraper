@@ -2,9 +2,10 @@
 
 Clean named-variety source: product_name_en is the variety (Acadian Night).
 `family` is the stone type; finish and classification map cleanly. Zucchi has no
-colour column, but the rich description and the name often name a colour
-("black granite"); a light scan recovers it as a raw_ input for Stage 3. Slab
-bundles with real metric dimensions, weights, and slab counts.
+colour column, but the structured Portuguese name carries it
+(CIN {type} {colour} {trade}, e.g. "Granito Preto Rio Negro"), with the English
+name and description as secondary sources; a light scan recovers it as a raw_
+input for Stage 3. Slab bundles with real metric dimensions, weights, slab counts.
 """
 
 from __future__ import annotations
@@ -28,9 +29,7 @@ class ZucchiAdapter(AdapterBase):
         "raw_name": lambda r: AdapterBase.clean(r.get("product_name_en")),
         "variety_match_key": lambda r: AdapterBase.clean(r.get("product_name_en")),
         "raw_type": lambda r: AdapterBase.clean(r.get("family")),
-        # colour is not a column; recover it from the name then the description
-        "raw_color": lambda r: extract_color(AdapterBase.clean(r.get("product_name_en")))
-        or extract_color(AdapterBase.clean(r.get("description"))),
+        "raw_color": lambda r: _color(r),   # no colour column; recovered from the name (see _color)
         "raw_finish": lambda r: AdapterBase.clean(r.get("finish")),
         "raw_quality": lambda r: AdapterBase.clean(r.get("classification")),
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
@@ -42,6 +41,20 @@ class ZucchiAdapter(AdapterBase):
         "raw_description": lambda r: AdapterBase.clean(r.get("description")),
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls"), "|"),
     }
+
+
+# Colour lives in the structured Portuguese name (CIN {type} {colour} {trade}); the English name and the
+# description are secondary sources for rows where the Portuguese name omits it. First non-empty wins, so
+# the authoritative PT colour beats a conflicting English trade name ("Wonderful Black" vs PT "Cinza").
+_COLOUR_SOURCE_FIELDS = ("product_name_pt", "product_name_en", "description")
+
+
+def _color(r: dict) -> str:
+    for field in _COLOUR_SOURCE_FIELDS:
+        colour = extract_color(AdapterBase.clean(r.get(field)))
+        if colour:
+            return colour
+    return ""
 
 
 def _dims(r: dict) -> str:

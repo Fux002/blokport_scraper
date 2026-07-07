@@ -22,6 +22,22 @@ def _isolate_config_store(monkeypatch, tmp_path_factory):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(absent))
 
 
+@pytest.fixture(autouse=True)
+def _clear_vocab_caches():
+    """The colour/type recognition vocab is lazily loaded and lru-cached from attributes.csv + the synonym
+    files. Clear those caches around every test so one that monkeypatches those paths can neither leak a
+    stale vocab into another test nor inherit one."""
+    from stone_pipeline.adapters import tokens
+    from stone_pipeline.reference import loaders
+    caches = (tokens.known_values, tokens._clear_type_words, tokens._colour_lookup,
+              tokens._strip_tokens, loaders.load_synonyms)
+    for cache in caches:
+        cache.cache_clear()
+    yield
+    for cache in caches:
+        cache.cache_clear()
+
+
 # --- CI safety net: skip the integration tests that need the operator's LOCAL data --------------------
 # A handful of pipeline tests need the from_medusa export (variants_export.csv) and/or a real scrape under
 # data/<source>/ -- BOTH gitignored, so present on a developer's machine but ABSENT in CI. Without this they

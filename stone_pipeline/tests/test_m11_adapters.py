@@ -11,7 +11,8 @@ import pytest
 
 from stone_pipeline.adapters import selftest
 from stone_pipeline.adapters.base import read_scrape_csv
-from stone_pipeline.adapters.tokens import extract_color, strip_variety
+from stone_pipeline.adapters.tokens import (
+    _colour_lookup, _match_colour, explicit_type_word, extract_color, known_values, strip_variety)
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.run import run_source
 
@@ -40,10 +41,73 @@ def test_generic_descriptor_yields_empty_variety():
     assert strip_variety("Pietra Gray Marble Slab") == "Pietra"
 
 
-def test_color_extracted_from_name():
+def test_match_colour_is_position_aware_and_boundary_safe():
+    # _match_colour is PURE: inject the vocabulary and assert the logic alone (no reference I/O). It is
+    # position-aware (first colour by TEXT order) and boundary-safe (whole words, via the match key).
+    lookup = {"black": "Black", "white": "White", "grey": "Grey", "blue": "Blue", "gold": "Gold",
+              "golden": "Golden", "cinza": "Grey", "preto": "Black", "rosa": "Rose",
+              "anthracite": "Anthracite"}
+    cases = {
+        "CIN Marmore Cinza Blue Sky": "Grey",      # position: the structural colour, not trade-name Blue
+        "CIN Granito Preto Rio Negro": "Black",     # synonym recognised
+        "Black and White": "Black",                 # first by position
+        "Rosá": "Rose",                             # accent folded by match_key
+        "Anthracite Grey X": "Anthracite",          # a value present only in the injected vocab
+        "Golden": "Golden",                         # boundary: 'Golden' is not 'Gold'
+        "Alaska Gold": "Gold",
+        "Mandrak": "",                              # no colour word
+        "": "",
+    }
+    for text, expected in cases.items():
+        assert _match_colour(text, lookup) == expected, text
+
+
+def test_extract_color_reads_live_vocab_and_synonyms():
+    # extract_color recognises against the live vocab (committed attributes.csv) + synonyms (color.csv):
+    # English canonical AND Portuguese synonyms resolve, position-aware over a trade-name colour.
     assert extract_color("Alaska Gold") == "Gold"
     assert extract_color("Acadian Night is a black granite") == "Black"
+    assert extract_color("CIN Granito Preto Rio Negro 2cm") == "Black"     # preto -> Black (synonym)
+    assert extract_color("CIN Marmore Cinza Blue Sky 2cm") == "Grey"       # position, not Blue
+    assert extract_color("CIN Granito Marrom Absoluto 2cm") == "Brown"     # marrom -> Brown (new synonym)
     assert extract_color("No colour here") == ""
+
+
+def test_colour_lookup_merges_canonical_and_synonyms():
+    lookup = _colour_lookup()
+    assert lookup["black"] == "Black"          # canonical (from attributes.csv)
+    assert lookup["preto"] == "Black"          # synonym (from color.csv)
+    assert lookup["gray"] == "Grey"            # synonym; canonical spelling is 'Grey'
+
+
+def test_known_values_sources_from_the_medusa_export():
+    # the ONE canonical vocabulary is the live export, shared with the resolver -- not a hardcoded list.
+    colours, types = known_values("color"), known_values("type")
+    assert "Black" in colours and "White" in colours and len(colours) > 10
+    assert "Granite" in types and "Quartzite" in types
+
+
+def test_zucchi_color_prefers_the_structured_portuguese_name():
+    # the colour lives in product_name_pt; the English trade name and description are secondary. A row
+    # whose English name conflicts (Wonderful Black) takes the authoritative PT colour (Cinza -> Grey).
+    from stone_pipeline.adapters.zucchi import _color
+    assert _color({"product_name_pt": "CIN Quartzito Verde Acquamare 2cm",
+                   "product_name_en": "Acquamare"}) == "Green"
+    assert _color({"product_name_pt": "CIN Marmore Cinza Blue Sky 2cm",
+                   "product_name_en": "Wonderful Black"}) == "Grey"          # PT wins the conflict
+    assert _color({"product_name_pt": "", "product_name_en": "Alaska Gold"}) == "Gold"   # EN fallback
+    assert _color({"product_name_pt": "", "product_name_en": "Mandrak",
+                   "description": ""}) == ""
+
+
+def test_explicit_type_word_uses_live_type_vocab_with_guards():
+    # type-word detection sources its vocabulary from the live export + synonyms (folded TYPE_SYNONYMS),
+    # while the detection guards (ambiguous words, negation) are unchanged.
+    assert explicit_type_word("Azul White Quartzite") == "Quartzite"   # trailing type word
+    assert explicit_type_word("Sodalite Baia") == "Sodalite"           # leading synonym (now in type.csv)
+    assert explicit_type_word("Spectra Crystal") is None               # descriptor-prone -> guarded
+    assert explicit_type_word("Falsa Agata") is None                   # negation guard
+    assert explicit_type_word("Acadian Night") is None                 # no type word
 
 
 def test_marenostone_routes_generic_to_gaps_not_guesses(tmp_path):

@@ -105,9 +105,9 @@ def build_variation_index(variant_table, backbone) -> "CandidateIndex":
     the many variants that have no backbone record (this prevents cross-colour
     fuzzy matches like White -> the Cream variety).
     """
-    from stone_pipeline.adapters.tokens import COLOR_TOKENS
+    from stone_pipeline.adapters.tokens import known_values
 
-    color_set = {c.casefold() for c in COLOR_TOKENS}
+    color_set = {c.casefold() for c in known_values("color")}
 
     def colors_from_name(name: str) -> set[str]:
         return {tok for tok in name.split() if tok.casefold() in color_set}

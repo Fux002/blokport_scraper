@@ -34,9 +34,9 @@ _COLOUR_CANON = {"gray": "grey", "golden": "gold"}
 
 
 def _colour_words(text: str) -> set[str]:
-    from stone_pipeline.adapters.tokens import COLOR_TOKENS
+    from stone_pipeline.adapters.tokens import known_values
 
-    cset = {c.casefold() for c in COLOR_TOKENS}
+    cset = {c.casefold() for c in known_values("color")}
     return {_COLOUR_CANON.get(t.casefold(), t.casefold())
             for t in proj.norm(text).split() if t.casefold() in cset}
 
