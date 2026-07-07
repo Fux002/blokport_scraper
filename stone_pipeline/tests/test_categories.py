@@ -90,6 +90,53 @@ def test_pcat_comes_only_from_env_export(monkeypatch):
     assert settings._pcat("Tiles", "BLOKPORT_CAT_TILES_PCAT") == "pcat_OVERRIDE"  # explicit override only
 
 
+def test_refresh_picks_up_a_post_import_export_change(tmp_path, monkeypatch):
+    # The freeze bug: _ENV_PCATS is read once at import, but produce fetches a fresh attributes.csv AFTER
+    # import. If that export changed meaning (here: category rows appear only in the SECOND write, standing
+    # in for Blokport's pcat->category label fix landing mid-task), the registry must re-read it -- else
+    # every row is category_invalid and new-variety fan-out is silently disabled off the stale snapshot.
+    from stone_pipeline.config import settings
+
+    saved = (settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF)
+    monkeypatch.setattr(settings, "_FROM_MEDUSA", tmp_path)
+    monkeypatch.delenv("BLOKPORT_CAT_TILES_PCAT", raising=False)  # exercise the file, not the override
+    attrs = tmp_path / "attributes.csv"
+    try:
+        # 1) an export with NO category rows (the stale pre-fix state) -> the registry goes inactive
+        attrs.write_text("category,value,sourceid\ncolor,Black,col_x\n", encoding="utf-8")
+        settings.refresh_category_pcats()
+        assert settings.active_categories() == ()
+        assert settings.category("slab").pcat_id == ""            # inactive: nothing can emit
+
+        # 2) the corrected export arrives AFTER import -> refresh reactivates from the live file
+        attrs.write_text(
+            "category,value,sourceid\n"
+            "category,Slabs,pcat_slab\ncategory,Blocks,pcat_block\ncategory,Tiles,pcat_tile\n",
+            encoding="utf-8")
+        settings.refresh_category_pcats()
+        assert settings.category("slab").pcat_id == "pcat_slab"   # re-derived from the fresh export
+        assert {c.label for c in settings.active_categories()} == {"Slabs", "Blocks", "Tiles"}
+    finally:
+        settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF = saved
+
+
+def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
+    # the tile pcat has an env-var override; the refresh must re-derive pcat_id the SAME way construction
+    # did (override wins over the file), not silently drop it back to the export value.
+    from stone_pipeline.config import settings
+
+    saved = (settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF)
+    monkeypatch.setattr(settings, "_FROM_MEDUSA", tmp_path)
+    monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "pcat_TILE_OVERRIDE")
+    (tmp_path / "attributes.csv").write_text(
+        "category,value,sourceid\ncategory,Tiles,pcat_tile_from_file\n", encoding="utf-8")
+    try:
+        settings.refresh_category_pcats()
+        assert settings.category("tile").pcat_id == "pcat_TILE_OVERRIDE"  # override, not the file value
+    finally:
+        settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF = saved
+
+
 def test_owner_ids_are_env_vars_with_prod_guard(monkeypatch):
     # company + sales-channel are operational env vars, never hardcoded: an explicit env var wins;
     # dev falls back to a local default; prod with no env var stays "" (never a dev id).
