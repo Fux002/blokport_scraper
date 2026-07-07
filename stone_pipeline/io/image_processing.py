@@ -97,6 +97,30 @@ def _fit_long_edge(bgr, target_long_edge: int):
                       interpolation=cv2.INTER_AREA), True
 
 
+def _levels(bgr, lo_pct: float, hi_pct: float):
+    """Exposure lift: stretch luminance so the lo/hi percentiles map to black/white, using the
+    photo's OWN tonal range (invents nothing) — brightens the dull, flat, badly-lit hangar shots
+    so the material reads properly. Chroma is preserved (only the Y channel is stretched)."""
+    ycc = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+    y = ycc[:, :, 0]
+    lo, hi = np.percentile(y, [lo_pct, hi_pct])
+    if hi <= lo:
+        return bgr
+    ycc[:, :, 0] = np.clip((y - lo) * 255.0 / (hi - lo), 0, 255)
+    return cv2.cvtColor(ycc.astype("uint8"), cv2.COLOR_YCrCb2BGR)
+
+
+def _vibrance(bgr, amount: float):
+    """Restore colour that poor light muted — boost LOW-saturation pixels more than already-colourful
+    ones, so nothing over-saturates and no colour is invented, just un-muted."""
+    if amount <= 0:
+        return bgr
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+    s = hsv[:, :, 1]
+    hsv[:, :, 1] = np.clip(s * (1.0 + amount * (1.0 - s / 255.0)), 0, 255)
+    return cv2.cvtColor(hsv.astype("uint8"), cv2.COLOR_HSV2BGR)
+
+
 # --------------------------------------------------------------------------- #
 #  De-watermark (locate the fixed logo by colour, inpaint with LaMa) — optional
 # --------------------------------------------------------------------------- #
@@ -197,6 +221,86 @@ class _Dewatermarker:
 
 
 # --------------------------------------------------------------------------- #
+#  Enhancement engine: Real-ESRGAN (learned, faithful) — optional, lazy
+# --------------------------------------------------------------------------- #
+
+class _ESRGANEnhancer:
+    """Real-ESRGAN learned super-resolution (clean + sharpen + 4x), loaded via spandrel. Faithful:
+    reconstructs natural texture and leaves colour untouched — unlike the classical WB+CLAHE chain
+    that desaturates and over-sharpens. Lazy + graceful: if torch/spandrel/weights are absent,
+    available() is False and the caller falls back to the classical enhancement. Runs on CUDA
+    (deploy), MPS (local Mac), or CPU. Large images are tiled to bound GPU memory."""
+
+    def __init__(self, model_name: str, weights_path: str, tile: int):
+        self.model_name = model_name
+        self.weights_path = weights_path
+        self.tile = tile
+        self._ok: Optional[bool] = None
+        self._model = None
+        self._device = None
+        self._scale = 4
+
+    def _resolve_weights(self) -> str:
+        if self.weights_path:
+            return self.weights_path
+        from stone_pipeline.config.settings import REPO_ROOT
+        return str(REPO_ROOT.parent / "models" / f"{self.model_name}.pth")
+
+    def available(self) -> bool:
+        if self._ok is not None:
+            return self._ok
+        try:
+            import torch
+            from spandrel import ImageModelDescriptor, ModelLoader
+
+            self._device = ("cuda" if torch.cuda.is_available()
+                            else "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+                            else "cpu")
+            model = ModelLoader().load_from_file(self._resolve_weights())
+            if not isinstance(model, ImageModelDescriptor):
+                raise RuntimeError("loaded file is not a single-image upscaling model")
+            self._model = model.to(self._device).eval()
+            self._scale = model.scale
+            self._ok = True
+        except Exception as exc:  # deps/weights absent — fall back to classical
+            log.warning("ESRGAN unavailable; falling back to classical enhancement",
+                        extra={"extra_fields": {"error": str(exc)}})
+            self._ok = False
+        return self._ok
+
+    def _infer_tiled(self, t):
+        import torch
+
+        s = self._scale
+        _, c, h, w = t.shape
+        if self.tile <= 0 or (h <= self.tile and w <= self.tile):
+            return self._model(t)
+        ov, out_s = 32, s
+        step = self.tile - ov
+        out = torch.zeros(1, c, h * out_s, w * out_s, device=self._device)
+        wt = torch.zeros(1, 1, h * out_s, w * out_s, device=self._device)
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                y2, x2 = min(y + self.tile, h), min(x + self.tile, w)
+                y1, x1 = max(y2 - self.tile, 0), max(x2 - self.tile, 0)
+                o = self._model(t[:, :, y1:y2, x1:x2])
+                out[:, :, y1 * out_s:y2 * out_s, x1 * out_s:x2 * out_s] += o
+                wt[:, :, y1 * out_s:y2 * out_s, x1 * out_s:x2 * out_s] += 1
+        return out / wt.clamp(min=1)
+
+    def enhance(self, bgr):
+        """BGR -> BGR, cleaned + sharpened + upscaled by the learned model."""
+        import torch
+
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        t = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).to(self._device)
+        with torch.no_grad():
+            out = self._infer_tiled(t)
+        arr = out.squeeze(0).clamp(0, 1).permute(1, 2, 0).cpu().numpy()
+        return cv2.cvtColor((arr * 255.0 + 0.5).astype(np.uint8), cv2.COLOR_RGB2BGR)
+
+
+# --------------------------------------------------------------------------- #
 #  Orchestrator
 # --------------------------------------------------------------------------- #
 
@@ -217,6 +321,8 @@ class ImageProcessor:
     def __init__(self, cfg: ImageProcessingConfig):
         self.cfg = cfg
         self._dw = _Dewatermarker() if cfg.dewatermark else None  # hue-based; no prompt/OCR args
+        self._esr = (_ESRGANEnhancer(cfg.esrgan_model, cfg.esrgan_weights, cfg.esrgan_tile)
+                     if cfg.engine == "esrgan" else None)
 
     def process(self, data: bytes, *, watermarked: bool = False) -> ProcessResult:
         if not self.cfg.enabled:
@@ -231,37 +337,42 @@ class ImageProcessor:
     def _process(self, data: bytes, watermarked: bool) -> ProcessResult:
         res = ProcessResult(data)
 
-        # 1) de-watermark (flagged sources only, and only if the backend loaded)
+        # 1) de-watermark (flagged sources only). Keep the cleaned pixels in-memory (no
+        #    intermediate JPEG) so the enhancement engine works on lossless input.
+        bgr = None
         if watermarked and self.cfg.dewatermark and self._dw and self._dw.available():
             pil = Image.open(BytesIO(data)).convert("RGB")
             cleaned, did = self._dw.process(pil)
             res.dewatermarked = did
-            buf = BytesIO()
-            cleaned.convert("RGB").save(buf, format="JPEG", quality=self.cfg.jpeg_quality)
-            data = buf.getvalue()
+            bgr = cv2.cvtColor(np.array(cleaned.convert("RGB")), cv2.COLOR_RGB2BGR)
+        if bgr is None:
+            bgr = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if bgr is None:  # not a decodable raster (svg, etc.) — leave untouched
+                res.data = data
+                return res
 
-        # decode for the OpenCV chain
-        arr = np.frombuffer(data, dtype=np.uint8)
-        bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if bgr is None:  # not a decodable raster (svg, etc.) — leave untouched
-            res.data = data
-            return res
-
-        # 2) faithful enhancement at native resolution
-        if self.cfg.enhance:
-            bgr = _gray_world_white_balance(bgr)
-            bgr = _clahe_contrast(bgr, self.cfg.clahe_clip)
+        # 2) enhancement engine
+        if self.cfg.engine == "esrgan" and self._esr is not None and self._esr.available():
+            # learned clean + sharpen + 4x, then cap, then a gentle faithful beautify
+            bgr = self._esr.enhance(bgr)
+            bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)      # cap the 4x output
+            bgr = _levels(bgr, self.cfg.levels_lo_pct, self.cfg.levels_hi_pct)  # exposure lift
+            bgr = _vibrance(bgr, self.cfg.vibrance)                      # restore muted colour
             res.enhanced = True
-        if self.cfg.denoise:
-            bgr = _denoise(bgr, self.cfg.denoise_strength)
-
-        # 3) cap the long edge (downscale-only — never enlarge), then a final
-        #    measured sharpen to counter any resampling softness
-        if self.cfg.upscale:
-            bgr, resized = _fit_long_edge(bgr, self.cfg.upscale_target_long_edge)
-            res.upscaled = resized
-        if self.cfg.sharpen_amount > 0:
-            bgr = _unsharp(bgr, self.cfg.sharpen_amount)
+            res.upscaled = True
+        else:
+            # classical fallback (OpenCV; no GPU, but distorts colour/texture more)
+            if self.cfg.enhance:
+                bgr = _gray_world_white_balance(bgr)
+                bgr = _clahe_contrast(bgr, self.cfg.clahe_clip)
+                res.enhanced = True
+            if self.cfg.denoise:
+                bgr = _denoise(bgr, self.cfg.denoise_strength)
+            if self.cfg.upscale:
+                bgr, resized = _fit_long_edge(bgr, self.cfg.upscale_target_long_edge)
+                res.upscaled = resized
+            if self.cfg.sharpen_amount > 0:
+                bgr = _unsharp(bgr, self.cfg.sharpen_amount)
 
         ok, enc = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, self.cfg.jpeg_quality])
         res.data = enc.tobytes() if ok else data

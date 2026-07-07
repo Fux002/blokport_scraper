@@ -276,7 +276,21 @@ class ImageProcessingConfig:
     BLOKPORT_IMAGE_PROCESSING=true (the AWS image-processing container)."""
 
     enabled: bool = _env_bool("BLOKPORT_IMAGE_PROCESSING", False)
-    # --- faithful enhancement (all images) ---
+    # --- enhancement engine ---------------------------------------------------
+    # "esrgan"   : Real-ESRGAN learned clean+sharpen+4x upscale, then a gentle exposure lift +
+    #              vibrance. Faithful (colour untouched, natural texture); needs the GPU extras
+    #              (torch + spandrel + the pinned weights). This is the intended production engine.
+    # "classical": the legacy OpenCV chain below (fast on CPU but distorts colour/texture). Used
+    #              as a graceful fallback when the ESRGAN model/torch is unavailable.
+    engine: str = os.environ.get("BLOKPORT_IMAGE_ENGINE", "esrgan").strip().lower()
+    esrgan_model: str = os.environ.get("BLOKPORT_ESRGAN_MODEL", "RealESRGAN_x4plus")
+    esrgan_weights: str = os.environ.get("BLOKPORT_ESRGAN_WEIGHTS", "")  # path override; else models/<model>.pth
+    esrgan_tile: int = 512            # per-tile input for large images (0 = whole image)
+    target_long_edge: int = 2048      # cap the 4x output at this long edge (INTER_AREA downscale)
+    levels_lo_pct: float = 0.5        # exposure lift: black-point percentile
+    levels_hi_pct: float = 99.6       # exposure lift: white-point percentile
+    vibrance: float = 0.20            # restore colour muted by bad light (0 = off)
+    # --- faithful enhancement (classical engine) ---
     enhance: bool = True              # white balance + CLAHE local contrast + exposure
     denoise: bool = True              # gentle chroma/luma denoise
     denoise_strength: int = 3         # cv2 fastNlMeans h; keep low to avoid smearing veins
