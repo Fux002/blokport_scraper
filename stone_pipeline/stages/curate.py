@@ -260,6 +260,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     confirm_decisions = decisions.load_confirm_decisions()
     alias_decisions = decisions.load_alias_decisions()   # norm(spelling) -> existing variety NAME to alias onto
     rejected = decisions.load_rejected()
+    seed_colors = decisions.load_variety_seed_colors()   # norm(variant) -> operator mint colour (over 'Natural')
     pending_confirm: list[dict] = []
     result = CurationResult(
         alias_additions={b: [] for b in BRANCHES},
@@ -550,7 +551,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # colour is REQUIRED for a Medusa product; a source like zucchi often supplies none, so a
         # variety would be born colourless and null every product's colour_id. Fall back to the
         # generic 'Multicolor' (a real attribute) so the variety + its products are always priceable.
-        colors = sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_FALLBACK_COLOR]
+        # an operator-chosen mint colour (from the new-variety review) WINS over the observed/fallback
+        # chain, so a colourless source is seeded with a real colour instead of the generic 'Natural'.
+        seeded = seed_colors.get(proj.norm(title))
+        colors = ([seeded] if seeded
+                  else sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_FALLBACK_COLOR])
         qualities = sorted(_u["qualities"]) or [obs_quality]
         finishes = list(dict.fromkeys([*sorted(_u["finishes"]),
                                        *([obs_finish] if obs_finish else []), *_DEFAULT_FINISHES]))

@@ -107,10 +107,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
     #   reject-> never propose it again (the learned 'no' memory)
     #   alias -> it is really a spelling of `alias_of` (an existing variety); route the product there
     # In config.db so it is snapshotted + restored (durable on ECS), never a CSV under ephemeral /app.
+    # seed_color: an operator-chosen colour to mint a NEW variety with, instead of the generic 'Natural'
+    # fallback, when its source supplies no colour (a colourless source would otherwise leave the variety
+    # 'Natural' forever, since no scraped product ever carries a colour for the leaf review to surface).
     conn.execute("CREATE TABLE IF NOT EXISTS variety_decision ("
                  "variant_norm TEXT PRIMARY KEY, variant_display TEXT NOT NULL DEFAULT '', "
                  "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), "
-                 "alias_of TEXT, decided_at TEXT NOT NULL)")
+                 "alias_of TEXT, seed_color TEXT, decided_at TEXT NOT NULL)")
+    if "seed_color" not in {r["name"] for r in conn.execute("PRAGMA table_info(variety_decision)")}:
+        conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_color TEXT")   # DBs created before it
     # New colour/finish/type/quality VALUES the operator created in Medusa and pasted the id for, keyed
     # by (kind, normalized value). The next produce adopts the id into the attribute vocab.
     conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("

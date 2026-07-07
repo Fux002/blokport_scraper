@@ -29,6 +29,15 @@ from stone_pipeline.core import logfmt
 log = logfmt.get_logger("config.server")
 
 
+def _color_vocab() -> dict[str, str]:
+    """norm(colour) -> canonical colour name, from the Medusa attribute vocab. Backs the mint colour
+    picker (GET /config/v1/colors) and validates an operator's seed colour (never seed one Medusa lacks).
+    Loaded per call (admin low-QPS), mirroring config/varieties.py; empty if attributes.csv is absent."""
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import load_attributes
+    return {proj.norm(c): c for c in load_attributes().canonical_names("color")}
+
+
 def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
     """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
     or ['sources', 'polonine']). Pure: returns (status_code, json body)."""
@@ -137,11 +146,21 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             # would resolve to nothing at produce time -- a silent no-op. Reject it loudly here instead.
             if action == "alias" and not varieties.exists(alias_of or ""):
                 return 400, {"error": f"alias_of {alias_of!r} is not an existing variety"}
+            # an optional mint colour must be a real Medusa colour attribute, else the variety would be
+            # seeded with a colour that null-ids every product -- same loud guard as the alias target.
+            seed_color = None
+            if (raw_color := (body.get("color") or "").strip()):
+                from stone_pipeline.matching import projections as proj
+                vocab = _color_vocab()
+                if proj.norm(raw_color) not in vocab:
+                    return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
+                seed_color = vocab[proj.norm(raw_color)]   # store the canonical casing
             try:
-                decisions_store.set_variety_decision(segments[2], action, alias_of)
+                decisions_store.set_variety_decision(segments[2], action, alias_of, seed_color=seed_color)
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
-            return 200, {"variant": segments[2], "action": action, "alias_of": alias_of}
+            return 200, {"variant": segments[2], "action": action, "alias_of": alias_of,
+                         "seed_color": seed_color}
         if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
             return 200, {"attributes": decisions_store.list_pending("attribute")}
         if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
@@ -183,10 +202,16 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             from stone_pipeline import adapters
             return 200, {"adapters": sorted(adapters.REGISTRY)}
         return 405, {"error": "GET /config/v1/adapters"}
+    if segments and segments[0] == "colors":
+        # the colour vocabulary for the new-variety mint colour picker: seed a colourless variety with a
+        # real Medusa colour instead of the generic 'Natural'. Agnostic: just the canonical names.
+        if method == "GET":
+            return 200, {"colors": sorted(_color_vocab().values())}
+        return 405, {"error": "GET /config/v1/colors"}
     if not segments or segments[0] != "sources":
         return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, "
-                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties, /adapters or "
-                     "/variations/<key>/{retire,un_retire}"}
+                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties, /adapters, /colors "
+                     "or /variations/<key>/{retire,un_retire}"}
     if len(segments) == 1:
         if method == "GET":
             # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)
