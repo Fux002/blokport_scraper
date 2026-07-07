@@ -57,6 +57,30 @@ differs. Promotion = `terraform apply` with prod vars + the promoted image tag.
 4. **Spot quota:** stay On-Demand for now (quota is there); optionally request Spot later for ~40% off.
 5. **De-watermark:** keep the existing LaMa ink-mask for now (separate track); estimate-and-subtract is later.
 
+## 4b. STATUS & RESUME (as of this session)
+- **Phase A — DONE** (`a9485bb`, on `main`, deployed): ESRGAN recipe in code, MPS-validated.
+- **Phase B — DONE** (`2657eb7`, on `main`): GPU image built clean, in ECR as `:gpu` / `:gpu-<sha>`.
+- **Phase C — WRITTEN + VALIDATED, APPLY HELD** (`0f387f9`, on branch `fix/category-pcat-refresh-after-fetch`):
+  `modules/gpu_enhance` validates; targeted plan = **12 add, 0 change, 0 destroy** (uses the ECR data
+  source, so it does NOT touch the shared repo). **Nothing applied — no AWS infra created.**
+- **HELD because:** the shared TF state is mid-refactor by the other chat (ECR moving from
+  `module.scraper` to root) and both chats share the branch. Applying now could destroy/recreate ECR.
+
+**Resume (once the other chat's ECR refactor + branch are merged to `main` and the state is clean):**
+```bash
+cd infra
+terraform plan  -target=module.gpu_enhance_dev            # expect 12 add, 0 change, 0 destroy
+terraform apply -target=module.gpu_enhance_dev            # create the Batch infra (idle = $0)
+# First job = the GPU proof (torch.cuda + a real enhance on a small slice):
+aws batch submit-job --job-queue blokport-gpu-enhance-development \
+  --job-definition blokport-gpu-enhance-development --job-name gpu-proof \
+  --container-overrides 'environment=[{name=SRC,value=marenostone},{name=SLICE_COUNT,value=20}]'
+# watch the Batch job -> CloudWatch /batch/blokport-gpu-enhance-development ; instance scales back to 0.
+```
+Then **Phase D** (clean-slate: delete legacy `improved/`+`scraped/`, run the pipeline fresh so the
+scraper populates `scraped/` and the Batch enhancer fills `improved/`) and **Phase E** (prod: set
+`prod_staging_bucket`, promote `:gpu-<sha>` via `prod_gpu_image_tag`, `terraform apply`).
+
 ## 5. Risks & mitigations
 - **CUDA/torch build churn** (the LaMa-style trap): use a pinned, known-good `pytorch/pytorch:*-cuda*`
   base + pinned torch/spandrel; validate on a real GPU in Phase B before any Batch wiring.
