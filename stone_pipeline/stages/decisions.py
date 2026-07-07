@@ -56,6 +56,12 @@ def load_rejected() -> set[str]:
     return decisions_store.rejected_names()
 
 
+def load_variety_seed_colors() -> dict[str, str]:
+    """norm(variant) -> the operator-chosen mint colour. curate seeds a minted variety with this instead
+    of the generic 'Natural' fallback, so a colourless source does not leave the variety colourless."""
+    return decisions_store.variety_seed_colors()
+
+
 def save_rejected(rejected: set[str]) -> None:
     """Persist runtime-learned rejects. Never overwrites an explicit mint/alias decision."""
     decisions_store.learn_rejects(rejected)

@@ -90,3 +90,32 @@ def test_get_adapters_lists_the_registry():
     assert code == 200
     assert set(body["adapters"]) == {"marenostone", "polonine", "varsha", "zucchi"}
     assert server.dispatch("POST", ["adapters"], {})[0] == 405
+
+
+# -- mint seed colour (seed a colourless new variety with a real colour, not 'Natural') --------
+
+def test_get_colors_returns_the_medusa_vocab():
+    code, body = server.dispatch("GET", ["colors"], None)
+    assert code == 200
+    assert "Beige" in body["colors"] and body["colors"] == sorted(body["colors"])   # canonical, sorted
+
+
+def test_mint_with_a_seed_colour(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                                 {"action": "mint", "color": "beige"})
+    assert code == 200 and body["seed_color"] == "Beige"        # stored in canonical casing
+    assert decisions.load_variety_seed_colors() == {"zucchi blue x": "Beige"}   # produce reads this
+    row = server.dispatch("GET", ["review", "variants"], None)[1]["variants"][0]
+    assert row["current_seed_color"] == "Beige"                 # UI reflects the between-runs choice
+
+
+def test_mint_seed_colour_must_be_a_real_attribute(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                                 {"action": "mint", "color": "definitely-not-a-colour"})
+    assert code == 400 and "not a known" in body["error"]
+    assert decisions.load_variety_seed_colors() == {}          # nothing seeded on a bad colour
+
+
+def test_reject_ignores_a_seed_colour(seeded_queue):
+    server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "reject", "color": "beige"})
+    assert decisions.load_variety_seed_colors() == {}          # only mint carries a seed colour
