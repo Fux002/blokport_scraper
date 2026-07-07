@@ -164,6 +164,56 @@ def test_bulk_approve_all_and_by_verdict():
     assert set(ds.backbone_leaf_overlay()[("tiger black", "granite")]) == {"quality", "finish"}
 
 
+# -- un-approving an already-decided leaf (revise a past verdict) ----------------
+
+def test_revise_unapproves_a_decided_leaf_the_pending_path_cannot_reach():
+    # a leaf a prior run APPROVED and grew into the overlay, later found spurious. Decided rows drop off the
+    # pending queue, so decide_leaf_pending can no longer reach it -- revise_leaf_decision is the way back.
+    ds.set_backbone_leaf_decision("Tiger Black", "Granite", "quality", "B", "approve")
+    ref = "|".join(("tiger black", "granite", "quality", "b"))
+    assert ds.backbone_leaf_overlay() == {("tiger black", "granite"): {"quality": ["B"]}}
+    assert ds.decide_leaf_pending(ref, "reject") is False        # not pending: the queue can't touch it
+
+    assert ds.revise_leaf_decision(ref, "reject") is True         # flip: drops from the overlay...
+    assert ds.backbone_leaf_overlay() == {}
+    assert ("tiger black", "granite", "quality", "b") in ds.leaf_decided()   # ...but stays remembered
+
+    assert ds.revise_leaf_decision(ref, "clear") is True          # clear: back to pristine
+    assert ds.leaf_decided() == set()
+    assert ds.revise_leaf_decision(ref, "reject") is False        # nothing left to revise -> no-op, not error
+
+
+def test_revise_rejects_bad_action_and_malformed_ref():
+    import pytest
+    ds.set_backbone_leaf_decision("Tiger Black", "Granite", "quality", "B", "approve")
+    with pytest.raises(ds.InvalidDecision):
+        ds.revise_leaf_decision("tiger black|granite|quality|b", "banana")
+    assert ds.revise_leaf_decision("too|few|parts", "clear") is False
+
+
+def test_list_decided_leaves_exposes_refs():
+    ds.set_backbone_leaf_decision("Tiger Black", "Granite", "quality", "B", "approve")
+    ds.set_backbone_leaf_decision("Tiger Black", "Granite", "finish", "Honed", "reject")
+    decided = ds.list_decided_leaves()
+    assert {d["add_value"]: d["action"] for d in decided} == {"B": "approve", "Honed": "reject"}
+    approved = next(d for d in decided if d["action"] == "approve")
+    assert approved["ref"] == "|".join(("tiger black", "granite", "quality", "b"))
+    assert ds.revise_leaf_decision(approved["ref"], "clear") is True   # the ref round-trips through revise
+
+
+def test_put_unapproves_a_decided_leaf_end_to_end():
+    # the operator flow: a spurious approval exists; GET decided finds it by ref; PUT reject un-approves it.
+    ds.set_backbone_leaf_decision("Tiger Black", "Granite", "quality", "B", "approve")
+    code, body = server.dispatch("GET", ["review", "backbone", "decided"], None)
+    assert code == 200 and body["decided"][0]["action"] == "approve"
+    ref = body["decided"][0]["ref"]
+    code, body = server.dispatch("PUT", ["review", "backbone", ref], {"action": "reject"})
+    assert code == 200 and body["action"] == "reject"
+    assert ds.backbone_leaf_overlay() == {}                       # no longer grows the tree
+    # a clear through the API on an unknown/already-gone ref is a clean 404, not a 500
+    assert server.dispatch("PUT", ["review", "backbone", "no|such|quality|x"], {"action": "clear"})[0] == 404
+
+
 # -- the republish stage (release without a supplier re-fetch) ------------------
 
 def test_stages_lists_are_in_sync():
