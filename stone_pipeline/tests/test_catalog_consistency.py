@@ -48,3 +48,36 @@ def test_orphan_inventory_sku_errors_only_when_export_present():
         export_ids={"v1"}, combo_ids={"v1"}, prod_ids={"v1"},
         inv_skus={"GHOST"}, known_skus=set())
     assert errors2 == []
+
+
+def test_auto_queue_images_queues_not_generates_without_gen_deps(tmp_path, monkeypatch):
+    # The deployed images lack the FLUX/BEN2 stack (fal_client/torch) on purpose. With FAL_KEY set but the
+    # deps absent, the produce must QUEUE the texture prompts (not run generators that ImportError) and
+    # leave generation to the image_pipeline/GPU pass.
+    import importlib.util
+    from stone_pipeline import catalog
+    from stone_pipeline.stages import image_prompts
+    prompts = tmp_path / "prompts.json"
+    prompts.write_text('[{"key": "slab_marble_x_1"}]', encoding="utf-8")
+    monkeypatch.setattr(image_prompts, "build", lambda: prompts)
+    monkeypatch.setenv("FAL_KEY", "present")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda m: None)     # no fal_client / torch
+    generated = []
+    monkeypatch.setattr(catalog, "_generate_queued_images", lambda: generated.append(1) or [])
+    assert catalog._auto_queue_images() == 1        # queued
+    assert generated == []                          # did NOT attempt inline generation
+
+
+def test_auto_queue_images_generates_when_deps_present(tmp_path, monkeypatch):
+    import importlib.util
+    from stone_pipeline import catalog
+    from stone_pipeline.stages import image_prompts
+    prompts = tmp_path / "prompts.json"
+    prompts.write_text('[{"key": "slab_marble_x_1"}]', encoding="utf-8")
+    monkeypatch.setattr(image_prompts, "build", lambda: prompts)
+    monkeypatch.setenv("FAL_KEY", "present")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda m: object())  # deps present -> generate
+    generated = []
+    monkeypatch.setattr(catalog, "_generate_queued_images", lambda: generated.append(1) or [])
+    catalog._auto_queue_images()
+    assert generated == [1]                         # inline generation ran
