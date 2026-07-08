@@ -1,0 +1,33 @@
+scope,key,density_kg_m3
+default,default,2700
+type,Agate,2600
+type,Alabaster,2320
+type,Amethyst,2650
+type,Andesite,2600
+type,Basalt,2900
+type,Bluestone,2650
+type,Cantera,2000
+type,Conglomerate,2500
+type,Coral Stone,2000
+type,Crystal,2650
+type,Dolomite,2850
+type,Gneiss,2750
+type,Granite,2700
+type,Limestone,2400
+type,Marble,2700
+type,Onyx,2650
+type,Porphyry,2650
+type,Quartz,2650
+type,Quartzite,2700
+type,Quartzitic Sandstone,2600
+type,Rhyolite,2500
+type,Sandstone,2300
+type,Schist,2700
+type,Semi-Precious Stone,2650
+type,Serpentine,2600
+type,Slate,2750
+type,Soapstone,2800
+type,Sodalite Syenite,2700
+type,Travertine,2400
+type,Tuff,1900
+type,Dolomite Marble,2850
