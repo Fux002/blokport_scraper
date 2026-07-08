@@ -41,6 +41,12 @@ variable "max_vcpus" {
   default     = 16
 }
 
+variable "root_volume_gb" {
+  description = "Instance root EBS size. Must fit the ~19 GB GPU image plus docker's ~2.5x pull/decompress overhead; the 30 GB AMI default is too small. Ephemeral (min=0), so cost is negligible."
+  type        = number
+  default     = 150
+}
+
 variable "ssm_secret_arns" {
   description = "name -> SSM SecureString ARN, injected as container secrets (e.g. proxy for image CDNs)."
   type        = map(string)

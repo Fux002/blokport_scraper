@@ -150,11 +150,39 @@ resource "aws_iam_role_policy" "job" {
   policy = data.aws_iam_policy_document.job.json
 }
 
+# The GPU image is large (~19 GB: CUDA base + baked Real-ESRGAN + SDXL-inpaint weights).
+# The ECS_AL2_NVIDIA AMI's default 30 GB root volume can't hold it (docker needs ~2.5x the
+# image size to pull + decompress), so the pull dies with "no space left on device". A launch
+# template enlarges the root volume; without this, GPU jobs never start.
+resource "aws_launch_template" "this" {
+  name = "${local.name}-lt"
+  block_device_mappings {
+    device_name = "/dev/xvda" # AL2 ECS AMI root device
+    ebs {
+      volume_size           = var.root_volume_gb
+      volume_type           = "gp3"
+      delete_on_termination = true
+    }
+  }
+  tag_specifications {
+    resource_type = "instance"
+    tags          = { Name = local.name }
+  }
+}
+
 # --- Batch: managed EC2 GPU compute environment (min=0 -> $0 idle) ------------
 resource "aws_batch_compute_environment" "this" {
-  name = local.name
-  type = "MANAGED"
+  # name_prefix + create_before_destroy: a compute env referenced by a job queue can't be
+  # deleted-then-recreated under the same name (the queue relationship blocks the delete and
+  # the name collides). Unique names let Terraform stand up the new env, re-point the queue,
+  # then retire the old one — so config changes (e.g. the launch template) don't deadlock.
+  name_prefix = "${local.name}-"
+  type        = "MANAGED"
   # service_role omitted -> Batch uses the account service-linked role (AWSServiceRoleForBatch).
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   compute_resources {
     type                = "EC2" # On-Demand (Spot G/VT quota is 0 in this account)
@@ -170,6 +198,11 @@ resource "aws_batch_compute_environment" "this" {
     # for GPU jobs — without it the container can't see the GPU.
     ec2_configuration {
       image_type = "ECS_AL2_NVIDIA"
+    }
+    # Enlarged root volume (above) so the big GPU image can be pulled.
+    launch_template {
+      launch_template_id = aws_launch_template.this.id
+      version            = aws_launch_template.this.latest_version
     }
     tags = { Name = local.name }
   }
