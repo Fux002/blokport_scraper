@@ -66,7 +66,20 @@ jobs:
           docker push "$REPO:$SHA"
           echo "Pushed $REPO:core and :$SHA"
 
-      # Heavy (~3 GB torch image); only on manual dispatch with the flag set.
+      # Both heavy images bake the CUDA/torch stack + ~7 GB of pinned models, which
+      # overflows the runner's ~14 GB default disk. Free ~25 GB before EITHER build.
+      - name: Free disk space (heavy images)
+        if: steps.gate.outputs.ready == 'true' && (inputs.build_imageproc || inputs.build_gpu)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift \
+                      /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/powershell /usr/share/miniconda
+          sudo docker image prune -af || true
+          sudo docker builder prune -af || true
+          df -h /
+
+      # Heavy CPU-torch variant (Real-ESRGAN + SDXL de-watermark, ~10 GB with baked
+      # models); only on manual dispatch with the flag set.
       - name: Build and push imageproc image
         if: steps.gate.outputs.ready == 'true' && inputs.build_imageproc
         env:
@@ -76,14 +89,6 @@ jobs:
           docker build --target imageproc -t "$REPO:imageproc" .
           docker push "$REPO:imageproc"
           echo "Pushed $REPO:imageproc"
-
-      # The CUDA image is large (~7 GB): free the runner's disk before building it.
-      - name: Free disk space (GPU image)
-        if: steps.gate.outputs.ready == 'true' && inputs.build_gpu
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
-          sudo docker image prune -af || true
-          df -h /
 
       # GPU image for the AWS Batch enhancer; :gpu = dev (mutable), :gpu-<sha> = promote to prod.
       - name: Build and push gpu image
