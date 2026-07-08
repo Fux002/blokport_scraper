@@ -15,7 +15,12 @@ pillow>=10              # modern cp312 wheel; stops pip backtracking to an uncom
 torch>=2.2
 torchvision>=0.17
 spandrel==0.4.2         # loads Real-ESRGAN (RRDBNet) weights for the enhancement engine (pinned)
-diffusers==0.39.0       # SDXL-inpaint pipeline for de-watermarking (pinned)
-transformers            # SDXL text encoders (CLIP) required by diffusers
-accelerate              # diffusers device/dtype placement
-safetensors             # weights format
+# The diffusers stack MUST match the GPU base image's torch (2.4.1). Newer diffusers/
+# transformers register custom ops with PEP-604 `X | None` type hints that torch 2.4.1's
+# torch.library.infer_schema cannot parse -> `import diffusers.models.autoencoders.autoencoder_kl`
+# fails and de-watermark silently disables. These 2024-era pins are the last set that imports
+# cleanly on torch 2.4.1. (If the base torch is bumped, bump these together.)
+diffusers==0.30.0       # SDXL-inpaint pipeline for de-watermarking
+transformers==4.44.2    # SDXL text encoders (CLIP); the pin that actually fixes the import
+accelerate==0.33.0      # diffusers device/dtype placement
+safetensors==0.4.4      # weights format

@@ -85,7 +85,8 @@ RUN pip install --upgrade "pip" "setuptools>=78.1.1"
 # first so nothing backtracks to an uncompilable old pillow), never re-touch torch.
 COPY stone_pipeline/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt \
-    && pip install "pillow>=10" "spandrel==0.4.2" "diffusers==0.39.0" transformers accelerate safetensors
+    && pip install "pillow>=10" "spandrel==0.4.2" \
+       "diffusers==0.30.0" "transformers==4.44.2" "accelerate==0.33.0" "safetensors==0.4.4"
 # Bake the model weights at build, PINNED (ESRGAN by SHA-256; the diffusers models by immutable
 # revision) so no unverified fetch happens on a live task and dev/prod are byte-identical:
 #   - Real-ESRGAN x4plus  : the enhancement engine
