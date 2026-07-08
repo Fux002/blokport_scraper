@@ -162,3 +162,19 @@ def test_build_is_deterministic(tmp_path):
     a, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     b, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     assert a == b and sorted(a) == sorted(b)  # same set, deterministic row order
+
+
+def test_run_missing_export_writes_empty_not_abort(tmp_path, monkeypatch):
+    # COLD START: Medusa has 0 variations, so variants_export.csv doesn't exist yet. run() must NOT abort
+    # (it used to raise SystemExit) -- it writes empty combination sets so pass 1 completes; the real
+    # export arrives after Medusa mints this produce's variants, and the next republish builds combos.
+    import types
+    fake = types.SimpleNamespace(paths=types.SimpleNamespace(
+        export_file=tmp_path / "does-not-exist.csv", to_upload_dir=tmp_path))
+    monkeypatch.setattr(tree_build, "SETTINGS", fake)
+    ret = tree_build.run()                                  # must not raise
+    assert ret == tmp_path / "2_valid_combinations.csv"
+    for name in ("2_valid_combinations.csv", "2_valid_combinations_update.csv",
+                 "2_valid_combinations_products_only.csv"):
+        rows = list(csv.reader((tmp_path / name).open(encoding="utf-8-sig")))
+        assert rows == [list(tree_build.COMBINATION_COLUMNS)]    # header only, zero data rows

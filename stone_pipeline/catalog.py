@@ -142,8 +142,15 @@ def _auto_queue_images() -> int:
         return 0
     items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
     items = items if isinstance(items, list) else items.get("items", [])
-    if items and os.environ.get("FAL_KEY"):
-        log.info("auto image generation: FAL_KEY present, generating", extra={"extra_fields": {"queued": len(items)}})
+    # The generators need the FLUX/BEN2 stack (fal_client + torch), which the lean deployed images
+    # deliberately omit -- texture generation is an external/GPU step, and the produce's job here is to
+    # QUEUE the prompts (prompts_to_generate.json). Only run inline when BOTH FAL_KEY and the deps are
+    # present (a dev box / a dedicated generation image); otherwise queue and say so, rather than run
+    # scripts that would just ImportError.
+    import importlib.util
+    missing_deps = [m for m in ("fal_client", "torch") if importlib.util.find_spec(m) is None]
+    if items and os.environ.get("FAL_KEY") and not missing_deps:
+        log.info("auto image generation: FAL_KEY + deps present, generating", extra={"extra_fields": {"queued": len(items)}})
         failed = _generate_queued_images()
         if failed:
             # distinct error-level signal: generation failed, so some {Key}.png will be absent. The
@@ -151,6 +158,14 @@ def _auto_queue_images() -> int:
             # this loudly so a wholesale failure isn't mistaken for a clean run.
             log.error("image generation failed -- expected images may be missing from this build",
                       extra={"extra_fields": {"failed_scripts": failed, "queued": len(items)}})
+    elif items and os.environ.get("FAL_KEY") and missing_deps:
+        # FAL_KEY is set but this image can't generate (no fal_client/torch): queue only, delegate the
+        # actual generation to the image_pipeline / GPU pass. Their products stay HELD until {Key}.png
+        # exists. Warn (not error) -- this is the expected deployed-image path, not a failure.
+        log.warning("%d new variant texture(s) QUEUED (image_pipeline/prompts_to_generate.json) but NOT "
+                    "generated here: this image lacks %s. Run the generator / GPU pass to produce them; "
+                    "until then their products stay HELD.",
+                    len(items), ", ".join(missing_deps), extra={"extra_fields": {"queued": len(items)}})
     elif items:
         # loud signal (risk 2): textures were queued but FAL_KEY is not set for the produce, so they are
         # NOT generated here -- every one of these new variants' products stays HELD out of the catalogue

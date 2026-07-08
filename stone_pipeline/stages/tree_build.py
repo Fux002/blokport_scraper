@@ -348,7 +348,19 @@ def run() -> Path:
     """
     export = SETTINGS.paths.export_file
     if not export.exists():
-        raise SystemExit(f"no variants export: {export} (download it from Medusa first)")
+        # Cold start: Medusa has 0 variations yet, so there is no export and nothing to build combinations
+        # against until THIS produce's variants are pulled and minted. Write EMPTY sets (not a hard abort)
+        # so pass 1 completes and the variants flow to Medusa; the next republish -- against the now-real
+        # export -- builds the combinations. WARNING (not silent) so a WARM run with a forgotten export is
+        # still visible (it also surfaces downstream as 0 products emitted).
+        to_upload = SETTINGS.paths.to_upload_dir
+        log.warning("no variants export; writing EMPTY combinations (cold start: nothing to build against "
+                    "until Medusa mints this produce's variations)",
+                    extra={"extra_fields": {"export": str(export)}})
+        for name in ("2_valid_combinations.csv", "2_valid_combinations_update.csv",
+                     "2_valid_combinations_products_only.csv"):
+            write_combinations(set(), to_upload / name)
+        return to_upload / "2_valid_combinations.csv"
     products = SETTINGS.paths.to_upload_dir / "3_products_all.csv"
     uncovered_file = SETTINGS.paths.review_dir / "tree_uncovered_variations.csv"
     assigned = _load_assigned_types(uncovered_file, _load_attributes(SETTINGS.paths.attributes_csv))
