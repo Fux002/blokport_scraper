@@ -50,14 +50,33 @@ def test_extracted_portuguese_colour_resolves_end_to_end(ref):
     assert row.color_name == "Black" and row.color_id is not None
 
 
-def test_synonym_none_is_clean_not_error(ref):
-    # finish 'Other' -> none: resolves to no id, but is not an unresolved error.
+def test_last_resort_finish_and_quality_defaults(ref):
+    # an unresolvable finish/quality is not dropped: a configured, flagged last-resort default fills it
+    # (slab finish -> Polished, tile -> Honed, block -> Raw; quality -> A) so the product still ships.
     resolvers = normalize.AttributeResolvers.build(ref)
-    row = CanonicalRow(src_site="marenostone", raw_finish="Other")
+    slab = CanonicalRow(src_site="polonine", raw_format="Slab", raw_finish="", raw_quality="")
+    normalize.normalize_row(slab, resolvers, ref)
+    assert slab.finish_name == "Polished" and slab.finish_id is not None
+    assert slab.finish_method == "last_resort_default"
+    assert slab.quality_name == "A" and slab.quality_id is not None and slab.quality_method == "last_resort_default"
+    assert sum(1 for f in slab.review_flags if f.code == FlagCode.attr_last_resort) == 2
+    tile = CanonicalRow(src_site="x", raw_format="Tile", raw_finish="", raw_quality="A")
+    normalize.normalize_row(tile, resolvers, ref)
+    assert tile.finish_name == "Honed"                 # tile default, not slab's
+    block = CanonicalRow(src_site="x", raw_format="Block", raw_finish="", raw_quality="A")
+    normalize.normalize_row(block, resolvers, ref)
+    assert block.finish_name == "Raw" and block.finish_method == "block_default_raw"   # block's own rule
+
+
+def test_synonym_none_finish_gets_last_resort_default(ref):
+    # finish 'Other' resolves to "no value" (synonym_none, not an unresolved error). Because finish is
+    # required for Medusa, that null then takes the configured last-resort default so the product ships
+    # rather than being rejected -- and it is never flagged as an unresolved error.
+    resolvers = normalize.AttributeResolvers.build(ref)
+    row = CanonicalRow(src_site="marenostone", raw_format="Slab", raw_finish="Other")
     normalize.normalize_row(row, resolvers, ref)
-    assert row.finish_id is None
-    assert row.finish_method == "synonym_none"
-    assert not any(f.code == FlagCode.attr_unresolved for f in row.review_flags)
+    assert not any(f.code == FlagCode.attr_unresolved for f in row.review_flags)   # not an error
+    assert row.finish_id is not None and row.finish_method == "last_resort_default"   # defaulted, ships
 
 
 def test_unknown_value_flags_and_does_not_guess(ref):

@@ -89,6 +89,15 @@ def _owner_id(env_var: str, dev_default: str) -> str:
 SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID)
 COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID)
 
+# Last-resort attribute defaults (config policy). When a REQUIRED attribute cannot be resolved from a
+# source, normalize applies the configured default here rather than DROP the product. This is the LAST
+# resort (only after resolution fails) and is ALWAYS flagged for correction, never a silent guess.
+# These are deliberate business values; change them here. Block finish defaults to 'Raw' separately.
+# Colour is NOT defaulted here (it is inherited from the matched variety / classified from the texture,
+# with a 'Natural' floor), only finish and quality.
+LAST_RESORT_FINISH = {"slab": "Polished", "tile": "Honed"}   # per branch; an unlisted branch uses slab's
+LAST_RESORT_QUALITY = "A"                                     # top grade when a source states none
+
 
 # --- Confidence enum with a fixed numeric mapping (section 3.4) ----------------
 class Confidence(IntEnum):

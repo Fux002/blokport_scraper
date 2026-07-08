@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 
 from stone_pipeline.adapters.tokens import explicit_type_word
-from stone_pipeline.config.settings import SETTINGS, Confidence
+from stone_pipeline.config.settings import LAST_RESORT_FINISH, LAST_RESORT_QUALITY, SETTINGS, Confidence
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.matching.engine import VocabResolver
@@ -155,12 +155,37 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
     # Default a block to 'Raw' — the standard block finish, in attributes.csv and the
     # block backbone. Check raw_format too: normalize runs BEFORE format_resolve, so
     # format_value isn't set yet -- the source format tag is what's available here.
-    if (row.format_value or row.raw_format or "").strip().lower() == "block" and not row.finish_id:
+    fmt = (row.format_value or row.raw_format or "").strip().lower()
+    if fmt == "block" and not row.finish_id:
         looked = ref.attributes.resolve_id("finish", "Raw")
         if looked:
             row.finish_name, row.finish_id = "Raw", looked[1]
             row.finish_confidence = _confidence_name(Confidence.low)
             row.finish_method = "block_default_raw"
+
+    # Last-resort attribute defaults (config policy, section: never drop a product for a resolvable-
+    # attribute gap). When a REQUIRED attribute could not be resolved from the source, apply the
+    # configured default (settings.LAST_RESORT_*) as the FINAL rung, and ALWAYS flag it for correction,
+    # instead of nulling the id and rejecting the product at validate. Deliberate, changeable, visible.
+    # Colour is NOT defaulted here: it is inherited from the matched variety / classified from the
+    # texture ('Natural' floor), so a colour default here would mask that better value.
+    if not row.finish_id:                                   # non-block finish (block handled above)
+        default_finish = LAST_RESORT_FINISH.get(fmt) or LAST_RESORT_FINISH.get("slab")
+        looked = ref.attributes.resolve_id("finish", default_finish) if default_finish else None
+        if looked:
+            row.finish_name, row.finish_id = looked
+            row.finish_confidence = _confidence_name(Confidence.low)
+            row.finish_method = "last_resort_default"
+            row.add_flag(ReviewFlag(field="finish", code=FlagCode.attr_last_resort, best_guess=looked[0],
+                                    confidence=Confidence.low, method="last_resort_default", src_url=row.src_url))
+    if not row.quality_id:
+        looked = ref.attributes.resolve_id("quality", LAST_RESORT_QUALITY)
+        if looked:
+            row.quality_name, row.quality_id = looked
+            row.quality_confidence = _confidence_name(Confidence.low)
+            row.quality_method = "last_resort_default"
+            row.add_flag(ReviewFlag(field="quality", code=FlagCode.attr_last_resort, best_guess=looked[0],
+                                    confidence=Confidence.low, method="last_resort_default", src_url=row.src_url))
 
 
 def run(rows: list[CanonicalRow], ref: ReferenceData) -> AttributeResolvers:

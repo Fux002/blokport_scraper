@@ -36,6 +36,7 @@ class FlagCode(str, Enum):
     format_unresolved = "format_unresolved"
     dimension_out_of_range = "dimension_out_of_range"
     weight_derived = "weight_derived"
+    attr_last_resort = "attr_last_resort"
     multi_value = "multi_value"
     type_overridden_by_variety = "type_overridden_by_variety"
     attr_from_variety = "attr_from_variety"
