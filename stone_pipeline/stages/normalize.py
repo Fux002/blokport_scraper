@@ -69,6 +69,21 @@ def _override_name(ref: ReferenceData, row: CanonicalRow, vocab: str) -> str | N
     return ref.overrides.get(row.src_site, row.surrogate_key or "", f"{vocab}_name")
 
 
+def _apply_last_resort(row: CanonicalRow, vocab: str, default_value: str | None, ref: ReferenceData) -> None:
+    """Fill a REQUIRED attribute with its configured last-resort default when resolution left it null,
+    so the product ships (flagged for correction) instead of being rejected at validate. No-op when
+    there is no default or it does not resolve."""
+    looked = ref.attributes.resolve_id(vocab, default_value) if default_value else None
+    if not looked:
+        return
+    setattr(row, f"{vocab}_name", looked[0])
+    setattr(row, f"{vocab}_id", looked[1])
+    setattr(row, f"{vocab}_confidence", _confidence_name(Confidence.low))
+    setattr(row, f"{vocab}_method", "last_resort_default")
+    row.add_flag(ReviewFlag(field=vocab, code=FlagCode.attr_last_resort, best_guess=looked[0],
+                            confidence=Confidence.low, method="last_resort_default", src_url=row.src_url))
+
+
 def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: ReferenceData) -> None:
     for vocab in VOCAB_FIELDS:
         # override is the top strategy (section 5, 8.4): a human-set name wins
@@ -163,29 +178,13 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
             row.finish_confidence = _confidence_name(Confidence.low)
             row.finish_method = "block_default_raw"
 
-    # Last-resort attribute defaults (config policy, section: never drop a product for a resolvable-
-    # attribute gap). When a REQUIRED attribute could not be resolved from the source, apply the
-    # configured default (settings.LAST_RESORT_*) as the FINAL rung, and ALWAYS flag it for correction,
-    # instead of nulling the id and rejecting the product at validate. Deliberate, changeable, visible.
-    # Colour is NOT defaulted here: it is inherited from the matched variety / classified from the
-    # texture ('Natural' floor), so a colour default here would mask that better value.
-    if not row.finish_id:                                   # non-block finish (block handled above)
-        default_finish = LAST_RESORT_FINISH.get(fmt) or LAST_RESORT_FINISH.get("slab")
-        looked = ref.attributes.resolve_id("finish", default_finish) if default_finish else None
-        if looked:
-            row.finish_name, row.finish_id = looked
-            row.finish_confidence = _confidence_name(Confidence.low)
-            row.finish_method = "last_resort_default"
-            row.add_flag(ReviewFlag(field="finish", code=FlagCode.attr_last_resort, best_guess=looked[0],
-                                    confidence=Confidence.low, method="last_resort_default", src_url=row.src_url))
+    # Last-resort defaults for a REQUIRED attribute the source did not resolve: a configured, flagged
+    # value (settings.LAST_RESORT_*) so the product ships instead of rejecting at validate. Colour is
+    # not defaulted here -- it inherits the variety's texture-classified colour ('Natural' floor).
+    if not row.finish_id:   # block finish already defaulted to Raw above
+        _apply_last_resort(row, "finish", LAST_RESORT_FINISH.get(fmt) or LAST_RESORT_FINISH.get("slab"), ref)
     if not row.quality_id:
-        looked = ref.attributes.resolve_id("quality", LAST_RESORT_QUALITY)
-        if looked:
-            row.quality_name, row.quality_id = looked
-            row.quality_confidence = _confidence_name(Confidence.low)
-            row.quality_method = "last_resort_default"
-            row.add_flag(ReviewFlag(field="quality", code=FlagCode.attr_last_resort, best_guess=looked[0],
-                                    confidence=Confidence.low, method="last_resort_default", src_url=row.src_url))
+        _apply_last_resort(row, "quality", LAST_RESORT_QUALITY, ref)
 
 
 def run(rows: list[CanonicalRow], ref: ReferenceData) -> AttributeResolvers:

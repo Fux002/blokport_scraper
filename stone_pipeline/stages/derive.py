@@ -119,6 +119,24 @@ def derive_category(row: CanonicalRow, ref: ReferenceData) -> None:
 
 
 # --- dimensions and weight (section 10.2) -------------------------------------
+def _derive_weight(row: CanonicalRow, ref: ReferenceData,
+                   length: float | None, width: float | None, height: float | None) -> tuple[float | None, str]:
+    """Weight in TONNES: the scraped value (kg/1000) when present, else volume x per-type density from
+    the real dims (type_density.csv). None when a dimension is missing (validate then rejects on the
+    dims). A derived weight is flagged. Returns (weight, method)."""
+    kg = _parse_measure(row.raw_weight, ref) if row.raw_weight else None
+    if kg is not None and kg > 0:
+        return kg / 1000.0, "weight:parsed"
+    if not all(v is not None and v > 0 for v in (length, width, height)):
+        return None, "weight:missing"
+    density = _type_density(row.type_name)
+    weight = round((length * width * height * density) / 1000.0, 3)
+    row.add_flag(ReviewFlag(field="weight", code=FlagCode.weight_derived,
+                            best_guess=f"{weight}t ({row.type_name or 'default'} density {density:g})",
+                            confidence=Confidence.medium, method="volume_x_density", src_url=row.src_url))
+    return weight, "weight:derived"
+
+
 def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     parsed: dict[str, float] = {}
     if row.raw_dimensions:
@@ -141,33 +159,13 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
 
     length = parsed.get("length")
     height = parsed.get("height")
-    # Dimensions are REQUIRED. A stone product with no real length/width/height cannot be sold (unknown
-    # size -> wrong area/volume pricing and freight), so we NEVER fabricate a size. An absent dimension
-    # stays None and an invalid one stays <= 0; validate REJECTS the product rather than invent a size.
-    methods.append("length:" + ("parsed" if length is not None else "missing"))
-    methods.append("height:" + ("parsed" if height is not None else "missing"))
-    methods.append("width:" + ("parsed" if width is not None else "missing"))
+    # Dimensions are REQUIRED and never fabricated: an absent one stays None, an invalid one stays <= 0,
+    # and validate rejects the product (no real size breaks area/volume pricing + freight).
+    for name, value in (("length", length), ("height", height), ("width", width)):
+        methods.append(f"{name}:{'parsed' if value is not None else 'missing'}")
 
-    # Weight: the scraped value when present (kg -> TONNES, matching the emitted 'Product Weight'), else
-    # DERIVED from the real dimensions and the per-type material density (kg/m3, reference/type_density.csv):
-    # weight = volume x density. This is a REAL physical weight from real dims (a slab's weight IS its
-    # volume x density), NOT a fabrication. It is only possible once all dims are present; if any is
-    # missing the product rejects at validate, so weight stays None here too. An unlisted stone type
-    # falls back to the default row (Marble). Every derived weight is flagged for visibility.
-    weight_kg = _parse_measure(row.raw_weight, ref) if row.raw_weight else None
-    weight = None
-    if weight_kg is not None and weight_kg > 0:
-        weight = weight_kg / 1000.0
-        methods.append("weight:parsed")
-    elif all(v is not None and v > 0 for v in (length, width, height)):
-        density = _type_density(row.type_name)                            # kg/m3
-        weight = round((length * width * height * density) / 1000.0, 3)    # m3 x kg/m3 = kg -> tonnes
-        methods.append("weight:derived")
-        row.add_flag(ReviewFlag(field="weight", code=FlagCode.weight_derived,
-                                best_guess=f"{weight}t ({row.type_name or 'default'} density {density:g})",
-                                confidence=Confidence.medium, method="volume_x_density", src_url=row.src_url))
-    else:
-        methods.append("weight:missing")   # dims absent -> cannot derive; validate rejects on the dims
+    weight, weight_method = _derive_weight(row, ref, length, width, height)
+    methods.append(weight_method)
 
     # range sanity: flag an out-of-range parsed/derived value (a mis-scaled scraped weight, or a
     # dimension typo). Skip None (a genuinely missing value that validate will reject).
