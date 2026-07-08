@@ -19,7 +19,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, S3_REGION
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("ledger.snapshot")
@@ -89,29 +89,28 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -
 
 
 def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -> bool:
-    """Restore a SQLite db from the latest S3 snapshot into `ledger_path` (the ledger by default; `key`
-    targets another, e.g. config.db), IF the local file is absent and a snapshot exists. Atomic (download
-    to a temp then rename). Returns True if a restore happened; False (leaving the caller to bootstrap
-    fresh) when the file already exists or there is no snapshot."""
+    """Restore a single file from its latest S3 snapshot into `ledger_path` (the ledger by default; `key`
+    targets another -- config.db, or the combinations baseline), IF the local file is absent and a snapshot
+    exists. Atomic (download to a temp then rename). Returns True if a restore happened; False (leaving the
+    caller to bootstrap fresh) when the file already exists or there is no snapshot."""
     ledger_path = Path(ledger_path)
     if ledger_path.exists():
-        return False                       # a local db already wins -- never clobber it
+        return False                       # a local copy already wins -- never clobber it
     key = key or snapshot_key(env)
     try:
         _s3().head_object(Bucket=S3_BUCKET, Key=key)   # raises if there is no snapshot yet
     except Exception:
-        log.info("no ledger snapshot to restore; starting fresh",
-                 extra={"extra_fields": {"key": key}})
+        log.info("no snapshot to restore; starting fresh", extra={"extra_fields": {"key": key}})
         return False
     tmp = ledger_path.with_suffix(f".restore.{os.getpid()}.tmp")   # pid-unique: both containers may boot together
     try:
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
         _s3().download_file(S3_BUCKET, key, str(tmp))
         os.replace(tmp, ledger_path)       # atomic rename into place (last writer wins, same content)
-        log.info("ledger restored from snapshot", extra={"extra_fields": {"key": key}})
+        log.info("restored from snapshot", extra={"extra_fields": {"key": key}})
         return True
     except Exception:
-        log.exception("ledger restore failed (non-fatal); starting fresh")
+        log.exception("snapshot restore failed (non-fatal); starting fresh")
         Path(tmp).unlink(missing_ok=True)
         return False
 
@@ -209,6 +208,27 @@ def restore_artifacts(env: str = ENV_NAME) -> None:
     from stone_pipeline.config.settings import SETTINGS
     restore_tree(SETTINGS.paths.outputs_dir, artifacts_key("outputs", env))
     restore_tree(SETTINGS.paths.data_dir, artifacts_key("data", env))
+
+
+# -- combinations delta baseline ----------------------------------------------
+# tree_build emits the incremental 2_valid_combinations_update.csv by diffing the new set against the
+# PREVIOUS build's to_upload/2_valid_combinations.csv. On a cold task that file is gone, so the "delta"
+# balloons to the whole ~2M set (the whole point of "build on it" is to avoid that). The full file is
+# already published to S3 every produce for Blokport's import (deploy.upload_artifacts), so that SAME
+# object is the durable baseline -- restore it, no second snapshot.
+def combinations_baseline_key() -> str:
+    """S3 key of the published big-list, which doubles as the delta baseline. ENV_SEGMENT (dev/prod) is the
+    Blokport-facing publish prefix that deploy.upload_artifacts writes to."""
+    return f"{ENV_SEGMENT}/scraper/to_upload/2_valid_combinations.csv"
+
+
+def restore_combinations_baseline() -> bool:
+    """Restore the last published big-list onto a cold task so the next produce's delta ('build on it')
+    stays a small increment, not the full ~2M set. No-op when a local copy already exists (a warm task's is
+    fresher) or nothing has been published yet."""
+    from stone_pipeline.config.settings import SETTINGS
+    return restore(SETTINGS.paths.to_upload_dir / "2_valid_combinations.csv",
+                   key=combinations_baseline_key())
 
 
 def start_periodic(ledger_path: str | Path, env: str = ENV_NAME,

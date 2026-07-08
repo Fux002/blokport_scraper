@@ -141,3 +141,20 @@ def test_tree_save_of_empty_or_missing_dir_is_a_noop(tmp_path, monkeypatch):
     empty = tmp_path / "empty"; empty.mkdir()
     assert snapshot.save_tree(empty, key) is False         # never overwrite a good snapshot with nothing
     assert not fake.store
+
+
+def test_combinations_baseline_key_uses_the_publish_prefix():
+    # the delta baseline IS the file already published for Blokport's import (ENV_SEGMENT prefix), so the
+    # two never diverge -- one durable copy, not a second snapshot.
+    assert snapshot.combinations_baseline_key() == "dev/scraper/to_upload/2_valid_combinations.csv"
+
+
+def test_combinations_baseline_restores_from_the_published_key(monkeypatch):
+    # a cold task restores the published big-list into the LOCAL combinations file, so the next produce's
+    # delta ("build on it") diffs against it instead of re-emitting the whole ~2M set. Reuses restore().
+    seen: dict = {}
+    monkeypatch.setattr(snapshot, "restore",
+                        lambda path, key=None: seen.update(path=str(path), key=key) or True)
+    assert snapshot.restore_combinations_baseline() is True
+    assert seen["key"] == "dev/scraper/to_upload/2_valid_combinations.csv"        # published prefix (dev)
+    assert seen["path"].endswith("to_upload/development/2_valid_combinations.csv")  # local dir (development)
