@@ -46,9 +46,9 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
         row.add_reject(RejectReason(rule="handle_missing", detail="handle" if not row.handle else "slug"))
     if require_images and not row.image_keys:
         row.add_reject(RejectReason(rule="no_image", detail=""))
-    # Bad source data: a SIZE that was present in the scrape but invalid (<= 0, e.g. a "0cm" typo)
-    # is left <= 0 by derive (never fabricated over). Reject the product rather than sell it with a
-    # wrong size that breaks the category's area/volume pricing. (Absent sizes are synthesised > 0.)
+    # Dimensions are REQUIRED and never fabricated: derive leaves a missing size None and an invalid one
+    # <= 0. Either way reject the product -- a stone with no/wrong real size breaks the category's
+    # area/volume pricing and freight. (`None or 0` -> 0 <= 0, so a missing size rejects here too.)
     for dim in ("length", "width", "height"):
         if (getattr(row, dim, None) or 0) <= 0:
             row.add_reject(RejectReason(rule="dimension_invalid", detail=dim))

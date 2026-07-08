@@ -160,6 +160,9 @@ class Paths:
     country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
     standard_slab_area_csv: Path = REPO_ROOT / "reference" / "standard_slab_area.csv"
+    # per-stone-type material density (kg/m3): derive weight from real dimensions when a source has no
+    # weight. Seeded from Medusa's type table; default row (Marble) is the rare fallback for a new type.
+    type_density_csv: Path = REPO_ROOT / "reference" / "type_density.csv"
 
     # The import template defines the emit schema (operating principle 8). Lives in
     # the package (header is the schema authority).

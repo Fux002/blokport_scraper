@@ -141,49 +141,50 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
 
     length = parsed.get("length")
     height = parsed.get("height")
-    # Synthesise a SIZE only when the scrape gave NONE (absent). A value that was PRESENT but invalid
-    # (<= 0, e.g. marenostone's "0cm" thickness typo) is deliberately LEFT <= 0 so validate REJECTS
-    # the whole product -- we never fabricate over bad source data; the product is skipped instead.
-    if length is None:
-        length = round(ids.seeded_uniform(row.surrogate_key, "length", *ranges["length"]), 3)
-        methods.append("length:synthetic")
-    else:
-        methods.append("length:parsed")
-    if height is None:
-        height = round(ids.seeded_uniform(row.surrogate_key, "height", *ranges["height"]), 3)
-        methods.append("height:synthetic")
-    else:
-        methods.append("height:parsed")
-    if width is None:
-        low, high = ranges.get("width", (0.2, 0.2))
-        width = round(ids.seeded_uniform(row.surrogate_key, "width", low, high), 3) if low != high else low
-        methods.append("width:synthetic")
-    else:
-        methods.append("width:parsed")
+    # Dimensions are REQUIRED. A stone product with no real length/width/height cannot be sold (unknown
+    # size -> wrong area/volume pricing and freight), so we NEVER fabricate a size. An absent dimension
+    # stays None and an invalid one stays <= 0; validate REJECTS the product rather than invent a size.
+    methods.append("length:" + ("parsed" if length is not None else "missing"))
+    methods.append("height:" + ("parsed" if height is not None else "missing"))
+    methods.append("width:" + ("parsed" if width is not None else "missing"))
 
-    # units.csv converts weight to KILOGRAMS, but the synthetic ranges and the emitted
-    # "Product Weight" are TONNES (a block is ~20 t, not 20 kg). Convert kg->t so a scraped
-    # weight and a synthetic one are the same unit (else a source that supplies weight ships a
-    # 1000x-too-large value). Dimensions stay in metres (this /1000 is weight-only).
+    # Weight: the scraped value when present (kg -> TONNES, matching the emitted 'Product Weight'), else
+    # DERIVED from the real dimensions and the per-type material density (kg/m3, reference/type_density.csv):
+    # weight = volume x density. This is a REAL physical weight from real dims (a slab's weight IS its
+    # volume x density), NOT a fabrication. It is only possible once all dims are present; if any is
+    # missing the product rejects at validate, so weight stays None here too. An unlisted stone type
+    # falls back to the default row (Marble). Every derived weight is flagged for visibility.
     weight_kg = _parse_measure(row.raw_weight, ref) if row.raw_weight else None
+    weight = None
     if weight_kg is not None and weight_kg > 0:
         weight = weight_kg / 1000.0
         methods.append("weight:parsed")
+    elif all(v is not None and v > 0 for v in (length, width, height)):
+        density = _type_density(row.type_name)                            # kg/m3
+        weight = round((length * width * height * density) / 1000.0, 3)    # m3 x kg/m3 = kg -> tonnes
+        methods.append("weight:derived")
+        row.add_flag(ReviewFlag(field="weight", code=FlagCode.weight_derived,
+                                best_guess=f"{weight}t ({row.type_name or 'default'} density {density:g})",
+                                confidence=Confidence.medium, method="volume_x_density", src_url=row.src_url))
     else:
-        weight = round(ids.seeded_uniform(row.surrogate_key, "weight", *ranges["weight"]), 3)
-        methods.append("weight:synthetic")
+        methods.append("weight:missing")   # dims absent -> cannot derive; validate rejects on the dims
 
-    # range sanity: flag out-of-range parsed dims + weight (section 6 Stage 6). Synthetic values are
-    # within range by construction, so only a mis-scaled PARSED value (e.g. weight in grams, or a per-m2
-    # weight) trips this.
+    # range sanity: flag an out-of-range parsed/derived value (a mis-scaled scraped weight, or a
+    # dimension typo). Skip None (a genuinely missing value that validate will reject).
     for name, value in (("length", length), ("width", width), ("height", height), ("weight", weight)):
+        if value is None:
+            continue
         lo, hi = ranges.get(name, (0.0, 5.0))
         if value < lo * 0.3 or value > hi * 3:
             row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_out_of_range,
                                     raw_value=str(value), confidence=Confidence.low,
                                     method="range_check", src_url=row.src_url))
 
-    row.length, row.width, row.height, row.weight = round(length, 3), round(width, 3), round(height, 3), round(weight, 3)
+    # keep None where a value is genuinely missing (validate rejects it); round the real ones.
+    row.length = round(length, 3) if length is not None else None
+    row.width = round(width, 3) if width is not None else None
+    row.height = round(height, 3) if height is not None else None
+    row.weight = round(weight, 3) if weight is not None else None
     row.dimension_method = ",".join(methods)
 
 
@@ -255,6 +256,30 @@ def _standard_areas() -> tuple[float | None, dict[str, float]]:
 
 def _standard_area(type_name: str | None) -> float | None:
     default, by_type = _standard_areas()
+    return by_type.get((type_name or "").casefold(), default)
+
+
+@functools.lru_cache(maxsize=1)
+def _type_densities() -> tuple[float, dict[str, float]]:
+    """Parse type_density.csv once: (default density, {type_casefold: density kg/m3}). The default row
+    (Marble, 2700) covers a type not listed. Falls back to Marble if the file is somehow absent."""
+    path = SETTINGS.paths.type_density_csv
+    default, by_type = 2700.0, {}
+    if not path.exists():
+        return default, by_type
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for r in csv.DictReader(handle):
+            value = float(r["density_kg_m3"])
+            if r["scope"] == "default":
+                default = value
+            elif r["scope"] == "type":
+                by_type[r["key"].casefold()] = value
+    return default, by_type
+
+
+def _type_density(type_name: str | None) -> float:
+    """Material density (kg/m3) for a stone type, defaulting to Marble for an unlisted type."""
+    default, by_type = _type_densities()
     return by_type.get((type_name or "").casefold(), default)
 
 

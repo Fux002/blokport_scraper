@@ -141,15 +141,28 @@ def test_description_uses_resolved_format_not_slab_default(ref, cfg):
     assert "is a natural " not in d, f"invented a colour: {row.description}"
 
 
-def test_tile_dimensions_are_tile_sized(ref, cfg):
-    # a tile with no scraped dimensions must get TILE-sized synthetic dims (~0.3-0.6m face,
-    # ~1-2cm thick), NOT slab-sized (1.5-3m) -- sources often ship tiles with no dimensions.
-    row = _slab_row(raw_format="Tile")
+def test_missing_dimensions_are_rejected_not_fabricated(ref, cfg):
+    # dimensions are REQUIRED and never synthesised: a product with no scraped dims keeps None,
+    # so validate rejects it rather than invent a size.
+    from stone_pipeline.stages import validate
+    row = _slab_row()   # no raw_dimensions / raw_thickness on the row
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert 0.3 <= row.length <= 0.6 and 0.3 <= row.height <= 0.6   # tile face, not slab
-    assert 0.01 <= row.width <= 0.02                               # tile thickness ~1-2cm
-    assert row.length < 1.0 and row.height < 1.0                   # definitively not slab-sized
+    assert row.length is None and row.width is None and row.height is None and row.weight is None
+    validate.validate_row(row)
+    assert not row.is_emittable
+    assert any(r.rule == "dimension_invalid" for r in row.reject_reasons)   # rejected, not fabricated
+
+
+def test_weight_derived_from_dimensions_and_density(ref, cfg):
+    # no scraped weight -> weight = volume(real dims) x per-type density, in tonnes, flagged.
+    # 3.2 x 0.03 x 2.0 x 2700(Granite) / 1000 = 0.5184 t
+    row = _slab_row(raw_dimensions="length=3.2;height=2.0", raw_thickness="0.03m", type_name="Granite")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert abs(row.weight - 0.518) < 0.002
+    assert "weight:derived" in row.dimension_method
+    assert any(f.code == FlagCode.weight_derived for f in row.review_flags)
 
 
 def test_description_template_reads_origin(ref, cfg):
