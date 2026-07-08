@@ -353,6 +353,9 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # off the ephemeral disk, so without this a redeploy wipes the last scrape and they abort with "no
     # source runs". No-op when a local scrape already exists or none has been snapshotted yet.
     snapshot.restore_artifacts()
+    # ...and the last published big-list combinations file, which tree_build diffs against to emit only the
+    # NEW combinations ("build on it"). Without it a cold task re-emits the whole ~2M set as the delta.
+    snapshot.restore_combinations_baseline()
     # keep config.db durable: a periodic snapshot backstop + a best-effort snapshot on clean shutdown
     # (the lifecycle verbs also snapshot immediately after a pause/delist so a crash never loses one).
     snapshot.start_periodic(config_db, key=snapshot.config_key())

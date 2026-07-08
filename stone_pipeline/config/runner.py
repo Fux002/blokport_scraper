@@ -115,6 +115,30 @@ _RUN_TIMEOUT = int(os.environ.get("BLOKPORT_RUN_TIMEOUT_SECONDS", "7200"))   # 2
                                                                             # control plane (409s all runs/ops)
 
 
+# Stages that regenerate the to_upload/ deliverables (tree_build + catalog); an inventory/scrape run
+# does not, so it must not re-publish the (unchanged, ~334MB) combination set. Mirrors produce._CATALOG_STAGES.
+_PUBLISH_STAGES = ("all", "catalog", "republish")
+
+
+def _publish_deliverables(stage: str) -> None:
+    """After a catalog-producing produce, mirror to_upload/ (+ review/) to the env's scraper home on S3,
+    so Blokport's one-click import streams the CURRENT valid-combination set (the full ~2M file, the
+    incremental _update delta, and the small _products_only file), plus the variants/products.
+
+    Why here: the ECS /run produce is the path an operator triggers, but only the batch run_pipeline.sh
+    published these before -- so between batch runs the fixed keys went stale (a produce rebuilt them
+    locally but never uploaded). Best-effort: a publish failure must not fail an otherwise-good produce
+    (the files are on disk and the scrape is snapshotted); it logs loudly instead."""
+    if stage not in _PUBLISH_STAGES:
+        return
+    try:
+        from deploy import upload_artifacts
+        upload_artifacts.main()
+    except Exception:
+        log.warning("artifact publish to S3 skipped; deliverables are local only (fixed keys may be stale)",
+                    exc_info=True)
+
+
 def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     with _lock:
         rec["status"] = "running"
@@ -149,6 +173,8 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         # lets catalog/republish (and so the backbone approve->republish->pull loop) survive a redeploy.
         from stone_pipeline.ledger import snapshot
         snapshot.save_artifacts()
+        # ...and publish the deliverables to S3 so Blokport's importer sees this produce's fixed keys.
+        _publish_deliverables(rec.get("stage", "all"))
     _stamp_last_run(rec, rec["status"])
     _persist_run(rec)                                   # durable `last` across a restart
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})

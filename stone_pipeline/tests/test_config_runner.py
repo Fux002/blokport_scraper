@@ -97,6 +97,35 @@ def test_catalog_stage_ignores_a_source_scope():
     assert "--sources" not in runner._build_command(seen["rec"])
 
 
+def test_publish_deliverables_only_on_catalog_producing_stages(monkeypatch):
+    # A catalog/republish/all produce regenerates to_upload/, so its deliverables (the valid-combination
+    # files) are published to S3; an inventory/scrape produce does not touch them, so it must not re-push
+    # the unchanged ~334MB set. Best-effort: a publish failure never raises out of the finish path.
+    from deploy import upload_artifacts
+    calls: list[str] = []
+    monkeypatch.setattr(upload_artifacts, "main", lambda: calls.append("published") or 0)
+
+    for stage in ("all", "catalog", "republish"):
+        runner._publish_deliverables(stage)
+    assert calls == ["published", "published", "published"]     # every catalog-producing stage publishes
+
+    calls.clear()
+    for stage in ("scrape", "inventory"):
+        runner._publish_deliverables(stage)
+    assert calls == []                                          # no deliverable change -> no publish
+
+
+def test_publish_deliverables_swallows_a_publish_error(monkeypatch):
+    # the fixed keys going stale is a soft failure (operator can re-run); it must never fail an
+    # otherwise-good produce, so a publish exception is logged, not raised.
+    from deploy import upload_artifacts
+
+    def _boom():
+        raise RuntimeError("s3 down")
+    monkeypatch.setattr(upload_artifacts, "main", _boom)
+    runner._publish_deliverables("catalog")                     # does not raise
+
+
 def test_run_refused_while_a_lifecycle_op_is_active(monkeypatch):
     monkeypatch.setattr(lifecycle, "_active", "reset")     # a destructive op holds the slot
     rec, code = runner.start_run(launch=lambda r: None)
