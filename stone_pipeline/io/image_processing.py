@@ -203,10 +203,10 @@ class _Dewatermarker:
 
 class _ESRGANEnhancer:
     """Real-ESRGAN learned super-resolution (clean + sharpen + 4x), loaded via spandrel. Faithful:
-    reconstructs natural texture and leaves colour untouched — unlike the classical WB+CLAHE chain
-    that desaturates and over-sharpens. Lazy + graceful: if torch/spandrel/weights are absent,
-    available() is False and the caller falls back to the classical enhancement. Runs on CUDA
-    (deploy), MPS (local Mac), or CPU. Large images are tiled to bound GPU memory."""
+    reconstructs natural texture and leaves colour untouched. Lazy + graceful: if torch/spandrel/
+    weights are absent, available() is False and enhancement is skipped (the image passes through
+    un-enhanced — there is no fallback). Runs on CUDA (deploy), MPS (local Mac), or CPU. Large
+    images are tiled to bound GPU memory."""
 
     def __init__(self, model_name: str, weights_path: str, tile: int):
         self.model_name = model_name
@@ -239,8 +239,8 @@ class _ESRGANEnhancer:
             self._model = model.to(self._device).eval()
             self._scale = model.scale
             self._ok = True
-        except Exception as exc:  # deps/weights absent — fall back to classical
-            log.warning("ESRGAN unavailable; falling back to classical enhancement",
+        except Exception as exc:  # deps/weights absent — skip enhancement (no fallback)
+            log.warning("ESRGAN unavailable; skipping enhancement (image passes through)",
                         extra={"extra_fields": {"error": str(exc)}})
             self._ok = False
         return self._ok
