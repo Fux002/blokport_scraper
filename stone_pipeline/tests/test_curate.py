@@ -163,6 +163,17 @@ def test_attribute_curation_suggests_synonym(ref):
     assert entry["recommended_action"] in ("synonym", "synonym?")
 
 
+def test_attribute_curation_ignores_non_attribute_vocab(ref):
+    # a 'variation' unresolved is a variety (owned by the confirm queue), NOT an attribute vocab. It must
+    # be skipped, never crash attribute curation, which only resolves type/colour/finish/quality.
+    row = CanonicalRow(src_site="zucchi", surrogate_key="5")
+    row.add_flag(ReviewFlag(field="variation", code=FlagCode.attr_unresolved, raw_value="Some New Stone"))
+    row.add_flag(ReviewFlag(field="color", code=FlagCode.attr_unresolved, raw_value="Blackish"))
+    attr = curate.build_attribute_curation([row], ref)
+    assert not any(a["vocab"] == "variation" for a in attr)   # skipped, no crash
+    assert any(a["vocab"] == "color" for a in attr)           # real attr vocab still processed
+
+
 def test_looks_like_artifact_heuristic():
     f = curate._looks_like_artifact
     assert f("Z Astoria") and f("X Blue") and f("") and f("123") and f("A")     # codes / junk

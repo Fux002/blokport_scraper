@@ -680,7 +680,10 @@ def build_attribute_curation(rows: list[CanonicalRow], ref: ReferenceData) -> li
     resolvers = AttributeResolvers.build(ref)
     out: list[dict] = []
     for (vocab, raw_value), count in sorted(seen.items()):
-        resolver = resolvers.resolvers[vocab]
+        resolver = resolvers.resolvers.get(vocab)
+        if resolver is None:
+            continue    # attribute curation only handles the closed attr vocab (type/colour/finish/
+                        # quality); a 'variation' unresolved is a variety, owned by the confirm queue
         # resolve() already found the single nearest canonical (evidence); keep it before resolve_multi
         # tries to compose, so the plain-fuzzy fallback reuses that score instead of recomputing it.
         res = resolver.resolve(raw_value)
