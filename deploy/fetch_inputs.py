@@ -17,10 +17,14 @@ import boto3
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS
 
-# The attribute vocabulary is a committed cold-start seed (every type/finish/colour/quality/category). If
-# Medusa is mid-reset its S3 export is thin/empty, and blindly downloading it would wipe the local vocab so
-# NOTHING resolves. These files keep the committed copy unless the S3 copy is at least as complete.
-_PROTECTED_BASE = {"attributes.csv"}
+# A thin/empty S3 copy (Medusa mid-reset, or an export not yet fully seeded) must never overwrite a fuller
+# local file, or the run silently starts from the wrong base:
+#   - attributes.csv is the committed vocab seed; a thin copy wipes it and NOTHING resolves.
+#   - variants_export.csv is the live matching reference; a thin copy makes the matcher treat the whole
+#     ~24.7k catalog as new -- mass re-mint / mass gap (the ledger-gap failure mode).
+#   - variants_export_base.csv is the committed full seed of truth (base == full).
+# These keep the local copy unless the S3 copy is at least half as complete (_MIN_KEEP_FRACTION).
+_PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv"}
 _MIN_KEEP_FRACTION = 0.5
 
 
