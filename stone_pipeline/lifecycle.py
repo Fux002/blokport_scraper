@@ -214,14 +214,25 @@ def purge(sources=None) -> tuple[dict, int]:
 def reset(sources=None, hard=False) -> tuple[dict, int]:
     """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
     re-scrape; hard also drops the scraped products. Variation/backbone rows are never deleted; a
-    'retiring' variety is preserved (not un-retired). `sources` scopes; None = global."""
+    'retiring' variety is preserved (not un-retired). `sources` scopes; None = global.
+
+    A GLOBAL reset ALSO clears the config.db review queue + operator-pasted attribute ids, so a clean start
+    is coherent across BOTH stores in one call: the :4200 queue is blank immediately (not stale until the
+    next produce recomputes it) and no dead Medusa id survives the wipe. Durable operator intent
+    (mint/reject/alias/seed decisions, retired keys, the approved-leaf overlay) is KEPT. A scoped per-source
+    reset leaves config.db alone, matching how it leaves the ledger's shared base layer alone."""
     _names, codes, err = _resolve(sources, require_non_empty=False)
     if err:
         return err
     result, code = _ledger_op("reset", lambda lg, sync: sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard)))
     if code != 200:
-        return result, code
-    return {"mode": "hard" if hard else "soft", "reset": result}, 200
+        return result, code                    # ledger refused (e.g. 409 in-flight): touch nothing else
+    out = {"mode": "hard" if hard else "soft", "reset": result}
+    if codes is None:                          # global reset only -> pair the config.db clean-start
+        from stone_pipeline.config import decisions_store
+        out["config"] = {"review_pending": decisions_store.clear_review_pending(),
+                         "attribute_ids": decisions_store.clear_attribute_ids()}
+    return out, 200
 
 
 def remove_source(name: str) -> tuple[dict, int]:
