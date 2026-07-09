@@ -176,6 +176,17 @@ def set_attribute_id(kind: str, value: str, medusa_id: str) -> None:
         conn.commit()
 
 
+def clear_attribute_ids() -> int:
+    """Drop every operator-pasted attribute id. Paired with a GLOBAL ledger reset: after Medusa is wiped
+    those ids point at entities that no longer exist, so clearing them makes the next catalog re-derive
+    from the fresh attributes.csv export and re-prompt for any still needed, instead of adopting a dead id.
+    Returns the number of rows dropped."""
+    with closing(store.open_store()) as conn:
+        n = conn.execute("DELETE FROM attribute_decision").rowcount
+        conn.commit()
+    return n
+
+
 # -- backbone leaf-growth decisions (produce READS the overlay + decided set) --
 
 def backbone_leaf_overlay() -> dict[tuple[str, str], dict[str, list[str]]]:
@@ -336,6 +347,21 @@ def replace_pending(kind: str, rows: list[dict]) -> None:
               json.dumps(r["sources"]) if r.get("sources") is not None else None, now)
              for r in deduped.values()])
         conn.commit()
+
+
+def clear_review_pending(kinds: tuple[str, ...] = _PENDING_KINDS) -> int:
+    """Empty the review queue(s) so a GLOBAL clean-start reset gives an immediately blank slate, instead of
+    the pre-reset queue lingering until the next produce recomputes (replace_pending) it. Returns the number
+    of rows dropped. Global-only, like the ledger reset's shared base layer -- a scoped per-source reset
+    leaves the queue (and the rest of config.db) alone."""
+    for k in kinds:
+        if k not in _PENDING_KINDS:
+            raise InvalidDecision(f"pending kind must be one of {_PENDING_KINDS}, got {k!r}")
+    marks = ",".join("?" * len(kinds))
+    with closing(store.open_store()) as conn:
+        n = conn.execute(f"DELETE FROM review_pending WHERE kind IN ({marks})", tuple(kinds)).rowcount
+        conn.commit()
+    return n
 
 
 def pending_payload(kind: str, ref: str) -> dict | None:
