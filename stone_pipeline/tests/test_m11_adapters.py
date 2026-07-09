@@ -110,6 +110,28 @@ def test_explicit_type_word_uses_live_type_vocab_with_guards():
     assert explicit_type_word("Acadian Night") is None                 # no type word
 
 
+def test_recognize_type_reads_a_type_field_against_live_vocab():
+    from stone_pipeline.adapters.tokens import recognize_type
+    # a real Medusa type (canonical or synonym) is recognised; a classification tag is not
+    assert recognize_type("Granite") == "Granite"
+    assert recognize_type("quartzite") == "Quartzite"
+    assert recognize_type("Marble") == "Marble"
+    assert recognize_type("Exotic") == ""          # varsha classification tag, not a type
+    assert recognize_type("Stock Clearance") == ""
+    assert recognize_type("Rough Blocks") == ""
+    assert recognize_type("") == ""
+
+
+def test_varsha_reads_stone_type_from_composition_head_only_when_real():
+    adapter = selftest.REGISTRY["varsha"]
+    real = adapter.adapt_record({"bundle_id": "1", "material_name": "BLACK ABSOLUTE",
+                                 "composition": "Granite / ", "finish": "Polished", "quality": "Premium"})
+    tag = adapter.adapt_record({"bundle_id": "2", "material_name": "ALPINUS",
+                                "composition": "EXOTIC / ", "finish": "Polished", "quality": "Premium"})
+    assert real.raw_type == "Granite"   # real type recovered from composition (was previously discarded)
+    assert tag.raw_type == ""           # a classification tag leaves type empty (held / matched, not tag)
+
+
 def test_marenostone_routes_generic_to_gaps_not_guesses(tmp_path):
     out = tmp_path / "out"
     out.mkdir()

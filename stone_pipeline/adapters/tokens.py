@@ -67,6 +67,28 @@ def explicit_type_word(name: str) -> str | None:
     return None
 
 
+@lru_cache(maxsize=None)
+def _type_lookup() -> dict[str, str]:
+    """match_key(value) -> canonical stone type, from the live canonical types plus the type synonyms.
+    The recognition vocabulary for reading a type from an EXPLICIT source field (a type/composition
+    column), sharing match_key with the resolver. Unlike explicit_type_word (which scans a variety NAME
+    and guards descriptor-prone words), an explicit type field IS a type assertion, so no word is guarded
+    out here. Synonym keys are already match_key-normalized by the loader."""
+    from stone_pipeline.reference.loaders import load_synonyms
+    lookup = {match_key(canon): canon for canon in known_values("type")}
+    for raw_key, canonical in load_synonyms("type").items():
+        lookup.setdefault(raw_key, canonical)
+    return lookup
+
+
+def recognize_type(value: str) -> str:
+    """The canonical Medusa stone type named by an EXPLICIT source field value, or '' if it names none.
+    'Granite'/'granito' -> 'Granite', a classification tag ('Exotic', 'Stock Clearance') -> ''. For a
+    MIXED source field (varsha's `composition`) that is sometimes a real type and sometimes a tag; the
+    caller isolates any source-specific parsing (e.g. splitting on '/') and passes the candidate head."""
+    return _type_lookup().get(match_key(value), "")
+
+
 # plural + singular title of every category (registry), plural first so e.g. "Slabs" is stripped before
 # "Slab". A scraper-side concept (the upload branch), not a Medusa attribute vocabulary.
 FORMAT_TOKENS = [t for c in CATEGORIES for t in (c.label, c.name.title())]
