@@ -62,6 +62,12 @@ class ScraperBase:
     # Lazy-imported so the module imports fine without curl_cffi installed.
     use_curl_cffi: bool = False
     impersonate: str = "chrome120"
+    # needs_proxy is SEPARATE from use_curl_cffi: some Cloudflare tenants accept the Chrome TLS
+    # fingerprint from a datacenter IP (varsha -> curl_cffi alone works), others block the datacenter IP
+    # regardless and demand a residential one (polonine). The residential proxy is metered per-GB, so it
+    # is used ONLY for the scrapers that genuinely need it, not for every curl_cffi site. Images never
+    # use it at all (their hosts serve datacenter IPs; see io/download.py).
+    needs_proxy: bool = False
 
     # tunables
     timeout: float = 30.0
@@ -104,10 +110,11 @@ class ScraperBase:
 
     # --- HTTP ----------------------------------------------------------------
     def _cffi(self):
-        """Lazily build a curl_cffi session (Chrome TLS impersonation), routed through
-        BLOKPORT_SCRAPER_PROXY when set. Cloudflare blocks datacenter IPs (the AWS NAT
-        egress), so the Cloudflare-fronted sources need a residential proxy from AWS;
-        locally the env var is unset and it connects directly."""
+        """Lazily build a curl_cffi session (Chrome TLS impersonation). Routed through
+        BLOKPORT_SCRAPER_PROXY ONLY when this scraper sets needs_proxy -- its Cloudflare tenant blocks the
+        datacenter IP even with the Chrome fingerprint, so a residential IP is required. A curl_cffi site
+        that does NOT need the proxy (needs_proxy=False) connects direct, sparing the metered residential
+        bandwidth. Locally the env var is unset, so everything connects direct."""
         if getattr(self, "_cffi_session", None) is None:
             try:
                 from curl_cffi import requests as cffi_requests
@@ -118,9 +125,9 @@ class ScraperBase:
                 ) from exc
             opts: dict = {"impersonate": self.impersonate}
             proxy = os.environ.get("BLOKPORT_SCRAPER_PROXY", "").strip()
-            if proxy:
+            if proxy and self.needs_proxy:
                 opts["proxies"] = {"http": proxy, "https": proxy}
-                self.log.info("routing %s through proxy", self.source)
+                self.log.info("routing %s through the residential proxy", self.source)
             self._cffi_session = cffi_requests.Session(**opts)
         return self._cffi_session
 
