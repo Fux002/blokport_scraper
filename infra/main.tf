@@ -6,22 +6,33 @@
 # The prod instance is created once `prod_staging_bucket` is set.
 # =============================================================================
 
-# --- Secrets (optional, by SSM name) ----------------------------------------
-# fal.ai key for variant-image generation; the scheduled scrape does NOT need it,
-# so it's injected only when fal_key_ssm_name is set.
+# --- Runtime secrets (FAL key + residential proxy) --------------------------
+# DEV: resolved by their KNOWN /blokport-dev/ names, so they are ALWAYS present -- a plain
+# `terraform apply` can NEVER strip them from the dev task. This is the durable fix for the recurring
+# "FAL_KEY / proxy vanished on apply" drift: dev secrets are wired by convention, exactly like the
+# sync/config tokens below, NOT via an optional input var that silently defaults to empty.
+data "aws_ssm_parameter" "fal_key_dev" { name = "/blokport-dev/FAL_KEY" }
+data "aws_ssm_parameter" "scraper_proxy_dev" { name = "/blokport-dev/BLOKPORT_SCRAPER_PROXY" }
+
+# PROD: still by explicit SSM-name var (empty until the prod params exist), so a dev deploy never forces
+# prod secret wiring. Consumed ONLY by module.scraper_prod (count-gated on prod_staging_bucket).
 data "aws_ssm_parameter" "fal_key" {
   count = var.fal_key_ssm_name == "" ? 0 : 1
   name  = var.fal_key_ssm_name
 }
-
-# Residential proxy for the Cloudflare-fronted scrapers (optional, by ARN).
 data "aws_ssm_parameter" "scraper_proxy" {
   count = var.scraper_proxy_ssm_name == "" ? 0 : 1
   name  = var.scraper_proxy_ssm_name
 }
 
 locals {
-  ssm_secrets = merge(
+  # DEV runtime secrets, ALWAYS injected (the two data sources above always resolve).
+  dev_ssm_secrets = {
+    FAL_KEY                = data.aws_ssm_parameter.fal_key_dev.arn
+    BLOKPORT_SCRAPER_PROXY = data.aws_ssm_parameter.scraper_proxy_dev.arn
+  }
+  # PROD runtime secrets, by explicit var (empty until the prod SSM params are configured).
+  prod_ssm_secrets = merge(
     var.fal_key_ssm_name == "" ? {} : { FAL_KEY = data.aws_ssm_parameter.fal_key[0].arn },
     var.scraper_proxy_ssm_name == "" ? {} : { BLOKPORT_SCRAPER_PROXY = data.aws_ssm_parameter.scraper_proxy[0].arn },
   )
@@ -115,7 +126,7 @@ module "scraper_dev" {
   schedule_enabled    = var.dev_schedule_enabled
   schedule_expression = var.schedule_expression
   keep_scraped        = var.keep_scraped
-  ssm_secret_arns     = local.ssm_secrets
+  ssm_secret_arns     = local.dev_ssm_secrets
   cpu                 = var.cpu
   memory              = var.memory
 }
@@ -137,7 +148,7 @@ module "scraper_prod" {
   schedule_enabled    = var.prod_schedule_enabled
   schedule_expression = var.schedule_expression
   keep_scraped        = var.keep_scraped
-  ssm_secret_arns     = local.ssm_secrets
+  ssm_secret_arns     = local.prod_ssm_secrets
   cpu                 = var.cpu
   memory              = var.memory
 }
@@ -219,5 +230,5 @@ module "sync_service_dev" {
   config_token_ssm_arn = data.aws_ssm_parameter.config_token_dev.arn
   # the produce subprocess (live scrape + image gen) carries the same runtime secrets as the batch
   # scraper -- proxy for the Cloudflare-fronted sites, fal key for images -- when they're configured.
-  produce_secret_arns = local.ssm_secrets
+  produce_secret_arns = local.dev_ssm_secrets
 }

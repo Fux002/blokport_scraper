@@ -179,7 +179,21 @@ resource "aws_ecs_task_definition" "this" {
       essential = true
       entryPoint   = ["python", "-m", "stone_pipeline.config.server"]
       portMappings = [{ containerPort = 8724, protocol = "tcp" }]
-      environment  = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
+      # The produce subprocess (fetch -> scrape -> build) runs in THIS container, so its image stage
+      # needs s3 mode: download + re-host to improved/ and fill _manifest.json so products carry a
+      # linked image and emit. Without it the stage defaults to passthrough, which only reads the
+      # manifest and holds every product no_image. On :core (no torch) the enhancement passes the
+      # image through un-enhanced; the GPU Batch reprocess (:gpu) de-watermarks/upscales after.
+      environment = concat(local.common_env, [
+        { name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" },
+        { name = "BLOKPORT_IMAGE_MODE", value = "s3" },
+        { name = "BLOKPORT_IMAGE_PROCESSING", value = "true" },
+        { name = "BLOKPORT_KEEP_SCRAPED", value = "true" },
+        # s3 dry-run defaults TRUE in dev (a safety so a dev box never writes the bucket): the image
+        # stage then derives keys/urls and logs bytes but never put_object's, so processed images never
+        # land and every product holds no_image. The produce runs here and MUST write, so turn it off.
+        { name = "BLOKPORT_S3_DRY_RUN", value = "false" },
+      ])
       # the config container runs the produce subprocess (fetch -> live scrape -> build), so it also
       # carries the scraper's runtime secrets (proxy, fal key) when configured.
       secrets = concat(
