@@ -266,6 +266,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     alias_decisions = decisions.load_alias_decisions()   # norm(spelling) -> existing variety NAME to alias onto
     rejected = decisions.load_rejected()
     seed_colors = decisions.load_variety_seed_colors()   # norm(variant) -> operator mint colour (over 'Natural')
+    seed_types = decisions.load_variety_seed_types()     # norm(variant) -> operator-assigned stone type (fills a void)
     pending_confirm: list[dict] = []
     result = CurationResult(
         alias_additions={b: [] for b in BRANCHES},
@@ -282,14 +283,20 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         """The (name, resolved stone_type, cleaned name) a row's variety is minted under -- computed
         ONE way so the dedup, variety_branches, obs_union and the mint all agree on the identity (and
         its (type, name) key). Type: the corrected type_name, else the raw tag, else the first
-        missing_variation gap's suggested type (then any gap's). Name: the match key, else the raw
-        name MINUS its format word (so 'Brown Onyx Slab' is 'Brown Onyx' everywhere, not just at mint)."""
+        missing_variation gap's suggested type, else the OPERATOR-ASSIGNED type (seed_type) for a
+        type-less variety -- never guessed. Name: the match key, else the raw name MINUS its format word
+        (so 'Brown Onyx Slab' is 'Brown Onyx' everywhere, not just at mint)."""
         mv = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         suggested = (mv[0].suggested_type if mv else "") or next(
             (g.suggested_type for g in row.tree_gaps if g.suggested_type), "")
         stone_type = row.type_name or row.raw_type or suggested or ""
         name = (row.variety_match_key or strip_format(row.raw_name or "")).strip()
-        return name, stone_type, _clean_variety(name, stone_type)
+        # clean is derived from the BASE (pre-seed) type, so the seed only fills the final stone_type and
+        # never changes the name/clean/Key uuid -- the seed lookup key norm(clean) stays stable run to run.
+        clean = _clean_variety(name, stone_type)
+        if not stone_type:
+            stone_type = seed_types.get(proj.norm(clean), "")
+        return name, stone_type, clean
 
     alias_new: dict[str, set[str]] = {}
     review_candidates: dict[str, set[str]] = {}
@@ -555,6 +562,16 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             u["finishes"].add(title_case(_r.finish_name))
 
     for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed in new_variant_rows:
+        if not stone_type:
+            # a variety cannot mint without a stone type (it drives the Key, so a wrong/empty type is a
+            # wrong identity). HOLD it for the operator to assign one via the review (seed_type) instead
+            # of guessing or shipping it type-less. This is the single enforcement point for the invariant.
+            pending_confirm.append({"confirm": "", "variant": title,
+                                    "reason": "needs a stone type -- assign one to mint",
+                                    "stone_type": "", "color": title_case(obs_color or ""),
+                                    "nearest_existing": (gap.nearest_existing or "") if gap else "",
+                                    "score": "", "model_prob": ""})
+            continue
         _u = obs_union.get((proj.norm(stone_type), proj.norm(title)),
                            {"colors": set(), "qualities": set(), "finishes": set()})
         # colour is REQUIRED for a Medusa product; a source like zucchi often supplies none, so a
@@ -660,6 +677,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     result.suspicious_names = suspicious   # written to review by write_curation
     result.pending_confirm = pending_confirm
     result.rejected = rejected
+    # Defence in depth: the mint-emission HOLD makes a type-less variety impossible here; surface it LOUD
+    # if a future change ever regresses, rather than shipping a type-less (bad-Key) variety to Medusa.
+    typeless = [p["variant"] for posts in result.backbone_new.values() for p in posts if not p.get("stone_type")]
+    if typeless:
+        log.error("type-less varieties reached the mint; should have been HELD for seed_type",
+                  extra={"extra_fields": {"count": len(typeless), "sample": typeless[:5]}})
     return result
 
 

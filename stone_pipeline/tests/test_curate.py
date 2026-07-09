@@ -244,3 +244,29 @@ def test_curation_does_not_modify_reference_files(ref, tmp_path):
     curate.build_curation([], ref)
     after = {p: os.path.getmtime(p) for p in before}
     assert before == after
+
+
+def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
+    # a variety with no resolvable stone type is HELD (never shipped type-less); the operator assigns a
+    # type via the review (seed_type), and the next produce mints it with that type + a typed Key.
+    from stone_pipeline.config import decisions_store
+
+    def typeless():
+        r = CanonicalRow(src_site="varsha", surrogate_key="n1", variety_match_key="Karur Special White",
+                         raw_type="")
+        r.add_gap(TreeGap(src_site="varsha", surrogate_key="n1", raw_name="Karur Special White",
+                          gap_kind=GapKind.missing_variation, nearest_existing="Something", nearest_score=30.0))
+        return r
+
+    res = curate.build_curation([typeless()], ref)
+    held = next(p for p in res.pending_confirm if p["variant"] == "Karur Special White")
+    assert held["reason"] == "needs a stone type -- assign one to mint"
+    assert not any(r["Name"] == "Karur Special White" for b in res.new_variants.values() for r in b)
+
+    decisions_store.set_variety_decision("Karur Special White", "mint", seed_type="Granite")
+    res2 = curate.build_curation([typeless()], ref)
+    posts = [p for b in ("slab", "block", "tile")
+             for p in res2.backbone_new[b] if p["variant"] == "Karur Special White"]
+    assert posts and all(p["stone_type"] == "Granite" for p in posts)   # minted with the assigned type
+    assert all("granite" in p["key"] for p in posts)                    # and a typed Key slug
+    assert not any(p["variant"] == "Karur Special White" for p in res2.pending_confirm)
