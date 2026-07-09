@@ -78,6 +78,7 @@ class PolonineScraper(ScraperBase):
     category = "slab"        # SlabWare slab inventory; explicit format (item 3)
     id_field = "product_id"
     use_curl_cffi = True     # Cloudflare-fronted
+    needs_proxy = True       # tested: this tenant blocks the datacenter IP even with the Chrome fingerprint
     columns = [
         "product_id", "material", "stone_type", "color", "finish", "quality",
         "classification", "thickness", "block", "bundle_no", "slab_numbers", "slab_count",

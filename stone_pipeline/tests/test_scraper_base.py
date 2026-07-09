@@ -112,3 +112,35 @@ def test_marenostone_parses_dimensions_from_attributes_table():
             '<td class="woocommerce-product-attributes-item__value"><p>3</p></td></tr></table>')
     assert _dims_from_html(html) == {"length": "140cm", "width": "35cm", "thickness": "3cm"}
     assert _dims_from_html("<table></table>") == {}  # no dims -> empty, never crashes
+
+
+def test_curl_cffi_uses_proxy_only_when_needs_proxy(tmp_path, monkeypatch):
+    # the residential proxy is metered; a curl_cffi site applies it ONLY when needs_proxy is set (its
+    # Cloudflare tenant blocks the datacenter IP). A curl_cffi site that works direct spends no proxy.
+    import sys
+    import types
+
+    captured: dict = {}
+    fake_req = types.ModuleType("curl_cffi.requests")
+    fake_req.Session = lambda **opts: captured.update(opts) or object()
+    fake_cffi = types.ModuleType("curl_cffi")
+    fake_cffi.requests = fake_req
+    monkeypatch.setitem(sys.modules, "curl_cffi", fake_cffi)
+    monkeypatch.setitem(sys.modules, "curl_cffi.requests", fake_req)
+    monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://u:p@proxy.soax.com:1337")
+
+    class _Proxied(_Fake):
+        use_curl_cffi = True
+        needs_proxy = True
+
+    class _Direct(_Fake):
+        use_curl_cffi = True
+        needs_proxy = False
+
+    captured.clear()
+    _Proxied(data_dir=tmp_path)._cffi()
+    assert "proxies" in captured                     # needs_proxy -> residential proxy applied
+
+    captured.clear()
+    _Direct(data_dir=tmp_path)._cffi()
+    assert "proxies" not in captured                 # curl_cffi alone -> no proxy spent

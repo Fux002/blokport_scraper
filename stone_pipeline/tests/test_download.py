@@ -1,6 +1,7 @@
-"""The image fetcher's proxy handling. A residential proxy is used when set, but a PUBLIC CDN the proxy
-refuses with 407 (zucchi on CloudFront, develi on Google Drive) is fetched DIRECT instead of failing --
-the proxy refuses the target, not the target refusing us. Plus the settled cases (200, 404)."""
+"""The image fetcher goes DIRECT and isolates failures: 200 -> bytes, 404 -> permanent miss, redirects
+SSRF-validated, transient non-200 retried. It IGNORES BLOKPORT_SCRAPER_PROXY -- images never use the
+residential proxy (that is site-scrape-only; the image hosts serve datacenter IPs directly, verified from
+the AWS egress). The fixture asserts no proxy is ever configured on the image client."""
 
 from __future__ import annotations
 
@@ -12,8 +13,6 @@ from stone_pipeline.io import download
 
 @pytest.fixture
 def mock_httpx(monkeypatch):
-    """Route every httpx.Client (proxied AND direct) through an injectable MockTransport, and let every
-    target pass the SSRF guard, so the fetcher's routing logic is tested without network or DNS."""
     monkeypatch.setattr(download, "url_allowed", lambda u: True)
     real_client = httpx.Client
 
@@ -21,7 +20,7 @@ def mock_httpx(monkeypatch):
         transport = httpx.MockTransport(handler)
 
         def fake_client(**kw):
-            kw.pop("proxy", None)  # the mock transport serves regardless of the proxy setting
+            assert "proxy" not in kw, "the image fetcher must NOT configure a proxy (images go direct)"
             return real_client(**kw, transport=transport)
 
         monkeypatch.setattr(httpx, "Client", fake_client)
@@ -29,52 +28,53 @@ def mock_httpx(monkeypatch):
     return install
 
 
-def test_proxy_407_falls_back_to_direct(mock_httpx, monkeypatch):
-    monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://u:p@proxy:8080")
-    calls: list[str] = []
-
-    def handler(request):
-        calls.append(str(request.url))
-        if len(calls) == 1:                                  # first hop = via the proxy -> refused
-            return httpx.Response(407, text="Proxy Authentication Required")
-        return httpx.Response(200, content=b"PNGBYTES")       # direct -> served
-
-    mock_httpx(handler)
+def test_direct_fetch_returns_bytes(mock_httpx):
+    mock_httpx(lambda r: httpx.Response(200, content=b"PNGBYTES"))
     fetch = download.httpx_fetcher(retries=3, backoff=0.0)
     assert fetch("https://d1vjwtwi5ituin.cloudfront.net/x.jpg") == b"PNGBYTES"
-    assert len(calls) == 2                                    # proxy (407) then direct (200)
 
 
-def test_proxy_200_does_not_fall_back(mock_httpx, monkeypatch):
-    monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://u:p@proxy:8080")
-    calls: list[str] = []
-
-    def handler(request):
-        calls.append(str(request.url))
-        return httpx.Response(200, content=b"OK")
-
-    mock_httpx(handler)
-    fetch = download.httpx_fetcher(retries=3, backoff=0.0)
-    assert fetch("https://cloudflare.example/a.jpg") == b"OK"
-    assert len(calls) == 1                                    # proxy served it: no needless direct hop
+def test_proxy_env_is_ignored_for_images(mock_httpx, monkeypatch):
+    # even with the proxy env SET, the client is built WITHOUT a proxy (the fixture asserts it). Images go
+    # direct; the residential proxy is reserved for the Cloudflare SITE scrape, not image downloads.
+    monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://u:p@proxy.soax.com:1337")
+    mock_httpx(lambda r: httpx.Response(200, content=b"OK"))
+    fetch = download.httpx_fetcher(retries=1, backoff=0.0)
+    assert fetch("https://varshastones.slabware.com/a.jpg") == b"OK"
 
 
-def test_no_proxy_fetches_direct(mock_httpx, monkeypatch):
-    monkeypatch.delenv("BLOKPORT_SCRAPER_PROXY", raising=False)
-    mock_httpx(lambda request: httpx.Response(200, content=b"OK"))
-    fetch = download.httpx_fetcher(retries=3, backoff=0.0)
-    assert fetch("https://host/a.jpg") == b"OK"
+def test_404_is_permanent_no_retry(mock_httpx):
+    calls = []
 
-
-def test_404_is_a_permanent_miss_no_retry(mock_httpx, monkeypatch):
-    monkeypatch.delenv("BLOKPORT_SCRAPER_PROXY", raising=False)
-    calls: list[int] = []
-
-    def handler(request):
+    def h(r):
         calls.append(1)
         return httpx.Response(404)
 
-    mock_httpx(handler)
+    mock_httpx(h)
     fetch = download.httpx_fetcher(retries=3, backoff=0.0)
     assert fetch("https://host/missing.jpg") is None
-    assert len(calls) == 1                                    # 404 is permanent -> not retried
+    assert len(calls) == 1                                    # permanent -> not retried
+
+
+def test_transient_500_retries_then_none(mock_httpx):
+    calls = []
+
+    def h(r):
+        calls.append(1)
+        return httpx.Response(500)
+
+    mock_httpx(h)
+    fetch = download.httpx_fetcher(retries=2, backoff=0.0)
+    assert fetch("https://host/a.jpg") is None
+    assert len(calls) == 2                                    # transient -> retried up to `retries`
+
+
+def test_redirect_is_followed_and_revalidated(mock_httpx):
+    def h(request):
+        if request.url.path == "/a.jpg":
+            return httpx.Response(302, headers={"location": "https://host/final.jpg"})
+        return httpx.Response(200, content=b"OK")
+
+    mock_httpx(h)
+    fetch = download.httpx_fetcher(retries=1, backoff=0.0)
+    assert fetch("https://host/a.jpg") == b"OK"

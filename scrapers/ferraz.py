@@ -78,6 +78,7 @@ class FerrazScraper(ScraperBase):
     category = "slab"        # Ferraz is slab inventory (bundles of slabs); item 3 explicit format
     id_field = "bundle_id"   # images named ferraz_<bundle_id>_<idx>
     use_curl_cffi = True   # Cloudflare-fronted SlabWare tenant
+    needs_proxy = True     # inactive; SlabWare tenant conservatively proxied (verify direct if activated)
     page_delay = 4.0
 
     columns = [
