@@ -89,9 +89,10 @@ def clean_alias_list(name: str, raw_aliases) -> list[str]:
       - drop a 'China market:' context prefix and pull any '(local name)' out of the brackets,
       - strip stray wrapping punctuation/brackets and junk (an alias with no letters or digits),
       - drop any alias equal to the variant Name (redundant),
-      - title-case and de-duplicate case-insensitively, preserving first-seen order.
+      - title-case for DISPLAY (accents preserved) but de-duplicate on match_key, so a case- OR
+        accent-only difference (Rosé vs Rose) still collapses. First-seen order preserved.
     Returns the cleaned alias list (possibly empty). title_case is resolved at call time."""
-    name_key = title_case(name or "").casefold()
+    name_key = match_key(name or "")
     out: list[str] = []
     seen: set[str] = set()
 
@@ -100,7 +101,7 @@ def clean_alias_list(name: str, raw_aliases) -> list[str]:
         if not _ALNUM_RE.search(value):
             return                                   # pure punctuation -> junk
         value = title_case(value)
-        key = value.casefold()
+        key = match_key(value)
         if not key or key == name_key or key in seen:
             return                                   # empty, == Name, or already have it
         seen.add(key)
@@ -130,10 +131,23 @@ def _cap_word(word: str) -> str:
     return "".join(out)
 
 
+# Romance-language connectors kept lower-case in a display title unless they LEAD the name
+# (Giallo di Siena, Verde de Fantasia). Small and closed on purpose -- a display nicety, NOT a
+# general stop-word list, and it never affects identity (match_key/gen_key fold separately).
+_TITLE_CONNECTORS = frozenset({"de", "do", "da", "di", "del", "della", "e", "y"})
+
+
 def title_case(text: str) -> str:
-    """Every word capitalized, rest lower-case, whitespace collapsed, accents folded to ASCII.
-    Consistent variant names and titles regardless of how the source cased or accented them."""
-    return collapse_ws(" ".join(_cap_word(w) for w in ascii_fold(text or "").split()))
+    """Every word capitalized, rest lower-case, whitespace collapsed. Unicode-aware: source accents
+    are PRESERVED (Rosé stays Rosé, Macaúbas stays Macaúbas) so the display name reads as the name,
+    while IDENTITY folds accents separately (match_key / gen_key's slug), so 'Porriño' and 'Porrino'
+    are still one stone. Romance connectors (de/do/di/...) stay lower-case unless they lead the name.
+    Note: this preserves accents that are IN the source; it does not restore a missing one
+    (AZUL MACAUBAS -> Azul Macaubas, not Macaúbas -- that needs a canonical/synonym table)."""
+    words = (text or "").split()
+    return " ".join(
+        w.lower() if i and w.lower() in _TITLE_CONNECTORS else _cap_word(w)
+        for i, w in enumerate(words))
 
 
 def slugify(text: str) -> str:

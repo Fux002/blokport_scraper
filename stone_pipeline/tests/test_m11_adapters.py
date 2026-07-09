@@ -196,16 +196,18 @@ def test_clean_variety_name_generic_and_prefix():
     assert c("ZB Patagonia", (r"^[Zz]\s*[Bb]?\s+",)) == "Patagonia"
 
 
-def test_accents_folded_consistently_everywhere():
-    # a variety name never carries a special character; the SAME folding applies to the display
-    # name, the slug/key, and the match key, so 'Porriño' and 'Porrino' are one stone.
+def test_accents_preserved_in_display_folded_in_identity():
+    # The DISPLAY name PRESERVES source accents (reads as the name); IDENTITY (slug/key/match key)
+    # folds them -- so 'Porriño' and 'Porrino' are still ONE stone, but the display shows 'Porriño'.
     from stone_pipeline.core.text import ascii_fold, title_case, slugify
     from stone_pipeline.matching.projections import norm
+    # identity folds accents (one stone regardless of accent)
     assert ascii_fold("Rosa Porriño") == "Rosa Porrino"
-    assert title_case("são GABRIEL") == "Sao Gabriel"
     assert slugify("Cinza Corumbá") == "cinza-corumba"
     assert norm("Porriño") == norm("Porrino")            # accent-insensitive matching
-    assert all(ord(c) < 128 for c in title_case("Rosa Porriño"))  # output is pure ASCII
+    # display PRESERVES accents (Unicode-aware title-case), and does not fold to ASCII
+    assert title_case("são GABRIEL") == "São Gabriel"
+    assert title_case("Rosa Porriño") == "Rosa Porriño"
 
 
 def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch):

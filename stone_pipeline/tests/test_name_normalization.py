@@ -55,3 +55,29 @@ def test_country_and_variety_keys_route_through_match_key():
     from stone_pipeline.reference.loaders import _norm as loaders_norm
     for v in ["United-States", "United_States", "united  states"]:
         assert loaders_norm(v) == match_key(v) == proj.norm(v) == "united states"
+
+
+def test_title_case_preserves_display_accents_but_identity_still_folds():
+    # DISPLAY: Unicode-aware title-case keeps SOURCE accents and reads as the name.
+    from stone_pipeline.core.text import title_case
+    assert title_case("AZUL MACAÚBAS") == "Azul Macaúbas"            # source accent preserved
+    assert title_case("quartzo vitro rosé") == "Quartzo Vitro Rosé"
+    assert title_case("são GABRIEL") == "São Gabriel"
+    # accent RESTORATION is out of scope -- a missing accent is NOT invented
+    assert title_case("AZUL MACAUBAS") == "Azul Macaubas"
+    # IDENTITY still folds, so the accented and unaccented display names are ONE stone
+    assert match_key("Azul Macaúbas") == match_key("Azul Macaubas")
+
+
+def test_title_case_lowercases_connectors_except_leading():
+    from stone_pipeline.core.text import title_case
+    assert title_case("giallo DI siena") == "Giallo di Siena"        # connector lower, mid-name
+    assert title_case("blanco Y negro") == "Blanco y Negro"
+    assert title_case("de something") == "De Something"              # connector leading -> capitalized
+    assert title_case("verde de fantasia") == "Verde de Fantasia"
+
+
+def test_alias_dedup_is_accent_and_case_insensitive():
+    # aliases differing only by accent/case collapse to one, and the KEPT display keeps its accent
+    from stone_pipeline.core.text import clean_alias_list
+    assert clean_alias_list("Rosa", ["Rosé", "rose", "ROSÉ"]) == ["Rosé"]
