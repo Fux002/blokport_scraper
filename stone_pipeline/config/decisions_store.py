@@ -57,13 +57,13 @@ class InvalidDecision(ValueError):
 # -- variety decisions (produce READS these) -----------------------------------
 
 def variety_actions() -> dict[str, dict]:
-    """norm(variant) -> {'action': mint|reject|alias, 'alias_of': str|None, 'seed_color': str|None} for
-    every decided variety. Empty for a fresh store."""
+    """norm(variant) -> {'action': mint|reject|alias, 'alias_of', 'seed_color', 'seed_type'} for every
+    decided variety. Empty for a fresh store."""
     with closing(store.open_store()) as conn:
         return {r["variant_norm"]: {"action": r["action"], "alias_of": r["alias_of"],
-                                    "seed_color": r["seed_color"]}
+                                    "seed_color": r["seed_color"], "seed_type": r["seed_type"]}
                 for r in conn.execute(
-                    "SELECT variant_norm, action, alias_of, seed_color FROM variety_decision")}
+                    "SELECT variant_norm, action, alias_of, seed_color, seed_type FROM variety_decision")}
 
 
 def variety_seed_colors() -> dict[str, str]:
@@ -71,6 +71,13 @@ def variety_seed_colors() -> dict[str, str]:
     produce seeds the minted variety with this instead of the generic 'Natural' fallback."""
     return {n: d["seed_color"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_color"]}
+
+
+def variety_seed_types() -> dict[str, str]:
+    """norm(variant) -> the operator-assigned stone type, for every MINT decision that set one. The next
+    produce mints a type-less variety with this instead of holding it for review."""
+    return {n: d["seed_type"] for n, d in variety_actions().items()
+            if d["action"] == "mint" and d["seed_type"]}
 
 
 def confirm_map() -> dict[str, str]:
@@ -98,10 +105,10 @@ def alias_map() -> dict[str, str]:
 
 
 def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
-                         seed_color: str | None = None) -> None:
+                         seed_color: str | None = None, seed_type: str | None = None) -> None:
     """Upsert ONE operator decision. Raises InvalidDecision on a bad action or an alias with no target.
-    Idempotent: re-deciding a variety overwrites the prior decision. `seed_color` (mint only) is the
-    colour to mint the variety with instead of the generic 'Natural'; ignored for reject/alias."""
+    Idempotent: re-deciding a variety overwrites the prior decision. `seed_color` and `seed_type` (mint
+    only) are the colour/stone type to mint the variety with; ignored for reject/alias."""
     action = (action or "").strip().lower()
     if action not in _ACTIONS:
         raise InvalidDecision(f"action must be one of {_ACTIONS}, got {action!r}")
@@ -111,18 +118,20 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
     if action != "alias":
         alias_of = None                      # only alias carries a target; keep the row unambiguous
     seed_color = (seed_color or "").strip() or None
+    seed_type = (seed_type or "").strip() or None
     if action != "mint":
-        seed_color = None                    # only mint carries a seed colour
+        seed_color = seed_type = None        # only mint carries a seed colour / type
     norm = _norm(variant)
     if not norm:
         raise InvalidDecision("variant name is empty")
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO variety_decision (variant_norm, variant_display, action, alias_of, seed_color, "
-            "decided_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(variant_norm) DO UPDATE SET "
+            "seed_type, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(variant_norm) DO UPDATE SET "
             "variant_display = excluded.variant_display, action = excluded.action, "
-            "alias_of = excluded.alias_of, seed_color = excluded.seed_color, decided_at = excluded.decided_at",
-            (norm, variant.strip(), action, alias_of, seed_color, _now()))
+            "alias_of = excluded.alias_of, seed_color = excluded.seed_color, "
+            "seed_type = excluded.seed_type, decided_at = excluded.decided_at",
+            (norm, variant.strip(), action, alias_of, seed_color, seed_type, _now()))
         conn.commit()
 
 
@@ -355,6 +364,7 @@ def list_pending(kind: str) -> list[dict]:
             item["current_action"] = actions.get(r["ref"], {}).get("action")
             item["current_alias_of"] = actions.get(r["ref"], {}).get("alias_of")
             item["current_seed_color"] = actions.get(r["ref"], {}).get("seed_color")
+            item["current_seed_type"] = actions.get(r["ref"], {}).get("seed_type")
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
         out.append(item)

@@ -119,3 +119,32 @@ def test_mint_seed_colour_must_be_a_real_attribute(seeded_queue):
 def test_reject_ignores_a_seed_colour(seeded_queue):
     server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "reject", "color": "beige"})
     assert decisions.load_variety_seed_colors() == {}          # only mint carries a seed colour
+
+
+# -- mint seed type (assign a stone type to a type-less new variety; HELD until it has one) --------
+
+def test_get_types_returns_the_medusa_vocab():
+    code, body = server.dispatch("GET", ["types"], None)
+    assert code == 200
+    assert "Granite" in body["types"] and body["types"] == sorted(body["types"])   # canonical, sorted
+
+
+def test_mint_with_a_seed_type(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                                 {"action": "mint", "type": "granite"})
+    assert code == 200 and body["seed_type"] == "Granite"       # stored in canonical casing
+    assert decisions.load_variety_seed_types() == {"zucchi blue x": "Granite"}   # produce reads this
+    row = server.dispatch("GET", ["review", "variants"], None)[1]["variants"][0]
+    assert row["current_seed_type"] == "Granite"                # UI reflects the between-runs choice
+
+
+def test_mint_seed_type_must_be_a_real_attribute(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                                 {"action": "mint", "type": "definitely-not-a-type"})
+    assert code == 400 and "not a known" in body["error"]
+    assert decisions.load_variety_seed_types() == {}           # nothing seeded on a bad type
+
+
+def test_reject_ignores_a_seed_type(seeded_queue):
+    server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "reject", "type": "granite"})
+    assert decisions.load_variety_seed_types() == {}           # only mint carries a seed type

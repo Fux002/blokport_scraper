@@ -110,12 +110,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # seed_color: an operator-chosen colour to mint a NEW variety with, instead of the generic 'Natural'
     # fallback, when its source supplies no colour (a colourless source would otherwise leave the variety
     # 'Natural' forever, since no scraped product ever carries a colour for the leaf review to surface).
+    # seed_type: an operator-assigned stone TYPE to mint a type-less variety with. Type has NO fallback
+    # (it drives the Key, so a wrong type is a wrong identity); a variety with no resolvable type is HELD
+    # until the operator assigns one here, never guessed.
     conn.execute("CREATE TABLE IF NOT EXISTS variety_decision ("
                  "variant_norm TEXT PRIMARY KEY, variant_display TEXT NOT NULL DEFAULT '', "
                  "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), "
-                 "alias_of TEXT, seed_color TEXT, decided_at TEXT NOT NULL)")
-    if "seed_color" not in {r["name"] for r in conn.execute("PRAGMA table_info(variety_decision)")}:
+                 "alias_of TEXT, seed_color TEXT, seed_type TEXT, decided_at TEXT NOT NULL)")
+    _variety_cols = {r["name"] for r in conn.execute("PRAGMA table_info(variety_decision)")}
+    if "seed_color" not in _variety_cols:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_color TEXT")   # DBs created before it
+    if "seed_type" not in _variety_cols:
+        conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_type TEXT")    # DBs created before it
     # New colour/finish/type/quality VALUES the operator created in Medusa and pasted the id for, keyed
     # by (kind, normalized value). The next produce adopts the id into the attribute vocab.
     conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("

@@ -62,6 +62,12 @@ def load_variety_seed_colors() -> dict[str, str]:
     return decisions_store.variety_seed_colors()
 
 
+def load_variety_seed_types() -> dict[str, str]:
+    """norm(variant) -> the operator-assigned stone type. curate mints a type-less variety with this
+    instead of holding it, so a source that supplies no type does not leave the variety unmintable."""
+    return decisions_store.variety_seed_types()
+
+
 def save_rejected(rejected: set[str]) -> None:
     """Persist runtime-learned rejects. Never overwrites an explicit mint/alias decision."""
     decisions_store.learn_rejects(rejected)

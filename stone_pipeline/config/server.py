@@ -38,6 +38,14 @@ def _color_vocab() -> dict[str, str]:
     return {proj.norm(c): c for c in load_attributes().canonical_names("color")}
 
 
+def _type_vocab() -> dict[str, str]:
+    """norm(type) -> canonical stone-type name, from the Medusa attribute vocab. Backs the mint type
+    picker (GET /config/v1/types) and validates an operator's seed type (never seed one Medusa lacks)."""
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import load_attributes
+    return {proj.norm(t): t for t in load_attributes().canonical_names("type")}
+
+
 def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
     """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
     or ['sources', 'polonine']). Pure: returns (status_code, json body)."""
@@ -148,21 +156,29 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             # would resolve to nothing at produce time -- a silent no-op. Reject it loudly here instead.
             if action == "alias" and not varieties.exists(alias_of or ""):
                 return 400, {"error": f"alias_of {alias_of!r} is not an existing variety"}
-            # an optional mint colour must be a real Medusa colour attribute, else the variety would be
-            # seeded with a colour that null-ids every product -- same loud guard as the alias target.
+            # an optional mint colour / stone type must be a real Medusa attribute, else the variety
+            # would be seeded with a value that null-ids every product -- same loud guard as the alias
+            # target. A type-less variety is HELD until the operator assigns a type here.
+            from stone_pipeline.matching import projections as proj
             seed_color = None
             if (raw_color := (body.get("color") or "").strip()):
-                from stone_pipeline.matching import projections as proj
                 vocab = _color_vocab()
                 if proj.norm(raw_color) not in vocab:
                     return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
                 seed_color = vocab[proj.norm(raw_color)]   # store the canonical casing
+            seed_type = None
+            if (raw_type := (body.get("type") or "").strip()):
+                vocab = _type_vocab()
+                if proj.norm(raw_type) not in vocab:
+                    return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
+                seed_type = vocab[proj.norm(raw_type)]
             try:
-                decisions_store.set_variety_decision(segments[2], action, alias_of, seed_color=seed_color)
+                decisions_store.set_variety_decision(segments[2], action, alias_of,
+                                                     seed_color=seed_color, seed_type=seed_type)
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
             return 200, {"variant": segments[2], "action": action, "alias_of": alias_of,
-                         "seed_color": seed_color}
+                         "seed_color": seed_color, "seed_type": seed_type}
         if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
             return 200, {"attributes": decisions_store.list_pending("attribute")}
         if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
@@ -219,10 +235,16 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         if method == "GET":
             return 200, {"colors": sorted(_color_vocab().values())}
         return 405, {"error": "GET /config/v1/colors"}
+    if segments and segments[0] == "types":
+        # the stone-type vocabulary for the new-variety mint type picker: assign a type to a type-less
+        # variety (held until it has one). Agnostic: just the canonical names.
+        if method == "GET":
+            return 200, {"types": sorted(_type_vocab().values())}
+        return 405, {"error": "GET /config/v1/types"}
     if not segments or segments[0] != "sources":
         return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, "
-                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties, /adapters, /colors "
-                     "or /variations/<key>/{retire,un_retire}"}
+                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties, /adapters, /colors, "
+                     "/types or /variations/<key>/{retire,un_retire}"}
     if len(segments) == 1:
         if method == "GET":
             # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)
