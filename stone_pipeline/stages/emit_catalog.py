@@ -145,16 +145,26 @@ def _mirror_rows(by_key: dict[str, dict]) -> list[dict]:
 
 
 def build(existing_path: Path | None = None, image_keys: set[str] | None = None) -> Path:
-    """Assemble to_upload/1_variants_full.csv from the immutable export + this run's
-    delta (to_upload/1_variants_update.csv).
+    """Assemble to_upload/1_variants_full.csv from the committed base (the complete
+    source-of-truth variant set) + this run's delta (to_upload/1_variants_update.csv).
 
     image_keys: the set of variant Keys that actually have a {Key}.png on S3. When provided (or
     resolvable from S3), a variant advertises its image link IFF its image exists -- so the file
     can never point Medusa at a missing image. Pass an explicit set in tests; None resolves it from
     S3, and a None result there (S3 unreachable) falls back to the prior heuristic."""
-    existing_path = Path(existing_path or SETTINGS.paths.export_file)
-    by_key = {r["Key"]: r for r in _rows(existing_path)}      # existing (read-only)
+    # Seed from the BASE (committed, complete, Id-free source of truth), never the live export: a cold
+    # start has a thin/empty live export (Medusa emptied), but the catalog must still rebuild the whole
+    # set and grow from there. The live export is unioned only as a safety net, so a variety Medusa minted
+    # that is not yet in the base is never dropped (base should already contain the live set).
+    existing_path = Path(existing_path or SETTINGS.paths.variants_export_base_csv)
+    by_key = {r["Key"]: r for r in _rows(existing_path)}      # base = complete catalog (read-only)
     order = list(by_key)
+    live = SETTINGS.paths.export_file
+    if existing_path != live:
+        for r in _rows(live):
+            if r["Key"] not in by_key:
+                by_key[r["Key"]] = r
+                order.append(r["Key"])
     n_existing = len(order)
     for r in _rows(SETTINGS.paths.to_upload_dir / "1_variants_update.csv"):   # new + alias delta
         if r["Key"] in by_key:

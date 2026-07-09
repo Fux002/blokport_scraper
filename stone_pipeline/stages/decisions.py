@@ -26,7 +26,7 @@ from stone_pipeline.matching import projections as proj
 # Field names the catalog stages build/read. Kept here so curate.py and emit stay unchanged; the store
 # persists these same fields as the pending-queue payload.
 ATTR_COLUMNS = ["medusa_id", "kind", "value", "count", "suggested_value", "action"]
-CONFIRM_COLUMNS = ["confirm", "variant", "stone_type", "color", "nearest_existing", "score", "model_prob"]
+CONFIRM_COLUMNS = ["confirm", "variant", "reason", "stone_type", "color", "nearest_existing", "score", "model_prob"]
 _PENDING_VARIETY_FIELDS = [c for c in CONFIRM_COLUMNS if c != "confirm"]   # 'confirm' now lives as `action`
 # The backbone-leaf suggestion: a value Medusa already has, not yet allowed on this variety. Same fields
 # in the CSV audit artifact and the review-queue payload, one source of truth.

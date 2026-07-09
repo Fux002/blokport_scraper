@@ -141,6 +141,10 @@ class Paths:
     # the immutable "existing variants" the catalog reads. The UPLOAD files are PRODUCED
     # by the catalog (to_upload/) and never read back -- input and output never alias.
     variants_export_csv: Path = _FROM_MEDUSA / "variants_export.csv"
+    # The committed, Id-free SOURCE OF TRUTH: the complete variant set (base == the full catalog). The
+    # catalog seeds from THIS, not the live export -- so a cold start (Medusa emptied -> thin live export)
+    # still rebuilds the whole catalog and only grows from there. sync_variants_base keeps it == full.
+    variants_export_base_csv: Path = _FROM_MEDUSA / "variants_export_base.csv"
 
     # per-category backbone files derive from the CATEGORIES registry.
     @property
