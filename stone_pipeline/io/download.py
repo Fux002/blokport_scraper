@@ -34,12 +34,14 @@ def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5)
 
     Proxy: some supplier image hosts (Cloudflare-fronted) block datacenter IPs (the AWS/ECS NAT egress), so
     downloads route through the residential proxy when BLOKPORT_SCRAPER_PROXY is set. But other suppliers
-    host on a PUBLIC CDN (zucchi on CloudFront, develi on Google Drive) that datacenter IPs reach fine and
-    that some residential-proxy providers REJECT with 407 (Proxy Auth Required). A 407 is the PROXY refusing
-    that target, not the target refusing us, so on 407 we retry the SAME url DIRECT -- which reaches a
-    public CDN. One reactive lever, no per-host allowlist to drift: proxied hosts stay proxied, CDN hosts
-    fall through to direct, and a genuinely unreachable host still fails loud (None). Unset locally = the
-    proxied client IS the direct client, so behaviour is unchanged there."""
+    host on a PUBLIC CDN (zucchi on CloudFront, marenostone direct, develi on Google Drive) that datacenter
+    IPs reach fine and that the proxy may REFUSE -- either the proxy provider rejects that target, or the
+    proxy is simply down. A refusal is the PROXY failing, not the target, so we retry the SAME url DIRECT.
+    For an HTTPS target (the usual case) the refusal is a 407 at the CONNECT tunnel, which httpx raises as
+    httpx.ProxyError (an EXCEPTION, not a response); for a rare HTTP target it is a 407 response. Both switch
+    to direct. One reactive lever, no per-host allowlist to drift: proxied hosts stay proxied, direct-
+    reachable hosts fall through to direct, and a host reachable ONLY via a (dead) proxy still fails loud
+    (None). Unset locally = the proxied client IS the direct client, so behaviour is unchanged there."""
     import os
 
     import httpx
@@ -89,6 +91,13 @@ def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5)
         log.warning("too many redirects", extra={"extra_fields": {"url": url}})
         return None, None
 
+    def _switch_to_direct(url: str, reason: str) -> "httpx.Client":
+        """The proxy refused this target; log it once and hand back the direct client for an immediate
+        retry. A single place so the 407-response and ProxyError-exception paths behave identically."""
+        log.info("proxy refused target; fetching direct",
+                 extra={"extra_fields": {"url": url, "reason": reason}})
+        return direct
+
     def fetch(url: str) -> Optional[bytes]:
         client = proxied
         for attempt in range(retries):
@@ -97,12 +106,19 @@ def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5)
                 if status is None:
                     return data  # settled: image bytes or a permanent miss
                 if status == 407 and client is proxied and proxied is not direct:
-                    # the proxy refused THIS target (a public CDN it will not serve), not the target
-                    # refusing us; the same url is reachable directly, so switch and retry now.
-                    log.info("proxy refused target (407); fetching direct",
-                             extra={"extra_fields": {"url": url}})
-                    client = direct
-                    continue  # not a transient error -> retry immediately, no backoff
+                    # HTTP target: the proxy refused it with a 407 RESPONSE. Retry direct (below).
+                    client = _switch_to_direct(url, "407 response")
+                    continue
+            except httpx.ProxyError as exc:
+                # HTTPS target: a 407 (or any refusal) at the proxy CONNECT tunnel raises here as an
+                # EXCEPTION, not a response -- this is the common path (image CDNs are https). The target is
+                # often reachable directly (a public CDN, or the proxy is down), so switch and retry now.
+                if client is proxied and proxied is not direct:
+                    client = _switch_to_direct(url, str(exc))
+                    continue
+                if attempt == retries - 1:  # already direct / no proxy -> a real failure
+                    log.warning("download failed", extra={"extra_fields": {"url": url, "error": str(exc)}})
+                    return None
             except Exception as exc:  # transient: retry with backoff
                 if attempt == retries - 1:
                     log.warning("download failed", extra={"extra_fields": {"url": url, "error": str(exc)}})
