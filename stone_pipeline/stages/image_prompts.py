@@ -4,7 +4,7 @@ One module, three modes -- all write the SAME file (image_pipeline/prompts_to_ge
 the only file the generator reads):
 
   build()               new product-backed variants only   (normal pipeline / no args)
-  build_regeneration()  every variant that has an image     (`--regenerate`: replace old-model set)
+  build_refresh(done)   product-backed images not yet re-made with the best model  (one-time quality pass)
   build_for_keys(keys)  a specific set of variant Keys      (`--keys K1 K2 …`: fix a few bad images)
 
 `output_name` IS the variant Key, so the generator writes {Key}.png and the S3 upload OVERWRITES
@@ -137,15 +137,23 @@ def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Pa
     return _write(items, out_path, "new")
 
 
-def build_regeneration(out_path: Path | None = None) -> Path:
-    """Every variant that has an image -- re-make the old, inferior-model set (and first-make the
-    product-backed new ones) with the current model. Imageless mirror tiles/blocks are skipped.
-    To force a true REGEN, clear image_pipeline/images/ first (the generator skips files it finds)."""
-    ktype = _backbone_types()
-    items = [item for key, r in _variants().items()
-             if (r.get("Image") or "").strip()
-             and (item := _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip()))]
-    return _write(items, out_path, "regenerate")
+def build_refresh(refreshed: set[str], out_path: Path | None = None) -> Path:
+    """Product-backed variants whose {Key}.png was made with an OLDER model, to re-make ONCE with the
+    current best model -- a one-time QUALITY pass, not the new-image queue. A variant qualifies only if it
+    ALREADY has an image AND backs a product (a variant with no product does not need a fresh texture; an
+    imageless one is build()'s job). `refreshed` is the durable set of Keys already re-made with the best
+    model, so a re-run never regenerates -- and re-charges -- the same image twice. Driven by
+    refresh_images, which owns that marker and the cost gate."""
+    backed, ktype, variants = product_backed_keys(), _backbone_types(), _variants()
+    items = []
+    for key in sorted(backed):
+        r = variants.get(key)
+        if not r or not (r.get("Image") or "").strip() or key in refreshed:
+            continue
+        item = _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip())
+        if item:
+            items.append(item)
+    return _write(items, out_path, "refresh")
 
 
 def build_for_keys(keys: list[str], out_path: Path | None = None) -> Path:
@@ -164,9 +172,9 @@ def build_for_keys(keys: list[str], out_path: Path | None = None) -> Path:
 if __name__ == "__main__":
     import sys
     args = sys.argv[1:]
-    if args[:1] == ["--regenerate"]:
-        p = build_regeneration()
-    elif args[:1] == ["--keys"]:
+    # the one-time quality refresh (build_refresh) is driven by `python -m stone_pipeline.refresh_images`,
+    # which owns the durable "already refreshed" marker + the cost gate, so it is not a raw prompt mode here.
+    if args[:1] == ["--keys"]:
         p = build_for_keys(args[1:])
     else:
         p = build()

@@ -72,31 +72,28 @@ Both scripts are resumable (skip files already produced), so re-running continue
 ## Prompt-builder modes (all write the same prompts_to_generate.json)
 ```
 python -m stone_pipeline.stages.image_prompts              # new product-backed variants (normal)
-python -m stone_pipeline.stages.image_prompts --regenerate # EVERY imaged variant (replace old set)
 python -m stone_pipeline.stages.image_prompts --keys K1 K2 # just these variant Keys (fix a few)
+python -m stone_pipeline.refresh_images                    # one-time quality refresh, product-backed only
 ```
 `output_name` is the variant Key, so every mode overwrites `{Key}.png` in place — one image per
 variant, never a new name. Need the fal key first: `export FAL_KEY=$(aws ssm get-parameter
 --name /blokport-<env>/FAL_KEY --with-decryption --query Parameter.Value --output text)`.
 
-## Regenerate ALL images (replace the old, inferior-model set)
-The bulk of the live images were made by an earlier, worse model. To re-make every
-variant image with the current model in ONE pass:
+## Refresh the poor-quality images (one-time, product-backed only, cost-gated)
+Many live images were made by an earlier, worse model. `refresh_images` re-makes each PRODUCT-BACKED
+variant's image ONCE with the current best model, and only those (a variant with no product does not
+need a fresh texture). A durable S3 marker (`<env>/variations/_refreshed.json`) records every Key already
+refreshed, so a re-run never regenerates -- or re-charges -- the same image twice.
 ```
-python -m stone_pipeline.stages.image_prompts --regenerate   # prompts for EVERY imaged variant
-cd image_pipeline
-python genetate_images.py        # generates the missing/old ones, SKIPS what's already in images/
-python rb_images.py
-aws s3 cp ./to_upload/ s3://blokport-dev-staging-3e58a6/dev/variations/ --recursive  # overwrites old
+python -m stone_pipeline.refresh_images                 # DRY RUN: how many + est. cost, spends nothing
+BLOKPORT_REFRESH_APPLY=1 python -m stone_pipeline.refresh_images   # generate + upload + mark
 ```
-- `--regenerate` reads `to_upload/<env>/1_variants_full.csv` and emits one prompt per variant
-  whose Image is set (≈12,553: 12,215 slab + 332 block + 6 tile). Imageless mirror tiles/blocks
-  are excluded (nothing to make) — they are imaged later, lazily, when a product lands on them.
-- **Resume = free regen control:** files already in `images/` are skipped, so the ~89 recently
-  generated (good) images are kept and only the old ones are re-made. To force a FULL redo of
-  everything, empty `images/` first.
-- **Cost / time:** ≈12.5k images ≈ **$1,255** at ~$0.10/img — a heavy paid batch; best run on the
-  AWS task (FAL_KEY is in SSM) rather than a laptop. The chain is resumable, so it can run in waves.
+- Selection = product-backed AND already-imaged AND not-yet-refreshed. It writes the queue, runs the
+  generator + rb + upload (reused runners), overwrites each `{Key}.png` in place, then adds the Keys to
+  the marker. Imageless variants are build()'s new-image queue, not a refresh.
+- **Cost:** product-backed set (~362) x ~$0.10/img `max` tier ≈ **~$36** one-time. The marker guarantees
+  you never pay twice for the same image. Needs `fal_client` + `torch` + `FAL_KEY`; on a box without the
+  stack the dry run still reports the plan.
 
 ## Notes / caveats
 - **Base image per category:** each prompt carries its own `base_image_url` — slab
