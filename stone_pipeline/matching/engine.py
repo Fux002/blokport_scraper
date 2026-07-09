@@ -310,6 +310,21 @@ class VariationEngine:
             top_cid, top_name, top_score = scored[0]
             # length/token guard: a short generic candidate must not win
             if top_score >= self.auto_accept and self._passes_guard(query, top_name):
+                # HOLD-not-guess: mirror the exact tier -- if the top fuzzy score is TIED between candidates
+                # that share a canonical name (the same variety name under >1 stone type, e.g. 'Calacatta
+                # Gold' marble vs dolomite_marble), auto-accepting picks one by arbitrary export-row order.
+                # Route that duplicate to review. A shared family ALIAS across distinct varieties
+                # ('Arabescato' -> many 'Arabescato ...') has different canonicals, so it still resolves;
+                # a lone typo correction ('Bianco Carara' -> the one 'Bianco Carrara') is unaffected.
+                tied_canon: dict[str, int] = {}
+                for cid, _n, s in scored:
+                    if s != top_score:
+                        break
+                    c = self._candidate(cid)
+                    if c:
+                        tied_canon[proj.norm(c.canonical)] = tied_canon.get(proj.norm(c.canonical), 0) + 1
+                if any(n > 1 for n in tied_canon.values()):
+                    return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3])
                 return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy", top_score, scored[:3])
             if top_score >= self.review_floor:
                 return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3])

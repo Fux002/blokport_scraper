@@ -121,6 +121,23 @@ def test_shared_alias_different_canonicals_still_resolves():
     assert eng.match("Arabescato Garfagnana").cid == "v1"    # exact canonical
     assert eng.match("Arabescato", block_type="marble").cid in ("v1", "v2")  # shared alias -> still resolves
 
+def test_typeless_query_tied_across_types_routes_to_review():
+    # HOLD-not-guess: a type-less query whose top FUZZY score ties across stone types must not auto-accept
+    # one by arbitrary export-row order (a silent cross-type merge that would bypass the seed_type hold).
+    eng = _engine(("v1", "Calacatta Gold", ["Calacatta Gold"], "marble"),
+                  ("v2", "Calacatta Gold", ["Calacatta Gold"], "dolomite_marble"))
+    m = eng.match("Calacata Gold")                              # typo, ties 96.3 across both types, no type
+    assert m.cid is None and m.method == "review"
+    # giving the type disambiguates -> resolves cleanly, no false hold
+    assert eng.match("Calacata Gold", block_type="marble").cid == "v1"
+
+def test_typeless_single_canonical_still_resolves():
+    # the typo-correction case must NOT regress: one variety name (no same-canonical duplicate) resolves
+    # even when the query gives no type -- the duplicate-canonical hold must not become a blanket hold.
+    eng = _engine(("v1", "Bianco Carrara", ["Bianco Carrara"], "marble"))
+    m = eng.match("Bianco Carara")
+    assert m.cid == "v1" and m.method != "review"
+
 def test_fuzzy_match_is_order_independent_within_run():
     # the #6 fix: a non-exact (fuzzy) match must NOT add a live alias mid-run, so a SECOND identical
     # query resolves the SAME way -- not promoted to 'exact'(high) purely because it came later.
