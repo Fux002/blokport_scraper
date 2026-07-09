@@ -207,6 +207,10 @@ def test_alias_decision_routes_spelling_onto_target_and_mints_nothing(ref):
     base = curate_white_g()
     assert "White G" in [p["variant"] for p in base.pending_confirm]
     assert not any(r["Name"] == "White G" for b in base.new_variants.values() for r in b)
+    # the held row states WHY in a dedicated 'reason' (sourced from the one _CODE_REASON map, not a
+    # duplicated literal) and never puts the raw code token in the colour field
+    held = next(p for p in base.pending_confirm if p["variant"] == "White G")
+    assert held["reason"] == curate._CODE_REASON["lone_letter"] and held["color"] == ""
 
     # decide: alias 'White G' onto the existing variety 'Alpine'
     decisions_store.set_variety_decision("White G", "alias", alias_of="Alpine")

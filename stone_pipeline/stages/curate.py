@@ -46,12 +46,13 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
 from stone_pipeline.core import csvio, logfmt
-from stone_pipeline.core.schema import CanonicalRow, GapKind
+from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind
 from stone_pipeline.core.text import (ascii_fold, looks_code_shaped, looks_codey,
                                       looks_like_artifact as _looks_like_artifact, title_case)
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
 from stone_pipeline.stages.format_resolve import branch_of
+from stone_pipeline.stages.normalize import AttributeResolvers
 
 log = logfmt.get_logger("curate")
 
@@ -154,6 +155,10 @@ def _alias_list(raw: str) -> list[str]:
 # (the backbone dictates which combinations a product may be uploaded as)
 _DEFAULT_FINISHES = ["Polished", "Honed", "Leathered", "Brushed", "Flamed",
                      "Sandblasted", "Sawn Cut", "Raw"]
+# Why a code-shaped name is held for confirmation -- shown in the review 'reason' column (a supplier code
+# has no colour, so it never belongs in the colour field). Keyed by looks_code_shaped's return.
+_CODE_REASON = {"lone_letter": "trailing grade letter (e.g. 'Rosal C')",
+                "bare_code": "supplier code, not a variety name"}
 # Generic fallback colour for a variety whose source supplies none (e.g. zucchi). Keeps the variety
 # + its products priceable. Must exist as a colour attribute in Medusa (see attributes_to_add.csv).
 _FALLBACK_COLOR = "Natural"
@@ -384,8 +389,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 rejected.add(proj.norm(clean))
                 continue
             if dec != "yes":                           # blank -> hold out of the upload and ask
-                pending_confirm.append({"confirm": "", "variant": clean, "stone_type": stone_type,
-                                        "color": code_why, "nearest_existing": base, "score": "", "model_prob": ""})
+                pending_confirm.append({"confirm": "", "variant": clean,
+                                        "reason": _CODE_REASON.get(code_why, "looks like a supplier code"),
+                                        "stone_type": stone_type, "color": "", "nearest_existing": base,
+                                        "score": "", "model_prob": ""})
                 continue
             # dec == "yes" -> the human confirmed it IS a real variety -> fall through to mint
         # PHASE 4 -- RESOLVE to an EXISTING variety (prefer an alias over a new variant). A generic
@@ -446,9 +453,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                         continue
                     if dec != "yes":               # pending: hold out of the upload, ask for a decision
                         pending_confirm.append({
-                            "confirm": "", "variant": clean, "stone_type": stone_type,
-                            "color": gap.suggested_color or "", "nearest_existing": nearest,
-                            "score": gap.nearest_score or "", "model_prob": round(d.prob, 2)})
+                            "confirm": "", "variant": clean,
+                            "reason": "uncertain: new variety or a spelling of the nearest existing",
+                            "stone_type": stone_type, "color": gap.suggested_color or "",
+                            "nearest_existing": nearest, "score": gap.nearest_score or "",
+                            "model_prob": round(d.prob, 2)})
                         continue
                     # dec == "yes" -> the human confirmed it IS a new variety -> fall through to mint
                 # "mint" -> fall through to create a new variant
@@ -660,10 +669,6 @@ def build_attribute_curation(rows: list[CanonicalRow], ref: ReferenceData) -> li
     needed), and only rarely a genuinely new value (which goes to the attribute
     file). Aggregate distinct unresolved values per vocab, suggest the nearest
     existing canonical value, and recommend synonym vs new_value."""
-    from rapidfuzz import fuzz
-
-    from stone_pipeline.core.schema import FlagCode
-
     seen: dict[tuple[str, str], int] = {}
     for row in rows:
         for flag in row.review_flags:
@@ -671,20 +676,27 @@ def build_attribute_curation(rows: list[CanonicalRow], ref: ReferenceData) -> li
                 key = (flag.field, flag.raw_value.strip())
                 seen[key] = seen.get(key, 0) + 1
 
+    # The SAME resolver Stage 3 uses, so the review suggestion never drifts from resolution.
+    resolvers = AttributeResolvers.build(ref)
     out: list[dict] = []
     for (vocab, raw_value), count in sorted(seen.items()):
-        canon = ref.attributes.canonical_names(vocab)
-        best, best_score = "", 0.0
-        for value in canon:
-            s = max(fuzz.ratio(proj.norm(raw_value), proj.norm(value)),
-                    fuzz.token_sort_ratio(proj.norm(raw_value), proj.norm(value)))
-            if s > best_score:
-                best, best_score = value, s
-        action = "synonym" if best_score >= 80 else ("synonym?" if best_score >= 60 else "new_value")
+        resolver = resolvers.resolvers[vocab]
+        # resolve() already found the single nearest canonical (evidence); keep it before resolve_multi
+        # tries to compose, so the plain-fuzzy fallback reuses that score instead of recomputing it.
+        res = resolver.resolve(raw_value)
+        nearest = res.evidence or {}
+        if res.value is None and res.method != "synonym_none":
+            res = resolver.resolve_multi(raw_value)
+        if res.value is not None:                       # maps onto an existing value -> adopt as a synonym
+            best, action, score = res.value, "synonym", 100.0
+        elif res.method == "compound_suggest":          # a real, new compound to create ('A and B')
+            best, action, score = res.evidence["best"], "new_value", 90.0
+        else:                                           # single unresolved -> resolve()'s fuzzy nearest
+            best, score = nearest.get("best") or "", nearest.get("score", 0.0)
+            action = "synonym" if score >= 80 else "synonym?" if score >= 60 else "new_value"
         out.append({
             "vocab": vocab, "raw_value": raw_value, "count": count,
-            "suggested_value": best, "score": round(best_score, 1),
-            "recommended_action": action,
+            "suggested_value": best, "score": score, "recommended_action": action,
         })
     return out
 

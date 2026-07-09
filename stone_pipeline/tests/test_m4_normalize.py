@@ -166,3 +166,58 @@ def test_near_duplicate_flag_not_merge():
     result = keys_dedupe.run(rows)
     assert len(result.rows) == 2  # not merged
     assert result.near_duplicates == 1
+
+
+# --- compound / multi attribute resolution (resolve_multi) --------------------
+def _finish_resolver(extra=()):
+    return VocabResolver(vocab="finish",
+                         canonical_values=["Polished", "Leathered", "Filled", "Honed",
+                                           "Polished and Filled", *extra],
+                         synonyms={"leather": "Leathered"}, fuzzy_floor=90.0)
+
+
+def test_resolve_multi_composes_an_existing_compound_finish():
+    r = _finish_resolver()
+    assert r.resolve("Polished + Filled").value is None            # whole doesn't resolve
+    res = r.resolve_multi("Polished + Filled")                     # ...but the vocab HAS 'Polished and Filled'
+    assert res.value == "Polished and Filled" and res.method == "compound"
+
+
+def test_resolve_multi_suggests_a_new_compound_for_a_finish():
+    # 'Polished + Leather' -> no 'Polished and Leathered' in the vocab, but finishes use the 'X and Y'
+    # pattern, so SUGGEST the composed compound (not the wrong single fuzzy 'Leathered').
+    res = _finish_resolver().resolve_multi("Polished + Leather")
+    assert res.value is None and res.method == "compound_suggest"
+    assert res.evidence["best"] == "Polished and Leathered"
+
+
+def test_resolve_multi_strips_descriptive_noise():
+    res = _finish_resolver().resolve_multi("Dual Finish - Polished/Leather")
+    assert res.method == "compound_suggest" and res.evidence["best"] == "Polished and Leathered"
+
+
+def test_resolve_multi_never_invents_a_compound_colour():
+    # colour has NO 'X and Y' entries -> a list keeps its primary, never composes 'Black and White'
+    r = VocabResolver(vocab="color", canonical_values=["Black", "White", "Grey"], synonyms={}, fuzzy_floor=90.0)
+    res = r.resolve_multi("Black | White")
+    assert res.value == "Black" and res.method == "multi_value"
+
+
+def test_resolve_multi_single_token_has_nothing_to_split():
+    assert _finish_resolver().resolve_multi("Polished").method == "unresolved"
+
+
+def test_resolve_multi_list_separator_keeps_primary_not_a_false_compound():
+    # 'Flamed | Leathered' is ALTERNATIVES (a list), NOT a dual finish -> keep the primary, never compose
+    # a false 'Flamed and Leathered' even though finishes DO have the compound pattern. ',' behaves the same.
+    r = _finish_resolver(extra=["Flamed"])
+    assert r.resolve_multi("Flamed | Leathered").value == "Flamed"
+    assert r.resolve_multi("Flamed | Leathered").method == "multi_value"
+    assert r.resolve_multi("Flamed, Leathered").method == "multi_value"
+
+
+def test_resolve_multi_slash_is_a_combination():
+    # '/' joins a dual finish ('Honed / Filled' -> 'Honed and Filled'), unlike the list '|'.
+    r = _finish_resolver(extra=["Honed and Filled"])
+    res = r.resolve_multi("Honed / Filled")
+    assert res.value == "Honed and Filled" and res.method == "compound"

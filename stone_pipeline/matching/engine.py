@@ -10,6 +10,7 @@ role is filled by the alias_resolver logistic model (Splink was retired).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -50,6 +51,16 @@ def _colour_conflict(query: str, candidate: str) -> bool:
 
 
 # --- vocabulary resolver (Stage 3 attributes, section 5A.4) -------------------
+# Separators inside one raw value. A COMBINATION ('+ & / and') joins the parts -> compose 'A and B'; a LIST
+# ('| ,') is alternatives -> keep the primary. The two separator sets are defined ONCE here, so splitting
+# into parts and testing for a combination can never drift apart. _JOIN_NOISE drops descriptive wrappers.
+_COMBINE_SEP = r"\+|&|/|\band\b"
+_LIST_SEP = r"\||,"
+_JOIN_SPLIT = re.compile(rf"\s*(?:{_COMBINE_SEP}|{_LIST_SEP})\s*", re.IGNORECASE)
+_COMBINE = re.compile(_COMBINE_SEP, re.IGNORECASE)
+_JOIN_NOISE = re.compile(r"\b(?:dual|combination|combo|mixed|finish|finishes)\b|[-–]", re.IGNORECASE)
+
+
 @dataclass
 class VocabResolver:
     """Normalize-then-lookup over a closed vocabulary: synonym, exact, fuzzy.
@@ -62,6 +73,8 @@ class VocabResolver:
 
     def __post_init__(self) -> None:
         self._by_norm = {proj.norm(v): v for v in self.canonical_values}
+        # Only a vocab that already uses the 'X and Y' pattern (finishes) may compose a compound.
+        self._has_compound_pattern = any(" and " in v.casefold() for v in self.canonical_values)
 
     def resolve(self, raw_value: str) -> Resolution:
         cleaned = proj.norm(raw_value)
@@ -104,6 +117,32 @@ class VocabResolver:
             method="unresolved",
             evidence={"best": best_value, "score": round(best_score, 1)},
         )
+
+    def resolve_multi(self, raw_value: str) -> Resolution:
+        """Resolve a value that joins several attributes ('Polished + Leather', 'Flamed | Leathered').
+        Call after resolve() fails on the whole value. A combination join composes the vocab's 'A and B'
+        (returned as `compound` if it exists, else suggested as `compound_suggest` when the vocab has the
+        pattern); a list join is alternatives, so the primary is kept (`multi_value`). Compounds are only
+        composed for a vocab that already has 'X and Y' values, so a compound colour is never invented."""
+        stripped = _JOIN_NOISE.sub(" ", raw_value or "")
+        parts = [p.strip() for p in _JOIN_SPLIT.split(stripped) if p.strip()]
+        if len(parts) < 2:
+            return Resolution(value=None, confidence=Confidence.none, method="unresolved")
+        resolved: list[str] = []
+        for part in parts:
+            v = self.resolve(part).value
+            if v is not None and v not in resolved:
+                resolved.append(v)
+        if not resolved:
+            return Resolution(value=None, confidence=Confidence.none, method="unresolved")
+        if len(resolved) >= 2 and self._has_compound_pattern and _COMBINE.search(stripped):
+            for a, b in ((resolved[0], resolved[1]), (resolved[1], resolved[0])):
+                canon = self._by_norm.get(proj.norm(f"{a} and {b}"))
+                if canon:
+                    return Resolution(value=canon, confidence=Confidence.medium, method="compound")
+            return Resolution(value=None, confidence=Confidence.low, method="compound_suggest",
+                              evidence={"best": f"{resolved[0]} and {resolved[1]}"})
+        return Resolution(value=resolved[0], confidence=Confidence.low, method="multi_value")
 
 
 # --- variation engine (Stage 4 tiers 1 to 6, section 5A.2) --------------------

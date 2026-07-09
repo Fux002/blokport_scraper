@@ -17,6 +17,26 @@ import boto3
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS
 
+# The attribute vocabulary is a committed cold-start seed (every type/finish/colour/quality/category). If
+# Medusa is mid-reset its S3 export is thin/empty, and blindly downloading it would wipe the local vocab so
+# NOTHING resolves. These files keep the committed copy unless the S3 copy is at least as complete.
+_PROTECTED_BASE = {"attributes.csv"}
+_MIN_KEEP_FRACTION = 0.5
+
+
+def _line_count(path: Path) -> int:
+    try:
+        with path.open(encoding="utf-8-sig") as h:
+            return sum(1 for _ in h)
+    except OSError:
+        return 0
+
+
+def _would_clobber(incoming_lines: int, current_lines: int) -> bool:
+    """True when a protected base file already on disk is materially larger than the S3 copy, so the
+    download would replace a full seed with a thin one -- keep what we have."""
+    return current_lines > 0 and incoming_lines < current_lines * _MIN_KEEP_FRACTION
+
 
 def main() -> int:
     prefix = f"{ENV_SEGMENT}/scraper/from_medusa/"
@@ -37,7 +57,17 @@ def main() -> int:
                 print(f"   ! skipped (key escapes {dest.name}/): {key}")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            client.download_file(S3_BUCKET, key, str(target))
+            if name in _PROTECTED_BASE and target.exists():
+                tmp = target.with_suffix(target.suffix + ".incoming")
+                client.download_file(S3_BUCKET, key, str(tmp))
+                incoming, current = _line_count(tmp), _line_count(target)
+                if _would_clobber(incoming, current):
+                    print(f"   ! kept committed {name} (S3 copy looks thin: {incoming} vs {current} lines)")
+                    tmp.unlink()
+                    continue
+                tmp.replace(target)
+            else:
+                client.download_file(S3_BUCKET, key, str(target))
             print(f"   {name}")
             n += 1
     if n == 0:

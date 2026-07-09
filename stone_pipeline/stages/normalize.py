@@ -12,7 +12,6 @@ variety, which is authoritative (section 6A).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from stone_pipeline.adapters.tokens import explicit_type_word
@@ -26,10 +25,6 @@ log = logfmt.get_logger("normalize")
 
 # vocab -> (raw field, code, multi-value allowed)
 VOCAB_FIELDS = ("type", "color", "finish", "quality")
-# Only unambiguous separators (pipe / slash / comma). ' and ' is NOT a separator: 'Black and Gold'
-# is a single colour descriptor, and splitting it silently dropped 'Gold' and mis-flagged multi_value.
-# A genuine 'X and Y' now stays one value -> it simply fails to resolve and is flagged for review.
-_MULTI_SPLIT = re.compile(r"\s*[|/,]\s*")
 
 
 @dataclass
@@ -49,14 +44,6 @@ class AttributeResolvers:
             for vocab in VOCAB_FIELDS
         }
         return cls(resolvers=resolvers)
-
-
-def _split_multi(raw: str) -> tuple[str, bool]:
-    """Return (first_value, is_multi). 'Black | Grey' -> ('Black', True)."""
-    parts = [p for p in _MULTI_SPLIT.split(raw or "") if p.strip()]
-    if len(parts) <= 1:
-        return (raw or "").strip(), False
-    return parts[0].strip(), True
 
 
 def _confidence_name(conf: Confidence) -> str:
@@ -96,21 +83,15 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
             setattr(row, f"{vocab}_method", "override")
             continue
         raw_value = getattr(row, f"raw_{vocab}", "") or ""
-        first, is_multi = _split_multi(raw_value)
-        resolution = resolvers.resolvers[vocab].resolve(first)
-        if resolution.value is None and not is_multi and raw_value:
-            # The whole value didn't resolve. A compound joined by 'and'/'&' ('White and Grey') is tried
-            # WHOLE first (so a real single descriptor / synonym wins), then falls back to the first
-            # RESOLVABLE conjunct -- flagged multi_value -- so the product still ships instead of being
-            # hard-rejected for a null id. (A genuine single 'Black and Gold' that resolves whole never
-            # reaches here.)
-            conjuncts = re.split(r"\s+(?:and|&)\s+", raw_value, flags=re.IGNORECASE)
-            if len(conjuncts) > 1:
-                for cand in conjuncts:
-                    alt = resolvers.resolvers[vocab].resolve(cand.strip())
-                    if alt.value is not None:
-                        resolution, first, is_multi = alt, cand.strip(), True
-                        break
+        resolver = resolvers.resolvers[vocab]
+        # 1. WHOLE value first: a genuine single value or an EXISTING compound ('Polished and Filled') wins.
+        resolution = resolver.resolve(raw_value)
+        # 2. else COMPOUND/MULTI: 'Polished + Leather' composes to the vocab's 'A and B' (or suggests it for
+        #    a compound-pattern vocab); a list 'Black | White' keeps its primary, flagged multi_value. All
+        #    driven by the vocab -- a compound colour is never invented. (synonym_none is a clean "no value".)
+        if resolution.value is None and resolution.method != "synonym_none" and raw_value:
+            resolution = resolver.resolve_multi(raw_value)
+        is_multi = resolution.method == "multi_value"
 
         canonical = resolution.value
         attr_id = None
