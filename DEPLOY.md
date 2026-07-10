@@ -103,33 +103,28 @@ terraform apply -var dev_schedule_enabled=true
 With `prod_staging_bucket` empty (the default), **only the dev task is created** — the
 prod instance is count-gated to zero, so nothing prod-side exists yet.
 
-## Rolling a dev deploy (the mutable `:core` gotcha)
-Dev tracks the **mutable** `:core` tag, and the running service's task def points at `:core`.
-So a merge to `main` rebuilds and pushes a NEW `:core` image, but the task def does not change —
-ECS sees "no change" and **never restarts the running task**. The task keeps serving the image it
-pulled when it last started, so the new code ships to ECR but is **not live**. "Deploy succeeded"
-means "image pushed", NOT "task rolled".
+## Rolling a dev deploy (the mutable `:core` gotcha -- now automatic)
+Dev tracks the **mutable** `:core` tag, and the running service's task def points at `:core`. So a merge
+to `main` rebuilds and pushes a NEW `:core` image, but the task def does not change -- ECS would see "no
+change" and never restart the running task, leaving the new code in ECR but **not live**.
 
-**After every dev-affecting merge, force the service to re-pull `:core`:**
+The Deploy workflow now closes this automatically: after the `:core` push, the **"Roll dev service"**
+step (`.github/workflows/deploy.yml`, `push` events only) runs `update-service --force-new-deployment`
+and `wait services-stable`, so a green Deploy means the task ACTUALLY rolled, not just that the image was
+pushed. This is safe: `config.db` (sources + review decisions) and the ledger restore from their S3
+snapshots on restart, so nothing is lost. The CI deploy role is granted `ecs:UpdateService` (scoped to
+ONLY the dev scraper service) + `ecs:DescribeServices` in `infra/main.tf`.
+
+If you ever need to roll by hand (e.g. a manual `imageproc`/`gpu` dispatch, which deliberately does NOT
+roll the app task):
 ```bash
 aws ecs update-service --cluster blokport-dev-cluster \
   --service blokport-scraper-svc-development --force-new-deployment
-# then confirm it actually rolled (not just "in progress"):
 aws ecs wait services-stable --cluster blokport-dev-cluster --service blokport-scraper-svc-development
-```
-This is safe: `config.db` (sources + review decisions) and the ledger restore from their S3 snapshots
-on restart, so nothing is lost. To verify the roll, compare the running task's image digest to `:core`
-in ECR — they must match:
-```bash
+# verify: the running task's image digest must match :core in ECR
 aws ecr describe-images --repository-name blokport-scraper \
-  --query "imageDetails[?contains(imageTags,'core')].[imageDigest,imageTags]" --output json
+  --image-ids imageTag=core --query 'imageDetails[0].imageDigest' --output text
 ```
-
-The proper fix (a `--force-new-deployment` + wait step in `.github/workflows/deploy.yml`, so a merge
-auto-rolls) is prepared on the `fix/deploy-roll-dev-service` branch but **held**: it first needs the CI
-deploy role to gain `ecs:UpdateService` + `ecs:DescribeServices`, and that IAM change lives in the
-drifted root stack (`infra/main.tf`), so it must be applied via a reviewed `terraform plan` BEFORE that
-branch merges. Until then, the manual command above is the procedure.
 
 ## Standing PROD up LATER (after dev is proven AND the prod Medusa platform exists)
 Prod is a **separate task in the prod cluster** (`blokport-scraper-production`), not a
