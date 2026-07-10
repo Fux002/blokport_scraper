@@ -117,6 +117,20 @@ data "aws_iam_policy_document" "deploy" {
     ]
     resources = [aws_ecr_repository.this.arn]
   }
+  # Let the Deploy workflow roll the dev service after a :core push, so a merge actually goes live instead
+  # of shipping a new image that ECS never rolls (the mutable-tag gotcha). UpdateService is scoped to ONLY
+  # the dev scraper service -- the deploy role can never touch Medusa's own services. DescribeServices is
+  # read-only (needed by `aws ecs wait services-stable`) and left unscoped for reliability.
+  statement {
+    sid       = "EcsRollDevServiceUpdate"
+    actions   = ["ecs:UpdateService"]
+    resources = ["${replace(data.terraform_remote_state.platform_dev.outputs.ecs_cluster_arn, ":cluster/", ":service/")}/blokport-scraper-svc-development"]
+  }
+  statement {
+    sid       = "EcsDescribeForRollWait"
+    actions   = ["ecs:DescribeServices"]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "deploy" {

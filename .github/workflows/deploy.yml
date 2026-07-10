@@ -30,6 +30,11 @@ permissions:
 
 env:
   AWS_REGION: eu-west-1
+  # Dev tracks the mutable :core tag and the service's task def points at :core, so a new :core push does
+  # NOT change the task def -- ECS sees "no change" and never rolls the running task. The roll step below
+  # forces a re-pull after a push, so a merge actually goes live (not just "image pushed to ECR").
+  ECS_CLUSTER: blokport-dev-cluster
+  ECS_SERVICE: blokport-scraper-svc-development
 
 jobs:
   build-push:
@@ -65,6 +70,20 @@ jobs:
           docker push "$REPO:core"
           docker push "$REPO:$SHA"
           echo "Pushed $REPO:core and :$SHA"
+
+      # The mutable-tag gotcha: pushing a new :core does not change the task def, so ECS never rolls the
+      # running service on its own -- the new image would sit in ECR, never live. Force a new deployment so
+      # it re-pulls :core, and WAIT for stable so a green Deploy means the task ACTUALLY rolled, not just
+      # that the image was pushed. Only on the main push (the dev deploy); a manual imageproc/gpu dispatch
+      # must not roll the app service. Prod is a separate task, promoted explicitly.
+      - name: Roll dev service (re-pull :core) and wait for stable
+        if: steps.gate.outputs.ready == 'true' && github.event_name == 'push'
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
+            --force-new-deployment >/dev/null
+          echo "Forced new deployment on $ECS_SERVICE; waiting for it to stabilize..."
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE"
+          echo "Dev service is stable on the new :core"
 
       # Both heavy images bake the CUDA/torch stack + ~7 GB of pinned models, which
       # overflows the runner's ~14 GB default disk. Free ~25 GB before EITHER build.
