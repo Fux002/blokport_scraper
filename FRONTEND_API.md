@@ -129,3 +129,22 @@ Render per source:
   a review flag.
 - Ports are `8724` (config) and `8723` (sync); do not hardcode `:4200` as a backend -- that is the frontend
   host that proxies to these two.
+
+---
+
+## Backend hardening (audit fixes) -- what :4200 must handle
+
+Response shapes are UNCHANGED. These backend fixes only make existing fields fire more often; the UI already
+renders all of them, so there is **nothing to change** -- just be aware:
+- **`stages[].validate` and `stages[].images` may now be `"DEGRADED"`.** They used to be always `"OK"`. Now
+  `validate` goes DEGRADED when a majority of rows are rejected, and `images` when a large fraction have no
+  publishable image. The layer strip already colour-codes DEGRADED (amber), so no code change -- but a green
+  strip is now more trustworthy (previously it hid a mass-reject / mass-no-image run).
+- **`admission.state` may be `"demoted"` more often.** Auto-demote now also fires on the produce/ECS path and
+  on a catastrophic empty scrape (it previously only ran on the local path). The demoted alert already exists.
+- **Diagnostics now persist for aborted runs too**, so a failed run is visible in `GET /config/v1/diagnostics`
+  with `health:"FAILED"` -- same shape, just more complete history.
+
+**Optional cosmetic (frontend-only):** the "New varieties" review table shows the variant name in ALL CAPS
+(e.g. `ICE BURG`). The backend stores it title-cased (`Ice Burg`); the uppercase is a CSS `text-transform:
+uppercase` on that column. Drop it if you want the table to read `Ice Burg`.

@@ -31,6 +31,16 @@ def test_stage_metric_summary_and_status_default():
     assert StageMetric(stage="y", status="DEGRADED").summary().startswith("y: DEGRADED")
 
 
+# --- images / validate strip status (the two cells that were hardcoded/absent) -------------------
+def test_ratio_status_thresholds_and_zero_guard():
+    from stone_pipeline.run import _ratio_status
+    assert _ratio_status(0, 10, 0.5) == "OK"
+    assert _ratio_status(5, 10, 0.5) == "DEGRADED"     # exactly at threshold -> DEGRADED
+    assert _ratio_status(4, 10, 0.5) == "OK"           # below -> OK
+    assert _ratio_status(3, 10, 0.25) == "DEGRADED"    # images no_image threshold
+    assert _ratio_status(0, 0, 0.5) == "OK"            # zero-total: no divide-by-zero, stays OK
+
+
 # --- normalize ----------------------------------------------------------------
 def test_normalize_report_ok_on_resolvable(ref):
     rows = [CanonicalRow(src_site="polonine", raw_color="Black") for _ in range(4)]

@@ -45,6 +45,19 @@ def test_active_pack_defaults_to_stone(monkeypatch):
     assert domain.active_pack().name == "stone"
 
 
+def test_pack_default_value_absent_from_attributes_fails_loud(monkeypatch):
+    # the enforceable names-vs-values boundary: a pack default VALUE that is not a real Medusa value in
+    # attributes.csv must fail LOUD at reference load, not ship as an unresolvable null id downstream.
+    import dataclasses
+    from types import SimpleNamespace
+    from stone_pipeline.reference import loaders
+    bogus = dataclasses.replace(domain.active_pack(), block_finish="Zzz Not A Real Finish")
+    monkeypatch.setattr(domain, "active_pack", lambda: bogus)
+    ref = SimpleNamespace(attributes=loaders.load_attributes())
+    with pytest.raises(ValueError, match="attributes.csv"):
+        loaders._assert_pack_defaults_resolve(ref)
+
+
 def test_missing_pack_fails_loud():
     with pytest.raises(FileNotFoundError):
         domain.load_pack("does_not_exist_pack")
@@ -65,6 +78,7 @@ def _valid_pack_dict():
                         "base_image": "", "shares_variety_vocab": True, "fan_out": True,
                         "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None}],
         "ambiguous_type_words": ["z"], "default_finishes": ["F"], "fallback_color": "N",
+        "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
         "finish_phrases": {"f": "p"}, "finish_phrase_default": "p"})
 
@@ -106,6 +120,9 @@ categories:
 ambiguous_type_words: [blend]
 default_finishes: [Standard]
 fallback_color: Unspecified
+last_resort_finishes: {shirt: Standard, pants: Standard}
+last_resort_quality: Standard
+block_finish: Standard
 dimension_ranges:
   shirt: {weight: [0.1, 0.3], length: [0.5, 0.8], width: [0.4, 0.6], height: [0.01, 0.02]}
   pants: {weight: [0.2, 0.5], length: [0.9, 1.2], width: [0.3, 0.5], height: [0.01, 0.02]}

@@ -33,8 +33,19 @@ ambiguous_type_words: [crystal, quartz, agate, amethyst, coral]
 # _DEFAULT_FINISHES). Order preserved.
 default_finishes: [Polished, Honed, Leathered, Brushed, Flamed, Sandblasted, Sawn Cut, Raw]
 
-# Generic fallback colour for a variety whose source supplies none, e.g. zucchi (was curate._FALLBACK_COLOR).
+# Generic fallback colour for a variety whose source supplies none, e.g. zucchi (was curate._FALLBACK_COLOR
+# and the duplicate variety_color.FALLBACK_COLOR).
 fallback_color: Natural
+
+# Last-resort attribute defaults: filled (flagged) when a REQUIRED attribute never resolves, so the product
+# ships for correction instead of dropping (was settings.LAST_RESORT_FINISH / LAST_RESORT_QUALITY). Per branch
+# for finish -- an unlisted branch uses slab's; one value for quality. Block finish defaults separately below.
+last_resort_finishes: {slab: Polished, tile: Honed}
+last_resort_quality: A
+
+# The standard finish for a raw/unfinished block, applied when a block source gives none (was the hardcoded
+# 'Raw' in stages/normalize.py). Must exist in attributes.csv + the block backbone.
+block_finish: Raw
 
 # Synthetic dimension/weight ranges per format, in metres/tonnes, used only as a fallback when a real value
 # is absent (was stages/derive.py _SLAB_RANGES / _BLOCK_RANGES / _TILE_RANGES). [lo, hi].

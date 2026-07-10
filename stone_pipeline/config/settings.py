@@ -100,14 +100,10 @@ def _owner_id(env_var: str, dev_default: str) -> str:
 SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID)
 COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID)
 
-# Last-resort attribute defaults (config policy). When a REQUIRED attribute cannot be resolved from a
-# source, normalize applies the configured default here rather than DROP the product. This is the LAST
-# resort (only after resolution fails) and is ALWAYS flagged for correction, never a silent guess.
-# These are deliberate business values; change them here. Block finish defaults to 'Raw' separately.
-# Colour is NOT defaulted here (it is inherited from the matched variety / classified from the texture,
-# with a 'Natural' floor), only finish and quality.
-LAST_RESORT_FINISH = {"slab": "Polished", "tile": "Honed"}   # per branch; an unlisted branch uses slab's
-LAST_RESORT_QUALITY = "A"                                     # top grade when a source states none
+# Last-resort attribute defaults are DOMAIN VALUES, so they live in the active pack, not here:
+# config/domains/<pack>.yaml -> last_resort_finishes / last_resort_quality / block_finish (read via
+# domain.active_pack() in stages/normalize.py). Field NAMES stay the Medusa contract; the VALUES are pack.
+# Colour is NOT last-resorted here (it inherits the variety's texture-classified colour, 'Natural' floor).
 
 
 # --- Confidence enum with a fixed numeric mapping (section 3.4) ----------------
@@ -230,6 +226,8 @@ class Thresholds:
     normalize_unresolved_degraded: float = 0.25   # rows with an unresolved required attribute
     match_unmatched_degraded: float = 0.50        # rows with no variation match (majority -> systemic)
     derive_incomplete_degraded: float = 0.25      # rows missing a required derived dimension/weight
+    validate_reject_degraded: float = 0.50        # rows rejected at validate (majority -> systemic, not stray)
+    images_no_image_degraded: float = 0.25        # rows with no publishable image (held from shipping)
 
 
 @dataclass(frozen=True)

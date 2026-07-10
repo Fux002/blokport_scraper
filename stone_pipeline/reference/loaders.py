@@ -28,6 +28,7 @@ from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.core.text import looks_code_shaped, match_key
 
@@ -426,10 +427,18 @@ def load_units(path: Path | None = None) -> Units:
             token = (record.get("token") or "").strip().casefold()
             if not token:
                 continue
+            # empty factor is a legit same-unit token (-> 1.0); a PRESENT but non-numeric factor is bad data
+            # -- skip it loudly rather than crash the whole reference load or silently mis-scale to 1.0.
+            factor_raw = (record.get("factor") or "").strip()
+            factor = 1.0 if not factor_raw else parse_number(factor_raw)
+            if factor is None:
+                log.warning("units: skipping token with a non-numeric factor",
+                            extra={"extra_fields": {"token": token, "factor": factor_raw}})
+                continue
             units.by_token[token] = UnitEntry(
                 dimension=(record.get("dimension") or "").strip(),
                 canonical=(record.get("canonical") or "").strip(),
-                factor=float(record.get("factor") or 1.0),
+                factor=factor,
             )
     return units
 
@@ -585,6 +594,26 @@ class ReferenceData:
         return self.variants["tile"]
 
 
+def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
+    """Fail LOUD if a domain-pack default VALUE (or a colour classify() can emit) is not a real Medusa value
+    in attributes.csv. Field NAMES are the Medusa contract; the VALUES must exist in Medusa's vocabulary --
+    so a pack/hardcoded default that Medusa renamed or removed is caught here at load, not shipped downstream
+    as an unresolvable null id. Reuses the same resolve_id every stage uses."""
+    from stone_pipeline.config.domain import active_pack
+    from stone_pipeline.stages.variety_color import CLASSIFIABLE_COLORS
+    pack = active_pack()
+    checks: list[tuple[str, str]] = (
+        [("finish", f) for f in pack.default_finishes]
+        + [("finish", f) for f in pack.last_resort_finishes.values()]
+        + [("finish", pack.block_finish), ("quality", pack.last_resort_quality),
+           ("color", pack.fallback_color)]
+        + [("color", c) for c in CLASSIFIABLE_COLORS])
+    missing = sorted({(v, val) for v, val in checks if val and not ref.attributes.resolve_id(v, val)})
+    if missing:
+        raise ValueError("domain pack default values absent from attributes.csv (a value Medusa does not "
+                         "have): " + ", ".join(f"{v}={val!r}" for v, val in missing))
+
+
 def load_all() -> ReferenceData:
     from stone_pipeline.state.overrides import load_overrides
     from stone_pipeline.config import decisions_store
@@ -621,6 +650,7 @@ def load_all() -> ReferenceData:
             ),
         },
     )
+    _assert_pack_defaults_resolve(ref)   # a pack default value not in Medusa's vocabulary fails loud here
     log.info(
         "reference loaded",
         extra={

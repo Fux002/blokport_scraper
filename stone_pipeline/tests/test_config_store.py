@@ -313,3 +313,20 @@ def test_persist_from_outputs_folds_disk_into_config_db(tmp_path, monkeypatch):
     n = diagnostics.persist_from_outputs(outputs_dir=outputs)
     assert n >= 1
     assert store.get_source_diagnostic("polonine")["run_id"] == "polonine_20260101_000000"
+
+
+def test_evaluate_from_outputs_records_once_and_skips_replays(tmp_path, monkeypatch):
+    # the admission half of what produce._finalize_control_plane now calls on EVERY produce path. Records a
+    # run event from disk, and a REPLAY (the config-server _watch_local also runs it) is skipped -- so the
+    # produce-path call and the local-watcher call safely coexist without double-counting the streak.
+    from stone_pipeline.config import admission
+    from stone_pipeline.config.sources import SourceConfig
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(admission, "_certified", lambda *a, **k: True)      # skip live certify in the unit
+    store.upsert_source(SourceConfig(source="polonine", adapter="polonine", source_code="pol", mode="review"))
+    outputs = tmp_path / "outputs"
+    _fake_run(outputs, "polonine")
+    assert admission.evaluate_from_outputs(outputs_dir=outputs) == 1        # one source newly processed
+    assert len(store.read_run_events("polonine")) == 1
+    assert admission.evaluate_from_outputs(outputs_dir=outputs) == 0        # same run_id -> replay skipped
+    assert len(store.read_run_events("polonine")) == 1                      # no double-count

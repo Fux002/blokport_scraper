@@ -13,13 +13,12 @@ import colorsys
 import json
 from pathlib import Path
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.text import match_key
 
 log = logfmt.get_logger("variety_color")
-
-FALLBACK_COLOR = "Natural"
 
 
 def classify(rgb: tuple[int, int, int]) -> str:
@@ -52,6 +51,14 @@ def classify(rgb: tuple[int, int, int]) -> str:
     if h < 290:
         return "Purple"
     return "Pink"
+
+
+# Every colour name classify() above can emit. Kept beside it so the pack-value existence gate
+# (reference.loaders.load_all) can assert each is a real Medusa colour in attributes.csv -- a colour renamed
+# or removed in Medusa then fails loud at load instead of classify() silently emitting an unresolvable one.
+# MUST mirror the return values of classify().
+CLASSIFIABLE_COLORS = frozenset({"Black", "Grey", "White", "Cream", "Red", "Brown",
+                                 "Gold", "Beige", "Yellow", "Green", "Blue", "Purple", "Pink"})
 
 
 def color_from_texture(path: Path) -> str | None:
@@ -92,13 +99,14 @@ def fill_colors(backbone_paths: list[Path] | None = None, texture_dir: Path | No
     paths = backbone_paths or [c.backbone_path for c in __import__(
         "stone_pipeline.config.settings", fromlist=["CATEGORIES"]).CATEGORIES]
     tdir = texture_dir or _texture_dir()
+    fallback_color = active_pack().fallback_color   # the pack's generic colour ('Natural' for stone)
     docs = {p: json.loads(Path(p).read_text(encoding="utf-8")) for p in paths if Path(p).exists()}
     ref_docs = [json.loads(Path(p).read_text(encoding="utf-8"))
                 for p in (reference_paths or []) if Path(p).exists()]
 
     def is_blank(post) -> bool:
         c = post.get("color")
-        return bool(post.get("key")) and (not c or c == [FALLBACK_COLOR])
+        return bool(post.get("key")) and (not c or c == [fallback_color])
 
     def posts(doc):
         # a backbone file is {"posts": [...]}; an additions file is a bare [...] list of posts. Both
@@ -122,7 +130,7 @@ def fill_colors(backbone_paths: list[Path] | None = None, texture_dir: Path | No
     for doc in list(docs.values()) + ref_docs:
         for post in posts(doc):
             c = post.get("color")
-            if post.get("key") and c and c != [FALLBACK_COLOR]:
+            if post.get("key") and c and c != [fallback_color]:
                 known.setdefault(_identity(post), c)
     propagated = 0
     for doc in docs.values():
@@ -137,7 +145,7 @@ def fill_colors(backbone_paths: list[Path] | None = None, texture_dir: Path | No
     for doc in docs.values():
         for post in posts(doc):
             if is_blank(post):
-                post["color"] = [FALLBACK_COLOR]
+                post["color"] = [fallback_color]
                 fallback += 1
     for p, doc in docs.items():
         Path(p).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")

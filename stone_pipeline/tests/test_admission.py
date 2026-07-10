@@ -77,6 +77,19 @@ def test_drift_auto_demotes_an_auto_source(tmp_path, monkeypatch):
     assert store.read_run_events("polonine")[0]["note"] == "demoted"
 
 
+def test_empty_scrape_abort_demotes_but_a_skip_does_not(tmp_path, monkeypatch):
+    # H1 contract: a floor-abort (empty scrape) stamps health="FAILED" into the run's diagnostics, so an
+    # auto source MUST be demoted. The twin: a genuine load_frame SKIP writes no health ("" -> coerced OK)
+    # and must NOT demote. This is why the abort has to write "FAILED" and not leave health empty.
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.upsert_source(SourceConfig(source="polonine", adapter="polonine", source_code="pol", mode="auto"))
+    failed = admission.record_and_evaluate("polonine", _summary("pol_fail", health="FAILED"), rule=RULE)
+    assert failed["demoted"] is True and load_source("polonine").mode == "review"
+    store.upsert_source(SourceConfig(source="varsha", adapter="varsha", source_code="var", mode="auto"))
+    skip = admission.record_and_evaluate("varsha", {"run_id": "var_skip", "stages": [], "gates": {}}, rule=RULE)
+    assert skip["demoted"] is False and load_source("varsha").mode == "auto"
+
+
 def test_clean_run_on_review_source_does_not_demote(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.upsert_source(SourceConfig(source="varsha", adapter="varsha", source_code="var", mode="review"))

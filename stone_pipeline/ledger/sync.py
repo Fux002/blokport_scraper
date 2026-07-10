@@ -397,9 +397,12 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
                              (external_id,)).fetchone()
         attempts = ((row["sync_attempts"] if row else 0) or 0) + 1
         state = "gap_held" if attempts >= _MAX_SYNC_ATTEMPTS else "dirty"   # dead-letter at the cap
+        # same retire guard as the synced branch below: a stray/out-of-order FAILED ack must NOT knock a
+        # 'retiring' row back to dirty/gap_held, which would re-enter the serve lane while its tombstone
+        # still serves /removed. A failed ack on a retiring row is a no-op (0 rows) by design.
         cur = ledger.execute(
             f"UPDATE {table} SET state = ?, sync_attempts = ?, sync_error = ?, updated_at = ? "
-            f"WHERE {pk} = ?",
+            f"WHERE {pk} = ? AND state != 'retiring'",
             (state, attempts, (reason or "apply failed")[:500], now, external_id))
         if state == "gap_held" and cur.rowcount:
             log.warning("entity dead-lettered after repeated Medusa failures",

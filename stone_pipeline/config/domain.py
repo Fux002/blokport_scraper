@@ -23,6 +23,7 @@ _DOMAINS_DIR = Path(__file__).parent / "domains"
 _DEFAULT_PACK = "stone"
 _REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories",
              "ambiguous_type_words", "default_finishes", "fallback_color",
+             "last_resort_finishes", "last_resort_quality", "block_finish",
              "dimension_ranges", "finish_phrases", "finish_phrase_default")
 
 
@@ -41,6 +42,9 @@ class DomainPack:
     ambiguous_type_words: frozenset[str]
     default_finishes: tuple[str, ...]
     fallback_color: str
+    last_resort_finishes: dict[str, str]   # branch -> flagged last-resort finish (unlisted branch uses slab's)
+    last_resort_quality: str               # flagged last-resort quality when a source states none
+    block_finish: str                      # the standard finish applied to a raw/unfinished block
     # format -> {weight|length|width|height: (lo, hi)} in metres/tonnes
     dimension_ranges: dict[str, dict[str, tuple[float, float]]]
     finish_phrases: dict[str, str]
@@ -64,6 +68,8 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
 
     if not data["attributes"]:
         bad("'attributes' is empty")
+    if not isinstance(data["last_resort_finishes"], dict):
+        bad("'last_resort_finishes' must be a mapping of branch -> finish")
     for i, cat in enumerate(data["categories"]):
         if not isinstance(cat, dict):
             bad(f"categories[{i}] is not a mapping")
@@ -102,6 +108,9 @@ def load_pack(name: str | None = None) -> DomainPack:
         ambiguous_type_words=frozenset(data["ambiguous_type_words"]),
         default_finishes=tuple(data["default_finishes"]),
         fallback_color=data["fallback_color"],
+        last_resort_finishes=dict(data["last_resort_finishes"]),
+        last_resort_quality=data["last_resort_quality"],
+        block_finish=data["block_finish"],
         dimension_ranges=ranges,
         finish_phrases=dict(data["finish_phrases"]),
         finish_phrase_default=data["finish_phrase_default"],

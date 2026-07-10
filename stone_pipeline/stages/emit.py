@@ -116,7 +116,10 @@ _add_product_image_columns(COLUMN_MAP, SETTINGS.images.product_image_slots)
 def read_template_columns(path: Path | None = None) -> list[str]:
     path = Path(path or SETTINGS.paths.template_csv)
     with path.open(newline="", encoding="utf-8-sig") as handle:
-        return next(csv.reader(handle))
+        header = next(csv.reader(handle), None)   # fail loud: the template is the emit schema authority, so
+        if not header:                            # an empty/header-less file is a deploy error, not a bare
+            raise ValueError(f"Medusa import template has no header row: {path}")   # StopIteration crash.
+        return header
 
 
 def row_to_cells(row: CanonicalRow, columns: list[str], cfg: SourceConfig) -> dict[str, str]:
