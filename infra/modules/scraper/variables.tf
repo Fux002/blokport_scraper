@@ -80,3 +80,33 @@ variable "log_retention_days" {
   type    = number
   default = 30
 }
+
+variable "gpu_job_queue_name" {
+  type        = string
+  default     = ""
+  description = "Batch job-queue NAME the auto-enhance trigger submits to (from the gpu_enhance module). Empty = never submits."
+}
+
+variable "gpu_job_definition_name" {
+  type        = string
+  default     = ""
+  description = "Batch job-definition NAME for the enhance reprocess (from the gpu_enhance module)."
+}
+
+variable "gpu_job_queue_arn" {
+  type        = string
+  default     = ""
+  description = "ARN of the enhance job queue; scopes the task role's batch:SubmitJob. Empty = permission not granted."
+}
+
+variable "gpu_job_definition_arn" {
+  type        = string
+  default     = ""
+  description = "ARN of the enhance job definition; scopes the task role's batch:SubmitJob."
+}
+
+variable "auto_enhance_enabled" {
+  type        = bool
+  default     = false
+  description = "BLOKPORT_AUTO_ENHANCE on the scheduled scraper. Ships false (dark); flip to auto-fire the GPU reprocess on new images."
+}

@@ -76,3 +76,33 @@ variable "produce_secret_arns" {
   default     = {}
   description = "ENV_NAME -> SSM ARN for the produce subprocess (e.g. BLOKPORT_SCRAPER_PROXY for the Cloudflare-fronted scrapers, FAL_KEY for image gen). Injected on the config container, which runs the live scrape. Empty when not configured."
 }
+
+variable "gpu_job_queue_name" {
+  type        = string
+  default     = ""
+  description = "Batch job-queue NAME the produce auto-enhance trigger submits to (from the gpu_enhance module). Empty = auto-enhance never submits."
+}
+
+variable "gpu_job_definition_name" {
+  type        = string
+  default     = ""
+  description = "Batch job-definition NAME for the enhance reprocess (from the gpu_enhance module)."
+}
+
+variable "gpu_job_queue_arn" {
+  type        = string
+  default     = ""
+  description = "ARN of the enhance job queue. Scopes the task role's batch:SubmitJob. Empty = the permission is not granted."
+}
+
+variable "gpu_job_definition_arn" {
+  type        = string
+  default     = ""
+  description = "ARN of the enhance job definition. Scopes the task role's batch:SubmitJob."
+}
+
+variable "auto_enhance_enabled" {
+  type        = bool
+  default     = false
+  description = "BLOKPORT_AUTO_ENHANCE on the produce container. Ships false (dark); flip to true to auto-fire the GPU reprocess on new images."
+}

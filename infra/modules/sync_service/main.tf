@@ -117,6 +117,17 @@ data "aws_iam_policy_document" "task" {
     actions   = ["s3:ListBucket"]
     resources = ["arn:aws:s3:::${var.staging_bucket}"]
   }
+  # Auto-enhance: let the produce subprocess submit the GPU reprocess for newly-staged images. Scoped to
+  # ONLY this env's enhance queue + job-definition (never any other Batch resource). Present only when the
+  # GPU module is wired in (dev); a produce with no queue configured simply never submits (no-op).
+  dynamic "statement" {
+    for_each = var.gpu_job_queue_arn == "" ? [] : [1]
+    content {
+      sid       = "SubmitEnhanceJobs"
+      actions   = ["batch:SubmitJob"]
+      resources = [var.gpu_job_queue_arn, var.gpu_job_definition_arn]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "task" {
@@ -193,6 +204,12 @@ resource "aws_ecs_task_definition" "this" {
         # stage then derives keys/urls and logs bytes but never put_object's, so processed images never
         # land and every product holds no_image. The produce runs here and MUST write, so turn it off.
         { name = "BLOKPORT_S3_DRY_RUN", value = "false" },
+        # Auto-enhance: after produce stages new raw images, submit the GPU reprocess for the delta so the
+        # GPU spins up on demand and back to zero. Ships OFF (flag false); the queue/job-def names let the
+        # trigger reach Batch once enabled. CLASSIFY stays false in the auto path (no uncalibrated discards).
+        { name = "BLOKPORT_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
+        { name = "BLOKPORT_GPU_QUEUE", value = var.gpu_job_queue_name },
+        { name = "BLOKPORT_GPU_JOBDEF", value = var.gpu_job_definition_name },
       ])
       # the config container runs the produce subprocess (fetch -> live scrape -> build), so it also
       # carries the scraper's runtime secrets (proxy, fal key) when configured.

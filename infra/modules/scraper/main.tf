@@ -150,6 +150,17 @@ data "aws_iam_policy_document" "task" {
     actions   = ["s3:ListBucket"]
     resources = [local.bucket_arn]
   }
+  # Auto-enhance: let the scheduled scrape submit the GPU reprocess for newly-staged images. Scoped to
+  # ONLY this env's enhance queue + job-definition. Present only when the GPU module is wired (empty = the
+  # permission is not granted and the trigger never submits).
+  dynamic "statement" {
+    for_each = var.gpu_job_queue_arn == "" ? [] : [1]
+    content {
+      sid       = "SubmitEnhanceJobs"
+      actions   = ["batch:SubmitJob"]
+      resources = [var.gpu_job_queue_arn, var.gpu_job_definition_arn]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "task" {
@@ -182,6 +193,11 @@ resource "aws_ecs_task_definition" "this" {
       { name = "BLOKPORT_IMAGE_MODE", value = "s3" },
       { name = "BLOKPORT_IMAGE_PROCESSING", value = "true" },
       { name = "BLOKPORT_KEEP_SCRAPED", value = var.keep_scraped },
+      # Auto-enhance: submit the GPU reprocess for the delta after the scheduled scrape stages new images.
+      # Ships OFF (flag false); queue/def names let the trigger reach Batch once enabled. CLASSIFY stays false.
+      { name = "BLOKPORT_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
+      { name = "BLOKPORT_GPU_QUEUE", value = var.gpu_job_queue_name },
+      { name = "BLOKPORT_GPU_JOBDEF", value = var.gpu_job_definition_name },
     ]
     secrets = [for k, v in var.ssm_secret_arns : { name = k, valueFrom = v }]
     logConfiguration = {

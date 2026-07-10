@@ -18,6 +18,7 @@ import sys
 
 import boto3
 
+from deploy.enhance_trigger import done_shas   # shared "already enhanced or discarded" delta
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, ImageProcessingConfig
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.image_processing import ImageProcessor
@@ -27,6 +28,7 @@ def main() -> int:
     src = os.environ.get("SRC", "varsha")
     watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
     classify = os.environ.get("CLASSIFY", "true").lower() in ("1", "true", "yes")
+    full = os.environ.get("FULL", "false").lower() in ("1", "true", "yes")  # redo ALL (else only the delta)
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
     count = int(os.environ.get("SLICE_COUNT", "0"))  # 0 = to the end
     src_prefix = imagestore.scraped_prefix(src)      # single source of truth for the S3 layout
@@ -36,14 +38,23 @@ def main() -> int:
     keys: list[str] = []
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=src_prefix):
         keys.extend(o["Key"] for o in page.get("Contents", []))
+    # Incremental by default: process only the DELTA (scraped originals not yet enhanced or discarded), so a
+    # post-produce run is cheap and a no-op when nothing is new. FULL=true forces the whole pool (re-enhance
+    # / margin re-tune). The trigger and this filter compute the SAME delta in the SAME sorted order, so a
+    # sliced fan-out never overlaps.
+    total = len(keys)
+    if not full:
+        done = done_shas(client, src)
+        keys = [k for k in keys if (imagestore.sha_from_url(k) or "") not in done]
     keys.sort()  # stable order so disjoint SLICE_OFFSET windows never overlap across tasks
     sliced = keys[offset:offset + count] if count else keys[offset:]
     if not sliced:
-        print(f"no originals in slice (src={src} offset={offset} count={count}); {len(keys)} total")
+        print(f"no images in slice (src={src} offset={offset} count={count} full={full}); "
+              f"{len(keys)} pending of {total} total")
         return 0
 
-    print(f"==> reprocess {src}: {len(sliced)} of {len(keys)} (offset={offset} "
-          f"count={count or 'all'}) watermarked={watermarked} classify={classify} "
+    print(f"==> reprocess {src}: {len(sliced)} of {len(keys)} pending ({total} total, offset={offset} "
+          f"count={count or 'all'}) full={full} watermarked={watermarked} classify={classify} "
           f"-> s3://{S3_BUCKET}/{dst_prefix}")
     proc = ImageProcessor(ImageProcessingConfig(
         enabled=True, dewatermark=watermarked, classify=classify, write_preview=False))
@@ -66,10 +77,14 @@ def main() -> int:
                                   Body=marker, ContentType="application/json")
                 discarded += 1
                 continue
-            # 2) a kept image is de-watermarked + enhanced into improved/ (replace-in-place, same key)
+            # 2) a kept image is de-watermarked + enhanced into improved/ (replace-in-place, same key),
+            #    then an ENHANCED marker so the incremental delta knows this image is done (produce's raw
+            #    re-encode in improved/ is NOT a "done" signal -- only this marker is).
             res = proc.process(data, watermarked=watermarked)
             client.put_object(Bucket=S3_BUCKET, Key=f"{dst_prefix}{name}",
                               Body=res.data, ContentType="image/jpeg")
+            client.put_object(Bucket=S3_BUCKET, Key=imagestore.enhanced_key(src, sha),
+                              Body=b"", ContentType="text/plain")
             done += 1
             dw += 1 if res.dewatermarked else 0
         except Exception as exc:  # never let one bad image kill the slice
