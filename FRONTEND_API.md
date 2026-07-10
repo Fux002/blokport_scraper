@@ -87,6 +87,16 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 > (keep + retry). These are Medusa's pull-job endpoints; the Sync page is a read view of `/status` +
 > `/failures` plus the `requeue` recovery button.
 
+> **Clearing a `removed` dead-letter (state `dead`).** `requeue` does NOT cover the removed lane (only
+> variations/products), and a plain "Pull removals" will NOT re-serve a `dead` tombstone -- the serve query
+> is `state='pending'`, and `dead` (hit after repeated `blocked` acks, usually because the variety still had
+> live children) does not serve. The recovery is **re-retire**, NOT a requeue: `POST
+> /config/v1/variations/<key>/retire` re-records the tombstone, which resets it `dead -> pending` (and
+> re-cascades any remaining products). That endpoint 409s if the variety still has LIVE products, so the
+> operator path is: **delist/move the blocking live products (or pass `force:true`) -> re-retire the variety
+> -> the next Pull removals now serves it.** No removed-requeue endpoint is needed -- re-retire is the
+> complete, intent-re-asserting mechanism.
+
 ---
 
 ## Diagnostics page  (config server :8724)  -- NEW
@@ -145,6 +155,8 @@ renders all of them, so there is **nothing to change** -- just be aware:
 - **Diagnostics now persist for aborted runs too**, so a failed run is visible in `GET /config/v1/diagnostics`
   with `health:"FAILED"` -- same shape, just more complete history.
 
-**Optional cosmetic (frontend-only):** the "New varieties" review table shows the variant name in ALL CAPS
-(e.g. `ICE BURG`). The backend stores it title-cased (`Ice Burg`); the uppercase is a CSS `text-transform:
-uppercase` on that column. Drop it if you want the table to read `Ice Burg`.
+**Variant-name casing (no action -- self-resolves):** the ALL-CAPS `ICE BURG` seen in the review table was
+STALE data from the pre-refactor build. The frontend renders the name verbatim (no `text-transform`), and the
+backend now title-cases at source (`title_case` in curate), so the next produce on the new build writes
+`Ice Burg`; existing product titles refresh on the following pull (upsert by stable SKU). No duplicates, no
+reset needed.
