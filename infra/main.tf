@@ -50,13 +50,26 @@ resource "aws_ecr_repository" "this" {
 
 resource "aws_ecr_lifecycle_policy" "this" {
   repository = aws_ecr_repository.this.name
+  # ECR evaluates rules by priority and an image matched by a higher rule is NOT re-evaluated by a
+  # lower one -- so the prefix rules below PROTECT the semantic tags (core / gpu / imageproc, which can
+  # never collide with a hex git-sha) from the broad churn rule. Without this, a single "keep last N,
+  # tagStatus=any" rule expired the large, infrequently-rebuilt :gpu image once enough per-commit
+  # :<sha> images piled up, silently breaking the GPU Batch (CannotPullImageManifestError).
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep last ${var.keep_last_images} images"
-      selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = var.keep_last_images }
-      action       = { type = "expire" }
-    }]
+    rules = [
+      { rulePriority = 1, description = "keep gpu images (:gpu + gpu-<sha>)",
+        selection = { tagStatus = "tagged", tagPrefixList = ["gpu"], countType = "imageCountMoreThan", countNumber = 3 },
+        action    = { type = "expire" } },
+      { rulePriority = 2, description = "keep imageproc images",
+        selection = { tagStatus = "tagged", tagPrefixList = ["imageproc"], countType = "imageCountMoreThan", countNumber = 2 },
+        action    = { type = "expire" } },
+      { rulePriority = 3, description = "keep :core",
+        selection = { tagStatus = "tagged", tagPrefixList = ["core"], countType = "imageCountMoreThan", countNumber = 2 },
+        action    = { type = "expire" } },
+      { rulePriority = 10, description = "expire the per-commit <sha> churn beyond the last ${var.keep_last_images}",
+        selection = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = var.keep_last_images },
+        action    = { type = "expire" } },
+    ]
   })
 }
 
