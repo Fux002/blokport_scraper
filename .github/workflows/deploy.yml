@@ -109,6 +109,16 @@ jobs:
           docker push "$REPO:imageproc"
           echo "Pushed $REPO:imageproc"
 
+      # imageproc (~17 GB) fills the runner disk, so a following gpu build in the SAME job runs out of
+      # space while baking its models ("No space left on device"). imageproc is already in ECR by now, so
+      # prune it + the build cache to reclaim room before gpu. Only when both are built in one dispatch.
+      - name: Reclaim disk after imageproc (before gpu)
+        if: steps.gate.outputs.ready == 'true' && inputs.build_imageproc && inputs.build_gpu
+        run: |
+          sudo docker image prune -af || true
+          sudo docker builder prune -af || true
+          df -h /
+
       # GPU image for the AWS Batch enhancer; :gpu = dev (mutable), :gpu-<sha> = promote to prod.
       - name: Build and push gpu image
         if: steps.gate.outputs.ready == 'true' && inputs.build_gpu
