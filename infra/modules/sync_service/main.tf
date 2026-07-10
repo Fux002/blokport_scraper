@@ -210,6 +210,9 @@ resource "aws_ecs_task_definition" "this" {
         { name = "BLOKPORT_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
         { name = "BLOKPORT_GPU_QUEUE", value = var.gpu_job_queue_name },
         { name = "BLOKPORT_GPU_JOBDEF", value = var.gpu_job_definition_name },
+        # HARD publish gate: only GPU-enhanced images (enhanced/ marker) may be linked. Ships OFF -- flip on
+        # ONLY after the markers are backfilled for the already-enhanced set, else every image holds.
+        { name = "BLOKPORT_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
       ])
       # the config container runs the produce subprocess (fetch -> live scrape -> build), so it also
       # carries the scraper's runtime secrets (proxy, fal key) when configured.

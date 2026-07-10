@@ -410,6 +410,13 @@ class ImagesConfig:
     require_images: bool = True  # a product with no image is rejected (Stage 9) -- we only list
     # products that have a picture, so 3_products_*.csv (and the inventory delta derived from the
     # same emitted set) never carry an imageless product.
+    # HARD publish gate: link an image ONLY if the GPU actually enhanced it (an `enhanced/<sha>` marker
+    # exists). Produce on the torch-free :core writes a RAW re-encode into improved/ without enhancing, so
+    # improved/ presence alone is NOT proof of processing -- without this gate a raw, watermarked image can
+    # reach the catalog. With it, an un-enhanced image is HELD (product publishes imageless) until the GPU
+    # reprocess enhances it and writes the marker. Ships OFF: the markers must be backfilled for the already
+    # enhanced set before flipping on, else every image holds. Enable with BLOKPORT_REQUIRE_ENHANCED=true.
+    require_enhanced: bool = _env_bool("BLOKPORT_REQUIRE_ENHANCED", False)
     # Number of numbered "Product Image N" columns a slab/tile product can fill. The pipeline
     # fills as many as the product actually has, up to this cap; the rest stay blank. Shared by
     # the image-slotting stage and the emit columns so they can never drift (the template header

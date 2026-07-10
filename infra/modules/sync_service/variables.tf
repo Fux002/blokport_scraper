@@ -106,3 +106,9 @@ variable "auto_enhance_enabled" {
   default     = false
   description = "BLOKPORT_AUTO_ENHANCE on the produce container. Ships false (dark); flip to true to auto-fire the GPU reprocess on new images."
 }
+
+variable "require_enhanced_enabled" {
+  type        = bool
+  default     = false
+  description = "BLOKPORT_REQUIRE_ENHANCED: hard publish gate -- only GPU-enhanced images (enhanced/ marker) are linked. Ships false; enable only after markers are backfilled, else all images hold."
+}

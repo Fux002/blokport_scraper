@@ -164,6 +164,7 @@ module "scraper_dev" {
   gpu_job_queue_arn       = module.gpu_enhance_dev.job_queue_arn
   gpu_job_definition_arn  = module.gpu_enhance_dev.job_definition_arn
   auto_enhance_enabled    = var.dev_auto_enhance
+  require_enhanced_enabled = var.dev_require_enhanced
 }
 
 # --- PROD deployment (runs in blokport-prod, writes the prod bucket only) -----
@@ -278,4 +279,5 @@ module "sync_service_dev" {
   gpu_job_queue_arn       = module.gpu_enhance_dev.job_queue_arn
   gpu_job_definition_arn  = module.gpu_enhance_dev.job_definition_arn
   auto_enhance_enabled    = var.dev_auto_enhance
+  require_enhanced_enabled = var.dev_require_enhanced
 }

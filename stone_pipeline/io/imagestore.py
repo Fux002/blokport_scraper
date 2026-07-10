@@ -30,6 +30,7 @@ MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
 MANIFEST_BACKUP_KEY = f"{_PRODUCTS}/_manifest.backup.json"
 IMPROVED_MARKER = f"/products/{IMPROVED_SUBDIR}/"   # a treated image's S3 url/key contains this substring
 DISCARDED_PREFIX_ALL = f"{_PRODUCTS}/{DISCARDED_SUBDIR}/"  # list this to load the whole discard set
+ENHANCED_PREFIX_ALL = f"{_PRODUCTS}/{ENHANCED_SUBDIR}/"    # list this for the whole enhanced-marker set (publish gate)
 
 # "Done" markers, written ONLY by the GPU reprocess (deploy/reprocess_source), one per image it handles:
 # an ENHANCED marker when it enhances, a DISCARDED marker when it rejects. These are the incremental signal

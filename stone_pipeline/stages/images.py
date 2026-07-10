@@ -138,6 +138,34 @@ def _load_discard_set(cfg=None) -> set[str]:
         return set()
 
 
+def _load_enhanced_set(cfg=None) -> set[str]:
+    """The content sha256 of every image the GPU reprocess actually ENHANCED (the products/enhanced/ marker
+    pool). When cfg.require_enhanced is on, ONLY these shas may be published -- an image in improved/ that
+    lacks a marker is a raw re-encode (produce on :core) and is HELD, never linked. Read from S3, read-only.
+    Fail CLOSED: if the set is unreachable, return an empty set so nothing is treated as enhanced (holds
+    rather than risks publishing raw). A produce already needs S3 for the manifest, so this rarely misses."""
+    if getattr(cfg, "mode", None) == "local":
+        return set()
+    try:
+        import boto3
+
+        s3 = SETTINGS.s3
+        client = boto3.Session(profile_name=s3.credentials_profile or None,
+                               region_name=s3.region).client("s3")
+        out: set[str] = set()
+        for page in client.get_paginator("list_objects_v2").paginate(
+                Bucket=s3.bucket, Prefix=imagestore.ENHANCED_PREFIX_ALL):
+            for obj in page.get("Contents", []):
+                sha = imagestore.sha_from_url(obj["Key"])
+                if sha:
+                    out.add(sha)
+        return out
+    except Exception as exc:  # fail closed: hold everything rather than risk publishing an un-enhanced image
+        log.warning("enhanced-marker set unreachable; with require_enhanced ON this HOLDS all images",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return set()
+
+
 def _watermarked_sources() -> set[str]:
     """Source names flagged `watermarked: true` in sources.yaml."""
     from stone_pipeline.config.sources import load_sources
@@ -224,6 +252,10 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                         "never linked to raw source urls. Run the image stage in s3 mode or restore S3 "
                         "access to populate the manifest.")
         discarded = _load_discard_set(cfg)
+        # HARD gate: when require_enhanced is on, publish ONLY images the GPU actually enhanced (marker
+        # present). improved/ presence is NOT proof -- produce on :core writes raw re-encodes there. None
+        # disables the gate (current behaviour). See _load_enhanced_set.
+        enhanced = _load_enhanced_set(cfg) if getattr(cfg, "require_enhanced", False) else None
         improved_marker = imagestore.IMPROVED_MARKER              # a treated image lives under improved/
         held_untreated = 0
         for row in rows:
@@ -236,8 +268,9 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                 if sha and sha in discarded:
                     n_discarded += 1                             # classified non-stone -> never link
                     continue
-                if mapped and improved_marker in mapped:
-                    urls.append(mapped)                          # treated -> link it
+                # link only if it is under improved/ AND (gate off OR proven-enhanced by a marker)
+                if mapped and improved_marker in mapped and (enhanced is None or (sha and sha in enhanced)):
+                    urls.append(mapped)                          # enhanced -> link it
                 elif mapped:
                     held_untreated += 1                          # on S3 but not enhanced yet -> hold
                     n_held += 1
@@ -356,6 +389,8 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         manifest_dirty = True
 
     discarded = _load_discard_set(cfg)
+    # HARD gate (same as passthrough): with require_enhanced on, link ONLY images the GPU actually enhanced.
+    enhanced = _load_enhanced_set(cfg) if getattr(cfg, "require_enhanced", False) else None
     for row in rows:
         public_urls: list[str] = []
         srcs = 0
@@ -376,6 +411,9 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             sha = imagestore.sha_from_url(public)
             if sha and sha in discarded:
                 n_discarded += 1                               # classified non-stone -> never link
+                continue
+            if enhanced is not None and not (sha and sha in enhanced):
+                n_other += 1                                   # raw / not-yet-enhanced -> HOLD (transient)
                 continue
             if public not in public_urls:
                 public_urls.append(public)
