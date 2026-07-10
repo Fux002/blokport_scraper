@@ -19,6 +19,34 @@ def test_fresh_store_is_empty_never_raises():
     assert ds.list_pending("variety") == []
 
 
+def test_review_queue_uniformly_title_cases_display_names():
+    # a supplier shouting 'VENATTO BLUE' must show 'Venatto Blue' in the review queue no matter which curate
+    # path surfaced it: the code-shaped + alias-review holds used to write raw supplier casing while the mint
+    # path title-cased. Now normalized at the one write boundary. Routing (norm-keyed) is unaffected, and a
+    # canonical multi-word type is left intact (title_case would mangle 'Semi-Precious Stone').
+    decisions.write_confirm_file([
+        {"variant": "VENATTO BLUE", "color": "DARK BLUE", "stone_type": "Semi-Precious Stone",
+         "reason": "uncertain", "nearest_existing": "ROSAL", "score": "", "model_prob": ""}])
+    item = ds.list_pending("variety")[0]
+    assert item["variant"] == "Venatto Blue" and item["color"] == "Dark Blue"
+    assert item["nearest_existing"] == "Rosal"                  # F1: nearest_existing normalized too
+    assert item["stone_type"] == "Semi-Precious Stone"          # canonical type intact, not title-mangled
+    ds.set_variety_decision("venatto blue", "reject")           # operator can act by any casing (norm-keyed)
+    assert decisions.load_rejected() == {"venatto blue"}
+
+
+def test_backbone_leaf_queue_title_cases_the_variety_name():
+    # F2: the backbone-leaf review's variety name must be cased like the variety queue's variant (it comes
+    # from the export, whose casing is unreliable) -- else the same variety reads differently across the two
+    # adjacent :4200 review lists. Routing keys on the normalized ref, so it is unaffected.
+    decisions.write_backbone_leaf_pending([
+        {"variety": "VENATTO BLUE", "stone_type": "Marble", "attribute": "color", "add_value": "Blue",
+         "currently_allowed": "White", "match_method": "exact", "match_confidence": "high",
+         "verdict": "likely_real", "example_url": ""}])
+    item = ds.list_pending("backbone_leaf")[0]
+    assert item["variety"] == "Venatto Blue" and item["add_value"] == "Blue"
+
+
 def test_mint_reject_alias_actions_map_correctly():
     ds.set_variety_decision("Alpha Stone", "mint")
     ds.set_variety_decision("Gamma Stone", "reject")
