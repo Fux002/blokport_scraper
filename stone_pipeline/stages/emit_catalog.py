@@ -117,6 +117,13 @@ def _rows(path: Path) -> list[dict]:
                 for r in csv.DictReader(h) if (r.get("Key") or "").strip()]
 
 
+def _posts_of(data) -> list[dict]:
+    """The posts of a backbone JSON, tolerant of either committed shape (a bare list OR {"posts": [...]}),
+    matching how reference.loaders reads the same files -- so a shape drift degrades a mirror, not crashes."""
+    return data.get("posts", data if isinstance(data, list) else []) if isinstance(data, dict) else (
+        data if isinstance(data, list) else [])
+
+
 def _mirror_rows(by_key: dict[str, dict]) -> list[dict]:
     """One variant row per source variety for each active mirror category (tiles
     mirror slabs). The mirror's deterministic Key carries the source variant's
@@ -130,17 +137,20 @@ def _mirror_rows(by_key: dict[str, dict]) -> list[dict]:
         if not (cat.mirror_of and cat.active):
             continue
         src = category(cat.mirror_of)
-        src_posts = json.loads(src.backbone_path.read_text(encoding="utf-8-sig"))["posts"]
-        mir_posts = json.loads(cat.backbone_path.read_text(encoding="utf-8-sig"))["posts"]
+        # tolerate either backbone shape the same way reference.loaders does (a bare list OR {"posts": [...]}),
+        # and skip a post with no key, so a malformed backbone file degrades a mirror rather than crashing emit.
+        src_posts = _posts_of(json.loads(src.backbone_path.read_text(encoding="utf-8-sig")))
+        mir_posts = _posts_of(json.loads(cat.backbone_path.read_text(encoding="utf-8-sig")))
         # join slab<->tile on variety identity (type, variant), NOT positional zip: the two
         # backbones can drift in order and a zip would silently mis-pair varieties.
         mir_by = {(mp.get("stone_type"), mp.get("variant")): mp for mp in mir_posts}
         for sp in src_posts:
             s = by_key.get(sp.get("key"))
             mp = mir_by.get((sp.get("stone_type"), sp.get("variant")))
-            if s and mp and mp["key"] not in out:
-                out[mp["key"]] = {"Key": mp["key"], "Name": s["Name"], "Image": "",
-                                  "Aliases": s["Aliases"], "Volume per kg (m³/kg)": ""}
+            mk = mp.get("key") if mp else None
+            if s and mk and mk not in out:
+                out[mk] = {"Key": mk, "Name": s.get("Name", ""), "Image": "",
+                           "Aliases": s.get("Aliases", ""), "Volume per kg (m³/kg)": ""}
     return list(out.values())
 
 

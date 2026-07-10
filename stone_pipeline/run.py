@@ -131,6 +131,13 @@ def _record(manifest, run_log, metric: StageMetric) -> None:
     run_log.info(f"{metric.stage} stage", extra={"extra_fields": {"summary": metric.summary()}})
 
 
+def _ratio_status(n: int, total: int, threshold: float) -> str:
+    """DEGRADED when a fraction n/total reaches the configured threshold, else OK (advisory layer status,
+    same shape the four stage functions use). Zero-total is OK -- nothing to be degraded about, and no
+    divide-by-zero. Shared by the images (no_image) and validate (rejected) strip cells."""
+    return gates.DEGRADED if total and n / total >= threshold else gates.OK
+
+
 SKIPPED = "SKIPPED"   # a load_frame source with no data this run: a clean, recorded no-op (not OK/FAILED)
 
 
@@ -231,6 +238,10 @@ def run_source(
     if frame.height < _floor:
         run_log.error("scrape below floor -- failed/empty scrape; aborting (NO delist)",
                       extra={"extra_fields": {"rows": frame.height, "min_expected": _floor}})
+        # this abort precedes Stage 0, so health_status is still "" -- stamp FAILED so the durable manifest
+        # records the failure and admission sees it (an empty "" is coerced to OK there and would silently
+        # keep an auto source auto-loading on a catastrophic empty scrape).
+        manifest.health_status = "FAILED"
         _write_diagnostics(manifest, layout)
         write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
                        gates=manifest.gate_status)
@@ -264,8 +275,12 @@ def run_source(
     if frame.height and dropped > 0.5 * frame.height:
         run_log.error("ingest: adapter dropped >50% of rows -- likely a mis-mapped required field; aborting",
                       extra={"extra_fields": {"rows_in": frame.height, "rows_out": len(rows), "dropped": dropped}})
+        # health passed (else we aborted above), so health_status is OK/DEGRADED here -- a >50% adapt drop is
+        # a run failure admission must see, so stamp FAILED on the run-level signal (health.json keeps the
+        # stage's own result).
+        manifest.health_status = "FAILED"
         _write_diagnostics(manifest, layout)
-        write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
+        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
                        gates=manifest.gate_status)
         raise SystemExit(2)
 
@@ -332,8 +347,13 @@ def run_source(
 
     # Stage 7: images  (skipped for an inventory-only refresh -- stock never touches images)
     img_stats = images.ImageStats() if inventory_only else images.run(rows)
+    # honest status (was hardcoded OK): a large no_image fraction means most products are held from shipping
+    # -- a systemic image-supply/processing problem, surfaced at this layer instead of hiding in the count.
+    _img_status = ("skipped" if inventory_only
+                   else _ratio_status(img_stats.no_image, len(rows),
+                                      SETTINGS.thresholds.images_no_image_degraded))
     _record(manifest, run_log, StageMetric(
-        stage="images", status="skipped" if inventory_only else gates.OK, rows_out=len(rows),
+        stage="images", status=_img_status, rows_out=len(rows),
         extra={"staged": img_stats.staged, "no_image": img_stats.no_image}))
     # Stage 8: constants
     _record(manifest, run_log, constants.run(rows, source_cfg))
@@ -353,9 +373,13 @@ def run_source(
     # Stage 9: validation
     validation = validate.run(rows, emit_on_review=source_cfg.emit_on_review,
                               require_images=False if inventory_only else SETTINGS.images.require_images)
-    manifest.add_stage(StageMetric(stage="validate", rows_in=len(rows), rows_out=len(validation.emit),
-                                   rejected=len(validation.rejects), reviewed=len(validation.review_only),
-                                   extra={"images_staged": img_stats.staged}))
+    # honest status (was always OK): a majority-reject run is a systemic problem (a whole batch failing a
+    # required id/dimension), not the odd stray reject -- surface it here instead of only in the count.
+    _val_status = _ratio_status(len(validation.rejects), len(rows),
+                                SETTINGS.thresholds.validate_reject_degraded)
+    manifest.add_stage(StageMetric(stage="validate", status=_val_status, rows_in=len(rows),
+                                   rows_out=len(validation.emit), rejected=len(validation.rejects),
+                                   reviewed=len(validation.review_only), extra={"images_staged": img_stats.staged}))
 
     # metrics
     manifest.match_method_distribution = dict(Counter(r.variation_method for r in rows))

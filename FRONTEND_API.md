@@ -87,6 +87,16 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 > (keep + retry). These are Medusa's pull-job endpoints; the Sync page is a read view of `/status` +
 > `/failures` plus the `requeue` recovery button.
 
+> **Clearing a `removed` dead-letter (state `dead`).** `requeue` does NOT cover the removed lane (only
+> variations/products), and a plain "Pull removals" will NOT re-serve a `dead` tombstone -- the serve query
+> is `state='pending'`, and `dead` (hit after repeated `blocked` acks, usually because the variety still had
+> live children) does not serve. The recovery is **re-retire**, NOT a requeue: `POST
+> /config/v1/variations/<key>/retire` re-records the tombstone, which resets it `dead -> pending` (and
+> re-cascades any remaining products). That endpoint 409s if the variety still has LIVE products, so the
+> operator path is: **delist/move the blocking live products (or pass `force:true`) -> re-retire the variety
+> -> the next Pull removals now serves it.** No removed-requeue endpoint is needed -- re-retire is the
+> complete, intent-re-asserting mechanism.
+
 ---
 
 ## Diagnostics page  (config server :8724)  -- NEW
@@ -129,3 +139,24 @@ Render per source:
   a review flag.
 - Ports are `8724` (config) and `8723` (sync); do not hardcode `:4200` as a backend -- that is the frontend
   host that proxies to these two.
+
+---
+
+## Backend hardening (audit fixes) -- what :4200 must handle
+
+Response shapes are UNCHANGED. These backend fixes only make existing fields fire more often; the UI already
+renders all of them, so there is **nothing to change** -- just be aware:
+- **`stages[].validate` and `stages[].images` may now be `"DEGRADED"`.** They used to be always `"OK"`. Now
+  `validate` goes DEGRADED when a majority of rows are rejected, and `images` when a large fraction have no
+  publishable image. The layer strip already colour-codes DEGRADED (amber), so no code change -- but a green
+  strip is now more trustworthy (previously it hid a mass-reject / mass-no-image run).
+- **`admission.state` may be `"demoted"` more often.** Auto-demote now also fires on the produce/ECS path and
+  on a catastrophic empty scrape (it previously only ran on the local path). The demoted alert already exists.
+- **Diagnostics now persist for aborted runs too**, so a failed run is visible in `GET /config/v1/diagnostics`
+  with `health:"FAILED"` -- same shape, just more complete history.
+
+**Variant-name casing (no action -- self-resolves):** the ALL-CAPS `ICE BURG` seen in the review table was
+STALE data from the pre-refactor build. The frontend renders the name verbatim (no `text-transform`), and the
+backend now title-cases at source (`title_case` in curate), so the next produce on the new build writes
+`Ice Burg`; existing product titles refresh on the following pull (upsert by stable SKU). No duplicates, no
+reset needed.

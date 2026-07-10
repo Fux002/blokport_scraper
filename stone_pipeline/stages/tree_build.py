@@ -44,7 +44,14 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
     attr: dict[str, dict[str, str]] = defaultdict(dict)
     with Path(path).open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
-            attr[match_key(r["category"])][match_key(r["value"])] = r["sourceid"].strip()
+            # tolerate a renamed/truncated header the same way reference.loaders reads this file: a blank
+            # category/value/sourceid is skipped, never a KeyError that aborts the whole tree build.
+            category = (r.get("category") or "").strip()
+            value = (r.get("value") or "").strip()
+            sourceid = (r.get("sourceid") or "").strip()
+            if not category or not value or not sourceid:
+                continue
+            attr[match_key(category)][match_key(value)] = sourceid
     return attr
 
 
@@ -223,12 +230,15 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     export_rows, name_of = [], {}
     with Path(export_csv).open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
-            vid = r["Id"].strip()
+            # tolerate a truncated/renamed export header: a row missing Id or Key is skipped, not a KeyError
+            # (the cold-start guard only checks the export EXISTS, not its shape).
+            vid = (r.get("Id") or "").strip()
+            key = (r.get("Key") or "").strip()
             name = (r.get("Name") or "").strip()
             # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
             # combination references a variation that will not exist after the Medusa cleanup.
-            if vid and vid not in exclude_ids and not looks_like_artifact(name):
-                export_rows.append((r["Key"].strip(), vid, name))
+            if vid and key and vid not in exclude_ids and not looks_like_artifact(name):
+                export_rows.append((key, vid, name))
                 name_of[vid] = match_key(name)
     variety: dict[str, dict] = {}
     color_freq, qual_freq = Counter(), Counter()

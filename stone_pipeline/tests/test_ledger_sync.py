@@ -350,6 +350,17 @@ def test_synced_ack_does_not_unretire_a_retiring_variation(tmp_path):
         assert ledger.get("variation", "key", "slab_v1")["state"] == "retiring"               # still retiring
 
 
+def test_failed_ack_does_not_unretire_a_retiring_variation(tmp_path):
+    # twin of the synced guard: a stray/out-of-order FAILED ack must NOT knock a RETIRING variation back to
+    # dirty/gap_held -- that would re-enter the serve lane while its tombstone still serves /removed.
+    from stone_pipeline.ledger.sync import ack
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="retiring", medusa_id="V1")
+        assert ack(ledger, "variations", "slab_v1", status_="failed", reason="Medusa 500") == 0   # no-op
+        row = ledger.get("variation", "key", "slab_v1")
+        assert row["state"] == "retiring" and (row["sync_attempts"] or 0) == 0   # untouched, not re-served
+
+
 def test_ack_batch_isolates_a_bad_ack(tmp_path):
     # one malformed ack in a batch must NOT drop the whole batch: it's skipped+logged, the rest apply.
     from stone_pipeline.ledger.sync import ack_batch

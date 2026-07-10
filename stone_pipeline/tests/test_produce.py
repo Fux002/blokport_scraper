@@ -30,6 +30,19 @@ def test_default_scope_scrapes_all(monkeypatch):
     assert calls == [("fetch", None), ("scrape", None), ("build", [])]
 
 
+def test_finalize_skips_inventory_but_runs_for_a_validated_produce(monkeypatch):
+    # an inventory run is a stock refresh, not a validated produce -- it must NOT persist a diagnostic or
+    # record an admission event (which would advance the N-clean-runs-to-auto streak without validating).
+    from stone_pipeline.config import admission, diagnostics
+    calls = []
+    monkeypatch.setattr(diagnostics, "persist_from_outputs", lambda *a, **k: calls.append("persist"))
+    monkeypatch.setattr(admission, "evaluate_from_outputs", lambda *a, **k: calls.append("evaluate"))
+    produce._finalize_control_plane("inventory")
+    assert calls == []                                   # inventory: no control-plane side effects
+    produce._finalize_control_plane("all")
+    assert calls == ["persist", "evaluate"]              # a validated produce records both
+
+
 def test_catalog_only_never_scrapes(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--stage", "catalog"]) == 0

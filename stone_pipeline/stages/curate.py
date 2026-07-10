@@ -338,6 +338,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     seen_new: set[tuple[str, str]] = set()  # (norm type, norm name) -- the gen_key identity
     suspicious: list[dict] = []          # names that look like supplier codes, not varieties
     new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches)
+    last_resort_quality = active_pack().last_resort_quality   # pack default when a mint has no observed quality
     for row in rows:
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         if not gaps:
@@ -426,7 +427,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     new_variant_rows.append((
                         clean, title_case(clean), stone_type,
                         title_case(_attr_surface(row, "color")),
-                        (row.quality_name or "A").strip() or "A",
+                        (row.quality_name or last_resort_quality).strip() or last_resort_quality,
                         title_case(_attr_surface(row, "finish")), gap, backed))
             else:                                       # the surface spans several varieties/types
                 review_candidates.setdefault(proj.norm(clean), set()).add(name)
@@ -473,7 +474,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         new_variant_rows.append((
             clean, title_case(clean), stone_type,
             title_case(_attr_surface(row, "color")),
-            (row.quality_name or "A").strip() or "A",
+            (row.quality_name or last_resort_quality).strip() or last_resort_quality,
             title_case(_attr_surface(row, "finish")), gap,
             variety_branches.get(proj.norm(clean), set()),  # product-backed branches
         ))

@@ -141,6 +141,30 @@ def _reconcile_gate(rc: int) -> int:
     return 0
 
 
+def _finalize_control_plane(stage: str) -> None:
+    """Fold this run's per-source diagnostics into config.db and run the admission reaction (auto-demote on
+    drift), so EVERY produce path populates :4200's diagnostics + the auto-demote safety -- not only the
+    config server's local watcher. Previously these ran only in runner._watch_local, so a CLI produce or an
+    ECS-dispatched task never persisted diagnostics and never demoted a drifting auto source.
+
+    Skips an INVENTORY run: it is a lightweight stock refresh that does NOT run the full validate path, so it
+    must not advance the admission consistency streak (N clean VALIDATED runs -> eligible) nor overwrite the
+    latest full-run diagnostic with an all-skipped one. (`catalog` is left running -- it does no per-source
+    run, so evaluate_from_outputs just replays the already-recorded latest and is a no-op.)
+
+    Best-effort + idempotent: both stores upsert by run_id/source, so this is a no-op replay when the local
+    watcher also runs it (which is KEPT, because it fires even when a hung subprocess is SIGKILLed). It never
+    changes produce's rc."""
+    if stage == "inventory":
+        return
+    try:
+        from stone_pipeline.config import admission, diagnostics
+        diagnostics.persist_from_outputs()
+        admission.evaluate_from_outputs()
+    except Exception:
+        log.exception("control-plane finalize (diagnostics/admission) failed; non-fatal")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
 
@@ -162,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
                       extra={"extra_fields": {"rc": rc, "sources": sources or "all"}})
             return rc
     rc = build.main(argv)
+    _finalize_control_plane(stage)
     if stage in _CATALOG_STAGES:
         from stone_pipeline.ledger import writethrough
         if writethrough.enabled():
