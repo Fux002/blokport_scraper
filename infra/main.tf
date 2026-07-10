@@ -156,6 +156,15 @@ module "scraper_dev" {
   ssm_secret_arns     = local.dev_ssm_secrets
   cpu                 = var.cpu
   memory              = var.memory
+
+  # Auto-enhance: the scheduled scrape submits the dev GPU reprocess for newly-staged images. Ships OFF
+  # (dev_auto_enhance defaults false). Prod stays unwired until its own GPU module is active.
+  gpu_job_queue_name      = module.gpu_enhance_dev.job_queue
+  gpu_job_definition_name = module.gpu_enhance_dev.job_definition
+  gpu_job_queue_arn       = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_definition_arn  = module.gpu_enhance_dev.job_definition_arn
+  auto_enhance_enabled    = var.dev_auto_enhance
+  require_enhanced_enabled = var.dev_require_enhanced
 }
 
 # --- PROD deployment (runs in blokport-prod, writes the prod bucket only) -----
@@ -262,4 +271,13 @@ module "sync_service_dev" {
   # the produce subprocess (live scrape + image gen) carries the same runtime secrets as the batch
   # scraper -- proxy for the Cloudflare-fronted sites, fal key for images -- when they're configured.
   produce_secret_arns = local.dev_ssm_secrets
+
+  # Auto-enhance: the produce trigger submits the dev GPU reprocess for newly-staged images (scoped IAM +
+  # queue/def names). Ships OFF (dev_auto_enhance defaults false); flip the var to enable after testing.
+  gpu_job_queue_name      = module.gpu_enhance_dev.job_queue
+  gpu_job_definition_name = module.gpu_enhance_dev.job_definition
+  gpu_job_queue_arn       = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_definition_arn  = module.gpu_enhance_dev.job_definition_arn
+  auto_enhance_enabled    = var.dev_auto_enhance
+  require_enhanced_enabled = var.dev_require_enhanced
 }

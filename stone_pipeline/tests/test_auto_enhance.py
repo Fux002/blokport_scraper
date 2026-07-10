@@ -1,0 +1,130 @@
+"""Auto-enhance trigger: after a produce stages new raw images, submit the GPU reprocess for ONLY the new
+ones (the delta), auto-sliced, with CLASSIFY=false. Off unless BLOKPORT_AUTO_ENHANCE; best-effort.
+
+The delta is scraped - (enhanced markers + discarded markers) -- NOT scraped - improved, because produce
+on the torch-free :core writes a raw re-encode into improved/ without enhancing. These tests pin that
+detection and the submit parameters with boto3 fully mocked (no AWS).
+"""
+
+from __future__ import annotations
+
+import types
+
+import pytest
+
+from stone_pipeline.config.settings import AutoEnhanceConfig
+from deploy import enhance_trigger as et
+
+A, B, C = "a" * 64, "b" * 64, "c" * 64
+
+
+class _Paginator:
+    def __init__(self, keys):
+        self.keys = keys
+
+    def paginate(self, Bucket, Prefix):
+        yield {"Contents": [{"Key": k} for k in self.keys if k.startswith(Prefix)]}
+
+
+class FakeS3:
+    def __init__(self, keys):
+        self.keys = keys
+
+    def get_paginator(self, _name):
+        return _Paginator(self.keys)
+
+
+class FakeBatch:
+    def __init__(self):
+        self.calls = []
+
+    def submit_job(self, **kw):
+        self.calls.append(kw)
+        return {"jobId": f"job-{len(self.calls)}"}
+
+
+def _keys(scraped=(), enhanced=(), discarded=(), src="varsha"):
+    k = []
+    k += [f"dev/products/scraped/{src}/{s}.jpg" for s in scraped]
+    k += [f"dev/products/enhanced/{src}/{s}.txt" for s in enhanced]
+    k += [f"dev/products/discarded/{src}/{s}.json" for s in discarded]
+    return k
+
+
+def test_done_and_pending_delta():
+    # scraped {A,B,C}; A enhanced, B discarded -> only C is pending
+    s3 = FakeS3(_keys(scraped=(A, B, C), enhanced=(A,), discarded=(B,)))
+    assert et.done_shas(s3, "varsha") == {A, B}
+    assert et.pending_shas(s3, "varsha") == {C}
+
+
+def test_nothing_pending_when_all_done():
+    s3 = FakeS3(_keys(scraped=(A, B), enhanced=(A,), discarded=(B,)))
+    assert et.pending_shas(s3, "varsha") == set()
+
+
+def _wire(monkeypatch, s3, batch, cfg, watermarked=("varsha",)):
+    monkeypatch.setattr(et, "SETTINGS", types.SimpleNamespace(auto_enhance=cfg))
+    monkeypatch.setattr(et, "_watermarked_sources", lambda: set(watermarked))
+    monkeypatch.setattr("boto3.client", lambda service, region_name=None: s3 if service == "s3" else batch)
+
+
+def test_disabled_is_noop(monkeypatch):
+    batch = FakeBatch()
+    _wire(monkeypatch, FakeS3(_keys(scraped=(A,))), batch,
+          AutoEnhanceConfig(enabled=False, queue="q", job_definition="jd"))
+    assert et.submit_pending(["varsha"]) == []
+    assert batch.calls == []
+
+
+def test_enabled_but_unconfigured_is_noop(monkeypatch):
+    batch = FakeBatch()
+    _wire(monkeypatch, FakeS3(_keys(scraped=(A,))), batch,
+          AutoEnhanceConfig(enabled=True, queue="", job_definition=""))
+    assert et.submit_pending(["varsha"]) == []
+    assert batch.calls == []
+
+
+def test_submits_only_delta_with_correct_params(monkeypatch):
+    batch = FakeBatch()
+    # scraped {A,B,C}; A already enhanced -> pending {B,C} = 2 images
+    s3 = FakeS3(_keys(scraped=(A, B, C), enhanced=(A,)))
+    _wire(monkeypatch, s3, batch,
+          AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD", slice_size=200),
+          watermarked=("varsha",))
+    ids = et.submit_pending(["varsha"])
+    assert len(ids) == 1 and len(batch.calls) == 1          # 2 images, slice 200 -> one job
+    call = batch.calls[0]
+    assert call["jobQueue"] == "Q" and call["jobDefinition"] == "JD"
+    env = {e["name"]: e["value"] for e in call["containerOverrides"]["environment"]}
+    assert env["SRC"] == "varsha"
+    assert env["WATERMARKED"] == "true"                     # varsha is watermarked
+    assert env["CLASSIFY"] == "false"                       # auto-enhance NEVER auto-discards
+    assert env["SLICE_OFFSET"] == "0"
+
+
+def test_auto_slices_large_delta(monkeypatch):
+    batch = FakeBatch()
+    shas = [f"{i:064x}" for i in range(5)]                  # 5 pending
+    s3 = FakeS3(_keys(scraped=shas))
+    _wire(monkeypatch, s3, batch,
+          AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD", slice_size=2),
+          watermarked=())
+    et.submit_pending(["varsha"])
+    # 5 pending / slice 2 -> ceil = 3 jobs at offsets 0,2,4
+    offsets = sorted(
+        int({e["name"]: e["value"] for e in c["containerOverrides"]["environment"]}["SLICE_OFFSET"])
+        for c in batch.calls)
+    assert offsets == [0, 2, 4]
+    # enhance-only source -> WATERMARKED false
+    env0 = {e["name"]: e["value"] for e in batch.calls[0]["containerOverrides"]["environment"]}
+    assert env0["WATERMARKED"] == "false"
+
+
+def test_no_job_when_nothing_pending(monkeypatch):
+    batch = FakeBatch()
+    s3 = FakeS3(_keys(scraped=(A,), enhanced=(A,)))         # the one image is already enhanced
+    _wire(monkeypatch, s3, batch,
+          AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD"))
+    assert et.submit_pending(["varsha"]) == []
+    assert batch.calls == []

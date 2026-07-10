@@ -410,6 +410,13 @@ class ImagesConfig:
     require_images: bool = True  # a product with no image is rejected (Stage 9) -- we only list
     # products that have a picture, so 3_products_*.csv (and the inventory delta derived from the
     # same emitted set) never carry an imageless product.
+    # HARD publish gate: link an image ONLY if the GPU actually enhanced it (an `enhanced/<sha>` marker
+    # exists). Produce on the torch-free :core writes a RAW re-encode into improved/ without enhancing, so
+    # improved/ presence alone is NOT proof of processing -- without this gate a raw, watermarked image can
+    # reach the catalog. With it, an un-enhanced image is HELD (product publishes imageless) until the GPU
+    # reprocess enhances it and writes the marker. Ships OFF: the markers must be backfilled for the already
+    # enhanced set before flipping on, else every image holds. Enable with BLOKPORT_REQUIRE_ENHANCED=true.
+    require_enhanced: bool = _env_bool("BLOKPORT_REQUIRE_ENHANCED", False)
     # Number of numbered "Product Image N" columns a slab/tile product can fill. The pipeline
     # fills as many as the product actually has, up to this cap; the rest stay blank. Shared by
     # the image-slotting stage and the emit columns so they can never drift (the template header
@@ -605,6 +612,24 @@ def refresh_category_pcats() -> None:
 
 
 @dataclass(frozen=True)
+class AutoEnhanceConfig:
+    """After a produce stages new raw images, auto-submit the GPU reprocess for just the new ones, so
+    enhancement/de-watermark happens without a manual step (the Batch compute env spins a GPU up on demand
+    and back to zero when idle). Fire-and-forget: produce submits and returns; the enhanced images land in
+    improved/ and the NEXT produce links them (the existing one-cycle hold). See deploy/enhance_trigger.
+
+    Off by default (BLOKPORT_AUTO_ENHANCE): ships dark, enabled per deployment. queue/job_definition name
+    the Batch target (from the gpu_enhance module, injected as env on the produce task). slice_size caps a
+    single job's image count so a big cold-start fans out across GPUs. The submitted reprocess always runs
+    CLASSIFY=false -- auto-enhance never auto-discards (that needs a calibrated margin, enabled separately)."""
+
+    enabled: bool = _env_bool("BLOKPORT_AUTO_ENHANCE", False)
+    queue: str = os.environ.get("BLOKPORT_GPU_QUEUE", "")
+    job_definition: str = os.environ.get("BLOKPORT_GPU_JOBDEF", "")
+    slice_size: int = _env_int("BLOKPORT_ENHANCE_SLICE", 200)
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: str = BLOKPORT_ENV  # "development" | "production" (BLOKPORT_ENV)
     # A hash of the live id set (section 3.2). Computed from reference data at
@@ -618,6 +643,7 @@ class Settings:
     backend: BackendConstants = field(default_factory=BackendConstants)
     s3: S3Config = field(default_factory=S3Config)
     images: ImagesConfig = field(default_factory=ImagesConfig)
+    auto_enhance: AutoEnhanceConfig = field(default_factory=AutoEnhanceConfig)
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     curation: CurationConfig = field(default_factory=CurationConfig)
 

@@ -23,12 +23,20 @@ IMG_EXT = (".jpg", ".jpeg", ".png")
 IMPROVED_SUBDIR = "improved"                 # the treated-image folder name (also settings.improved_subdir)
 SCRAPED_SUBDIR = "scraped"
 DISCARDED_SUBDIR = "discarded"               # non-stone images the classifier rejected (spec sheets, logos)
+ENHANCED_SUBDIR = "enhanced"                 # per-image "done" markers the GPU reprocess writes (see below)
 
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
 MANIFEST_BACKUP_KEY = f"{_PRODUCTS}/_manifest.backup.json"
 IMPROVED_MARKER = f"/products/{IMPROVED_SUBDIR}/"   # a treated image's S3 url/key contains this substring
 DISCARDED_PREFIX_ALL = f"{_PRODUCTS}/{DISCARDED_SUBDIR}/"  # list this to load the whole discard set
+ENHANCED_PREFIX_ALL = f"{_PRODUCTS}/{ENHANCED_SUBDIR}/"    # list this for the whole enhanced-marker set (publish gate)
+
+# "Done" markers, written ONLY by the GPU reprocess (deploy/reprocess_source), one per image it handles:
+# an ENHANCED marker when it enhances, a DISCARDED marker when it rejects. These are the incremental signal
+# for auto-enhance -- an image "needs processing" iff it is in scraped/ but has NEITHER marker. We CANNOT
+# use improved/ presence for this: produce on the torch-free :core writes a raw re-encode into improved/
+# without enhancing, so improved/ presence does not mean "enhanced". Only the GPU writes these markers.
 
 # every image object is content-addressed as <site>/<sha256>.<ext>, so the sha is recoverable from any
 # hosted url or key -- the one identity that the reprocess (filename) and Stage 7 (improved url) share.
@@ -55,6 +63,16 @@ def discarded_key(source: str, sha256: str) -> str:
     """The per-image discard marker key. One object per discarded image (content-addressed), so the many
     parallel reprocess slices write without ever racing a shared file. Body = {reason, score, classifier}."""
     return f"{_PRODUCTS}/{DISCARDED_SUBDIR}/{source}/{sha256}.json"
+
+
+def enhanced_prefix(source: str) -> str:
+    return f"{_PRODUCTS}/{ENHANCED_SUBDIR}/{source}/"
+
+
+def enhanced_key(source: str, sha256: str) -> str:
+    """The per-image ENHANCED marker key (the GPU reprocess writes it after enhancing an image). Marks the
+    image "done" for incremental auto-enhance, distinct from produce's raw re-encode in improved/."""
+    return f"{_PRODUCTS}/{ENHANCED_SUBDIR}/{source}/{sha256}.txt"
 
 
 def sha_from_url(url: str) -> Optional[str]:
