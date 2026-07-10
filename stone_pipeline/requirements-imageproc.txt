@@ -21,6 +21,6 @@ spandrel==0.4.2         # loads Real-ESRGAN (RRDBNet) weights for the enhancemen
 # fails and de-watermark silently disables. These 2024-era pins are the last set that imports
 # cleanly on torch 2.4.1. (If the base torch is bumped, bump these together.)
 diffusers==0.30.0       # SDXL-inpaint pipeline for de-watermarking
-transformers==4.44.2    # SDXL text encoders (CLIP); the pin that actually fixes the import
+transformers==4.44.2    # SDXL text encoders (CLIP) + the non-stone image classifier (CLIPModel); import-fix pin
 accelerate==0.33.0      # diffusers device/dtype placement
 safetensors==0.4.4      # weights format

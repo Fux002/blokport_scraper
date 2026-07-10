@@ -1,7 +1,7 @@
 """Build the valid-combination set for Medusa's relational `valid_combination` table.
 
 FULL combination set (the relational table has no size ceiling, so we pre-load every
-possible combination — a future product is then far more likely to already match,
+possible combination -- a future product is then far more likely to already match,
 needing no rebuild). Each variation gets EVERY finish its category supports x the UNION
 of every colour/quality we know for the variety (its backbone post, the scraped product,
 and a same-variety product in another category). The product's type wins so products
@@ -9,7 +9,7 @@ always match; a no-data variation falls back to the type parsed from its Key/Nam
 catalogue's most common colour.
 
 Output is one row per valid combination (the 6-tuple) for
-POST /admin/valid-combinations/import — no nested blob, no size ceiling:
+POST /admin/valid-combinations/import -- no nested blob, no size ceiling:
 
     product_category_id, type_id, variation_id, finish_id, color_id, quality_id
 
@@ -31,7 +31,8 @@ from stone_pipeline.core.text import looks_like_artifact, match_key
 
 log = logfmt.get_logger("tree")
 
-_PREFIX_CATEGORY = {"slab": "slabs", "block": "blocks", "tile": "tiles"}
+# category name -> plural group key, derived from the pack-built category registry (was hardcoded).
+_PREFIX_CATEGORY = {c.name: c.plural for c in CATEGORIES}
 COMBINATION_COLUMNS = ("product_category_id", "type_id", "variation_id",
                        "finish_id", "color_id", "quality_id")
 
@@ -78,7 +79,7 @@ def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[st
     """Key-prefix -> EVERY finish the category supports (all distinct finishes in its
     backbone, plus any its products use). Tiles mirror slabs."""
     # EVERY finish the category supports (all distinct finishes in its backbone, plus
-    # any its products use) — so each variation is priceable in any finish and a future
+    # any its products use) -- so each variation is priceable in any finish and a future
     # product is far more likely to already match, no rebuild needed. Tiles mirror slabs.
     cat_to_prefix = {v: k for k, v in _PREFIX_CATEGORY.items()}
     out: dict[str, set] = defaultdict(set)

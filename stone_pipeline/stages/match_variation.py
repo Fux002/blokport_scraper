@@ -18,11 +18,14 @@ Outcomes (section 5A.3):
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 from stone_pipeline.config.settings import SETTINGS, Confidence, category
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
+from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.matching.engine import VariationEngine, VariationMatch
 from stone_pipeline.matching.index import build_variation_index
 from stone_pipeline.matching import projections as proj
@@ -289,14 +292,23 @@ def _fmt_candidates(candidates: list[tuple[str, str, float]]) -> str:
 
 
 def run(rows: list[CanonicalRow], ref: ReferenceData, writeback: WriteBack | None = None,
-        writeback_path=None, generic_descriptor: bool = False) -> VariationStage:
+        writeback_path=None, generic_descriptor: bool = False) -> StageMetric:
     stage = VariationStage.build(ref, writeback=writeback, writeback_path=writeback_path,
                                  generic_descriptor=generic_descriptor)
     for row in rows:
         stage.resolve_row(row)
+    # The Resolve layer is the essential-complexity core: surface its own health. A high UNMATCHED share
+    # on an established source signals a tree/index/vocab drift (not just new varieties), caught here.
+    # review rows are held (not gapped); gapped rows carry a tree gap for the operator worklist.
     resolved = sum(1 for r in rows if r.variation_id)
+    review = sum(1 for r in rows if any(f.code == FlagCode.variation_review for f in r.review_flags))
+    gapped = sum(1 for r in rows if not r.variation_id and r.tree_gaps)
+    unmatched = len(rows) - resolved
+    methods = dict(Counter(r.variation_method for r in rows if r.variation_method))
+    status = DEGRADED if rows and unmatched / len(rows) >= SETTINGS.thresholds.match_unmatched_degraded else OK
     log.info(
         "variation done",
-        extra={"extra_fields": {"rows": len(rows), "resolved": resolved, "gapped": len(rows) - resolved}},
+        extra={"extra_fields": {"rows": len(rows), "resolved": resolved, "gapped": gapped}},
     )
-    return stage
+    return StageMetric(stage="match_variation", status=status, rows_in=len(rows), rows_out=len(rows),
+                       reviewed=review, gapped=gapped, extra={"resolved": resolved, "methods": methods})

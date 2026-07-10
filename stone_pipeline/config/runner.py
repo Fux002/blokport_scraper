@@ -81,6 +81,27 @@ def _persist_run(rec: dict) -> None:
         log.exception("failed to persist run record (non-fatal)")
 
 
+def _persist_diagnostics() -> None:
+    """Fold each source's latest per-layer diagnostic (written to outputs/ by the pipeline) into config.db,
+    so GET /config/v1/diagnostics serves the :4200 UI durably. This process shares the run disk in dev.
+    Best-effort: a diagnostics failure must never affect the run."""
+    try:
+        from stone_pipeline.config import diagnostics
+        diagnostics.persist_from_outputs()
+    except Exception:
+        log.exception("failed to persist per-source diagnostics (non-fatal)")
+
+
+def _evaluate_admission() -> None:
+    """Record each source's run outcome into its consistency history and REACT: a drift on an `auto` source
+    auto-demotes it to review. Best-effort: an admission failure must never affect the run."""
+    try:
+        from stone_pipeline.config import admission
+        admission.evaluate_from_outputs()
+    except Exception:
+        log.exception("failed to evaluate source admission (non-fatal)")
+
+
 def _stamp_last_run(rec: dict, status: str) -> None:
     """Persist this run against each of its sources (the admin list's 'last run' label). Best-effort:
     a store failure must never affect the run. `scope` (the explicit subset) is what actually ran when
@@ -177,6 +198,8 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         _publish_deliverables(rec.get("stage", "all"))
     _stamp_last_run(rec, rec["status"])
     _persist_run(rec)                                   # durable `last` across a restart
+    _persist_diagnostics()                              # per-source layer diagnostics -> config.db (for :4200)
+    _evaluate_admission()                               # record consistency history + auto-demote on drift
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
 
 

@@ -1,7 +1,7 @@
-"""Adapter registry — AUTO-DISCOVERED from the source modules in this package.
+"""Adapter registry -- AUTO-DISCOVERED from the source modules in this package.
 
 Each source adapter module (e.g. ``varsha.py``) ends with ``ADAPTER = <Source>Adapter()``.
-Dropping such a file into this package registers it automatically — there is NO manual list
+Dropping such a file into this package registers it automatically -- there is NO manual list
 to keep in sync. Framework modules (``base``, ``tokens``, ``selftest``) and templates
 (``_*``) are skipped. ``REGISTRY`` maps ``adapter.source`` -> the adapter instance.
 """

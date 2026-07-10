@@ -11,7 +11,6 @@ later milestones.
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import sys
@@ -20,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
-from stone_pipeline.adapters.base import AdapterBase, read_scrape_csv
+from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
 from stone_pipeline.config.settings import COMPANY_ID, IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS
 from stone_pipeline.config.sources import load_source
@@ -74,7 +73,10 @@ def _gap_rows(rows: list[CanonicalRow]) -> list[dict]:
     seen: dict[tuple, dict] = {}
     for row in rows:
         for gap in row.tree_gaps:
-            key = (gap.gap_kind, gap.normalized_name, gap.suggested_color, gap.suggested_finish)
+            # include suggested_type + suggested_quality: two gaps that differ ONLY by type/quality are
+            # distinct tree entities and must both reach the operator worklist, not collapse to the first.
+            key = (gap.gap_kind, gap.normalized_name, gap.suggested_type,
+                   gap.suggested_color, gap.suggested_finish, gap.suggested_quality)
             if key not in seen:
                 seen[key] = gap.model_dump(mode="json")
     return list(seen.values())
@@ -121,6 +123,50 @@ def _apply_gate(rows, contract, manifest, run_log):
     return report
 
 
+def _record(manifest, run_log, metric: StageMetric) -> None:
+    """Record one stage's diagnostic uniformly: append its metric and log a one-line status summary,
+    mirroring _apply_gate for module gates. A DEGRADED stage surfaces here at its OWN layer; it never
+    changes routing (the gates remain the sole authority on what emits)."""
+    manifest.add_stage(metric)
+    run_log.info(f"{metric.stage} stage", extra={"extra_fields": {"summary": metric.summary()}})
+
+
+SKIPPED = "SKIPPED"   # a load_frame source with no data this run: a clean, recorded no-op (not OK/FAILED)
+
+
+def _skipped_manifest(source: str, reason: str) -> "Manifest":
+    """A clean 'no data this run' result for a load_frame source: a recorded no-op, never a failure. It is
+    NOT written to disk (nothing was produced) and carries no stage metrics, so run_all keeps it OUT of the
+    failed/missing set and the admin sees a skip, not a broken source."""
+    m = Manifest(run_id=make_run_id(source, "nodata"), source=source,
+                 code_version=SETTINGS.code_version, environment=SETTINGS.environment)
+    m.health_status = SKIPPED
+    m.totals["rows"] = 0
+    return m
+
+
+def _write_diagnostics(manifest, layout) -> None:
+    """Write the run manifest AND the one-glance per-layer stages.json (each stage's status plus the
+    validate-in gate/health/magnitude statuses), so a bug surfaces at the layer it was born in. Called
+    on every exit path -- including the early aborts -- so a failed run still leaves a readable
+    diagnostic; stages that never ran are simply absent (an abort truncates the list)."""
+    manifest.write(layout.diagnostics / "manifest.json")
+    stages_doc = {
+        "run_id": manifest.run_id,
+        "source": manifest.source,
+        "health": manifest.health_status,
+        "magnitude": manifest.magnitude_status,
+        "gates": manifest.gate_status,
+        "stages": [
+            {"stage": m.stage, "status": m.status, "rows_in": m.rows_in, "rows_out": m.rows_out,
+             "rejected": m.rejected, "reviewed": m.reviewed, "gapped": m.gapped, "extra": m.extra}
+            for m in manifest.stage_metrics
+        ],
+    }
+    (layout.diagnostics / "stages.json").write_text(
+        json.dumps(stages_doc, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
 def run_source(
     source: str, scrape_path: Optional[Path] = None, outputs_dir: Optional[Path] = None,
     state_dir: Optional[Path] = None, inventory_only: bool = False,
@@ -141,11 +187,16 @@ def run_source(
     state_dir = Path(state_dir or SETTINGS.paths.state_dir)
     writeback_path = state_dir / "alias_writeback.csv"
 
-    # INGEST is pluggable: a non-file source (API/DB/feed) overrides adapter.load_frame to hand back
-    # its own frame; everything below is identical. The default is the scraper CSV.
+    # ACQUIRE layer: a data source hands back its raw frame however it acquires it. A scraper source reads
+    # the CSV its fetcher wrote; a load_frame source (API/DB/feed) overrides adapter.load_frame; everything
+    # below is identical regardless. A load_frame source that yields NO data this run is a CLEAN skip (not
+    # a CSV fallback, not a failure); only a scraper source with no file is the missing-scrape error.
     custom = adapter.load_frame(scrape_path)
     if custom is not None:
         frame, ts_token, origin = custom
+    elif adapter.acquires_via() == ACQ_LOAD_FRAME:
+        logfmt.bind(log, source=source).info("load_frame source produced no data this run; skipping (not a failure)")
+        return _skipped_manifest(source, "no data from load_frame this run")
     else:
         scrape_path = scrape_path or find_scrape_file(source)
         if scrape_path is None:
@@ -180,7 +231,7 @@ def run_source(
     if frame.height < _floor:
         run_log.error("scrape below floor -- failed/empty scrape; aborting (NO delist)",
                       extra={"extra_fields": {"rows": frame.height, "min_expected": _floor}})
-        manifest.write(layout.diagnostics / "manifest.json")
+        _write_diagnostics(manifest, layout)
         write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
                        gates=manifest.gate_status)
         raise SystemExit(2)
@@ -193,7 +244,7 @@ def run_source(
     manifest.health_status = report.status
     if report.status == health.FAILED:
         run_log.error("health FAILED; aborting before emit")
-        manifest.write(layout.diagnostics / "manifest.json")
+        _write_diagnostics(manifest, layout)
         write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
                        gates=manifest.gate_status)
         raise SystemExit(2)
@@ -213,7 +264,7 @@ def run_source(
     if frame.height and dropped > 0.5 * frame.height:
         run_log.error("ingest: adapter dropped >50% of rows -- likely a mis-mapped required field; aborting",
                       extra={"extra_fields": {"rows_in": frame.height, "rows_out": len(rows), "dropped": dropped}})
-        manifest.write(layout.diagnostics / "manifest.json")
+        _write_diagnostics(manifest, layout)
         write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
                        gates=manifest.gate_status)
         raise SystemExit(2)
@@ -225,7 +276,7 @@ def run_source(
     if ingest_gate.status == gates.FAILED:
         run_log.error("ingest gate FAILED; aborting before clean -- scrape is missing required fields",
                       extra={"extra_fields": {"violations": ingest_gate.violations}})
-        manifest.write(layout.diagnostics / "manifest.json")
+        _write_diagnostics(manifest, layout)
         write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
                        gates=manifest.gate_status)
         raise SystemExit(2)
@@ -243,11 +294,11 @@ def run_source(
                                    extra={"by_value": fmt_stats.by_value, "unresolved": fmt_stats.unresolved}))
 
     # Stage 3: normalize
-    normalize.run(rows, ref)
+    _record(manifest, run_log, normalize.run(rows, ref))
     # Stage 4: variation (collects alias write-back for persistence at run end)
     writeback = WriteBack()
-    match_variation.run(rows, ref, writeback=writeback, writeback_path=writeback_path,
-                        generic_descriptor=adapter.generic_descriptor)
+    _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback, writeback_path=writeback_path,
+                                                   generic_descriptor=adapter.generic_descriptor))
     # Stage 5: reconcile tree
     stats = reconcile_tree.run(rows, ref)
     manifest.add_stage(StageMetric(stage="reconcile", rows_in=len(rows), rows_out=len(rows),
@@ -261,7 +312,7 @@ def run_source(
 
     # Stage 6: derivation
     source_cfg = load_source(source)
-    derive.run(rows, ref, source_cfg)
+    _record(manifest, run_log, derive.run(rows, ref, source_cfg))
 
     # Canonical magnitude-drift gate: after derive populates the physical fields (weight/dims), catch a
     # unit/normalization rescale before it reaches the catalog. Source-agnostic (canonical fields only),
@@ -274,15 +325,18 @@ def run_source(
         if mag_status == magnitude_drift.FAILED:
             run_log.error("magnitude drift FAILED; aborting before emit",
                           extra={"extra_fields": {"drift": mag_report["drift"]}})
-            manifest.write(layout.diagnostics / "manifest.json")
+            _write_diagnostics(manifest, layout)
             write_steps_md(layout, source=source, run_id=run_id, health=manifest.health_status,
                            counts={}, gates=manifest.gate_status)
             raise SystemExit(2)
 
-    # Stage 7: images  (skipped for an inventory-only refresh — stock never touches images)
+    # Stage 7: images  (skipped for an inventory-only refresh -- stock never touches images)
     img_stats = images.ImageStats() if inventory_only else images.run(rows)
+    _record(manifest, run_log, StageMetric(
+        stage="images", status="skipped" if inventory_only else gates.OK, rows_out=len(rows),
+        extra={"staged": img_stats.staged, "no_image": img_stats.no_image}))
     # Stage 8: constants
-    constants.run(rows, source_cfg)
+    _record(manifest, run_log, constants.run(rows, source_cfg))
 
     # row fingerprint: hash of the inputs that determine the output (section 11.2),
     # the basis for incremental runs (section 13A.5) and drift checks
@@ -324,7 +378,7 @@ def run_source(
 
     # Stage 10: emit into the clean per-run layout (outputs/<run_id>/...)
     existing_rows = [r for r in validation.emit if r.product_status == "existing"]
-    # item 5: the inventory-only delta — existing products whose supplier stock moved. Shared by
+    # item 5: the inventory-only delta -- existing products whose supplier stock moved. Shared by
     # both modes: it is the SOLE output of an inventory refresh and one output of a full run.
     changed = [r for r in existing_rows if r.product_changed] if known else []
     # delete loop: products in Medusa (this source) that the latest scrape dropped -> stock-0 delist + report
@@ -379,7 +433,7 @@ def run_source(
     written = writeback.flush(writeback_path)
     if written:
         manifest.write_backs.append(f"alias_writeback:{written}")
-    manifest.write(layout.diagnostics / "manifest.json")
+    _write_diagnostics(manifest, layout)
     report.write(layout.diagnostics / "health.json")
     # the per-source product checklist
     write_steps_md(layout, source=source, run_id=run_id, health=report.status,
@@ -446,11 +500,13 @@ def auto_sources_blocked(results: dict[str, Manifest], requested: list[str],
 def print_summary(manifest: Manifest) -> None:
     """One-screen run summary (section 13A.4)."""
     t = manifest.totals
+    stage_strip = " ".join(f"{m.stage}={m.status}" for m in manifest.stage_metrics) or "(none)"
     lines = [
         "",
         f"  source            {manifest.source}",
         f"  health            {manifest.health_status}",
         f"  gates             {_format_gate_status(manifest.gate_status)}",
+        f"  stages            {stage_strip}",
         f"  rows in           {t.get('rows', 0)}",
         f"  emitted           {t.get('emitted', 0)}",
         f"  rejected          {t.get('rejected', 0)}",
@@ -500,14 +556,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
     try:
         if target == "all":
-            # only sources that actually HAVE a scrape this run are expected to produce output; a
-            # registered adapter with no scrape file is absent, not failed (don't alert on it). A
-            # DISABLED source is also not expected -- run_all skips it, so exclude it here too or the
-            # missing-check below would flag every disabled-but-has-data source as a failure (exit 1).
+            # sources expected to produce this run: a scraper source with a scrape file on disk, OR a
+            # load_frame source (API/DB/feed) which acquires its own frame and so has no file to gate on.
+            # A scraper adapter with no scrape file is absent, not failed (don't alert). A DISABLED source
+            # is also not expected -- run_all skips it, so exclude it here too or the missing-check below
+            # would flag every disabled-but-has-data source as a failure (exit 1).
             from stone_pipeline.config import store
             _enabled = store.enabled_names()
             requested = [s for s in adapter_registry.REGISTRY
-                         if find_scrape_file(s) and (_enabled is None or s in _enabled)]
+                         if (find_scrape_file(s) or adapter_registry.REGISTRY[s].acquires_via() == ACQ_LOAD_FRAME)
+                         and (_enabled is None or s in _enabled)]
             results = run_all(requested)
             for manifest in results.values():
                 print_summary(manifest)

@@ -59,6 +59,11 @@ def _now() -> str:
 
 
 def _connect(path: Path) -> sqlite3.Connection:
+    # the SQLite substrate seam (Phase 4 RDS-readiness): a Postgres migration branches HERE, gating the
+    # PRAGMAs below. require_sqlite fails loud if a not-yet-wired dialect is configured. See
+    # MIGRATION_TO_POSTGRES.md.
+    from stone_pipeline.core.dbdialect import require_sqlite
+    require_sqlite("config store")
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
@@ -157,6 +162,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "attribute TEXT NOT NULL, value_norm TEXT NOT NULL, value_display TEXT NOT NULL DEFAULT '', "
                  "action TEXT NOT NULL CHECK (action IN ('approve','reject')), decided_at TEXT NOT NULL, "
                  "PRIMARY KEY (variety_norm, stone_type_norm, attribute, value_norm))")
+    # per-source pipeline diagnostics (Phase 1 layer diagnostics): the LATEST run's compact per-stage +
+    # health/gate/magnitude/drift summary per source, so GET /config/v1/diagnostics serves the admin UI
+    # durably (survives a config-server restart) without scanning the ephemeral outputs/ tree per request.
+    # One row per source (latest run wins); the control plane records it after a produce.
+    conn.execute("CREATE TABLE IF NOT EXISTS source_diagnostic ("
+                 "source TEXT PRIMARY KEY, run_id TEXT NOT NULL, summary TEXT NOT NULL, updated_at TEXT NOT NULL)")
+    # rolling per-source run-event history (Phase 2 admission): the last N runs' outcomes, so the admission
+    # rule can require N consecutive CLEAN runs before a source is 'consistent enough' to auto-load, and a
+    # drift event can auto-demote an auto source. Bounded per source (settings.admission.history_limit).
+    conn.execute("CREATE TABLE IF NOT EXISTS source_run_event ("
+                 "source TEXT NOT NULL, run_id TEXT NOT NULL, at TEXT NOT NULL, "
+                 "health TEXT NOT NULL, worst TEXT NOT NULL, drift TEXT NOT NULL DEFAULT '[]', "
+                 "certified INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (source, run_id))")
     conn.commit()
 
 
@@ -270,16 +288,19 @@ def upsert_source(cfg: SourceConfig, *, enabled: bool = True, schedule: str | No
 
 
 def set_state(source: str, *, lifecycle: str | None = None, enabled: bool | None = None,
-              path: str | Path | None = None) -> None:
+              mode: str | None = None, path: str | Path | None = None) -> None:
     """The ONE source-state mutation: set `lifecycle` ('active'|'paused'|'delisted', the label Medusa
-    reads) and/or `enabled` (the mechanical run flag) in a single write; either omitted leaves it
-    unchanged. The lifecycle verbs go through here."""
+    reads), `enabled` (the mechanical run flag), and/or `mode` ('review'|'auto', the trust ladder) in a
+    single write; any omitted leaves it unchanged. The lifecycle verbs and the admission auto-demote go
+    through here."""
     sets: list[str] = []
     params: list = []
     if lifecycle is not None:
         sets.append("lifecycle = ?"); params.append(lifecycle)
     if enabled is not None:
         sets.append("enabled = ?"); params.append(1 if enabled else 0)
+    if mode is not None:
+        sets.append("mode = ?"); params.append(mode)
     if not sets:
         return
     sets.append("updated_at = ?"); params.append(_now())
@@ -345,6 +366,85 @@ def last_run_log(path: str | Path | None = None) -> dict | None:
         r = conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL "
                          "ORDER BY finished_at DESC LIMIT 1").fetchone()
         return json.loads(r["record"]) if r else None
+
+
+def record_source_diagnostic(source: str, run_id: str, summary: dict,
+                             path: str | Path | None = None) -> None:
+    """Store one source's latest-run diagnostic summary (compact JSON: per-stage status + health/gate/
+    magnitude/drift), upsert by source (latest run wins). Written by the control plane after a produce;
+    served by GET /config/v1/diagnostics."""
+    with closing(open_store(path)) as conn:
+        conn.execute(
+            "INSERT INTO source_diagnostic (source, run_id, summary, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(source) DO UPDATE SET run_id = excluded.run_id, "
+            "summary = excluded.summary, updated_at = excluded.updated_at",
+            (source, run_id, json.dumps(summary), _now()))
+        conn.commit()
+
+
+def _diag_row(r: sqlite3.Row) -> dict:
+    d = json.loads(r["summary"])
+    d["updated_at"] = r["updated_at"]
+    return d
+
+
+def get_source_diagnostic(source: str, path: str | Path | None = None) -> dict | None:
+    """One source's latest persisted diagnostic, or None. Guarded so a read never CREATES the config DB
+    (the test-isolation contract keeps an absent DB absent)."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        return None
+    with closing(open_store(p)) as conn:
+        r = conn.execute("SELECT summary, updated_at FROM source_diagnostic WHERE source = ?",
+                         (source,)).fetchone()
+        return _diag_row(r) if r else None
+
+
+def read_source_diagnostics(path: str | Path | None = None) -> list[dict]:
+    """Every source's latest persisted diagnostic (empty when there is no store yet)."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        return []
+    with closing(open_store(p)) as conn:
+        return [_diag_row(r) for r in
+                conn.execute("SELECT summary, updated_at FROM source_diagnostic ORDER BY source")]
+
+
+def record_run_event(source: str, run_id: str, health: str, worst: str, drift: list,
+                     certified: bool, note: str | None = None, limit: int = 20,
+                     path: str | Path | None = None) -> None:
+    """Append one run's outcome to a source's rolling history (upsert by run_id), then prune to the newest
+    `limit`. Feeds the admission rule (N consecutive clean runs) and the auto-demote-on-drift reaction."""
+    with closing(open_store(path)) as conn:
+        conn.execute(
+            "INSERT INTO source_run_event (source, run_id, at, health, worst, drift, certified, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(source, run_id) DO UPDATE SET at = excluded.at, health = excluded.health, "
+            "worst = excluded.worst, drift = excluded.drift, certified = excluded.certified, note = excluded.note",
+            (source, run_id, _now(), health, worst, json.dumps(drift), 1 if certified else 0, note))
+        conn.execute(
+            "DELETE FROM source_run_event WHERE source = ? AND run_id NOT IN "
+            "(SELECT run_id FROM source_run_event WHERE source = ? ORDER BY at DESC, run_id DESC LIMIT ?)",
+            (source, source, limit))
+        conn.commit()
+
+
+def read_run_events(source: str, limit: int | None = None,
+                    path: str | Path | None = None) -> list[dict]:
+    """A source's run history, newest first (empty when there is no store yet)."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        return []
+    query = "SELECT * FROM source_run_event WHERE source = ? ORDER BY at DESC, run_id DESC"
+    params: tuple = (source,)
+    if limit:
+        query += " LIMIT ?"
+        params = (source, limit)
+    with closing(open_store(p)) as conn:
+        return [{"source": r["source"], "run_id": r["run_id"], "at": r["at"], "health": r["health"],
+                 "worst": r["worst"], "drift": json.loads(r["drift"] or "[]"),
+                 "certified": bool(r["certified"]), "note": r["note"]}
+                for r in conn.execute(query, params)]
 
 
 def record_run(sources, status: str, stage: str, at: str | None = None,

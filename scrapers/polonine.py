@@ -78,7 +78,10 @@ class PolonineScraper(ScraperBase):
     category = "slab"        # SlabWare slab inventory; explicit format (item 3)
     id_field = "product_id"
     use_curl_cffi = True     # Cloudflare-fronted
-    needs_proxy = True       # tested: this tenant blocks the datacenter IP even with the Chrome fingerprint
+    # tested: this tenant blocks the datacenter IP even with the Chrome fingerprint, so it needs a
+    # residential proxy. Declared as a capability (config/proxies.yaml maps it to the residential proxy +
+    # its secret); the toolbox way, so swapping the provider is a config edit.
+    proxy_capability = "cloudflare_residential"
     columns = [
         "product_id", "material", "stone_type", "color", "finish", "quality",
         "classification", "thickness", "block", "bundle_no", "slab_numbers", "slab_count",

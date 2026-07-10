@@ -55,12 +55,29 @@ def _fetch_inputs() -> None:
     settings.refresh_category_pcats()
 
 
+def _acquires_scraper(source: str) -> bool:
+    """True when this source is fetched by a scraper (data/<source>/...). A load_frame/file_drop source
+    acquires its own frame in the pipeline (adapter.load_frame / a dropped file), so it must NOT be sent
+    to the scraper runner, which would reject an unknown scraper name. Unknown source -> treated as a
+    scraper so the runner reports it, not silently dropped."""
+    from stone_pipeline import adapters as adapter_registry
+    from stone_pipeline.adapters.base import ACQ_SCRAPER
+    adapter = adapter_registry.REGISTRY.get(source)
+    return adapter is None or adapter.acquires_via() == ACQ_SCRAPER
+
+
 def _live_scrape(sources: list[str] | None) -> int:
     """LIVE-fetch fresh supplier data into data/<source>/ -- what build's pipeline stage then reads.
-    `sources` None -> every registered scraper (`run all`); an explicit list -> just those. A failed
-    source surfaces as a non-zero rc so produce aborts before building against stale/absent data."""
+    `sources` None -> every registered scraper (`run all`); an explicit list -> just the SCRAPER sources
+    in it (load_frame/file_drop sources need no supplier fetch; the pipeline acquires their frames). A
+    failed scraper surfaces as a non-zero rc so produce aborts before building against stale/absent data."""
     from scrapers import run as scrapers_run
-    return scrapers_run.main(sources if sources else ["all"])
+    if not sources:
+        return scrapers_run.main(["all"])
+    scraper_sources = [s for s in sources if _acquires_scraper(s)]
+    if not scraper_sources:
+        return 0    # all load_frame/file_drop: nothing to live-scrape; build acquires their frames
+    return scrapers_run.main(scraper_sources)
 
 
 # The catalog consistency gate keys off variants_export.csv, so it FALSE-ALARMS on varieties minted

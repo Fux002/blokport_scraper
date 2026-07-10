@@ -104,7 +104,7 @@ def test_product_backed_unions_backbone_and_scraped_colour(tmp_path):
     exp = _export(tmp_path, [("v1", "slab_marble_carrara_1", "Carrara")])
     prod = _products(tmp_path, [_prow(vid="v1", col="c_grey")])  # scraped Grey, backbone White
     combos, stats, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert {c[COL] for c in _for(combos, "v1")} == {"c_white", "c_grey"}  # both — widest valid set
+    assert {c[COL] for c in _for(combos, "v1")} == {"c_white", "c_grey"}  # both -- widest valid set
     assert stats["covered"] == 1
 
 

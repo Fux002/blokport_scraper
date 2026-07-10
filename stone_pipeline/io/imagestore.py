@@ -14,16 +14,25 @@ Layout (under the env segment, e.g. dev/):
 
 from __future__ import annotations
 
+import re
+from typing import Optional
+
 from stone_pipeline.config.settings import ENV_SEGMENT
 
 IMG_EXT = (".jpg", ".jpeg", ".png")
 IMPROVED_SUBDIR = "improved"                 # the treated-image folder name (also settings.improved_subdir)
 SCRAPED_SUBDIR = "scraped"
+DISCARDED_SUBDIR = "discarded"               # non-stone images the classifier rejected (spec sheets, logos)
 
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
 MANIFEST_BACKUP_KEY = f"{_PRODUCTS}/_manifest.backup.json"
 IMPROVED_MARKER = f"/products/{IMPROVED_SUBDIR}/"   # a treated image's S3 url/key contains this substring
+DISCARDED_PREFIX_ALL = f"{_PRODUCTS}/{DISCARDED_SUBDIR}/"  # list this to load the whole discard set
+
+# every image object is content-addressed as <site>/<sha256>.<ext>, so the sha is recoverable from any
+# hosted url or key -- the one identity that the reprocess (filename) and Stage 7 (improved url) share.
+_SHA_RE = re.compile(r"([0-9a-f]{64})\.[a-z0-9]+$", re.IGNORECASE)
 
 
 def raw_prefix(source: str) -> str:
@@ -36,6 +45,25 @@ def scraped_prefix(source: str) -> str:
 
 def improved_prefix(source: str) -> str:
     return f"{_PRODUCTS}/{IMPROVED_SUBDIR}/{source}/"
+
+
+def discarded_prefix(source: str) -> str:
+    return f"{_PRODUCTS}/{DISCARDED_SUBDIR}/{source}/"
+
+
+def discarded_key(source: str, sha256: str) -> str:
+    """The per-image discard marker key. One object per discarded image (content-addressed), so the many
+    parallel reprocess slices write without ever racing a shared file. Body = {reason, score, classifier}."""
+    return f"{_PRODUCTS}/{DISCARDED_SUBDIR}/{source}/{sha256}.json"
+
+
+def sha_from_url(url: str) -> Optional[str]:
+    """The content sha256 embedded in a hosted image url/key (.../<site>/<sha>.<ext>), or None. Used by
+    Stage 7 to map a linked improved url back to its content identity for the discard-set lookup."""
+    if not url:
+        return None
+    m = _SHA_RE.search(url)
+    return m.group(1).lower() if m else None
 
 
 def parse_raw_key(key: str) -> tuple[str, str] | None:

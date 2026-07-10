@@ -14,13 +14,15 @@ import csv
 import functools
 import json
 import re
-from dataclasses import dataclass
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence
 from stone_pipeline.config.sources import SourceConfig
-from stone_pipeline.core import ids, logfmt
+from stone_pipeline.core import logfmt
+from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
+from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.core.text import match_key, slugify, title_case
 from stone_pipeline.reference.loaders import ReferenceData
 
@@ -47,24 +49,10 @@ def _count_slab_entries(raw: str) -> int:
         pass
     return len(_SLAB_KEY.findall(raw or ""))
 
-# section 10.2 branch dimension/weight ranges in METRES/tonnes (fallback only; parsed dims win).
-# A tile is a small finished piece (~30–60 cm face, ~1–2 cm thick), NOT a slab — sources often
-# ship tiles with no dimensions, so the synthetic fill MUST be tile-sized or tiles come out slab-big.
-_SLAB_RANGES = {"weight": (0.225, 0.350), "length": (1.5, 3.0), "width": (0.02, 0.03), "height": (1.5, 3.0)}
-_BLOCK_RANGES = {"weight": (18.0, 23.0), "length": (1.5, 3.0), "width": (1.5, 3.0), "height": (1.5, 3.0)}
-_TILE_RANGES = {"weight": (0.005, 0.012), "length": (0.3, 0.6), "width": (0.01, 0.02), "height": (0.3, 0.6)}
-
-# section 10.4 finish-to-surface-phrase table
-_FINISH_PHRASE = {
-    "honed": "a smooth matte surface",
-    "polished": "a bright reflective surface",
-    "leathered": "a soft textured surface",
-    "brushed": "a lightly textured surface",
-    "flamed": "a rugged non-slip surface",
-    "split face": "a dramatic three-dimensional natural cleft",
-    "sandblasted": "a fine matte texture",
-    "tumbled": "a worn antique surface",
-}
+# section 10.2 branch dimension/weight ranges (fallback only; parsed dims win) and the section 10.4
+# finish-to-surface-phrase table now live in the active product-domain pack (config/domains/<pack>.yaml),
+# so a different product type declares its own ranges/phrases. The stone pack reproduces the historical
+# values exactly, so output is unchanged.
 
 
 def _conf_name(c: Confidence) -> str:
@@ -153,8 +141,8 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
         width = parsed["width"] if "width" in parsed else parsed.get("thickness")
 
     fmt = (row.format_value or "").casefold()
-    ranges = (_BLOCK_RANGES if (row.is_block or fmt == "block")
-              else _TILE_RANGES if fmt == "tile" else _SLAB_RANGES)
+    _range_key = "block" if (row.is_block or fmt == "block") else "tile" if fmt == "tile" else "slab"
+    ranges = active_pack().dimension_ranges[_range_key]
     methods = []
 
     length = parsed.get("length")
@@ -311,7 +299,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
             row.origin_source = "scrape_field"
             row.origin_confidence = _conf_name(Confidence.high)
             return
-    # 2. origin_map — the per-variety override built from the master variety reference. Two tiers:
+    # 2. origin_map -- the per-variety override built from the master variety reference. Two tiers:
     #    an EXACT variety-name rule (trusted, the variety's known country), or a geographic name
     #    PATTERN (e.g. 'carrara'->IT, 'persa'->BR) that generalises to a variety the exact tier has
     #    never seen -- this is what carries origin onto a brand-new variant. A pattern hit is a strong
@@ -359,7 +347,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
 # --- ports (section 3.3) ------------------------------------------------------
 def derive_ports(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
     # ports belong to the SUPPLIER (the scraped website's company) and where it ships
-    # from — set per source in sources.yaml by name/locode/id, resolved against ports.csv.
+    # from -- set per source in sources.yaml by name/locode/id, resolved against ports.csv.
     # Independent of the stone's origin.
     row.port_ids = [pid for t in (source_cfg.ports_default or []) if (pid := ref.ports.resolve(t))]
     if source_cfg.ports_default and not row.port_ids:
@@ -380,7 +368,7 @@ def _primary_variety_name(name: str) -> str:
 
 
 def derive_title(row: CanonicalRow) -> None:
-    # variety (+ finish) only — NOT the category word (no 'Slab'/'Block'/'Tile' in the title)
+    # variety (+ finish) only -- NOT the category word (no 'Slab'/'Block'/'Tile' in the title)
     if row.variation_name:
         parts = [_primary_variety_name(row.variation_name)]
         if row.finish_name:
@@ -409,7 +397,8 @@ def derive_description(row: CanonicalRow) -> None:
     # block as a 'slab' when the format is genuinely unresolved.
     fmt = _FORMAT_WORD.get((row.format_value or "").strip().casefold(), "").lower() or "piece"
     finish = (row.finish_name or "").lower()
-    phrase = _FINISH_PHRASE.get(finish, "a refined natural surface")
+    _pack = active_pack()
+    phrase = _pack.finish_phrases.get(finish, _pack.finish_phrase_default)
     finish_clause = f"a {finish} {fmt}" if finish else f"a {fmt}"
     row.description = (
         f"{variety} is a {material} {origin_clause}. "
@@ -453,12 +442,17 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
         row.description, row.description_method = v, "override"
 
 
-@dataclass
-class DeriveStats:
-    rows: int = 0
+def _provenance_gap(row: CanonicalRow) -> bool:
+    """A derived value present WITHOUT its provenance method is a bug (invariant: provenance on every
+    derived value). Check the load-bearing derived fields; a gap here should never happen."""
+    pairs = ((row.width or row.length or row.height, row.dimension_method),
+             (row.origin_country_code, row.origin_source),
+             (row.title, row.title_method),
+             (row.bundle_size, row.bundle_size_method))
+    return any(value and not method for value, method in pairs)
 
 
-def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) -> DeriveStats:
+def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) -> StageMetric:
     for row in rows:
         derive_category(row, ref)
         derive_dimensions(row, ref)
@@ -469,5 +463,11 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
         derive_description(row)
         _apply_overrides(row, ref)  # overrides win over the derived values
         derive_handle(row, source_cfg)  # handle follows the (possibly overridden) title
-    log.info("derive done", extra={"extra_fields": {"rows": len(rows)}})
-    return DeriveStats(rows=len(rows))
+    # A required dimension left None (never fabricated) means validate will reject the row; a high share
+    # signals a source that stopped shipping sizes. A provenance gap is an invariant breach -> DEGRADED.
+    incomplete = sum(1 for r in rows if r.length is None or r.width is None or r.height is None)
+    provenance_gaps = sum(1 for r in rows if _provenance_gap(r))
+    degraded = (rows and incomplete / len(rows) >= SETTINGS.thresholds.derive_incomplete_degraded) or provenance_gaps
+    log.info("derive done", extra={"extra_fields": {"rows": len(rows), "incomplete_dims": incomplete}})
+    return StageMetric(stage="derive", status=DEGRADED if degraded else OK, rows_in=len(rows), rows_out=len(rows),
+                       extra={"incomplete_dims": incomplete, "provenance_gaps": provenance_gaps})

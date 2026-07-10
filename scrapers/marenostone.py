@@ -68,17 +68,21 @@ _DIM_ROW = re.compile(r'__label">\s*([^<]+?)\s*</th>\s*<td[^>]*__value">\s*<p>\s
                       re.IGNORECASE | re.DOTALL)
 
 
-def _dims_from_html(html: str) -> dict:
-    """Length / Width / Thickness (with their unit from the label, e.g. '140cm') from a
-    marenostone product page's attributes table. 'Length' is the long face, 'Width' the short
-    face, 'Thickness' the depth."""
+def _dims_from_html(html: str, default_unit: str = "cm") -> dict:
+    """Length / Width / Thickness (with their unit from the label, e.g. '140cm') from a marenostone
+    product page's attributes table. 'Length' is the long face, 'Width' the short face, 'Thickness' the
+    depth. The unit comes from the label ('Length (cm)'); when a label omits it, `default_unit` is the
+    source's DECLARED convention (see MarenoStoneScraper.dimension_unit), never a hardcoded guess. A
+    NON-NUMERIC value (e.g. 'Free' for a free-length slab) keeps its raw text -- it is not given a
+    fabricated unit, so it reads downstream as 'no real size' and rejects, instead of a bogus '<x>cm'."""
     out: dict = {}
     for label, value in _DIM_ROW.findall(html or ""):
         value = value.strip()
         if not value:
             continue
         unit = re.search(r"\((\w+)\)", label)
-        valued = f"{value}{unit.group(1) if unit else 'cm'}"
+        u = unit.group(1) if unit else default_unit
+        valued = f"{value}{u}" if any(ch.isdigit() for ch in value) else value
         low = label.lower()
         if "length" in low:
             out["length"] = valued
@@ -94,6 +98,10 @@ def _dims_from_html(html: str) -> dict:
 class MarenoStoneScraper(ScraperBase):
     source = "marenostone"
     category = None  # format is per-product (attr_format), not a constant
+    # DECLARED source convention: marenostone.com renders dimensions in centimetres (verified across the
+    # live catalogue). Locked in here so the extractor never silently guesses a unit when a label omits it
+    # -- a source with a different convention declares its own. The label's unit still wins when present.
+    dimension_unit = "cm"
     columns = [
         "product_id", "name", "slug", "permalink", "sku",
         "attr_category1", "attr_category2", "attr_format", "attr_finish",
@@ -126,7 +134,7 @@ class MarenoStoneScraper(ScraperBase):
         if url in cache:
             return cache[url]
         try:
-            dims = _dims_from_html(self.get(url).text)
+            dims = _dims_from_html(self.get(url).text, self.dimension_unit)
         except Exception as exc:  # never let a missing page kill the row
             # record_failure (not just a warning) so silently-blank dimensions are AUDITABLE rather
             # than looking like a genuine source gap. Do NOT cache the failure: a later row sharing this

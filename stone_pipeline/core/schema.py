@@ -41,7 +41,12 @@ class FlagCode(str, Enum):
     type_overridden_by_variety = "type_overridden_by_variety"
     attr_from_variety = "attr_from_variety"
     noncanonical_attr_casing = "noncanonical_attr_casing"
-    no_image = "no_image"
+    no_image = "no_image"                          # transient: nothing scraped / download failed -> retry
+    # terminal: images WERE scraped but Stage 7 (the image pipeline) classified every one as non-stone
+    # (spec sheet, pure vendor logo) and discarded them. A known-good empty, NOT a failure: the product is a
+    # real stone with no usable photo. It publishes without an image; the discard reason (provenance) is
+    # carried on this flag for review; it is never retried/alarmed as broken. Emitted ONLY by Stage 7.
+    no_publishable_image = "no_publishable_image"
     ports_default = "ports_default"
     surrogate_minted = "surrogate_minted"
     degraded_batch = "degraded_batch"

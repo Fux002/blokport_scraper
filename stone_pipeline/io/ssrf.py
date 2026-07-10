@@ -1,14 +1,14 @@
 """SSRF guard for outbound fetches.
 
 Image URLs (and links) come from scraped HTML, which is only semi-trusted: a malicious
-or compromised source could point one — or a redirect — at an internal/link-local
+or compromised source could point one -- or a redirect -- at an internal/link-local
 address (e.g. the Fargate task-metadata IP 169.254.170.2) to read credentials. This
 restricts fetches to http(s) on hosts that resolve EXCLUSIVELY to public addresses, and
 callers apply it to every redirect hop (so a public URL can't 302 to an internal one).
 
 Note: a small TOCTOU window (DNS rebinding) remains between the resolve-and-check here
-and the client's own connect-time resolve. For the threat model — scraped image URLs,
-not a determined rebinding attacker — blocking on the resolved IP plus per-hop redirect
+and the client's own connect-time resolve. For the threat model -- scraped image URLs,
+not a determined rebinding attacker -- blocking on the resolved IP plus per-hop redirect
 validation is a strong mitigation. Pinning the socket to the resolved IP would close it
 fully but needs a custom transport; revisit if the threat model hardens.
 """

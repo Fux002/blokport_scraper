@@ -62,7 +62,8 @@ RUN mkdir -p /app/models \
     && echo "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1  /app/models/RealESRGAN_x4plus.pth" | sha256sum -c -
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('diffusers/stable-diffusion-xl-1.0-inpainting-0.1', revision='115134f363124c53c7d878647567d04daf26e41e'); \
-    d('madebyollin/sdxl-vae-fp16-fix', revision='207b116dae70ace3637169f1ddd2434b91b3a8cd')"
+    d('madebyollin/sdxl-vae-fp16-fix', revision='207b116dae70ace3637169f1ddd2434b91b3a8cd'); \
+    d('openai/clip-vit-base-patch32', revision='3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268', ignore_patterns=['*.msgpack','*.h5','*.md'])"
 ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth
 
 
@@ -98,7 +99,8 @@ RUN mkdir -p /app/models \
     && echo "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1  /app/models/RealESRGAN_x4plus.pth" | sha256sum -c -
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('diffusers/stable-diffusion-xl-1.0-inpainting-0.1', revision='115134f363124c53c7d878647567d04daf26e41e'); \
-    d('madebyollin/sdxl-vae-fp16-fix', revision='207b116dae70ace3637169f1ddd2434b91b3a8cd')"
+    d('madebyollin/sdxl-vae-fp16-fix', revision='207b116dae70ace3637169f1ddd2434b91b3a8cd'); \
+    d('openai/clip-vit-base-patch32', revision='3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268', ignore_patterns=['*.msgpack','*.h5','*.md'])"
 # Sensible enhancement defaults baked in (Batch job overrides SRC / BLOKPORT_ENV / bucket).
 ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
     BLOKPORT_IMAGE_PROCESSING=true

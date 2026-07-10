@@ -4,7 +4,20 @@ The pipeline ingests any source that lands a `data/<source>/<timestamp>/products
 and has an **adapter** mapping that CSV to the canonical schema. Adapters are
 **auto-discovered** — drop the file in and it registers itself.
 
+> **Before a source is allowed to produce, it MUST clear every gate in
+> [`NEW_SOURCE_CHECKLIST.md`](../../NEW_SOURCE_CHECKLIST.md).** The steps below are the mechanical build;
+> the checklist is the full admission contract (declare conventions → fixture → certify → source contract →
+> health/ingest → clean/magnitude/process/validate → invariants → admission ladder → human live-verify). A
+> source that fails any gate stays in `mode: review` (or out) until fixed. Follow the checklist end to end.
+
 ## Steps
+
+**0. Declare what the source offers** (source-isolation invariant): every source-specific fact is a
+declaration on the scraper/adapter/config, never an inline guess or an order-dependent heuristic. Beyond
+`source`/`columns`/`format`, declare the source's conventions -- e.g. `dimension_unit` if it parses dimensions
+(see `marenostone.py`), `proxy_capability` if it needs a proxy, its acquisition type. If the source's rule is
+ambiguous (a unit a label omits, which category level is the material), DECLARE the rule from a live sample;
+do not decide it at extraction time. See NEW_SOURCE_CHECKLIST.md section 0.
 
 1. **Scraper** — `scrapers/<source>.py`: copy `scrapers/_template.py`, subclass `ScraperBase`,
    set `source`/`columns`/`id_field` and a per-product `format` (`slab`/`block`/`tile`),

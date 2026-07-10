@@ -119,7 +119,7 @@ def clean_alias_list(name: str, raw_aliases) -> list[str]:
 
 
 def _cap_word(word: str) -> str:
-    """Capitalize the first alphabetic char, lowercase the rest — so 'ASTORIA' ->
+    """Capitalize the first alphabetic char, lowercase the rest -- so 'ASTORIA' ->
     'Astoria', 'no.' -> 'No.', '(lasa' -> '(Lasa', '426' -> '426'."""
     out, capped = [], False
     for ch in word:
@@ -154,7 +154,7 @@ def slugify(text: str) -> str:
     return _NON_SLUG.sub("-", ascii_fold(text or "").casefold()).strip("-")
 
 
-# strip stray edge punctuation, but NOT brackets — a balanced '(Sunset Gold)' is meaningful
+# strip stray edge punctuation, but NOT brackets -- a balanced '(Sunset Gold)' is meaningful
 _EDGE_PUNCT = re.compile(r"^[\s\-–—_/.,:;#*|]+|[\s\-–—_/.,:;#*|]+$")
 
 
@@ -165,7 +165,7 @@ def _is_number_code(tok: str) -> bool:
     """A token carrying a number that does NOT belong in a stone variety name -> drop it. The
     ONLY number a stone name uses is a granite code: 'G' + digits ('G682', 'G032'). EVERYTHING
     else with a digit ('3D', '2cm', '1.08', '426', '883') or a 'No.' series marker is a code /
-    measurement to strip — no other stone uses numbers in its name."""
+    measurement to strip -- no other stone uses numbers in its name."""
     t = tok.strip("().[]{}-–—,")
     if not t:
         return False
@@ -236,7 +236,7 @@ def clean_variety_name(name: str, code_prefixes: tuple[str, ...] = (),
 
 
 def looks_like_artifact(name: str) -> bool:
-    """A HIGH-CONFIDENCE check that a name does not read like a real stone — a backstop to the
+    """A HIGH-CONFIDENCE check that a name does not read like a real stone -- a backstop to the
     per-source corpus cleaning (detect_code_prefixes), used to refuse minting and keep junk out
     of the upload files. Only the unambiguous shapes: empty / too short / no letters, a leading
     LONE letter ('Z Astoria'), or a SEPARATE number/series code ('Super – 1.08', 'Marjan No. 426',

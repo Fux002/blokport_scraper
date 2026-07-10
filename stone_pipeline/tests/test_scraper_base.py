@@ -114,6 +114,19 @@ def test_marenostone_parses_dimensions_from_attributes_table():
     assert _dims_from_html("<table></table>") == {}  # no dims -> empty, never crashes
 
 
+def test_marenostone_declared_unit_and_free_length():
+    from scrapers.marenostone import MarenoStoneScraper, _dims_from_html
+    L = 'woocommerce-product-attributes-item__label'
+    V = 'woocommerce-product-attributes-item__value'
+    # source declares its unit -> a label with NO (unit) uses the declared 'cm', not a hardcoded guess
+    assert MarenoStoneScraper.dimension_unit == "cm"
+    no_unit = f'<table><tr><th class="{L}">Length</th><td class="{V}"><p>200</p></td></tr></table>'
+    assert _dims_from_html(no_unit, default_unit="cm") == {"length": "200cm"}
+    # a non-numeric 'Free' length keeps its raw text (no fabricated 'Freecm') -> rejects downstream as no size
+    free = f'<table><tr><th class="{L}">Length (cm)</th><td class="{V}"><p>Free</p></td></tr></table>'
+    assert _dims_from_html(free) == {"length": "Free"}
+
+
 def test_curl_cffi_uses_proxy_only_when_needs_proxy(tmp_path, monkeypatch):
     # the residential proxy is metered; a curl_cffi site applies it ONLY when needs_proxy is set (its
     # Cloudflare tenant blocks the datacenter IP). A curl_cffi site that works direct spends no proxy.
@@ -144,3 +157,36 @@ def test_curl_cffi_uses_proxy_only_when_needs_proxy(tmp_path, monkeypatch):
     captured.clear()
     _Direct(data_dir=tmp_path)._cffi()
     assert "proxies" not in captured                 # curl_cffi alone -> no proxy spent
+
+
+# --- the proxy toolbox: capability-based resolution (Phase 5) ------------------
+def test_proxy_capability_resolves_via_the_toolbox(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://u:p@proxy:1337")
+
+    class _Cap(_Fake):
+        proxy_capability = "cloudflare_residential"
+
+    assert _Cap(data_dir=tmp_path)._resolve_proxy() == "http://u:p@proxy:1337"
+
+
+def test_capability_without_secret_connects_direct(tmp_path, monkeypatch):
+    monkeypatch.delenv("BLOKPORT_SCRAPER_PROXY", raising=False)
+
+    class _Cap(_Fake):
+        proxy_capability = "cloudflare_residential"
+
+    assert _Cap(data_dir=tmp_path)._resolve_proxy() is None   # loud warn, connects direct
+
+
+def test_legacy_needs_proxy_still_honoured(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://legacy:1")
+
+    class _Legacy(_Fake):
+        needs_proxy = True                            # no capability -> the legacy single-proxy fallback
+
+    assert _Legacy(data_dir=tmp_path)._resolve_proxy() == "http://legacy:1"
+
+
+def test_no_capability_no_needs_proxy_is_direct(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://x:1")
+    assert _Fake(data_dir=tmp_path)._resolve_proxy() is None   # default: metered proxy never spent

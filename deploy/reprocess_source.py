@@ -2,7 +2,7 @@
 
 For a source already scraped to S3, re-run the de-watermark + enhance + upscale chain
 on the raw originals at <env>/products/scraped/<src>/ and write the result to
-<env>/products/improved/<src>/<same-hash>.jpg — straight into the production location
+<env>/products/improved/<src>/<same-hash>.jpg -- straight into the production location
 the product sheets link to, replacing any prior version in place (same content key).
 
 Parallelise across tasks with SLICE_OFFSET / SLICE_COUNT (0 count = to the end). SRC
@@ -12,6 +12,7 @@ image via the entrypoint:  RUN_MODE=reprocess
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -25,6 +26,7 @@ from stone_pipeline.io.image_processing import ImageProcessor
 def main() -> int:
     src = os.environ.get("SRC", "varsha")
     watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
+    classify = os.environ.get("CLASSIFY", "true").lower() in ("1", "true", "yes")
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
     count = int(os.environ.get("SLICE_COUNT", "0"))  # 0 = to the end
     src_prefix = imagestore.scraped_prefix(src)      # single source of truth for the S3 layout
@@ -41,15 +43,30 @@ def main() -> int:
         return 0
 
     print(f"==> reprocess {src}: {len(sliced)} of {len(keys)} (offset={offset} "
-          f"count={count or 'all'}) watermarked={watermarked} -> s3://{S3_BUCKET}/{dst_prefix}")
+          f"count={count or 'all'}) watermarked={watermarked} classify={classify} "
+          f"-> s3://{S3_BUCKET}/{dst_prefix}")
     proc = ImageProcessor(ImageProcessingConfig(
-        enabled=True, dewatermark=watermarked, write_preview=False))
+        enabled=True, dewatermark=watermarked, classify=classify, write_preview=False))
 
-    done = dw = failed = 0
+    done = dw = discarded = failed = 0
     for i, key in enumerate(sliced):
-        name = key.rsplit("/", 1)[-1]
+        name = key.rsplit("/", 1)[-1]          # <sha256>.jpg
+        sha = name.rsplit(".", 1)[0]
         try:
             data = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
+            # 1) classify: a non-stone image (spec sheet / price list / plain logo) is recorded in the
+            #    discarded/ pool and NOT enhanced or published. One marker object per image (content-keyed),
+            #    so the parallel slices never race a shared file. Stage 7 reads the pool and, when a
+            #    variant's every image is discarded, emits the terminal no_publishable_image flag.
+            cl = proc.classify(data)
+            if cl.ran and not cl.keep:
+                marker = json.dumps({"reason": cl.reason, "score": round(cl.p_nonstone, 4),
+                                     "classifier": proc.classifier_id}, sort_keys=True).encode("utf-8")
+                client.put_object(Bucket=S3_BUCKET, Key=imagestore.discarded_key(src, sha),
+                                  Body=marker, ContentType="application/json")
+                discarded += 1
+                continue
+            # 2) a kept image is de-watermarked + enhanced into improved/ (replace-in-place, same key)
             res = proc.process(data, watermarked=watermarked)
             client.put_object(Bucket=S3_BUCKET, Key=f"{dst_prefix}{name}",
                               Body=res.data, ContentType="image/jpeg")
@@ -59,8 +76,10 @@ def main() -> int:
             failed += 1
             print(f"   [{offset + i}] FAILED {name}: {exc}")
         if i % 25 == 0:
-            print(f"   [{offset + i}/{offset + len(sliced)}] ok={done} dw={dw} failed={failed}")
-    print(f"==> {src} slice done: {done}/{len(sliced)} written, {dw} de-watermarked, {failed} failed")
+            print(f"   [{offset + i}/{offset + len(sliced)}] ok={done} dw={dw} "
+                  f"discarded={discarded} failed={failed}")
+    print(f"==> {src} slice done: {done}/{len(sliced)} written, {dw} de-watermarked, "
+          f"{discarded} discarded, {failed} failed")
     return 0
 
 

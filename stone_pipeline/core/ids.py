@@ -32,7 +32,7 @@ def mint_surrogate(src_site: str, src_url: str | None, raw_name: str | None, ord
                    raw_format: str | None = None) -> str:
     """Deterministic surrogate when the natural key is missing (section 2, Stage 2).
 
-    Keyed on a STABLE basis — the product url, else its raw name — so the same product mints the
+    Keyed on a STABLE basis -- the product url, else its raw name -- so the same product mints the
     same surrogate (and thus the same SKU) on every re-scrape, even if the supplier reorders its
     listing. This is what keeps the inventory lane's existing-product link intact for blank-key
     rows. The scrape position (ordinal) is NOT reproducible across runs, so it is used ONLY as a
@@ -40,7 +40,7 @@ def mint_surrogate(src_site: str, src_url: str | None, raw_name: str | None, ord
     genuine collision surfaces loudly rather than silently drifting).
 
     The format/branch is part of the basis: a supplier that lists the SAME variety as both a slab
-    and a block under the same url/name (blank natural key) must mint DISTINCT surrogates — they are
+    and a block under the same url/name (blank natural key) must mint DISTINCT surrogates -- they are
     two different products and must not collapse to one SKU and get silently de-duped away."""
     basis = (src_url or "").strip() or (raw_name or "").strip()
     fmt = (raw_format or "").strip().casefold()

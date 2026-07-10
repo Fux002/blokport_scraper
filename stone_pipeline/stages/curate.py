@@ -44,6 +44,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind
@@ -73,7 +74,7 @@ def active_branches() -> tuple[str, ...]:
 
 def _slug_us(text: str) -> str:
     """Underscore slug matching the existing Key convention (agata_black). Accent-folded so the
-    Key is fold-invariant — same key whether the caller passes 'Porriño' or 'Porrino' — matching
+    Key is fold-invariant -- same key whether the caller passes 'Porriño' or 'Porrino' -- matching
     title_case/slugify and so the deterministic Key can never split one variety in two."""
     return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", ascii_fold(text or "").casefold())).strip("_")
 
@@ -151,17 +152,13 @@ def _alias_list(raw: str) -> list[str]:
     return [a.strip() for a in (raw or "").split("|") if a.strip()]
 
 
-# a sensible default allowed-finish set for a new variant; the human refines it
-# (the backbone dictates which combinations a product may be uploaded as)
-_DEFAULT_FINISHES = ["Polished", "Honed", "Leathered", "Brushed", "Flamed",
-                     "Sandblasted", "Sawn Cut", "Raw"]
+# The default allowed-finish set for a new variant and the generic fallback colour (for a source that
+# supplies none, e.g. zucchi) now live in the active product-domain pack (config/domains/<pack>.yaml); the
+# stone pack reproduces the historical values. The human still refines the finish set per the backbone.
 # Why a code-shaped name is held for confirmation -- shown in the review 'reason' column (a supplier code
 # has no colour, so it never belongs in the colour field). Keyed by looks_code_shaped's return.
 _CODE_REASON = {"lone_letter": "trailing grade letter (e.g. 'Rosal C')",
                 "bare_code": "supplier code, not a variety name"}
-# Generic fallback colour for a variety whose source supplies none (e.g. zucchi). Keeps the variety
-# + its products priceable. Must exist as a colour attribute in Medusa (see attributes_to_add.csv).
-_FALLBACK_COLOR = "Natural"
 
 
 # format words to strip from a variety name (singular + plural of every category)
@@ -580,11 +577,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # an operator-chosen mint colour (from the new-variety review) WINS over the observed/fallback
         # chain, so a colourless source is seeded with a real colour instead of the generic 'Natural'.
         seeded = seed_colors.get(proj.norm(title))
+        _pack = active_pack()
         colors = ([seeded] if seeded
-                  else sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_FALLBACK_COLOR])
+                  else sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_pack.fallback_color])
         qualities = sorted(_u["qualities"]) or [obs_quality]
         finishes = list(dict.fromkeys([*sorted(_u["finishes"]),
-                                       *([obs_finish] if obs_finish else []), *_DEFAULT_FINISHES]))
+                                       *([obs_finish] if obs_finish else []), *_pack.default_finishes]))
         # A cross-branch sibling's variety already exists in another branch carrying the scraped
         # spelling as an alias (alias_new). Carry that SAME alias onto the new sibling so its product
         # resolves in ONE upload, not two (mint the variety AND attach its alias in the same leg --

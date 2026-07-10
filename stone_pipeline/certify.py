@@ -1,8 +1,8 @@
-"""Per-source certification gate — the trust foundation for safe auto-loading.
+"""Per-source certification gate -- the trust foundation for safe auto-loading.
 
 A data source (a web scraper OR any other product connection) is NOT trusted to
 auto-load into Medusa until it passes certification. A source's `mode` (in
-sources.yaml) is "review" by default — its output stages for human sign-off;
+sources.yaml) is "review" by default -- its output stages for human sign-off;
 only `mode: auto` lets it load automatically. You promote review->auto once this
 command is green and you've signed off, so a newly-added source can never silently
 push bad data live.

@@ -163,8 +163,8 @@ def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
                         discontinued: tuple[tuple[str, str], ...] = ()) -> Path:
     """Inventory-only update (item 5): for existing products whose stock changed, emit the
     inventory CSV. The importer uses only Variant Sku (which product) and Inventory Quantity, but
-    the full structure is written so the file loads. `discontinued` (sku, handle) pairs — products
-    the supplier dropped — are written at quantity 0: a reversible delist (a later scrape that
+    the full structure is written so the file loads. `discontinued` (sku, handle) pairs -- products
+    the supplier dropped -- are written at quantity 0: a reversible delist (a later scrape that
     carries the stone again simply sets it back)."""
     from stone_pipeline.stages.product_state import inventory_for, sku_for
 

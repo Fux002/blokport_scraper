@@ -99,7 +99,13 @@ def classify(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) 
         else:
             row.product_status = "existing"
             stats.existing += 1
-            old_inv = (entry.get("inventory") or "").strip()
+            # Compare like-for-like: new_inv is normalized (inventory_for -> str(int(...))), so the export's
+            # raw value must be normalized the SAME way or messy formatting ('10.0', '1,000', ' 10 ') reads
+            # as a phantom change every run -- emitting spurious inventory deltas and breaking byte-identical
+            # re-runs. A real 0 is preserved (differs from inventory_for's in-stock floor of 1).
+            old_raw = (entry.get("inventory") or "").strip()
+            _old_n = parse_number(old_raw) if old_raw else None
+            old_inv = str(int(_old_n)) if _old_n is not None else old_raw
             new_inv = inventory_for(row)
             row.product_changed = bool(old_inv) and old_inv != new_inv
             if row.product_changed:
@@ -112,7 +118,7 @@ def classify(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) 
 
 def discontinued(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) -> list[tuple[str, str]]:
     """Close the delete loop: Medusa SKUs owned by THIS source (sku prefix `{source_code}-`) that
-    the latest scrape did NOT produce — the supplier dropped them. Returned as (sku, handle) for a
+    the latest scrape did NOT produce -- the supplier dropped them. Returned as (sku, handle) for a
     reversible stock-0 delist + a review report. Empty without a baseline (`known`), so it never
     fires until the Medusa product export is present. Source-scoped by SKU prefix, so one supplier's
     run can never delist another's products."""
