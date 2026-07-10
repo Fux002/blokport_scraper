@@ -67,6 +67,20 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             rec = runner.get_run(segments[1])
             return (200, rec) if rec else (404, {"error": f"no run {segments[1]!r}"})
         return 404, {"error": "expected /config/v1/run or /config/v1/run/<run_id>"}
+    if segments and segments[0] == "diagnostics":
+        # per-source pipeline diagnostics for the admin UI (read-only): which layer degraded + what
+        # drifted in the source, so a silent format change is visible.
+        #   GET /config/v1/diagnostics            -> [{source, run_id, health, gates, stages, drift, ...}, ...]
+        #   GET /config/v1/diagnostics/<source>   -> that source's latest summary (404 if it never produced)
+        from stone_pipeline.config import diagnostics
+        if method != "GET":
+            return 405, {"error": "GET /config/v1/diagnostics[/<source>]"}
+        if len(segments) == 1:
+            return 200, {"diagnostics": diagnostics.read_all()}
+        if len(segments) == 2:
+            summary = diagnostics.read_source(segments[1])
+            return (200, summary) if summary else (404, {"error": f"no diagnostics for {segments[1]!r}"})
+        return 404, {"error": "expected /config/v1/diagnostics or /config/v1/diagnostics/<source>"}
     if segments and segments[0] == "reset":
         # clean-start the ledger sync state (the coordinated ①②③ reset, our ① half). Body (optional):
         #   {"hard": true, "sources": ["zucchi", ...]}   hard also drops scraped products; sources scopes.

@@ -15,16 +15,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from stone_pipeline.adapters.tokens import explicit_type_word
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import LAST_RESORT_FINISH, LAST_RESORT_QUALITY, SETTINGS, Confidence
 from stone_pipeline.core import logfmt
+from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
+from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.matching.engine import VocabResolver
 from stone_pipeline.reference.loaders import ReferenceData
 
 log = logfmt.get_logger("normalize")
 
-# vocab -> (raw field, code, multi-value allowed)
-VOCAB_FIELDS = ("type", "color", "finish", "quality")
+# The attribute vocabulary (in resolution order) is declared by the active product-domain pack; the stone
+# pack reproduces the historical ("type", "color", "finish", "quality"). Selected by BLOKPORT_DOMAIN_PACK at
+# startup, so a different product type resolves its OWN attribute set with no code change.
+VOCAB_FIELDS = tuple(active_pack().attributes)
 
 
 @dataclass
@@ -148,7 +153,7 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
 
     # Blocks are sold raw/unfinished, so sources rarely give a finish ('' or 'Other');
     # that would null finish_id and reject the row at validate (finish is required).
-    # Default a block to 'Raw' — the standard block finish, in attributes.csv and the
+    # Default a block to 'Raw' -- the standard block finish, in attributes.csv and the
     # block backbone. Check raw_format too: normalize runs BEFORE format_resolve, so
     # format_value isn't set yet -- the source format tag is what's available here.
     fmt = (row.format_value or row.raw_format or "").strip().lower()
@@ -168,9 +173,17 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
         _apply_last_resort(row, "quality", LAST_RESORT_QUALITY, ref)
 
 
-def run(rows: list[CanonicalRow], ref: ReferenceData) -> AttributeResolvers:
+def run(rows: list[CanonicalRow], ref: ReferenceData) -> StageMetric:
     resolvers = AttributeResolvers.build(ref)
     for row in rows:
         normalize_row(row, resolvers, ref)
-    log.info("normalize done", extra={"extra_fields": {"rows": len(rows)}})
-    return resolvers
+    # Per-layer signal: an unusually high share of rows whose required attribute never resolved points
+    # at a vocab/synonym drift (the attribute-vocab-drift bug class), caught here rather than as a
+    # downstream reject. last_resort/multi are informational counts, not anomalies.
+    unresolved = sum(1 for r in rows if any(f.code == FlagCode.attr_unresolved for f in r.review_flags))
+    last_resort = sum(1 for r in rows if any(f.code == FlagCode.attr_last_resort for f in r.review_flags))
+    multi = sum(1 for r in rows if any(f.code == FlagCode.multi_value for f in r.review_flags))
+    status = DEGRADED if rows and unresolved / len(rows) >= SETTINGS.thresholds.normalize_unresolved_degraded else OK
+    log.info("normalize done", extra={"extra_fields": {"rows": len(rows), "unresolved": unresolved}})
+    return StageMetric(stage="normalize", status=status, rows_in=len(rows), rows_out=len(rows),
+                       extra={"unresolved_rows": unresolved, "last_resort": last_resort, "multi_value": multi})

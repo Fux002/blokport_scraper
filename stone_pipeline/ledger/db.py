@@ -106,7 +106,11 @@ class Ledger:
 
     @staticmethod
     def _connect(path: str | Path) -> sqlite3.Connection:
-        """The one SQLite-specific spot. Swap this for a Postgres DSN later."""
+        """The one SQLite-specific spot: the connect + PRAGMAs below are the substrate seam. A Postgres
+        migration adds its branch HERE (see MIGRATION_TO_POSTGRES.md). require_sqlite fails loud if a
+        not-yet-wired dialect is configured, so the seam is explicit and a misconfig surfaces here."""
+        from stone_pipeline.core.dbdialect import require_sqlite
+        require_sqlite("ledger")
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")

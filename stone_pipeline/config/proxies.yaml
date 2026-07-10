@@ -1,0 +1,21 @@
+# Proxy toolbox: declare each proxy ONCE here, reference it from a scraper by CAPABILITY. Adding or removing
+# a proxy is an edit to THIS file (plus setting its secret) -- the scraper code never changes.
+#
+# A scraper sets `proxy_capability = "<cap>"`; the first proxy whose `for_capabilities` lists that cap is
+# used, and its URL is read from the env var named in `url_env`. Secrets are injected per environment from
+# SSM by convention: /blokport-<env>/<url_env>. The metered residential proxy is used ONLY by a scraper that
+# declares a capability (images never use it -- their hosts serve datacenter IPs; see io/download.py).
+#
+# To ADD a proxy (e.g. a datacenter provider for a US source):
+#   1. add an entry below with a NEW `url_env` (e.g. BLOKPORT_PROXY_DATACENTER_US);
+#   2. store its URL as the SSM secret /blokport-<env>/BLOKPORT_PROXY_DATACENTER_US and inject it on the
+#      scraper task (infra: add the name to the task's secret list -- see the infra proxy secret convention);
+#   3. give the scraper `proxy_capability = "<the new capability>"`.
+proxies:
+  residential_soax:
+    provider: SOAX
+    type: residential
+    # the existing single-proxy secret, so the toolbox is backward-compatible with today's deployment.
+    url_env: BLOKPORT_SCRAPER_PROXY
+    regions: [EU]
+    for_capabilities: [cloudflare_residential]

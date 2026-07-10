@@ -20,6 +20,8 @@ from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from pathlib import Path
 
+from stone_pipeline.config.domain import active_pack  # dependency-free (yaml only); no import cycle
+
 # Repository root: this file is stone_pipeline/config/settings.py, so two parents up.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = REPO_ROOT.parent
@@ -56,6 +58,15 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read an integer env var; fall back to default when unset or non-numeric (fail soft to the default,
+    never crash config import on a bad override)."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip().lstrip("-").isdigit():
+        return default
+    return int(raw.strip())
+
+
 # The dev bucket is known. The PROD bucket is supplied at deploy time via BLOKPORT_S3_BUCKET.
 # In PRODUCTION we must NOT silently fall back to the dev bucket (that would store prod images in
 # dev and stamp prod Medusa rows with dev URLs) -- fail fast instead. Dev keeps the known default.
@@ -69,11 +80,11 @@ S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
 S3_REGION = os.environ.get("BLOKPORT_S3_REGION", "eu-west-1")
 
 
-# Owner Medusa ids — operational config, NOT catalog attributes, so they are environment
-# variables (the catalog attribute ids — color/finish/type/quality/category — come from the
+# Owner Medusa ids -- operational config, NOT catalog attributes, so they are environment
+# variables (the catalog attribute ids -- color/finish/type/quality/category -- come from the
 # env's attributes.csv instead). The sales channel is ONE id per environment; the company is
 # the general Blokport owner by default and can be overridden per scrape in sources.yaml. Each
-# has a dev default for local runs; a PRODUCTION run must set the env var — it never falls back
+# has a dev default for local runs; a PRODUCTION run must set the env var -- it never falls back
 # to a dev id (returns "" so the miss is loud, never a silent dev/prod cross).
 _DEV_SALES_CHANNEL_ID = "sc_01KTM2B2DJNSW6WPS1Q8FN8B2R"
 _DEV_COMPANY_ID = "01KTV98X8RG743YR3QHCECZKKA"
@@ -213,6 +224,31 @@ class Thresholds:
     health_fill_drop_warn: float = 0.15
     health_fill_drop_fail: float = 0.40
     health_rowcount_floor: float = 0.50
+    # Per-stage diagnostic DEGRADED thresholds (share of the batch). Informational only -- a DEGRADED
+    # stage never changes routing (the gates remain the sole authority on what emits); it flags a
+    # systemic anomaly at its own layer so a drift surfaces where it is born, not three stages later.
+    normalize_unresolved_degraded: float = 0.25   # rows with an unresolved required attribute
+    match_unmatched_degraded: float = 0.50        # rows with no variation match (majority -> systemic)
+    derive_incomplete_degraded: float = 0.25      # rows missing a required derived dimension/weight
+
+
+@dataclass(frozen=True)
+class Admission:
+    """The rule that decides when a data source is 'consistent enough to be allowed in' (auto-load). All
+    config, no magic numbers in code. A source becomes ELIGIBLE for auto after `consistent_runs` clean runs
+    in a row (health OK + no drift) AND (if required) passing certification; a drift event on an `auto`
+    source auto-DEMOTES it back to review. Env-overridable for a different risk posture."""
+    consistent_runs: int = _env_int("BLOKPORT_ADMISSION_CONSISTENT_RUNS", 3)
+    require_certify: bool = _env_bool("BLOKPORT_ADMISSION_REQUIRE_CERTIFY", True)
+    history_limit: int = 20   # rolling per-source run-event history kept in config.db
+
+    def __post_init__(self):
+        # fail loud on a nonsensical threshold (e.g. a hostile env override): a consistent_runs < 1 would
+        # make ANY source eligible for auto with zero clean runs. No silent clamp -- surface the misconfig.
+        if self.consistent_runs < 1:
+            raise ValueError(f"BLOKPORT_ADMISSION_CONSISTENT_RUNS must be >= 1, got {self.consistent_runs}")
+        if self.history_limit < 1:
+            raise ValueError(f"admission history_limit must be >= 1, got {self.history_limit}")
 
 
 @dataclass(frozen=True)
@@ -262,7 +298,7 @@ class S3Config:
     staging_prefix: str = f"{ENV_SEGMENT}/products/"
     # Empty by default -> boto3 default credential chain (the ECS task IAM role on
     # AWS; ambient creds locally). Set BLOKPORT_AWS_PROFILE only to force a named
-    # local profile — never on Fargate, where no profile exists (ProfileNotFound).
+    # local profile -- never on Fargate, where no profile exists (ProfileNotFound).
     credentials_profile: str = os.environ.get("BLOKPORT_AWS_PROFILE", "")
     # When true the image stage does not hit S3; it derives keys deterministically
     # and records them, but performs no network IO. Used when creds are absent.
@@ -278,10 +314,10 @@ class ImageProcessingConfig:
 
     These are photos of the ACTUAL slabs a customer buys, usually shot in a
     storage unit under poor, uneven light. Enhancement is Real-ESRGAN (learned
-    clean + sharpen + 4x), then a gentle exposure lift + vibrance — brighter and
+    clean + sharpen + 4x), then a gentle exposure lift + vibrance -- brighter and
     crisper while keeping the stone's true colour and vein pattern. It needs the
     torch stack (requirements-imageproc.txt); if that is unavailable the step is
-    skipped with a warning (the image passes through un-enhanced — no fallback).
+    skipped with a warning (the image passes through un-enhanced -- no fallback).
 
     De-watermark runs ONLY on sources flagged `watermarked: true` in sources.yaml
     (e.g. varsha burns a visible mark into its photos), reconstructing the mark's
@@ -302,7 +338,7 @@ class ImageProcessingConfig:
     vibrance: float = 0.20            # restore colour muted by bad light (0 = off)
     # --- de-watermark (flagged sources only; needs the GPU imageproc extras) ---
     # The mark is located by its (stone-absent) pink ink + text strokes, then its small central
-    # footprint is REGENERATED with a learned inpainting model (SDXL-inpaint) — natural matching
+    # footprint is REGENERATED with a learned inpainting model (SDXL-inpaint) -- natural matching
     # stone texture, not the smear a classical fill leaves on patterned slabs. The exact pixels
     # under a drifting, multi-position semi-transparent mark can't be recovered, so this small
     # region is reconstructed; everything else is untouched.
@@ -323,6 +359,32 @@ class ImageProcessingConfig:
     # dev while testing, optional in prod. The improved/ + scraped/ folder names are
     # part of the S3 layout and live in io.imagestore (single source of truth).
     keep_scraped: bool = _env_bool("BLOKPORT_KEEP_SCRAPED", False)
+    # --- non-stone image discard (CLIP zero-shot; needs the same torch stack) ---
+    # A scraped image is sometimes NOT a photo of the stone: a spec sheet, a price list, or a plain
+    # vendor logo. CLIP scores each image against a "stone photo" prompt set vs a "document / logo" set;
+    # an image the non-stone class wins with probability >= classify_margin is DISCARDED -- not enhanced,
+    # not published -- and recorded in the discarded/ pool (io.imagestore). A variant whose EVERY image is
+    # discarded emits the terminal no_publishable_image review flag (it publishes imageless, is not retried
+    # as lost). Whole-image semantic score, NEVER text density: a slab photo WITH printed sizes, or a stone
+    # photo carrying a small vendor logo, is still a stone photo and is KEPT. Reuses transformers (already a
+    # dewatermark dep); the CLIP weights are baked into the imageproc/gpu images. Runs in the GPU reprocess
+    # (deploy.reprocess_source); Stage 7 only reads the resulting pool, so :core stays torch-free.
+    # Off by default (a discard is destructive): enable only once the margin is validated on a real sample.
+    classify: bool = _env_bool("BLOKPORT_IMAGE_CLASSIFY", False)
+    classify_model: str = os.environ.get("BLOKPORT_CLIP_MODEL", "openai/clip-vit-base-patch32")
+    classify_margin: float = 0.85  # discard iff P(non-stone) >= this; conservative, keep when unsure
+    classify_stone_prompts: tuple = (
+        "a photograph of a natural stone slab",
+        "a close-up photo of a polished stone surface",
+        "a photo of marble or granite or quartzite texture",
+        "a slab of stone in a warehouse",
+    )
+    classify_nonstone_prompts: tuple = (
+        "a document or technical spec sheet",
+        "a price list or printed catalogue page",
+        "a plain company logo on a blank background",
+        "a screenshot of text or a table",
+    )
 
 
 @dataclass(frozen=True)
@@ -470,35 +532,32 @@ _ENV_PCATS = _env_category_pcats()  # {'Slabs': pcat, 'Blocks': pcat, 'Tiles': p
 
 def _pcat(label: str, env_var: str | None = None) -> str:
     """A category's Medusa pcat for THIS env, sourced ONLY from the env's Medusa export
-    (from_medusa/<env>/attributes.csv) — never hardcoded. An explicit env-var override is allowed.
+    (from_medusa/<env>/attributes.csv) -- never hardcoded. An explicit env-var override is allowed.
     A category absent from the export stays "" (inactive, emits nothing), so dev and prod ids can
     never cross and no stale literal can leak."""
     if env_var and os.environ.get(env_var):
         return os.environ[env_var]
     return _ENV_PCATS.get(label, "")
 
-# The category list. Adding a category = ADD AN ENTRY HERE (a source edit): every
-# category-derived constant in the pipeline recomputes from this tuple at import.
-# `_BY_NAME` below is the runtime index the helpers read (so activation via the env
-# pcat, and tests, can flip a category); behaviour is keyed off the flags + active.
-# Full recipe: CATEGORY_GUIDE.md.
-CATEGORIES: tuple[Category, ...] = (
-    Category("slab", "slabs", "Slabs",
-             _pcat("Slabs"), "backbone_slabs.json",
-             "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg",
-             shares_variety_vocab=True, fan_out=True, mirror_of=None, volume_per_kg="0.0017"),
-    Category("block", "blocks", "Blocks",
-             _pcat("Blocks"), "backbone_blocks.json",
-             "https://v3b.fal.media/files/b/0a9f301e/Vlbo_xk9vDJtYKhEbkxBZ_base_block.jpeg",
-             shares_variety_vocab=True, fan_out=True, mirror_of=None, volume_per_kg="0.0014348"),
-    # tiles (and other non-slab categories) use the block volume per kg
-    Category("tile", "tiles", "Tiles",
-             _pcat("Tiles", "BLOKPORT_CAT_TILES_PCAT"),
-             "backbone_tiles.json",
-             "https://v3b.fal.media/files/b/0a9f30f3/jdmNyxqelKJM4DxFi4jyG_base_tiles.png",
-             shares_variety_vocab=True, fan_out=True, mirror_of="slab", volume_per_kg="0.0014348",
-             pcat_env_var="BLOKPORT_CAT_TILES_PCAT"),
-)
+# The category list is declared by the active product-domain pack (config/domains/<pack>.yaml). Adding a
+# category = ADD AN ENTRY THERE; every category-derived constant in the pipeline recomputes from this tuple
+# at import. The Medusa pcat id stays env-derived (_pcat, from the env's attributes.csv), never in the pack,
+# so dev/prod ids never cross. `_BY_NAME` below is the runtime index the helpers read (activation via the
+# env pcat, and tests, can flip a category). The stone pack reproduces the historical slab/block/tile tuple
+# exactly. Full recipe: CATEGORY_GUIDE.md.
+def _build_categories() -> "tuple[Category, ...]":
+    return tuple(
+        Category(
+            c["name"], c["plural"], c["label"],
+            _pcat(c["label"], c.get("pcat_env_var")), c["backbone_filename"], c["base_image"],
+            shares_variety_vocab=c["shares_variety_vocab"], fan_out=c["fan_out"],
+            mirror_of=c.get("mirror_of"), volume_per_kg=c.get("volume_per_kg", ""),
+            pcat_env_var=c.get("pcat_env_var"))
+        for c in active_pack().categories
+    )
+
+
+CATEGORIES: tuple[Category, ...] = _build_categories()
 
 _BY_NAME = {c.name: c for c in CATEGORIES}
 _BY_LABEL = {c.label: c for c in CATEGORIES}
@@ -557,6 +616,7 @@ class Settings:
 
     paths: Paths = field(default_factory=Paths)
     thresholds: Thresholds = field(default_factory=Thresholds)
+    admission: Admission = field(default_factory=Admission)
     backend: BackendConstants = field(default_factory=BackendConstants)
     s3: S3Config = field(default_factory=S3Config)
     images: ImagesConfig = field(default_factory=ImagesConfig)

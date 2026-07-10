@@ -180,6 +180,10 @@ module "gpu_enhance_dev" {
   image_repo_url = data.aws_ecr_repository.scraper.repository_url # shared repo (data source; decoupled from ECR refactor)
   image_tag      = var.gpu_image_tag
   region         = var.region
+  # 128 vCPU = up to 32 g4dn.xlarge in parallel. Full-catalog reprocess is ~53 GPU-hours at ~30s/image;
+  # 4 GPUs (the default 16) took >2h per slice and hit the Batch timeout. min stays 0, so idle cost is $0
+  # and total spend is ~flat vs 4 GPUs (same GPU-hours) -- this only compresses wall-clock to ~1.5-2h.
+  max_vcpus      = 128
 }
 
 module "gpu_enhance_prod" {

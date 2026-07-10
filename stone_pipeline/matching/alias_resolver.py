@@ -1,5 +1,5 @@
 """Tier-7 alias resolver: an entity-resolution model that decides whether a new variety name is
-an ALIAS of an existing variant or a genuinely NEW stone — with a calibrated probability instead
+an ALIAS of an existing variant or a genuinely NEW stone -- with a calibrated probability instead
 of a flat fuzzy threshold (which mis-files siblings like 'Cristallo Divine' vs 'Cristallo Bianco').
 
 Trained per run on the backbone's own aliases (positives) + each variety's fuzzy-nearest DISTINCT
@@ -94,8 +94,8 @@ class AliasResolver:
         return self.decide_against(a, ta, ca, [b], tb, cb)
 
     def decide_against(self, a: str, ta: str, ca, surfaces: list[str], tb: str, cb) -> Decision:
-        """Score the new name against ALL surfaces of the candidate variety — its canonical name
-        AND its known aliases — and take the strongest. A scrape that matches an existing alias is
+        """Score the new name against ALL surfaces of the candidate variety -- its canonical name
+        AND its known aliases -- and take the strongest. A scrape that matches an existing alias is
         an alias, even if it's far from the canonical name (e.g. 'Ice Burg' ~ alias 'Ice Berg').
 
         Typo safety net: the token-based model can miss a misspelling that changes tokenization
@@ -177,7 +177,7 @@ class AliasResolver:
 
 def from_backbones():
     """Train the resolver on every category's backbone (name + aliases + type + colour) and return
-    (resolver, name_norm -> (stone_type, colors, aliases)) — the lookup the mint decision uses for
+    (resolver, name_norm -> (stone_type, colors, aliases)) -- the lookup the mint decision uses for
     the nearest variety. Returns (None, {}) when there's too little labelled data, so the caller
     falls back to the fuzzy floor."""
     from stone_pipeline.config.settings import CATEGORIES, SETTINGS

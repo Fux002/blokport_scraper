@@ -31,6 +31,11 @@ log = logfmt.get_logger("adapter")
 # the source row dict and returns the canonical value.
 FieldRule = Union[str, Callable[[dict[str, Any]], Any]]
 
+# How a source's raw frame is ACQUIRED (the Acquire layer). A scraper is just one kind of data source.
+ACQ_SCRAPER = "scraper"        # a fetcher in scrapers.REGISTRY wrote data/<source>/<ts>/products.csv
+ACQ_LOAD_FRAME = "load_frame"  # the adapter fetches its own frame (API / DB / partner feed)
+ACQ_FILE_DROP = "file_drop"    # an operator drops an export file; no fetcher, read like a scrape
+
 
 class AdapterBase:
     """Subclass and set: source, adapter_version, variety_match_key (the source
@@ -57,6 +62,17 @@ class AdapterBase:
     field_map: dict[str, FieldRule] = {}
     # canonical fields that must be non-empty after mapping, else the row is bad
     required_canonical: tuple[str, ...] = ("src_natural_key",)
+    # explicit acquisition override ("" -> infer). Set to ACQ_FILE_DROP for a source whose export an
+    # operator drops in with no fetcher; load_frame sources are inferred, so no config is needed for them.
+    acquisition: str = ""
+
+    def acquires_via(self) -> str:
+        """How this source's raw frame is acquired (the Acquire layer): 'load_frame' when the adapter
+        fetches it (API/DB/feed), else 'scraper'. Inferred from a load_frame override unless set
+        explicitly, so an all-scraper source needs no new config and behaves exactly as before."""
+        if self.acquisition:
+            return self.acquisition
+        return ACQ_LOAD_FRAME if type(self).load_frame is not AdapterBase.load_frame else ACQ_SCRAPER
 
     # --- shared parsing helpers (section 7A.1) --------------------------------
     @staticmethod
@@ -64,7 +80,7 @@ class AdapterBase:
         if value is None:
             return ""
         # decode HTML entities (&#8211; -> en-dash, &amp; -> &) so scraped names match
-        # the reference, which stores decoded names — else 'Marjan &#8211; No. 426'
+        # the reference, which stores decoded names -- else 'Marjan &#8211; No. 426'
         # never matches the variant 'Marjan – No. 426' and the product is dropped.
         text = html.unescape(str(value)).replace("\xa0", " ")   # non-breaking space -> normal space
         text = re.sub("[​-‍﻿]", "", text)       # drop zero-width chars / BOM
@@ -111,7 +127,7 @@ class AdapterBase:
             data["raw_format"] = self.clean(record.get(self.format_field))
         # smart name cleanup: strip supplier-code artifacts so matching AND minting see a
         # clean variety name: generic structural rules + data-discovered codes (_lead_codes)
-        # + any explicit code_prefixes override — so codes are removed without hardcoding them.
+        # + any explicit code_prefixes override -- so codes are removed without hardcoding them.
         if data.get("variety_match_key"):
             data["variety_match_key"] = clean_variety_name(
                 data["variety_match_key"], self.code_prefixes, self._lead_codes)
@@ -123,7 +139,7 @@ class AdapterBase:
 
     def load_frame(self, scrape_path: Optional[Path] = None):
         """Ingest hook for NON-FILE data sources (API / DB / partner feed). Override to return
-        ``(frame, timestamp_token, origin_label)`` — the records as a polars frame, a timestamp
+        ``(frame, timestamp_token, origin_label)`` -- the records as a polars frame, a timestamp
         string for the run id, and a label for logging. Everything downstream (adapt -> stages ->
         emit) is identical regardless of where the frame came from.
 
@@ -136,7 +152,7 @@ class AdapterBase:
         """Row-isolated mapping (section 13A.3): a malformed row is dropped, the
         batch continues; the count of dropped rows is logged."""
         # DISCOVER this source's leading code prefixes from the whole batch (data-driven, no
-        # hardcoded strings), so adapt_record strips them from every variety — generalises to
+        # hardcoded strings), so adapt_record strips them from every variety -- generalises to
         # a new scraper's own codes without listing them.
         if self.variety_match_key and self.variety_match_key in frame.columns:
             names = [self.clean(v) for v in frame[self.variety_match_key].to_list()]

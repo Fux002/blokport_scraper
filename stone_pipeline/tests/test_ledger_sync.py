@@ -174,6 +174,21 @@ def test_purge_discontinued_deletes_only_qty0_products(tmp_path):
         assert ledger.get("product", "sku", "ZUC-1") is not None
 
 
+def test_serve_isolates_a_row_with_corrupt_json(tmp_path):
+    # one row with an unserializable cell must NOT 500 the whole leased page: it is dead-lettered
+    # (gap_held) and dropped, the good rows still serve.
+    from stone_pipeline.ledger.sync import ready_variations
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_good", state="pending")
+        _variation(ledger, "slab_bad", state="pending")
+        ledger.execute("UPDATE variation SET aliases = '{corrupt' WHERE key = 'slab_bad'")
+        served = ready_variations(ledger)                       # must NOT raise
+        keys = {v["external_id"] for v in served}
+        assert "slab_good" in keys and "slab_bad" not in keys   # good served, bad dropped
+        assert ledger.get("variation", "key", "slab_bad")["state"] == "gap_held"    # dead-lettered
+        assert ledger.get("variation", "key", "slab_good")["state"] == "syncing"    # leased normally
+
+
 def test_serve_in_flight_detects_a_lease(tmp_path):
     from stone_pipeline.ledger.sync import serve_in_flight, ready
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
@@ -323,6 +338,16 @@ def test_failed_ack_dead_letters_after_cap_then_requeues(tmp_path):
         ack(ledger, "products", "P-1", medusa_id="M1", status_="synced")   # a success clears it
         r = ledger.get("product", "sku", "P-1")
         assert r["state"] == "synced" and r["sync_attempts"] == 0 and r["sync_error"] is None
+
+
+def test_synced_ack_does_not_unretire_a_retiring_variation(tmp_path):
+    # a stray/out-of-order synced ack must NOT flip a RETIRING variation back to synced -- its tombstone
+    # still serves /removed, so un-retiring it would diverge the two systems.
+    from stone_pipeline.ledger.sync import ack
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="retiring", medusa_id="V1")
+        assert ack(ledger, "variations", "slab_v1", medusa_id="V1", status_="synced") == 0   # refused
+        assert ledger.get("variation", "key", "slab_v1")["state"] == "retiring"               # still retiring
 
 
 def test_ack_batch_isolates_a_bad_ack(tmp_path):

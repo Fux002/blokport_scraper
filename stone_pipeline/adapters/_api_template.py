@@ -1,7 +1,7 @@
-"""TEMPLATE for a NON-FILE data source (API / DB / partner feed) — copy, rename, fill in.
+"""TEMPLATE for a NON-FILE data source (API / DB / partner feed) -- copy, rename, fill in.
 
 A normal scraper writes data/<source>/<ts>/products.csv and the adapter just maps it. For a source
-that has NO scrape file — a REST API, a database, a partner's live export — you additionally
+that has NO scrape file -- a REST API, a database, a partner's live export -- you additionally
 override `load_frame`: fetch the records, build a polars frame in the SAME column shape your
 `field_map` expects, and return (frame, timestamp_token, origin_label). Everything downstream
 (adapt -> stages -> emit -> catalog) is identical; the rest of the pipeline never knows or cares

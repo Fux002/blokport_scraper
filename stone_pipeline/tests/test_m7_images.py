@@ -185,7 +185,7 @@ def test_processing_enhances_and_is_idempotent(tmp_path):
 
 def test_rescrape_same_url_different_bytes_not_reprocessed(tmp_path):
     """A repeated scrape where the supplier RE-ENCODES the same photo (same URL,
-    different bytes) must NOT create a duplicate or re-process — the url->key
+    different bytes) must NOT create a duplicate or re-process -- the url->key
     manifest keys idempotency on the source URL, not the raw bytes."""
     import cv2
     import numpy as np

@@ -61,6 +61,7 @@ _DATA_DEPENDENT_TESTS = {
     "test_inventory::test_inventory_only_run_skips_images_products_and_canonical",
     "test_ledger_writethrough::test_writethrough_products_match_emitted_csv",
     "test_m11_adapters::test_marenostone_routes_generic_to_gaps_not_guesses",
+    "test_stage_reports::test_run_writes_per_stage_diagnostics",
 }
 
 

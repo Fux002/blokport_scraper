@@ -258,6 +258,10 @@ resource "aws_batch_job_definition" "this" {
     attempts = 2
   }
   timeout {
-    attempt_duration_seconds = 7200 # 2h ceiling per job
+    # 5h ceiling. Per-image cost varies widely by source: enhance-only is ~30s but the de-watermark
+    # sources (SDXL inpaint on top of ESRGAN) run ~50-65s, so a ~220-image slice can take ~4h. A generous
+    # cap is the robust fix (the reprocess is idempotent + on-demand instances are stable) -- fragile
+    # per-source slice sizing to fit a tight timeout is what let the slow slices breach the old 2h.
+    attempt_duration_seconds = 18000
   }
 }

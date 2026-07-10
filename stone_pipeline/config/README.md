@@ -49,8 +49,45 @@ Every request needs `Authorization: Bearer <BLOKPORT_CONFIG_TOKEN>`. JSON in, JS
 | `POST` | `/config/v1/run` | trigger a scrape ("produce") of the ENABLED sources | `202` + run record, or `409` (in-flight run) |
 | `GET` | `/config/v1/run` | the current / latest run | `{ "current": <run> \| null }` |
 | `GET` | `/config/v1/run/<run_id>` | one run by id | `<run>` or `404` |
+| `GET` | `/config/v1/diagnostics` | every source's latest per-layer diagnostic | `{ "diagnostics": [ <diag>, ... ] }` |
+| `GET` | `/config/v1/diagnostics/<source>` | one source's latest diagnostic | `<diag>` or `404` |
 
 `PUT` replaces the row, so send the full object (a missing field falls to its default).
+
+### The "Diagnostics" tab (per-source layer health)
+
+`GET /config/v1/diagnostics/<source>` returns the LATEST run's per-layer diagnostic so the UI shows,
+per source, WHICH layer degraded and WHAT changed in the source (a silent format change is otherwise
+invisible). Shape:
+
+```
+<diag> = {
+  "source": "polonine", "run_id": "polonine_20260625_222933",
+  "health": "OK" | "DEGRADED" | "FAILED",         // the Validate-in layer
+  "magnitude": "OK" | "DEGRADED" | "FAILED",
+  "gates": { "ingest": "OK", "clean": "OK", "process": "OK" },
+  "stages": [ { "stage": "normalize", "status": "OK" | "DEGRADED" | "FAILED" | "skipped" | "not_run",
+                "rows_in": 303, "rows_out": 303, "rejected": 0, "reviewed": 0, "gapped": 0,
+                "extra": { ... } }, ... ],
+  "drift": [ { "kind": "fill_drop" | "new_column" | "missing_column" | ...,
+               "field": "color", "detail": "...", "likely_rename": "..." }, ... ],
+  "row_count": 303, "row_baseline": 303, "updated_at": "<iso>",
+  "admission": { "state": "review" | "eligible" | "auto" | "demoted",   // the trust ladder
+                 "streak": 3, "required": 3,        // consecutive clean runs / how many are needed
+                 "certified": true, "eligible": true, "mode": "review",
+                 "last_drift": [ "fill_drop", ... ] }
+}
+```
+
+`admission.state` is the trust signal: `review` (default), `eligible` (met the consistency rule -- clean for
+`required` runs in a row + certified -- so it MAY be promoted to auto), `auto` (loading automatically), or
+`demoted` (was auto; a drift knocked it back to review). A drift on an `auto` source auto-demotes it, so bad
+data can never keep auto-loading; surface `eligible` as a "promote to auto?" prompt and `demoted` as an alert.
+
+Render each `stages[].status` + `gates` + `health` as a colour-coded strip (green OK / amber DEGRADED /
+red FAILED); a non-empty `drift` is the "source format changed" banner (show `kind` + `field`). The value
+is durable in `config.db` (survives a config-server restart); a source that has never produced returns
+`404`. Read-only; call it server-side with the token like the other endpoints.
 To add a new scraper, `PUT` a name that does not exist yet. To disable one, `PUT` it with
 `"enabled": false` (or include it in any edit).
 

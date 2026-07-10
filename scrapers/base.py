@@ -37,7 +37,7 @@ _MAX_REDIRECTS = 5
 
 
 class _SSRFBlocked(Exception):
-    """A fetch target resolved to a non-public host (or non-http(s) scheme) — never retried."""
+    """A fetch target resolved to a non-public host (or non-http(s) scheme) -- never retried."""
 
 VALID_FORMATS = ("slab", "block", "tile")
 _USER_AGENTS = [
@@ -62,11 +62,15 @@ class ScraperBase:
     # Lazy-imported so the module imports fine without curl_cffi installed.
     use_curl_cffi: bool = False
     impersonate: str = "chrome120"
-    # needs_proxy is SEPARATE from use_curl_cffi: some Cloudflare tenants accept the Chrome TLS
-    # fingerprint from a datacenter IP (varsha -> curl_cffi alone works), others block the datacenter IP
-    # regardless and demand a residential one (polonine). The residential proxy is metered per-GB, so it
-    # is used ONLY for the scrapers that genuinely need it, not for every curl_cffi site. Images never
-    # use it at all (their hosts serve datacenter IPs; see io/download.py).
+    # proxy_capability is the toolbox way (config/proxies.yaml): a scraper names the KIND of proxy it needs
+    # (e.g. "cloudflare_residential") and the registry resolves it to a proxy + its secret. Adding/swapping a
+    # proxy is a config edit, not a code change. Empty = no proxy from the toolbox.
+    proxy_capability: str = ""
+    # needs_proxy is the LEGACY single-proxy flag (BLOKPORT_SCRAPER_PROXY), still honoured as a fallback when
+    # no proxy_capability is set. Separate from use_curl_cffi: some Cloudflare tenants accept the Chrome TLS
+    # fingerprint from a datacenter IP (varsha -> curl_cffi alone works), others block it and demand a
+    # residential one (polonine). The residential proxy is metered per-GB, so it is used ONLY by a scraper
+    # that asks for it. Images never use it (their hosts serve datacenter IPs; see io/download.py).
     needs_proxy: bool = False
 
     # tunables
@@ -109,12 +113,31 @@ class ScraperBase:
         self.log = self._make_logger()
 
     # --- HTTP ----------------------------------------------------------------
+    def _resolve_proxy(self) -> Optional[str]:
+        """The proxy URL for this scraper, or None (connect direct). Toolbox first: a declared
+        proxy_capability resolves via config/proxies.yaml to a proxy + its secret; a capability that
+        resolves to no secret logs LOUD (a source known to need a proxy would otherwise silently run direct
+        into a block). Legacy fallback: needs_proxy uses BLOKPORT_SCRAPER_PROXY. Images never call this."""
+        if self.proxy_capability:
+            from stone_pipeline.config.proxies import proxy_url_for_capability
+            url, name = proxy_url_for_capability(self.proxy_capability)
+            if url:
+                self.log.info("routing %s through %s (%s)", self.source, name, self.proxy_capability)
+                return url
+            self.log.warning("%s declares proxy_capability=%r but its proxy/secret is unset; connecting "
+                             "DIRECT (likely to be blocked)", self.source, self.proxy_capability)
+            return None
+        if self.needs_proxy:
+            url = os.environ.get("BLOKPORT_SCRAPER_PROXY", "").strip()
+            if url:
+                self.log.info("routing %s through the residential proxy (legacy needs_proxy)", self.source)
+                return url
+        return None
+
     def _cffi(self):
-        """Lazily build a curl_cffi session (Chrome TLS impersonation). Routed through
-        BLOKPORT_SCRAPER_PROXY ONLY when this scraper sets needs_proxy -- its Cloudflare tenant blocks the
-        datacenter IP even with the Chrome fingerprint, so a residential IP is required. A curl_cffi site
-        that does NOT need the proxy (needs_proxy=False) connects direct, sparing the metered residential
-        bandwidth. Locally the env var is unset, so everything connects direct."""
+        """Lazily build a curl_cffi session (Chrome TLS impersonation), routed through the proxy this
+        scraper resolves (see _resolve_proxy) or direct. Locally the proxy secret is unset, so everything
+        connects direct."""
         if getattr(self, "_cffi_session", None) is None:
             try:
                 from curl_cffi import requests as cffi_requests
@@ -124,10 +147,9 @@ class ScraperBase:
                     "Install: pip3 install curl_cffi"
                 ) from exc
             opts: dict = {"impersonate": self.impersonate}
-            proxy = os.environ.get("BLOKPORT_SCRAPER_PROXY", "").strip()
-            if proxy and self.needs_proxy:
+            proxy = self._resolve_proxy()
+            if proxy:
                 opts["proxies"] = {"http": proxy, "https": proxy}
-                self.log.info("routing %s through the residential proxy", self.source)
             self._cffi_session = cffi_requests.Session(**opts)
         return self._cffi_session
 
@@ -176,7 +198,7 @@ class ScraperBase:
                 else:
                     last_exc = RuntimeError(f"too many redirects: {url}")
             except _SSRFBlocked:
-                raise  # permanent — never retry a blocked target
+                raise  # permanent -- never retry a blocked target
             except Exception as exc:  # transient: back off and retry
                 last_exc = exc
                 time.sleep(self.backoff_base ** attempt)

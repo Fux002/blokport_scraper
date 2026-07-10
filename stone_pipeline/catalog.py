@@ -35,7 +35,7 @@ log = logfmt.get_logger("catalog")
 def latest_run_dirs(outputs_root: Path) -> list[Path]:
     """The NEWEST run folder per source under outputs_root. A run id is `<source>_<date>_<time>`,
     so the lexically-greatest folder for a source is its latest scrape; older folders are stale.
-    Consolidation MUST ignore the stale ones — each scrape is a full snapshot, so including two
+    Consolidation MUST ignore the stale ones -- each scrape is a full snapshot, so including two
     run folders for one source would double-count it (duplicate SKUs). This makes the catalog
     idempotent and leftover-proof: a forgotten old run folder can never inflate the output."""
     latest: dict[str, Path] = {}
@@ -127,7 +127,7 @@ def run(outputs_root: Path | None = None) -> Path:
 
 def _auto_queue_images() -> int:
     """Auto-build the generator's prompt queue (image_pipeline/prompts_to_generate.json) for the
-    new variants this run, then — if FAL_KEY is set — kick off generation so the image is ready on
+    new variants this run, then -- if FAL_KEY is set -- kick off generation so the image is ready on
     S3 before import. Without FAL_KEY it just leaves the queue ready for the image_pipeline run.
     The variant Image URL already points at dev/variations/{Key}.png, so generation overwrites that
     exact object (one image per variant)."""
@@ -376,7 +376,7 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
 def consolidate_inventory(inv_csvs: list[Path], to_upload: Path | None = None) -> int:
     """Merge the given per-run inventory_update.csv files into ONE deliverable:
     to_upload/<env>/4_inventory_update.csv. Deduped by Variant Sku (globally unique), last run
-    wins — so re-running against the same Medusa baseline never double-lists a SKU. Medusa's
+    wins -- so re-running against the same Medusa baseline never double-lists a SKU. Medusa's
     INVENTORY importer loads it WITHOUT a product re-import or any image work. Always written
     (header-only when nothing changed) so the deliverable is predictable. Returns SKU count."""
     to_upload = Path(to_upload or SETTINGS.paths.to_upload_dir)
@@ -404,7 +404,7 @@ def collect_inventory(outputs_root: Path) -> int:
 def collect_discontinued(outputs_root: Path) -> int:
     """Consolidate the latest run per source's delete-loop report into one review file:
     review/<env>/products_discontinued.csv (deduped by SKU). These are products the suppliers no
-    longer carry — already set to stock 0 by the inventory update, listed here for optional delete.
+    longer carry -- already set to stock 0 by the inventory update, listed here for optional delete.
     Always written (header-only when none) so the file is a predictable, auditable deliverable."""
     review = SETTINGS.paths.review_dir
     review.mkdir(parents=True, exist_ok=True)

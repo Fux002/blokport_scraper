@@ -158,7 +158,7 @@ def test_blank_sku_mints_not_drops(tmp_path):
 
 
 def test_codes_auto_detected_from_corpus_no_hardcoding():
-    # supplier codes are DISCOVERED from how they fan out across a source's names — no string
+    # supplier codes are DISCOVERED from how they fan out across a source's names -- no string
     # is hardcoded. varsha's 'Z'/'ZB' front many varieties, so they are detected and stripped;
     # a real shared prefix that does not fan out, and single z-words, are kept.
     from stone_pipeline.core.text import detect_code_prefixes, clean_variety_name
@@ -180,7 +180,7 @@ def test_clean_variety_name_generic_and_prefix():
     # lone-letter leading codes + stray punctuation
     assert c("A Bianco") == "Bianco"
     assert c("  - Statuario ") == "Statuario"
-    # ANY number-bearing token is stripped ('No.' too) — no stone uses numbers in its name...
+    # ANY number-bearing token is stripped ('No.' too) -- no stone uses numbers in its name...
     assert c("Super – 1.08") == "Super" and c("Wave - 1.06") == "Wave"
     assert c("Marjan – No. 426") == "Marjan"
     assert c("883 Black") == "Black"

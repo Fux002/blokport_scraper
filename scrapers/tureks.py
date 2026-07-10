@@ -124,8 +124,12 @@ class TureksScraper(ScraperBase):
         self.log.info("tureks: got %d products (X-WP-Total=%s, X-WP-TotalPages=%s)",
                       len(products), total, total_pages)
         if total_pages and int(total_pages) > 1:
-            self.log.warning("catalog has more pages (X-WP-TotalPages=%s) than fetched; "
-                             "increase PER_PAGE or add pagination.", total_pages)
+            # We fetched only page 1. Marking the run INCOMPLETE stops the pipeline from treating this
+            # truncated scrape as the authoritative latest -- otherwise the missing rows 101+ would be
+            # discontinued/stock-0 (a wrong delist). Fails loud: add pagination (page param) or raise
+            # PER_PAGE, then the run is authoritative again.
+            self.mark_incomplete(f"catalog has {total_pages} pages but only page 1 was fetched "
+                                 f"(PER_PAGE={PER_PAGE}); add pagination before this scrape can delist")
         yield from products
 
     def parse_product(self, p: dict) -> Optional[dict]:

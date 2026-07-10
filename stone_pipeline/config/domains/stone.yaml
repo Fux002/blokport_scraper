@@ -1,0 +1,57 @@
+# Product-domain pack: natural stone (the DEFAULT pack).
+#
+# Declares the domain vocabulary + defaults that used to be hardcoded in the pipeline stages, so the tool
+# can be spun up for a different product type by adding a sibling pack (config/domains/<type>.yaml) and
+# setting BLOKPORT_DOMAIN_PACK. Every value here reproduces the historical stone constant EXACTLY, so the
+# stone output stays byte-identical (the golden-output test is the guard). No em dashes.
+name: stone
+
+# The attribute vocabulary this product type resolves against (was normalize.VOCAB_FIELDS /
+# loaders.VOCAB_CATEGORIES). Order is the resolution order. `disambiguator` is the identity-defining
+# attribute (drives the Key, never guessed); `leaf_attributes` are the ones that grow the backbone leaf
+# (everything except the disambiguator). A different product type declares its own set here.
+attributes: [type, color, finish, quality]
+disambiguator: type
+leaf_attributes: [color, finish, quality]
+
+# The category model (was the CATEGORIES tuple in settings.py). Each category is one FORM of the product;
+# every category-derived constant in the pipeline recomputes from this list. The Medusa pcat id is NOT here
+# -- it is env-specific and resolved at runtime from the env's attributes.csv. base_image "" = real photo.
+categories:
+  - {name: slab,  plural: slabs,  label: Slabs,  backbone_filename: backbone_slabs.json,  shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0017",    pcat_env_var: null,
+     base_image: "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg"}
+  - {name: block, plural: blocks, label: Blocks, backbone_filename: backbone_blocks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014348", pcat_env_var: null,
+     base_image: "https://v3b.fal.media/files/b/0a9f301e/Vlbo_xk9vDJtYKhEbkxBZ_base_block.jpeg"}
+  # tiles mirror slabs and use the block volume per kg
+  - {name: tile,  plural: tiles,  label: Tiles,  backbone_filename: backbone_tiles.json,  shares_variety_vocab: true, fan_out: true, mirror_of: slab, volume_per_kg: "0.0014348", pcat_env_var: BLOKPORT_CAT_TILES_PCAT,
+     base_image: "https://v3b.fal.media/files/b/0a9f30f3/jdmNyxqelKJM4DxFi4jyG_base_tiles.png"}
+
+# Type words too generic to disambiguate a variety on their own (was adapters/tokens.py _AMBIGUOUS_TYPE_WORDS).
+ambiguous_type_words: [crystal, quartz, agate, amethyst, coral]
+
+# A sensible default allowed-finish set for a new variant; the human refines it (was stages/curate.py
+# _DEFAULT_FINISHES). Order preserved.
+default_finishes: [Polished, Honed, Leathered, Brushed, Flamed, Sandblasted, Sawn Cut, Raw]
+
+# Generic fallback colour for a variety whose source supplies none, e.g. zucchi (was curate._FALLBACK_COLOR).
+fallback_color: Natural
+
+# Synthetic dimension/weight ranges per format, in metres/tonnes, used only as a fallback when a real value
+# is absent (was stages/derive.py _SLAB_RANGES / _BLOCK_RANGES / _TILE_RANGES). [lo, hi].
+dimension_ranges:
+  slab:  {weight: [0.225, 0.350], length: [1.5, 3.0], width: [0.02, 0.03], height: [1.5, 3.0]}
+  block: {weight: [18.0, 23.0],  length: [1.5, 3.0], width: [1.5, 3.0],   height: [1.5, 3.0]}
+  tile:  {weight: [0.005, 0.012], length: [0.3, 0.6], width: [0.01, 0.02], height: [0.3, 0.6]}
+
+# Finish -> surface phrase for the generated product description (was stages/derive.py _FINISH_PHRASE).
+finish_phrases:
+  honed: "a smooth matte surface"
+  polished: "a bright reflective surface"
+  leathered: "a soft textured surface"
+  brushed: "a lightly textured surface"
+  flamed: "a rugged non-slip surface"
+  split face: "a dramatic three-dimensional natural cleft"
+  sandblasted: "a fine matte texture"
+  tumbled: "a worn antique surface"
+# Phrase when the finish has no specific entry (was the default in derive.derive_description).
+finish_phrase_default: "a refined natural surface"

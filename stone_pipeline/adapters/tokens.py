@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core.text import match_key
 
@@ -30,9 +31,9 @@ def known_values(vocab: str) -> tuple[str, ...]:
     return tuple(load_attributes().canonical_names(vocab))
 
 
-# Type words that double as common variety-NAME descriptors -- never used to override a supplier's type
-# ('Spectra Crystal' is a quartzite; 'Crystal' is a descriptor, not the type).
-_AMBIGUOUS_TYPE_WORDS = {"crystal", "quartz", "agate", "amethyst", "coral"}
+# Type words that double as common variety-NAME descriptors ('Spectra Crystal' is a quartzite; 'Crystal'
+# is a descriptor, not the type) now live in the active product-domain pack (pack.ambiguous_type_words);
+# the stone pack reproduces the historical set.
 # Negation prefixes that CANCEL a following type word -- 'Falsa Agata' (false agate) is genuinely an onyx,
 # so the type word must not be read as the variety's type.
 _NEGATION_WORDS = {"falsa", "false", "falso", "fake", "faux", "imitation"}
@@ -45,7 +46,7 @@ def _clear_type_words() -> frozenset[str]:
     (e.g. 'Sodalite Syenite') are excluded -- a name carries the short synonym ('Sodalite'), not the pair."""
     from stone_pipeline.reference.loaders import load_synonyms
     words = {match_key(v) for v in known_values("type")} | set(load_synonyms("type"))
-    return frozenset(w for w in words if " " not in w) - _AMBIGUOUS_TYPE_WORDS
+    return frozenset(w for w in words if " " not in w) - active_pack().ambiguous_type_words
 
 
 def explicit_type_word(name: str) -> str | None:

@@ -1,4 +1,4 @@
-"""TEMPLATE for a STANDALONE-category adapter (e.g. accessories) — copy, rename,
+"""TEMPLATE for a STANDALONE-category adapter (e.g. accessories) -- copy, rename,
 fill in. A standalone category does not share the stone-variety vocabulary, so the
 adapter's job is just to map the scraped product columns to the canonical row and
 tag the category via raw_format = the category name. Matching is then done by that

@@ -86,8 +86,8 @@ _MANIFEST_KEY = "_manifest.json"
 
 def _load_manifest(backend) -> dict[str, str]:
     """Persisted source_url -> public_url map (cross-run idempotency on the URL).
-    A URL processed in a prior scrape is reused as-is — never re-downloaded or
-    re-processed — so repeated scrapes of the same products never duplicate an
+    A URL processed in a prior scrape is reused as-is -- never re-downloaded or
+    re-processed -- so repeated scrapes of the same products never duplicate an
     already-processed image, even if the supplier re-encodes the bytes."""
     try:
         raw = backend.get(_MANIFEST_KEY)
@@ -108,6 +108,34 @@ def _save_manifest(backend, manifest: dict[str, str]) -> None:
                     content_type="application/json", overwrite=True)
     except Exception as exc:
         log.warning("could not persist image manifest", extra={"extra_fields": {"error": str(exc)}})
+
+
+def _load_discard_set(cfg=None) -> set[str]:
+    """The content sha256 of every image the pipeline classified as non-stone (the products/discarded/
+    pool written by the GPU reprocess). A linked url whose embedded sha is in this set is NEVER published;
+    a variant whose EVERY image is in it emits the terminal no_publishable_image flag. Read straight from
+    S3, read-only, best-effort: {} offline or in local mode (discards live only in the S3 pool), so a
+    fully-offline run still works and simply treats nothing as discarded."""
+    if getattr(cfg, "mode", None) == "local":
+        return set()
+    try:
+        import boto3
+
+        s3 = SETTINGS.s3
+        client = boto3.Session(profile_name=s3.credentials_profile or None,
+                               region_name=s3.region).client("s3")
+        out: set[str] = set()
+        for page in client.get_paginator("list_objects_v2").paginate(
+                Bucket=s3.bucket, Prefix=imagestore.DISCARDED_PREFIX_ALL):
+            for obj in page.get("Contents", []):
+                sha = imagestore.sha_from_url(obj["Key"])
+                if sha:
+                    out.add(sha)
+        return out
+    except Exception as exc:  # no S3/boto3 -> treat nothing as discarded (never wrongly hide an image)
+        log.warning("discard set unreachable; nothing treated as discarded",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return set()
 
 
 def _watermarked_sources() -> set[str]:
@@ -134,7 +162,8 @@ def _write_preview(rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def _slot_row(row: CanonicalRow, public_urls: list[str]) -> None:
+def _slot_row(row: CanonicalRow, public_urls: list[str], *,
+              terminal_discard: bool = False, discard_reason: str = "") -> None:
     row.image_keys = public_urls
     row.thumbnail_key = public_urls[0] if public_urls else None
     if row.is_block:
@@ -145,7 +174,17 @@ def _slot_row(row: CanonicalRow, public_urls: list[str]) -> None:
     else:
         row.product_image_keys = public_urls[:_SLAB_SLOTS]
         row.oriented_image_keys = []
-    if not public_urls:
+    if public_urls:
+        return
+    # No linked image. Emit EXACTLY ONE flag (the discard contract): a variant whose every scraped image
+    # was classified non-stone is a TERMINAL known-good empty (no_publishable_image -> publishes imageless,
+    # not retried); anything else is a transient no_image (retry next scrape).
+    if terminal_discard:
+        row.add_flag(ReviewFlag(field="images", code=FlagCode.no_publishable_image,
+                                best_guess=discard_reason or "non-stone image (spec sheet / logo)",
+                                confidence=Confidence.high, method="clip_stone_classifier",
+                                src_url=row.src_url))
+    else:
         row.add_flag(ReviewFlag(field="images", code=FlagCode.no_image,
                                 confidence=Confidence.none, method="zero_usable", src_url=row.src_url))
 
@@ -184,25 +223,36 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             log.warning("passthrough: imageproc manifest empty/unreachable -- product images are HELD, "
                         "never linked to raw source urls. Run the image stage in s3 mode or restore S3 "
                         "access to populate the manifest.")
+        discarded = _load_discard_set(cfg)
         improved_marker = imagestore.IMPROVED_MARKER              # a treated image lives under improved/
         held_untreated = 0
         for row in rows:
             srcs = [u for u in dict.fromkeys(row.raw_image_urls or []) if u and u.strip()]
             urls = []
+            n_discarded = n_held = 0
             for u in srcs:
                 mapped = manifest.get(u)
+                sha = imagestore.sha_from_url(mapped) if mapped else None
+                if sha and sha in discarded:
+                    n_discarded += 1                             # classified non-stone -> never link
+                    continue
                 if mapped and improved_marker in mapped:
                     urls.append(mapped)                          # treated -> link it
                 elif mapped:
                     held_untreated += 1                          # on S3 but not enhanced yet -> hold
-            _slot_row(row, urls)
+                    n_held += 1
+                else:
+                    n_held += 1                                  # unknown url -> hold (retry next produce)
+            # terminal only when EVERY scraped image is discarded (none survived, none merely held)
+            terminal = bool(srcs) and not urls and n_discarded > 0 and n_held == 0
+            _slot_row(row, urls, terminal_discard=terminal)
             if urls:
                 stats.staged += 1
             else:
                 stats.no_image += 1
         log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
-            "staged": stats.staged, "no_image": stats.no_image,
-            "manifest_entries": len(manifest), "held_untreated": held_untreated}})
+            "staged": stats.staged, "no_image": stats.no_image, "manifest_entries": len(manifest),
+            "held_untreated": held_untreated, "discard_set": len(discarded)}})
         return stats
 
     backend = _build_backend(cfg)
@@ -275,7 +325,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         # one (the URL we return). Without processing, the image stays at the root.
         dest_key = f"{imagestore.IMPROVED_SUBDIR}/{ck}" if processor is not None else ck
         # store via backend (idempotent; re-run re-derives same key, no re-upload).
-        # If it already exists, reuse the URL and skip processing entirely — each
+        # If it already exists, reuse the URL and skip processing entirely -- each
         # source image is only ever enhanced/de-watermarked once.
         if backend.exists(dest_key):
             public = backend.url_for(dest_key)
@@ -305,21 +355,33 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         manifest[url] = public
         manifest_dirty = True
 
+    discarded = _load_discard_set(cfg)
     for row in rows:
         public_urls: list[str] = []
+        srcs = 0
+        n_discarded = n_other = 0
         for url in (row.raw_image_urls or []):
             if not url or not url.strip():
                 continue
+            srcs += 1
             public = url_to_public.get(url)
             if public is None:
+                # download failed / placeholder-blocked -> transient, retry (never turns the row terminal)
+                n_other += 1
                 if url in fetched and fetched[url] is None:
                     row.add_flag(ReviewFlag(field="images", code=FlagCode.image_download_failed,
                                             raw_value=url, confidence=Confidence.low,
                                             method="download", src_url=row.src_url))
                 continue
+            sha = imagestore.sha_from_url(public)
+            if sha and sha in discarded:
+                n_discarded += 1                               # classified non-stone -> never link
+                continue
             if public not in public_urls:
                 public_urls.append(public)
-        _slot_row(row, public_urls)
+        # terminal only when EVERY scraped image is discarded (none survived, none merely failed)
+        terminal = srcs > 0 and not public_urls and n_discarded > 0 and n_other == 0
+        _slot_row(row, public_urls, terminal_discard=terminal)
         if public_urls:
             stats.staged += 1
         else:

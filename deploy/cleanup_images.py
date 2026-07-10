@@ -6,7 +6,7 @@ NOT referenced by the current product CSV, and prunes the matching url->image ma
 entries (so a later re-scrape of a returning URL re-processes it instead of pointing at a
 deleted object). Result: S3 holds only the images the shop actually uses.
 
-Safe to run as an occasional one-off (e.g. quarterly). DRY-RUN by default — it only
+Safe to run as an occasional one-off (e.g. quarterly). DRY-RUN by default -- it only
 reports what it would remove; pass --apply to actually delete.
 
   python -m deploy.cleanup_images                       # dry-run report

@@ -2,9 +2,11 @@
 
 Reject a row on any hard failure: a required attribute id null (type, colour,
 finish, quality), variation_id null, an unresolved leaf (a tree gap present),
-category not the branch's valid category, handle or slug not globally unique, or
-no image when images are required by config. Soft issues (review flags, no hard
-failure) emit or hold per the emit_on_review switch.
+category not the branch's valid category, handle or slug not globally unique, a
+missing owner (company_id / sales_channel_id, required at all times), or no image
+when images are required by config -- EXCEPT a row Stage 7 marked no_publishable_image,
+a terminal known-good empty that publishes without an image. Soft issues (review
+flags, no hard failure) emit or hold per the emit_on_review switch.
 
 Hard rejects never reach the import CSV regardless of the switch.
 """
@@ -15,12 +17,21 @@ from dataclasses import dataclass, field
 
 from stone_pipeline.config.settings import active_categories
 from stone_pipeline.core import logfmt
-from stone_pipeline.core.schema import CanonicalRow, RejectReason
+from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
 
 log = logfmt.get_logger("validate")
 
 # required attribute ids for a row to be importable (section 7 Stage 9, 6A)
 REQUIRED_ID_FIELDS = ("type_id", "color_id", "finish_id", "quality_id", "variation_id")
+
+
+def _no_publishable_image(row: CanonicalRow) -> bool:
+    """True when Stage 7 (the image pipeline) classified every scraped image as non-stone and discarded
+    them -- a TERMINAL known-good empty, not a transient no_image. Such a product is a real stone with no
+    usable photo: it publishes WITHOUT an image (like a legitimately imageless variant), the discard reason
+    surfaces in review, and it is never rejected/retried/alarmed as broken. The pixel decision + the discard
+    memory live entirely in Stage 7 (source-isolation preserved); the full pipeline only reacts to the flag."""
+    return any(f.code == FlagCode.no_publishable_image for f in row.review_flags)
 
 
 @dataclass
@@ -44,7 +55,18 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
         row.add_reject(RejectReason(rule="category_invalid", detail=str(row.category_pcat_id)))
     if not row.handle or not row.slug:
         row.add_reject(RejectReason(rule="handle_missing", detail="handle" if not row.handle else "slug"))
-    if require_images and not row.image_keys:
+    # Owner ids are REQUIRED at all times: sales_channel makes a product visible/buyable, company owns it.
+    # constants (Stage 8) sets them from config (dev has defaults; prod must set the env vars). A blank
+    # here means a misconfigured owner -- reject rather than emit an unowned, channel-less (invisible)
+    # product. This is the row-level gate every emit path shares (the run.main prod guard is the early,
+    # whole-run version of the same rule).
+    if not row.company_id or not row.sales_channel_id:
+        row.add_reject(RejectReason(rule="owner_missing",
+                                    detail="company_id" if not row.company_id else "sales_channel_id"))
+    # No usable image + images required -> reject as a transient no_image (retry next scrape). EXCEPTION:
+    # a row Stage 7 marked no_publishable_image is a terminal known-good empty -- it publishes WITHOUT an
+    # image instead of being rejected, so a real stone whose only photos were spec sheets/logos is not lost.
+    if require_images and not row.image_keys and not _no_publishable_image(row):
         row.add_reject(RejectReason(rule="no_image", detail=""))
     # Dimensions are REQUIRED and never fabricated: derive leaves a missing size None and an invalid one
     # <= 0. Either way reject the product -- a stone with no/wrong real size breaks the category's

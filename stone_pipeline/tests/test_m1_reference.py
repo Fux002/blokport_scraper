@@ -78,7 +78,7 @@ def test_6a_trace_reproduces_against_real_upload(ref):
     # Variation ids are environment-specific: they resolve only when the variants
     # reference is the SAME Medusa environment as this upload sample. The reference
     # can be re-seeded (fresh ids), so the variation hit-rate is informational here,
-    # not asserted — the id-resolution guarantee being tested is the attribute ids above.
+    # not asserted -- the id-resolution guarantee being tested is the attribute ids above.
     _ = variation_resolved
 
 

@@ -24,11 +24,12 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Optional
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import content_hash
-from stone_pipeline.core.text import ascii_fold, looks_code_shaped, match_key
+from stone_pipeline.core.text import looks_code_shaped, match_key
 
 
 _TYPE_SLUGS: Optional[set[str]] = None
@@ -84,8 +85,10 @@ def is_mistyped_variant(key: str, name: str) -> bool:
 
 log = logfmt.get_logger("reference")
 
-# Vocabulary categories carried in attributes.csv (section 6).
-VOCAB_CATEGORIES = ("color", "finish", "type", "quality")
+# Vocabulary categories carried in attributes.csv (section 6), declared by the active product-domain pack
+# (the stone pack reproduces the historical set). Used only to load the per-attribute synonyms, so order
+# is immaterial.
+VOCAB_CATEGORIES = tuple(active_pack().attributes)
 
 
 def _norm(value: str) -> str:

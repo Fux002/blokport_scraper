@@ -141,7 +141,7 @@ class BrumagranScraper(ScraperBase):
     category = "slab"        # Bruma is slab inventory, one row per bundle (item 3)
     id_field = "bundle_id"   # images named brumagran_<bundle_id>_<idx>
     use_curl_cffi = True   # Cloudflare-fronted SlabWare tenant
-    needs_proxy = True     # inactive; SlabWare tenant conservatively proxied (verify direct if activated)
+    proxy_capability = "cloudflare_residential"   # inactive; conservatively proxied (verify direct if activated)
 
     columns = [
         # Core identity

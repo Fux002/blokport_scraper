@@ -18,10 +18,17 @@ from stone_pipeline.core import csvio
 def test_safe_cell_neutralizes_formula_leaders(leader):
     assert csvio.safe_cell(f"{leader}HYPERLINK(1)") == f"'{leader}HYPERLINK(1)"
 
+@pytest.mark.parametrize("leader", ["=", "+", "-", "@"])
+def test_safe_cell_neutralizes_leader_behind_whitespace(leader):
+    # Sheets/Excel evaluate a formula leader even behind leading whitespace, so ' =cmd' must be neutralized.
+    assert csvio.safe_cell(f" {leader}HYPERLINK(1)") == f"' {leader}HYPERLINK(1)"
+
+
 def test_safe_cell_passes_benign_values():
     assert csvio.safe_cell("Carrara") == "Carrara"
     assert csvio.safe_cell("A4") == "A4"
     assert csvio.safe_cell("Bianco 2cm") == "Bianco 2cm"
+    assert csvio.safe_cell("  leading spaces") == "  leading spaces"   # whitespace alone is not a formula
 
 def test_safe_cell_none_is_empty():
     assert csvio.safe_cell(None) == ""

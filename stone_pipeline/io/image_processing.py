@@ -1,12 +1,12 @@
 """Enhancement + de-watermark for scraped product photos.
 
 These are photographs of the ACTUAL slabs a customer buys, usually shot in a
-storage unit under poor, uneven light. The job is to make them presentable — fix
-exposure, contrast, softness and small size — while keeping the picture a true
+storage unit under poor, uneven light. The job is to make them presentable -- fix
+exposure, contrast, softness and small size -- while keeping the picture a true
 record of the stone (the vein pattern and colour must stay faithful; only the
 watermark's footprint is reconstructed).
 
-Enhancement is Real-ESRGAN (learned super-resolution — clean + sharpen + 4x), then
+Enhancement is Real-ESRGAN (learned super-resolution -- clean + sharpen + 4x), then
 a gentle exposure lift + vibrance: brighter, crisper and natural, preserving the
 stone's colour rather than desaturating it.
 
@@ -21,7 +21,7 @@ Pipeline per image:  de-watermark (flagged sources only) -> enhance (ESRGAN) -> 
 Both the ESRGAN enhancer and the SDXL de-watermark backend need the torch stack in
 requirements-imageproc.txt (cv2/numpy/Pillow are core deps). When that stack is
 absent each step is skipped with a single warning and the image passes through
-un-enhanced — there is no classical fallback.
+un-enhanced -- there is no classical fallback.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from stone_pipeline.config.settings import ImageProcessingConfig
 from stone_pipeline.core import logfmt
@@ -46,12 +46,12 @@ log = logfmt.get_logger("image_processing")
 
 
 # --------------------------------------------------------------------------- #
-#  Faithful beautify helpers (applied after Real-ESRGAN — no invented detail)
+#  Faithful beautify helpers (applied after Real-ESRGAN -- no invented detail)
 # --------------------------------------------------------------------------- #
 
 def _fit_long_edge(bgr, target_long_edge: int):
     """Cap the long edge at target_long_edge by DOWNSCALING only; never enlarge.
-    Enlarging a smaller original adds bytes, not real detail — crispness comes from
+    Enlarging a smaller original adds bytes, not real detail -- crispness comes from
     the enhancement, not pixel count (and bloated files load slowly). Returns
     (image, changed). INTER_AREA is the right filter for downscaling."""
     h, w = bgr.shape[:2]
@@ -65,7 +65,7 @@ def _fit_long_edge(bgr, target_long_edge: int):
 
 def _levels(bgr, lo_pct: float, hi_pct: float):
     """Exposure lift: stretch luminance so the lo/hi percentiles map to black/white, using the
-    photo's OWN tonal range (invents nothing) — brightens the dull, flat, badly-lit hangar shots
+    photo's OWN tonal range (invents nothing) -- brightens the dull, flat, badly-lit hangar shots
     so the material reads properly. Chroma is preserved (only the Y channel is stretched)."""
     ycc = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb).astype(np.float32)
     y = ycc[:, :, 0]
@@ -77,7 +77,7 @@ def _levels(bgr, lo_pct: float, hi_pct: float):
 
 
 def _vibrance(bgr, amount: float):
-    """Restore colour that poor light muted — boost LOW-saturation pixels more than already-colourful
+    """Restore colour that poor light muted -- boost LOW-saturation pixels more than already-colourful
     ones, so nothing over-saturates and no colour is invented, just un-muted."""
     if amount <= 0:
         return bgr
@@ -94,8 +94,8 @@ def _vibrance(bgr, amount: float):
 class _Dewatermarker:
     """Removes the consistent, semi-transparent supplier watermark from a slab photo.
 
-    The mark is LOCATED by what stone never carries — its pink/magenta ink plus the local
-    deviation of its text strokes — giving a tight central footprint. The exact stone under a
+    The mark is LOCATED by what stone never carries -- its pink/magenta ink plus the local
+    deviation of its text strokes -- giving a tight central footprint. The exact stone under a
     drifting, multi-position semi-transparent mark can't be recovered (classical subtraction
     leaves artefacts, and a plain inpaint smears patterned stone), so that small footprint is
     REGENERATED with a learned inpainting model (SDXL-inpaint): natural, matching stone texture.
@@ -120,7 +120,7 @@ class _Dewatermarker:
         self._pipe = None
         self._device = None
 
-    # SDXL's stock VAE decodes to black in fp16 — use the fp16-safe VAE when running fp16 (CUDA).
+    # SDXL's stock VAE decodes to black in fp16 -- use the fp16-safe VAE when running fp16 (CUDA).
     VAE_FP16 = "madebyollin/sdxl-vae-fp16-fix"
 
     def available(self) -> bool:
@@ -141,7 +141,7 @@ class _Dewatermarker:
             self._pipe.set_progress_bar_config(disable=True)
             self._pipe.enable_attention_slicing()
             self._ok = True
-        except Exception as exc:  # deps/weights absent — degrade gracefully
+        except Exception as exc:  # deps/weights absent -- degrade gracefully
             log.warning("de-watermark unavailable; skipping (enhancement still runs)",
                         extra={"extra_fields": {"error": str(exc)}})
             self._ok = False
@@ -198,14 +198,14 @@ class _Dewatermarker:
 
 
 # --------------------------------------------------------------------------- #
-#  Enhancement engine: Real-ESRGAN (learned, faithful) — optional, lazy
+#  Enhancement engine: Real-ESRGAN (learned, faithful) -- optional, lazy
 # --------------------------------------------------------------------------- #
 
 class _ESRGANEnhancer:
     """Real-ESRGAN learned super-resolution (clean + sharpen + 4x), loaded via spandrel. Faithful:
     reconstructs natural texture and leaves colour untouched. Lazy + graceful: if torch/spandrel/
     weights are absent, available() is False and enhancement is skipped (the image passes through
-    un-enhanced — there is no fallback). Runs on CUDA (deploy), MPS (local Mac), or CPU. Large
+    un-enhanced -- there is no fallback). Runs on CUDA (deploy), MPS (local Mac), or CPU. Large
     images are tiled to bound GPU memory."""
 
     def __init__(self, model_name: str, weights_path: str, tile: int):
@@ -239,7 +239,7 @@ class _ESRGANEnhancer:
             self._model = model.to(self._device).eval()
             self._scale = model.scale
             self._ok = True
-        except Exception as exc:  # deps/weights absent — skip enhancement (no fallback)
+        except Exception as exc:  # deps/weights absent -- skip enhancement (no fallback)
             log.warning("ESRGAN unavailable; skipping enhancement (image passes through)",
                         extra={"extra_fields": {"error": str(exc)}})
             self._ok = False
@@ -278,6 +278,67 @@ class _ESRGANEnhancer:
 
 
 # --------------------------------------------------------------------------- #
+#  Non-stone image classifier (CLIP zero-shot) -- optional, lazy
+# --------------------------------------------------------------------------- #
+
+class _StoneClassifier:
+    """Is this a photo of the stone, or a non-stone image (spec sheet, price list, plain vendor logo) that
+    must never be published? CLIP scores the WHOLE image against a stone prompt set vs a non-stone set and
+    discards ONLY when the non-stone class wins with probability >= margin -- conservative, because a
+    discard removes the image from the catalogue. Whole-image semantic score, NOT text density: a slab
+    photo carrying printed sizes, or a stone photo with a small vendor logo, is still a stone photo and is
+    KEPT (its non-stone probability stays low).
+
+    Lazy + graceful: without torch/transformers/weights, available() is False and NOTHING is discarded
+    (fail safe -- never discard when we cannot classify). Deterministic (a forward pass, no sampling).
+    Reuses transformers (already pulled in by the de-watermark stack); the CLIP weights are baked in."""
+
+    def __init__(self, model: str, margin: float, stone_prompts, nonstone_prompts):
+        self.model = model
+        self.margin = margin
+        self.stone_prompts = list(stone_prompts)
+        self.nonstone_prompts = list(nonstone_prompts)
+        self._ok: Optional[bool] = None
+        self._clip = None
+        self._proc = None
+        self._device = None
+
+    def available(self) -> bool:
+        if self._ok is not None:
+            return self._ok
+        try:
+            import torch
+            from transformers import CLIPModel, CLIPProcessor
+
+            self._device = ("cuda" if torch.cuda.is_available()
+                            else "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+                            else "cpu")
+            self._clip = CLIPModel.from_pretrained(self.model).to(self._device).eval()
+            self._proc = CLIPProcessor.from_pretrained(self.model)
+            self._ok = True
+        except Exception as exc:  # deps/weights absent -- classify nothing (never discard blindly)
+            log.warning("stone classifier unavailable; nothing discarded (images pass through)",
+                        extra={"extra_fields": {"error": str(exc)}})
+            self._ok = False
+        return self._ok
+
+    def classify(self, pil_image):
+        """(keep: bool, p_nonstone: float, reason: str). keep is False only when the non-stone class wins
+        with probability >= margin; the reason is the winning non-stone prompt (for review provenance)."""
+        import torch
+
+        prompts = self.stone_prompts + self.nonstone_prompts
+        inputs = self._proc(text=prompts, images=pil_image.convert("RGB"),
+                            return_tensors="pt", padding=True).to(self._device)
+        with torch.no_grad():
+            probs = self._clip(**inputs).logits_per_image.softmax(dim=1)[0]  # over ALL prompts
+        n = len(self.stone_prompts)
+        p_nonstone = float(probs[n:].sum())
+        reason = self.nonstone_prompts[int(torch.argmax(probs[n:]))]
+        return p_nonstone < self.margin, p_nonstone, reason
+
+
+# --------------------------------------------------------------------------- #
 #  Orchestrator
 # --------------------------------------------------------------------------- #
 
@@ -287,6 +348,14 @@ class ProcessResult:
     dewatermarked: bool = False
     enhanced: bool = False
     upscaled: bool = False
+
+
+@dataclass
+class ClassifyResult:
+    keep: bool = True          # False only when confidently non-stone (spec sheet / logo)
+    p_nonstone: float = 0.0    # probability of the non-stone class (audit / tuning)
+    reason: str = ""           # the winning non-stone prompt, for review provenance
+    ran: bool = False          # the classifier actually ran (deps + weights present)
 
 
 class ImageProcessor:
@@ -300,6 +369,23 @@ class ImageProcessor:
         self._dw = (_Dewatermarker(cfg.dewatermark_model, cfg.dewatermark_steps, cfg.dewatermark_guidance)
                     if cfg.dewatermark else None)
         self._esr = _ESRGANEnhancer(cfg.esrgan_model, cfg.esrgan_weights, cfg.esrgan_tile)
+        self._clf = (_StoneClassifier(cfg.classify_model, cfg.classify_margin,
+                                      cfg.classify_stone_prompts, cfg.classify_nonstone_prompts)
+                     if cfg.classify else None)
+        self.classifier_id = f"clip:{cfg.classify_model}" if cfg.classify else ""
+
+    def classify(self, data: bytes) -> ClassifyResult:
+        """Decide whether raw image bytes are a publishable stone photo. Never raises: any failure (or an
+        absent classifier) returns keep=True (fail safe -- an unclassifiable image is never discarded)."""
+        if not self.cfg.enabled or self._clf is None or not self._clf.available():
+            return ClassifyResult(keep=True, ran=False)
+        try:
+            pil = Image.open(BytesIO(data)).convert("RGB")
+            keep, p_nonstone, reason = self._clf.classify(pil)
+            return ClassifyResult(keep=keep, p_nonstone=p_nonstone, reason=reason, ran=True)
+        except Exception as exc:  # a bad image never forces a discard
+            log.warning("classify failed; keeping image", extra={"extra_fields": {"error": str(exc)}})
+            return ClassifyResult(keep=True, ran=False)
 
     def process(self, data: bytes, *, watermarked: bool = False) -> ProcessResult:
         if not self.cfg.enabled:
@@ -324,13 +410,13 @@ class ImageProcessor:
             bgr = cv2.cvtColor(np.array(cleaned.convert("RGB")), cv2.COLOR_RGB2BGR)
         if bgr is None:
             bgr = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if bgr is None:  # not a decodable raster (svg, etc.) — leave untouched
+            if bgr is None:  # not a decodable raster (svg, etc.) -- leave untouched
                 res.data = data
                 return res
 
         # 2) enhancement: Real-ESRGAN (learned clean + sharpen + 4x), then a gentle
         #    faithful beautify. If the torch stack/weights are unavailable the image
-        #    passes through un-enhanced (available() logs one warning) — no fallback.
+        #    passes through un-enhanced (available() logs one warning) -- no fallback.
         if self._esr.available():
             bgr = self._esr.enhance(bgr)
             bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)      # cap the 4x output

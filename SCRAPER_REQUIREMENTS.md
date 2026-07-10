@@ -2,8 +2,12 @@
 
 The single source of truth for what a scraper (or any product data connection) must
 produce, what happens when a field is absent, and how to add and certify a new
-source. If you are adding a scraper, this is the checklist. No em dashes (repo
-convention).
+source. No em dashes (repo convention).
+
+> This document is the FIELD contract (what each canonical field must hold). The step-by-step ADMISSION
+> gate a new source must clear before it is allowed to produce -- declare, fixture, certify, contract,
+> health, validate, the review->auto ladder, live-verify -- is [`NEW_SOURCE_CHECKLIST.md`](NEW_SOURCE_CHECKLIST.md).
+> Adding a source: follow that checklist; the build steps are in `stone_pipeline/adapters/ADAPTERS.md`.
 
 A scraper yields raw rows in its own column shape; an adapter
 (`stone_pipeline/adapters/<source>.py`) maps those columns to the canonical schema.

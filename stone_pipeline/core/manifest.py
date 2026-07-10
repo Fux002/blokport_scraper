@@ -30,6 +30,9 @@ def content_hash(path: Path) -> str:
 @dataclass
 class StageMetric:
     stage: str
+    # OK / DEGRADED / FAILED (the shared gate ladder) or skipped / not_run. The stage computes it from
+    # its own counts; the manifest only stores the string, so this stays a pure data container.
+    status: str = "OK"
     rows_in: int = 0
     rows_out: int = 0
     rejected: int = 0
@@ -37,6 +40,21 @@ class StageMetric:
     gapped: int = 0
     seconds: float = 0.0
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def summary(self) -> str:
+        """One-line, human-readable status for the run log / stages.json (mirrors GateReport.summary)."""
+        parts = [f"{self.stage}: {self.status} ({self.rows_in}->{self.rows_out}"]
+        if self.rejected:
+            parts.append(f", {self.rejected} rejected")
+        if self.reviewed:
+            parts.append(f", {self.reviewed} reviewed")
+        if self.gapped:
+            parts.append(f", {self.gapped} gapped")
+        parts.append(")")
+        if self.extra:
+            top = ", ".join(f"{k}={v}" for k, v in sorted(self.extra.items()))
+            parts.append(f" [{top}]")
+        return "".join(parts)
 
 
 @dataclass

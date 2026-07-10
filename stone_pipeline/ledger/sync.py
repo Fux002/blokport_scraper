@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
+from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger.db import Ledger, now_iso
 
@@ -70,9 +71,10 @@ _ENTITY = {
     # so wiring it here would make ack('combinations','failed') raise). Combinations are CSV-rendered
     # from the export and Medusa resolves priceable tuples itself. Re-add only with a full serve lane.
 }
-# a variation always belongs to a category (strict): branch is NOT NULL and constrained,
-# so every served variation maps to one canonical category name.
-_CATEGORY = {"slab": "Slabs", "block": "Blocks", "tile": "Tiles"}
+# a variation always belongs to a category (strict): branch is NOT NULL and constrained, so every served
+# variation maps to one canonical category label. Derived from the pack-built category registry (was
+# hardcoded name->label).
+_CATEGORY = {c.name: c.label for c in CATEGORIES}
 
 
 def _as_number(text):
@@ -177,6 +179,23 @@ def count_ready(ledger: Ledger, type_: str) -> int:
     raise ValueError(f"unsupported sync type {type_!r}")
 
 
+def _isolate(ledger: Ledger, table: str, pk_col: str, rows, build) -> list[dict]:
+    """Build each LEASED row's serve dict, isolating one whose stored JSON/cell is corrupt: it is
+    dead-lettered to 'gap_held' (so it stops re-serving and surfaces in /failures) and dropped from THIS
+    page, instead of raising and 500-ing the whole leased delta. One bad row can never strand the pull."""
+    out: list[dict] = []
+    for row in rows:
+        try:
+            out.append(build(row))
+        except Exception as exc:
+            pk = row[pk_col]
+            log.exception("ledger serve: row has an unserializable cell; dead-lettering it",
+                          extra={"extra_fields": {"table": table, "pk": pk, "error": str(exc)}})
+            ledger.execute(f"UPDATE {table} SET state = 'gap_held', sync_error = ?, updated_at = ? "
+                           f"WHERE {pk_col} = ?", (f"serve: {exc}"[:500], now_iso(), pk))
+    return out
+
+
 def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
     """Variations awaiting sync (pending/dirty), in the produced set, that have a canonical type.
     An untyped variation is HELD, never served (design L1). Ordered by a stable key (design L2).
@@ -191,7 +210,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "  ORDER BY created_at, key" + _sub_limit(limit) + ") "
         "RETURNING key, branch, type, name, aliases, image_url, volume, payload_hash",
         (now_iso(),)).fetchall()
-    return [{
+    return _isolate(ledger, "variation", "key", rows, lambda v: {
         "external_id": v["key"],
         "payload_hash": v["payload_hash"],
         "payload": {
@@ -202,7 +221,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "image_url": v["image_url"] or "",
             "volume": _as_number(v["volume"]),   # m3/kg as a number, not a string
         },
-    } for v in rows]
+    })
 
 
 def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
@@ -230,7 +249,7 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "  WHERE " + _ELIGIBLE_PRODUCT +
         "  ORDER BY p.created_at, p.sku" + _sub_limit(limit) + ") RETURNING *",
         (now_iso(),)).fetchall()
-    return [{
+    return _isolate(ledger, "product", "sku", rows, lambda p: {
         "external_id": p["sku"],
         "payload_hash": p["payload_hash"],
         "payload": {
@@ -262,7 +281,7 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "oriented_images": json.loads(p["oriented_image_keys"] or "[]"),
             "image_urls": json.loads(p["product_image_keys"] or "[]"),
         },
-    } for p in rows]
+    })
 
 
 def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
@@ -390,9 +409,13 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     # synced: a PRODUCT is only marked synced if its variation is synced (the eligibility guard).
     guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced')" \
         if type_ == "products" else ""
+    # retire guard: a synced ack must NOT resurrect a row that is being RETIRED. A stray/out-of-order ack
+    # would otherwise flip a 'retiring' row back to 'synced' while its variation tombstone still serves
+    # /removed, diverging the two systems. (ack from pending/syncing/dirty stays allowed by design -- serve
+    # leases are an optimization, not a precondition; only 'retiring' is protected.)
     cur = ledger.execute(
         f"UPDATE {table} SET medusa_id = ?, state = 'synced', sync_attempts = 0, sync_error = NULL, "
-        f"last_synced = ?, updated_at = ? WHERE {pk} = ?{guard}",
+        f"last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}",
         (medusa_id, now, now, external_id))
     if cur.rowcount == 0 and type_ == "products":
         log.warning("refused a product ack ahead of its variation (out-of-order / not resolvable)",
@@ -422,21 +445,22 @@ def ack_batch(ledger: Ledger, acks: list[dict]) -> dict[str, int]:
 
 
 def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
-    """The dead-lettered entities and WHY (external_id, attempts, last error) -- the drill-down
-    behind the /status gap_held count, so an operator can see what Medusa rejected and fix it."""
+    """The dead-lettered entities and WHY -- the drill-down behind the /status gap_held count, so an
+    operator can see what Medusa rejected and fix it. Item: {type, external_id, attempts, error,
+    updated_at}. `updated_at` is the last-attempt ISO timestamp (the :4200 failures card renders it)."""
     out: list[dict] = []
     for type_, table in (("variations", "variation"), ("products", "product")):
         pk = _ENTITY[type_][1]
         for r in ledger.execute(
-            f"SELECT {pk} AS xid, sync_attempts, sync_error FROM {table} "
+            f"SELECT {pk} AS xid, sync_attempts, sync_error, updated_at FROM {table} "
             f"WHERE state = 'gap_held' ORDER BY updated_at DESC LIMIT ?", (limit,)):
-            out.append({"type": type_, "external_id": r["xid"],
-                        "attempts": r["sync_attempts"], "error": r["sync_error"]})
+            out.append({"type": type_, "external_id": r["xid"], "attempts": r["sync_attempts"],
+                        "error": r["sync_error"], "updated_at": r["updated_at"]})
     for r in ledger.execute(                             # tombstones stuck 'dead' (Medusa kept blocking)
-        "SELECT external_id AS xid, sync_attempts, sync_error FROM removed "
+        "SELECT external_id AS xid, sync_attempts, sync_error, updated_at FROM removed "
         "WHERE state = 'dead' ORDER BY updated_at DESC LIMIT ?", (limit,)):
-        out.append({"type": "removed", "external_id": r["xid"],
-                    "attempts": r["sync_attempts"], "error": r["sync_error"]})
+        out.append({"type": "removed", "external_id": r["xid"], "attempts": r["sync_attempts"],
+                    "error": r["sync_error"], "updated_at": r["updated_at"]})
     return out
 
 

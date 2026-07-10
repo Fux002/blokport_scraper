@@ -20,9 +20,11 @@ _FORMULA_LEADERS = ("=", "+", "-", "@", "\t", "\r")
 
 def safe_cell(value) -> str:
     """Neutralise CSV formula injection: prefix a leading =,+,-,@ (or tab/CR) cell with a single
-    quote so a scraped value like '=HYPERLINK(...)' is treated as text, not executed."""
+    quote so a scraped value like '=HYPERLINK(...)' is treated as text, not executed. Also catches a
+    formula leader hidden behind leading whitespace (' =cmd'), which Sheets/Excel still evaluate."""
     s = "" if value is None else str(value)
-    return "'" + s if s[:1] in _FORMULA_LEADERS else s
+    dangerous = s[:1] in _FORMULA_LEADERS or s.lstrip()[:1] in ("=", "+", "-", "@")
+    return "'" + s if dangerous else s
 
 
 def atomic_write(path: Path | str, write_fn: Callable) -> None:

@@ -3,6 +3,8 @@ enabled flag controls which scrapers run."""
 
 from __future__ import annotations
 
+import json
+
 from stone_pipeline.config import store
 from stone_pipeline.config.sources import load_source, load_sources
 
@@ -249,3 +251,65 @@ def test_put_rejects_a_duplicate_source_code(tmp_path, monkeypatch):
     code, body = server.dispatch("PUT", ["sources", "varsha"],
                                  {"adapter": "varsha", "source_code": "var", "vendor": "Renamed"})
     assert code == 200 and body["vendor"] == "Renamed"
+
+
+# --- per-source pipeline diagnostics (Phase 1b) -------------------------------
+def _fake_run(outputs_dir, source, drift=None, stage_status="OK"):
+    """A minimal on-disk run: outputs/<source>_<ts>/diagnostics/{stages,health}.json."""
+    d = outputs_dir / f"{source}_20260101_000000" / "diagnostics"
+    d.mkdir(parents=True)
+    (d / "stages.json").write_text(json.dumps({
+        "run_id": f"{source}_20260101_000000", "source": source, "health": "OK",
+        "magnitude": "OK", "gates": {"ingest": "OK"},
+        "stages": [{"stage": "normalize", "status": stage_status, "rows_in": 3, "rows_out": 3,
+                    "rejected": 0, "reviewed": 0, "gapped": 0, "extra": {}}]}), encoding="utf-8")
+    (d / "health.json").write_text(json.dumps(
+        {"drift": drift or [], "row_count": 3, "row_baseline": 3}), encoding="utf-8")
+
+
+def test_source_diagnostic_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.record_source_diagnostic("polonine", "polonine_20260101_000000",
+                                   {"source": "polonine", "health": "DEGRADED", "stages": []})
+    got = store.get_source_diagnostic("polonine")
+    assert got["health"] == "DEGRADED" and got["updated_at"]
+    assert [d["source"] for d in store.read_source_diagnostics()] == ["polonine"]
+    # a read against an ABSENT db never creates it (the isolation contract) and returns empty
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))
+    assert store.get_source_diagnostic("polonine") is None
+    assert store.read_source_diagnostics() == []
+    assert not (tmp_path / "absent.db").exists()
+
+
+def test_diagnostics_endpoint_serves_persisted(tmp_path, monkeypatch):
+    from stone_pipeline.config import server
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.record_source_diagnostic("polonine", "polonine_x",
+                                   {"source": "polonine", "health": "OK", "stages": []})
+    assert server.dispatch("GET", ["diagnostics"], None)[1]["diagnostics"][0]["source"] == "polonine"
+    code, body = server.dispatch("GET", ["diagnostics", "polonine"], None)
+    assert code == 200 and body["health"] == "OK"
+    assert server.dispatch("GET", ["diagnostics", "nope"], None)[0] == 404      # never produced
+    assert server.dispatch("POST", ["diagnostics"], None)[0] == 405             # read-only
+
+
+def test_diagnostics_disk_fallback_surfaces_drift(tmp_path, monkeypatch):
+    # a source produced from the CLI (no control-plane persist) is still visible when the server shares
+    # the run disk: the endpoint falls back to the latest on-disk run and folds in the health DRIFT.
+    from stone_pipeline.config import diagnostics
+    outputs = tmp_path / "outputs"
+    _fake_run(outputs, "polonine", drift=[{"kind": "fill_drop", "field": "color"}], stage_status="DEGRADED")
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))    # nothing persisted
+    got = diagnostics.read_source("polonine", outputs_dir=outputs)
+    assert got is not None and got["stages"][0]["status"] == "DEGRADED"
+    assert got["drift"] == [{"kind": "fill_drop", "field": "color"}]         # format change surfaced
+
+
+def test_persist_from_outputs_folds_disk_into_config_db(tmp_path, monkeypatch):
+    from stone_pipeline.config import diagnostics
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    outputs = tmp_path / "outputs"
+    _fake_run(outputs, "polonine")                                          # polonine is a known adapter
+    n = diagnostics.persist_from_outputs(outputs_dir=outputs)
+    assert n >= 1
+    assert store.get_source_diagnostic("polonine")["run_id"] == "polonine_20260101_000000"

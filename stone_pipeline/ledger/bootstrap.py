@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.ledger.db import Ledger, now_iso, payload_hash
 
 
@@ -113,7 +114,10 @@ def seed_products(ledger: Ledger, path: str | Path | None = None) -> int:
             "inventory_quantity, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (sku, src.lower(), surrogate, info.get("handle") or "", inv or None, "synced", now, now),
         )
-        qty = int(inv) if inv.isdigit() else 0
+        # parse via the shared numeric front door: a bare .isdigit() coerced '10.0'/'1,000'/'12 ' to 0
+        # (a phantom out-of-stock that then re-serves as a spurious delta). parse_number reads them right.
+        _n = parse_number(inv)
+        qty = int(_n) if _n is not None and _n > 0 else 0
         # last_synced_qty equals qty so the bootstrap itself produces no spurious delta
         ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty,
                                     "updated_at": now}, pk=("sku",))

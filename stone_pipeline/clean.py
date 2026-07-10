@@ -2,9 +2,9 @@
 
 Each scrape and each pipeline run writes a fresh timestamped folder; the pipeline always uses the
 latest, so older ones are pure leftover (superseded snapshots of the same source). This prunes
-them — keeping the LATEST per source — plus stale inventory runs, OS cruft (.DS_Store), and
+them -- keeping the LATEST per source -- plus stale inventory runs, OS cruft (.DS_Store), and
 ORPHAN generated images (image_pipeline/{images,to_upload}/<Key>.png whose variant Key is no
-longer in the catalog — a stone that was removed or renamed).
+longer in the catalog -- a stone that was removed or renamed).
 
     python -m stone_pipeline.clean            # report + remove
     python -m stone_pipeline.clean --dry-run  # report only, remove nothing
@@ -74,7 +74,7 @@ def _superseded_runs(root: Path) -> list[Path]:
 
 
 def _catalog_keys() -> set[str]:
-    """The current variant Keys (1_variants_full.csv) — the live image targets."""
+    """The current variant Keys (1_variants_full.csv) -- the live image targets."""
     f = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
     if not f.exists():
         return set()
@@ -83,7 +83,7 @@ def _catalog_keys() -> set[str]:
 
 
 def _orphan_images(image_pipeline_root: Path, catalog_keys: set[str]) -> list[Path]:
-    """image_pipeline/{images,to_upload}/<Key>.png whose Key is no longer in the catalog — a
+    """image_pipeline/{images,to_upload}/<Key>.png whose Key is no longer in the catalog -- a
     generated image for a variant that was removed or renamed. Returns nothing when catalog_keys
     is empty, so a missing/unbuilt catalog never treats every generated image as orphaned."""
     if not catalog_keys:

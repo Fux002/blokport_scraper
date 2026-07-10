@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS ledger_meta (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS variation (
     key           TEXT PRIMARY KEY,                    -- {branch}_{slug(type)}_{slug(name)}_{uuid5}
+    -- the branch set mirrors the active domain pack's category names (stone: slab/block/tile). A different
+    -- product pack must widen/regenerate this CHECK before its first ledger write (config/domains/<pack>.yaml).
     branch        TEXT NOT NULL CHECK (branch IN ('slab', 'block', 'tile')),
     type          TEXT NOT NULL,                       -- canonical stone type name
     name          TEXT NOT NULL,                       -- canonical variety name
@@ -92,6 +94,8 @@ CREATE INDEX IF NOT EXISTS idx_variation_branch ON variation (branch);
 -- other mutable content to diff.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS attribute (
+    -- the vocab set mirrors the domain pack's attributes + 'category' (stone: color/finish/quality/type).
+    -- A different product pack must widen/regenerate this CHECK before its first ledger write.
     category    TEXT NOT NULL CHECK (category IN ('color','finish','quality','type','category')),
     value       TEXT NOT NULL,                         -- canonical value (exact spelling Medusa resolves on)
     medusa_id   TEXT,                                  -- null until synced
