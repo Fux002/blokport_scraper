@@ -105,20 +105,35 @@ def test_submits_only_delta_with_correct_params(monkeypatch):
 
 def test_auto_slices_large_delta(monkeypatch):
     batch = FakeBatch()
-    shas = [f"{i:064x}" for i in range(5)]                  # 5 pending
+    shas = [f"{i:064x}" for i in range(5)]                  # 5 pending, all of the (sorted) scraped list
     s3 = FakeS3(_keys(scraped=shas))
     _wire(monkeypatch, s3, batch,
           AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD", slice_size=2),
           watermarked=())
     et.submit_pending(["varsha"])
-    # 5 pending / slice 2 -> ceil = 3 jobs at offsets 0,2,4
+    # 5 images across windows of 2 -> 3 windows at offsets 0,2,4 (into the stable full sorted list)
     offsets = sorted(
         int({e["name"]: e["value"] for e in c["containerOverrides"]["environment"]}["SLICE_OFFSET"])
         for c in batch.calls)
     assert offsets == [0, 2, 4]
-    # enhance-only source -> WATERMARKED false
     env0 = {e["name"]: e["value"] for e in batch.calls[0]["containerOverrides"]["environment"]}
-    assert env0["WATERMARKED"] == "false"
+    assert env0["WATERMARKED"] == "false"                  # enhance-only source
+
+
+def test_slices_target_the_window_of_the_pending_image(monkeypatch):
+    # REGRESSION for the slice-race bug: only the LAST image (sorted position 5) is pending; every slice must
+    # index the STABLE full sorted list, so the job must target ITS window (offset 4), NOT offset 0. The old
+    # ceil(pending/size)-from-0 logic submitted offset 0 and would have processed the wrong window -> the
+    # pending image gets no marker -> held dark. Window-targeting fixes it.
+    batch = FakeBatch()
+    shas = [f"{i:064x}" for i in range(6)]                  # sorted positions 0..5
+    s3 = FakeS3(_keys(scraped=shas, enhanced=shas[:5]))     # first 5 done, only position 5 pending
+    _wire(monkeypatch, s3, batch,
+          AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD", slice_size=2), watermarked=())
+    et.submit_pending(["varsha"])
+    offsets = [int({e["name"]: e["value"] for e in c["containerOverrides"]["environment"]}["SLICE_OFFSET"])
+               for c in batch.calls]
+    assert offsets == [4]                                  # window containing position 5, never 0
 
 
 def test_no_job_when_nothing_pending(monkeypatch):

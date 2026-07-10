@@ -15,7 +15,6 @@ Shared with deploy/reprocess_source: `done_shas()` is the incremental "already p
 
 from __future__ import annotations
 
-import math
 import os
 
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, SETTINGS
@@ -25,15 +24,17 @@ from stone_pipeline.io import imagestore
 log = logfmt.get_logger("enhance_trigger")
 
 
+def _keys_under(client, prefix: str) -> list[str]:
+    """All object keys under an S3 prefix (unsorted)."""
+    out: list[str] = []
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix):
+        out.extend(o["Key"] for o in page.get("Contents", []))
+    return out
+
+
 def _shas_under(client, prefix: str) -> set[str]:
     """All content sha256 under an S3 prefix (from the <sha>.<ext> object names)."""
-    out: set[str] = set()
-    for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            sha = imagestore.sha_from_url(obj["Key"])
-            if sha:
-                out.add(sha)
-    return out
+    return {sha for k in _keys_under(client, prefix) if (sha := imagestore.sha_from_url(k))}
 
 
 def done_shas(client, source: str) -> set[str]:
@@ -78,19 +79,27 @@ def submit_pending(sources: list[str] | None = None) -> list[str]:
     from stone_pipeline.config.sources import load_sources
     srcs = sources if sources is not None else list(load_sources().keys())
     watermarked = _watermarked_sources()
+    size = cfg.slice_size
     submitted: list[str] = []
     for src in srcs:
         try:
-            pending = len(pending_shas(s3, src))
+            scraped = sorted(_keys_under(s3, imagestore.scraped_prefix(src)))  # STABLE list, == reprocess sort
+            done = done_shas(s3, src)
         except Exception as exc:  # a listing failure for one source never blocks the others
-            log.warning("auto-enhance: could not compute delta; skipping source",
+            log.warning("auto-enhance: could not list source; skipping",
                         extra={"extra_fields": {"source": src, "error": str(exc)}})
             continue
-        if pending == 0:
+        # Windows (offset/size buckets) of the STABLE full sorted list that contain at least one un-done
+        # image. We submit offsets into the FULL list (not the delta) so the reprocess -- which slices that
+        # same stable list -- never misaligns under concurrency; it skips already-done images inside each
+        # window per-image. Submitting only non-empty windows keeps the fan-out cheap (no idle GPU jobs).
+        pending_positions = [i for i, k in enumerate(scraped)
+                             if (imagestore.sha_from_url(k) or "") not in done]
+        if not pending_positions:
             continue
-        n_slices = math.ceil(pending / cfg.slice_size)
-        for i in range(n_slices):
-            offset = i * cfg.slice_size
+        windows = sorted({p // size for p in pending_positions})
+        for w in windows:
+            offset = w * size
             try:
                 resp = batch.submit_job(
                     jobName=f"autoenh-{src}-{offset}",
@@ -101,14 +110,14 @@ def submit_pending(sources: list[str] | None = None) -> list[str]:
                         {"name": "WATERMARKED", "value": "true" if src in watermarked else "false"},
                         {"name": "CLASSIFY", "value": "false"},   # auto-enhance never auto-discards
                         {"name": "SLICE_OFFSET", "value": str(offset)},
-                        {"name": "SLICE_COUNT", "value": str(cfg.slice_size)},
+                        {"name": "SLICE_COUNT", "value": str(size)},
                     ]})
                 submitted.append(resp["jobId"])
             except Exception as exc:  # a submit failure is loud but non-fatal to the produce
                 log.error("auto-enhance: submit_job failed",
                           extra={"extra_fields": {"source": src, "offset": offset, "error": str(exc)}})
         log.info("auto-enhance submitted", extra={"extra_fields": {
-            "source": src, "pending": pending, "slices": n_slices}})
+            "source": src, "pending": len(pending_positions), "windows": len(windows)}})
     return submitted
 
 
