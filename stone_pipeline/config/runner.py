@@ -198,8 +198,11 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         _publish_deliverables(rec.get("stage", "all"))
     _stamp_last_run(rec, rec["status"])
     _persist_run(rec)                                   # durable `last` across a restart
-    _persist_diagnostics()                              # per-source layer diagnostics -> config.db (for :4200)
-    _evaluate_admission()                               # record consistency history + auto-demote on drift
+    # An inventory run is a stock refresh, NOT a validated produce, so it must not advance the admission
+    # consistency streak nor overwrite the latest full-run diagnostic (matches produce._finalize_control_plane).
+    if rec.get("stage") != "inventory":
+        _persist_diagnostics()                          # per-source layer diagnostics -> config.db (for :4200)
+        _evaluate_admission()                           # record consistency history + auto-demote on drift
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
 
 
