@@ -471,18 +471,15 @@ class OriginRule:
     country_iso: str
     city: str
     county: str
+    confirmed: bool = False  # operator-verified (minted overlay, or a CSV row marked confirmed)
 
 
 @dataclass
 class OriginMap:
     rules: list[OriginRule] = field(default_factory=list)
 
-    def lookup(self, name: str) -> Optional[OriginRule]:
-        # exact variety match first (O(1) via a lazily-built index -- there can be 10k+ rules), then
-        # a name PATTERN. Patterns are single tokens (e.g. 'oman', 'persa') and MUST match a whole
-        # word, never a substring -- else 'oman' matches "rOMANo" (Italian travertine -> Oman) and
-        # 'india' matches "INDIAna" (US limestone -> India). Tokenize with the same [a-z]+ rule the
-        # builder uses, so pattern membership is exact. The index is cached after the first call.
+    def _ensure_index(self) -> None:
+        # lazily built (there can be 10k+ rules); invalidated by apply_origin_overlay.
         if not hasattr(self, "_variety_index"):
             self._variety_index = {_norm(r.pattern): r for r in self.rules if r.match_type == "variety"}
             # MOST-SPECIFIC pattern wins, deterministically: longest token first, then alphabetic --
@@ -491,15 +488,53 @@ class OriginMap:
                 ((_norm(r.pattern), r) for r in self.rules if r.match_type == "pattern"),
                 key=lambda pr: (-len(pr[0]), pr[0]),
             )
-        norm_name = _norm(name)
-        hit = self._variety_index.get(norm_name)
+
+    def exact(self, name: str) -> Optional[OriginRule]:
+        """The exact per-variety rule (curated CSV or minted overlay), or None. Excludes name PATTERNS:
+        a pattern is a marketing-name guess, only ever a suggestion, never an emitted origin (a look-alike
+        named after a famous stone is not from that stone's country)."""
+        self._ensure_index()
+        return self._variety_index.get(_norm(name))
+
+    def lookup(self, name: str) -> Optional[OriginRule]:
+        # exact variety match first, then a name PATTERN. Patterns are single tokens (e.g. 'oman',
+        # 'persa') and MUST match a whole word, never a substring -- else 'oman' matches "rOMANo"
+        # (Italian travertine -> Oman) and 'india' matches "INDIAna" (US limestone -> India). Used for the
+        # :4200 mint SUGGESTION (exact OR pattern); derive_origin emits from exact() only.
+        self._ensure_index()
+        hit = self._variety_index.get(_norm(name))
         if hit is not None:
             return hit
-        tokens = set(re.findall(r"[a-z]+", norm_name))
+        tokens = set(re.findall(r"[a-z]+", _norm(name)))
         for pat, rule in self._pattern_rules:
             if pat in tokens:
                 return rule
         return None
+
+    def apply_origin_overlay(self, minted: dict[str, str]) -> int:
+        """Overlay operator-minted origins (variety_decision.seed_country) as CONFIRMED exact rules, so
+        the effective per-variety map = curated CSV + minted decisions (mirrors Backbone.apply_leaf_overlay).
+        `minted` is norm(variety) -> ISO2. A minted country REPLACES any CSV rule for that variety (the
+        operator's explicit choice wins). Returns how many rules were added or overridden."""
+        if not minted:
+            return 0
+        by_norm = {_norm(r.pattern): i for i, r in enumerate(self.rules) if r.match_type == "variety"}
+        added = 0
+        for variety, iso in minted.items():
+            iso = (iso or "").strip().upper()
+            if not variety or not iso:
+                continue
+            rule = OriginRule(match_type="variety", pattern=variety, country_iso=iso,
+                              city="", county="", confirmed=True)
+            idx = by_norm.get(_norm(variety))
+            if idx is not None:
+                self.rules[idx] = rule       # operator override wins over the CSV
+            else:
+                self.rules.append(rule)
+            added += 1
+        if hasattr(self, "_variety_index"):
+            del self._variety_index          # force a rebuild so the overlay is visible
+        return added
 
 
 def load_country_codes(path: Path | None = None) -> dict[str, str]:
@@ -548,9 +583,14 @@ def load_origin_map(path: Path | None = None) -> OriginMap:
                     log.warning("origin_map duplicate variety with conflicting country (last wins)",
                                 extra={"extra_fields": {"variety": pat, "iso": iso, "prior": prior}})
                 seen[_norm(pat)] = iso
+            # 'confirmed' is optional (absent -> unconfirmed, so the frozen snapshot rows surface for
+            # review until an operator verifies each one). Backward-compatible: a CSV without the column
+            # loads every row as unconfirmed.
+            confirmed = (record.get("confirmed") or "").strip().casefold() in ("true", "1", "yes", "y")
             origin.rules.append(OriginRule(match_type=mt, pattern=pat, country_iso=iso,
                                            city=(record.get("city") or "").strip(),
-                                           county=(record.get("county") or "").strip()))
+                                           county=(record.get("county") or "").strip(),
+                                           confirmed=confirmed))
     if skipped:
         log.warning("origin_map rows skipped (need match_type variety|pattern + pattern + country_iso)",
                     extra={"extra_fields": {"skipped": skipped, "path": str(path)}})
@@ -650,6 +690,9 @@ def load_all() -> ReferenceData:
             ),
         },
     )
+    # The effective origin map = the curated CSV grown by operator-minted origins (variety_decision
+    # .seed_country), overlaid in memory here -- the one place ref is built, mirroring the leaf overlay.
+    ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_countries())
     _assert_pack_defaults_resolve(ref)   # a pack default value not in Medusa's vocabulary fails loud here
     log.info(
         "reference loaded",

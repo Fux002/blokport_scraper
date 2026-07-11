@@ -28,7 +28,7 @@ class FlagCode(str, Enum):
     bundle_ratio_noninteger = "bundle_ratio_noninteger"
     origin_unresolved = "origin_unresolved"
     origin_supplier_default = "origin_supplier_default"
-    origin_pattern_guess = "origin_pattern_guess"
+    origin_unconfirmed = "origin_unconfirmed"    # a map origin not yet operator-verified (confirm to clear)
     image_placeholder = "image_placeholder"
     image_download_failed = "image_download_failed"
     near_duplicate = "near_duplicate"

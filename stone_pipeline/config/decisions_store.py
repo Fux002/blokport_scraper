@@ -59,13 +59,15 @@ class InvalidDecision(ValueError):
 # -- variety decisions (produce READS these) -----------------------------------
 
 def variety_actions() -> dict[str, dict]:
-    """norm(variant) -> {'action': mint|reject|alias, 'alias_of', 'seed_color', 'seed_type'} for every
-    decided variety. Empty for a fresh store."""
+    """norm(variant) -> {'action': mint|reject|alias, 'alias_of', 'seed_color', 'seed_type',
+    'seed_country'} for every decided variety. Empty for a fresh store."""
     with closing(store.open_store()) as conn:
         return {r["variant_norm"]: {"action": r["action"], "alias_of": r["alias_of"],
-                                    "seed_color": r["seed_color"], "seed_type": r["seed_type"]}
+                                    "seed_color": r["seed_color"], "seed_type": r["seed_type"],
+                                    "seed_country": r["seed_country"]}
                 for r in conn.execute(
-                    "SELECT variant_norm, action, alias_of, seed_color, seed_type FROM variety_decision")}
+                    "SELECT variant_norm, action, alias_of, seed_color, seed_type, seed_country "
+                    "FROM variety_decision")}
 
 
 def variety_seed_colors() -> dict[str, str]:
@@ -80,6 +82,18 @@ def variety_seed_types() -> dict[str, str]:
     produce mints a type-less variety with this instead of holding it for review."""
     return {n: d["seed_type"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_type"]}
+
+
+def variety_seed_countries() -> dict[str, str]:
+    """norm(variant) -> the operator-chosen ISO country of origin, for every MINT decision that set one.
+    load_all overlays these onto origin_map as CONFIRMED per-variety rules (the effective origin map =
+    curated CSV + minted decisions), so a minted variety carries the true origin the operator picked.
+    Empty (no side effect -- does not create the DB) for a fresh store: load_all reads this every build,
+    so it must NOT materialise config.db, mirroring backbone_leaf_overlay."""
+    if not store.config_db_path().exists():
+        return {}
+    return {n: d["seed_country"] for n, d in variety_actions().items()
+            if d["action"] == "mint" and d["seed_country"]}
 
 
 def confirm_map() -> dict[str, str]:
@@ -107,10 +121,12 @@ def alias_map() -> dict[str, str]:
 
 
 def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
-                         seed_color: str | None = None, seed_type: str | None = None) -> None:
+                         seed_color: str | None = None, seed_type: str | None = None,
+                         seed_country: str | None = None) -> None:
     """Upsert ONE operator decision. Raises InvalidDecision on a bad action or an alias with no target.
-    Idempotent: re-deciding a variety overwrites the prior decision. `seed_color` and `seed_type` (mint
-    only) are the colour/stone type to mint the variety with; ignored for reject/alias."""
+    Idempotent: re-deciding a variety overwrites the prior decision. `seed_color`, `seed_type` and
+    `seed_country` (mint only) are the colour / stone type / ISO origin country to mint the variety
+    with; ignored for reject/alias. The caller validates seed_country is a real ISO code."""
     action = (action or "").strip().lower()
     if action not in _ACTIONS:
         raise InvalidDecision(f"action must be one of {_ACTIONS}, got {action!r}")
@@ -121,19 +137,22 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
         alias_of = None                      # only alias carries a target; keep the row unambiguous
     seed_color = (seed_color or "").strip() or None
     seed_type = (seed_type or "").strip() or None
+    seed_country = (seed_country or "").strip().upper() or None
     if action != "mint":
-        seed_color = seed_type = None        # only mint carries a seed colour / type
+        seed_color = seed_type = seed_country = None   # only mint carries the seed colour / type / origin
     norm = _norm(variant)
     if not norm:
         raise InvalidDecision("variant name is empty")
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO variety_decision (variant_norm, variant_display, action, alias_of, seed_color, "
-            "seed_type, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(variant_norm) DO UPDATE SET "
+            "seed_type, seed_country, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(variant_norm) DO UPDATE SET "
             "variant_display = excluded.variant_display, action = excluded.action, "
             "alias_of = excluded.alias_of, seed_color = excluded.seed_color, "
-            "seed_type = excluded.seed_type, decided_at = excluded.decided_at",
-            (norm, variant.strip(), action, alias_of, seed_color, seed_type, _now()))
+            "seed_type = excluded.seed_type, seed_country = excluded.seed_country, "
+            "decided_at = excluded.decided_at",
+            (norm, variant.strip(), action, alias_of, seed_color, seed_type, seed_country, _now()))
         conn.commit()
 
 
@@ -393,6 +412,7 @@ def list_pending(kind: str) -> list[dict]:
             item["current_alias_of"] = actions.get(r["ref"], {}).get("alias_of")
             item["current_seed_color"] = actions.get(r["ref"], {}).get("seed_color")
             item["current_seed_type"] = actions.get(r["ref"], {}).get("seed_type")
+            item["current_seed_country"] = actions.get(r["ref"], {}).get("seed_country")
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
         out.append(item)

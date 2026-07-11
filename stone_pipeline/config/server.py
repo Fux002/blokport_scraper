@@ -46,6 +46,23 @@ def _type_vocab() -> dict[str, str]:
     return {proj.norm(t): t for t in load_attributes().canonical_names("type")}
 
 
+def _country_iso(raw: str) -> str | None:
+    """Resolve a country NAME or ISO2 to a canonical ISO-3166 alpha-2, or None if it is not a real country.
+    Name-first (so 'UK' -> GB) then a bare valid ISO2 -- mirrors derive._to_iso. Validates the operator's
+    mint origin so a garbage country is never stored. Loaded per call (admin low-QPS)."""
+    from stone_pipeline.core.text import match_key
+    from stone_pipeline.reference.loaders import load_country_codes
+    v = (raw or "").strip()
+    if not v:
+        return None
+    codes = load_country_codes()
+    if hit := codes.get(match_key(v)):
+        return hit
+    if len(v) == 2 and v.isalpha() and v.upper() in set(codes.values()):
+        return v.upper()
+    return None
+
+
 def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
     """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
     or ['sources', 'polonine']). Pure: returns (status_code, json body)."""
@@ -163,6 +180,14 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
         from stone_pipeline.config import decisions_store, varieties
         if len(segments) == 2 and segments[1] == "variants" and method == "GET":
             return 200, {"variants": decisions_store.list_pending("variety")}
+        # a suggested origin to PRE-FILL the mint dialog (exact map OR name pattern) -- a hint the
+        # operator confirms or overrides; nothing is emitted from it. null when the map has no guess.
+        if len(segments) == 4 and segments[1] == "variants" and segments[3] == "origin-suggestion" \
+                and method == "GET":
+            from stone_pipeline.reference.loaders import load_origin_map
+            rule = load_origin_map().lookup(unquote(segments[2]))
+            return 200, {"variant": unquote(segments[2]),
+                         "suggested_country": rule.country_iso if rule else None}
         if len(segments) == 3 and segments[1] == "variants" and method == "PUT":
             if not isinstance(body, dict):
                 return 400, {"error": "body must be a JSON object {action, alias_of?}"}
@@ -188,13 +213,20 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
                 if proj.norm(raw_type) not in vocab:
                     return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
                 seed_type = vocab[proj.norm(raw_type)]
+            # the mint ORIGIN: a real ISO country (name or code). Required at mint is enforced in the
+            # :4200 UI so nothing breaks here before it ships the field; when a country IS sent it must be
+            # a real one (never store garbage). A minted country overlays origin_map as a confirmed rule.
+            seed_country = None
+            if (raw_country := (body.get("country") or "").strip()):
+                if not (seed_country := _country_iso(raw_country)):
+                    return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
             try:
-                decisions_store.set_variety_decision(segments[2], action, alias_of,
-                                                     seed_color=seed_color, seed_type=seed_type)
+                decisions_store.set_variety_decision(segments[2], action, alias_of, seed_color=seed_color,
+                                                     seed_type=seed_type, seed_country=seed_country)
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
             return 200, {"variant": segments[2], "action": action, "alias_of": alias_of,
-                         "seed_color": seed_color, "seed_type": seed_type}
+                         "seed_color": seed_color, "seed_type": seed_type, "seed_country": seed_country}
         if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
             return 200, {"attributes": decisions_store.list_pending("attribute")}
         if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
