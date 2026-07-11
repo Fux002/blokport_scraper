@@ -38,31 +38,32 @@ def main() -> int:
     keys: list[str] = []
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=src_prefix):
         keys.extend(o["Key"] for o in page.get("Contents", []))
-    # Incremental by default: process only the DELTA (scraped originals not yet enhanced or discarded), so a
-    # post-produce run is cheap and a no-op when nothing is new. FULL=true forces the whole pool (re-enhance
-    # / margin re-tune). The trigger and this filter compute the SAME delta in the SAME sorted order, so a
-    # sliced fan-out never overlaps.
+    # Slice the STABLE full sorted scraped list -- NEVER a delta-filtered list. Concurrent slices start at
+    # different times and would each compute a different "done" set (markers accrue as slices run); slicing
+    # a delta that shrinks under you makes identical offsets land on different images -> gaps/overlaps. The
+    # full list is timing-independent, so disjoint SLICE_OFFSET windows always cover every image exactly once.
+    keys.sort()
     total = len(keys)
-    if not full:
-        done = done_shas(client, src)
-        keys = [k for k in keys if (imagestore.sha_from_url(k) or "") not in done]
-    keys.sort()  # stable order so disjoint SLICE_OFFSET windows never overlap across tasks
     sliced = keys[offset:offset + count] if count else keys[offset:]
     if not sliced:
-        print(f"no images in slice (src={src} offset={offset} count={count} full={full}); "
-              f"{len(keys)} pending of {total} total")
+        print(f"no images in slice (src={src} offset={offset} count={count}); {total} total")
         return 0
+    # Incremental is a PER-IMAGE skip inside the loop (never used to slice, so it cannot shift the window):
+    # an image already enhanced or discarded is a no-op. FULL=true reprocesses everything (backfill / re-tune).
+    skip = set() if full else done_shas(client, src)
 
-    print(f"==> reprocess {src}: {len(sliced)} of {len(keys)} pending ({total} total, offset={offset} "
-          f"count={count or 'all'}) full={full} watermarked={watermarked} classify={classify} "
-          f"-> s3://{S3_BUCKET}/{dst_prefix}")
+    print(f"==> reprocess {src}: slice[{offset}:{offset + len(sliced)}] of {total} full={full} "
+          f"watermarked={watermarked} classify={classify} -> s3://{S3_BUCKET}/{dst_prefix}")
     proc = ImageProcessor(ImageProcessingConfig(
         enabled=True, dewatermark=watermarked, classify=classify, write_preview=False))
 
-    done = dw = discarded = failed = 0
+    enhanced = dw = discarded = skipped = failed = 0
     for i, key in enumerate(sliced):
         name = key.rsplit("/", 1)[-1]          # <sha256>.jpg
         sha = name.rsplit(".", 1)[0]
+        if sha in skip:                        # already enhanced or discarded in a prior run -> idempotent no-op
+            skipped += 1
+            continue
         try:
             data = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
             # 1) classify: a non-stone image (spec sheet / price list / plain logo) is recorded in the
@@ -85,16 +86,16 @@ def main() -> int:
                               Body=res.data, ContentType="image/jpeg")
             client.put_object(Bucket=S3_BUCKET, Key=imagestore.enhanced_key(src, sha),
                               Body=b"", ContentType="text/plain")
-            done += 1
+            enhanced += 1
             dw += 1 if res.dewatermarked else 0
         except Exception as exc:  # never let one bad image kill the slice
             failed += 1
             print(f"   [{offset + i}] FAILED {name}: {exc}")
         if i % 25 == 0:
-            print(f"   [{offset + i}/{offset + len(sliced)}] ok={done} dw={dw} "
-                  f"discarded={discarded} failed={failed}")
-    print(f"==> {src} slice done: {done}/{len(sliced)} written, {dw} de-watermarked, "
-          f"{discarded} discarded, {failed} failed")
+            print(f"   [{offset + i}/{offset + len(sliced)}] enhanced={enhanced} dw={dw} "
+                  f"discarded={discarded} skipped={skipped} failed={failed}")
+    print(f"==> {src} slice done: {enhanced} enhanced, {dw} de-watermarked, "
+          f"{discarded} discarded, {skipped} skipped, {failed} failed")
     return 0
 
 
