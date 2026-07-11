@@ -149,12 +149,35 @@ def test_scrape_unresolvable_falls_through(ref, cfg):
     assert row.origin_country_code == "IN"
     assert row.origin_source == "supplier_default"
 
-def test_tier2_origin_map_exact_medium(ref, cfg):
+def test_tier2_origin_map_exact_unconfirmed_is_flagged(ref, cfg):
+    # an exact rule from the (unverified) origin_map.csv ships the country at medium, but FLAGGED --
+    # the frozen-snapshot origins surface for review until an operator confirms each one.
     row = _row(variation_name="Agata Black")
     derive.derive_origin(row, ref, cfg)
     assert row.origin_country_code == "BR"
-    assert row.origin_source == "origin_map"
+    assert row.origin_source == "origin_unconfirmed"
     assert row.origin_confidence == "medium"
+    assert any(f.code == FlagCode.origin_unconfirmed for f in row.review_flags)
+
+
+def test_tier2_confirmed_rule_ships_clean(ref, cfg):
+    # a confirmed rule (operator-minted or verified) is the real origin: high confidence, no review flag
+    r = dataclasses.replace(ref, origin_map=_map(("variety", "Agata Black", "BR", "", "", True)))
+    row = _row(variation_name="Agata Black")
+    derive.derive_origin(row, r, cfg)
+    assert row.origin_country_code == "BR"
+    assert row.origin_source == "origin_confirmed"
+    assert row.origin_confidence == "high"
+    assert not any(f.field == "origin" for f in row.review_flags)
+
+
+def test_tier2b_pattern_no_longer_emits_falls_to_supplier(ref, cfg):
+    # a name PATTERN ('persa') is NO LONGER an emitted origin: exact() excludes patterns, so a
+    # pattern-only variety falls to the flagged supplier default (pattern survives only as a suggestion).
+    row = _row(variation_name="Brandnew Persa Gold XL", raw_origin="")
+    derive.derive_origin(row, ref, _cfg_with_default(cfg, "IN"))
+    assert row.origin_source == "supplier_default"
+    assert any(f.code == FlagCode.origin_supplier_default for f in row.review_flags)
 
 def test_tier3_supplier_default_low_and_flagged(ref, cfg):
     row = _row(variation_name="Zzqq Unknown Variety Abc")

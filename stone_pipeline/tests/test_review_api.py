@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import server, varieties
+from stone_pipeline.config import decisions_store, server, varieties
 from stone_pipeline.stages import decisions
 
 
@@ -148,3 +148,41 @@ def test_mint_seed_type_must_be_a_real_attribute(seeded_queue):
 def test_reject_ignores_a_seed_type(seeded_queue):
     server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "reject", "type": "granite"})
     assert decisions.load_variety_seed_types() == {}           # only mint carries a seed type
+
+
+# -- mint seed country (Q2: the operator picks the ORIGIN at approval; it overlays origin_map) --------
+
+def test_mint_with_a_seed_country(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                                 {"action": "mint", "country": "brazil"})
+    assert code == 200 and body["seed_country"] == "BR"        # name resolved + stored as ISO2
+    assert decisions_store.variety_seed_countries() == {"zucchi blue x": "BR"}   # load_all overlays this
+    row = server.dispatch("GET", ["review", "variants"], None)[1]["variants"][0]
+    assert row["current_seed_country"] == "BR"                 # UI reflects the between-runs choice
+
+
+def test_mint_accepts_a_bare_iso_country(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                                 {"action": "mint", "country": "no"})   # bare ISO2 -> canonical upper
+    assert code == 200 and body["seed_country"] == "NO"
+    assert decisions_store.variety_seed_countries() == {"zucchi blue x": "NO"}
+
+
+def test_mint_seed_country_must_be_a_real_country(seeded_queue):
+    code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                                 {"action": "mint", "country": "Xanadu"})
+    assert code == 400 and "not a real" in body["error"]
+    assert decisions_store.variety_seed_countries() == {}      # nothing seeded on a bogus country
+
+
+def test_reject_ignores_a_seed_country(seeded_queue):
+    server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
+                    {"action": "reject", "country": "brazil"})
+    assert decisions_store.variety_seed_countries() == {}      # only mint carries a seed country
+
+
+def test_origin_suggestion_endpoint():
+    # the :4200 mint dialog pre-fills the country from the suggestion (exact map OR name pattern) -- a hint
+    code, body = server.dispatch("GET", ["review", "variants", "Verde Persa", "origin-suggestion"], None)
+    assert code == 200
+    assert body["suggested_country"] == "BR"                   # 'persa' pattern -> BR (suggestion only)

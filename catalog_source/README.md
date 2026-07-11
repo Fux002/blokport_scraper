@@ -24,16 +24,22 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
   by port NAME or UN/LOCODE (e.g. `Brindisi` / `ITBDS`) — resolved to ids against this file.
 - `origin_map.csv` — the per-VARIETY quarry country (origin is a property of the stone, NOT the
   supplier — a trader in Italy sells Brazilian quartzite; origin is Brazil). Columns
-  `match_type,pattern,country_iso,city,county`, two rule kinds:
+  `match_type,pattern,country_iso,city,county,confirmed`, two rule kinds:
   - `variety,<Variant Name>,<ISO>,…` — an EXACT name → country (type-independent). Add one row
     per variety whose origin you know.
-  - `pattern,<token>,<ISO>,,` — a single name TOKEN that points at one country (`carrara`→IT,
-    `persa`→BR); matches a whole word, so it carries origin onto BRAND-NEW variants whose name
-    contains a known place/family token — no per-variant entry needed.
-  Resolution order (`derive_origin`): scraped country → this file (exact, then pattern) → the
-  supplier's `origin_default` as a LOW-confidence **flagged** fallback. That `origin_supplier_default`
-  flag in `products_review.csv` is the maintenance worklist: it lists exactly which new varieties
-  have no real origin yet — add a `variety,…` row here and the next build resolves them exactly.
+  - `pattern,<token>,<ISO>,,` — a single name TOKEN (`carrara`→IT, `persa`→BR). **Patterns are a
+    SUGGESTION only now** — they pre-fill the :4200 mint origin field but are NEVER emitted as a
+    product's origin (a look-alike named after a famous stone is not from that country).
+  - `confirmed` — `true` once you have VERIFIED a `variety` row's country. A blank/absent `confirmed`
+    means the row is the old unverified snapshot: it still ships (Medusa needs an origin) but carries
+    the `origin_unconfirmed` review flag until you confirm it. Optional column — a CSV without it loads
+    every row as unconfirmed.
+  Resolution order (`derive_origin`): scraped country → **operator-minted origin** (the country picked
+  on :4200 at mint, overlaid here as a confirmed rule) → this file, EXACT only (`confirmed`→clean,
+  unconfirmed→flagged) → the supplier's `origin_default` as a LOW-confidence **flagged** fallback.
+  Maintenance loop: the `origin_unconfirmed` / `origin_supplier_default` flags in `products_review.csv`
+  are the worklist — confirm or add a `variety,…,true` row here and the next build resolves it clean.
+  New varieties get their true origin at mint on :4200 (part of the approval), never guessed from the name.
   (This file is hand-maintained — it is NOT generated from any export.)
 - `missing_variants.csv` — variants parked OUT of the tree (no/ambiguous image).
 - `image_model.csv` — which model made each variant's image (`flux-2-max` vs `legacy`);

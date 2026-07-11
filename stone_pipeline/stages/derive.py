@@ -299,26 +299,27 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
             row.origin_source = "scrape_field"
             row.origin_confidence = _conf_name(Confidence.high)
             return
-    # 2. origin_map -- the per-variety override built from the master variety reference. Two tiers:
-    #    an EXACT variety-name rule (trusted, the variety's known country), or a geographic name
-    #    PATTERN (e.g. 'carrara'->IT, 'persa'->BR) that generalises to a variety the exact tier has
-    #    never seen -- this is what carries origin onto a brand-new variant. A pattern hit is a strong
-    #    data-driven guess, so it's still emitted at medium confidence but FLAGGED, so it surfaces for
-    #    a one-time confirm; once confirmed into the raw reference it becomes an exact rule next build.
-    rule = ref.origin_map.lookup(row.variation_name or row.raw_name or "")
+    # 2. the per-variety origin map = curated origin_map.csv + operator-minted overlay (seed_country).
+    #    EXACT variety rules only -- a name PATTERN is never emitted (a look-alike named after a famous
+    #    stone is not quarried in that stone's country); the pattern lives on only as the :4200 mint
+    #    suggestion. A CONFIRMED rule (operator-minted, or a CSV row marked confirmed) is the real origin
+    #    and ships clean; an UNCONFIRMED rule (the frozen snapshot) still ships -- Medusa requires an
+    #    origin -- but is FLAGGED, so the unverified ones surface for review and confirmation.
+    rule = ref.origin_map.exact(row.variation_name or row.raw_name or "")
     if rule:
         row.origin_country_code = rule.country_iso
         row.origin_city = rule.city
         row.origin_county = rule.county
-        row.origin_confidence = _conf_name(Confidence.medium)
-        if rule.match_type == "pattern":
-            row.origin_source = "origin_pattern"
-            row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_pattern_guess,
-                                    raw_value=rule.pattern, best_guess=rule.country_iso,
-                                    confidence=Confidence.medium, method="origin_pattern",
-                                    src_url=row.src_url))
+        if rule.confirmed:
+            row.origin_source = "origin_confirmed"
+            row.origin_confidence = _conf_name(Confidence.high)
         else:
-            row.origin_source = "origin_map"
+            row.origin_source = "origin_unconfirmed"
+            row.origin_confidence = _conf_name(Confidence.medium)
+            row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_unconfirmed,
+                                    raw_value=rule.country_iso, best_guess=rule.country_iso,
+                                    confidence=Confidence.medium, method="origin_map_unconfirmed",
+                                    src_url=row.src_url))
         return
     # 3. supplier-country fallback. Strictly, the supplier's country is where the stone is SOLD FROM,
     #    not necessarily where it was quarried (a trader can ship stone from many countries) -- so the

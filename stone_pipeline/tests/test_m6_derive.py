@@ -5,6 +5,8 @@ upload style.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from stone_pipeline.config.sources import load_source
@@ -298,15 +300,58 @@ def test_origin_unresolved_when_no_supplier_default(ref):
     assert any(f.code == FlagCode.origin_unresolved for f in row.review_flags)
 
 
-def test_origin_pattern_generalizes_to_new_variety(ref, cfg):
-    # a brand-new variety the exact tier has never seen still resolves via a geographic name PATTERN
-    # ('persa' -> BR), carrying origin onto new variants -- emitted at medium confidence but FLAGGED
-    # so it surfaces for a one-time confirm into the master reference.
+def test_pattern_only_variety_no_longer_auto_emits_origin(ref, cfg):
+    # a name PATTERN ('persa' -> BR) is NO LONGER an emitted origin: a look-alike named after a stone is
+    # not quarried in that stone's country. A variety the exact map has never seen falls to the flagged
+    # supplier default (the review worklist); the pattern survives only as the :4200 mint suggestion.
     row = _slab_row(variation_name="Verde Persa Imperiale XL", raw_origin="")
     derive.derive_origin(row, ref, cfg)
+    assert row.origin_source == "supplier_default"
+    assert any(f.code == FlagCode.origin_supplier_default for f in row.review_flags)
+
+
+def test_origin_map_exact_ignores_name_patterns():
+    from stone_pipeline.reference.loaders import OriginMap, OriginRule
+    m = OriginMap(rules=[OriginRule("variety", "Blue Pearl", "NO", "", ""),
+                         OriginRule("pattern", "persa", "BR", "", "")])
+    assert m.exact("Blue Pearl").country_iso == "NO"        # exact variety rule
+    assert m.exact("Verde Persa") is None                   # a pattern is NOT an exact origin
+    assert m.lookup("Verde Persa").country_iso == "BR"      # but IS a suggestion (for :4200)
+
+
+def test_minted_origin_overlays_map_as_confirmed():
+    # the effective per-variety map = CSV + minted seed_country, overlaid as CONFIRMED, operator wins
+    from stone_pipeline.reference.loaders import OriginMap, OriginRule, _norm
+    m = OriginMap(rules=[OriginRule("variety", "Blue Pearl", "NO", "", "", confirmed=False)])
+    added = m.apply_origin_overlay({_norm("Blue Pearl"): "IN", _norm("Brand New Stone"): "CN"})
+    assert added == 2
+    bp = m.exact("Blue Pearl")
+    assert bp.country_iso == "IN" and bp.confirmed is True   # minted overrides the CSV country
+    assert m.exact("Brand New Stone").country_iso == "CN"    # a new variety is added, confirmed
+
+
+def test_derive_origin_unconfirmed_map_hit_is_flagged(ref, cfg):
+    # a real exact rule from the (unverified) origin_map.csv ships the country but FLAGS it for review
+    from stone_pipeline.reference.loaders import OriginMap, OriginRule
+    r = dataclasses.replace(ref, origin_map=OriginMap(
+        rules=[OriginRule("variety", "Testonia", "BR", "", "", confirmed=False)]))
+    row = _slab_row(variation_name="Testonia", raw_origin="")
+    derive.derive_origin(row, r, cfg)
     assert row.origin_country_code == "BR"
-    assert row.origin_source == "origin_pattern"
-    assert any(f.code == FlagCode.origin_pattern_guess for f in row.review_flags)
+    assert row.origin_source == "origin_unconfirmed"
+    assert any(f.code == FlagCode.origin_unconfirmed for f in row.review_flags)
+
+
+def test_derive_origin_confirmed_map_hit_ships_clean(ref, cfg):
+    # a confirmed rule (operator-minted or verified) is the real origin: no review flag
+    from stone_pipeline.reference.loaders import OriginMap, OriginRule
+    r = dataclasses.replace(ref, origin_map=OriginMap(
+        rules=[OriginRule("variety", "Testonia", "BR", "", "", confirmed=True)]))
+    row = _slab_row(variation_name="Testonia", raw_origin="")
+    derive.derive_origin(row, r, cfg)
+    assert row.origin_country_code == "BR"
+    assert row.origin_source == "origin_confirmed"
+    assert not any(f.field == "origin" for f in row.review_flags)
 
 
 def test_origin_accepts_country_name(ref, cfg):
