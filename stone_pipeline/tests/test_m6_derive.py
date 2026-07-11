@@ -88,18 +88,55 @@ def test_block_has_no_bundle(ref, cfg):
     assert row.bundle_size is None
 
 
-def test_title_matches_upload_style(ref, cfg):
-    row = _slab_row(variation_name="Walnut Travertine", finish_name="Honed")
+def test_title_is_listing_style_with_material_and_format(ref, cfg):
+    # a sellable, searchable title: variety + finish + material + format
+    row = _slab_row(variation_name="Carrara", finish_name="Honed", type_name="Marble")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Walnut Travertine Honed"   # variety + finish, NO category word
+    assert row.title == "Carrara Honed Marble Slab"
+
+
+def test_title_skips_material_already_in_variety_name(ref, cfg):
+    # 'Travertine' is already in the variety name -> never repeat it ('...Travertine Travertine')
+    row = _slab_row(variation_name="Walnut Travertine", finish_name="Honed", type_name="Travertine")
+    derive.derive_category(row, ref)
+    derive.derive_title(row)
+    assert row.title == "Walnut Travertine Honed Slab"
+
+
+def test_title_multiword_material_not_doubled(ref, cfg):
+    # a multi-word type whose head noun is already in the name is skipped whole -> no 'Sandstone Sandstone'
+    row = _slab_row(variation_name="Rain Forest Sandstone", finish_name="Honed",
+                    type_name="Quartzitic Sandstone")
+    derive.derive_category(row, ref)
+    derive.derive_title(row)
+    assert row.title == "Rain Forest Sandstone Honed Slab"
+    assert row.title.lower().count("sandstone") == 1
+
+
+def test_block_title_drops_finish_and_raw(ref, cfg):
+    # a block is uncut stone -> no finish word in the title (no 'Blue Pearl Raw'); material + Block stay
+    row = _slab_row(raw_format="Block", variation_name="Blue Pearl", finish_name="Raw",
+                    type_name="Granite")
+    derive.derive_category(row, ref)
+    derive.derive_title(row)
+    assert row.title == "Blue Pearl Granite Block"
+    assert "Raw" not in row.title
+
+
+def test_title_omits_format_word_when_unresolved(ref, cfg):
+    # an unresolved format must not put a neutral 'Piece' in the title (unlike the description prose)
+    row = _slab_row(variation_name="Carrara", finish_name="Honed", type_name="Marble", raw_format="")
+    derive.derive_title(row)   # no derive_category -> format stays unresolved
+    assert row.title == "Carrara Honed Marble"
 
 
 def test_title_strips_parenthetical_alias(ref, cfg):
-    row = _slab_row(variation_name="Carrara (Bianco Carrara)", finish_name="Polished")
+    row = _slab_row(variation_name="Carrara (Bianco Carrara)", finish_name="Polished", type_name="Marble")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Carrara Polished"
+    assert row.title == "Carrara Polished Marble Slab"
+    assert "Bianco" not in row.title
 
 
 def test_dimensions_prefer_parsed(ref, cfg):
@@ -171,6 +208,56 @@ def test_description_template_reads_origin(ref, cfg):
     derive.derive_description(row)
     assert "Carrara, IT" in row.description
     assert row.description_method == "template"
+
+
+def test_description_includes_real_thickness_for_slab(ref, cfg):
+    # width is the parsed thickness (2cm -> 20mm) -> the description carries a real buying spec
+    row = _slab_row(raw_dimensions="length=2.8m;height=1.97m", raw_thickness="2cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    derive.derive_description(row)
+    assert "at 20 mm" in row.description
+    assert "it offers" in row.description   # warmer connective
+
+
+def test_description_omits_thickness_for_block(ref, cfg):
+    # a block never carries a slab thickness spec (its 'width' is a chunk dimension, not a thickness)
+    row = _slab_row(raw_format="Block", raw_dimensions="length=1.5m;height=1.5m", raw_thickness="1.5m")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    derive.derive_description(row)
+    assert "mm" not in row.description
+
+
+def test_description_uses_benefit_led_finish_phrase(ref, cfg):
+    # the sensory 'sell' lives in the finish phrase, tied to the real finish (honest, not adjective spam)
+    row = _slab_row(finish_name="Polished")
+    derive.derive_category(row, ref)
+    derive.derive_description(row)
+    assert "mirror-like" in row.description
+
+
+def test_handle_is_decoupled_from_the_enriched_title(ref, cfg):
+    # the URL keys off variety+finish, NOT the display title -> enriching the title never churns it
+    row = _slab_row(variation_name="Carrara", finish_name="Honed", type_name="Marble")
+    derive.derive_category(row, ref)
+    derive.derive_title(row)
+    derive.derive_handle(row, cfg)
+    assert row.title == "Carrara Honed Marble Slab"          # display carries material + format
+    assert row.handle == "carrara-honed-pol-620"             # URL does not
+    assert "marble" not in row.handle and "slab" not in row.handle
+    assert row.handle == row.slug
+
+
+def test_block_handle_keeps_finish_even_though_title_drops_it(ref, cfg):
+    # the block title drops 'Raw', but the handle keeps it -> byte-identical to the pre-change URL
+    row = _slab_row(raw_format="Block", variation_name="Blue Pearl", finish_name="Raw",
+                    type_name="Granite", surrogate_key="42")
+    derive.derive_category(row, ref)
+    derive.derive_title(row)
+    derive.derive_handle(row, cfg)
+    assert "Raw" not in row.title
+    assert row.handle == "blue-pearl-raw-pol-42"
 
 
 def test_ports_belong_to_supplier(ref, cfg):

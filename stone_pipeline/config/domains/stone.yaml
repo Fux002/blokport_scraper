@@ -55,14 +55,16 @@ dimension_ranges:
   tile:  {weight: [0.005, 0.012], length: [0.3, 0.6], width: [0.01, 0.02], height: [0.3, 0.6]}
 
 # Finish -> surface phrase for the generated product description (was stages/derive.py _FINISH_PHRASE).
+# Benefit-led but finish-true: each line describes what the finish actually is, so it sells without
+# inventing a claim. This is the one honest place the description carries a sensory hook.
 finish_phrases:
-  honed: "a smooth matte surface"
-  polished: "a bright reflective surface"
-  leathered: "a soft textured surface"
-  brushed: "a lightly textured surface"
-  flamed: "a rugged non-slip surface"
-  split face: "a dramatic three-dimensional natural cleft"
-  sandblasted: "a fine matte texture"
-  tumbled: "a worn antique surface"
+  polished: "a bright, mirror-like surface that reflects light and deepens the stone's colour"
+  honed: "a smooth, understated matte finish that reads calm and contemporary"
+  leathered: "a soft, tactile texture with a gentle low sheen"
+  brushed: "a lightly textured, modern matte finish"
+  flamed: "a rugged, slip-resistant surface made for outdoor use"
+  split face: "a bold, three-dimensional natural cleft with real depth"
+  sandblasted: "a fine, even matte texture"
+  tumbled: "a softened, antique-worn character"
 # Phrase when the finish has no specific entry (was the default in derive.derive_description).
 finish_phrase_default: "a refined natural surface"
