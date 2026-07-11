@@ -21,7 +21,7 @@ import json
 import os
 import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from stone_pipeline.config import store
 from stone_pipeline.core import logfmt
@@ -63,9 +63,10 @@ def _country_iso(raw: str) -> str | None:
     return None
 
 
-def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
+def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[int, object]:
     """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
-    or ['sources', 'polonine']). Pure: returns (status_code, json body)."""
+    or ['sources', 'polonine']); `query` is the raw URL query string (e.g. 'q=carr&limit=20').
+    Pure: returns (status_code, json body)."""
     if segments and segments[0] == "run":
         # the 'produce' trigger: kick a scrape/catalog into the ledger. Body (all optional):
         #   {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"}
@@ -264,11 +265,17 @@ def dispatch(method: str, segments: list[str], body) -> tuple[int, object]:
             return 200, {"ref": ref, "action": action}
         return 404, {"error": "expected GET/PUT/POST /config/v1/review/{variants,attributes,backbone}[/<ref>]"}
     if segments and segments[0] == "varieties":
-        # existing variety names (+ stone_type) for the review alias-to dropdown.
+        # existing variety names (+ stone_type) for the review alias-to dropdown, from the durable ledger.
+        # Optional ?q=<substring> + ?limit=<n> back a type-ahead: the full set is ~25k, so a client can
+        # narrow it instead of pulling ~1 MB on every open.
         if method == "GET":
             from stone_pipeline.config import varieties
-            return 200, {"varieties": varieties.list_all()}
-        return 405, {"error": "GET /config/v1/varieties"}
+            params = parse_qs(query)
+            q = (params.get("q", [""])[0] or "").strip() or None
+            raw_limit = (params.get("limit", [""])[0] or "").strip()
+            limit = int(raw_limit) if raw_limit.isdigit() else None
+            return 200, {"varieties": varieties.list_all(q=q, limit=limit)}
+        return 405, {"error": "GET /config/v1/varieties[?q=&limit=]"}
     if segments and segments[0] == "adapters":
         # the coded adapters available to run (the auto-discovered REGISTRY). The :4200 admin turns the
         # source "adapter" field into a validated dropdown from this, so it can proactively block adding a
@@ -379,7 +386,7 @@ class ConfigHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 return self._respond(400, {"error": "invalid JSON body"})
         try:
-            code, payload = dispatch(method, seg[2:], body)
+            code, payload = dispatch(method, seg[2:], body, parts.query)
         except Exception:
             log.exception("config request failed", extra={"extra_fields": {"path": self.path}})
             return self._respond(500, {"error": "internal error"})

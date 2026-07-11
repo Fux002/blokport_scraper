@@ -74,7 +74,7 @@ def test_put_attribute_id(seeded_queue):
 
 def test_get_varieties_route(monkeypatch):
     monkeypatch.setattr(varieties, "list_all",
-                        lambda: [{"name": "Bianco Carrara", "stone_type": "Marble"}])
+                        lambda q=None, limit=None: [{"name": "Bianco Carrara", "stone_type": "Marble"}])
     code, body = server.dispatch("GET", ["varieties"], None)
     assert code == 200 and body["varieties"][0]["name"] == "Bianco Carrara"
 
