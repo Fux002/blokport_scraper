@@ -58,17 +58,17 @@ resource "aws_ecr_lifecycle_policy" "this" {
   policy = jsonencode({
     rules = [
       { rulePriority = 1, description = "keep gpu images (:gpu + gpu-<sha>)",
-        selection = { tagStatus = "tagged", tagPrefixList = ["gpu"], countType = "imageCountMoreThan", countNumber = 3 },
-        action    = { type = "expire" } },
+        selection    = { tagStatus = "tagged", tagPrefixList = ["gpu"], countType = "imageCountMoreThan", countNumber = 3 },
+      action = { type = "expire" } },
       { rulePriority = 2, description = "keep imageproc images",
-        selection = { tagStatus = "tagged", tagPrefixList = ["imageproc"], countType = "imageCountMoreThan", countNumber = 2 },
-        action    = { type = "expire" } },
+        selection    = { tagStatus = "tagged", tagPrefixList = ["imageproc"], countType = "imageCountMoreThan", countNumber = 2 },
+      action = { type = "expire" } },
       { rulePriority = 3, description = "keep :core",
-        selection = { tagStatus = "tagged", tagPrefixList = ["core"], countType = "imageCountMoreThan", countNumber = 2 },
-        action    = { type = "expire" } },
+        selection    = { tagStatus = "tagged", tagPrefixList = ["core"], countType = "imageCountMoreThan", countNumber = 2 },
+      action = { type = "expire" } },
       { rulePriority = 10, description = "expire the per-commit <sha> churn beyond the last ${var.keep_last_images}",
-        selection = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = var.keep_last_images },
-        action    = { type = "expire" } },
+        selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = var.keep_last_images },
+      action = { type = "expire" } },
     ]
   })
 }
@@ -157,13 +157,13 @@ module "scraper_dev" {
   cpu                 = var.cpu
   memory              = var.memory
 
-  # Auto-enhance: the scheduled scrape submits the dev GPU reprocess for newly-staged images. Ships OFF
-  # (dev_auto_enhance defaults false). Prod stays unwired until its own GPU module is active.
-  gpu_job_queue_name      = module.gpu_enhance_dev.job_queue
-  gpu_job_definition_name = module.gpu_enhance_dev.job_definition
-  gpu_job_queue_arn       = module.gpu_enhance_dev.job_queue_arn
-  gpu_job_definition_arn  = module.gpu_enhance_dev.job_definition_arn
-  auto_enhance_enabled    = var.dev_auto_enhance
+  # Auto-enhance: the scheduled scrape submits the dev GPU reprocess for newly-staged images. ON in dev
+  # (dev_auto_enhance defaults true). Prod stays unwired until its own GPU module is active.
+  gpu_job_queue_name       = module.gpu_enhance_dev.job_queue
+  gpu_job_definition_name  = module.gpu_enhance_dev.job_definition
+  gpu_job_queue_arn        = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
+  auto_enhance_enabled     = var.dev_auto_enhance
   require_enhanced_enabled = var.dev_require_enhanced
 }
 
@@ -191,8 +191,8 @@ module "scraper_prod" {
 
 # =============================================================================
 # GPU image enhancer (AWS Batch, on-demand, scales to 0). One per env, scoped to
-# that env's bucket. Runs the :gpu image (Real-ESRGAN). Dev tracks :gpu; prod uses
-# the promoted :gpu-<sha>. Only the CDN proxy secret is injected (no FAL_KEY needed).
+# that env's bucket. Runs the :gpu image (Real-ESRGAN enhance + FAL FLUX Fill de-watermark).
+# Dev tracks :gpu; prod uses the promoted :gpu-<sha>. FAL_KEY is injected on dev (de-watermark).
 # =============================================================================
 module "gpu_enhance_dev" {
   source = "./modules/gpu_enhance"
@@ -206,10 +206,19 @@ module "gpu_enhance_dev" {
   # 128 vCPU = up to 32 g4dn.xlarge in parallel. Full-catalog reprocess is ~53 GPU-hours at ~30s/image;
   # 4 GPUs (the default 16) took >2h per slice and hit the Batch timeout. min stays 0, so idle cost is $0
   # and total spend is ~flat vs 4 GPUs (same GPU-hours) -- this only compresses wall-clock to ~1.5-2h.
-  max_vcpus      = 128
+  max_vcpus = 128
   # FAL_KEY for the FAL FLUX Fill de-watermarker (watermarked sources). Wired by convention to the known
   # dev SSM param, exactly like the scraper/produce secrets, so a plain apply can never strip it.
   ssm_secret_arns = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
+}
+
+locals {
+  # The batch:SubmitJob IAM for the auto-enhance triggers must survive job-definition REVISION bumps. The
+  # trigger submits by NAME, which resolves to the latest revision; pinning the policy to the exact :N ARN
+  # (module output) means any job-def change (e.g. adding a secret) silently breaks the submit with an IAM
+  # denial until every dependent module is re-applied. Match all revisions by NAME instead: strip the
+  # trailing :<revision> and allow :*. Queue ARNs have no revision, so they are used as-is.
+  dev_gpu_jobdef_iam_arn = replace(module.gpu_enhance_dev.job_definition_arn, "/:[0-9]+$/", ":*")
 }
 
 module "gpu_enhance_prod" {
@@ -276,11 +285,11 @@ module "sync_service_dev" {
   produce_secret_arns = local.dev_ssm_secrets
 
   # Auto-enhance: the produce trigger submits the dev GPU reprocess for newly-staged images (scoped IAM +
-  # queue/def names). Ships OFF (dev_auto_enhance defaults false); flip the var to enable after testing.
-  gpu_job_queue_name      = module.gpu_enhance_dev.job_queue
-  gpu_job_definition_name = module.gpu_enhance_dev.job_definition
-  gpu_job_queue_arn       = module.gpu_enhance_dev.job_queue_arn
-  gpu_job_definition_arn  = module.gpu_enhance_dev.job_definition_arn
-  auto_enhance_enabled    = var.dev_auto_enhance
+  # queue/def names). ON in dev (dev_auto_enhance defaults true).
+  gpu_job_queue_name       = module.gpu_enhance_dev.job_queue
+  gpu_job_definition_name  = module.gpu_enhance_dev.job_definition
+  gpu_job_queue_arn        = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
+  auto_enhance_enabled     = var.dev_auto_enhance
   require_enhanced_enabled = var.dev_require_enhanced
 }

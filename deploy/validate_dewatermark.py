@@ -8,7 +8,8 @@ committing to the full (slow) set. Run on the imageproc or gpu image:
 
     RUN_MODE=validate-dewatermark   (the entrypoint dispatches here)
 
-Needs torch + diffusers (the SDXL-inpaint stack). Tune the count with VALIDATE_N.
+Needs FAL_KEY (the hosted FAL FLUX Fill de-watermarker) plus torch for the ESRGAN enhance.
+Tune the count with VALIDATE_N.
 """
 
 from __future__ import annotations
