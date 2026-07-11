@@ -9,7 +9,7 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 ## Stack
 - Python >=3.11 (CI + Docker run on 3.12). No argparse; config-driven, not interactive.
 - Core libs: polars, pyarrow, pydantic v2, rapidfuzz, jellyfish, httpx, curl_cffi (Cloudflare TLS impersonation), boto3 (S3), pyyaml.
-- Image stage: opencv-python-headless, numpy, pillow (core, CPU); optional torch + spandrel (Real-ESRGAN) + diffusers (SDXL de-watermark) for enhance/de-watermark.
+- Image stage: opencv-python-headless, numpy, pillow (core, CPU); optional torch + spandrel (Real-ESRGAN) for enhance; FAL FLUX Fill (fal-client, hosted API) for de-watermark.
 - Persistence: SQLite — `config.db` (scraper control plane) and per-env sync ledger DB.
 - Deploy target: AWS (Fargate scheduled task + on-demand Batch GPU), image in shared ECR, infra in Terraform.
 
@@ -38,8 +38,8 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 
 ### Docker
 - `docker build --target core -t blokport-scraper:core .` — scrape + pipeline + CPU image enhance (scheduled Fargate task).
-- `docker build --target imageproc ...` — core + CPU torch de-watermark stack (local/CPU).
-- `docker build --target gpu ...` — CUDA torch Real-ESRGAN + SDXL de-watermark (AWS Batch). Model weights are baked and pinned (ESRGAN by SHA-256, diffusers by revision).
+- `docker build --target imageproc ...` — core + CPU torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark (local/CPU).
+- `docker build --target gpu ...` — CUDA torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark (AWS Batch). ESRGAN weights baked + pinned by SHA-256; de-watermark is the hosted FAL API (FAL_KEY, no baked model).
 
 ## Conventions
 - **Binding invariants** (plan section 0): no argparse, no em dashes anywhere, deterministic + idempotent (same input → byte-identical output, safe to re-run), NEVER guess a value into output (below-floor → review queue or tree gap), provenance on every derived value, fail loud and isolated (one dead row/image flags that row, never crashes the run).

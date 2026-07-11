@@ -16,11 +16,11 @@ on:
   workflow_dispatch:
     inputs:
       build_imageproc:
-        description: "Also build + push the heavy imageproc image (CPU torch: Real-ESRGAN + SDXL de-watermark)"
+        description: "Also build + push the heavy imageproc image (CPU torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark)"
         type: boolean
         default: false
       build_gpu:
-        description: "Also build + push the GPU image (CUDA torch: Real-ESRGAN + SDXL de-watermark) for the AWS Batch enhancer"
+        description: "Also build + push the GPU image (CUDA torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark) for the AWS Batch enhancer"
         type: boolean
         default: false
 
@@ -97,8 +97,8 @@ jobs:
           sudo docker builder prune -af || true
           df -h /
 
-      # Heavy CPU-torch variant (Real-ESRGAN + SDXL de-watermark, ~10 GB with baked
-      # models); only on manual dispatch with the flag set.
+      # Heavy CPU-torch variant (Real-ESRGAN enhance + FAL de-watermark, ~10 GB with baked
+      # ESRGAN model); only on manual dispatch with the flag set.
       - name: Build and push imageproc image
         if: steps.gate.outputs.ready == 'true' && inputs.build_imageproc
         env:

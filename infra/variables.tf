@@ -111,12 +111,12 @@ variable "scraper_proxy_ssm_name" {
 
 variable "dev_auto_enhance" {
   type        = bool
-  default     = false
-  description = "Enable BLOKPORT_AUTO_ENHANCE on the dev produce + scheduled scrape: auto-submit the GPU reprocess for newly-staged images. Ships false; flip on after a validated cold-start cycle."
+  default     = true
+  description = "Enable BLOKPORT_AUTO_ENHANCE on the dev produce + scheduled scrape: auto-submit the GPU reprocess for newly-staged images. ON in dev: the cold-start cycle is validated. Prod uses its own var."
 }
 
 variable "dev_require_enhanced" {
   type        = bool
-  default     = false
-  description = "Enable BLOKPORT_REQUIRE_ENHANCED on dev produce + scheduled scrape: publish ONLY GPU-enhanced images. Flip on only after the enhanced/ markers are backfilled for the existing enhanced set."
+  default     = true
+  description = "Enable BLOKPORT_REQUIRE_ENHANCED on dev produce + scheduled scrape: publish ONLY GPU-enhanced images. ON in dev: the enhanced/ markers are backfilled for the existing set. Prod uses its own var."
 }

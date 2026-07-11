@@ -150,10 +150,10 @@ resource "aws_iam_role_policy" "job" {
   policy = data.aws_iam_policy_document.job.json
 }
 
-# The GPU image is large (~19 GB: CUDA base + baked Real-ESRGAN + SDXL-inpaint weights).
-# The ECS_AL2_NVIDIA AMI's default 30 GB root volume can't hold it (docker needs ~2.5x the
-# image size to pull + decompress), so the pull dies with "no space left on device". A launch
-# template enlarges the root volume; without this, GPU jobs never start.
+# The GPU image is ~4 GB (CUDA base + baked Real-ESRGAN; de-watermark is the hosted FAL API, no baked
+# weights). The launch template enlarges the ECS_AL2_NVIDIA AMI's default 30 GB root volume anyway, as
+# safe headroom: docker needs ~2.5x the image size to pull + decompress, and a future baked model would
+# otherwise reintroduce the "no space left on device" pull failure that stalls GPU jobs.
 resource "aws_launch_template" "this" {
   name = "${local.name}-lt"
   block_device_mappings {
@@ -259,7 +259,7 @@ resource "aws_batch_job_definition" "this" {
   }
   timeout {
     # 5h ceiling. Per-image cost varies widely by source: enhance-only is ~30s but the de-watermark
-    # sources (SDXL inpaint on top of ESRGAN) run ~50-65s, so a ~220-image slice can take ~4h. A generous
+    # sources (FAL round-trip on top of ESRGAN) run ~50-65s, so a ~220-image slice can take ~4h. A generous
     # cap is the robust fix (the reprocess is idempotent + on-demand instances are stable) -- fragile
     # per-source slice sizing to fit a tight timeout is what let the slow slices breach the old 2h.
     attempt_duration_seconds = 18000
