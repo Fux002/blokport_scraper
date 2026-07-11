@@ -207,6 +207,9 @@ module "gpu_enhance_dev" {
   # 4 GPUs (the default 16) took >2h per slice and hit the Batch timeout. min stays 0, so idle cost is $0
   # and total spend is ~flat vs 4 GPUs (same GPU-hours) -- this only compresses wall-clock to ~1.5-2h.
   max_vcpus      = 128
+  # FAL_KEY for the FAL FLUX Fill de-watermarker (watermarked sources). Wired by convention to the known
+  # dev SSM param, exactly like the scraper/produce secrets, so a plain apply can never strip it.
+  ssm_secret_arns = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
 }
 
 module "gpu_enhance_prod" {

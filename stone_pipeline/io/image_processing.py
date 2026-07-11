@@ -10,22 +10,28 @@ Enhancement is Real-ESRGAN (learned super-resolution -- clean + sharpen + 4x), t
 a gentle exposure lift + vibrance: brighter, crisper and natural, preserving the
 stone's colour rather than desaturating it.
 
-De-watermark reconstructs the mark's footprint with SDXL-inpaint (the classical
-detect-then-copy approaches smeared patterned stone). Flagged sources only.
+De-watermark locates the pink/magenta logo and sends ONLY its cropped region to FAL
+FLUX Fill (hosted inpainting), then composites the fill back through the logo mask so
+everything outside the logo is byte-identical -- no whole-region "box" like the old
+SDXL footprint reconstruction. Flagged sources only; a failure HOLDS the image (never
+publishes it watermarked).
 
 Bytes in, bytes out, so the image stage can apply it during re-host and tests can
 inject a fake. Everything is gated by `ImageProcessingConfig` (off by default).
 
-Pipeline per image:  de-watermark (flagged sources only) -> enhance (ESRGAN) -> beautify.
+Pipeline per image:  de-watermark (flagged sources, FAL) -> enhance (ESRGAN) -> beautify.
 
-Both the ESRGAN enhancer and the SDXL de-watermark backend need the torch stack in
-requirements-imageproc.txt (cv2/numpy/Pillow are core deps). When that stack is
-absent each step is skipped with a single warning and the image passes through
-un-enhanced -- there is no classical fallback.
+The ESRGAN enhancer + CLIP classifier need the torch stack in requirements-imageproc.txt
+(cv2/numpy/Pillow are core deps); the FAL de-watermarker needs fal-client + FAL_KEY. When
+ESRGAN's stack is absent enhancement is skipped with a warning (no fallback).
 """
 
 from __future__ import annotations
 
+import math
+import os
+import tempfile
+import time
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Optional
@@ -39,8 +45,9 @@ from stone_pipeline.core import logfmt
 
 # cv2/numpy/Pillow are core deps and this module is imported lazily (only when
 # processing is enabled), so importing them at module top is safe and keeps the
-# hot path free of repeated import statements. torch/spandrel/diffusers stay lazy
-# inside the enhancer/de-watermarker (optional, heavy, requirements-imageproc.txt only).
+# hot path free of repeated import statements. torch/spandrel stay lazy inside the
+# enhancer (heavy, requirements-imageproc.txt only); fal_client stays lazy inside
+# the de-watermarker (the FAL FLUX Fill client, network-based, no local model).
 
 log = logfmt.get_logger("image_processing")
 
@@ -88,68 +95,71 @@ def _vibrance(bgr, amount: float):
 
 
 # --------------------------------------------------------------------------- #
-#  De-watermark (locate the mark, reconstruct its footprint with SDXL inpaint)
+#  De-watermark: locate the logo, send only its crop to FAL FLUX Fill
 # --------------------------------------------------------------------------- #
 
+@dataclass
+class DewatermarkResult:
+    image: Image.Image           # the de-watermarked image (or the original when skipped/failed)
+    applied: bool = False        # the logo was found AND FAL filled it
+    failed: bool = False         # FAL (or its config) failed -> caller MUST hold the image, never publish
+    billed_mp: int = 0           # billed megapixels for this image (0 when no FAL call was made)
+
+
 class _Dewatermarker:
-    """Removes the consistent, semi-transparent supplier watermark from a slab photo.
+    """Removes the supplier watermark with FAL FLUX Fill (hosted inpainting).
 
-    The mark is LOCATED by what stone never carries -- its pink/magenta ink plus the local
-    deviation of its text strokes -- giving a tight central footprint. The exact stone under a
-    drifting, multi-position semi-transparent mark can't be recovered (classical subtraction
-    leaves artefacts, and a plain inpaint smears patterned stone), so that small footprint is
-    REGENERATED with a learned inpainting model (SDXL-inpaint): natural, matching stone texture.
-    A feathered composite blends it seamlessly; everything outside the footprint is untouched.
+    The pink/magenta logo is LOCATED by _locate (stone never carries that ink), and ONLY the padded
+    logo crop of the image is sent to FAL. The fill is composited back through a feathered logo mask,
+    so every pixel outside the logo is byte-identical to the original -- no whole-region "box" like the
+    old SDXL footprint reconstruction left on veined stone. FAL bills per megapixel, so cropping to the
+    logo keeps each slab at the $0.05 floor; callers send the RAW (pre-upscale) image to keep the crop
+    smallest.
 
-    Lazy + graceful: without torch/diffusers/weights, available() is False and de-watermarking is
-    skipped (enhancement still runs). Runs fp16 on CUDA (deploy); fp32 on MPS/CPU (fp16 NaNs there)."""
+    No local model: it needs `fal_client` + a network + `FAL_KEY`. Outcomes:
+      - logo absent            -> applied=False, failed=False (clean slab, no FAL cost).
+      - FAL / config failure   -> applied=False, failed=True  (HOLD the image; a re-run retries).
+      - filled                 -> applied=True.
+    Never returns a watermarked image marked as done."""
 
-    SEARCH = (0.32, 0.68, 0.22, 0.78)     # y0,y1,x0,x1 fractions of the central search band
+    SEARCH = (0.32, 0.68, 0.22, 0.78)       # y0,y1,x0,x1 fractions of the central search band
     HUE_LO, HUE_HI, SAT_MIN = 148, 180, 35  # the mark's pink/magenta ink in OpenCV HSV
-    INK_MEDIAN, INK_DELTA = 31, 9         # text strokes deviate this much from the local stone
-    MIN_INK = 25                          # px of ink needed to trust that a mark is present
-    PAD, FEATHER = 16, 9                  # footprint padding (px) / composite feather radius (px)
-    TILE = 1024                           # SDXL native inpaint resolution
-    _PROMPT = ("natural polished stone slab, continuous seamless mineral veining, "
-               "photorealistic, high detail")
-    _NEG = "text, letters, words, watermark, logo, sign, seam, blur, smooth patch"
+    INK_MEDIAN, INK_DELTA = 31, 9           # text strokes deviate this much from the local stone
+    MIN_INK = 25                            # px of ink needed to trust a mark is present
+    DILATE = 4                              # grow the logo mask so FAL covers anti-aliased edges (px)
+    FEATHER = 9                             # composite feather radius (px)
+    MAX_RETRIES = 3
+    BASE_BACKOFF = 2.0
 
-    def __init__(self, model: str, steps: int, guidance: float):
-        self.model, self.steps, self.guidance = model, steps, guidance
+    def __init__(self, cfg: ImageProcessingConfig):
+        self.model = cfg.fal_model
+        self.prompt = cfg.fal_prompt
+        self.seed = cfg.fal_seed
+        self.pad = cfg.crop_pad
+        self.min_side = cfg.crop_min_side
+        self.snap = max(1, cfg.crop_snap)
+        self.price_per_mp = cfg.fal_price_per_mp
         self._ok: Optional[bool] = None
-        self._pipe = None
-        self._device = None
-
-    # SDXL's stock VAE decodes to black in fp16 -- use the fp16-safe VAE when running fp16 (CUDA).
-    VAE_FP16 = "madebyollin/sdxl-vae-fp16-fix"
 
     def available(self) -> bool:
+        """True only when fal_client imports AND FAL_KEY is set. False means we CANNOT de-watermark, so a
+        watermarked image must be HELD (the caller treats unavailability as a failure), never published."""
         if self._ok is not None:
             return self._ok
         try:
-            import torch
-            from diffusers import AutoencoderKL, AutoPipelineForInpainting
-
-            mps = getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
-            self._device = "cuda" if torch.cuda.is_available() else "mps" if mps else "cpu"
-            # fp16 only on CUDA; on MPS/CPU fp16 NaN-decodes to black, so run fp32 there.
-            dtype = torch.float16 if self._device == "cuda" else torch.float32
-            kwargs = {"torch_dtype": dtype}
-            if dtype == torch.float16:  # fp16-safe VAE, else the decode is black
-                kwargs["vae"] = AutoencoderKL.from_pretrained(self.VAE_FP16, torch_dtype=dtype)
-            self._pipe = AutoPipelineForInpainting.from_pretrained(self.model, **kwargs).to(self._device)
-            self._pipe.set_progress_bar_config(disable=True)
-            self._pipe.enable_attention_slicing()
-            self._ok = True
-        except Exception as exc:  # deps/weights absent -- degrade gracefully
-            log.warning("de-watermark unavailable; skipping (enhancement still runs)",
-                        extra={"extra_fields": {"error": str(exc)}})
+            import fal_client  # noqa: F401
+            self._ok = bool(os.environ.get("FAL_KEY"))
+            if not self._ok:
+                log.error("de-watermark unavailable: FAL_KEY not set (watermarked images will be HELD)")
+        except Exception as exc:
+            log.error("de-watermark unavailable: fal_client import failed (watermarked images will be HELD)",
+                      extra={"extra_fields": {"error": str(exc)}})
             self._ok = False
         return self._ok
 
-    def _footprint(self, bgr):
-        """(x0,y0,x1,y1) bounding box of the watermark, or None if no mark is found. Located
-        by pink ink + local stroke deviation within the central band."""
+    def _locate(self, bgr):
+        """Return (bbox, logo_mask) or None. bbox=(x0,y0,x1,y1) tight to the ink; logo_mask is a full
+        image uint8 (255 = logo pixel), the SHAPE to inpaint. Presence-gated on MIN_INK ink pixels."""
         h, w = bgr.shape[:2]
         sy0, sy1, sx0, sx1 = (int(h * self.SEARCH[0]), int(h * self.SEARCH[1]),
                               int(w * self.SEARCH[2]), int(w * self.SEARCH[3]))
@@ -162,39 +172,113 @@ class _Dewatermarker:
         ys, xs = np.where(ink > 0)
         if len(xs) < self.MIN_INK:
             return None
-        return (max(0, sx0 + xs.min() - self.PAD), max(0, sy0 + ys.min() - self.PAD),
-                min(w, sx0 + xs.max() + self.PAD), min(h, sy0 + ys.max() + self.PAD))
+        logo_mask = np.zeros((h, w), np.uint8)
+        logo_mask[sy0:sy1, sx0:sx1][ink > 0] = 255
+        if self.DILATE > 0:
+            k = np.ones((self.DILATE * 2 + 1, self.DILATE * 2 + 1), np.uint8)
+            logo_mask = cv2.dilate(logo_mask, k)
+        bbox = (int(sx0 + xs.min()), int(sy0 + ys.min()), int(sx0 + xs.max()), int(sy0 + ys.max()))
+        return bbox, logo_mask
 
-    def process(self, pil_image):
-        """Return a copy with the watermark footprint reconstructed, or the original if no mark."""
-        import torch
+    def _pad_axis(self, a0, a1, lim):
+        """Pad [a0,a1] by self.pad, grow to at least self.min_side, then round the span UP to a multiple
+        of self.snap -- all clamped to [0,lim], staying valid (0 <= a0 < a1 <= lim)."""
+        a0 = max(0, a0 - self.pad)
+        a1 = min(lim, a1 + self.pad)
+        target = min(lim, max(self.min_side, a1 - a0))
+        target = min(lim, ((target + self.snap - 1) // self.snap) * self.snap)  # snap up, capped at lim
+        need = target - (a1 - a0)
+        if need > 0:                                    # grow symmetrically, then spill to whichever side has room
+            left = min(a0, (need + 1) // 2)
+            a0 -= left
+            a1 = min(lim, a1 + (need - left))
+            if (a1 - a0) < target:
+                a0 = max(0, a1 - target)
+        return a0, a1
 
+    def _crop_box(self, bbox, w, h):
+        x0, x1 = self._pad_axis(bbox[0], bbox[2], w)
+        y0, y1 = self._pad_axis(bbox[1], bbox[3], h)
+        return x0, y0, x1, y1
+
+    def billed_megapixels(self, w: int, h: int) -> int:
+        return max(1, math.ceil(w * h / 1_000_000))
+
+    def process(self, pil_image) -> DewatermarkResult:
         bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
-        box = self._footprint(bgr)
-        if box is None:
-            return pil_image, False
+        located = self._locate(bgr)
+        if located is None:
+            return DewatermarkResult(pil_image, applied=False)      # clean slab -> no FAL cost
+        bbox, logo_mask = located
         h, w = bgr.shape[:2]
-        cx, cy = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
-        side = (min(h, w, self.TILE) // 8) * 8                # a square crop for SDXL, /8-aligned
-        x0 = int(np.clip(cx - side // 2, 0, w - side))
-        y0 = int(np.clip(cy - side // 2, 0, h - side))
-        crop = bgr[y0:y0 + side, x0:x0 + side]
-        mcrop = np.zeros((side, side), np.uint8)
-        cv2.rectangle(mcrop, (box[0] - x0, box[1] - y0), (box[2] - x0, box[3] - y0), 255, -1)
+        x0, y0, x1, y1 = self._crop_box(bbox, w, h)
+        crop = bgr[y0:y1, x0:x1]
+        cmask = logo_mask[y0:y1, x0:x1]
+        if crop.size == 0 or int(cmask.max()) == 0:                 # nothing to fill after cropping
+            return DewatermarkResult(pil_image, applied=False)
+        try:
+            filled_rgb = self._fal_fill(crop, cmask)                # RGB uint8, same HxW as crop
+        except Exception as exc:                                    # network/validation/refusal -> HOLD
+            log.error("de-watermark FAL failed; holding image (never publishing watermarked)",
+                      extra={"extra_fields": {"error": str(exc)}})
+            return DewatermarkResult(pil_image, applied=False, failed=True)
+        filled_bgr = cv2.cvtColor(filled_rgb, cv2.COLOR_RGB2BGR).astype(np.float32)
+        # feathered composite THROUGH the logo mask: outside-logo pixels stay byte-identical, logo blends
+        feather = cv2.GaussianBlur(cmask.astype(np.float32) / 255.0, (0, 0), self.FEATHER)[..., None]
+        blended = crop.astype(np.float32) * (1 - feather) + filled_bgr * feather
+        bgr[y0:y1, x0:x1] = np.clip(blended, 0, 255).astype(np.uint8)
+        out = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        return DewatermarkResult(out, applied=True, billed_mp=self.billed_megapixels(x1 - x0, y1 - y0))
 
-        img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)).resize((self.TILE, self.TILE))
-        mask = Image.fromarray(mcrop).resize((self.TILE, self.TILE))
-        result = self._pipe(
-            prompt=self._PROMPT, negative_prompt=self._NEG, image=img, mask_image=mask,
-            num_inference_steps=self.steps, strength=0.99, guidance_scale=self.guidance,
-            generator=torch.Generator(self._device).manual_seed(0)).images[0]
-        inpainted = cv2.cvtColor(np.array(result.resize((side, side))), cv2.COLOR_RGB2BGR).astype(np.float32)
+    def _fal_fill(self, crop_bgr, cmask):
+        """Send the crop + logo mask to FAL FLUX Fill; return the filled crop as RGB uint8 (same size).
+        Retries transient errors with backoff; fails fast on deterministic (422) rejections; validates the
+        output. Raises on unrecoverable failure so process() holds the image."""
+        import fal_client
+        import requests
 
-        # feathered composite -> the reconstructed footprint blends with no seam
-        feather = cv2.GaussianBlur(mcrop.astype(np.float32) / 255.0, (0, 0), self.FEATHER)[..., None]
-        blended = crop.astype(np.float32) * (1 - feather) + inpainted * feather
-        bgr[y0:y0 + side, x0:x0 + side] = np.clip(blended, 0, 255).astype(np.uint8)
-        return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)), True
+        crop_rgb = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB))
+        mask_l = Image.fromarray(cmask).convert("L")
+        ti = tempfile.mktemp(suffix=".png")
+        tm = tempfile.mktemp(suffix=".png")
+        try:
+            crop_rgb.save(ti)
+            mask_l.save(tm)
+            last = None
+            for attempt in range(1, self.MAX_RETRIES + 1):
+                try:
+                    result = fal_client.subscribe(self.model, arguments={
+                        "image_url": fal_client.upload_file(ti),
+                        "mask_url": fal_client.upload_file(tm),
+                        "prompt": self.prompt,
+                        "seed": self.seed,
+                        "output_format": "png",
+                    })
+                    imgs = result.get("images") or []
+                    if not imgs:
+                        raise ValueError(f"no images in FAL response: {list(result.keys())}")
+                    url = imgs[0]["url"] if isinstance(imgs[0], dict) else imgs[0]
+                    resp = requests.get(url, timeout=120)
+                    resp.raise_for_status()
+                    out = Image.open(BytesIO(resp.content)).convert("RGB")
+                    if out.size != crop_rgb.size:                  # FLUX may round dims -> snap back
+                        out = out.resize(crop_rgb.size)
+                    arr = np.array(out)
+                    if arr.std() < 1.0:                            # blank/black frame or a safety refusal
+                        raise ValueError("FAL returned a blank image")
+                    return arr
+                except Exception as exc:
+                    last = exc
+                    msg = str(exc).lower()
+                    if "422" in msg or "unprocessable" in msg:     # deterministic rejection -> no retry
+                        raise
+                    if attempt < self.MAX_RETRIES:
+                        time.sleep(self.BASE_BACKOFF * (2 ** (attempt - 1)))
+            raise last if last else RuntimeError("FAL fill failed")
+        finally:
+            for t in (ti, tm):
+                if os.path.exists(t):
+                    os.remove(t)
 
 
 # --------------------------------------------------------------------------- #
@@ -348,6 +432,10 @@ class ProcessResult:
     dewatermarked: bool = False
     enhanced: bool = False
     upscaled: bool = False
+    # True iff de-watermarking a WATERMARKED image could not complete (FAL unavailable / failed / an
+    # unexpected error). The caller MUST hold the image (no marker), never publish it watermarked.
+    dewatermark_failed: bool = False
+    billed_mp: int = 0             # FAL billed megapixels for this image (0 when no FAL call was made)
 
 
 @dataclass
@@ -366,8 +454,7 @@ class ImageProcessor:
 
     def __init__(self, cfg: ImageProcessingConfig):
         self.cfg = cfg
-        self._dw = (_Dewatermarker(cfg.dewatermark_model, cfg.dewatermark_steps, cfg.dewatermark_guidance)
-                    if cfg.dewatermark else None)
+        self._dw = _Dewatermarker(cfg) if cfg.dewatermark else None
         self._esr = _ESRGANEnhancer(cfg.esrgan_model, cfg.esrgan_weights, cfg.esrgan_tile)
         self._clf = (_StoneClassifier(cfg.classify_model, cfg.classify_margin,
                                       cfg.classify_stone_prompts, cfg.classify_nonstone_prompts)
@@ -395,19 +482,28 @@ class ImageProcessor:
         except Exception as exc:  # faithful fallback: original bytes, never crash
             log.warning("image processing failed; keeping original",
                         extra={"extra_fields": {"error": str(exc)}})
-            return ProcessResult(data)
+            # a failure on a WATERMARKED image must hold it (never publish the original, watermarked).
+            return ProcessResult(data, dewatermark_failed=watermarked)
 
     def _process(self, data: bytes, watermarked: bool) -> ProcessResult:
         res = ProcessResult(data)
 
-        # 1) de-watermark (flagged sources only). Keep the cleaned pixels in-memory (no
-        #    intermediate JPEG) so the enhancement engine works on lossless input.
+        # 1) de-watermark (flagged sources only) via FAL. If the source is watermarked but de-watermarking
+        #    cannot run or fails, HOLD the image (dewatermark_failed) -- never fall through to enhance+
+        #    publish a watermarked slab. Keep the cleaned pixels in-memory (no intermediate JPEG).
         bgr = None
-        if watermarked and self.cfg.dewatermark and self._dw and self._dw.available():
+        if watermarked and self.cfg.dewatermark and self._dw is not None:
+            if not self._dw.available():                      # no FAL_KEY / client -> cannot de-watermark
+                res.dewatermark_failed = True
+                return res
             pil = Image.open(BytesIO(data)).convert("RGB")
-            cleaned, did = self._dw.process(pil)
-            res.dewatermarked = did
-            bgr = cv2.cvtColor(np.array(cleaned.convert("RGB")), cv2.COLOR_RGB2BGR)
+            dw = self._dw.process(pil)
+            if dw.failed:                                     # FAL error -> hold, retry next run
+                res.dewatermark_failed = True
+                return res
+            res.dewatermarked = dw.applied
+            res.billed_mp = dw.billed_mp
+            bgr = cv2.cvtColor(np.array(dw.image.convert("RGB")), cv2.COLOR_RGB2BGR)
         if bgr is None:
             bgr = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
             if bgr is None:  # not a decodable raster (svg, etc.) -- leave untouched

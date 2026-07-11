@@ -52,12 +52,20 @@ def main() -> int:
     # an image already enhanced or discarded is a no-op. FULL=true reprocesses everything (backfill / re-tune).
     skip = set() if full else done_shas(client, src)
 
+    # De-watermarking is FAL (hosted); a watermarked source cannot run without FAL_KEY. Fail fast rather
+    # than silently HOLDING every image (which would look like a stalled run producing nothing).
+    if watermarked and not os.environ.get("FAL_KEY"):
+        print(f"ERROR: watermarked source {src} needs FAL_KEY for de-watermarking; aborting (set FAL_KEY)")
+        return 2
+
     print(f"==> reprocess {src}: slice[{offset}:{offset + len(sliced)}] of {total} full={full} "
           f"watermarked={watermarked} classify={classify} -> s3://{S3_BUCKET}/{dst_prefix}")
     proc = ImageProcessor(ImageProcessingConfig(
         enabled=True, dewatermark=watermarked, classify=classify, write_preview=False))
+    price, max_usd = proc.cfg.fal_price_per_mp, proc.cfg.fal_max_usd
 
-    enhanced = dw = discarded = skipped = failed = 0
+    enhanced = dw = discarded = skipped = held = failed = 0
+    fal_cost = 0.0
     for i, key in enumerate(sliced):
         name = key.rsplit("/", 1)[-1]          # <sha256>.jpg
         sha = name.rsplit(".", 1)[0]
@@ -66,10 +74,9 @@ def main() -> int:
             continue
         try:
             data = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
-            # 1) classify: a non-stone image (spec sheet / price list / plain logo) is recorded in the
-            #    discarded/ pool and NOT enhanced or published. One marker object per image (content-keyed),
-            #    so the parallel slices never race a shared file. Stage 7 reads the pool and, when a
-            #    variant's every image is discarded, emits the terminal no_publishable_image flag.
+            # 1) classify FIRST (before any FAL cost): a non-stone image (spec sheet / logo) is recorded in
+            #    the discarded/ pool and NOT de-watermarked, enhanced, or published. One marker object per
+            #    image (content-keyed), so the parallel slices never race a shared file.
             cl = proc.classify(data)
             if cl.ran and not cl.keep:
                 marker = json.dumps({"reason": cl.reason, "score": round(cl.p_nonstone, 4),
@@ -78,24 +85,34 @@ def main() -> int:
                                   Body=marker, ContentType="application/json")
                 discarded += 1
                 continue
-            # 2) a kept image is de-watermarked + enhanced into improved/ (replace-in-place, same key),
-            #    then an ENHANCED marker so the incremental delta knows this image is done (produce's raw
-            #    re-encode in improved/ is NOT a "done" signal -- only this marker is).
+            # 2) FAL de-watermark (watermarked sources) + ESRGAN enhance.
             res = proc.process(data, watermarked=watermarked)
-            client.put_object(Bucket=S3_BUCKET, Key=f"{dst_prefix}{name}",
-                              Body=res.data, ContentType="image/jpeg")
-            client.put_object(Bucket=S3_BUCKET, Key=imagestore.enhanced_key(src, sha),
-                              Body=b"", ContentType="text/plain")
-            enhanced += 1
-            dw += 1 if res.dewatermarked else 0
+            fal_cost += res.billed_mp * price
+            # HOLD (no improved/, NO marker) when de-watermarking a watermarked image failed, or the image
+            # did not enhance (ESRGAN down / undecodable): the enhanced marker must mean "clean + enhanced",
+            # so the publish gate never links a watermarked or un-enhanced image. A re-run retries a held one.
+            if res.dewatermark_failed or not res.enhanced:
+                held += 1
+            else:
+                client.put_object(Bucket=S3_BUCKET, Key=f"{dst_prefix}{name}",
+                                  Body=res.data, ContentType="image/jpeg")
+                client.put_object(Bucket=S3_BUCKET, Key=imagestore.enhanced_key(src, sha),
+                                  Body=b"", ContentType="text/plain")
+                enhanced += 1
+                dw += 1 if res.dewatermarked else 0
         except Exception as exc:  # never let one bad image kill the slice
             failed += 1
             print(f"   [{offset + i}] FAILED {name}: {exc}")
+        # circuit breaker: never silently overspend the metered FAL API (e.g. a mis-scoped FULL run).
+        if fal_cost > max_usd:
+            print(f"ABORT: FAL cost ${fal_cost:.2f} exceeded ceiling ${max_usd:.2f} "
+                  f"(BLOKPORT_FAL_MAX_USD); {enhanced} enhanced, {held} held so far")
+            return 3
         if i % 25 == 0:
             print(f"   [{offset + i}/{offset + len(sliced)}] enhanced={enhanced} dw={dw} "
-                  f"discarded={discarded} skipped={skipped} failed={failed}")
-    print(f"==> {src} slice done: {enhanced} enhanced, {dw} de-watermarked, "
-          f"{discarded} discarded, {skipped} skipped, {failed} failed")
+                  f"discarded={discarded} skipped={skipped} held={held} failed={failed} FAL=${fal_cost:.2f}")
+    print(f"==> {src} slice done: {enhanced} enhanced, {dw} de-watermarked, {discarded} discarded, "
+          f"{skipped} skipped, {held} held, {failed} failed, FAL cost ${fal_cost:.2f}")
     return 0
 
 
