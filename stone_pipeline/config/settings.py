@@ -67,6 +67,17 @@ def _env_int(name: str, default: int) -> int:
     return int(raw.strip())
 
 
+def _env_float(name: str, default: float) -> float:
+    """Read a float env var; fall back to default when unset or non-numeric (fail soft, never crash)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        return default
+
+
 # The dev bucket is known. The PROD bucket is supplied at deploy time via BLOKPORT_S3_BUCKET.
 # In PRODUCTION we must NOT silently fall back to the dev bucket (that would store prod images in
 # dev and stamp prod Medusa rows with dev URLs) -- fail fast instead. Dev keeps the known default.
@@ -318,8 +329,8 @@ class ImageProcessingConfig:
     skipped with a warning (the image passes through un-enhanced -- no fallback).
 
     De-watermark runs ONLY on sources flagged `watermarked: true` in sources.yaml
-    (e.g. varsha burns a visible mark into its photos), reconstructing the mark's
-    footprint with SDXL-inpaint. Same torch stack; skipped with a warning if absent.
+    (e.g. varsha burns a visible mark into its photos): the logo crop is sent to FAL
+    FLUX Fill (hosted) and composited back. Needs fal-client + FAL_KEY, not a local model.
 
     Disabled by default: until `enabled` is true the image stage behaves exactly
     as before (no processing, no new deps loaded). Enable per deployment with
@@ -335,16 +346,23 @@ class ImageProcessingConfig:
     levels_hi_pct: float = 99.6       # exposure lift: white-point percentile
     vibrance: float = 0.20            # restore colour muted by bad light (0 = off)
     # --- de-watermark (flagged sources only; needs the GPU imageproc extras) ---
-    # The mark is located by its (stone-absent) pink ink + text strokes, then its small central
-    # footprint is REGENERATED with a learned inpainting model (SDXL-inpaint) -- natural matching
-    # stone texture, not the smear a classical fill leaves on patterned slabs. The exact pixels
-    # under a drifting, multi-position semi-transparent mark can't be recovered, so this small
-    # region is reconstructed; everything else is untouched.
+    # The mark is LOCATED by its (stone-absent) pink/magenta ink (_footprint), then only the logo
+    # region is sent to FAL FLUX Fill (a hosted inpainter) to reconstruct it, and the result is
+    # composited back through the logo mask so everything outside the logo is byte-identical. FAL is
+    # billed per megapixel ($0.05, 1 MP floor, rounds up), so we send ONLY the padded logo crop of the
+    # RAW image (before the ESRGAN upscale) -- that keeps every slab at the floor. Removing SDXL-inpaint
+    # (which regenerated a whole square footprint and left a visible box on veined stone) also drops the
+    # heavy diffusers stack. Runs in the GPU reprocess (needs network + FAL_KEY, not a local model).
     dewatermark: bool = True
-    dewatermark_model: str = os.environ.get(
-        "BLOKPORT_DEWATERMARK_MODEL", "diffusers/stable-diffusion-xl-1.0-inpainting-0.1")
-    dewatermark_steps: int = 25
-    dewatermark_guidance: float = 7.5
+    fal_model: str = os.environ.get("BLOKPORT_FAL_FILL_MODEL", "fal-ai/flux-pro/v1/fill")
+    fal_prompt: str = ("natural polished stone slab, continuous seamless mineral veining, "
+                       "photorealistic, high detail")
+    fal_seed: int = 0                 # fixed for best-effort reproducibility across re-runs
+    fal_price_per_mp: float = 0.05    # USD per billed megapixel (rounds up, 1 MP floor)
+    fal_max_usd: float = _env_float("BLOKPORT_FAL_MAX_USD", 150.0)  # per-run cost circuit breaker
+    crop_pad: int = 64                # context stone around the logo sent to FAL (px)
+    crop_min_side: int = 512          # pad the crop up to this short side for fill quality (still < 1 MP)
+    crop_snap: int = 16               # FLUX prefers dims divisible by 16
     # --- output / audit ---
     jpeg_quality: int = 85  # 85 is visually identical to 92 for photos at ~30-40% smaller files
     write_preview: bool = True        # images/reports/processed_preview.csv (source -> processed)
