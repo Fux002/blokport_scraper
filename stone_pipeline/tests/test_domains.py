@@ -35,7 +35,8 @@ def test_consumers_read_the_pack_not_hardcoded():
     assert p.dimension_ranges["slab"]["weight"] == (0.225, 0.350)
     assert p.dimension_ranges["block"]["weight"] == (18.0, 23.0)
     assert p.dimension_ranges["tile"]["height"] == (0.3, 0.6)
-    assert p.finish_phrases["polished"] == "a bright reflective surface"
+    assert p.finish_phrases["polished"] == \
+        "a bright, mirror-like surface that reflects light and deepens the stone's colour"
     assert p.finish_phrase_default == "a refined natural surface"
 
 

@@ -367,17 +367,46 @@ def _primary_variety_name(name: str) -> str:
     return re.sub(r"\s*\(.*?\)\s*", " ", name or "").strip()
 
 
+_GENERIC_TYPE_TOKENS = frozenset({"stone"})  # too generic to signal the type is already named
+
+
+def _material_suffix(variety_name: str, type_name: str | None) -> str:
+    """The stone type to append to a title, or '' when the variety name already implies it.
+    Skips if ANY non-generic token of the type is already a whole word in the variety name, so
+    'Walnut Travertine' + Travertine, or 'X Sandstone' + Quartzitic Sandstone, never doubles the
+    material. 'stone' is treated as generic (it appears in many names + multi-word types). Biases
+    to skip: a missing material only costs a little findability, a doubled one reads broken."""
+    if not type_name:
+        return ""
+    type_tokens = [t for t in re.findall(r"[a-z]+", type_name.casefold()) if t not in _GENERIC_TYPE_TOKENS]
+    if not type_tokens:
+        return ""                                  # a purely generic type ('Stone') adds nothing
+    variety_tokens = set(re.findall(r"[a-z]+", (variety_name or "").casefold()))
+    if any(t in variety_tokens for t in type_tokens):
+        return ""                                  # the variety name already names this type
+    return type_name
+
+
 def derive_title(row: CanonicalRow) -> None:
-    # variety (+ finish) only -- NOT the category word (no 'Slab'/'Block'/'Tile' in the title)
-    if row.variation_name:
-        parts = [_primary_variety_name(row.variation_name)]
-        if row.finish_name:
-            parts.append(row.finish_name)
-        row.title = title_case(" ".join(parts))
-        row.title_method = "construct"
-    else:
+    # A listing-style title: variety, then finish, material and format when they add information.
+    # Finish is dropped for blocks (uncut stone has no finish; avoids 'Carrara Raw'); material is
+    # omitted when the variety name already implies it (_material_suffix); the format word is
+    # omitted when unresolved (a title must not carry a neutral 'Piece'). The handle keys off
+    # variety+finish INDEPENDENTLY (derive_handle), so enriching the display title never moves a URL.
+    if not row.variation_name:
         row.title = title_case(row.raw_name or "")
         row.title_method = "raw_name_fallback"
+        return
+    variety = _primary_variety_name(row.variation_name)
+    parts = [variety]
+    if row.finish_name and not row.is_block:
+        parts.append(row.finish_name)
+    if material := _material_suffix(variety, row.type_name):
+        parts.append(material)
+    if fmt := _FORMAT_WORD.get((row.format_value or "").strip().casefold(), ""):
+        parts.append(fmt)
+    row.title = title_case(" ".join(p for p in parts if p))
+    row.title_method = "construct"
 
 
 def derive_description(row: CanonicalRow) -> None:
@@ -389,10 +418,10 @@ def derive_description(row: CanonicalRow) -> None:
     stone_type = (row.type_name or "stone").lower()     # 'stone' is a safe generic noun
     color = (row.color_name or "").lower()               # OMIT when unresolved -- never invent 'natural'
     material = f"{color} {stone_type}".strip()           # 'black marble', or just 'marble'
-    if row.origin_city and row.origin_country_code:
-        origin_clause = f"extracted in {row.origin_city}, {row.origin_country_code}"
-    else:
-        origin_clause = "natural stone"
+    # origin is a real provenance claim -- only stated when both city and country resolved, else omitted
+    # (never a generic 'natural stone' filler that reads redundant next to the material).
+    origin_clause = f" from {row.origin_city}, {row.origin_country_code}" \
+        if row.origin_city and row.origin_country_code else ""
     # the RESOLVED format word (format_resolve ran already); a neutral 'piece' beats mislabelling a
     # block as a 'slab' when the format is genuinely unresolved.
     fmt = _FORMAT_WORD.get((row.format_value or "").strip().casefold(), "").lower() or "piece"
@@ -400,17 +429,33 @@ def derive_description(row: CanonicalRow) -> None:
     _pack = active_pack()
     phrase = _pack.finish_phrases.get(finish, _pack.finish_phrase_default)
     finish_clause = f"a {finish} {fmt}" if finish else f"a {fmt}"
+    # real thickness (slabs/tiles): width IS the parsed thickness in metres, never fabricated. Omit for
+    # blocks and when missing or outside a sane display band (a mis-scaled parse validate will reject).
+    thickness_clause = ""
+    if not row.is_block and row.width is not None:
+        mm = round(row.width * 1000)
+        if 3 <= mm <= 80:
+            thickness_clause = f" at {mm} mm"
     row.description = (
-        f"{variety} is a {material} {origin_clause}. "
-        f"Supplied as {finish_clause}, it presents {phrase}."
+        f"{variety} is a {material}{origin_clause}. "
+        f"Supplied as {finish_clause}{thickness_clause}, it offers {phrase}."
     )
     row.description_method = "template"
 
 
 def derive_handle(row: CanonicalRow, source_cfg: SourceConfig) -> None:
-    # slugify(title), namespaced with source code + surrogate for global
-    # uniqueness and stable upsert (section 10 Stage 10, section 11.4)
-    base = slugify(row.title or row.raw_name or "")
+    # The handle/slug is the product's stable URL, so key it off variety+finish (the product's core
+    # identity), NOT the enriched display title -- adding material/format to the title must never
+    # move a URL. This reproduces the pre-enrichment handle byte-for-byte (the old title WAS
+    # variety+finish, block finish included), so no existing URL churns. Namespaced with source +
+    # surrogate for global uniqueness and stable upsert (section 10 Stage 10, section 11.4).
+    if row.variation_name:
+        parts = [_primary_variety_name(row.variation_name)]
+        if row.finish_name:                        # finish always in the URL base (incl. block 'Raw')
+            parts.append(row.finish_name)
+        base = slugify(" ".join(p for p in parts if p))
+    else:
+        base = slugify(row.raw_name or "")
     namespaced = f"{base}-{source_cfg.source_code}-{slugify(row.surrogate_key or '')}"
     row.handle = namespaced
     row.slug = namespaced
