@@ -164,6 +164,26 @@ def test_build_is_deterministic(tmp_path):
     assert a == b and sorted(a) == sorted(b)  # same set, deterministic row order
 
 
+def test_partial_export_row_is_warned_not_silently_dropped(tmp_path, caplog):
+    # A row carrying data but MISSING Id/Key is a real variation dropped from combinations -- it must be
+    # surfaced (fail-loud), while a blank line and a thin/header-only cold-start export stay silent and
+    # never abort. Distinguishes the two.
+    import logging
+    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
+    exp = tmp_path / "export.csv"
+    with exp.open("w", newline="", encoding="utf-8") as h:
+        w = csv.writer(h)
+        w.writerow(["Id", "Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"])
+        w.writerow(["v1", "slab_marble_carrara_1", "Carrara", "", "", ""])
+        w.writerow(["", "", "Orphan Marble", "", "", ""])   # data present, no Id/Key -> warned
+        w.writerow(["", "", "", "", "", ""])                # blank line -> silent
+    with caplog.at_level(logging.WARNING):
+        combos, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], _products(tmp_path, [_prow()]))
+    assert _for(combos, "v1")                               # the good row still built, no abort
+    warns = [r for r in caplog.records if "missing Id/Key" in r.getMessage()]
+    assert len(warns) == 1                                  # the partial row surfaced, blank line ignored
+
+
 def test_run_missing_export_writes_empty_not_abort(tmp_path, monkeypatch):
     # COLD START: Medusa has 0 variations, so variants_export.csv doesn't exist yet. run() must NOT abort
     # (it used to raise SystemExit) -- it writes empty combination sets so pass 1 completes; the real

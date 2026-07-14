@@ -27,7 +27,7 @@ from stone_pipeline.core.layout import write_sync_md
 from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
-from stone_pipeline.stages import curate, emit, emit_catalog, tree_build
+from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
 
 log = logfmt.get_logger("catalog")
 
@@ -66,6 +66,11 @@ def run(outputs_root: Path | None = None) -> Path:
     ref = loaders.load_all()
     result = curate.run(rows, ref)                # -> to_upload/1_variants_update.csv, review/, backbone_additions/
     products = collect_products(outputs_root)     # -> to_upload/3_products_*.csv (per source + combined)
+    # Regenerate every mirror backbone (Tiles) from the CURRENT slab backbone before anything reads it:
+    # emit_catalog's tile mirror rows (below) and tree_build's combinations both consume the tile backbone,
+    # so rebuilding it here makes tiles a pure derivation of slabs that can never silently rot. (The manual
+    # build_tile_backbone step used to be forgotten, leaving polluted tiles inconsistent with cleaned slabs.)
+    build_tile_backbone.build()
     emit_catalog.build()                          # -> to_upload/1_variants_full.csv -- AFTER products, so its
                                                   #    product-backed image stamping reads THIS run's products
                                                   #    (their variation ids), never a stale prior set
@@ -478,9 +483,13 @@ def write_variants_to_delete() -> int:
 
 
 def _consistency_errors(export_ids: set[str], combo_ids: set[str], prod_ids: set[str],
-                        inv_skus: set[str], known_skus: set[str]) -> tuple[list[str], list[str]]:
+                        inv_skus: set[str], known_skus: set[str],
+                        prod_tuples: set[tuple[str, ...]] = frozenset(),
+                        combo_tuples: set[tuple[str, ...]] = frozenset(),
+                        ) -> tuple[list[str], list[str]]:
     """Pure set-arithmetic core of the consistency gate (testable without files). Every product and
-    combination variation id must exist in the export; every inventory SKU must exist in Medusa."""
+    combination variation id must exist in the export; every inventory SKU must exist in Medusa; and
+    every product's FULL (type,variation,finish,colour,quality) tuple must be an allowed combination."""
     if not export_ids:
         return (["variants_export.csv is missing or has no Ids -- cannot verify"], [])
     errors: list[str] = []
@@ -498,6 +507,19 @@ def _consistency_errors(export_ids: set[str], combo_ids: set[str], prod_ids: set
         # a type (review/tree_uncovered_variations.csv) or held, not silently shipped.
         errors.append(f"{len(prod_ids - combo_ids)} product variations have NO valid-combination row "
                       "(unpriceable -- assign a type in tree_uncovered_variations.csv or hold them)")
+    # Beyond variation-level coverage: the product's FULL (type,variation,finish,colour,quality) tuple
+    # must itself be an allowed combination. The finish->Raw fallback guarantees every typed variation
+    # gets SOME combination row, so the variation-level check above passes even when a product ships a
+    # type/colour the tree never allowed for that variation (e.g. a product served on Quartzite while
+    # the allowed set has the variety only under Marble). That disagreement ships UNPRICEABLE and is the
+    # exact "backbone gap" that drafts the product downstream -- catch it here, structurally.
+    if combo_tuples:
+        orphan = prod_tuples - combo_tuples
+        if orphan:
+            errors.append(f"{len(orphan)} product combinations (type/colour/finish/quality) are NOT in "
+                          "valid_combinations (the product feed disagrees with the allowed set -- the "
+                          "product's type/colour was never allowed for its variation; fix the source "
+                          "type/colour or add the combination)")
     # Inventory updates may ONLY target products that exist in Medusa -- never push stock for a product
     # that was never imported (an imageless product held out of the catalog, or a stray SKU). Only
     # checked once a Medusa product export is present (known_skus non-empty).
@@ -523,6 +545,32 @@ def verify_consistency() -> tuple[list[str], list[str]]:
         except FileNotFoundError:
             return set()
 
+    # Full-combination tuples, in ONE canonical field order (type, variation, finish, colour, quality),
+    # so the product feed's STN ids and the valid-combinations columns compare directly. Category is
+    # pinned by variation_id (Key prefix), so it is redundant in the tuple. Only complete tuples (every
+    # component present) are compared -- an incomplete row is a missing-id case other gates already cover.
+    def _tuples(path: Path, cols: tuple[str, ...]) -> set[tuple[str, ...]]:
+        try:
+            with path.open(encoding="utf-8-sig", newline="") as h:
+                reader = csv.DictReader(h)
+                # Fail loud on a renamed/dropped column: a silent all(vals)==False would drop every row
+                # and no-op the tuple gate, masking a real mismatch. Only checked when the file has a
+                # header (an empty file legitimately yields no tuples).
+                if reader.fieldnames and (missing := [c for c in cols if c not in reader.fieldnames]):
+                    raise ValueError(f"{path.name} is missing expected column(s) {missing} -- the tuple "
+                                     "consistency gate cannot run against a changed schema")
+                out: set[tuple[str, ...]] = set()
+                for r in reader:
+                    vals = tuple((r.get(c) or "").strip() for c in cols)
+                    if all(vals):
+                        out.add(vals)
+                return out
+        except FileNotFoundError:
+            return set()
+
+    combo_cols = ("type_id", "variation_id", "finish_id", "color_id", "quality_id")
+    prod_cols = ("STN Type Id", "STN Variation Id", "STN Finish Id", "STN Color Id", "STN Quality Id")
+
     from stone_pipeline.stages.product_state import load_known_products
     known = load_known_products()
     return _consistency_errors(
@@ -531,6 +579,8 @@ def verify_consistency() -> tuple[list[str], list[str]]:
         prod_ids=_ids(p.to_upload_dir / "3_products_all.csv", "STN Variation Id"),
         inv_skus={s.upper() for s in _ids(p.to_upload_dir / "4_inventory_update.csv", "Variant Sku")},
         known_skus=set(known.by_sku),
+        prod_tuples=_tuples(p.to_upload_dir / "3_products_all.csv", prod_cols),
+        combo_tuples=_tuples(p.to_upload_dir / "2_valid_combinations.csv", combo_cols),
     )
 
 

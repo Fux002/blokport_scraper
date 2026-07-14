@@ -228,6 +228,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     # export rows + variety identity (Name) -> the colour/type a scrape gave it anywhere,
     # so fan-out mirrors in other categories inherit it, plus catalogue defaults.
     export_rows, name_of = [], {}
+    malformed = 0
     with Path(export_csv).open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
             # tolerate a truncated/renamed export header: a row missing Id or Key is skipped, not a KeyError
@@ -240,6 +241,14 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             if vid and key and vid not in exclude_ids and not looks_like_artifact(name):
                 export_rows.append((key, vid, name))
                 name_of[vid] = match_key(name)
+            elif (vid or key or name) and not (vid and key):
+                # a row that carries data but is MISSING Id or Key is not a blank line -- it is a real
+                # variation being silently dropped from combinations. Surface it (fail-loud, without
+                # aborting the run on a thin/header-only cold-start export, which is legitimately empty).
+                malformed += 1
+    if malformed:
+        log.warning("export rows missing Id/Key were skipped from combinations",
+                    extra={"extra_fields": {"count": malformed, "export": str(export_csv)}})
     variety: dict[str, dict] = {}
     color_freq, qual_freq = Counter(), Counter()
     for vid, p in products.items():

@@ -50,6 +50,105 @@ def test_orphan_inventory_sku_errors_only_when_export_present():
     assert errors2 == []
 
 
+def test_full_tuple_mismatch_is_a_hard_error():
+    # Super White class: the product's variation IS covered at variation level (finish->Raw fallback),
+    # so the variation-level gate passes -- but its full (type,variation,finish,colour,quality) tuple
+    # was never an allowed combination (served on Quartzite, allowed only under Marble). The tuple gate
+    # must catch it.
+    quartzite = ("Tq", "v1", "Fraw", "Cwhite", "Qa")
+    marble = ("Tm", "v1", "Fraw", "Cwhite", "Qa")
+    errors, _ = _consistency_errors(
+        export_ids={"v1"}, combo_ids={"v1"}, prod_ids={"v1"}, inv_skus=set(), known_skus=set(),
+        prod_tuples={quartzite}, combo_tuples={marble})
+    assert any("are NOT in valid_combinations" in e for e in errors)
+
+
+def test_full_tuple_subset_passes():
+    tup = ("Tm", "v1", "Fraw", "Cwhite", "Qa")
+    errors, _ = _consistency_errors(
+        export_ids={"v1"}, combo_ids={"v1"}, prod_ids={"v1"}, inv_skus=set(), known_skus=set(),
+        prod_tuples={tup}, combo_tuples={tup, ("Tm", "v1", "Fpol", "Cwhite", "Qa")})
+    assert errors == []
+
+
+def test_tuple_gate_silent_when_no_combos_supplied():
+    # backward-compat: callers that pass no tuples (default empty) must not trip the tuple check.
+    errors, _ = _consistency_errors(
+        export_ids={"v1"}, combo_ids={"v1"}, prod_ids={"v1"}, inv_skus=set(), known_skus=set())
+    assert errors == []
+
+
+def _write_csv(path, header, rows):
+    import csv
+    with path.open("w", newline="", encoding="utf-8") as h:
+        w = csv.DictWriter(h, fieldnames=header)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def test_verify_consistency_roundtrip_pins_column_order(tmp_path, monkeypatch):
+    """End-to-end through verify_consistency (not just the pure core): a product whose full tuple IS an
+    allowed combination must pass, and one whose tuple is absent must error. This pins the prod_cols<->
+    combo_cols column mapping -- a swapped field order would misalign the tuples and flip both results."""
+    from types import SimpleNamespace
+    from stone_pipeline import catalog
+    from stone_pipeline.stages import product_state
+
+    up = tmp_path / "to_upload"; up.mkdir()
+    _write_csv(tmp_path / "variants_export.csv", ["Id"], [{"Id": "v1"}])
+    _write_csv(up / "2_valid_combinations.csv",
+               ["product_category_id", "type_id", "variation_id", "finish_id", "color_id", "quality_id"],
+               [{"product_category_id": "pc", "type_id": "Tm", "variation_id": "v1",
+                 "finish_id": "Fraw", "color_id": "Cwhite", "quality_id": "Qa"}])
+    prod_header = ["STN Type Id", "STN Variation Id", "STN Finish Id", "STN Color Id", "STN Quality Id"]
+
+    def _paths():
+        return SimpleNamespace(variants_export_csv=tmp_path / "variants_export.csv", to_upload_dir=up)
+    monkeypatch.setattr(catalog, "SETTINGS", SimpleNamespace(paths=_paths()))
+    monkeypatch.setattr(product_state, "load_known_products", lambda *a, **k: SimpleNamespace(by_sku={}))
+
+    # matching tuple -> no tuple error
+    _write_csv(up / "3_products_all.csv", prod_header,
+               [{"STN Type Id": "Tm", "STN Variation Id": "v1", "STN Finish Id": "Fraw",
+                 "STN Color Id": "Cwhite", "STN Quality Id": "Qa"}])
+    errors, _ = catalog.verify_consistency()
+    assert not any("valid_combinations" in e for e in errors), errors
+
+    # orphan tuple (served as Quartzite, allowed only as Marble) -> tuple error
+    _write_csv(up / "3_products_all.csv", prod_header,
+               [{"STN Type Id": "Tq", "STN Variation Id": "v1", "STN Finish Id": "Fraw",
+                 "STN Color Id": "Cwhite", "STN Quality Id": "Qa"}])
+    errors, _ = catalog.verify_consistency()
+    assert any("are NOT in valid_combinations" in e for e in errors), errors
+
+
+def test_tuples_missing_column_fails_loud(tmp_path, monkeypatch):
+    """A renamed/dropped column in the combinations export must fail loud, not silently no-op the gate."""
+    import pytest
+    from types import SimpleNamespace
+    from stone_pipeline import catalog
+    from stone_pipeline.stages import product_state
+    up = tmp_path / "to_upload"; up.mkdir()
+    _write_csv(tmp_path / "variants_export.csv", ["Id"], [{"Id": "v1"}])
+    _write_csv(up / "3_products_all.csv",
+               ["STN Type Id", "STN Variation Id", "STN Finish Id", "STN Color Id", "STN Quality Id"],
+               [{"STN Type Id": "Tm", "STN Variation Id": "v1", "STN Finish Id": "F",
+                 "STN Color Id": "C", "STN Quality Id": "Q"}])
+    # combinations file with a RENAMED column (colour_id -> color) must raise
+    _write_csv(up / "2_valid_combinations.csv",
+               ["product_category_id", "type_id", "variation_id", "finish_id", "color", "quality_id"], [])
+    monkeypatch.setattr(catalog, "SETTINGS",
+                        SimpleNamespace(paths=SimpleNamespace(variants_export_csv=tmp_path / "variants_export.csv", to_upload_dir=up)))
+    monkeypatch.setattr(product_state, "load_known_products", lambda *a, **k: SimpleNamespace(by_sku={}))
+    # empty combos file (header only) -> fieldnames present but missing color_id -> fail loud
+    _write_csv(up / "2_valid_combinations.csv",
+               ["product_category_id", "type_id", "variation_id", "finish_id", "color", "quality_id"],
+               [{"product_category_id": "pc", "type_id": "Tm", "variation_id": "v1",
+                 "finish_id": "F", "color": "C", "quality_id": "Q"}])
+    with pytest.raises(ValueError, match="missing expected column"):
+        catalog.verify_consistency()
+
+
 def test_auto_queue_images_queues_not_generates_without_gen_deps(tmp_path, monkeypatch):
     # The deployed images lack the FLUX/BEN2 stack (fal_client/torch) on purpose. With FAL_KEY set but the
     # deps absent, the produce must QUEUE the texture prompts (not run generators that ImportError) and
