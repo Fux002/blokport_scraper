@@ -134,13 +134,11 @@ def test_tuples_missing_column_fails_loud(tmp_path, monkeypatch):
                ["STN Type Id", "STN Variation Id", "STN Finish Id", "STN Color Id", "STN Quality Id"],
                [{"STN Type Id": "Tm", "STN Variation Id": "v1", "STN Finish Id": "F",
                  "STN Color Id": "C", "STN Quality Id": "Q"}])
-    # combinations file with a RENAMED column (colour_id -> color) must raise
-    _write_csv(up / "2_valid_combinations.csv",
-               ["product_category_id", "type_id", "variation_id", "finish_id", "color", "quality_id"], [])
     monkeypatch.setattr(catalog, "SETTINGS",
                         SimpleNamespace(paths=SimpleNamespace(variants_export_csv=tmp_path / "variants_export.csv", to_upload_dir=up)))
     monkeypatch.setattr(product_state, "load_known_products", lambda *a, **k: SimpleNamespace(by_sku={}))
-    # empty combos file (header only) -> fieldnames present but missing color_id -> fail loud
+    # combinations file with a RENAMED column (color_id -> color): fieldnames present but color_id absent
+    # -> the tuple gate must raise rather than silently drop every row and no-op.
     _write_csv(up / "2_valid_combinations.csv",
                ["product_category_id", "type_id", "variation_id", "finish_id", "color", "quality_id"],
                [{"product_category_id": "pc", "type_id": "Tm", "variation_id": "v1",
