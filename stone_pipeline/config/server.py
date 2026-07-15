@@ -102,6 +102,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
     if segments and segments[0] == "reset":
         # clean-start the ledger sync state (the coordinated ①②③ reset, our ① half). Body (optional):
         #   {"hard": true, "sources": ["zucchi", ...]}   hard also drops scraped products; sources scopes.
+        #   {"pristine": true}                           factory cold start: global hard reset + wipe the
+        #     durable operator overlay (variety/leaf/retired decisions) so the next produce is seed-only.
         # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted. A GLOBAL
         # reset also clears the config.db review queue + operator-pasted attribute ids (response.config),
         # so the clean start is coherent across both stores; a scoped reset leaves config.db alone.
@@ -109,7 +111,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if method == "POST":
             srcs = body.get("sources") if isinstance(body, dict) else None
             hard = bool(body.get("hard")) if isinstance(body, dict) else False
-            result, code = lifecycle.reset(srcs, hard)
+            pristine = bool(body.get("pristine")) if isinstance(body, dict) else False
+            result, code = lifecycle.reset(srcs, hard, pristine=pristine)
             return code, result
         return 405, {"error": "POST /config/v1/reset to reset the ledger"}
     if segments and segments[0] == "purge":

@@ -208,6 +208,28 @@ def clear_attribute_ids() -> int:
     return n
 
 
+def clear_variety_decisions() -> int:
+    """Drop EVERY operator variety decision (mint/reject/alias + seed colour/type/country). PRISTINE
+    (factory) reset ONLY: a normal soft/hard reset KEEPS these on purpose (curation you want to survive a
+    sync reset), but a cold start back to the committed seed must forget them, else a previously minted or
+    aliased variety silently re-applies on the next produce and the 'clean' catalog is not seed-only.
+    Returns the number of rows dropped."""
+    with closing(store.open_store()) as conn:
+        n = conn.execute("DELETE FROM variety_decision").rowcount
+        conn.commit()
+    return n
+
+
+def clear_leaf_decisions() -> int:
+    """Drop EVERY backbone leaf-growth decision (approve/reject). PRISTINE reset ONLY, same rationale as
+    clear_variety_decisions: an approved leaf grows the tree via the load-time overlay (apply_leaf_overlay),
+    so it must be forgotten for a cold start to reproduce the committed backbone. Returns the rows dropped."""
+    with closing(store.open_store()) as conn:
+        n = conn.execute("DELETE FROM backbone_leaf_decision").rowcount
+        conn.commit()
+    return n
+
+
 # -- backbone leaf-growth decisions (produce READS the overlay + decided set) --
 
 def backbone_leaf_overlay() -> dict[tuple[str, str], dict[str, list[str]]]:

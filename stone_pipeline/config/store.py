@@ -339,6 +339,19 @@ def remove_retired(key: str, path: str | Path | None = None) -> None:
         conn.commit()
 
 
+def clear_retired(path: str | Path | None = None) -> int:
+    """Drop EVERY retired variation key (the durable exclusion memory). PRISTINE (factory) reset only: a
+    normal reset keeps retirements, but a cold start back to the seed must forget them so a previously
+    retired variety is re-minted from the seed like any other. Returns the number of rows dropped."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        return 0
+    with closing(open_store(p)) as conn:
+        n = conn.execute("DELETE FROM retired_variation").rowcount
+        conn.commit()
+    return n
+
+
 def delete_source(source: str, path: str | Path | None = None) -> bool:
     """Remove a scraper from the config store entirely (the ':4200' Remove-permanently button, after its
     ledger products have been purged). Returns True if a row was deleted, False if the source was already
