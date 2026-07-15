@@ -33,14 +33,19 @@ def slab_engine(ref):
 # several ids (e.g. "Afyon White" appears many times), so the engine resolves it
 # at the fuzzy/phonetic tier rather than a single-id exact hit. The contract is
 # "the right variety, confidently", not "via a specific tier".
+# 'Aspen White' is deliberately NOT here: it is a genuinely AMBIGUOUS alias, shared by three varieties
+# across two types (Granite 'Indian Aspen White', Marble 'Afyon White', Marble 'Afyon White Billur'), so
+# without a type block no single answer is correct -- the real pipeline disambiguates it by the product's
+# scraped type, not by name alone (see test_cross_type_alias_needs_block below). The cases here are names
+# that resolve to ONE variety by name: an exact canonical name, a typo, a spacing variant, a translation
+# alias. Each must prefer the variety NAMED closest to the query over one that merely carries it as an alias.
 @pytest.mark.parametrize(
     "query,expected_name",
     [
-        ("Arabescato", "Arabescato"),
-        ("Aspen White", "Afyon White"),  # alias
+        ("Arabescato", "Arabescato"),   # exact canonical name beats 'White Ornamental' (alias 'Arabescato')
         ("AfyonWhite", "Afyon White"),  # spacing
-        ("Arabescatto", "Arabescato"),  # spelling-by-ear typo
-        ("Afyon Beyazi", "Afyon White"),  # translation alias
+        ("Arabescatto", "Arabescato"),  # spelling-by-ear typo, beats an alias-only namesake
+        ("Afyon Beyazi", "Afyon White"),  # translation alias (single owner)
     ],
 )
 def test_near_miss_resolves(slab_engine, query, expected_name):
@@ -48,6 +53,16 @@ def test_near_miss_resolves(slab_engine, query, expected_name):
     assert match.canonical == expected_name
     assert match.cid is not None
     assert match.method not in ("review", "no_candidate")  # confidently resolved
+
+
+def test_cross_type_alias_needs_block(slab_engine):
+    """'Aspen White' is an alias of a Granite AND a Marble variety. WITHOUT a type it is ambiguous, so it
+    must NOT be attributed to a specific stone by name alone (never-guess). WITH the product's type as a
+    block, it resolves to the variety of that type -- the real pipeline always passes block_type."""
+    granite = slab_engine.match("Aspen White", block_type="Granite")
+    assert granite.canonical == "Indian Aspen White"
+    marble = slab_engine.match("Aspen White", block_type="Marble")
+    assert marble.canonical in ("Afyon White", "Afyon White Billur")
 
 
 def test_projection_tiers_work_in_isolation():
@@ -107,14 +122,19 @@ def test_empty_variety_match_key_routes_to_gap(ref):
 
 # --- Stage 5 membership -------------------------------------------------------
 def test_type_overridden_by_variety(ref):
+    # The bound variation's Key is the type authority: the matcher bound the MARBLE Arabescato
+    # (variation_key type slug 'marble'), so a scraped type_name of Granite is overridden to Marble.
+    # A matched row always carries variation_key (match_variation sets id + key together).
     row = CanonicalRow(
         src_site="polonine", surrogate_key="x",
-        variation_id="vid", variation_name="Arabescato",
+        variation_id="vid",
+        variation_key="slab_marble_arabescato_00000000-0000-0000-0000-000000000000",
+        variation_name="Arabescato",
         type_name="Granite", color_name="White", finish_name="Polished", quality_name="A",
     )
     stats = reconcile_tree.ReconcileStats()
     reconcile_tree.reconcile_row(row, ref, stats)
-    # Arabescato is a marble in the backbone; type must be overridden
+    # Arabescato is a marble in the backbone; type overridden to the bound variation's type
     assert row.type_name == "Marble"
     assert any(f.code == FlagCode.type_overridden_by_variety for f in row.review_flags)
 

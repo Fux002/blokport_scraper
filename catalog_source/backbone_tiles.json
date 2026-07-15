@@ -21,8 +21,9 @@
         "A"
       ],
       "aliases": [
-        "Preto Agata, Agate Black",
-        "Preto Agata, Black"
+        "Preto Agata",
+        "Agate Black",
+        "Black"
       ],
       "image_file": "tile_agate_agata_black_d3141f62-eb4f-5e62-846c-187d8c1b2fc2.png",
       "exists": "no",
@@ -50,8 +51,9 @@
         "A"
       ],
       "aliases": [
-        "Azul Agata, Agate Blue",
-        "Azul Agata, Blue"
+        "Azul Agata",
+        "Agate Blue",
+        "Blue"
       ],
       "image_file": "tile_agate_agata_blue_715f2c78-d5f4-55c5-8aa1-e170fe56fbe9.png",
       "exists": "no",
@@ -12390,10 +12392,12 @@
       "aliases": [
         "Branco Crystal Angelus",
         "Crystal Angelus Blue",
-        "Azul Crystal Angelus, Crystal Angelus",
+        "Azul Crystal Angelus",
+        "Crystal Angelus",
         "Branco Angelus",
         "Angelus Blue",
-        "Azul Angelus, Angelus"
+        "Azul Angelus",
+        "Angelus"
       ],
       "image_file": "tile_crystal_angelus_c315747a-4e2e-503a-ac6b-f25a4e69833b.png",
       "exists": "no",
@@ -12660,8 +12664,10 @@
         "A"
       ],
       "aliases": [
-        "Branco Crystal Freccia, Crystal Freccia",
-        "Branco Freccia, Freccia"
+        "Branco Crystal Freccia",
+        "Crystal Freccia",
+        "Branco Freccia",
+        "Freccia"
       ],
       "image_file": "tile_crystal_crystal_78daf2eb-8297-56e9-95ae-781bf56142f1.png",
       "exists": "no",
@@ -12689,7 +12695,8 @@
         "A"
       ],
       "aliases": [
-        "Branco D'Amore, D'Amore"
+        "Branco D'Amore",
+        "D'Amore"
       ],
       "image_file": "tile_crystal_d_amore_ffbc0894-9313-52d0-9768-8488517b04cb.png",
       "exists": "no",
@@ -12895,7 +12902,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Faberge Gold, Faberge Golden"
+        "Branco Faberge Gold",
+        "Faberge Golden"
       ],
       "image_file": "tile_crystal_faberge_gold_7d784301-abc6-5d9c-a16f-0f5815364277.png",
       "exists": "no",
@@ -13951,7 +13959,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Aspen, Aspen"
+        "Branco Aspen",
+        "Aspen"
       ],
       "image_file": "tile_dolomite_bianco_celestia_36c184da-b569-5250-88d2-8f939d012180.png",
       "exists": "no",
@@ -13992,7 +14001,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Batistella, Batistella"
+        "Branco Batistella",
+        "Batistella"
       ],
       "image_file": "tile_dolomite_bianco_stella_7be5b6f1-7836-58a3-820f-0d3e46b38949.png",
       "exists": "no",
@@ -14072,7 +14082,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Calacatta Celestia, Calacatta Celestia"
+        "Branco Calacatta Celestia",
+        "Calacatta Celestia"
       ],
       "image_file": "tile_dolomite_calacatta_celestia_9471a4e2-7fe6-5eb2-b4bb-435766763f06.png",
       "exists": "no",
@@ -14112,7 +14123,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Calacat Columbus, Calacat Columbus"
+        "Branco Calacat Columbus",
+        "Calacat Columbus"
       ],
       "image_file": "tile_dolomite_calacatta_columbus_34ea26e5-eb6c-532d-8dc5-138ff2213d6e.png",
       "exists": "no",
@@ -14151,7 +14163,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Bianco Celline, Bianco Celline"
+        "Branco Bianco Celline",
+        "Bianco Celline"
       ],
       "image_file": "tile_dolomite_celline_083bf5e3-bfc3-5d10-a29d-a0476dd7c0d5.png",
       "exists": "no",
@@ -14469,7 +14482,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Michelangelo Cala, Michelangelo Cala"
+        "Branco Michelangelo Cala",
+        "Michelangelo Cala"
       ],
       "image_file": "tile_dolomite_michelangelo_calacatta_ffd044fd-a94d-5a7c-8dc7-028826c85b3d.png",
       "exists": "no",
@@ -20049,8 +20063,8 @@
         "Rosso India Granite",
         "Rosso Multicolor",
         "Rosso Multicolor Granite",
-        "Symphony Red Granite, Red Multi",
-        "Symphony Red, Red Multi",
+        "Symphony Red Granite",
+        "Symphony Red",
         "幻彩红"
       ],
       "image_file": "tile_granite_multicolor_red_b48f93f2-2b2e-5be7-ae8c-b66fe074f410.png",
@@ -25519,13 +25533,15 @@
         "White Alpine Granite",
         "Infinity White Granite",
         "Alp White Granite",
-        "Alpinus White Granite, Alpinus, Z Alpinus",
+        "Alpinus White Granite",
+        "Alpinus",
+        "Z Alpinus",
         "Alpine White",
         "Alpine Bianco",
         "White Alpine",
         "Infinity White",
         "Alp White",
-        "Alpinus White, Alpinus, Z Alpinus",
+        "Alpinus White",
         "潘多拉"
       ],
       "image_file": "tile_granite_alpine_a881adc3-8534-5bae-a52c-550d60bba406.png",
@@ -29183,9 +29199,11 @@
       ],
       "aliases": [
         "Indian Andromeda Granite",
-        "Colonial White Granite, Andromeda White, Z Andromeda White",
+        "Colonial White Granite",
+        "Andromeda White",
+        "Z Andromeda White",
         "Indian Andromeda",
-        "Colonial White, Andromeda White, Z Andromeda White"
+        "Colonial White"
       ],
       "image_file": "tile_granite_andromeda_white_f132315e-111e-590a-90ea-98bd7338849c.png",
       "exists": "no",
@@ -30594,10 +30612,12 @@
         "India Antique White",
         "Silver Cloud Granite",
         "Viscount White Granite",
-        "Silver Clouds Granite, Z B Viscount White, Z Viscount White",
+        "Silver Clouds Granite",
+        "Z B Viscount White",
+        "Z Viscount White",
         "Silver Cloud",
         "Viscount White",
-        "Silver Clouds, Z B Viscount White, Z Viscount White",
+        "Silver Clouds",
         "Lucky White",
         "Lucky White FG",
         "Lucky White Classic Granite",
@@ -31118,8 +31138,9 @@
         "A"
       ],
       "aliases": [
-        "Acqua Blue Granite, Z Aqua Blue",
-        "Acqua Blue, Z Aqua Blue"
+        "Acqua Blue Granite",
+        "Z Aqua Blue",
+        "Acqua Blue"
       ],
       "image_file": "tile_granite_aqua_blue_1e5635be-4aae-5ab5-a043-01f4c5278072.png",
       "exists": "no",
@@ -32056,10 +32077,11 @@
       "aliases": [
         "Golden Arctic Granite",
         "Gold Arctic Granite",
-        "Polar Gold Granite, Arctic Gold",
+        "Polar Gold Granite",
+        "Arctic Gold",
         "Golden Arctic",
         "Gold Arctic",
-        "Polar Gold, Arctic Gold"
+        "Polar Gold"
       ],
       "image_file": "tile_granite_arctic_gold_5f7359c3-b2b1-5186-b72e-a37c0d3be61a.png",
       "exists": "no",
@@ -35438,13 +35460,14 @@
         "Astoria Beige Granite",
         "Astoria Cream Granite",
         "Bianco Astoria Granite",
-        "Ivory Cream Granite, Astoria, Z Astoria",
+        "Ivory Cream Granite",
+        "Z Astoria",
         "Astoria Gold",
         "Creama Astoria",
         "Astoria Beige",
         "Astoria Cream",
         "Bianco Astoria",
-        "Ivory Cream, Astoria, Z Astoria",
+        "Ivory Cream",
         "Astoria White",
         "White Avorio Granite",
         "Bianco Avoria Granite",
@@ -36512,8 +36535,9 @@
       ],
       "aliases": [
         "Azul Nueva Granite",
-        "Nueva Blue Granite, Z B Azul Nova",
-        "Nueva Blue, Z B Azul Nova"
+        "Nueva Blue Granite",
+        "Z B Azul Nova",
+        "Nueva Blue"
       ],
       "image_file": "tile_granite_azul_nova_347fabe0-9e20-5df1-8da4-cd0908ea51e0.png",
       "exists": "no",
@@ -44262,20 +44286,21 @@
         "Marinace Black Granite",
         "Granito Marinace Nero",
         "Black Mosaic Granite",
-        "Nero Marinace Granite, Black Marinace, Black Mosaic, Marinace Black, Granito Marinace..., Black Mosaic/black Marinace",
-        "Black Pebble",
-        "Marinace Black",
+        "Nero Marinace Granite",
+        "Black Marinace",
         "Black Mosaic",
-        "Nero Marinace, Black Marinace, Black Mosaic, Marinace Black, Granito Marinace..., Black Mosaic/black Marinace",
+        "Marinace Black",
+        "Granito Marinace...",
+        "Black Mosaic/black Marinace",
+        "Black Pebble",
+        "Nero Marinace",
         "Marinace Nero",
-        "Nero Marinace, Black Marinace, Black Mosaic, Marinace Black, Marinace..., Black Mosaic/black Marinace",
+        "Marinace...",
         "Jurassic Black Granite",
         "Mosaic Black Granite",
         "Black Marinace Granite",
-        "Nero Marinace Granite",
         "Jurassic Black",
         "Mosaic Black",
-        "Nero Marinace",
         "Cappadocia Black Granite",
         "India Marinace Black Granite",
         "Indian Black Marinace Granite",
@@ -44539,12 +44564,14 @@
       ],
       "aliases": [
         "Venom Granite",
-        "Venom Black Granite, Black Mist",
+        "Venom Black Granite",
+        "Black Mist",
         "Venom",
-        "Venom Black, Black Mist",
+        "Venom Black",
         "Nero Mist",
-        "Nero Mist Granite, Negresco Granite",
-        "Nero Mist, Negresco"
+        "Nero Mist Granite",
+        "Negresco Granite",
+        "Negresco"
       ],
       "image_file": "tile_granite_black_mist_fc584cba-a905-5839-aa22-0fda07fe5333.png",
       "exists": "no",
@@ -45456,11 +45483,15 @@
         "Taurus Black",
         "Black Fusion Granite",
         "Magma Black Granite",
-        "Black Volcano Granite, Z B Fusion Black",
+        "Black Volcano Granite",
+        "Z B Fusion Black",
         "Magma Black",
-        "Black Volcano, Z B Fusion Black",
-        "Magma Gold Granite, Black Taurus, Black Taurus Bulgari, Taurus Black, Taurus",
-        "Magma Gold, Black Taurus, Black Taurus Bulgari, Taurus Black, Taurus"
+        "Black Volcano",
+        "Magma Gold Granite",
+        "Black Taurus",
+        "Black Taurus Bulgari",
+        "Taurus",
+        "Magma Gold"
       ],
       "image_file": "tile_granite_black_taurus_3d38fb57-7e8d-53b1-b579-ac989405263d.png",
       "exists": "no",
@@ -48256,9 +48287,9 @@
         "Blue Celeste",
         "Shadow Gray",
         "Azul Dunes Granite",
-        "Azul Celeste Granite, Z Blue Dunes",
+        "Azul Celeste Granite",
+        "Z Blue Dunes",
         "Azul Dunes",
-        "Azul Celeste, Z Blue Dunes",
         "蓝色沙丘",
         "Lán sè shāqiū"
       ],
@@ -51804,8 +51835,11 @@
       ],
       "aliases": [
         "Piracema White",
-        "Piracema White Granite, White Piracema Granite, Branco Piracema Granite",
-        "Piracema White, White Piracema, Branco Piracema"
+        "Piracema White Granite",
+        "White Piracema Granite",
+        "Branco Piracema Granite",
+        "White Piracema",
+        "Branco Piracema"
       ],
       "image_file": "tile_granite_branco_piracema_a66ccec7-699d-5d28-9ed1-75f88505052d.png",
       "exists": "no",
@@ -60312,9 +60346,10 @@
       "aliases": [
         "Chiku Pearl Granite",
         "Chicku Pearl Granite",
-        "Chikoo Pearl Brown Granite, Chiku Pearl",
+        "Chikoo Pearl Brown Granite",
+        "Chiku Pearl",
         "Chicku Pearl",
-        "Chikoo Pearl Brown, Chiku Pearl"
+        "Chikoo Pearl Brown"
       ],
       "image_file": "tile_granite_chikoo_pearl_2c923016-5f03-58dd-9c6a-d01a1280fdb0.png",
       "exists": "no",
@@ -62720,8 +62755,10 @@
         "A"
       ],
       "aliases": [
-        "Cinza Corumba Granite, Brazil Grey Granite",
-        "Cinza Corumba, Brazil Grey"
+        "Cinza Corumba Granite",
+        "Brazil Grey Granite",
+        "Cinza Corumba",
+        "Brazil Grey"
       ],
       "image_file": "tile_granite_cinza_corumba_71907c87-7f63-59ea-a894-5a189bc82216.png",
       "exists": "no",
@@ -64475,10 +64512,9 @@
         "Colonial Premium",
         "Colonial Cream Premium Granite",
         "Colonial Beige Granite",
-        "Colonial Gold Granite, Z B Colonial Gold",
+        "Z B Colonial Gold",
         "Colonial Cream Premium",
         "Colonial Beige",
-        "Colonial Gold, Z B Colonial Gold",
         "殖民地黄金",
         "Zhímíndì huángjīn"
       ],
@@ -65195,8 +65231,11 @@
         "Nero Exotico Granite",
         "Nero Exotico",
         "Black Horse Granite",
-        "Copa Cabana Granite, Black Horse, Skyfall, Nero Exotico, Maori, Dalmata, Black..., Copacabana",
-        "Copa Cabana, Black Horse, Skyfall, Nero Exotico, Maori, Dalmata, Black..., Copacabana",
+        "Skyfall",
+        "Maori",
+        "Dalmata",
+        "Black...",
+        "Copacabana",
         "Copacabana Black",
         "Taupe Black",
         "Black Taupe Granite",
@@ -65205,7 +65244,6 @@
         "Panda Granite",
         "Black Taupe",
         "Ink Impression",
-        "Dalmata",
         "Panda",
         "水墨印象",
         "Shuǐmò Yìnxiàng"
@@ -66191,12 +66229,12 @@
         "Viscount White Granite",
         "White Cosmic Granite",
         "Cosmos White Granite",
-        "Viscount White Wavy Granite, New Viscount White",
+        "Viscount White Wavy Granite",
         "New Viscount White",
         "Viscount White",
         "White Cosmic",
         "Cosmos White",
-        "Viscount White Wavy, New Viscount White"
+        "Viscount White Wavy"
       ],
       "image_file": "tile_granite_cosmic_white_8d5420c1-35fe-5d4c-9c4b-534986526e46.png",
       "exists": "no",
@@ -69299,9 +69337,9 @@
         "Dallas White Granite",
         "Dahlia White",
         "Branco Dallas Granite",
-        "White Dallas Granite, White Dallas",
+        "White Dallas Granite",
+        "White Dallas",
         "Branco Dallas",
-        "White Dallas, White Dallas",
         "Swan White",
         "White Swan Granite",
         "White Swan",
@@ -70171,7 +70209,7 @@
         "Delicatus Silver Granite",
         "Bianco Delicatus Granite",
         "Everest Delicatus White",
-        "Delicatus Bianco Granite, Delicatus White",
+        "Delicatus Bianco Granite",
         "Delicatus White",
         "White Flower",
         "Winter Walley",
@@ -70179,7 +70217,7 @@
         "White Delicatus",
         "Delicatus Silver",
         "Bianco Delicatus",
-        "Delicatus Bianco, Delicatus White",
+        "Delicatus Bianco",
         "发财树",
         "Fācái shù"
       ],
@@ -70299,7 +70337,7 @@
         "Delicatus Golden Granite",
         "Persa Delicatus Granite",
         "Giallo Delicatus Granite",
-        "Delicato Giallo Granite, Delicatus",
+        "Delicato Giallo Granite",
         "Juparana Delicato",
         "Delicatus Hiperion",
         "Juparana Delicatus Gold",
@@ -70309,7 +70347,7 @@
         "Delicatus Golden",
         "Persa Delicatus",
         "Giallo Delicatus",
-        "Delicato Giallo, Delicatus",
+        "Delicato Giallo",
         "Juparana Delicatus Granite",
         "金枝玉叶"
       ],
@@ -78374,9 +78412,10 @@
       "aliases": [
         "Desert Cream Granite",
         "Fussion Gold Granite",
-        "Desert Gold Dune Granite, Z Fusion Gold",
+        "Desert Gold Dune Granite",
+        "Z Fusion Gold",
         "Desert Cream",
-        "Desert Gold Dune, Z Fusion Gold"
+        "Desert Gold Dune"
       ],
       "image_file": "tile_granite_fusion_gold_14290ab3-b01d-5f30-b60e-4db8cf7a8ed6.png",
       "exists": "no",
@@ -84891,8 +84930,8 @@
         "Petrous Gold",
         "Golden Alaska",
         "Petrous Cream",
-        "Alaska White Granite, Alaska Gold",
-        "Alaska White, Alaska Gold"
+        "Alaska White Granite",
+        "Alaska White"
       ],
       "image_file": "tile_granite_giallo_alaska_ac442d98-2470-533c-8e8c-0969cdeff67a.png",
       "exists": "no",
@@ -91396,12 +91435,12 @@
         "Golden Beach Granite",
         "Beach Gold Granite",
         "Golden Beach Sand Granite",
-        "Giallo Beach Granite, Golden Beach",
-        "South Beach",
+        "Giallo Beach Granite",
         "Golden Beach",
+        "South Beach",
         "Beach Gold",
         "Golden Beach Sand",
-        "Giallo Beach, Golden Beach",
+        "Giallo Beach",
         "Crystal Beach",
         "Brown Sand Granite",
         "Australia Desert Sand Granite",
@@ -93979,9 +94018,9 @@
         "Erlangshan Peacock Green",
         "India Peacock Green",
         "India Peacock Verde Granite",
-        "Green Peacock Granite, Peacock Green",
+        "Green Peacock Granite",
         "India Peacock Verde",
-        "Green Peacock, Peacock Green",
+        "Green Peacock",
         "Peacock Green Light",
         "Peacock Green of Two Vendors Mountain Granite",
         "Peacock Light Green Granite",
@@ -103819,15 +103858,14 @@
         "A"
       ],
       "aliases": [
-        "White Ice Granite, White Ice, Branco White Ice",
-        "White Ice, White Ice, Branco White Ice",
+        "White Ice Granite",
+        "White Ice",
+        "Branco White Ice",
         "Romanix",
         "Bianco Romanix Granite",
         "Blanco Romanix",
-        "White Ice Granite",
         "Ice White Granite",
-        "Bianco Romanix",
-        "White Ice"
+        "Bianco Romanix"
       ],
       "image_file": "tile_granite_ice_white_6a95c52a-31a2-5e53-bb83-c5c4e3a9a84c.png",
       "exists": "no",
@@ -105206,9 +105244,10 @@
       ],
       "aliases": [
         "Dark Forest Granite",
-        "Black Forest Granite, Black Forest, Z Black Forest",
-        "Dark Forest",
-        "Black Forest, Black Forest, Z Black Forest"
+        "Black Forest Granite",
+        "Black Forest",
+        "Z Black Forest",
+        "Dark Forest"
       ],
       "image_file": "tile_granite_india_black_forest_a0294abc-9eee-5495-963c-25ff0114ecdc.png",
       "exists": "no",
@@ -105249,8 +105288,9 @@
         "A"
       ],
       "aliases": [
-        "Blue Flower Granite, Blue Flower, Z Blue Flower",
-        "Blue Flower, Blue Flower, Z Blue Flower"
+        "Blue Flower Granite",
+        "Blue Flower",
+        "Z Blue Flower"
       ],
       "image_file": "tile_granite_india_blue_flower_3a784dfe-13ae-52cd-a34b-96b603cbc76c.png",
       "exists": "no",
@@ -106053,12 +106093,15 @@
         "Aruba Granite",
         "Aruba Tropical Granite",
         "Indora Granite",
-        "Indian Aurora Red Granite, Indian Aurora, Z Indian Aurora, Z B Indian Aurora",
+        "Indian Aurora Red Granite",
+        "Indian Aurora",
+        "Z Indian Aurora",
+        "Z B Indian Aurora",
         "Aurora India",
         "Aruba",
         "Aruba Tropical",
         "Indora",
-        "Indian Aurora Red, Indian Aurora, Z Indian Aurora, Z B Indian Aurora"
+        "Indian Aurora Red"
       ],
       "image_file": "tile_granite_indian_aurora_3e3dc1f4-0d77-5bc3-aadd-922e0ab69375.png",
       "exists": "no",
@@ -106109,12 +106152,12 @@
         "Himalaya Granite",
         "Indian Kinawa Granite",
         "New Himalayan Blue Granite",
-        "Himalaya Brown Granite, Himalayan Blue",
+        "Himalaya Brown Granite",
         "Himalaya Blue",
         "Himalayan Blue Gandhi",
         "Himalaya",
         "New Himalayan Blue",
-        "Himalaya Brown, Himalayan Blue",
+        "Himalaya Brown",
         "Koppal Granite",
         "Koppal Blue Granite",
         "Kuknur Blue Granite",
@@ -107492,7 +107535,10 @@
         "Chiffon Beige Granite",
         "Sivakasi Brown Granite",
         "Shivakasi Gold Granite",
-        "Astoria Granite, Ivory Brown, Z Ivory Brown, Z B Ivory Brown",
+        "Astoria Granite",
+        "Ivory Brown",
+        "Z Ivory Brown",
+        "Z B Ivory Brown",
         "Ivory Chiffon",
         "Ivory Brown Light",
         "Ivory Brown Light Extra",
@@ -107501,7 +107547,7 @@
         "Chiffon Beige",
         "Sivakasi Brown",
         "Shivakasi Gold",
-        "Astoria, Ivory Brown, Z Ivory Brown, Z B Ivory Brown"
+        "Astoria"
       ],
       "image_file": "tile_granite_ivory_brown_ad653ecc-629f-5dcd-986c-02b823c7de18.png",
       "exists": "no",
@@ -107605,7 +107651,7 @@
         "Ivory Cream Gold",
         "Ivory",
         "Ivory Beige",
-        "Ivory Fantasy, Fantasy Ivory",
+        "Fantasy Ivory",
         "象牙米黄",
         "Xiàngyá mǐhuáng"
       ],
@@ -124888,13 +124934,18 @@
         "Black Cosmic Granite",
         "Cosmic Black Granite",
         "Titanium Granite",
-        "Magnific Gold Granite, Magma Gold, Black Fusion, Titanium Gold Black, Lava Oro, Sedna Gold, Titanium, Titanium Black, Cosmic Black, Black Cosmic",
-        "Gold Silk",
-        "Black Cosmic",
-        "Cosmic Black",
-        "Titanium",
-        "Magnific Gold, Magma Gold, Black Fusion, Titanium Gold Black, Lava Oro, Sedna Gold, Titanium, Titanium Black, Cosmic Black, Black Cosmic",
+        "Magnific Gold Granite",
+        "Magma Gold",
+        "Black Fusion",
+        "Titanium Gold Black",
+        "Lava Oro",
         "Sedna Gold",
+        "Titanium",
+        "Titanium Black",
+        "Cosmic Black",
+        "Black Cosmic",
+        "Gold Silk",
+        "Magnific Gold",
         "Sedna Granite",
         "Giallo Sedna Granite",
         "Granito Amarelo Sedna",
@@ -125372,9 +125423,10 @@
       ],
       "aliases": [
         "Preto Makalu Granite",
-        "Makalu Black Granite, Makalu",
+        "Makalu Black Granite",
+        "Makalu",
         "Preto Makalu",
-        "Makalu Black, Makalu"
+        "Makalu Black"
       ],
       "image_file": "tile_granite_makalu_d8e8b736-6e54-52f2-be37-955728b1b4d1.png",
       "exists": "no",
@@ -126439,8 +126491,7 @@
         "Kuppam Grey",
         "Marina Green Granite",
         "KP Green Granite",
-        "Maharani Green Granite, Kuppam Green",
-        "Maharani Green, Kuppam Green",
+        "Maharani Green Granite",
         "Maharani Green",
         "Verde Maharani",
         "Pradesh Green Granite",
@@ -126453,7 +126504,6 @@
         "Verdi Marina",
         "Verde Venato",
         "Verde Marina",
-        "Maharani Green Granite",
         "Verde Maharani Granite",
         "Grey Marina Granite",
         "Grey Marina",
@@ -127914,9 +127964,10 @@
       ],
       "aliases": [
         "Matrix 3-D Granite",
-        "Matrix Granite, Matrix, Matrix Anticato",
-        "Matrix 3-D",
-        "Matrix, Matrix, Matrix Anticato"
+        "Matrix Granite",
+        "Matrix",
+        "Matrix Anticato",
+        "Matrix 3-D"
       ],
       "image_file": "tile_granite_matrix_3d_8bd5a208-35a7-5845-84f7-d86d07f61e8a.png",
       "exists": "no",
@@ -128800,10 +128851,12 @@
       "aliases": [
         "Metalicus Azul Granite",
         "Metallic Blue Granite",
-        "Metalicus Black Granite, Metalicus, Preto Metalicus",
+        "Metalicus Black Granite",
+        "Metalicus",
+        "Preto Metalicus",
         "Metalicus Azul",
         "Metallic Blue",
-        "Metalicus Black, Metalicus, Preto Metalicus"
+        "Metalicus Black"
       ],
       "image_file": "tile_granite_metalicus_80670b6c-7ceb-527e-96c7-ba93869c2a25.png",
       "exists": "no",
@@ -129144,11 +129197,10 @@
         "French Creek Granite",
         "Fox Hill Black Granite",
         "Midnight Black Granite",
-        "Jet Mist Granite, American Black",
+        "Jet Mist Granite",
         "Pennsylvania Black",
         "French Creek",
         "Fox Hill Black",
-        "Jet Mist, American Black",
         "Jet Mist",
         "Virginia Mist Granite",
         "Jet Mist Black Granite",
@@ -129181,7 +129233,6 @@
         "Black Pennsylvania",
         "Virginia Black",
         "Granito Virginia Mist",
-        "Jet Mist Granite",
         "Virginia Mist Black Granite",
         "Virginia Jet Mist Granite",
         "Virginia Mist Black",
@@ -129278,12 +129329,14 @@
         "Millenium Gold Granite",
         "Millennium Cream Granite",
         "Amarillo Rio Granite",
-        "Tasman Taupe Granite, Millenium Cream, Millenium Crema",
+        "Tasman Taupe Granite",
+        "Millenium Cream",
+        "Millenium Crema",
         "Millenium Beige",
         "Millenium Gold",
         "Millennium Cream",
         "Amarillo Rio",
-        "Tasman Taupe, Millenium Cream, Millenium Crema",
+        "Tasman Taupe",
         "Millennium Dream",
         "Millenium Lady Dream Granite",
         "Millennium Golden Dream Granite",
@@ -129836,7 +129889,11 @@
         "Misty Black Quartzite",
         "Misty Green Black",
         "Black Misty",
-        "Preto Negresco, Negresco, CBR Preto Negresco, CBR Negresco, Blac..."
+        "Preto Negresco",
+        "Negresco",
+        "CBR Preto Negresco",
+        "CBR Negresco",
+        "Blac..."
       ],
       "image_file": "tile_granite_misty_black_d2109c2e-17c6-57ac-8440-110bbb6c9e88.png",
       "exists": "no",
@@ -130442,9 +130499,12 @@
         "Exotic Monalisa",
         "Mona Lisa Granite",
         "Mona Lisa White Granite",
-        "Exotic Mona Lisa Granite, Monalisa, Z Monalisa, Zb Monalisa",
+        "Exotic Mona Lisa Granite",
+        "Monalisa",
+        "Z Monalisa",
+        "Zb Monalisa",
         "Mona Lisa White",
-        "Exotic Mona Lisa, Monalisa, Z Monalisa, Zb Monalisa"
+        "Exotic Mona Lisa"
       ],
       "image_file": "tile_granite_mona_lisa_14b41cd8-4053-53ef-abfe-8f5e6c897a01.png",
       "exists": "no",
@@ -130771,7 +130831,8 @@
         "A"
       ],
       "aliases": [
-        "Cinza Rubelita Rose, Rubelita Rose"
+        "Cinza Rubelita Rose",
+        "Rubelita Rose"
       ],
       "image_file": "tile_granite_mont_rouge_d611290f-e59c-5ca9-b231-1be383d96b9a.png",
       "exists": "no",
@@ -138303,8 +138364,9 @@
         "Ibere Nilo River",
         "Nilo River Granite",
         "Ibere Nile River Granite",
-        "Nile River Granite, Nilo River",
-        "Nile River, Nilo River"
+        "Nile River Granite",
+        "Nilo River",
+        "Nile River"
       ],
       "image_file": "tile_granite_nilo_river_efe7db13-2524-5127-ae82-a69255884eed.png",
       "exists": "no",
@@ -141368,11 +141430,11 @@
         "Oreo Branco Granite",
         "Oreo Bianco Granite",
         "Oreo Granite",
-        "White Oreo Granite, Oreo",
+        "White Oreo Granite",
+        "Oreo",
         "Oreo Branco",
         "Oreo Bianco",
-        "Oreo",
-        "White Oreo, Oreo"
+        "White Oreo"
       ],
       "image_file": "tile_granite_oreo_white_0f3d1e09-5c75-577a-af36-5fe0cb11cdce.png",
       "exists": "no",
@@ -141704,7 +141766,8 @@
         "Blanco Orion",
         "Bianco Orion",
         "Orion White Supreme",
-        "White Orion Supreme, Orion White",
+        "White Orion Supreme",
+        "Orion White",
         "White Orion",
         "White Symphony",
         "Symphony White Granite",
@@ -144371,10 +144434,10 @@
         "Patagonia Blue Granite",
         "Patagonia Azul Granite",
         "Azul Patagonia Granite",
-        "Patagonia Blue Quartzite, Patagonia Blue",
+        "Patagonia Blue Quartzite",
+        "Patagonia Blue",
         "Patagonia Azul",
-        "Azul Patagonia",
-        "Patagonia Blue, Patagonia Blue"
+        "Azul Patagonia"
       ],
       "image_file": "tile_granite_patagonia_blue_c52e62b5-56ad-5d0a-8d46-fa16b8621646.png",
       "exists": "no",
@@ -144426,8 +144489,10 @@
         "Patagonia",
         "Patagonia White Granite",
         "Patagonia Quartzite",
-        "Patagonia Original Granite, Patagonia, White Patagonia, Zb Patagonia",
-        "Patagonia Original, Patagonia, White Patagonia, Zb Patagonia",
+        "Patagonia Original Granite",
+        "White Patagonia",
+        "Zb Patagonia",
+        "Patagonia Original",
         "Blanco Patagonia Granite",
         "Granito Branco Patagonia",
         "Bianco Patagonia Granite",
@@ -146495,8 +146560,9 @@
         "A"
       ],
       "aliases": [
-        "Persa Bianco Granite, Persa Avorio",
-        "Persa Bianco, Persa Avorio"
+        "Persa Bianco Granite",
+        "Persa Avorio",
+        "Persa Bianco"
       ],
       "image_file": "tile_granite_persa_avorio_f6998975-d876-593d-b33b-03e5b23f2842.png",
       "exists": "no",
@@ -148913,10 +148979,11 @@
       "aliases": [
         "Pitaya White Granite",
         "Branco Pitaya Granite",
-        "Bianco Pitaya Granite, Pitaya",
+        "Bianco Pitaya Granite",
+        "Pitaya",
         "Pitaya White",
         "Branco Pitaya",
-        "Bianco Pitaya, Pitaya"
+        "Bianco Pitaya"
       ],
       "image_file": "tile_granite_pitaya_cc2c1972-3a8e-54b9-84a6-6d3be825427e.png",
       "exists": "no",
@@ -149237,10 +149304,11 @@
         "Colonial White",
         "Buckingham White Granite",
         "New Imperial White Granite",
-        "Indian Bianco Romano Granite, Z Colonial White",
+        "Indian Bianco Romano Granite",
+        "Z Colonial White",
         "Buckingham White",
         "New Imperial White",
-        "Indian Bianco Romano, Z Colonial White",
+        "Indian Bianco Romano",
         "Nadol Silver White",
         "Silver White Granite",
         "Platinum White Granite",
@@ -150132,11 +150200,11 @@
         "Porto Branco Granite",
         "Milky Way Granite",
         "Nero Via Lattea",
-        "Preto Lotus Granite, Via Lattea, Milky Way",
-        "Nero Branco",
+        "Preto Lotus Granite",
         "Via Lattea",
         "Milky Way",
-        "Preto Lotus, Via Lattea, Milky Way",
+        "Nero Branco",
+        "Preto Lotus",
         "夜来香",
         "Yèlái xiāng"
       ],
@@ -161917,8 +161985,7 @@
         "Odisha Blue Granite",
         "Orissa Blue",
         "Orissa Blue Granite",
-        "Orissa Blue Granite, Royal Blue",
-        "Orissa Blue, Royal Blue",
+        "Royal Blue",
         "Orissa Sea Waves",
         "Orissa Sea Waves Granite",
         "Orissia Blue",
@@ -165737,10 +165804,10 @@
         "A"
       ],
       "aliases": [
-        "St, Santa Cecilia Light",
+        "St",
+        "Santa Cecilia Light",
         "St. Secilia Light",
         "Santa Cecilia Light Granite",
-        "St",
         "娱乐金麻",
         "Yúlè jīn má"
       ],
@@ -175981,7 +176048,8 @@
         "Snow Mountain Orchid Granite",
         "Snow Mountain Silver Fox Granite",
         "Golden Peacock Granite",
-        "Golden Wave Granite, Splendor White",
+        "Golden Wave Granite",
+        "Splendor White",
         "Splendour White",
         "Silver Fox",
         "Branco Splendor",
@@ -175990,7 +176058,7 @@
         "Snow Mountain Orchid",
         "Snow Mountain Silver Fox",
         "Golden Peacock",
-        "Golden Wave, Splendor White",
+        "Golden Wave",
         "Splendor",
         "Splendor Gold Granite",
         "Splendour Granite",
@@ -182898,14 +182966,14 @@
         "Mysore Tiger Granite",
         "Mysore Tiger Black Granite",
         "AP Black Impala Granite",
-        "M15 Granite, Tiger Black Marble",
+        "M15 Granite",
+        "Tiger Black Marble",
         "Black Tiger",
         "Negro Tigre",
         "Mysore Tiger",
         "Mysore Tiger Black",
         "AP Black Impala",
-        "M15, Tiger Black Marble",
-        "M15, Tiger Black"
+        "Tiger Black"
       ],
       "image_file": "tile_granite_tiger_black_413bd086-5e46-5e50-a3b8-550e6a344a2c.png",
       "exists": "no",
@@ -183584,9 +183652,12 @@
       ],
       "aliases": [
         "Titanium Golden Granite",
-        "Titanium Giallo Granite, Titanium Gold, Gold Titanium, Z B Titanium Gold",
+        "Titanium Giallo Granite",
+        "Titanium Gold",
+        "Gold Titanium",
+        "Z B Titanium Gold",
         "Titanium Golden",
-        "Titanium Giallo, Titanium Gold, Gold Titanium, Z B Titanium Gold"
+        "Titanium Giallo"
       ],
       "image_file": "tile_granite_titanium_gold_8e4110b3-ff74-59f2-a01f-38aa2389bd0d.png",
       "exists": "no",
@@ -183672,7 +183743,8 @@
         "A"
       ],
       "aliases": [
-        "Preto Titanium Aspen, Titanium Aspen"
+        "Preto Titanium Aspen",
+        "Titanium Aspen"
       ],
       "image_file": "tile_granite_titanium_jb_0de8285f-a218-591a-a92f-ac0a14385276.png",
       "exists": "no",
@@ -186964,9 +187036,10 @@
       ],
       "aliases": [
         "Vanilla Forest Granite",
-        "Vanilla Sky Granite, Vanilla",
+        "Vanilla Sky Granite",
+        "Vanilla",
         "Vanilla Forest",
-        "Vanilla Sky, Vanilla"
+        "Vanilla Sky"
       ],
       "image_file": "tile_granite_vanilla_178eef50-c86c-5aaa-b0bb-7a566e6bbd17.png",
       "exists": "no",
@@ -187576,14 +187649,14 @@
         "New Venetian Giallo Granite",
         "Amarelo Ouro Brasil Granite",
         "Amarelo Brasil Granite",
-        "(in China stone market: 威尼斯金麻 -Wēinísī jīn má), New Venetian Gold",
+        "(in China stone market: 威尼斯金麻 -Wēinísī jīn má)",
         "New Giallo Veneziano",
         "New Venetian Brazil",
         "New Veneziano",
         "New Venetian Giallo",
         "Amarelo Ouro Brasil",
         "Amarelo Brasil",
-        "(in China market: 威尼斯金麻 -Wēinísī jīn má), New Venetian Gold",
+        "(in China market: 威尼斯金麻 -Wēinísī jīn má)",
         "New Venetian Gold Granite",
         "Giallo Veneziano Granite",
         "Veneziano Giallo Granite",
@@ -190068,8 +190141,9 @@
       ],
       "aliases": [
         "Red Brasilia",
-        "Red Brasilia Granite, Vermelho Brasilia, Brazilian Red",
-        "Red Brasilia, Vermelho Brasilia, Brazilian Red",
+        "Red Brasilia Granite",
+        "Vermelho Brasilia",
+        "Brazilian Red",
         "Vermelho Brasilia Red Granite",
         "Granito Vermelho Brasilia",
         "Red Bahia Granite",
@@ -190081,8 +190155,7 @@
         "Red Bahia",
         "Rosa Bahia",
         "Bahia Rose",
-        "Bahia Red",
-        "Vermelho Brasilia"
+        "Bahia Red"
       ],
       "image_file": "tile_granite_vermelho_bahia_c65c94a6-d8ce-5efc-99b8-b7fad0421351.png",
       "exists": "no",
@@ -192211,7 +192284,11 @@
         "Visage Blue Granite",
         "Vizac Blue Granite",
         "Vizak Blue Granite",
-        "Vizaq Blue Granite, Vizag Blue, Vizag Azul, z b VIZAG BLUE, Z Vizag Blue",
+        "Vizaq Blue Granite",
+        "Vizag Blue",
+        "Vizag Azul",
+        "z b VIZAG BLUE",
+        "Z Vizag Blue",
         "Andhra Blue",
         "Azul Magnetic",
         "Azul Vizag",
@@ -192219,7 +192296,7 @@
         "Blue Vizag India",
         "Ganga Blue",
         "Ontario Blue",
-        "Vizaq Blue, Vizag Blue, Vizag Azul, z b VIZAG BLUE, Z Vizag Blue"
+        "Vizaq Blue"
       ],
       "image_file": "tile_granite_vizag_blue_7c768415-09d1-5542-a708-534dca823528.png",
       "exists": "no",
@@ -192429,8 +192506,9 @@
         "Aurora Blue Labradorite Granite",
         "Azul Aurora",
         "Azul Aurora Granite",
-        "Azul Galactic Granite, Galactic Blue",
-        "Azul Galactic, Galactic Blue",
+        "Azul Galactic Granite",
+        "Galactic Blue",
+        "Azul Galactic",
         "Black Labradorite",
         "Black Labradorite Granite",
         "Blue Diamond",
@@ -192465,7 +192543,6 @@
         "Emerald Blue",
         "Emerald Blue Granite",
         "Extra Blue Ukraine",
-        "Galactic Blue",
         "Galactic Blue Granite",
         "Huángjiā lán",
         "Irina Blue",
@@ -194522,10 +194599,11 @@
         "Bianco G Granite",
         "Branco G Granite",
         "Granito Branco G",
-        "White Ornamental Granite, White G",
+        "White Ornamental Granite",
+        "White G",
         "Bianco G",
         "Branco G",
-        "White Ornamental, White G"
+        "White Ornamental"
       ],
       "image_file": "tile_granite_white_g_1a3be813-ff90-5347-984f-f483f1df8f05.png",
       "exists": "no",
@@ -195744,8 +195822,9 @@
         "Bianco Ornamental Granite",
         "Branco Ornamental",
         "Granito Branco Ornamental",
-        "Light Ornamental Granite, White Ornamental",
-        "Light Ornamental, White Ornamental",
+        "Light Ornamental Granite",
+        "White Ornamental",
+        "Light Ornamental",
         "Ornamental White",
         "Ornamental White Granite",
         "White Ornamental Granite"
@@ -246199,11 +246278,12 @@
         "Palladium Silver Limestone",
         "Grey Palladium Limestone",
         "Silver Palladium Limestone",
-        "Palladium Grey Limestone, Palladium",
+        "Palladium Grey Limestone",
+        "Palladium",
         "Palladium Silver",
         "Grey Palladium",
         "Silver Palladium",
-        "Palladium Grey, Palladium"
+        "Palladium Grey"
       ],
       "image_file": "tile_limestone_palladium_3964d9f9-db40-5237-9dfc-9c051c470fc2.png",
       "exists": "no",
@@ -278814,11 +278894,11 @@
         "Arabescato Oro Marble",
         "Fantastico Grigiorosa Marble",
         "Marmo Arabescato Orobico",
-        "Marmo Arabescato Orobico Grigio, Arabescato Orobico",
+        "Marmo Arabescato Orobico Grigio",
         "Arabescato Grigio Orobico",
         "Arabescato Oro",
         "Fantastico Grigiorosa",
-        "Arabescato Orobico Grigio, Arabescato Orobico",
+        "Arabescato Orobico Grigio",
         "Italian Dream Gray Marble",
         "Italian Fantasy Gray Marble",
         "Orobico Grey Gold Marble",
@@ -284185,8 +284265,8 @@
         "Iberê Avalanche",
         "Avalanche Marble",
         "Iberê Avalanche Marble",
-        "Ibere Calacatta Marble, White Avalanche",
-        "Ibere Calacatta, White Avalanche"
+        "Ibere Calacatta Marble",
+        "Ibere Calacatta"
       ],
       "image_file": "tile_marble_avalanche_cb90f8a7-f50a-590c-a9eb-7246048991c2.png",
       "exists": "no",
@@ -291462,7 +291542,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Shadow Marmil, Shadow Marmil"
+        "Branco Shadow Marmil",
+        "Shadow Marmil"
       ],
       "image_file": "tile_marble_bianco_impala_11c0e29b-56f9-5dd9-8c86-0f8a25dec45a.png",
       "exists": "no",
@@ -294535,9 +294616,8 @@
         "Trada Black",
         "Black Crocodile Marble",
         "Mamba Black Marble",
-        "Black Fate Marble, Black Mamba, Preto Black Mamba",
-        "Mamba Black",
-        "Black Fate, Black Mamba, Preto Black Mamba"
+        "Preto Black Mamba",
+        "Mamba Black"
       ],
       "image_file": "tile_marble_black_crocodile_55aa7e51-4e49-5686-b8cf-d5707575516f.png",
       "exists": "no",
@@ -294998,9 +295078,9 @@
       ],
       "aliases": [
         "Iris Black Marble",
-        "Sivas Black Marble, Iris Black",
+        "Sivas Black Marble",
         "Iris Black",
-        "Sivas Black, Iris Black",
+        "Sivas Black",
         "Iride Nero",
         "Black Iris Marble",
         "Marmo Iride Nero",
@@ -295012,14 +295092,12 @@
         "Ruivina Black Marble",
         "Ruivina Dark Marble",
         "Ruivina Marble",
-        "Sivas Black Marble",
         "Sivas Nero Perla Marble",
         "Black Star",
         "AGF",
         "Ruivina Black",
         "Ruivina Dark",
         "Ruivina",
-        "Sivas Black",
         "Sivas Nero Perla"
       ],
       "image_file": "tile_marble_black_iris_99c1c3ed-7cd8-5a00-bf4b-a90881eddfba.png",
@@ -299586,8 +299664,10 @@
         "A"
       ],
       "aliases": [
-        "Branco Iron Marble, Iron Marble",
-        "Branco Iron, Iron"
+        "Branco Iron Marble",
+        "Iron Marble",
+        "Branco Iron",
+        "Iron"
       ],
       "image_file": "tile_marble_botticelli_34a39143-f780-5527-ae79-727e9293e671.png",
       "exists": "no",
@@ -302121,7 +302201,9 @@
         "Breccia St Maria Marble",
         "Breccia St Maria",
         "凯悦红/意大利彩玉/布莱查红",
-        "Kǎi Yuè Hóng,Yìdàlì Cǎi Yù,Bù Lái Chá Hóng"
+        "Kǎi Yuè Hóng",
+        "Yìdàlì Cǎi Yù",
+        "Bù Lái Chá Hóng"
       ],
       "image_file": "tile_marble_breccia_oniciata_beige_f4759691-aa9a-5deb-b8bd-26a70bcf0da9.png",
       "exists": "no",
@@ -302198,7 +302280,9 @@
         "Breccia Oniciata Beige",
         "Breccia New Aurora",
         "凯悦红/意大利彩玉/布莱查红",
-        "Kǎi Yuè Hóng,Yìdàlì Cǎi Yù,Bù Lái Chá Hóng"
+        "Kǎi Yuè Hóng",
+        "Yìdàlì Cǎi Yù",
+        "Bù Lái Chá Hóng"
       ],
       "image_file": "tile_marble_breccia_oniciata_pink_2fdfe2cf-070f-59b7-a85e-c97a9cc5741e.png",
       "exists": "no",
@@ -306339,10 +306423,10 @@
         "Cachoeiro White Marble",
         "White Marble Cachoeiro",
         "Marmore Branco Cachoeira",
-        "Branco Cachoeira, Cachoeiro White, Branco Cachoeiro",
-        "Blanco Cachoeiro",
-        "Branco Cachoeiro",
+        "Branco Cachoeira",
         "Cachoeiro White",
+        "Branco Cachoeiro",
+        "Blanco Cachoeiro",
         "White Cachoeiro"
       ],
       "image_file": "tile_marble_cachoeiro_7ce4286d-c039-59eb-a048-196f232dbf67.png",
@@ -307990,7 +308074,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Calacatta Fantasy, Calacatta Fantasy"
+        "Branco Calacatta Fantasy",
+        "Calacatta Fantasy"
       ],
       "image_file": "tile_marble_calacatta_fantasy_60fd337d-21ee-512f-8d34-07199aa4179f.png",
       "exists": "no",
@@ -310949,10 +311034,9 @@
         "Bianco Caravaggio Marble",
         "Caravaggio White Dolomite",
         "Marmi Bianco Caravaggio",
-        "Bianco Caravaggio Quartzite, Bianco Caravaggio",
-        "Caravaggio White",
+        "Bianco Caravaggio Quartzite",
         "Bianco Caravaggio",
-        "Bianco Caravaggio, Bianco Caravaggio"
+        "Caravaggio White"
       ],
       "image_file": "tile_marble_caravaggio_c7f27357-497d-5382-ade4-ad06500ccdad.png",
       "exists": "no",
@@ -311758,7 +311842,8 @@
         "Monte Bianco",
         "Mont Blanc",
         "Montblanc Marble",
-        "Mont Blanc Calcite, Mont Blanc, Branco Mont Blanc",
+        "Mont Blanc Calcite",
+        "Branco Mont Blanc",
         "Montblanc",
         "勃朗峰大理石",
         "Bó lǎng fēng dàlǐshí"
@@ -312054,9 +312139,8 @@
         "Ebano Brown Limestone",
         "Marmor Maron Kesra",
         "Kesra Brown",
-        "Maron Kesra Marble, Ebano",
-        "Ebano Brown",
-        "Maron Kesra, Ebano"
+        "Maron Kesra Marble",
+        "Ebano Brown"
       ],
       "image_file": "tile_marble_carthage_brown_45dd8f68-0474-5068-bca5-ab5213da0fcd.png",
       "exists": "no",
@@ -317435,7 +317519,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Cloud Cristale O, Cloud Cristale O"
+        "Branco Cloud Cristale O",
+        "Cloud Cristale O"
       ],
       "image_file": "tile_marble_cloud_cristale_f93c60b8-0f5c-542d-b227-186410992696.png",
       "exists": "no",
@@ -325564,8 +325649,9 @@
         "A"
       ],
       "aliases": [
-        "Azul Cristalita Marble, Cristalita Blue",
-        "Azul Cristalita, Cristalita Blue"
+        "Azul Cristalita Marble",
+        "Cristalita Blue",
+        "Azul Cristalita"
       ],
       "image_file": "tile_marble_cristalita_blue_b1c31ef2-4a93-5e6b-9d6e-56a7575cd3a1.png",
       "exists": "no",
@@ -326375,8 +326461,9 @@
         "A"
       ],
       "aliases": [
-        "Leonardo da Vinci Marble, da Vinci",
-        "Leonardo da Vinci, da Vinci",
+        "Leonardo da Vinci Marble",
+        "da Vinci",
+        "Leonardo da Vinci",
         "达芬奇",
         "Dá fēn qí"
       ],
@@ -336120,11 +336207,12 @@
         "Olivia Emperador Marble",
         "Emperador Marble",
         "Egyptian Emperador",
-        "Olivia Marron Marble, Z Olivia",
+        "Olivia Marron Marble",
+        "Z Olivia",
         "Olivia",
         "Olivia Emperador",
         "Emperador",
-        "Olivia Marron, Z Olivia",
+        "Olivia Marron",
         "钱啡网纹",
         "Qiǎn fēi wǎng wén"
       ],
@@ -336898,8 +336986,11 @@
         "A"
       ],
       "aliases": [
-        "Equinox White Marble, Equinox, Cinza Calcita Equinox, Calcita Equinox",
-        "Equinox White, Equinox, Cinza Calcita Equinox, Calcita Equinox"
+        "Equinox White Marble",
+        "Equinox",
+        "Cinza Calcita Equinox",
+        "Calcita Equinox",
+        "Equinox White"
       ],
       "image_file": "tile_marble_equinox_fa4a5dcc-f28c-5ae2-9b3f-17755963fa94.png",
       "exists": "no",
@@ -339087,13 +339178,16 @@
         "Bianco Everest Marble",
         "White Everest Marble",
         "Shanxi White Marble",
-        "China Bianco Everest Marble, Everest, Branco Pin Verde Marmiex, Pin Marmiex",
+        "China Bianco Everest Marble",
+        "Everest",
+        "Branco Pin Verde Marmiex",
+        "Pin Marmiex",
         "Everest White",
         "Snow White",
         "Bianco Everest",
         "White Everest",
         "Shanxi White",
-        "China Bianco Everest, Everest, Branco Pin Verde Marmiex, Pin Marmiex"
+        "China Bianco Everest"
       ],
       "image_file": "tile_marble_everest_39862b77-9da0-5538-b9fa-b673bc0d14e7.png",
       "exists": "no",
@@ -339219,7 +339313,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Flores, Flores"
+        "Branco Flores",
+        "Flores"
       ],
       "image_file": "tile_marble_evora_white_d218048b-d6c7-5db7-8932-fd8069f0df3a.png",
       "exists": "no",
@@ -340084,8 +340179,7 @@
         "Blue Fantasy Marble",
         "Fantasy Blue Jade",
         "Blue Fantasy",
-        "Fantasy Blue Marble, Blue Fantasy",
-        "Fantasy Blue, Blue Fantasy",
+        "Fantasy Blue",
         "梦幻蓝",
         "Mènghuàn lán"
       ],
@@ -345729,7 +345823,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Rajado Petra San, Rajado Petra San"
+        "Branco Rajado Petra San",
+        "Rajado Petra San"
       ],
       "image_file": "tile_marble_gloria_venato_2d5f5012-0efc-5d54-8618-28dc44749a71.png",
       "exists": "no",
@@ -351911,15 +352006,16 @@
         "Koke Brown Grey Marble",
         "Hazelnut Grey Marble",
         "Mocha Grey Marble",
-        "Tiger Grey Marble, Mocha Grey, Grey Mocha",
+        "Tiger Grey Marble",
+        "Mocha Grey",
+        "Grey Mocha",
         "Cocoa Grey",
         "Burdur Grey",
         "Turkish Cocoa Grey",
         "Brown Grey",
         "Koke Brown Grey",
         "Hazelnut Grey",
-        "Mocha Grey",
-        "Tiger Grey, Mocha Grey, Grey Mocha",
+        "Tiger Grey",
         "Grey Moca Marble",
         "Moka Grey Marble",
         "Grey Moca",
@@ -358937,8 +359033,9 @@
         "A"
       ],
       "aliases": [
-        "Ocean Storm Marble, Hurricane",
-        "Ocean Storm, Hurricane"
+        "Ocean Storm Marble",
+        "Hurricane",
+        "Ocean Storm"
       ],
       "image_file": "tile_marble_hurricane_ec200f0a-31f5-517b-9501-9d54077dc566.png",
       "exists": "no",
@@ -359697,9 +359794,9 @@
         "Calcite Iceberg",
         "Iceberg Grey Marble",
         "White Ice Marble",
-        "Ice White Marble, Iceberg",
+        "Ice White Marble",
         "White Ice",
-        "Ice White, Iceberg"
+        "Ice White"
       ],
       "image_file": "tile_marble_iceberg_grey_3d2f48ac-6304-5c70-a8ec-113258415c0a.png",
       "exists": "no",
@@ -362137,7 +362234,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Carrarinha, Carrarinha"
+        "Branco Carrarinha",
+        "Carrarinha"
       ],
       "image_file": "tile_marble_iris_white_4b4bf6e9-732e-5b71-b1c1-432e8d765f69.png",
       "exists": "no",
@@ -362659,8 +362757,8 @@
         "Affumicato Gray",
         "Affumicato Gray Marble",
         "Affumicato Marble",
-        "Affumicato Silver Marble, Affumicato",
-        "Affumicato Silver, Affumicato",
+        "Affumicato Silver Marble",
+        "Affumicato Silver",
         "Afyon Grey",
         "Afyon Grey Marble",
         "Atlas Gray",
@@ -376426,9 +376524,10 @@
       "aliases": [
         "Lorena Bianco Marble",
         "Lorena White Calcite",
-        "Marmol Branco Lorena, Lorena White",
+        "Marmol Branco Lorena",
+        "Lorena White",
         "Lorena Bianco",
-        "Branco Lorena, Lorena White"
+        "Branco Lorena"
       ],
       "image_file": "tile_marble_lorena_white_33eaf662-32dd-5468-8e49-7ef219bc2810.png",
       "exists": "no",
@@ -384899,18 +384998,16 @@
         "Greylac White Marble",
         "Milas Lilac Marble",
         "Milas New York Marble",
-        "Vino Viola Calacatta Marble, Lilac",
+        "Vino Viola Calacatta Marble",
         "Lilac",
         "Greylac White",
         "Milas New York",
-        "Vino Viola Calacatta, Lilac",
+        "Vino Viola Calacatta",
         "Incense Plum",
-        "Vino Viola Calacatta Marble",
         "Greylac Marble",
         "Incense Lilac Marble",
         "Chanel Plum Marble",
         "Chanel Lilac Marble",
-        "Vino Viola Calacatta",
         "Incense Lilac",
         "Chanel Plum",
         "Chanel Lilac",
@@ -390069,7 +390166,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Calacatta Namib, Calacatta Namib"
+        "Branco Calacatta Namib",
+        "Calacatta Namib"
       ],
       "image_file": "tile_marble_namib_calacatta_2457d13c-ad38-5749-935e-c5be152ea74b.png",
       "exists": "no",
@@ -390108,7 +390206,8 @@
         "A"
       ],
       "aliases": [
-        "Importado Branco Crayon, Importado Crayon"
+        "Importado Branco Crayon",
+        "Importado Crayon"
       ],
       "image_file": "tile_marble_namib_crayon_e4395c0a-48dd-55e9-b618-05ab616563f4.png",
       "exists": "no",
@@ -390199,13 +390298,13 @@
         "Bianco Rhino Marble",
         "Bibala White",
         "Bibala White Marble",
-        "Caraculo White Marble, Exotic White",
-        "Caraculo White, Exotic White",
+        "Caraculo White Marble",
+        "Exotic White",
+        "Caraculo White",
         "Damara White",
         "Damara White Marble",
         "Etosha White",
         "Etosha White Marble",
-        "Exotic White",
         "Exotic White Marble",
         "Karibib Fantasy",
         "Karibib Fantasy Marble",
@@ -393350,7 +393449,9 @@
         "Cappuccino Beige Marble",
         "Cappuccino Marble",
         "Burdur Latte Marble",
-        "Burdur Beige Marble, Cappuccino, Branco Cappuccino",
+        "Burdur Beige Marble",
+        "Cappuccino",
+        "Branco Cappuccino",
         "New Latte Beige",
         "Latte Cream",
         "Crema Latte",
@@ -393359,9 +393460,8 @@
         "Burdur Crema Latte",
         "Creama Latte",
         "Cappuccino Beige",
-        "Cappuccino",
         "Burdur Latte",
-        "Burdur Beige, Cappuccino, Branco Cappuccino",
+        "Burdur Beige",
         "拿铁",
         "Ná tiě"
       ],
@@ -396306,8 +396406,10 @@
         "A"
       ],
       "aliases": [
-        "Ocean White Marble, Z B Ocean White, Z Ocean White",
-        "Ocean White, Z B Ocean White, Z Ocean White",
+        "Ocean White Marble",
+        "Z B Ocean White",
+        "Z Ocean White",
+        "Ocean White",
         "Sea Stone Marble",
         "Marine Elegance Marble",
         "Ocean Rhythm Marble",
@@ -410913,8 +411015,11 @@
         "A"
       ],
       "aliases": [
-        "Branco Portinari Marble, Portinari, Branco Clear Data, Clear Data",
-        "Branco Portinari, Portinari, Branco Clear Data, Clear Data"
+        "Branco Portinari Marble",
+        "Portinari",
+        "Branco Clear Data",
+        "Clear Data",
+        "Branco Portinari"
       ],
       "image_file": "tile_marble_portinari_c660035b-aabd-542d-b141-755b71d6f782.png",
       "exists": "no",
@@ -411660,8 +411765,10 @@
         "Fish Belly Grey Marble",
         "Fish Maw Blue",
         "Fish Maw Blue Marble",
-        "Fish Maw Gray Marble, Classic Gray, Branco Classic Gray MB, Classic MB",
-        "Fish Maw Gray, Classic Gray, Branco Classic Gray MB, Classic MB",
+        "Fish Maw Gray Marble",
+        "Branco Classic Gray MB",
+        "Classic MB",
+        "Fish Maw Gray",
         "Fish Maw Grey",
         "Fish Maw Grey Marble",
         "Mina Gray",
@@ -424404,9 +424511,9 @@
         "Langbo Grey Small Pattern",
         "Oyster White Marble",
         "Langbo Grey Marble",
-        "Large Flower Marble, Oyster Grey",
+        "Large Flower Marble",
         "Oyster White",
-        "Large Flower, Oyster Grey",
+        "Large Flower",
         "Royal Oyster Gray Marble",
         "Gray Oyster Marble",
         "Pacific Oyster Marble",
@@ -426706,9 +426813,11 @@
       ],
       "aliases": [
         "Saint Tropez Green Marble",
-        "St Tropez Marble, Saint Tropez, Azul Saint Tropez",
+        "St Tropez Marble",
+        "Saint Tropez",
+        "Azul Saint Tropez",
         "Saint Tropez Green",
-        "St Tropez, Saint Tropez, Azul Saint Tropez"
+        "St Tropez"
       ],
       "image_file": "tile_marble_saint_tropez_a5306974-e6ea-5508-8b9e-e729697fd1b5.png",
       "exists": "no",
@@ -431443,10 +431552,13 @@
         "Sequoia Brown Woodstone",
         "Sequoia Brown Limestone",
         "Sequoia Brown Quartzite",
-        "Brown Sequoia Marble, Sequoia Brown, Marrom Sequoia Brown, Sequoia Marrom",
+        "Brown Sequoia Marble",
+        "Sequoia Brown",
+        "Marrom Sequoia Brown",
+        "Sequoia Marrom",
         "Sequoia Brown Wooden",
         "Sequoia Marrone",
-        "Brown Sequoia, Sequoia Brown, Marrom Sequoia Brown, Sequoia Marrom"
+        "Brown Sequoia"
       ],
       "image_file": "tile_marble_sequoia_brown_0393707f-f9d3-5f61-82bd-047acc067801.png",
       "exists": "no",
@@ -431485,7 +431597,8 @@
         "A"
       ],
       "aliases": [
-        "Cinza Nimbus, Nimbus"
+        "Cinza Nimbus",
+        "Nimbus"
       ],
       "image_file": "tile_marble_sequoia_grey_4f0b7cc3-162d-5930-b188-7817737a1023.png",
       "exists": "no",
@@ -432269,9 +432382,12 @@
         "Shadow Storm White Marble",
         "Ocean Storm Marble",
         "Shadow Storm Marmore",
-        "Shadow Storm Crystal Marble, Shadow Storm, Branco MGB Shadow, MGB Shadow",
+        "Shadow Storm Crystal Marble",
+        "Shadow Storm",
+        "Branco MGB Shadow",
+        "MGB Shadow",
         "Shadow Storm White",
-        "Shadow Storm Crystal, Shadow Storm, Branco MGB Shadow, MGB Shadow"
+        "Shadow Storm Crystal"
       ],
       "image_file": "tile_marble_shadow_storm_e154ec3e-2c79-54ed-8368-f50474032db0.png",
       "exists": "no",
@@ -432313,21 +432429,21 @@
         "A"
       ],
       "aliases": [
-        "White Shadow Marble, Shadow White",
-        "White Shadow, Shadow White",
+        "White Shadow Marble",
+        "Shadow White",
+        "White Shadow",
         "White Shadow Kuzbas",
         "Kuznetsk White Shadow Marble",
         "Kuznetsk White Marble",
-        "White Shadow Marble",
         "Siberia White Shadow Marble",
         "White Shadow Supreme Marble",
-        "Supreme White Marble, White Shadow, Branco White Shadow",
+        "Supreme White Marble",
+        "Branco White Shadow",
         "Kuznetsk White Shadow",
         "Kuznetsk White",
-        "White Shadow",
         "Siberia White Shadow",
         "White Shadow Supreme",
-        "Supreme White, White Shadow, Branco White Shadow"
+        "Supreme White"
       ],
       "image_file": "tile_marble_shadow_white_95710882-4657-55c2-934e-160831d57232.png",
       "exists": "no",
@@ -432860,7 +432976,8 @@
         "Shayan Beige Marble",
         "New Shayan Beige Marble",
         "New Royal Botticino Marble",
-        "Royal Botticino Marble, Shayan Marble",
+        "Royal Botticino Marble",
+        "Shayan Marble",
         "Shanna",
         "Shayan Crystal Beige",
         "Crystal Shanna Beige",
@@ -432871,7 +432988,8 @@
         "Shayan Beige",
         "New Shayan Beige",
         "New Royal Botticino",
-        "Royal Botticino, Shayan",
+        "Royal Botticino",
+        "Shayan",
         "Shayan Crystal",
         "水晶莎安娜",
         "Shuǐjīng shā ānnà"
@@ -434519,9 +434637,9 @@
       ],
       "aliases": [
         "Espiner Brunet Marble",
-        "Silk Marble, Silk",
-        "Espiner Brunet",
-        "Silk, Silk"
+        "Silk Marble",
+        "Silk",
+        "Espiner Brunet"
       ],
       "image_file": "tile_marble_silk_espiner_6a4901de-804a-5d77-8daa-c4701699dd14.png",
       "exists": "no",
@@ -436420,9 +436538,11 @@
       "aliases": [
         "Silver Stream Marble",
         "Black Wooden Marble",
-        "Silver Wave Marble, Silver Wave Marble Slab – 1.06",
+        "Silver Wave Marble",
+        "Silver Wave Marble Slab – 1.06",
         "Black Wooden",
-        "Silver Wave, Silver Wave Slab – 1.06",
+        "Silver Wave",
+        "Silver Wave Slab – 1.06",
         "熊猫精灵",
         "Xióngmāo jīnglíng"
       ],
@@ -439515,13 +439635,12 @@
         "Crema Eva Marble",
         "Crema Evita Marble",
         "Menes Gold Marble",
-        "Menes Gold, Luna Pearl",
+        "Menes Gold",
         "Rich Gold",
         "Lunar Pearl",
         "Sofitel Beige",
         "Crema Eva",
         "Crema Evita",
-        "Menes Gold",
         "Melisa Jin",
         "Melisa Beige Marble",
         "Luna Pearl Marble",
@@ -444682,7 +444801,8 @@
       "aliases": [
         "White Symphony Marble",
         "Symphony Marble",
-        "Marmore Symphonia, Z Symphony",
+        "Marmore Symphonia",
+        "Z Symphony",
         "White Symphony",
         "Symphony",
         "幻彩白",
@@ -447276,9 +447396,11 @@
       ],
       "aliases": [
         "Tesoro White Marble",
-        "Tesoro Branco Marble, Tesoro Bianco, Branco Tesoro Bianco",
+        "Tesoro Branco Marble",
+        "Tesoro Bianco",
+        "Branco Tesoro Bianco",
         "Tesoro White",
-        "Tesoro Branco, Tesoro Bianco, Branco Tesoro Bianco"
+        "Tesoro Branco"
       ],
       "image_file": "tile_marble_tesoro_bianco_626cfea8-da2a-5f36-beb8-2bfa513604d2.png",
       "exists": "no",
@@ -447319,9 +447441,11 @@
       ],
       "aliases": [
         "Tesoro Blu Marble",
-        "River Blue Marble, Tesoro Blu, Branco Moura Rajado, Moura Rajado",
+        "River Blue Marble",
         "Tesoro Blu",
-        "River Blue, Tesoro Blu, Branco Moura Rajado, Moura Rajado"
+        "Branco Moura Rajado",
+        "Moura Rajado",
+        "River Blue"
       ],
       "image_file": "tile_marble_tesoro_blue_e46fee88-2325-5457-a127-0ad00bf7fb47.png",
       "exists": "no",
@@ -447370,7 +447494,8 @@
         "Tesoro Brown",
         "Tesoro Gray",
         "Tesoro Grey",
-        "Cinza Gray Imperiale, Imperiale"
+        "Cinza Gray Imperiale",
+        "Imperiale"
       ],
       "image_file": "tile_marble_tesoro_grigio_5ba7b973-9d18-5f35-9bb3-7ed516025f2b.png",
       "exists": "no",
@@ -447409,7 +447534,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Tesoro Escandalo, Tesoro Escandalo"
+        "Branco Tesoro Escandalo",
+        "Tesoro Escandalo"
       ],
       "image_file": "tile_marble_tesoro_scandalus_474830fa-c2bb-5ded-95d2-d42860ed5563.png",
       "exists": "no",
@@ -450935,14 +451061,14 @@
         "Tropical Crystal Blue Marble",
         "Tropical Blue Quartzite",
         "Crystal Tropical Blue Marble",
-        "Azul Cielo Marble, Tropical Blue",
-        "Tropical Sky Blue",
+        "Azul Cielo Marble",
         "Tropical Blue",
+        "Tropical Sky Blue",
         "Tropical Sky",
         "Azul Tropicale",
         "Tropical Crystal Blue",
         "Crystal Tropical Blue",
-        "Azul Cielo, Tropical Blue"
+        "Azul Cielo"
       ],
       "image_file": "tile_marble_tropical_blue_sky_05597c72-505d-5354-8200-75e710357f8e.png",
       "exists": "no",
@@ -452270,11 +452396,11 @@
         "Calacatta Amber Marble",
         "Sichuan Calacatta Marble",
         "Turkish Calacatta White Marble",
-        "Kutahya White Marble, Calacatta Amber",
+        "Kutahya White Marble",
         "Calacatta Amber",
         "Sichuan Calacatta",
         "Turkish Calacatta White",
-        "Kutahya White, Calacatta Amber",
+        "Kutahya White",
         "Turkey Calacatta Gold Marble",
         "Turkey Calacatta Marble",
         "Turkey Calacatta Gold",
@@ -452323,8 +452449,7 @@
         "Classic Beige Marble",
         "Daino Beige",
         "Daino Beige Marble",
-        "Daino Beige Marble, Diana Royal",
-        "Daino Beige, Diana Royal",
+        "Diana Royal",
         "Daino Marble",
         "Daino Reale Beige",
         "Daino Reale Beige Marble",
@@ -452335,7 +452460,6 @@
         "Diana Beige",
         "Diana Beige Marble",
         "Diana Marble",
-        "Diana Royal",
         "Diana Royal Beige",
         "Diana Royal Beige Marble",
         "Diana Royal Cream",
@@ -454698,13 +454822,14 @@
         "Bianco Venatino Marble",
         "Bianco Venato Marble",
         "Marmo Bianco Venatino",
-        "Venato White Marble, Venatino, Branco Venatino, Bianco Venatto",
+        "Venato White Marble",
+        "Venatino",
+        "Branco Venatino",
+        "Bianco Venatto",
         "Bianco Venatino",
         "Bianco Venato",
-        "Venato White, Venatino, Branco Venatino, Bianco Venatto",
-        "Venatino White",
-        "Venato White Marble",
         "Venato White",
+        "Venatino White",
         "新雅士白",
         "Xīn yǎshì bái"
       ],
@@ -455058,7 +455183,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Maracana, Maracana"
+        "Branco Maracana",
+        "Maracana"
       ],
       "image_file": "tile_marble_veneza_81df6f16-7ec9-5d5f-b6b2-68b15b51a827.png",
       "exists": "no",
@@ -466975,8 +467101,11 @@
         "Blue",
         "Blue Crystal Marble",
         "Blue Ice Jade",
-        "Ice Blue Jade, Blue Onyx, Onice Blue, Azul Onyx",
-        "Ice Blue Jade, Blue, Onice Blue, Azul",
+        "Ice Blue Jade",
+        "Blue Onyx",
+        "Onice Blue",
+        "Azul Onyx",
+        "Azul",
         "Blue Crystal",
         "Blue Marmo Onyx",
         "Marmo Onix Blue",
@@ -470676,11 +470805,12 @@
         "Moon White Onyx",
         "Guangxi White Onyx",
         "White Onyx China",
-        "White Jade Stone, Z China White",
+        "White Jade Stone",
+        "Z China White",
         "Moon White",
         "Guangxi White",
         "White China",
-        "White Jade, Z China White",
+        "White Jade",
         "China White Onyx",
         "白玉",
         "Báiyù"
@@ -474223,9 +474353,10 @@
       "aliases": [
         "Ivory Vein Onyx",
         "Onice Ivory",
-        "Ivory White Onyx, Onice Avorio",
+        "Ivory White Onyx",
+        "Onice Avorio",
         "Ivory Vein",
-        "Ivory White, Onice Avorio"
+        "Ivory White"
       ],
       "image_file": "tile_onyx_ivory_bc2ed618-b33c-5582-b15d-4a5a55d82f8a.png",
       "exists": "no",
@@ -480898,7 +481029,8 @@
         "White Onyx",
         "Doga Beyaz Oniks",
         "Doga White Onyx",
-        "Seben Beyaz Oniks, Onice Bianco",
+        "Seben Beyaz Oniks",
+        "Onice Bianco",
         "White",
         "Doga White",
         "Mystic White Onyx",
@@ -485510,8 +485642,10 @@
         "A"
       ],
       "aliases": [
-        "African Fusion, Belvedere, Belvedere Quartzite, Branco Belvedere",
-        "African Fusion, Belvedere, Belvedere, Branco Belvedere"
+        "African Fusion",
+        "Belvedere",
+        "Belvedere Quartzite",
+        "Branco Belvedere"
       ],
       "image_file": "tile_quartzite_african_fusion_belvedere_4feaefed-5380-598b-b710-7747c1f5d965.png",
       "exists": "no",
@@ -485673,7 +485807,8 @@
         "A"
       ],
       "aliases": [
-        "Preto Monte Baldo, Monte Baldo"
+        "Preto Monte Baldo",
+        "Monte Baldo"
       ],
       "image_file": "tile_quartzite_anthra_black_55d53956-9457-5b8c-955a-03b38f1289c3.png",
       "exists": "no",
@@ -485874,7 +486009,8 @@
         "A"
       ],
       "aliases": [
-        "Verde Tuerredda, Tuerredda"
+        "Verde Tuerredda",
+        "Tuerredda"
       ],
       "image_file": "tile_quartzite_arturo_green_efac4490-1256-5086-be31-8ec18456bd71.png",
       "exists": "no",
@@ -486042,7 +486178,8 @@
         "A"
       ],
       "aliases": [
-        "Avocatus, Z Avocatus"
+        "Avocatus",
+        "Z Avocatus"
       ],
       "image_file": "tile_quartzite_avocatus_fbf47030-c55a-5c14-a636-d5544f8ff795.png",
       "exists": "no",
@@ -486167,7 +486304,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Azurra Bay, Azurra Bay"
+        "Branco Azurra Bay",
+        "Azurra Bay"
       ],
       "image_file": "tile_quartzite_azzurra_bay_758b0753-99bf-531f-88c6-9848611eb688.png",
       "exists": "no",
@@ -486702,9 +486840,15 @@
         "A"
       ],
       "aliases": [
-        "Blue Treasure Quartzite, Azul Treasure Quartzite, Azul Treasure Granite, Golden Treasure Quartzite, Santorini Quartzite",
-        "Blue Treasure, Azul Treasure, Azul Treasure Granite, Golden Treasure, Santorini",
-        "Blue Treasure, Azul Treasure, Azul Treasure, Golden Treasure, Santorini"
+        "Blue Treasure Quartzite",
+        "Azul Treasure Quartzite",
+        "Azul Treasure Granite",
+        "Golden Treasure Quartzite",
+        "Santorini Quartzite",
+        "Blue Treasure",
+        "Azul Treasure",
+        "Golden Treasure",
+        "Santorini"
       ],
       "image_file": "tile_quartzite_blue_treasure_aee81b03-8642-5c38-b6ba-c5627bd721e0.png",
       "exists": "no",
@@ -487418,7 +487562,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Chateaux Blanc, Chateaux Blanc"
+        "Branco Chateaux Blanc",
+        "Chateaux Blanc"
       ],
       "image_file": "tile_quartzite_chateau_blanc_37c5891c-e8ab-501d-913a-f51cbe35f8c2.png",
       "exists": "no",
@@ -487584,7 +487729,9 @@
         "A"
       ],
       "aliases": [
-        "Pink Cristallo, Rose Cristallo, Cristallo Pink"
+        "Pink Cristallo",
+        "Rose Cristallo",
+        "Cristallo Pink"
       ],
       "image_file": "tile_quartzite_cristallo_rosa_dd8b95b1-4ad3-52a2-8f5a-fe98b9166b1c.png",
       "exists": "no",
@@ -487920,7 +488067,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Extreme Blanc, Extreme Blanc"
+        "Branco Extreme Blanc",
+        "Extreme Blanc"
       ],
       "image_file": "tile_quartzite_denali_d7fcccd9-d6f6-5406-9d29-6a36c3413bbc.png",
       "exists": "no",
@@ -488437,7 +488585,8 @@
         "A"
       ],
       "aliases": [
-        "Verde Fusion Multicol, Fusion Multicol"
+        "Verde Fusion Multicol",
+        "Fusion Multicol"
       ],
       "image_file": "tile_quartzite_fusion_multicolor_8024910c-719f-56d3-b4ad-637f65105fe5.png",
       "exists": "no",
@@ -488565,7 +488714,8 @@
         "A"
       ],
       "aliases": [
-        "Z B Grey Macaubus, Z Grey Macaubus"
+        "Z B Grey Macaubus",
+        "Z Grey Macaubus"
       ],
       "image_file": "tile_quartzite_grey_macaubus_e61f5674-61c8-579e-ba3a-02ef4f5a7978.png",
       "exists": "no",
@@ -488731,7 +488881,8 @@
         "A"
       ],
       "aliases": [
-        "Cinza Ijen Paratinga, Ijen Paratinga"
+        "Cinza Ijen Paratinga",
+        "Ijen Paratinga"
       ],
       "image_file": "tile_quartzite_ijen_blue_ced48d15-93b4-50bb-b39c-c4dbd07cc488.png",
       "exists": "no",
@@ -489081,7 +489232,8 @@
         "A"
       ],
       "aliases": [
-        "Cinza Prasiolita, Prasiolita"
+        "Cinza Prasiolita",
+        "Prasiolita"
       ],
       "image_file": "tile_quartzite_jade_pearl_75bad2bc-c303-5a89-90c3-d2012c5e86f6.png",
       "exists": "no",
@@ -490225,7 +490377,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Nuage Premio, Nuage Premio"
+        "Branco Nuage Premio",
+        "Nuage Premio"
       ],
       "image_file": "tile_quartzite_nuage_6c55bc2e-056d-55b0-8d71-85a92128f21f.png",
       "exists": "no",
@@ -490772,7 +490925,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Taj Ganj, Taj Ganj",
+        "Branco Taj Ganj",
+        "Taj Ganj",
         "Taj Mahal",
         "Taj Mahal Quartzite",
         "Tajmahal",
@@ -491550,9 +491704,11 @@
         "A"
       ],
       "aliases": [
-        "Tanzanita Quartzite, Tanzinita Quartzite, Tanzinita Granite",
-        "Tanzanita, Tanzinita, Tanzinita Granite",
-        "Tanzanita, Tanzinita, Tanzinita"
+        "Tanzanita Quartzite",
+        "Tanzinita Quartzite",
+        "Tanzinita Granite",
+        "Tanzanita",
+        "Tanzinita"
       ],
       "image_file": "tile_quartzite_tanzanita_ae648825-08b2-52a0-b655-1109499d9d47.png",
       "exists": "no",
@@ -491758,9 +491914,11 @@
         "A"
       ],
       "aliases": [
-        "Amarelo Gabana, Gabana",
+        "Amarelo Gabana",
+        "Gabana",
         "Toblerone Bianco",
-        "Branco Toblerone Bianc, Toblerone Bianc"
+        "Branco Toblerone Bianc",
+        "Toblerone Bianc"
       ],
       "image_file": "tile_quartzite_toblerone_e647104d-5546-51cc-ae69-c5039a803040.png",
       "exists": "no",
@@ -492225,7 +492383,8 @@
         "A"
       ],
       "aliases": [
-        "Quartizito Branco Eve, Quartizito Eve"
+        "Quartizito Branco Eve",
+        "Quartizito Eve"
       ],
       "image_file": "tile_quartzite_white_eve_1505a956-5062-57e9-b329-5c52b1955732.png",
       "exists": "no",
@@ -492393,7 +492552,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Yosemite Falls, Yosemite Falls"
+        "Branco Yosemite Falls",
+        "Yosemite Falls"
       ],
       "image_file": "tile_quartzite_yosemite_9c02b168-2656-5353-93ba-1129f9b91aff.png",
       "exists": "no",
@@ -492433,7 +492593,8 @@
         "A"
       ],
       "aliases": [
-        "Cinza Vista Linda, Vista Linda"
+        "Cinza Vista Linda",
+        "Vista Linda"
       ],
       "image_file": "tile_quartzite_zanari_b2afeed8-28d2-598b-87ea-419398a16e52.png",
       "exists": "no",
@@ -515549,7 +515710,9 @@
         "A"
       ],
       "aliases": [
-        "Azul Agata Spiral, Agata Spiral, Agate Blue Spiral"
+        "Azul Agata Spiral",
+        "Agata Spiral",
+        "Agate Blue Spiral"
       ],
       "image_file": "tile_agate_agata_blue_spiral_0fd17070-0003-5a30-8286-241988bf08f4.png",
       "exists": "no",
@@ -515577,7 +515740,9 @@
         "A"
       ],
       "aliases": [
-        "Marrom Agata, Agata Marrom, Agate Brown"
+        "Marrom Agata",
+        "Agata Marrom",
+        "Agate Brown"
       ],
       "image_file": "tile_agate_agata_brown_6bbfc923-e399-58e5-83d6-9fb52c36d4b4.png",
       "exists": "no",
@@ -515605,7 +515770,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Agata Colors, Agate Colors"
+        "Branco Agata Colors",
+        "Agate Colors"
       ],
       "image_file": "tile_agate_agata_colors_36237841-9e18-52e4-a9ed-d19851aca9fc.png",
       "exists": "no",
@@ -515633,7 +515799,9 @@
         "A"
       ],
       "aliases": [
-        "Branco Agata, Agate Natural, Agate Natural Classic"
+        "Branco Agata",
+        "Agate Natural",
+        "Agate Natural Classic"
       ],
       "image_file": "tile_agate_agata_natural_768269e3-68ef-5e9c-adc4-6810db828766.png",
       "exists": "no",
@@ -515664,7 +515832,8 @@
         "A"
       ],
       "aliases": [
-        "Agata Tropi, Agate Tropicalia"
+        "Agata Tropi",
+        "Agate Tropicalia"
       ],
       "image_file": "tile_agate_agata_tropicalia_311b9a19-e88c-5c7c-aa63-4ccfbfe51838.png",
       "exists": "no",
@@ -515692,7 +515861,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Agata, Agate White"
+        "Branco Agata",
+        "Agate White"
       ],
       "image_file": "tile_agate_agata_white_cbe65dfe-0006-54ae-93a5-3860c4ebd22f.png",
       "exists": "no",
@@ -515720,7 +515890,8 @@
         "A"
       ],
       "aliases": [
-        "Branco Mundra, Mundra"
+        "Branco Mundra",
+        "Mundra"
       ],
       "image_file": "tile_semi_precious_stone_arctic_4f76d69b-0bc1-577c-afeb-3db04fdee795.png",
       "exists": "no",
@@ -515835,7 +516006,9 @@
         "A"
       ],
       "aliases": [
-        "Branco Mundra G, Mundra G, Oro Aura"
+        "Branco Mundra G",
+        "Mundra G",
+        "Oro Aura"
       ],
       "image_file": "tile_semi_precious_stone_golden_aura_4282f714-ef96-5d8e-bf66-4efd1eb14a75.png",
       "exists": "no",
@@ -530307,8 +530480,10 @@
         "Travertin Alabastrino",
         "Travertine Alabastrino",
         "Travertino Alabastrino",
-        "Alabastro Travertine, Turkish Alabastrino Travertine",
-        "Alabastro, Turkish Alabastrino"
+        "Alabastro Travertine",
+        "Turkish Alabastrino Travertine",
+        "Alabastro",
+        "Turkish Alabastrino"
       ],
       "image_file": "tile_travertine_alabastrino_5b4f2b12-6334-506e-9862-3ec615a83818.png",
       "exists": "no",
@@ -543007,12 +543182,18 @@
         "Ivory White Travertine",
         "Denizli Ivory Travertine",
         "Ivory Light Travertine",
-        "Ivory Medium Travertine, Light Travertine, Travertino Avorio, Ivory Travertino, Light VC Raw Travertine",
+        "Ivory Medium Travertine",
+        "Light Travertine",
+        "Travertino Avorio",
+        "Ivory Travertino",
+        "Light VC Raw Travertine",
         "Ivory White",
         "Denizli Ivory",
         "Ivory Light",
-        "Ivory Medium, Light, Travertino Avorio, Ivory Travertino, Light VC Raw",
-        "Ivory Medium, Light, Avorio, Ivory, Light VC Raw",
+        "Ivory Medium",
+        "Light",
+        "Light VC Raw",
+        "Ivory",
         "象牙洞石",
         "Xiàngyá dòng shí"
       ],
@@ -557451,13 +557632,15 @@
         "Yellow Travertine Dark",
         "Yellow Travertine",
         "Yellow Travertine Light",
-        "Travertin Yellow Brown, Giallo Travertine, Yellow Travertino",
+        "Travertin Yellow Brown",
+        "Giallo Travertine",
+        "Yellow Travertino",
         "Afyon Gold",
         "Yellow Dark",
         "Yellow",
         "Yellow Light",
-        "Travertin Yellow Brown, Giallo, Yellow Travertino",
-        "Yellow Brown, Giallo, Yellow"
+        "Giallo",
+        "Yellow Brown"
       ],
       "image_file": "tile_travertine_yellow_brown_5575ae8b-58c6-5c3c-82f6-c01d0160f623.png",
       "exists": "no",

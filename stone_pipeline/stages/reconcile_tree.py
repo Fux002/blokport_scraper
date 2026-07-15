@@ -19,7 +19,8 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.matching import projections as proj
-from stone_pipeline.reference.loaders import BackboneVariety, ReferenceData
+from stone_pipeline.adapters.tokens import recognize_type
+from stone_pipeline.reference.loaders import ReferenceData, type_slug_from_key
 
 log = logfmt.get_logger("reconcile_tree")
 
@@ -106,16 +107,23 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
             )
         return
 
-    # Disambiguate same-name backbone varieties by the CORRECTED, canonical type (type_name), not
-    # the raw scrape tag. backbone.lookup compares _norm(variety.stone_type) == _norm(stone_type) and
-    # stone_type is canonical, so a raw tag ('Semiprecious' vs 'Semi-Precious Stone', or a name-
-    # corrected 'Agata'->'Agate') never matched and fell to candidates[0] nondeterministically.
-    variety = ref.backbone.lookup(row.variation_name or "", stone_type=row.type_name or row.raw_type)
+    # The variation's TYPE is the single authority and is intrinsic to the variation the MATCHER bound
+    # (encoded in variation_key) -- never a name-derived type_name, never a FOREIGN same-name backbone
+    # record of another stone. A product name can carry a stray type word ('Tiger Black Marble Slab', a
+    # granite) and a product can mis-bind across a name collision or base<->backbone drift ('Azul White'
+    # is a quartzite in the export but only an onyx in the backbone). In every case the type of the
+    # variation a product is attached to is what its Key says. Pinning it here keeps type and variation on
+    # the SAME variety, so a product can never price or ship as a stone different from the variety it links
+    # to (which tree_build would otherwise absorb into a self-consistent but WRONG cross-type combination).
+    bound_type = _bound_type(row)
+    _apply_type(row, bound_type, ref, stats)
+
+    # Membership record: the backbone variety of this name AND the bound type, for its colour/finish/
+    # quality sets. A foreign same-name record of a DIFFERENT type is never used -- it would validate
+    # against the wrong stone's sets. Absent (base<->backbone drift): keep the pinned type, flag the
+    # missing record, do not fabricate membership.
+    variety = ref.backbone.lookup(row.variation_name or "", stone_type=bound_type)
     if variety is None:
-        variety = ref.backbone.lookup(row.variation_name or "")
-    if variety is None:
-        # variation resolved but no backbone record: keep variation, flag, do not
-        # fabricate membership. Type stays as Stage 3 resolved it.
         row.add_flag(
             ReviewFlag(
                 field="variation",
@@ -128,9 +136,6 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
         )
         _finalize_ids(row, ref)
         return
-
-    # 1. type is authoritative from the variety
-    _apply_type(row, variety, ref, stats)
 
     # 1b. fill colour/quality from the variety when the scrape omitted them (the
     # variety is the authority; this recovers sources with no colour column)
@@ -151,8 +156,22 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
     _finalize_ids(row, ref)
 
 
-def _apply_type(row: CanonicalRow, variety: BackboneVariety, ref: ReferenceData, stats: ReconcileStats) -> None:
-    new_type = variety.stone_type
+def _bound_type(row: CanonicalRow) -> str:
+    """The canonical stone type of the variation the matcher bound, read from its Key (the type
+    authority). type_slug_from_key takes the LONGEST known type slug so multi-word types resolve
+    ('slab_dolomite_marble_..' -> 'Dolomite Marble'). Falls back to the Stage-3 resolved type only when
+    there is no variation_key or the Key carries no known type (defensive; a matched row normally has a
+    Key whose type is known)."""
+    if row.variation_key:
+        canon = recognize_type(type_slug_from_key(row.variation_key))
+        if canon:
+            return canon
+    return row.type_name or row.raw_type or ""
+
+
+def _apply_type(row: CanonicalRow, new_type: str, ref: ReferenceData, stats: ReconcileStats) -> None:
+    if not new_type:
+        return
     if row.type_name and proj.norm(row.type_name) != proj.norm(new_type):
         stats.type_overridden += 1
         row.add_flag(
