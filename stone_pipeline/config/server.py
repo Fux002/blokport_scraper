@@ -192,6 +192,13 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if len(segments) == 3 and segments[1] == "variants" and method == "PUT":
             if not isinstance(body, dict):
                 return 400, {"error": "body must be a JSON object {action, alias_of?}"}
+            # DECODE the path segment before it becomes the decision key. The variety was SURFACED with
+            # review_pending.ref = norm(real name) (e.g. 'alpine luxe'); a multi-word name arrives here
+            # percent-encoded ('Alpine%20Luxe'), and norm keeps the literal '%20' ('alpine 20luxe'), so a
+            # raw segment would store the decision under a key that never matches the pending ref and the
+            # UI reads back current_action=null. unquote first, so ref == variant_norm holds by construction
+            # (mirrors the GET at origin-suggestion and the backbone PUT).
+            variant = unquote(segments[2])
             action = body.get("action", "")
             alias_of = body.get("alias_of")
             # domain guard (server's job, not the store's): an alias MUST target a real variety, else it
@@ -222,22 +229,23 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
                 if not (seed_country := _country_iso(raw_country)):
                     return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
             try:
-                decisions_store.set_variety_decision(segments[2], action, alias_of, seed_color=seed_color,
+                decisions_store.set_variety_decision(variant, action, alias_of, seed_color=seed_color,
                                                      seed_type=seed_type, seed_country=seed_country)
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
-            return 200, {"variant": segments[2], "action": action, "alias_of": alias_of,
+            return 200, {"variant": variant, "action": action, "alias_of": alias_of,
                          "seed_color": seed_color, "seed_type": seed_type, "seed_country": seed_country}
         if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
             return 200, {"attributes": decisions_store.list_pending("attribute")}
         if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
             if not isinstance(body, dict):
                 return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
+            value = unquote(segments[2])   # same decode-before-key rule as the variety PUT (see above)
             try:
-                decisions_store.set_attribute_id(body.get("kind", ""), segments[2], body.get("medusa_id", ""))
+                decisions_store.set_attribute_id(body.get("kind", ""), value, body.get("medusa_id", ""))
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
-            return 200, {"value": segments[2], "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
+            return 200, {"value": value, "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
         if len(segments) == 2 and segments[1] == "backbone" and method == "GET":
             return 200, {"backbone": decisions_store.list_pending("backbone_leaf")}
         if len(segments) == 3 and segments[1] == "backbone" and segments[2] == "decided" and method == "GET":
