@@ -51,7 +51,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind
 from stone_pipeline.core.text import (ascii_fold, looks_code_shaped, looks_codey,
                                       looks_like_artifact as _looks_like_artifact, title_case)
 from stone_pipeline.matching import projections as proj
-from stone_pipeline.reference.loaders import ReferenceData
+from stone_pipeline.reference.loaders import ReferenceData, type_slug_from_key
 from stone_pipeline.stages.format_resolve import branch_of
 from stone_pipeline.stages.normalize import AttributeResolvers
 
@@ -101,6 +101,17 @@ def _attr_surface(row, vocab: str) -> str:
     return getattr(row, f"raw_{vocab}", "") or ""
 
 
+def _review_evidence(row) -> dict:
+    """The scraped EVIDENCE surfaced on a review hold, so a human can judge the correct type/variety
+    (which of the Gneiss/Granite/Marble/Onyx 'Aqua Blue' this product is) from the actual product, not
+    just the name: the source, ONE product image (the processed S3 render when present, else the raw
+    scrape url), and the supplier description. All optional -- empty when the row carried none."""
+    imgs = (getattr(row, "image_keys", None) or []) or (getattr(row, "raw_image_urls", None) or [])
+    return {"src": getattr(row, "src_site", "") or "",
+            "image": next((u for u in imgs if u), ""),
+            "description": getattr(row, "description", "") or ""}
+
+
 def image_filename(key: str) -> str:
     """The image base name IS the variant Key, so the image-to-variant link is a
     1:1, unambiguous identity (handles duplicate variety names automatically) and
@@ -120,14 +131,21 @@ class ImportFile:
     branch: str
     path: Path
     present: bool
-    by_name: dict[str, dict] = field(default_factory=dict)  # norm(name) -> {Key,Name,Image,Aliases}
+    # A variety's identity is (name, TYPE), not name alone: the SAME name legitimately exists as several
+    # stones ('Aqua Blue' is a gneiss AND a granite AND a marble AND an onyx). Keying by name alone
+    # collapsed them to one arbitrary type (last row wins), so a type-less scrape was silently tied to the
+    # wrong type and the mint-dedup went blind to the hidden types. Keep every variety and index by
+    # (norm name, norm type); `type` on each variety is derived from its Key (the authority).
+    varieties: list[dict] = field(default_factory=list)              # each: {Key,Name,Image,Aliases,Volume,type}
+    by_name_type: dict[tuple[str, str], dict] = field(default_factory=dict)  # (norm name, norm type) -> variety
+    by_name: dict[str, dict] = field(default_factory=dict)           # norm name -> variety (name-only lookup)
 
 
 def load_existing(branch: str) -> ImportFile:
-    """The EXISTING variants of one category, keyed by normalized Name, read from the
-    immutable Medusa export (download-only). Used to decide alias-vs-new and to dedup.
-    The export is never written by the pipeline, so the catalog is a pure function of
-    (export + scrapes) -- re-running yields the identical output."""
+    """The EXISTING variants of one category, read from the immutable Medusa export (download-only) and
+    indexed by (normalized Name, normalized stone TYPE). Used to decide alias-vs-new and to dedup. The
+    export is never written by the pipeline, so the catalog is a pure function of (export + scrapes) --
+    re-running yields the identical output."""
     path = SETTINGS.paths.export_file
     imp = ImportFile(branch=branch, path=path, present=path.exists())
     if not imp.present:
@@ -138,13 +156,17 @@ def load_existing(branch: str) -> ImportFile:
             key = (r.get("Key") or "").strip()
             # one combined export file; keep only this branch's rows (Key prefix)
             if name and key.casefold().startswith(branch.casefold()):
-                imp.by_name[proj.norm(name)] = {
-                    "Key": (r.get("Key") or "").strip(),
+                v = {
+                    "Key": key,
                     "Name": name,
                     "Image": (r.get("Image") or "").strip(),
                     "Aliases": (r.get("Aliases") or "").strip(),
                     "Volume": (r.get("Volume per kg (m³/kg)") or "").strip(),
+                    "type": proj.norm(type_slug_from_key(key)),   # the variety's stone type, from its Key
                 }
+                imp.varieties.append(v)
+                imp.by_name_type[(proj.norm(name), v["type"])] = v
+                imp.by_name[proj.norm(name)] = v   # name-only lookup (a review suggestion has no type)
     return imp
 
 
@@ -241,14 +263,17 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # variation_key and silently never serve. Excluding it means such a scrape mints/holds for review.
     from stone_pipeline.stages import decisions as _decisions
     retired_keys = _decisions.load_retired()
-    existing_surface: dict[str, set[str]] = {}
+    # norm(surface) -> the set of (owner norm-name, owner norm-type) varieties that carry it. Owners are
+    # (name, TYPE) so 'Aqua Blue' resolves to FOUR distinct owners (one per type), not one collapsed entry.
+    existing_surface: dict[str, set[tuple[str, str]]] = {}
     for b in active_branches():
-        for nrm, v in imports[b].by_name.items():
+        for v in imports[b].varieties:
             if v.get("Key") in retired_keys:
                 continue
-            existing_surface.setdefault(nrm, set()).add(nrm)
+            owner = (proj.norm(v["Name"]), v["type"])
+            existing_surface.setdefault(owner[0], set()).add(owner)
             for al in _alias_list(v.get("Aliases", "")):
-                existing_surface.setdefault(proj.norm(al), set()).add(nrm)
+                existing_surface.setdefault(proj.norm(al), set()).add(owner)
     # vocabulary of pure colour + stone-type words. A name made ONLY of these (e.g. 'Cream
     # Quartzite', 'Black Granite') is an unbranded GENERIC trade name -- its own underdog variety,
     # never to be aliased UP into a premium quarry-specific stone (the backbone lists such generics
@@ -295,8 +320,23 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             stone_type = seed_types.get(proj.norm(clean), "")
         return name, stone_type, clean
 
-    alias_new: dict[str, set[str]] = {}
+    # alias_new / review_candidates now key on the (name, TYPE) OWNER, so a spelling is attached to the
+    # correct-type variety -- never collapsed onto an arbitrary same-name variety of a different stone.
+    alias_new: dict[tuple[str, str], set[str]] = {}
     review_candidates: dict[str, set[str]] = {}
+
+    def _by_name_owner(nm: str) -> tuple[str, str] | None:
+        """The (name, type) owner for a bare variety NAME that carries no type of its own -- an operator
+        alias target (alias_of is a name), or a matched row missing its variation_key. Mirrors the old
+        name-only lookup: the existing variety of that name in the first branch that has one (arbitrary
+        among types for a multi-type name -- the decision API cannot yet name a type). Returns None if no
+        such variety exists."""
+        for b in active_branches():
+            v = imports[b].by_name.get(nm)
+            if v:
+                return (nm, v["type"])
+        return None
+
     for row in rows:
         # fall back to the raw name MINUS its format word, so a generic-descriptor
         # spelling is a clean alias ("Brown Onyx") not a junk one ("Brown Onyx Slab").
@@ -304,7 +344,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if not spelling:
             continue
         if _non_exact_confirmed(row):
-            alias_new.setdefault(proj.norm(row.variation_name or ""), set()).add(spelling)
+            # attach to the variety the row MATCHED, by its (name, Key-type) -- the Key is the authority;
+            # fall back to the by-name owner when the match carries no key (defensive / test rows).
+            nnm = proj.norm(row.variation_name or "")
+            owner = (nnm, proj.norm(type_slug_from_key(row.variation_key))) if row.variation_key else _by_name_owner(nnm)
+            if owner:
+                alias_new.setdefault(owner, set()).add(spelling)
         elif (row.variation_method or "") in ("review", "semantic_review", "review_generic"):
             for flag in row.review_flags:
                 if flag.field == "variation" and flag.best_guess:
@@ -339,6 +384,30 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     suspicious: list[dict] = []          # names that look like supplier codes, not varieties
     new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches)
     last_resort_quality = active_pack().last_resort_quality   # pack default when a mint has no observed quality
+
+    def _alias_and_backfill(owner: tuple[str, str], spelling: str, clean: str, stype: str, row, gap) -> None:
+        """Attach a scraped spelling to an EXISTING variety (by its (name, type) owner). If a product backs
+        the variety in a branch where it does NOT yet exist, also mint the missing sibling so the product
+        resolves next round (the existing-cores guard skips branches where it already lives)."""
+        alias_new.setdefault(owner, set()).add(spelling)
+        backed = variety_branches.get(proj.norm(clean), set())
+        if backed:
+            new_variant_rows.append((clean, title_case(clean), stype,
+                                     title_case(_attr_surface(row, "color")),
+                                     (row.quality_name or last_resort_quality).strip() or last_resort_quality,
+                                     title_case(_attr_surface(row, "finish")), gap, backed))
+
+    def _hold_for_type(clean: str, row, gap, cand_types: list[str]) -> None:
+        """A type-less scrape whose name is a REAL variety under SEVERAL stone types: hold it for the human
+        to assign the correct type, surfacing the candidate types -- never a typeless clone onto an
+        arbitrary type. (Stage C adds the scraped evidence to help the human decide.)"""
+        pending_confirm.append({
+            "confirm": "", "variant": clean,
+            "reason": "name exists as several stone types -- assign the correct one",
+            "stone_type": "", "color": title_case(_attr_surface(row, "color")),
+            "nearest_existing": " | ".join(title_case(t) for t in cand_types),
+            "score": "", "model_prob": "", **_review_evidence(row)})
+
     for row in rows:
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         if not gaps:
@@ -386,8 +455,8 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if code_why:
             base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
             alias_to = alias_decisions.get(proj.norm(clean))
-            if alias_to:                               # operator: this code-shaped name is a spelling of X
-                alias_new.setdefault(proj.norm(alias_to), set()).add(name)
+            if alias_to and (own := _by_name_owner(proj.norm(alias_to))):  # operator: this code is a spelling of X
+                alias_new.setdefault(own, set()).add(name)
                 continue
             dec = confirm_decisions.get(proj.norm(clean))
             if dec == "no":                            # honour 'no' so the code stops re-appearing
@@ -397,7 +466,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 pending_confirm.append({"confirm": "", "variant": clean,
                                         "reason": _CODE_REASON.get(code_why, "looks like a supplier code"),
                                         "stone_type": stone_type, "color": "", "nearest_existing": base,
-                                        "score": "", "model_prob": ""})
+                                        "score": "", "model_prob": "", **_review_evidence(row)})
                 continue
             # dec == "yes" -> the human confirmed it IS a real variety -> fall through to mint
         # PHASE 4 -- RESOLVE to an EXISTING variety (prefer an alias over a new variant). A generic
@@ -405,33 +474,32 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # model) -- it can never be promoted into a premium named stone (misselling).
         ctoks = set(proj.norm(clean).split())
         generic = bool(ctoks) and ctoks <= generic_words
-        # 4a. exact surface match: the cleaned name ALREADY EXISTS as a variety (any branch/type) ->
-        # never mint a duplicate. A typeless source whose name collides with an existing variety
-        # (possibly ambiguous across types) is routed to review so a human confirms which variety it
-        # is, instead of auto-cloning a typeless copy.
+        # 4a. exact surface match: the cleaned name ALREADY EXISTS -> never mint a duplicate. Owners are
+        # (name, TYPE), so a legitimately-multi-type name ('Aqua Blue' = gneiss/granite/marble/onyx) is
+        # routed BY TYPE, never collapsed onto an arbitrary same-name variety of a different stone:
+        #   * product's type IS an existing type      -> alias to THAT variety
+        #   * type-less + exactly one existing variety -> alias to it
+        #   * type-less + one name across SEVERAL types -> HOLD for the human to assign the correct type
+        #   * a surface shared across several NAMES (an alias family) -> review which variety
+        #   * product carries a NEW type (not among the existing) -> fall through to MINT that new variety
         owners = existing_surface.get(proj.norm(clean))
         if owners and not generic:
-            if len(owners) == 1:                       # unambiguous existing variety (name or alias)
-                alias_new.setdefault(next(iter(owners)), set()).add(name)
-                # If a scraped product backs this variety in a branch where it does NOT yet exist
-                # (e.g. a block product for a variety that only has a slab/tile sibling), ALSO mint
-                # the missing sibling so the product can resolve next round -- otherwise the alias
-                # dead-ends (emit_alias_rows can only attach where the variety already exists) and the
-                # product never gets a variation_id. Gated on an ALREADY-EXISTING owner + a real
-                # product, so it can only ever create a sibling of a KNOWN variety, never a junk mint;
-                # the new-variant emitter's existing-cores guard skips the branches where it lives.
-                # (clean is already in seen_new from the dedup above, so the loop runs this once per
-                # variety; the new-variant emitter then skips the branches where it already exists.)
-                backed = variety_branches.get(proj.norm(clean), set())
-                if backed:
-                    new_variant_rows.append((
-                        clean, title_case(clean), stone_type,
-                        title_case(_attr_surface(row, "color")),
-                        (row.quality_name or last_resort_quality).strip() or last_resort_quality,
-                        title_case(_attr_surface(row, "finish")), gap, backed))
-            else:                                       # the surface spans several varieties/types
-                review_candidates.setdefault(proj.norm(clean), set()).add(name)
-            continue
+            st = proj.norm(stone_type)
+            same_type = sorted(o for o in owners if st and o[1] == st)
+            if same_type:                              # product's type matches an existing variety -> alias
+                _alias_and_backfill(same_type[0], name, clean, stone_type, row, gap)
+                continue
+            if not st:                                 # type-less: decide by how the name resolves
+                if len(owners) == 1:                   # exactly one existing variety -> alias to it
+                    _alias_and_backfill(next(iter(owners)), name, clean, stone_type, row, gap)
+                    continue
+                if len({o[0] for o in owners}) == 1:   # SAME name, several TYPES -> hold, assign the type
+                    _hold_for_type(clean, row, gap, sorted({o[1] for o in owners}))
+                    continue
+                review_candidates.setdefault(proj.norm(clean), set()).add(name)  # alias family -> review
+                continue
+            # st is set but NOT among the existing types -> a genuinely NEW variety of this name+type;
+            # fall through to PHASE 5 (mint), guarded by the now type-aware existing_cores (no duplicate).
         # 4b. fuzzy nearest: alias-vs-new decision against the nearest existing variety. The tier-7
         # model uses name + type + colour to tell a real alias ('Marjan' -> 'Marjan Silver') from a
         # distinct sibling ('Cristallo Divine' vs 'Cristallo Bianco'): P>=hi auto-confirms the alias,
@@ -444,13 +512,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 d = resolver.decide_against(clean, stone_type, [gap.suggested_color or ""],
                                             [nearest, *nal], nt, nc)
                 if d.verdict == "alias":
-                    alias_new.setdefault(proj.norm(nearest), set()).add(name)   # confident -> confirmed
+                    # confident -> confirm; attach to the nearest variety of its OWN type (near_meta.nt),
+                    # so a spelling lands on the right stone, not an arbitrary same-name one.
+                    alias_new.setdefault((proj.norm(nearest), proj.norm(nt)), set()).add(name)
                     continue
                 if d.verdict == "review":
                     # uncertain -> the human decides (mint / reject / alias) via the review API
                     alias_to = alias_decisions.get(proj.norm(clean))
-                    if alias_to:                       # operator: this spelling is really variety X
-                        alias_new.setdefault(proj.norm(alias_to), set()).add(name)
+                    if alias_to and (own := _by_name_owner(proj.norm(alias_to))):  # operator: this spelling is variety X
+                        alias_new.setdefault(own, set()).add(name)
                         continue
                     dec = confirm_decisions.get(proj.norm(clean))
                     if dec == "no":
@@ -462,7 +532,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                             "reason": "uncertain: new variety or a spelling of the nearest existing",
                             "stone_type": stone_type, "color": gap.suggested_color or "",
                             "nearest_existing": nearest, "score": gap.nearest_score or "",
-                            "model_prob": round(d.prob, 2)})
+                            "model_prob": round(d.prob, 2), **_review_evidence(row)})
                         continue
                     # dec == "yes" -> the human confirmed it IS a new variety -> fall through to mint
                 # "mint" -> fall through to create a new variant
@@ -489,9 +559,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     review_candidates = {tgt: sp for tgt, sp in review_candidates.items() if sp}
 
     # --- 3. emit alias additions (after gap classification feeds review_candidates)
-    def emit_alias_rows(name_norm: str, spellings: set[str], confirmed: bool) -> None:
+    def emit_alias_rows(target, spellings: set[str], confirmed: bool) -> None:
+        # target is a (name, type) OWNER (a confirmed alias -> the exact variety) or a bare NAME (a
+        # needs-review suggestion, which has no chosen type). Attach to the matching variety per branch.
         for branch in active_branches():
-            existing = imports[branch].by_name.get(name_norm)
+            existing = (imports[branch].by_name_type.get(target) if isinstance(target, tuple)
+                        else imports[branch].by_name.get(target))
             if not existing:
                 continue  # variety not in this category's import file
             current = _alias_list(existing["Aliases"])
@@ -510,9 +583,9 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 "_status": "confirmed" if confirmed else "needs_review",
             })
 
-    for name_norm, spellings in alias_new.items():
-        emit_alias_rows(name_norm, spellings, confirmed=True)
-    for name_norm, spellings in review_candidates.items():
+    for owner, spellings in alias_new.items():                 # owner = (name, type)
+        emit_alias_rows(owner, spellings, confirmed=True)
+    for name_norm, spellings in review_candidates.items():     # bare name (no chosen type)
         emit_alias_rows(name_norm, spellings, confirmed=False)
 
     # Guard against minting a variety that ALREADY EXISTS in a branch (the matcher
@@ -532,7 +605,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             except FileNotFoundError:
                 existing_cores[b] = set()
         else:
-            existing_cores[b] = {_core(v["Key"], b) for v in imports[b].by_name.values() if v.get("Key")}
+            existing_cores[b] = {_core(v["Key"], b) for v in imports[b].varieties if v.get("Key")}
 
     # --- 4. emit genuinely-new variants: import row + backbone post + image entry -
     # A variety is the same material in any format, so it is emitted into every
@@ -589,7 +662,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # resolves in ONE upload, not two (mint the variety AND attach its alias in the same leg --
         # otherwise a brand-new branch like a block needs a second round-trip to add the alias).
         sib_aliases = sorted({s for owner, sp in alias_new.items()
-                              if proj.norm(owner) == proj.norm(title) for s in sp})
+                              if owner[0] == proj.norm(title) for s in sp})
         for branch in active_branches():
             key = gen_key(branch, stone_type, title)
             if _core(key, branch) in existing_cores[branch]:
