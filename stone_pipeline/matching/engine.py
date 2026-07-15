@@ -193,10 +193,22 @@ class VariationEngine:
         block_type: str = "",
         block_color: str = "",
         ambiguous_to_review: bool = False,
+        query: str = "",
     ) -> Optional[VariationMatch]:
         # a single id resolves directly; several ids for the same surface (the
         # reference has duplicate names) are disambiguated by type/colour blocking,
         # so a real name like "White Travertine" still resolves cleanly
+        # IDENTITY beats ALIAS membership: when the surface hits several varieties but the query is the
+        # CANONICAL NAME of some of them, keep only those. 'Arabescato' the query is the variety named
+        # 'Arabescato', not 'White Ornamental' (which merely carries 'Arabescato' as an alias) nor the
+        # longer 'Arabescato Arni'. Only narrows the set; if none (query is an alias of all) or several
+        # (same name across types) match by name, the block + ambiguity logic below still applies.
+        if len(ids) > 1 and query:
+            named = {cid for cid in ids
+                     if (c := self._candidate(cid)) and proj.norm(c.canonical) == proj.norm(query)}
+            if named:
+                ids = named
+                method = f"{method}_name"
         if len(ids) > 1 and (block_type or block_color):
             blocked = {cid for cid in ids if self._block_ok(cid, block_type, block_color)}
             if len(blocked) == 1:
@@ -252,7 +264,7 @@ class VariationEngine:
         # tier 2: exact on norm (canonical + aliases). A genuine same-surface duplicate that blocking
         # can't separate routes to review here, not to an arbitrary fuzzy-tier pick.
         match = self._resolve_single(self.index.lookup_norm(query), "exact", Confidence.high,
-                                     block_type, block_color, ambiguous_to_review=True)
+                                     block_type, block_color, ambiguous_to_review=True, query=query)
         if match:
             return match
 
@@ -263,7 +275,7 @@ class VariationEngine:
             ("deprefixed", self.index.lookup_deprefixed(query)),
         ):
             match = self._resolve_single(ids, f"projection_{method}", Confidence.high,
-                                         block_type, block_color)
+                                         block_type, block_color, query=query)
             if match:
                 return match
 
@@ -304,7 +316,11 @@ class VariationEngine:
                     best = score
             if best > 0:
                 scored.append((cid, cand.canonical, best))
-        scored.sort(key=lambda t: t[2], reverse=True)
+        # Sort by score, then prefer a hit on the variety's CANONICAL name over a hit on one of its
+        # aliases at the SAME score: 'Arabescatto' (typo) resolves to 'Arabescato' the variety, not to
+        # 'White Ornamental' which merely carries 'Arabescato' as an alias. _fuzzy_score(query, canonical)
+        # == best exactly when the canonical name is (one of) the best-scoring surface(s).
+        scored.sort(key=lambda t: (t[2], _fuzzy_score(query, t[1]) >= t[2]), reverse=True)
 
         if scored:
             top_cid, top_name, top_score = scored[0]

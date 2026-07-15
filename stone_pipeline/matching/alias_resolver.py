@@ -116,6 +116,14 @@ class AliasResolver:
             verdict = "review" if best_char >= _CHAR_REVIEW_FLOOR else "mint"
         else:
             verdict = "review"
+        # Type gate: never AUTO-confirm an alias across a stone-type boundary. A name shared by two
+        # stones (a Marble 'Tiger Black' and a Granite 'Tiger Black' are DIFFERENT varieties) must be
+        # human-confirmed, not merged on name similarity alone -- auto-merging pollutes the backbone with
+        # a cross-type alias that then mis-binds future products. Only the confident 'alias' verdict is
+        # downgraded to 'review'; the gate reads the RESOLVED types (ta/tb), never a type word inside the
+        # name/alias. A missing type on either side (type-less source) is no signal, so it does not gate.
+        if verdict == "alias" and ta and tb and _norm(ta) != _norm(tb):
+            verdict = "review"
         return Decision(verdict, best_p)
 
     @classmethod

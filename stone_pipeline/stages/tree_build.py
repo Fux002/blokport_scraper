@@ -288,24 +288,28 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         # the variety's backbone, the scraped product, and a same-variety product in
         # another category. Finishes = every finish the category supports. The PRODUCT's
         # type wins (it's what the product row carries, so the product always matches).
-        typ, colors, quals = None, set(), set()
+        # The variation's TYPE is intrinsic to the variation (its Key), NOT what a product asserted. A
+        # product mis-bound across a name collision or base<->backbone drift must never inject its own type
+        # as a valid combination for THIS variation -- that shipped cross-type products the gate can't
+        # catch, because it validates products against combinations the products themselves created. So
+        # TYPE is pinned to the Key (the same authority reconcile pins the product's type to); only COLOUR
+        # and QUALITY union every source, since a variety legitimately spans several colours/qualities.
+        colors, quals = set(), set()
         if prod := products.get(vid):
-            typ, colors, quals = prod["type"], colors | prod["colors"], quals | prod["quals"]
+            colors |= prod["colors"]
+            quals |= prod["quals"]
         kpost = by_key.get(key)                                          # the variation's OWN backbone post
         post = kpost or by_cat_name.get((prefix + "s", nl)) or by_name.get(nl)
         if post:
-            t, c, q = combo(post)
-            colors |= c
+            _t, c, q = combo(post)
+            colors |= c                                                 # colour/quality safe to union by name
             quals |= q
-            # adopt the post's TYPE only from a KEY match. A name-only post (by_cat_name/by_name) can
-            # be a DIFFERENT stone of the same name -> using its type mis-prices the variation
-            # ('Pietra' the Marble priced as Granite). Its colour/quality are still safe to union.
-            if kpost:
-                typ = typ or t
         if inh := variety.get(nl):
-            colors |= inh["colors"]                                     # colour/quality inherit by name OK
-            quals |= inh["quals"]                                       # but NOT type (same cross-type risk)
-        typ = typ or _resolve_type(key, name, attr) or assigned_types.get(nl)   # the variation's own Key, else user-assigned
+            colors |= inh["colors"]
+            quals |= inh["quals"]
+        # TYPE authority: the variation's own Key type (longest slug match), else its OWN backbone post's
+        # type (KEY match only -- a name-only post can be a different stone), else a user-assigned type.
+        typ = _resolve_type(key, name, attr) or (combo(kpost)[0] if kpost else None) or assigned_types.get(nl)
         colors = colors or {default_color}                 # last resort: catalogue defaults
         quals = quals or {default_qual}
         finishes = cat_finishes.get(prefix, []) or ([_raw_finish] if _raw_finish else [])
