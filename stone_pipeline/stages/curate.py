@@ -382,7 +382,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # Uncertain at any resolve/mint step -> HOLD for human review (variants_to_confirm.csv), never guess.
     seen_new: set[tuple[str, str]] = set()  # (norm type, norm name) -- the gen_key identity
     suspicious: list[dict] = []          # names that look like supplier codes, not varieties
-    new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches)
+    new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches, evidence)
     last_resort_quality = active_pack().last_resort_quality   # pack default when a mint has no observed quality
 
     def _alias_and_backfill(owner: tuple[str, str], spelling: str, clean: str, stype: str, row, gap) -> None:
@@ -395,7 +395,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             new_variant_rows.append((clean, title_case(clean), stype,
                                      title_case(_attr_surface(row, "color")),
                                      (row.quality_name or last_resort_quality).strip() or last_resort_quality,
-                                     title_case(_attr_surface(row, "finish")), gap, backed))
+                                     title_case(_attr_surface(row, "finish")), gap, backed, _review_evidence(row)))
 
     def _hold_for_type(clean: str, row, gap, cand_types: list[str]) -> None:
         """A type-less scrape whose name is a REAL variety under SEVERAL stone types: hold it for the human
@@ -547,6 +547,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             (row.quality_name or last_resort_quality).strip() or last_resort_quality,
             title_case(_attr_surface(row, "finish")), gap,
             variety_branches.get(proj.norm(clean), set()),  # product-backed branches
+            _review_evidence(row),
         ))
 
     # A spelling already CONFIRMED as an alias of its real owner (gap loop above) must NOT also be
@@ -632,16 +633,17 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if _r.finish_name:
             u["finishes"].add(title_case(_r.finish_name))
 
-    for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed in new_variant_rows:
+    for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed, evidence in new_variant_rows:
         if not stone_type:
             # a variety cannot mint without a stone type (it drives the Key, so a wrong/empty type is a
             # wrong identity). HOLD it for the operator to assign one via the review (seed_type) instead
             # of guessing or shipping it type-less. This is the single enforcement point for the invariant.
+            # Carry the scraped evidence (src/image/description) so the human can judge the type.
             pending_confirm.append({"confirm": "", "variant": title,
                                     "reason": "needs a stone type -- assign one to mint",
                                     "stone_type": "", "color": title_case(obs_color or ""),
                                     "nearest_existing": (gap.nearest_existing or "") if gap else "",
-                                    "score": "", "model_prob": ""})
+                                    "score": "", "model_prob": "", **evidence})
             continue
         _u = obs_union.get((proj.norm(stone_type), proj.norm(title)),
                            {"colors": set(), "qualities": set(), "finishes": set()})
