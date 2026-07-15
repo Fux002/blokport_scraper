@@ -211,7 +211,7 @@ def purge(sources=None) -> tuple[dict, int]:
     return _ledger_op("purge", lambda lg, sync: sync.purge_discontinued(lg, source_codes=codes))
 
 
-def reset(sources=None, hard=False) -> tuple[dict, int]:
+def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
     re-scrape; hard also drops the scraped products. Variation/backbone rows are never deleted; a
     'retiring' variety is preserved (not un-retired). `sources` scopes; None = global.
@@ -220,18 +220,34 @@ def reset(sources=None, hard=False) -> tuple[dict, int]:
     is coherent across BOTH stores in one call: the :4200 queue is blank immediately (not stale until the
     next produce recomputes it) and no dead Medusa id survives the wipe. Durable operator intent
     (mint/reject/alias/seed decisions, retired keys, the approved-leaf overlay) is KEPT. A scoped per-source
-    reset leaves config.db alone, matching how it leaves the ledger's shared base layer alone."""
+    reset leaves config.db alone, matching how it leaves the ledger's shared base layer alone.
+
+    `pristine` (factory reset) is the TRUE cold start: on top of a global hard reset it ALSO wipes that
+    durable operator overlay (variety_decision + backbone_leaf_decision + retired_variation), so the next
+    produce derives the catalog PURELY from the committed seed (variants_export_base + backbone_*), with no
+    accumulated mint/alias/approve/retire re-applying. It is global-only (a scoped factory reset is
+    meaningless) and forces hard=True (a cold start starts from no scraped products). The registered sources
+    and run history are left alone -- neither affects the catalog output."""
+    if pristine and sources is not None:
+        return {"error": "pristine (factory) reset is global-only; do not pass sources"}, 400
+    if pristine:
+        hard = True                            # a factory cold start begins from zero scraped products
     _names, codes, err = _resolve(sources, require_non_empty=False)
     if err:
         return err
     result, code = _ledger_op("reset", lambda lg, sync: sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard)))
     if code != 200:
         return result, code                    # ledger refused (e.g. 409 in-flight): touch nothing else
-    out = {"mode": "hard" if hard else "soft", "reset": result}
+    out = {"mode": "pristine" if pristine else ("hard" if hard else "soft"), "reset": result}
     if codes is None:                          # global reset only -> pair the config.db clean-start
-        from stone_pipeline.config import decisions_store
-        out["config"] = {"review_pending": decisions_store.clear_review_pending(),
-                         "attribute_ids": decisions_store.clear_attribute_ids()}
+        from stone_pipeline.config import decisions_store, store
+        config = {"review_pending": decisions_store.clear_review_pending(),
+                  "attribute_ids": decisions_store.clear_attribute_ids()}
+        if pristine:                           # factory reset: also forget the durable operator overlay
+            config["variety_decisions"] = decisions_store.clear_variety_decisions()
+            config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
+            config["retired_keys"] = store.clear_retired()
+        out["config"] = config
     return out, 200
 
 
