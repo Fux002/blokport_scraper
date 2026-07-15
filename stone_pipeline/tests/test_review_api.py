@@ -63,6 +63,25 @@ def test_put_alias_validates_the_target(monkeypatch):
     assert decisions.load_alias_decisions() == {"blue carara": "Bianco Carrara"}
 
 
+def test_put_alias_with_percent_encoded_name_reflects_in_get(monkeypatch):
+    """Regression: at the HTTP boundary a multi-word variety arrives percent-encoded ('Alpine%20Luxe').
+    The PUT must decode it before it becomes the decision key, else norm keeps the literal '%20'
+    ('alpine 20luxe') and never matches the pending ref ('alpine luxe') -- the UI then reads back
+    current_action=null. do_GET/do_PUT split the path WITHOUT decoding, so dispatch sees the raw segment."""
+    monkeypatch.setattr(varieties, "exists", lambda name: name == "Bianco Carrara")
+    decisions.write_confirm_file([
+        {"confirm": "", "variant": "Alpine Luxe", "stone_type": "", "color": "",
+         "nearest_existing": "", "score": 0, "model_prob": 0}])
+    code, body = server.dispatch("PUT", ["review", "variants", "Alpine%20Luxe"],
+                                 {"action": "alias", "alias_of": "Bianco Carrara"})
+    assert code == 200 and body["variant"] == "Alpine Luxe"          # echoed decoded, not the raw segment
+    # keyed by norm(real name), so the produce-side alias router finds it
+    assert decisions.load_alias_decisions() == {"alpine luxe": "Bianco Carrara"}
+    # and the pending row reflects the decision so the admin badge/dropdown render
+    row = server.dispatch("GET", ["review", "variants"], None)[1]["variants"][0]
+    assert row["current_action"] == "alias" and row["current_alias_of"] == "Bianco Carrara"
+
+
 def test_put_attribute_id(seeded_queue):
     code, body = server.dispatch("PUT", ["review", "attributes", "Leathered"],
                                  {"kind": "finish", "medusa_id": "pcol_9"})
