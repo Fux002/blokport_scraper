@@ -496,6 +496,12 @@ def _lock_and_check_in_flight(ledger: Ledger) -> None:
     mutation; with busy_timeout it waits for our commit. Raises ServeInFlight -> caller maps to 409.
     Shared by reset_sync_state and purge_discontinued (both are destructive, both must not race a pull)."""
     ledger.execute("UPDATE ledger_meta SET updated_at = ? WHERE id = 1", (now_iso(),))
+    # A crashed puller (e.g. the ECS task recycled by a deploy mid-serve) leaves DEAD 'syncing' leases.
+    # reap_stale_syncing only ran at the head of a SERVE, so those dead leases would 409 a reset/purge
+    # forever on a pull that no longer exists -- the operator gets wedged (reset refused, every re-pull
+    # clipped by the next deploy). Reclaim stale leases here FIRST, so only a LIVE pull (lease < TTL) still
+    # blocks; a killed pull can never permanently wedge a reset. Same TTL/semantics as the serve path.
+    reap_stale_syncing(ledger)
     if serve_in_flight(ledger):
         raise ServeInFlight("a pull is in flight; refusing to mutate mid-serve")
 

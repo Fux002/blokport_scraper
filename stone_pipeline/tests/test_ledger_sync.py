@@ -212,6 +212,21 @@ def test_reset_refuses_atomically_while_a_lease_is_held(tmp_path):
         assert ledger.get("variation", "key", "slab_v2")["medusa_id"] == "V2"
 
 
+def test_reset_reaps_a_dead_lease_instead_of_wedging(tmp_path):
+    # A crashed puller (the ECS task recycled by a deploy mid-serve) leaves a DEAD 'syncing' lease. A
+    # reset must REAP it and proceed, not 409 forever on a pull that no longer exists -- otherwise the
+    # operator is wedged: reset refused, every re-pull clipped by the next deploy. Only a LIVE lease blocks.
+    from stone_pipeline.ledger.sync import reset_sync_state, ready
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-0", "slab_v1", state="pending")
+        ready(ledger, "products")                        # leases P-0 -> 'syncing'
+        ledger.execute("UPDATE product SET updated_at = '2000-01-01T00:00:00+00:00'")   # lease goes stale
+        out = reset_sync_state(ledger)                   # must NOT raise: the dead lease is reaped first
+        assert out["product"] == 1                        # the reaped-then-reset product was counted
+        assert ledger.counts("product").get("syncing", 0) == 0    # no lease survives the reset
+
+
 def test_serving_leases_so_overlapping_pulls_never_double_serve(tmp_path):
     # D5 in-flight guard: a pull LEASES its rows to 'syncing'. A second, overlapping pull (Medusa's
     # job paginating, or two triggers) must get NOTHING for those rows -- never the same entity twice.
