@@ -222,12 +222,15 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     (mint/reject/alias/seed decisions, retired keys, the approved-leaf overlay) is KEPT. A scoped per-source
     reset leaves config.db alone, matching how it leaves the ledger's shared base layer alone.
 
-    `pristine` (factory reset) is the TRUE cold start: on top of a global hard reset it ALSO wipes that
+    `pristine` (factory reset) is the TRUE cold start: on top of a global hard reset it ALSO (a) wipes the
     durable operator overlay (variety_decision + backbone_leaf_decision + retired_variation), so the next
     produce derives the catalog PURELY from the committed seed (variants_export_base + backbone_*), with no
-    accumulated mint/alias/approve/retire re-applying. It is global-only (a scoped factory reset is
-    meaningless) and forces hard=True (a cold start starts from no scraped products). The registered sources
-    and run history are left alone -- neither affects the catalog output."""
+    accumulated mint/alias/approve/retire re-applying, and (b) PRUNES stale variations (in_full=0, no
+    products) -- tombstoning re-key old sides and dropped varieties so MEDUSA converges to the seed too,
+    not just the sync state. Without (b), a seed change (e.g. a retype) leaves the old variety live in
+    Medusa forever (seed vs Medusa out of line). It is global-only (a scoped factory reset is meaningless)
+    and forces hard=True (a cold start starts from no scraped products). Registered sources and run history
+    are left alone -- neither affects the catalog output."""
     if pristine and sources is not None:
         return {"error": "pristine (factory) reset is global-only; do not pass sources"}, 400
     if pristine:
@@ -235,7 +238,8 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     _names, codes, err = _resolve(sources, require_non_empty=False)
     if err:
         return err
-    result, code = _ledger_op("reset", lambda lg, sync: sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard)))
+    result, code = _ledger_op("reset", lambda lg, sync: sync.reset_sync_state(
+        lg, source_codes=codes, hard=bool(hard), prune_stale=pristine))
     if code != 200:
         return result, code                    # ledger refused (e.g. 409 in-flight): touch nothing else
     out = {"mode": "pristine" if pristine else ("hard" if hard else "soft"), "reset": result}

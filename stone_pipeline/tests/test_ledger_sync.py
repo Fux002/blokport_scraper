@@ -11,12 +11,12 @@ from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import ack, ready, status
 
 
-def _variation(ledger, key, state, medusa_id=None, type_="Marble", image_url="https://s3/tex.png"):
+def _variation(ledger, key, state, medusa_id=None, type_="Marble", image_url="https://s3/tex.png", in_full=1):
     now = now_iso()
     ledger.upsert("variation", {"key": key, "branch": "slab", "type": type_, "name": "x",
                                 "aliases": "[]", "image_url": image_url, "image_sha256": None,
                                 "image_model": None, "volume": "", "medusa_id": medusa_id,
-                                "in_full": 1, "payload_hash": "", "state": state,
+                                "in_full": in_full, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
 
@@ -210,6 +210,40 @@ def test_reset_refuses_atomically_while_a_lease_is_held(tmp_path):
             reset_sync_state(ledger)
         # nothing was reset -- the synced one keeps its id (the canary write rolled back on raise)
         assert ledger.get("variation", "key", "slab_v2")["medusa_id"] == "V2"
+
+
+def test_prune_stale_tombstones_dropped_varieties_even_without_a_medusa_id(tmp_path):
+    # The re-key old side: a variation dropped OUT of the catalogue (in_full=0) with no products. A prior
+    # reset already cleared its medusa_id, so retire_variation's 'synced' gate would drop it locally with NO
+    # tombstone -- leaving Medusa an orphan. prune_stale_variations must tombstone it by KEY regardless, so
+    # Blokport (deletes by key) removes it. A live in_full=1 variety is never touched.
+    from stone_pipeline.ledger.sync import prune_stale_variations
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_old_x", state="pending", in_full=0)      # dropped, no medusa_id
+        _variation(ledger, "slab_live_y", state="synced", medusa_id="V", in_full=1)
+        out = prune_stale_variations(ledger)
+        assert out["pruned"] == 1 and out["keys"] == ["slab_old_x"]
+        # the stale one is held 'retiring' with a variation tombstone Blokport will consume
+        assert ledger.get("variation", "key", "slab_old_x")["state"] == "retiring"
+        assert ledger.execute("SELECT 1 FROM removed WHERE external_id='slab_old_x' AND kind='variation'").fetchone()
+        # the live catalogue variety is untouched
+        assert ledger.get("variation", "key", "slab_live_y")["state"] == "synced"
+
+
+def test_pristine_reset_prunes_stale_but_plain_reset_does_not(tmp_path):
+    from stone_pipeline.ledger.sync import reset_sync_state
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_old_x", state="synced", medusa_id="V1", in_full=0)   # stale, still in Medusa
+        _variation(ledger, "slab_live_y", state="synced", medusa_id="V2", in_full=1)
+        # a PLAIN global reset leaves the stale row alone (only zeroes sync state)
+        reset_sync_state(ledger, prune_stale=False)
+        assert ledger.get("variation", "key", "slab_old_x")["state"] == "pending"
+        assert not ledger.execute("SELECT 1 FROM removed WHERE external_id='slab_old_x'").fetchone()
+        # a PRISTINE reset (prune_stale) tombstones it so Medusa converges to the seed
+        out = reset_sync_state(ledger, prune_stale=True)
+        assert out["pruned_stale"] == 1
+        assert ledger.get("variation", "key", "slab_old_x")["state"] == "retiring"
+        assert ledger.execute("SELECT 1 FROM removed WHERE external_id='slab_old_x' AND kind='variation'").fetchone()
 
 
 def test_reset_reaps_a_dead_lease_instead_of_wedging(tmp_path):
