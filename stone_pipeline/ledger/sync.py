@@ -496,6 +496,12 @@ def _lock_and_check_in_flight(ledger: Ledger) -> None:
     mutation; with busy_timeout it waits for our commit. Raises ServeInFlight -> caller maps to 409.
     Shared by reset_sync_state and purge_discontinued (both are destructive, both must not race a pull)."""
     ledger.execute("UPDATE ledger_meta SET updated_at = ? WHERE id = 1", (now_iso(),))
+    # A crashed puller (e.g. the ECS task recycled by a deploy mid-serve) leaves DEAD 'syncing' leases.
+    # reap_stale_syncing only ran at the head of a SERVE, so those dead leases would 409 a reset/purge
+    # forever on a pull that no longer exists -- the operator gets wedged (reset refused, every re-pull
+    # clipped by the next deploy). Reclaim stale leases here FIRST, so only a LIVE pull (lease < TTL) still
+    # blocks; a killed pull can never permanently wedge a reset. Same TTL/semantics as the serve path.
+    reap_stale_syncing(ledger)
     if serve_in_flight(ledger):
         raise ServeInFlight("a pull is in flight; refusing to mutate mid-serve")
 
@@ -517,17 +523,22 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
 
 
 def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
-                     hard: bool = False) -> dict[str, int]:
+                     hard: bool = False, prune_stale: bool = False) -> dict[str, int]:
     """CLEAN START of the sync overlay, so the ledger stops drifting from a wiped Medusa.
 
     soft (default): every entity -> 'pending' and all Medusa ids + sync bookkeeping dropped; inventory
       baseline cleared. Re-serves the whole catalog from zero WITHOUT re-scraping.
     hard: additionally DELETE the scraped products + inventory (the scraper's per-source output), so a
       re-scrape rebuilds them from scratch.
+    prune_stale (global only): tombstone every variation that dropped OUT of the current catalogue
+      (in_full = 0, no products) so Medusa CONVERGES to the seed -- deleting re-key old sides and dropped
+      varieties instead of leaving them as stale entities. This is what makes the factory reset a true
+      cold start on BOTH sides (a plain reset only zeroes sync state; it never removed a stale entity).
 
-    INVARIANT: variation/backbone rows are NEVER deleted -- they are your base config (also held in git
-    as variants_export_base + backbone_*), and re-seeding them from the live export would re-introduce
-    stale synced ids (the drift we are fixing). Only their sync OVERLAY is cleared.
+    INVARIANT: variation/backbone rows in the CURRENT catalogue are NEVER deleted -- they are your base
+    config (also held in git as variants_export_base + backbone_*), and re-seeding them from the live
+    export would re-introduce stale synced ids (the drift we are fixing). Only their sync OVERLAY is
+    cleared. prune_stale removes ONLY in_full=0 rows (already out of the catalogue), never a live variety.
 
     `source_codes` scopes products (+ their stock) to those sources; the shared base layer
     (variations/attributes/combinations) is reset only on a GLOBAL (unscoped) reset. Returns row counts.
@@ -539,6 +550,11 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     if scoped:
         marks = ",".join("?" * len(source_codes)) or "NULL"   # source IN (NULL) matches no row
         where, params = (f" WHERE source IN ({marks})", tuple(source_codes))
+
+    # Prune BEFORE the overlay reset: prune sets stale rows 'retiring' + tombstones them, and _reset_overlay
+    # preserves 'retiring' (never flips a mid-removal row). Global-only, like the shared-base overlay reset.
+    if prune_stale and not scoped:
+        out["pruned_stale"] = prune_stale_variations(ledger)["pruned"]
 
     # shared base layer: overlay reset only on a global reset (a per-source reset leaves it alone).
     for t in ("attribute", "variation"):
@@ -682,6 +698,33 @@ def retire_variation(ledger: Ledger, key: str, force: bool = False,
     log.warning("variety RETIRED", extra={"extra_fields": {
         "key": key, "products_removed": len(prods), "tombstoned_variation": synced, "force": force}})
     return {"retired": key, "products_removed": len(prods), "tombstoned_variation": synced}
+
+
+def prune_stale_variations(ledger: Ledger) -> dict:
+    """Tombstone every variation that has DROPPED OUT of the current catalogue (in_full = 0) and has no
+    products, so Medusa converges to the seed instead of keeping stale entities (re-key old sides, dropped
+    varieties). Returns {pruned, keys}.
+
+    Tombstones by KEY UNCONDITIONALLY -- not gated on medusa_id like retire_variation. That gate is wrong
+    here: a prior reset drops medusa_id, so a stale row that Medusa DOES hold would look 'never synced' and
+    be deleted locally with NO tombstone, leaving Medusa an orphan forever (the 'seed vs Medusa out of line'
+    fault). Blokport deletes by key (deleteScraperVariationByKey) and no-ops a key it never had, so an
+    unconditional key-tombstone is safe both ways. The row is held 'retiring' until Medusa acks the delete
+    (an in_full=0 row is already excluded from the served catalogue, so holding it costs nothing).
+
+    Only touches products-free rows: a variation that still has products is live -- never dropped here. The
+    caller runs this INSIDE the reset's write lock, BEFORE the overlay reset (which preserves 'retiring')."""
+    keys = [r["key"] for r in ledger.execute(
+        "SELECT key FROM variation v WHERE v.in_full = 0 AND v.state != 'retiring' "
+        "AND NOT EXISTS (SELECT 1 FROM product p WHERE p.variation_key = v.key)")]
+    for key in keys:
+        ledger.execute("DELETE FROM combination WHERE variation_key = ?", (key,))   # dormant FK child
+        record_tombstones(ledger, [(key, None)], reason="stale_not_in_seed", kind="variation")
+        ledger.set_state("variation", "key", key, "retiring")
+    if keys:
+        log.warning("pruned stale variations (not in current seed catalogue)", extra={"extra_fields": {
+            "pruned": len(keys)}})
+    return {"pruned": len(keys), "keys": keys}
 
 
 def un_retire_variation(ledger: Ledger, key: str) -> dict:
