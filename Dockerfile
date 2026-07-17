@@ -64,6 +64,10 @@ RUN mkdir -p /app/models \
     && echo "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1  /app/models/RealESRGAN_x4plus.pth" | sha256sum -c -
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('openai/clip-vit-base-patch32', revision='3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268', ignore_patterns=['*.msgpack','*.h5','*.md'])"
+# BEN2 background-remover weights (variant textures), PINNED to the same revision rb_images.py loads, so the
+# runtime from_pretrained hits the cache -- no fetch on a live task. Skip the demo images (large, unused).
+RUN python -c "from huggingface_hub import snapshot_download as d; \
+    d('PramaLLC/BEN2', revision='e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f', ignore_patterns=['BEN2_demo_pictures/*','*.md'])"
 ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth
 
 
@@ -91,12 +95,13 @@ RUN pip install -r /tmp/requirements.txt \
        "transformers==4.44.2" "safetensors==0.4.4" "fal-client>=0.4" "requests>=2.31" \
        "git+https://github.com/PramaLLC/BEN2.git@2c99a5da477b5523585bfa5c893888a6e818a8f6"
 # ben2: BEN2 background-removal for VARIANT TEXTURES (rb_images.py), so RUN_MODE=generate-textures runs on
-# THIS same GPU image. Additive -- the de-watermark/enhance paths are unchanged. Its model is fetched from
-# HF at first use (rb_images.BEN_Base.from_pretrained); baking it pinned (like ESRGAN/CLIP below) is a follow-up.
-# Bake the model weights at build, PINNED (ESRGAN by SHA-256; CLIP by immutable revision) so no
+# THIS same GPU image. Additive -- the de-watermark/enhance paths are unchanged. Its model is BAKED below
+# (pinned), so no fetch happens on a live task.
+# Bake the model weights at build, PINNED (ESRGAN by SHA-256; CLIP + BEN2 by immutable revision) so no
 # unverified fetch happens on a live task and dev/prod are byte-identical:
 #   - Real-ESRGAN x4plus       : the enhancement engine (local GPU)
 #   - clip-vit-base-patch32    : the non-stone image classifier (local GPU)
+#   - PramaLLC/BEN2            : variant-texture background remover (rb_images.py)
 # De-watermarking is FAL FLUX Fill (hosted) -- no local model to bake.
 RUN mkdir -p /app/models \
     && curl -fsSL -o /app/models/RealESRGAN_x4plus.pth \
@@ -104,6 +109,9 @@ RUN mkdir -p /app/models \
     && echo "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1  /app/models/RealESRGAN_x4plus.pth" | sha256sum -c -
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('openai/clip-vit-base-patch32', revision='3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268', ignore_patterns=['*.msgpack','*.h5','*.md'])"
+# BEN2 background-remover weights, PINNED to the same revision rb_images.py loads (no runtime fetch).
+RUN python -c "from huggingface_hub import snapshot_download as d; \
+    d('PramaLLC/BEN2', revision='e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f', ignore_patterns=['BEN2_demo_pictures/*','*.md'])"
 # Sensible enhancement defaults baked in (Batch job overrides SRC / BLOKPORT_ENV / bucket).
 ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
     BLOKPORT_IMAGE_PROCESSING=true

@@ -9,6 +9,12 @@ INPUT_DIR = "./images"
 OUTPUT_DIR = "./to_upload"     # background-removed {Key}.png, ready for S3 dev/variations/
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 SKIP_EXISTING = True          # skip images already done (resume support)
+BEN2_REPO = "PramaLLC/BEN2"
+# PIN the exact model revision: from_pretrained defaults to 'main', which can move and silently pull a
+# different model (non-deterministic output + a surprise runtime download). The :gpu/:imageproc images bake
+# THIS revision, so pinning it here makes the load hit the baked snapshot -- no runtime fetch, identical
+# output for new textures AND the quality-refresh (both go through this loader).
+BEN2_REVISION = "e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f"
 # -----------------------------------------------------------------------------
 
 
@@ -25,7 +31,7 @@ def initialize_ben2_model():
     """Initialize the BEN2 model for high-quality background removal."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🚀 Initializing BEN2 model on {device} (first run may take a moment)...")
-    model = BEN_Base.from_pretrained("PramaLLC/BEN2")
+    model = BEN_Base.from_pretrained(BEN2_REPO, revision=BEN2_REVISION)
     model = model.to(device).eval()
     print("✅ BEN2 model ready for high-quality background removal!\n")
     return model, device
