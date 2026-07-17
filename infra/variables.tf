@@ -117,8 +117,8 @@ variable "dev_auto_enhance" {
 
 variable "dev_auto_texture" {
   type        = bool
-  default     = false
-  description = "Enable BLOKPORT_AUTO_TEXTURE on the dev produce: after a produce queues new-variant textures, auto-submit the GPU job (RUN_MODE=generate-textures) to generate + upload them. Ships OFF: flip true ONLY after the :gpu image is rebuilt with ben2 (build_gpu), else dispatched jobs fail at background-removal."
+  default     = true
+  description = "Enable BLOKPORT_AUTO_TEXTURE on the dev produce: after a produce queues new-variant textures, auto-submit the GPU job (RUN_MODE=generate-textures) to generate + upload them. ON in dev: the :gpu image now carries ben2 + the baked BEN2 model, and the flag was applied + validated (2026-07-17). Prod uses its own var."
 }
 
 variable "dev_require_enhanced" {
