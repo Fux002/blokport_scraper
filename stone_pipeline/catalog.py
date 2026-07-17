@@ -186,7 +186,10 @@ def _auto_queue_images() -> int:
     # set; best-effort (never fails the produce). The next produce stamps the images (one-cycle hold).
     if items and not generated_inline:
         try:
+            from stone_pipeline.prepare_variant_images import publish_prompts, PROMPTS_LOCAL
             from deploy.texture_trigger import submit_texture_job
+            # Publish THIS produce's queue so the bare GPU task pulls the exact set (it can't rebuild it).
+            publish_prompts(PROMPTS_LOCAL)
             submit_texture_job(len(items))
         except Exception:
             log.exception("auto-texture trigger failed (non-fatal; textures stay queued for the next run)")

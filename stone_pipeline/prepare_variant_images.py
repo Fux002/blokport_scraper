@@ -33,6 +33,11 @@ log = logfmt.get_logger("prepare_variant_images")
 VARIATIONS_PREFIX = f"{ENV_SEGMENT}/variations/"   # where a variant's {Key}.png must land (its Image URL home)
 # rb_images.py writes the background-removed {Key}.png here (cwd=image_pipeline, OUTPUT_DIR="./to_upload").
 DEBG_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "to_upload"
+# The queue image_prompts.build writes / genetate_images.py reads (ONE file, image_pipeline/).
+PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json"
+# The produce PUBLISHES its queue here so an on-demand GPU task (which has no local export/products/
+# backbone_additions to rebuild it) can pull the exact queue the produce built. Env-scoped.
+PROMPTS_S3_KEY = f"{ENV_SEGMENT}/scraper/prompts_to_generate.json"
 GEN_DEPS = ("fal_client", "torch")                 # the generator stack the actual run needs to import
 
 
@@ -57,6 +62,48 @@ def _target_keys(prompts_path: Path) -> list[str]:
     """The variant Keys in the just-built queue (output_name IS the Key)."""
     items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
     return [i["output_name"] for i in items if i.get("output_name")]
+
+
+def publish_prompts(prompts_path: Path, client=None) -> bool:
+    """Upload the produce's just-built queue to S3 so an on-demand GPU texture job can pull the EXACT set
+    the produce built (a fresh :gpu task has no local export/products/backbone_additions to rebuild it).
+    Called by the produce when it dispatches the GPU job. No-op (returns False) when S3 is unreachable or
+    dry-run, or the queue file is absent."""
+    client = client or _s3_client()
+    if client is None or SETTINGS.s3.dry_run or not prompts_path.is_file():
+        return False
+    try:
+        client.upload_file(str(prompts_path), SETTINGS.s3.bucket, PROMPTS_S3_KEY)
+        return True
+    except Exception as exc:
+        log.error("could not publish the texture queue to S3", extra={"extra_fields": {"error": str(exc)}})
+        return False
+
+
+def _fetch_published_prompts(client=None) -> bool:
+    """Download the produce's published queue from S3 into PROMPTS_LOCAL. Returns True if it landed. Used
+    by the GPU task, which cannot rebuild the queue locally. Absent object / unreachable S3 -> False (the
+    caller then falls back to building locally, the dev-box path)."""
+    client = client or _s3_client()
+    if client is None:
+        return False
+    try:
+        PROMPTS_LOCAL.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(SETTINGS.s3.bucket, PROMPTS_S3_KEY, str(PROMPTS_LOCAL))
+        return True
+    except Exception:
+        return False   # no published queue (e.g. running on a box that rebuilds it locally)
+
+
+def _resolve_queue() -> Path:
+    """The queue to generate from. Prefer the produce's PUBLISHED queue (the on-demand GPU task can't
+    rebuild it -- no local export/products); fall back to building locally (dev box / an image-capable
+    produce that has the inputs). Either way returns the path genetate_images.py reads."""
+    if _fetch_published_prompts():
+        log.info("using the produce's published texture queue from S3", extra={"extra_fields": {
+            "key": PROMPTS_S3_KEY}})
+        return PROMPTS_LOCAL
+    return image_prompts.build()
 
 
 def _generator_blockers() -> list[str]:
@@ -87,9 +134,10 @@ def upload_variant_images(keys: list[str], client=None) -> tuple[int, list[str]]
 
 
 def run() -> int:
-    """Build the new-variant queue, generate + de-background, upload each {Key}.png to <env>/variations/.
-    Returns the number uploaded (0 when nothing is queued or the generator stack is absent)."""
-    prompts_path = image_prompts.build()
+    """Resolve the queue (produce's published one on S3, else build locally), generate + de-background,
+    upload each {Key}.png to <env>/variations/. Returns the number uploaded (0 when nothing is queued or
+    the generator stack is absent)."""
+    prompts_path = _resolve_queue()
     targets = _target_keys(prompts_path)
     if not targets:
         log.info("no new variant images to prepare (every product-backed variant already has one on S3)")
