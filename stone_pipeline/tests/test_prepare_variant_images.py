@@ -12,6 +12,8 @@ import pytest
 
 import stone_pipeline.prepare_variant_images as pvi
 
+_REAL_FETCH = pvi._fetch_published_prompts   # captured before the autouse stub replaces it
+
 
 @pytest.fixture(autouse=True)
 def _no_published_queue(monkeypatch):
@@ -126,3 +128,48 @@ def test_resolve_queue_prefers_the_published_queue_over_a_local_build(monkeypatc
     monkeypatch.setattr(pvi.image_prompts, "build",
                         lambda: (_ for _ in ()).throw(AssertionError("rebuilt instead of using published")))
     assert pvi._resolve_queue() == pvi.PROMPTS_LOCAL
+
+
+def test_publish_prompts_uses_the_per_dispatch_key(tmp_path, monkeypatch):
+    # a unique per-dispatch key must be honoured (the anti-clobber contract), not the shared legacy key
+    q = tmp_path / "prompts_to_generate.json"; q.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
+    client = _FakeS3()
+    key = "dev/scraper/texture_queues/abc123.json"
+    assert pvi.publish_prompts(q, key=key, client=client) is True
+    assert client.calls == [(str(q), "test-bucket", key)]
+
+
+def test_fetch_published_prompts_reads_the_key_from_env(tmp_path, monkeypatch):
+    # the GPU task must pull EXACTLY the key the produce passed via BLOKPORT_TEXTURE_QUEUE_KEY
+    monkeypatch.setattr(pvi, "_fetch_published_prompts", _REAL_FETCH)   # undo the autouse stub for this test
+    monkeypatch.setattr(pvi, "PROMPTS_LOCAL", tmp_path / "q.json")
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
+    client = _FakeS3()
+    monkeypatch.setenv(pvi.TEXTURE_QUEUE_KEY_ENV, "dev/scraper/texture_queues/xyz.json")
+    assert pvi._fetch_published_prompts(client=client) is True
+    assert client.downloads == [("test-bucket", "dev/scraper/texture_queues/xyz.json", str(tmp_path / "q.json"))]
+    # absent env -> legacy shared key
+    monkeypatch.delenv(pvi.TEXTURE_QUEUE_KEY_ENV, raising=False)
+    client2 = _FakeS3()
+    assert pvi._fetch_published_prompts(client=client2) is True
+    assert client2.downloads[0][1] == pvi.PROMPTS_S3_KEY
+
+
+def test_prune_already_on_s3_drops_existing_and_rewrites_queue(tmp_path, monkeypatch):
+    q = tmp_path / "prompts.json"
+    q.write_text(json.dumps([{"output_name": "slab_a"}, {"output_name": "slab_b"}]), encoding="utf-8")
+    # slab_a already has its image on S3 -> pruned from BOTH the queue file and the returned targets
+    monkeypatch.setattr("stone_pipeline.stages.emit_catalog._s3_variation_keys", lambda: {"slab_a"})
+    kept = pvi._prune_already_on_s3(q, ["slab_a", "slab_b"])
+    assert kept == ["slab_b"]
+    assert json.loads(q.read_text(encoding="utf-8")) == [{"output_name": "slab_b"}]
+
+
+def test_prune_noop_when_s3_unreachable(tmp_path, monkeypatch):
+    # S3 unreachable (None) -> generate all rather than wrongly skip a possibly-missing image
+    q = tmp_path / "prompts.json"
+    q.write_text(json.dumps([{"output_name": "slab_a"}]), encoding="utf-8")
+    monkeypatch.setattr("stone_pipeline.stages.emit_catalog._s3_variation_keys", lambda: None)
+    assert pvi._prune_already_on_s3(q, ["slab_a"]) == ["slab_a"]
+    assert json.loads(q.read_text(encoding="utf-8")) == [{"output_name": "slab_a"}]   # file untouched

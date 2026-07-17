@@ -20,12 +20,14 @@ from stone_pipeline.core import logfmt
 log = logfmt.get_logger("texture_trigger")
 
 
-def submit_texture_job(queued: int) -> str | None:
+def submit_texture_job(queued: int, queue_key: str | None = None) -> str | None:
     """Submit ONE GPU Batch job (RUN_MODE=generate-textures) to generate + upload the `queued` new-variant
-    textures. Returns the job id, or None when disabled / misconfigured / nothing queued. A submit failure
-    logs loud and returns None -- it NEVER raises, so it can never fail the produce (the textures stay queued
-    for the next run). Idempotent downstream: prepare_variant_images skips images already on S3, so an
-    overlapping re-submit re-charges nothing already produced."""
+    textures. `queue_key` is the UNIQUE per-dispatch S3 key of the queue this job must pull (passed as
+    BLOKPORT_TEXTURE_QUEUE_KEY), so overlapping mints never share one clobberable queue object. Returns the
+    job id, or None when disabled / misconfigured / nothing queued. A submit failure logs loud and returns
+    None -- it NEVER raises, so it can never fail the produce (the textures stay queued for the next run).
+    Idempotent downstream: prepare_variant_images prunes images already on S3, so an overlapping re-submit
+    re-charges nothing already produced."""
     cfg = SETTINGS.auto_texture
     if not cfg.enabled:
         log.info("auto-texture disabled (BLOKPORT_AUTO_TEXTURE unset); no GPU job submitted")
@@ -56,7 +58,9 @@ def submit_texture_job(queued: int) -> str | None:
             # {Key}.png silently never reaches dev/variations/ (the produce container sets this same false).
             containerOverrides={"environment": [
                 {"name": "RUN_MODE", "value": "generate-textures"},
-                {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"}]})
+                {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"}]
+                # the exact per-dispatch queue this job must pull (unique per submit -> no clobber race).
+                + ([{"name": "BLOKPORT_TEXTURE_QUEUE_KEY", "value": queue_key}] if queue_key else [])})
         job_id = resp["jobId"]
         log.info("auto-texture submitted", extra={"extra_fields": {"queued": queued, "job_id": job_id}})
         return job_id

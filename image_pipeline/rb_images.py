@@ -28,12 +28,23 @@ def make_output_name(filename):
 
 
 def initialize_ben2_model():
-    """Initialize the BEN2 model for high-quality background removal."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🚀 Initializing BEN2 model on {device} (first run may take a moment)...")
+    """Initialize the BEN2 model for high-quality background removal.
+
+    Fail loud, never silently degrade: when BLOKPORT_REQUIRE_CUDA is set (the :gpu texture job, which was
+    dispatched specifically for a GPU) but CUDA is absent, abort -- running BEN2 on CPU here is a multi-minute
+    per-image stall that looks like a hang and burns a GPU box doing nothing. The CPU :imageproc refresh path
+    does NOT set the flag, so CPU stays a valid device there. Model load hits the baked snapshot (HF offline
+    in the image), so this is fast and never reaches the network."""
+    cuda = torch.cuda.is_available()
+    if os.environ.get("BLOKPORT_REQUIRE_CUDA") and not cuda:
+        raise RuntimeError(
+            "BLOKPORT_REQUIRE_CUDA is set but torch.cuda.is_available() is False: this GPU texture job has no "
+            "usable CUDA device. Aborting loud rather than silently running BEN2 on CPU.")
+    device = torch.device("cuda" if cuda else "cpu")
+    print(f"🚀 Initializing BEN2 model on {device} (cuda_available={cuda})...", flush=True)
     model = BEN_Base.from_pretrained(BEN2_REPO, revision=BEN2_REVISION)
     model = model.to(device).eval()
-    print("✅ BEN2 model ready for high-quality background removal!\n")
+    print("✅ BEN2 model ready for high-quality background removal!\n", flush=True)
     return model, device
 
 
@@ -56,7 +67,7 @@ def process_images():
 
     if not files:
         print(f"❌ No images found in '{input_dir}'.")
-        return
+        return 0
 
     print(f"📂 Input  : {input_dir.resolve()}")
     print(f"📂 Output : {output_dir.resolve()}")
@@ -92,8 +103,12 @@ def process_images():
             print(f"❌ Error processing {filename}: {e}\n")
 
     print("=" * 50)
-    print(f"✅ Complete: {done} processed, {skipped} skipped, {failed} failed.")
+    print(f"✅ Complete: {done} processed, {skipped} skipped, {failed} failed.", flush=True)
+    return failed
 
 
 if __name__ == "__main__":
-    process_images()
+    # exit non-zero when any image failed so the caller's failure accounting is truthful (a partial BEN2
+    # failure must flag those variants HELD, not look like a clean run).
+    import sys
+    sys.exit(1 if process_images() else 0)

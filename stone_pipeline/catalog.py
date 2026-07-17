@@ -31,6 +31,11 @@ from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalo
 
 log = logfmt.get_logger("catalog")
 
+# Per-image-script wall-clock ceiling. Generation (FLUX over the whole queue, 4 workers) legitimately runs
+# minutes; this is a defense-in-depth backstop far above normal so a genuinely wedged stage (e.g. a hung
+# model load or network call) fails and flags its variants HELD instead of pinning the whole Batch task.
+IMAGE_SCRIPT_TIMEOUT_S = 3600
+
 
 def latest_run_dirs(outputs_root: Path) -> list[Path]:
     """The NEWEST run folder per source under outputs_root. A run id is `<source>_<date>_<time>`,
@@ -153,7 +158,9 @@ def _auto_queue_images() -> int:
     # present (a dev box / a dedicated generation image); otherwise queue and say so, rather than run
     # scripts that would just ImportError.
     import importlib.util
-    missing_deps = [m for m in ("fal_client", "torch") if importlib.util.find_spec(m) is None]
+
+    from stone_pipeline.prepare_variant_images import GEN_DEPS   # single source of the generator dep list
+    missing_deps = [m for m in GEN_DEPS if importlib.util.find_spec(m) is None]
     generated_inline = False
     if items and os.environ.get("FAL_KEY") and not missing_deps:
         log.info("auto image generation: FAL_KEY + deps present, generating", extra={"extra_fields": {"queued": len(items)}})
@@ -184,15 +191,32 @@ def _auto_queue_images() -> int:
     # Part of the produce (Republish), NOT a cron: when textures were queued but this lean image did not
     # generate them, fire-and-forget ONE on-demand GPU job to do it. No-op unless BLOKPORT_AUTO_TEXTURE is
     # set; best-effort (never fails the produce). The next produce stamps the images (one-cycle hold).
-    if items and not generated_inline:
+    if items and not generated_inline and SETTINGS.auto_texture.enabled:
+        import uuid
+
+        from stone_pipeline.prepare_variant_images import (PROMPTS_LOCAL, TEXTURE_QUEUE_PREFIX,
+                                                           publish_prompts)
+        from deploy.texture_trigger import submit_texture_job
+        dispatched = False
         try:
-            from stone_pipeline.prepare_variant_images import publish_prompts, PROMPTS_LOCAL
-            from deploy.texture_trigger import submit_texture_job
-            # Publish THIS produce's queue so the bare GPU task pulls the exact set (it can't rebuild it).
-            publish_prompts(PROMPTS_LOCAL)
-            submit_texture_job(len(items))
+            # Publish THIS produce's queue to a UNIQUE key so a concurrent produce cannot clobber the queue a
+            # still-starting GPU job is about to pull; then dispatch a job bound to exactly that key. Gate the
+            # dispatch on a successful publish: if publish no-op'd (S3 dry-run/unreachable) we must NOT submit
+            # a job that would pull a stale/absent queue.
+            queue_key = f"{TEXTURE_QUEUE_PREFIX}{uuid.uuid4().hex}.json"
+            if publish_prompts(PROMPTS_LOCAL, key=queue_key):
+                dispatched = bool(submit_texture_job(len(items), queue_key=queue_key))
+            else:
+                log.error("texture queue publish no-op'd (S3 dry-run/unreachable); NOT dispatching a GPU job "
+                          "against a stale queue", extra={"extra_fields": {"queued": len(items)}})
         except Exception:
             log.exception("auto-texture trigger failed (non-fatal; textures stay queued for the next run)")
+        if not dispatched:
+            # loud + actionable, never swallowed: these variants' products stay HELD until a produce
+            # successfully publishes the queue AND submits the GPU job.
+            log.error("%d new variant texture(s) queued but NO GPU job was dispatched; their products stay "
+                      "HELD until a successful produce publishes + dispatches (check FAL_KEY / S3 write / "
+                      "GPU queue+jobdef config)", len(items), extra={"extra_fields": {"queued": len(items)}})
     return len(items)
 
 
@@ -206,8 +230,18 @@ def _generate_queued_images() -> list[str]:
     failed: list[str] = []
     for script in ("genetate_images.py", "rb_images.py"):
         if (ip / script).exists():
-            # sys.executable (not bare "python") so the venv interpreter is used.
-            rc = subprocess.run([sys.executable, script], cwd=ip, check=False).returncode
+            # sys.executable (not bare "python") so the venv interpreter is used. -u (unbuffered) so the
+            # scripts' per-image progress streams to CloudWatch live: without it Python block-buffers a
+            # subprocess' stdout and the whole BEN2 stage looks like a silent hang until it exits. timeout so
+            # a wedged stage can never pin the Batch task forever -- a timeout is recorded as a failed script.
+            try:
+                rc = subprocess.run([sys.executable, "-u", script], cwd=ip, check=False,
+                                    timeout=IMAGE_SCRIPT_TIMEOUT_S).returncode
+            except subprocess.TimeoutExpired:
+                log.error("image-pipeline script timed out",
+                          extra={"extra_fields": {"script": script, "timeout_s": IMAGE_SCRIPT_TIMEOUT_S}})
+                failed.append(script)
+                continue
             if rc != 0:
                 log.error("image-pipeline script failed",
                           extra={"extra_fields": {"script": script, "returncode": rc}})

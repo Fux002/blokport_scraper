@@ -66,6 +66,19 @@ def test_submits_one_job_with_run_mode_override(monkeypatch):
     assert {"name": "RUN_MODE", "value": "generate-textures"} in env   # reuse the enhance jobdef, texture mode
     # dev defaults S3_DRY_RUN true; the texture job MUST write, or the upload silently no-ops
     assert {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"} in env
+    # no queue_key passed -> no BLOKPORT_TEXTURE_QUEUE_KEY override (legacy shared-key fallback)
+    assert not any(e["name"] == "BLOKPORT_TEXTURE_QUEUE_KEY" for e in env)
+
+
+def test_submits_with_per_dispatch_queue_key(monkeypatch):
+    monkeypatch.setattr(tt, "SETTINGS", _cfg(queue="tex-q", job_definition="tex-jd"))
+    batch = _FakeBatch(job_id="job-xyz")
+    _install_boto3(monkeypatch, batch)
+    key = "dev/scraper/texture_queues/deadbeef.json"
+    assert tt.submit_texture_job(3, queue_key=key) == "job-xyz"
+    env = batch.calls[0]["containerOverrides"]["environment"]
+    # the job must be bound to EXACTLY the queue the produce published (no clobber race)
+    assert {"name": "BLOKPORT_TEXTURE_QUEUE_KEY", "value": key} in env
 
 
 def test_submit_failure_is_swallowed(monkeypatch):

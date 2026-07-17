@@ -36,8 +36,14 @@ DEBG_OUTPUT_DIR = SETTINGS.paths.workspace_root / "image_pipeline" / "to_upload"
 # The queue image_prompts.build writes / genetate_images.py reads (ONE file, image_pipeline/).
 PROMPTS_LOCAL = SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json"
 # The produce PUBLISHES its queue here so an on-demand GPU task (which has no local export/products/
-# backbone_additions to rebuild it) can pull the exact queue the produce built. Env-scoped.
+# backbone_additions to rebuild it) can pull the exact queue the produce built. Env-scoped. This is the
+# LEGACY/fallback key; each dispatch now publishes to a UNIQUE key (below) to avoid the clobber race where a
+# second produce overwrites the queue a still-starting GPU job is about to pull.
 PROMPTS_S3_KEY = f"{ENV_SEGMENT}/scraper/prompts_to_generate.json"
+# A per-dispatch queue lives here; the produce mints a unique key under this prefix and passes it to the GPU
+# job via TEXTURE_QUEUE_KEY_ENV, so overlapping mints never share (and clobber) one queue object.
+TEXTURE_QUEUE_PREFIX = f"{ENV_SEGMENT}/scraper/texture_queues/"
+TEXTURE_QUEUE_KEY_ENV = "BLOKPORT_TEXTURE_QUEUE_KEY"   # the GPU job reads its exact queue key from here
 GEN_DEPS = ("fal_client", "torch")                 # the generator stack the actual run needs to import
 
 
@@ -64,16 +70,17 @@ def _target_keys(prompts_path: Path) -> list[str]:
     return [i["output_name"] for i in items if i.get("output_name")]
 
 
-def publish_prompts(prompts_path: Path, client=None) -> bool:
+def publish_prompts(prompts_path: Path, key: str | None = None, client=None) -> bool:
     """Upload the produce's just-built queue to S3 so an on-demand GPU texture job can pull the EXACT set
     the produce built (a fresh :gpu task has no local export/products/backbone_additions to rebuild it).
-    Called by the produce when it dispatches the GPU job. No-op (returns False) when S3 is unreachable or
-    dry-run, or the queue file is absent."""
+    Called by the produce when it dispatches the GPU job, with a UNIQUE per-dispatch key so a concurrent
+    produce can't clobber it. No-op (returns False) when S3 is unreachable or dry-run, or the queue file is
+    absent -- the caller MUST treat False as 'do not dispatch a GPU job against a stale queue'."""
     client = client or _s3_client()
     if client is None or SETTINGS.s3.dry_run or not prompts_path.is_file():
         return False
     try:
-        client.upload_file(str(prompts_path), SETTINGS.s3.bucket, PROMPTS_S3_KEY)
+        client.upload_file(str(prompts_path), SETTINGS.s3.bucket, key or PROMPTS_S3_KEY)
         return True
     except Exception as exc:
         log.error("could not publish the texture queue to S3", extra={"extra_fields": {"error": str(exc)}})
@@ -82,17 +89,40 @@ def publish_prompts(prompts_path: Path, client=None) -> bool:
 
 def _fetch_published_prompts(client=None) -> bool:
     """Download the produce's published queue from S3 into PROMPTS_LOCAL. Returns True if it landed. Used
-    by the GPU task, which cannot rebuild the queue locally. Absent object / unreachable S3 -> False (the
-    caller then falls back to building locally, the dev-box path)."""
+    by the GPU task, which cannot rebuild the queue locally. Reads its EXACT queue key from
+    TEXTURE_QUEUE_KEY_ENV (the per-dispatch key the produce passed), falling back to the legacy shared key
+    for a manual/legacy run. Absent object / unreachable S3 -> False (the caller then falls back to building
+    locally, the dev-box path)."""
     client = client or _s3_client()
     if client is None:
         return False
+    key = os.environ.get(TEXTURE_QUEUE_KEY_ENV) or PROMPTS_S3_KEY
     try:
         PROMPTS_LOCAL.parent.mkdir(parents=True, exist_ok=True)
-        client.download_file(SETTINGS.s3.bucket, PROMPTS_S3_KEY, str(PROMPTS_LOCAL))
+        client.download_file(SETTINGS.s3.bucket, key, str(PROMPTS_LOCAL))
         return True
     except Exception:
         return False   # no published queue (e.g. running on a box that rebuilds it locally)
+
+
+def _prune_already_on_s3(prompts_path: Path, targets: list[str]) -> list[str]:
+    """Drop queue entries whose {Key}.png is ALREADY in <env>/variations/ on S3 and rewrite prompts_path so
+    the generator itself skips them -- the S3 object is the idempotency marker, so a re-dispatch never
+    regenerates (or re-charges FAL for) an image that exists. S3 unreachable (keys is None) -> no pruning and
+    generate all: the safe default, since we cannot prove an image exists (better a rare re-charge than
+    skipping a genuinely missing image and shipping a variant imageless)."""
+    from stone_pipeline.stages.emit_catalog import _s3_variation_keys
+    existing = _s3_variation_keys()
+    if not existing:
+        return targets
+    items = json.loads(prompts_path.read_text(encoding="utf-8")) if prompts_path.exists() else []
+    keep = [i for i in items if i.get("output_name") not in existing]
+    dropped = len(items) - len(keep)
+    if dropped:
+        prompts_path.write_text(json.dumps(keep), encoding="utf-8")
+        log.info("skipped variant images already on S3 (idempotent re-dispatch)",
+                 extra={"extra_fields": {"skipped": dropped}})
+    return [k for k in targets if k not in existing]
 
 
 def _resolve_queue() -> Path:
@@ -154,6 +184,14 @@ def run() -> int:
     if not targets:
         log.info("no new variant images to prepare (every product-backed variant already has one on S3)")
         print("Nothing to prepare: every product-backed variant already has an image.")
+        return 0
+
+    # Idempotency: prune queue entries whose image is already on S3 BEFORE generating, so a re-dispatch
+    # (overlapping mints, a re-Republish) never re-charges FAL for an image that exists.
+    targets = _prune_already_on_s3(prompts_path, targets)
+    if not targets:
+        log.info("every queued variant image is already on S3; nothing to generate")
+        print("Nothing to prepare: every queued variant image already exists on S3.")
         return 0
 
     blockers = _generator_blockers()
