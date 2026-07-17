@@ -68,7 +68,13 @@ RUN python -c "from huggingface_hub import snapshot_download as d; \
 # runtime from_pretrained hits the cache -- no fetch on a live task. Skip the demo images (large, unused).
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('PramaLLC/BEN2', revision='e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f', ignore_patterns=['BEN2_demo_pictures/*','*.md'])"
-ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth
+# HF offline: CLIP + BEN2 are baked above; force offline so from_pretrained hits the cache and never falls
+# through to a live Hub fetch (which on a networkless task hangs instead of failing). No REQUIRE_CUDA here --
+# :imageproc is the CPU path and BEN2 on CPU is legitimate.
+ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_DOWNLOAD_TIMEOUT=15
 
 
 # --- GPU enhancement variant (CUDA torch + Real-ESRGAN + CLIP) ----------------
@@ -113,8 +119,18 @@ RUN python -c "from huggingface_hub import snapshot_download as d; \
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('PramaLLC/BEN2', revision='e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f', ignore_patterns=['BEN2_demo_pictures/*','*.md'])"
 # Sensible enhancement defaults baked in (Batch job overrides SRC / BLOKPORT_ENV / bucket).
+# HF offline: the CLIP + BEN2 snapshots are baked above (root's default /root/.cache/huggingface). Force
+# offline so from_pretrained can NEVER fall through to a live Hub fetch -- on the Batch GPU subnet that has no
+# HF route the fetch does not fail fast, it HANGS for minutes with no output (the 26-min BEN2 stall). Offline
+# turns a cache miss into an immediate LocalEntryNotFoundError (fail loud); the timeout bounds any stray call.
+# BLOKPORT_REQUIRE_CUDA: this image is dispatched specifically for the GPU, so rb_images must abort loud if
+# CUDA is absent rather than silently degrade BEN2 to CPU (:imageproc, the CPU path, does NOT set this).
 ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
-    BLOKPORT_IMAGE_PROCESSING=true
+    BLOKPORT_IMAGE_PROCESSING=true \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_DOWNLOAD_TIMEOUT=15 \
+    BLOKPORT_REQUIRE_CUDA=1
 COPY . /app
 RUN chmod +x /app/deploy/run_pipeline.sh
 ENTRYPOINT ["/app/deploy/run_pipeline.sh"]

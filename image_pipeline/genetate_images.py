@@ -385,7 +385,7 @@ def generate_one(item: dict, base_sizes: dict) -> bool:
     return False
 
 
-def main() -> None:
+def main() -> int:
     key = os.environ.get("FAL_KEY", "")
     if not key or key == "PASTE-YOUR-ROTATED-KEY-HERE":
         raise SystemExit("❌ FAL_KEY not set. Export it first: export FAL_KEY=\"<id>:<secret>\" "
@@ -436,7 +436,7 @@ def main() -> None:
     if not todo:
         log("✅ Nothing to do — every requested image already exists in the output "
             "folder. Delete files (or change OUTPUT_DIR) to regenerate.")
-        return
+        return 0
 
     log(f"🚀 Generating {len(todo)} images with {MAX_WORKERS} workers...")
     log(f"   (Max can take 20-60s per image — a heartbeat prints every "
@@ -490,7 +490,11 @@ def main() -> None:
     log(f"✅ Done: {done} succeeded, {failed} failed.")
     if failed:
         log(f"   Failed items logged to {FAILURES_FILE} — re-run this script to retry them.")
+    return failed
 
 
 if __name__ == "__main__":
-    main()
+    # exit non-zero when any image failed to generate, so the caller (prepare_variant_images via
+    # _generate_queued_images) records this script as failed and holds those variants rather than treating a
+    # partial run as clean. FAL_KEY-missing already raises SystemExit above.
+    raise SystemExit(1 if main() else 0)
