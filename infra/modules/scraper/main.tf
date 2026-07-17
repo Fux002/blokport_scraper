@@ -156,9 +156,13 @@ data "aws_iam_policy_document" "task" {
   dynamic "statement" {
     for_each = var.gpu_job_queue_arn == "" ? [] : [1]
     content {
-      sid       = "SubmitEnhanceJobs"
-      actions   = ["batch:SubmitJob"]
-      resources = [var.gpu_job_queue_arn, var.gpu_job_definition_arn]
+      sid     = "SubmitEnhanceJobs"
+      actions = ["batch:SubmitJob"]
+      # SubmitJob by NAME (what the triggers do) authorizes against the BARE job-definition ARN
+      # (.../name), while submit-by-revision authorizes against .../name:<n>. The passed ARN is the ':*'
+      # (revision) form, which does NOT match the bare name -> AccessDenied. Allow BOTH so a name-submit works.
+      resources = concat([var.gpu_job_queue_arn],
+      distinct([var.gpu_job_definition_arn, replace(var.gpu_job_definition_arn, ":*", "")]))
     }
   }
 }

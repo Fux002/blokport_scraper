@@ -8,15 +8,28 @@ from __future__ import annotations
 import json
 import types
 
+import pytest
+
 import stone_pipeline.prepare_variant_images as pvi
+
+
+@pytest.fixture(autouse=True)
+def _no_published_queue(monkeypatch):
+    # default for run() tests: no produce-published queue on S3, so _resolve_queue falls back to the local
+    # build path (which those tests monkeypatch). Tests of the published path override this explicitly.
+    monkeypatch.setattr(pvi, "_fetch_published_prompts", lambda client=None: False)
 
 
 class _FakeS3:
     def __init__(self):
         self.calls = []
+        self.downloads = []
 
     def upload_file(self, local, bucket, key):
         self.calls.append((local, bucket, key))
+
+    def download_file(self, bucket, key, local):
+        self.downloads.append((bucket, key, local))
 
 
 def _fake_settings(dry_run: bool, bucket: str = "test-bucket"):
@@ -79,3 +92,32 @@ def test_run_generates_then_uploads_when_ready(tmp_path, monkeypatch):
                         lambda keys, client=None: seen.update(keys=keys) or (len(keys), []))
     assert pvi.run() == 2
     assert seen["keys"] == ["slab_marble_a", "slab_marble_b"]
+
+
+# -- queue passing: produce publishes the queue to S3; the bare GPU task pulls it -----------------------
+
+def test_publish_prompts_uploads_to_the_env_scoped_key(tmp_path, monkeypatch):
+    q = tmp_path / "prompts_to_generate.json"
+    q.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
+    client = _FakeS3()
+    assert pvi.publish_prompts(q, client=client) is True
+    assert client.calls == [(str(q), "test-bucket", pvi.PROMPTS_S3_KEY)]
+
+
+def test_publish_prompts_noop_when_file_missing_or_dry_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
+    client = _FakeS3()
+    assert pvi.publish_prompts(tmp_path / "absent.json", client=client) is False   # no file
+    assert client.calls == []
+    q = tmp_path / "p.json"; q.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=True))
+    assert pvi.publish_prompts(q, client=_FakeS3()) is False                        # dry-run
+
+
+def test_resolve_queue_prefers_the_published_queue_over_a_local_build(monkeypatch):
+    # when the produce's queue is on S3, use it (do NOT rebuild locally -- the bare GPU task cannot)
+    monkeypatch.setattr(pvi, "_fetch_published_prompts", lambda client=None: True)
+    monkeypatch.setattr(pvi.image_prompts, "build",
+                        lambda: (_ for _ in ()).throw(AssertionError("rebuilt instead of using published")))
+    assert pvi._resolve_queue() == pvi.PROMPTS_LOCAL
