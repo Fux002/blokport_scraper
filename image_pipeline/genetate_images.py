@@ -318,7 +318,10 @@ def save_image(content: bytes, out_path: Path) -> None:
         img = img.resize((FINAL_SIZE, FINAL_SIZE), Image.LANCZOS)
         if OUTPUT_FORMAT in ("jpeg", "jpg") and img.mode != "RGB":
             img = img.convert("RGB")
-        img.save(tmp)
+        # Pass the format EXPLICITLY: the atomic temp name ends in ".tmp", and PIL infers the format from
+        # the extension -> ".tmp" is unknown -> "unknown file extension: .tmp" (every save failed). Derive it
+        # from the REAL output extension (.png/.jpg), not the temp one.
+        img.save(tmp, format=Image.registered_extensions().get(out_path.suffix.lower(), "PNG"))
     os.replace(tmp, out_path)
 
 
