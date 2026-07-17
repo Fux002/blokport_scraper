@@ -86,7 +86,8 @@ RUN pip install --upgrade "pip" "setuptools>=78.1.1"
 COPY stone_pipeline/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt \
     && pip install "pillow>=10" "spandrel==0.4.2" \
-       "transformers==4.44.2" "safetensors==0.4.4" "fal-client>=0.4" "requests>=2.31" "ben2"
+       "transformers==4.44.2" "safetensors==0.4.4" "fal-client>=0.4" "requests>=2.31" \
+       "git+https://github.com/PramaLLC/BEN2.git@2c99a5da477b5523585bfa5c893888a6e818a8f6"
 # ben2: BEN2 background-removal for VARIANT TEXTURES (rb_images.py), so RUN_MODE=generate-textures runs on
 # THIS same GPU image. Additive -- the de-watermark/enhance paths are unchanged. Its model is fetched from
 # HF at first use (rb_images.BEN_Base.from_pretrained); baking it pinned (like ESRGAN/CLIP below) is a follow-up.
