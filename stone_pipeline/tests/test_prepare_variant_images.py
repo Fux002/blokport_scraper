@@ -33,8 +33,13 @@ class _FakeS3:
 
 
 def _fake_settings(dry_run: bool, bucket: str = "test-bucket"):
-    # rebind the module's SETTINGS (frozen dataclass -> replace the name, don't mutate the field)
-    return types.SimpleNamespace(s3=types.SimpleNamespace(dry_run=dry_run, bucket=bucket))
+    # rebind the module's SETTINGS (frozen dataclass -> replace the name, don't mutate the field). paths is
+    # used by the _find_png rglob fallback; point workspace_root at a dir with no image_pipeline/ so a
+    # missing key stays missing.
+    import pathlib
+    return types.SimpleNamespace(
+        s3=types.SimpleNamespace(dry_run=dry_run, bucket=bucket),
+        paths=types.SimpleNamespace(workspace_root=pathlib.Path("/nonexistent-workspace-root")))
 
 
 def test_upload_targets_the_variations_prefix_and_reports_missing(tmp_path, monkeypatch):
