@@ -648,6 +648,21 @@ class AutoEnhanceConfig:
 
 
 @dataclass(frozen=True)
+class AutoTextureConfig:
+    """After a produce queues NEW-variant textures the lean :core cannot generate (no fal_client/torch),
+    auto-submit ONE on-demand GPU Batch job to generate + upload them (deploy/texture_trigger). Part of the
+    produce (Republish), NOT a cron: it fires only when a produce actually queued textures. The job reuses
+    the SAME GPU queue/job-definition as auto_enhance (the :gpu image runs both, selected by RUN_MODE=
+    generate-textures -> prepare_variant_images, the unchanged FLUX.2 -> BEN2 -> upload pipeline); a separate
+    flag so textures and photo-enhance enable independently. Fire-and-forget; the next produce stamps the
+    images (the same one-cycle hold as auto_enhance). Off by default (BLOKPORT_AUTO_TEXTURE)."""
+
+    enabled: bool = _env_bool("BLOKPORT_AUTO_TEXTURE", False)
+    queue: str = os.environ.get("BLOKPORT_GPU_QUEUE", "")
+    job_definition: str = os.environ.get("BLOKPORT_GPU_JOBDEF", "")
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: str = BLOKPORT_ENV  # "development" | "production" (BLOKPORT_ENV)
     # A hash of the live id set (section 3.2). Computed from reference data at
@@ -662,6 +677,7 @@ class Settings:
     s3: S3Config = field(default_factory=S3Config)
     images: ImagesConfig = field(default_factory=ImagesConfig)
     auto_enhance: AutoEnhanceConfig = field(default_factory=AutoEnhanceConfig)
+    auto_texture: AutoTextureConfig = field(default_factory=AutoTextureConfig)
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     curation: CurationConfig = field(default_factory=CurationConfig)
 

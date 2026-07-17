@@ -285,11 +285,12 @@ module "sync_service_dev" {
   produce_secret_arns = local.dev_ssm_secrets
 
   # Auto-enhance: the produce trigger submits the dev GPU reprocess for newly-staged images (scoped IAM +
-  # queue/def names). ON in dev (dev_auto_enhance defaults true).
+  # queue/def names). ON in dev (dev_auto_enhance defaults true). Auto-texture reuses the same queue/jobdef.
   gpu_job_queue_name       = module.gpu_enhance_dev.job_queue
   gpu_job_definition_name  = module.gpu_enhance_dev.job_definition
   gpu_job_queue_arn        = module.gpu_enhance_dev.job_queue_arn
   gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
   auto_enhance_enabled     = var.dev_auto_enhance
+  auto_texture_enabled     = var.dev_auto_texture
   require_enhanced_enabled = var.dev_require_enhanced
 }

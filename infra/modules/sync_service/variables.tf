@@ -107,6 +107,12 @@ variable "auto_enhance_enabled" {
   description = "BLOKPORT_AUTO_ENHANCE on the produce container. Ships false (dark); flip to true to auto-fire the GPU reprocess on new images."
 }
 
+variable "auto_texture_enabled" {
+  type        = bool
+  default     = false
+  description = "BLOKPORT_AUTO_TEXTURE on the produce container. Ships false (dark); flip to true ONLY after the :gpu image is rebuilt with ben2, else the dispatched texture job fails at background-removal. Reuses the same GPU queue/jobdef as auto-enhance (RUN_MODE=generate-textures)."
+}
+
 variable "require_enhanced_enabled" {
   type        = bool
   default     = false

@@ -21,3 +21,7 @@ transformers==4.44.2    # the non-stone image classifier (CLIPModel); pin import
 safetensors==0.4.4      # weights format (CLIP)
 fal-client>=0.4         # FAL FLUX Fill de-watermark client (hosted inpainting; FAL_KEY from env)
 requests>=2.31          # download the FAL result
+ben2                    # BEN2 background-removal for VARIANT TEXTURES (image_pipeline/rb_images.py), needed
+                        # by the on-demand GPU texture job (RUN_MODE=generate-textures). Pulls its model from
+                        # HF at first use (rb_images: BEN_Base.from_pretrained); a pinned build-time bake --
+                        # like the ESRGAN/CLIP weights -- is a follow-up hardening, not required to run.
