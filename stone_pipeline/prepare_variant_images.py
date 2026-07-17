@@ -114,18 +114,30 @@ def _generator_blockers() -> list[str]:
     return blockers
 
 
+def _find_png(key: str) -> Path | None:
+    """Locate the generated {key}.png. Primary: DEBG_OUTPUT_DIR (rb_images' output). Fallback: search the
+    whole image_pipeline/ tree -- robust to any cwd/output-dir divergence on a runner (the generator scripts
+    resolve "./to_upload" relative to THEIR cwd, which must equal DEBG_OUTPUT_DIR but is where the one live
+    run diverged: the direct path came up empty though rb_images reported 19 written)."""
+    direct = DEBG_OUTPUT_DIR / f"{key}.png"
+    if direct.is_file():
+        return direct
+    ip_root = SETTINGS.paths.workspace_root / "image_pipeline"
+    return next(ip_root.rglob(f"{key}.png"), None)
+
+
 def upload_variant_images(keys: list[str], client=None) -> tuple[int, list[str]]:
-    """Upload each generated {Key}.png from the de-background output dir to <env>/variations/{Key}.png --
-    the CORRECT prefix the variant's Image URL resolves to. Returns (uploaded, missing_keys). A key whose
-    png the generator did not produce is REPORTED (missing), never silently skipped: its product stays HELD
-    and the caller surfaces it. No-op (returns 0, all keys missing) when S3 is unreachable or dry-run."""
+    """Upload each generated {Key}.png (found under image_pipeline/) to <env>/variations/{Key}.png -- the
+    CORRECT prefix the variant's Image URL resolves to. Returns (uploaded, missing_keys). A key whose png the
+    generator did not produce is REPORTED (missing), never silently skipped: its product stays HELD and the
+    caller surfaces it. No-op (returns 0, all keys missing) when S3 is unreachable or dry-run."""
     client = client or _s3_client()
     if client is None or SETTINGS.s3.dry_run:
         return 0, list(keys)
     uploaded, missing = 0, []
     for key in keys:
-        png = DEBG_OUTPUT_DIR / f"{key}.png"
-        if not png.is_file():
+        png = _find_png(key)
+        if png is None:
             missing.append(key)
             continue
         client.upload_file(str(png), SETTINGS.s3.bucket, f"{VARIATIONS_PREFIX}{key}.png")
@@ -159,9 +171,19 @@ def run() -> int:
     uploaded, missing = upload_variant_images(targets)
     if failed or missing:
         # loud: some images did not generate/upload, so their products stay HELD until a clean re-run.
-        # Safe (gate_on_images never ships an imageless product) but surfaced, never silent.
+        # Safe (gate_on_images never ships an imageless product) but surfaced, never silent. Include where we
+        # looked, so a path/output-dir mismatch on a runner is diagnosable from the log rather than guessed.
+        def _peek(p: Path):
+            try:
+                return sorted(x.name for x in p.iterdir())[:6]
+            except Exception as exc:
+                return f"<{exc}>"
+        ip_root = SETTINGS.paths.workspace_root / "image_pipeline"
         log.error("some variant images were not produced", extra={"extra_fields": {
-            "queued": len(targets), "uploaded": uploaded, "failed_scripts": failed, "missing_pngs": missing}})
+            "queued": len(targets), "uploaded": uploaded, "failed_scripts": failed,
+            "missing_pngs": missing[:8], "debg_dir": str(DEBG_OUTPUT_DIR), "debg_files": _peek(DEBG_OUTPUT_DIR),
+            "ip_to_upload": _peek(ip_root / "to_upload"), "ip_images": _peek(ip_root / "images"),
+            "cwd": os.getcwd(), "workspace_root": str(SETTINGS.paths.workspace_root)}})
     log.info("variant images prepared", extra={"extra_fields": {"queued": len(targets), "uploaded": uploaded}})
     print(f"Prepared + uploaded {uploaded}/{len(targets)} new variant image(s) to {VARIATIONS_PREFIX}")
     return uploaded
