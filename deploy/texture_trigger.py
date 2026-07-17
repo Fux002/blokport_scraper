@@ -51,7 +51,12 @@ def submit_texture_job(queued: int) -> str | None:
             jobDefinition=cfg.job_definition,
             # override the job-def's default RUN_MODE (reprocess) so the SAME :gpu container runs the texture
             # pipeline instead of the de-watermark/enhance one. No SRC/window env: one job does the whole queue.
-            containerOverrides={"environment": [{"name": "RUN_MODE", "value": "generate-textures"}]})
+            # BLOKPORT_S3_DRY_RUN=false is REQUIRED: it defaults TRUE in dev (a safety so a box never writes the
+            # bucket), and the gpu job-def does not set it -- so without this the texture upload no-ops and every
+            # {Key}.png silently never reaches dev/variations/ (the produce container sets this same false).
+            containerOverrides={"environment": [
+                {"name": "RUN_MODE", "value": "generate-textures"},
+                {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"}]})
         job_id = resp["jobId"]
         log.info("auto-texture submitted", extra={"extra_fields": {"queued": queued, "job_id": job_id}})
         return job_id
