@@ -171,23 +171,23 @@ resource "aws_ecs_task_definition" "this" {
 
   container_definitions = jsonencode([
     {
-      name = "sync"
-      image = "${var.image_repo_url}:${var.image_tag}"
+      name      = "sync"
+      image     = "${var.image_repo_url}:${var.image_tag}"
       essential = true
       # override the Dockerfile ENTRYPOINT (run_pipeline.sh) -- an empty array is treated as "unset"
       # by ECS. On a cold task the server restores the ledger from its S3 snapshot, else self-seeds a
       # fresh one (snapshot.restore + bootstrap_ledger_if_missing), so no wrapper is needed.
-      entryPoint   = ["python", "-m", "stone_pipeline.ledger.server"]
-      portMappings = [{ containerPort = 8723, protocol = "tcp" }]
-      environment  = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
-      secrets      = [{ name = "BLOKPORT_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
-      mountPoints  = local.ledger_mount
+      entryPoint       = ["python", "-m", "stone_pipeline.ledger.server"]
+      portMappings     = [{ containerPort = 8723, protocol = "tcp" }]
+      environment      = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
+      secrets          = [{ name = "BLOKPORT_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
+      mountPoints      = local.ledger_mount
       logConfiguration = { logDriver = "awslogs", options = local.log_options }
     },
     {
-      name = "config"
-      image = "${var.image_repo_url}:${var.image_tag}"
-      essential = true
+      name         = "config"
+      image        = "${var.image_repo_url}:${var.image_tag}"
+      essential    = true
       entryPoint   = ["python", "-m", "stone_pipeline.config.server"]
       portMappings = [{ containerPort = 8724, protocol = "tcp" }]
       # The produce subprocess (fetch -> scrape -> build) runs in THIS container, so its image stage
@@ -208,6 +208,10 @@ resource "aws_ecs_task_definition" "this" {
         # GPU spins up on demand and back to zero. Ships OFF (flag false); the queue/job-def names let the
         # trigger reach Batch once enabled. CLASSIFY stays false in the auto path (no uncalibrated discards).
         { name = "BLOKPORT_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
+        # Auto-texture: after produce QUEUES new-variant textures, submit ONE GPU job (RUN_MODE=generate-
+        # textures) to generate + upload them -- reusing the SAME queue/jobdef below. Ships OFF; flip on only
+        # after the :gpu image carries ben2 (else the job fails at background-removal).
+        { name = "BLOKPORT_AUTO_TEXTURE", value = tostring(var.auto_texture_enabled) },
         { name = "BLOKPORT_GPU_QUEUE", value = var.gpu_job_queue_name },
         { name = "BLOKPORT_GPU_JOBDEF", value = var.gpu_job_definition_name },
         # HARD publish gate: only GPU-enhanced images (enhanced/ marker) may be linked. Ships OFF -- flip on
@@ -218,8 +222,8 @@ resource "aws_ecs_task_definition" "this" {
       # carries the scraper's runtime secrets (proxy, fal key) when configured.
       secrets = concat(
         [{ name = "BLOKPORT_CONFIG_TOKEN", valueFrom = var.config_token_ssm_arn }],
-        [for k, v in var.produce_secret_arns : { name = k, valueFrom = v }])
-      mountPoints  = local.ledger_mount
+      [for k, v in var.produce_secret_arns : { name = k, valueFrom = v }])
+      mountPoints      = local.ledger_mount
       logConfiguration = { logDriver = "awslogs", options = local.log_options }
     },
   ])
@@ -265,6 +269,6 @@ resource "aws_ecs_service" "this" {
     registry_arn = aws_service_discovery_service.scraper.arn
   }
 
-  depends_on = [aws_service_discovery_service.scraper]   # Cloud Map registration exists before the service starts
+  depends_on = [aws_service_discovery_service.scraper] # Cloud Map registration exists before the service starts
   tags       = local.tags
 }

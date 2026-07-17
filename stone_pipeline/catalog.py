@@ -154,9 +154,11 @@ def _auto_queue_images() -> int:
     # scripts that would just ImportError.
     import importlib.util
     missing_deps = [m for m in ("fal_client", "torch") if importlib.util.find_spec(m) is None]
+    generated_inline = False
     if items and os.environ.get("FAL_KEY") and not missing_deps:
         log.info("auto image generation: FAL_KEY + deps present, generating", extra={"extra_fields": {"queued": len(items)}})
         failed = _generate_queued_images()
+        generated_inline = True
         if failed:
             # distinct error-level signal: generation failed, so some {Key}.png will be absent. The
             # image gate downstream HOLDS imageless variants, but only when S3 is reachable -- surface
@@ -165,11 +167,11 @@ def _auto_queue_images() -> int:
                       extra={"extra_fields": {"failed_scripts": failed, "queued": len(items)}})
     elif items and os.environ.get("FAL_KEY") and missing_deps:
         # FAL_KEY is set but this image can't generate (no fal_client/torch): queue only, delegate the
-        # actual generation to the image_pipeline / GPU pass. Their products stay HELD until {Key}.png
-        # exists. Warn (not error) -- this is the expected deployed-image path, not a failure.
+        # actual generation to the on-demand GPU texture job (auto-texture, below). Their products stay
+        # HELD until {Key}.png exists. Warn (not error) -- this is the expected lean-image path.
         log.warning("%d new variant texture(s) QUEUED (image_pipeline/prompts_to_generate.json) but NOT "
-                    "generated here: this image lacks %s. Run the generator / GPU pass to produce them; "
-                    "until then their products stay HELD.",
+                    "generated here: this image lacks %s. Dispatching the GPU texture job (auto-texture); "
+                    "until it lands, their products stay HELD.",
                     len(items), ", ".join(missing_deps), extra={"extra_fields": {"queued": len(items)}})
     elif items:
         # loud signal (risk 2): textures were queued but FAL_KEY is not set for the produce, so they are
@@ -179,6 +181,15 @@ def _auto_queue_images() -> int:
         log.warning("no FAL_KEY for the produce: %d new variant texture(s) queued but NOT generated -- "
                     "their products stay HELD until the images exist (wire FAL_KEY, or run image_pipeline)",
                     len(items), extra={"extra_fields": {"queued": len(items)}})
+    # Part of the produce (Republish), NOT a cron: when textures were queued but this lean image did not
+    # generate them, fire-and-forget ONE on-demand GPU job to do it. No-op unless BLOKPORT_AUTO_TEXTURE is
+    # set; best-effort (never fails the produce). The next produce stamps the images (one-cycle hold).
+    if items and not generated_inline:
+        try:
+            from deploy.texture_trigger import submit_texture_job
+            submit_texture_job(len(items))
+        except Exception:
+            log.exception("auto-texture trigger failed (non-fatal; textures stay queued for the next run)")
     return len(items)
 
 

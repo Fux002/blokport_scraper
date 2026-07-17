@@ -26,6 +26,10 @@ if [ "$RUN_MODE" = "reprocess" ]; then
   echo "==> reprocess a source's scraped/ originals -> improved/ (no scrape)"
   exec python -m deploy.reprocess_source
 fi
+if [ "$RUN_MODE" = "generate-textures" ]; then
+  echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> dev/variations/), no scrape"
+  exec python -m stone_pipeline.prepare_variant_images
+fi
 
 ENV_NAME="${BLOKPORT_ENV:-development}"
 echo "==> blokport scraper run | env=${ENV_NAME} image_mode=${BLOKPORT_IMAGE_MODE:-passthrough} processing=${BLOKPORT_IMAGE_PROCESSING:-false}"

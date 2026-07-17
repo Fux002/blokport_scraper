@@ -115,6 +115,12 @@ variable "dev_auto_enhance" {
   description = "Enable BLOKPORT_AUTO_ENHANCE on the dev produce + scheduled scrape: auto-submit the GPU reprocess for newly-staged images. ON in dev: the cold-start cycle is validated. Prod uses its own var."
 }
 
+variable "dev_auto_texture" {
+  type        = bool
+  default     = false
+  description = "Enable BLOKPORT_AUTO_TEXTURE on the dev produce: after a produce queues new-variant textures, auto-submit the GPU job (RUN_MODE=generate-textures) to generate + upload them. Ships OFF: flip true ONLY after the :gpu image is rebuilt with ben2 (build_gpu), else dispatched jobs fail at background-removal."
+}
+
 variable "dev_require_enhanced" {
   type        = bool
   default     = true
