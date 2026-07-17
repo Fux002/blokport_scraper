@@ -46,8 +46,9 @@ ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 FROM core AS imageproc
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       build-essential libjpeg-dev zlib1g-dev libgl1 libglib2.0-0 curl \
+       build-essential libjpeg-dev zlib1g-dev libgl1 libglib2.0-0 curl git \
     && rm -rf /var/lib/apt/lists/*
+# git: requirements-imageproc installs ben2 from a pinned git SHA (PyPI package was pulled).
 COPY stone_pipeline/requirements-imageproc.txt /tmp/requirements-imageproc.txt
 # --extra-index-url (NOT --index-url): keep PyPI as the primary index so pillow etc.
 # resolve normally, while torch/torchvision pull the CPU build from the pytorch index
@@ -78,8 +79,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates libgl1 libglib2.0-0 curl build-essential libjpeg-dev zlib1g-dev \
+       ca-certificates libgl1 libglib2.0-0 curl build-essential libjpeg-dev zlib1g-dev git \
     && rm -rf /var/lib/apt/lists/*
+# git: pip installs ben2 (BEN2 background-remover) from a pinned git SHA -- the PyPI package was pulled.
 RUN pip install --upgrade "pip" "setuptools>=78.1.1"
 # torch/torchvision are ALREADY in the CUDA base — install ONLY the app deps (pillow>=10
 # first so nothing backtracks to an uncompilable old pillow), never re-touch torch.
