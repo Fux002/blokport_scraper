@@ -64,6 +64,8 @@ def test_submits_one_job_with_run_mode_override(monkeypatch):
     assert call["jobQueue"] == "tex-q" and call["jobDefinition"] == "tex-jd"
     env = call["containerOverrides"]["environment"]
     assert {"name": "RUN_MODE", "value": "generate-textures"} in env   # reuse the enhance jobdef, texture mode
+    # dev defaults S3_DRY_RUN true; the texture job MUST write, or the upload silently no-ops
+    assert {"name": "BLOKPORT_S3_DRY_RUN", "value": "false"} in env
 
 
 def test_submit_failure_is_swallowed(monkeypatch):
