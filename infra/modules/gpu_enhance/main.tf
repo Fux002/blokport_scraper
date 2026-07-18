@@ -265,3 +265,74 @@ resource "aws_batch_job_definition" "this" {
     attempt_duration_seconds = 18000
   }
 }
+
+# --- Failure alerting: notify when an auto-texture job FAILS ------------------
+# The variant-texture loop is fire-and-forget with a one-cycle hold, so a failed batch surfaces only as
+# products missing from Pull. An EventBridge rule on the Batch "FAILED" state change (scoped to THIS queue
+# and the "autotexture" job name the produce dispatches) fans out to SNS -> email. Event-driven, no polling.
+# All gated on alert_email being set, so an unconfigured env creates nothing.
+locals {
+  alerts_enabled = var.alert_email == "" ? 0 : 1
+}
+
+resource "aws_sns_topic" "alerts" {
+  count = local.alerts_enabled
+  name  = "${local.name}-alerts"
+}
+
+resource "aws_sns_topic_subscription" "alerts_email" {
+  count     = local.alerts_enabled
+  topic_arn = aws_sns_topic.alerts[0].arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+data "aws_iam_policy_document" "alerts_topic" {
+  count = local.alerts_enabled
+  statement {
+    sid       = "AllowEventBridgePublish"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.alerts[0].arn]
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "alerts" {
+  count  = local.alerts_enabled
+  arn    = aws_sns_topic.alerts[0].arn
+  policy = data.aws_iam_policy_document.alerts_topic[0].json
+}
+
+resource "aws_cloudwatch_event_rule" "texture_failed" {
+  count       = local.alerts_enabled
+  name        = "${local.name}-texture-failed"
+  description = "Auto-texture Batch job FAILED in ${local.name}"
+  event_pattern = jsonencode({
+    source        = ["aws.batch"]
+    "detail-type" = ["Batch Job State Change"]
+    detail = {
+      status   = ["FAILED"]
+      jobQueue = [aws_batch_job_queue.this.arn]
+      jobName  = [{ prefix = "autotexture" }] # the name the produce's texture dispatch submits
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "texture_failed_sns" {
+  count     = local.alerts_enabled
+  rule      = aws_cloudwatch_event_rule.texture_failed[0].name
+  target_id = "sns"
+  arn       = aws_sns_topic.alerts[0].arn
+  # a compact human-readable line instead of the raw event JSON
+  input_transformer {
+    input_paths = {
+      job    = "$.detail.jobName"
+      id     = "$.detail.jobId"
+      reason = "$.detail.statusReason"
+    }
+    input_template = "\"Auto-texture job <job> (<id>) FAILED in ${local.name}: <reason>. New-variant images were NOT generated; their products stay HELD until a successful re-run.\""
+  }
+}

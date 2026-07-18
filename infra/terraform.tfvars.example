@@ -8,3 +8,7 @@
 # image_tag           = "core"          # or "imageproc" for de-watermark
 # schedule_enabled    = false           # flip true once a manual run is verified
 # schedule_expression = "cron(0 3 * * ? *)"
+#
+# Proactive alert when an auto-texture GPU job fails (otherwise a failed batch shows only as
+# products missing from Pull). Set this, apply, then CONFIRM the SNS email AWS sends you:
+# alert_email         = "ops@example.com"

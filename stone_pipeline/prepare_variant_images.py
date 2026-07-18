@@ -44,6 +44,11 @@ PROMPTS_S3_KEY = f"{ENV_SEGMENT}/scraper/prompts_to_generate.json"
 # job via TEXTURE_QUEUE_KEY_ENV, so overlapping mints never share (and clobber) one queue object.
 TEXTURE_QUEUE_PREFIX = f"{ENV_SEGMENT}/scraper/texture_queues/"
 TEXTURE_QUEUE_KEY_ENV = "BLOKPORT_TEXTURE_QUEUE_KEY"   # the GPU job reads its exact queue key from here
+# Per-dispatch queue objects are ephemeral coordination, consumed by their GPU job within minutes. Delete
+# any older than this at publish time so the prefix self-heals instead of accumulating forever. Far above a
+# job's runtime (jobs finish in minutes; the Batch attempt ceiling is hours), so this can never delete a
+# queue a running or just-published job still needs.
+TEXTURE_QUEUE_TTL_SECONDS = 86400   # 1 day
 GEN_DEPS = ("fal_client", "torch")                 # the generator stack the actual run needs to import
 
 
@@ -81,10 +86,37 @@ def publish_prompts(prompts_path: Path, key: str | None = None, client=None) -> 
         return False
     try:
         client.upload_file(str(prompts_path), SETTINGS.s3.bucket, key or PROMPTS_S3_KEY)
-        return True
     except Exception as exc:
         log.error("could not publish the texture queue to S3", extra={"extra_fields": {"error": str(exc)}})
         return False
+    _prune_stale_queue_keys(client)   # self-heal: drop old per-dispatch queues so the prefix never grows unbounded
+    return True
+
+
+def _prune_stale_queue_keys(client) -> int:
+    """Delete per-dispatch queue objects under TEXTURE_QUEUE_PREFIX older than TEXTURE_QUEUE_TTL_SECONDS --
+    they are ephemeral (each is consumed by its GPU job within minutes), so without this the prefix grows
+    forever (one object per mint-batch, including failed dispatches). Best-effort: a cleanup failure NEVER
+    fails the produce (the images are what matter); it only logs. Returns the count deleted. The TTL is far
+    above any job's runtime, so a running or just-published queue is never touched."""
+    from datetime import datetime, timezone
+    cutoff = datetime.now(timezone.utc).timestamp() - TEXTURE_QUEUE_TTL_SECONDS
+    deleted = 0
+    try:
+        for page in client.get_paginator("list_objects_v2").paginate(
+                Bucket=SETTINGS.s3.bucket, Prefix=TEXTURE_QUEUE_PREFIX):
+            stale = [{"Key": o["Key"]} for o in page.get("Contents", [])
+                     if o["LastModified"].timestamp() < cutoff]
+            if stale:
+                client.delete_objects(Bucket=SETTINGS.s3.bucket, Delete={"Objects": stale, "Quiet": True})
+                deleted += len(stale)
+    except Exception as exc:
+        log.warning("stale texture-queue cleanup skipped (non-fatal)",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return deleted
+    if deleted:
+        log.info("pruned stale texture queues", extra={"extra_fields": {"deleted": deleted}})
+    return deleted
 
 
 def _fetch_published_prompts(client=None) -> bool:

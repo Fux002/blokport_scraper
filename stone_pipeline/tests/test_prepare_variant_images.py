@@ -173,3 +173,44 @@ def test_prune_noop_when_s3_unreachable(tmp_path, monkeypatch):
     monkeypatch.setattr("stone_pipeline.stages.emit_catalog._s3_variation_keys", lambda: None)
     assert pvi._prune_already_on_s3(q, ["slab_a"]) == ["slab_a"]
     assert json.loads(q.read_text(encoding="utf-8")) == [{"output_name": "slab_a"}]   # file untouched
+
+
+# -- stale texture-queue cleanup (litter self-heal) ----------------------------------------------------
+
+class _FakeS3Lister:
+    """S3 fake with a paginator + delete_objects, for the queue-cleanup test."""
+    def __init__(self, contents):
+        self._contents = contents          # list of {"Key","LastModified"}
+        self.deleted = []
+
+    def get_paginator(self, _name):
+        contents = self._contents
+        class _P:
+            def paginate(self, **_kw):
+                return [{"Contents": contents}]
+        return _P()
+
+    def delete_objects(self, Bucket, Delete):
+        self.deleted.extend(o["Key"] for o in Delete["Objects"])
+
+
+def test_prune_stale_queue_keys_deletes_only_old_objects(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
+    monkeypatch.setattr(pvi, "TEXTURE_QUEUE_TTL_SECONDS", 3600)   # 1h for the test
+    now = datetime.now(timezone.utc)
+    client = _FakeS3Lister([
+        {"Key": "dev/scraper/texture_queues/old.json", "LastModified": now - timedelta(hours=5)},
+        {"Key": "dev/scraper/texture_queues/fresh.json", "LastModified": now - timedelta(minutes=2)},
+    ])
+    assert pvi._prune_stale_queue_keys(client) == 1
+    assert client.deleted == ["dev/scraper/texture_queues/old.json"]   # fresh (in-flight) never touched
+
+
+def test_prune_stale_queue_keys_is_best_effort(monkeypatch):
+    # a cleanup failure must NEVER raise (it can't be allowed to fail the produce)
+    monkeypatch.setattr(pvi, "SETTINGS", _fake_settings(dry_run=False))
+    class _Boom:
+        def get_paginator(self, _n):
+            raise RuntimeError("s3 down")
+    assert pvi._prune_stale_queue_keys(_Boom()) == 0

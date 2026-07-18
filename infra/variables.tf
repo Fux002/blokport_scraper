@@ -126,3 +126,9 @@ variable "dev_require_enhanced" {
   default     = true
   description = "Enable BLOKPORT_REQUIRE_ENHANCED on dev produce + scheduled scrape: publish ONLY GPU-enhanced images. ON in dev: the enhanced/ markers are backfilled for the existing set. Prod uses its own var."
 }
+
+variable "alert_email" {
+  type        = string
+  default     = ""
+  description = "Ops email for a proactive alert when an auto-texture GPU job FAILS (both envs). Empty = no alerting is created. On first apply with a value set, AWS sends an SNS confirmation email that must be clicked before alerts deliver."
+}
