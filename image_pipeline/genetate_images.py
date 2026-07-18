@@ -494,7 +494,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # exit non-zero when any image failed to generate, so the caller (prepare_variant_images via
-    # _generate_queued_images) records this script as failed and holds those variants rather than treating a
-    # partial run as clean. FAL_KEY-missing already raises SystemExit above.
-    raise SystemExit(1 if main() else 0)
+    # os._exit (NOT SystemExit): a FAL request that TIMES OUT mid-batch leaves a lingering non-daemon
+    # httpx/fal-client thread, so normal interpreter shutdown BLOCKS after generation finishes -- the process
+    # hangs and never hands off to the next stage (rb_images/BEN2), leaving every texture unbuilt. Seen live
+    # on a 20-item batch with one 300s FAL timeout (a 1-item run has no timeout, so it exited fine and hid
+    # this). Output is line-flushed (run with -u) and images saved atomically, so a hard exit loses nothing
+    # and guarantees the pipeline advances. Exit non-zero if any image failed, so accounting stays truthful.
+    import sys
+    code = 1 if main() else 0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
