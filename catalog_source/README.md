@@ -24,9 +24,9 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
   by port NAME or UN/LOCODE (e.g. `Brindisi` / `ITBDS`) — resolved to ids against this file.
 - `origin_map.csv` — the per-VARIETY quarry country (origin is a property of the stone, NOT the
   supplier — a trader in Italy sells Brazilian quartzite; origin is Brazil). Columns
-  `match_type,pattern,country_iso,city,county,confirmed`, two rule kinds:
-  - `variety,<Variant Name>,<ISO>,…` — an EXACT name → country (type-independent). Add one row
-    per variety whose origin you know.
+  `match_type,pattern,country_iso,city,county,confirmed,stone_type`, two rule kinds:
+  - `variety,<Variant Name>,<ISO>,…` -- an EXACT name to a country. Add one row per variety whose origin
+    you know. By default a `variety` row is TYPE-BLIND (applies to the name under any stone type).
   - `pattern,<token>,<ISO>,,` — a single name TOKEN (`carrara`→IT, `persa`→BR). **Patterns are a
     SUGGESTION only now** — they pre-fill the :4200 mint origin field but are NEVER emitted as a
     product's origin (a look-alike named after a famous stone is not from that country).
@@ -34,6 +34,13 @@ filenames are pinned in `stone_pipeline/config/settings.py`.
     means the row is the old unverified snapshot: it still ships (Medusa needs an origin) but carries
     the `origin_unconfirmed` review flag until you confirm it. Optional column — a CSV without it loads
     every row as unconfirmed.
+  - `stone_type` -- OPTIONAL, the LAST column. Blank = type-blind (the default, and how every existing
+    row loads; a CSV without the column is unchanged). Set it only for a HOMONYM: the same variety name
+    used for genuinely different stones of different types, which can have different origins. A
+    type-scoped row wins for that type; the type-blind row is the fallback for every other type. Example
+    (columns `match_type,pattern,country_iso,city,county,confirmed,stone_type`):
+    `variety,Aqua Blue,BR,,,true,` (any type → Brazil) plus `variety,Aqua Blue,IR,,,true,Onyx` (the Onyx
+    one → Iran). Operator mints carry the type too, so a minted origin only overrides its own type.
   Resolution order (`derive_origin`): scraped country → **operator-minted origin** (the country picked
   on :4200 at mint, overlaid here as a confirmed rule) → this file, EXACT only (`confirmed`→clean,
   unconfirmed→flagged) → the supplier's `origin_default` as a LOW-confidence **flagged** fallback.

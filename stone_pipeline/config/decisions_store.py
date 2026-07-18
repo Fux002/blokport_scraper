@@ -96,6 +96,18 @@ def variety_seed_countries() -> dict[str, str]:
             if d["action"] == "mint" and d["seed_country"]}
 
 
+def variety_seed_country_rules() -> dict[tuple[str, str], str]:
+    """(norm(variant), norm(stone_type)) -> the operator-chosen ISO origin, for every MINT that set a
+    country. TYPE-SCOPED so a homonym minted under different types carries different origins; a mint with no
+    type keys ('', ) type-blind. This is the shape apply_origin_overlay consumes (variety_seed_countries is
+    the flat name->iso accessor). No side effect on a fresh store (load_all reads it every build)."""
+    if not store.config_db_path().exists():
+        return {}
+    return {(n, _norm(d["seed_type"])): d["seed_country"]
+            for n, d in variety_actions().items()
+            if d["action"] == "mint" and d["seed_country"]}
+
+
 def confirm_map() -> dict[str, str]:
     """norm(variant) -> 'yes'|'no' -- the mint/reject view the legacy confirm-file reader expects.
     alias decisions are NOT in this map; the alias router consumes them separately (`alias_map`)."""
