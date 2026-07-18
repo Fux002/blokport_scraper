@@ -323,7 +323,7 @@ def test_minted_origin_overlays_map_as_confirmed():
     # the effective per-variety map = CSV + minted seed_country, overlaid as CONFIRMED, operator wins
     from stone_pipeline.reference.loaders import OriginMap, OriginRule, _norm
     m = OriginMap(rules=[OriginRule("variety", "Blue Pearl", "NO", "", "", confirmed=False)])
-    added = m.apply_origin_overlay({_norm("Blue Pearl"): "IN", _norm("Brand New Stone"): "CN"})
+    added = m.apply_origin_overlay({(_norm("Blue Pearl"), ""): "IN", (_norm("Brand New Stone"), ""): "CN"})
     assert added == 2
     bp = m.exact("Blue Pearl")
     assert bp.country_iso == "IN" and bp.confirmed is True   # minted overrides the CSV country

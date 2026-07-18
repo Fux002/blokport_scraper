@@ -305,7 +305,9 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
     #    suggestion. A CONFIRMED rule (operator-minted, or a CSV row marked confirmed) is the real origin
     #    and ships clean; an UNCONFIRMED rule (the frozen snapshot) still ships -- Medusa requires an
     #    origin -- but is FLAGGED, so the unverified ones surface for review and confirmation.
-    rule = ref.origin_map.exact(row.variation_name or row.raw_name or "")
+    # pass the resolved stone type so a homonym (same name, different type) can carry a type-specific origin;
+    # exact() falls back to the type-blind rule when no type-scoped one exists (the common case).
+    rule = ref.origin_map.exact(row.variation_name or row.raw_name or "", row.type_name)
     if rule:
         row.origin_country_code = rule.country_iso
         row.origin_city = rule.city

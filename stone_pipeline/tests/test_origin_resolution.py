@@ -193,3 +193,68 @@ def test_tier4_unresolved_no_country_flagged(ref, cfg):
     assert not (row.origin_country_code or "")
     assert row.origin_source == "unresolved"
     assert any(f.code == FlagCode.origin_unresolved for f in row.review_flags)
+
+
+# --- type-scoped origin: homonyms (same name, different stone type) -----------
+def test_exact_type_scoped_beats_type_blind():
+    # 'Aqua Blue' is Brazil in general, but the Onyx one is Iran. A type-blind row is the default; a
+    # type-scoped row overrides it for that type only.
+    m = OriginMap(rules=[
+        OriginRule("variety", "Aqua Blue", "BR", "", ""),                       # type-blind (any type)
+        OriginRule("variety", "Aqua Blue", "IR", "", "", stone_type="Onyx"),    # scoped to Onyx
+    ])
+    assert m.exact("aqua blue", "Onyx").country_iso == "IR"     # type-scoped wins
+    assert m.exact("aqua blue", "Granite").country_iso == "BR"  # other type -> type-blind fallback
+    assert m.exact("aqua blue").country_iso == "BR"             # no type given -> type-blind
+    assert m.exact("aqua blue", None).country_iso == "BR"
+
+def test_exact_type_scoped_only_does_not_leak_to_other_types():
+    # a rule scoped to Onyx must NOT stamp a Granite (or type-unknown) row -- better unresolved than wrong.
+    m = OriginMap(rules=[OriginRule("variety", "Aqua Blue", "IR", "", "", stone_type="Onyx")])
+    assert m.exact("aqua blue", "Onyx").country_iso == "IR"
+    assert m.exact("aqua blue", "Granite") is None
+    assert m.exact("aqua blue") is None
+
+def test_load_origin_map_parses_stone_type_column(tmp_path):
+    p = tmp_path / "origin_map.csv"
+    p.write_text("match_type,pattern,stone_type,country_iso,city,county\n"
+                 "variety,Aqua Blue,,BR,,\n"           # type-blind
+                 "variety,Aqua Blue,Onyx,IR,,\n",      # type-scoped
+                 encoding="utf-8")
+    m = load_origin_map(p)
+    assert m.exact("Aqua Blue", "Onyx").country_iso == "IR"
+    assert m.exact("Aqua Blue", "Marble").country_iso == "BR"   # falls back to type-blind
+
+def test_load_origin_map_without_type_column_is_type_blind(tmp_path):
+    # backward compatibility: a CSV with no stone_type column loads every row as type-blind (old behavior).
+    p = tmp_path / "origin_map.csv"
+    p.write_text("match_type,pattern,country_iso,city,county\nvariety,Foo,BR,,\n", encoding="utf-8")
+    m = load_origin_map(p)
+    assert m.exact("Foo").country_iso == "BR"
+    assert m.exact("Foo", "Granite").country_iso == "BR"        # any type resolves to the type-blind row
+
+def test_overlay_type_scoped_does_not_clobber_other_type():
+    # a mint scoped to Onyx overrides only the Onyx origin; the type-blind and other-type rows survive.
+    m = OriginMap(rules=[
+        OriginRule("variety", "Aqua Blue", "BR", "", ""),
+        OriginRule("variety", "Aqua Blue", "US", "", "", stone_type="Onyx"),
+    ])
+    added = m.apply_origin_overlay({("aqua blue", "onyx"): "IR"})
+    assert added == 1
+    onyx = m.exact("aqua blue", "Onyx")
+    assert onyx.country_iso == "IR" and onyx.confirmed is True  # minted override, this type only
+    assert m.exact("aqua blue", "Granite").country_iso == "BR"  # type-blind rule untouched
+
+def test_derive_origin_uses_row_type_for_homonym(ref, cfg):
+    # end-to-end: two products, same variety name, different type -> different emitted origin.
+    import dataclasses
+    r = dataclasses.replace(ref, origin_map=OriginMap(rules=[
+        OriginRule("variety", "Aqua Blue", "BR", "", "", confirmed=True),
+        OriginRule("variety", "Aqua Blue", "IR", "", "", confirmed=True, stone_type="Onyx"),
+    ]))
+    onyx = _row(variation_name="Aqua Blue", type_name="Onyx", raw_origin="")
+    granite = _row(variation_name="Aqua Blue", type_name="Granite", raw_origin="")
+    derive.derive_origin(onyx, r, cfg)
+    derive.derive_origin(granite, r, cfg)
+    assert onyx.origin_country_code == "IR"
+    assert granite.origin_country_code == "BR"

@@ -472,6 +472,10 @@ class OriginRule:
     city: str
     county: str
     confirmed: bool = False  # operator-verified (minted overlay, or a CSV row marked confirmed)
+    # '' = type-blind: the rule applies to the name under ANY stone type (the default, and how every
+    # pre-existing row loads). A value scopes the rule to one stone type, so a HOMONYM (same variety name,
+    # different type -- e.g. an Onyx and a Granite both named "Aqua Blue") can carry a different origin.
+    stone_type: str = ""
 
 
 @dataclass
@@ -481,7 +485,20 @@ class OriginMap:
     def _ensure_index(self) -> None:
         # lazily built (there can be 10k+ rules); invalidated by apply_origin_overlay.
         if not hasattr(self, "_variety_index"):
-            self._variety_index = {_norm(r.pattern): r for r in self.rules if r.match_type == "variety"}
+            # keyed by (norm name, norm stone_type); '' type = type-blind. A type-scoped row lets a homonym
+            # (same name, different type) carry a different origin. On a duplicate (name,type) the LAST wins,
+            # matching load_origin_map's conflict handling.
+            self._variety_index = {(_norm(r.pattern), _norm(r.stone_type)): r
+                                   for r in self.rules if r.match_type == "variety"}
+            # name-only view for the type-blind mint SUGGESTION: prefer the type-blind row for a name, else
+            # any type-scoped one (the suggestion is advisory; derive emits from exact()).
+            self._variety_by_name: dict[str, OriginRule] = {}
+            for r in self.rules:
+                if r.match_type != "variety":
+                    continue
+                n = _norm(r.pattern)
+                if _norm(r.stone_type) == "" or n not in self._variety_by_name:
+                    self._variety_by_name[n] = r
             # MOST-SPECIFIC pattern wins, deterministically: longest token first, then alphabetic --
             # so when a name carries two pattern tokens the result never depends on CSV row order.
             self._pattern_rules = sorted(
@@ -489,20 +506,29 @@ class OriginMap:
                 key=lambda pr: (-len(pr[0]), pr[0]),
             )
 
-    def exact(self, name: str) -> Optional[OriginRule]:
-        """The exact per-variety rule (curated CSV or minted overlay), or None. Excludes name PATTERNS:
-        a pattern is a marketing-name guess, only ever a suggestion, never an emitted origin (a look-alike
-        named after a famous stone is not from that stone's country)."""
+    def exact(self, name: str, stone_type: str | None = None) -> Optional[OriginRule]:
+        """The exact per-variety rule (curated CSV or minted overlay), or None. A rule SCOPED to `stone_type`
+        wins; else the type-blind (any-type) rule for the name; else None. Excludes name PATTERNS: a pattern
+        is a marketing-name guess, only ever a suggestion, never an emitted origin (a look-alike named after a
+        famous stone is not from that stone's country)."""
         self._ensure_index()
-        return self._variety_index.get(_norm(name))
+        if stone_type:
+            hit = self._variety_index.get((_norm(name), _norm(stone_type)))
+            if hit is not None:
+                return hit
+        return self._variety_index.get((_norm(name), ""))
 
-    def lookup(self, name: str) -> Optional[OriginRule]:
-        # exact variety match first, then a name PATTERN. Patterns are single tokens (e.g. 'oman',
-        # 'persa') and MUST match a whole word, never a substring -- else 'oman' matches "rOMANo"
-        # (Italian travertine -> Oman) and 'india' matches "INDIAna" (US limestone -> India). Used for the
-        # :4200 mint SUGGESTION (exact OR pattern); derive_origin emits from exact() only.
+    def lookup(self, name: str, stone_type: str | None = None) -> Optional[OriginRule]:
+        # exact variety match (type-scoped, then type-blind) first, then a name PATTERN. Patterns are single
+        # tokens (e.g. 'oman', 'persa') and MUST match a whole word, never a substring -- else 'oman' matches
+        # "rOMANo" (Italian travertine -> Oman) and 'india' matches "INDIAna" (US limestone -> India). Used
+        # for the :4200 mint SUGGESTION (exact OR pattern); derive_origin emits from exact() only.
         self._ensure_index()
-        hit = self._variety_index.get(_norm(name))
+        if stone_type:
+            hit = self._variety_index.get((_norm(name), _norm(stone_type)))
+            if hit is not None:
+                return hit
+        hit = self._variety_by_name.get(_norm(name))
         if hit is not None:
             return hit
         tokens = set(re.findall(r"[a-z]+", _norm(name)))
@@ -511,29 +537,33 @@ class OriginMap:
                 return rule
         return None
 
-    def apply_origin_overlay(self, minted: dict[str, str]) -> int:
-        """Overlay operator-minted origins (variety_decision.seed_country) as CONFIRMED exact rules, so
-        the effective per-variety map = curated CSV + minted decisions (mirrors Backbone.apply_leaf_overlay).
-        `minted` is norm(variety) -> ISO2. A minted country REPLACES any CSV rule for that variety (the
-        operator's explicit choice wins). Returns how many rules were added or overridden."""
+    def apply_origin_overlay(self, minted: dict[tuple[str, str], str]) -> int:
+        """Overlay operator-minted origins (variety_decision seed_type + seed_country) as CONFIRMED exact
+        rules, so the effective per-variety map = curated CSV + minted decisions (mirrors
+        Backbone.apply_leaf_overlay). `minted` is (norm variety, norm stone_type) -> ISO2; a type-less mint
+        keys ('', ) type-blind. A minted (variety, type) REPLACES any CSV rule for that SAME (variety, type)
+        -- the operator's explicit choice wins, but only for that type, never clobbering a different type's
+        origin. Returns how many rules were added or overridden."""
         if not minted:
             return 0
-        by_norm = {_norm(r.pattern): i for i, r in enumerate(self.rules) if r.match_type == "variety"}
+        by_key = {(_norm(r.pattern), _norm(r.stone_type)): i
+                  for i, r in enumerate(self.rules) if r.match_type == "variety"}
         added = 0
-        for variety, iso in minted.items():
+        for (variety, stone_type), iso in minted.items():
             iso = (iso or "").strip().upper()
             if not variety or not iso:
                 continue
             rule = OriginRule(match_type="variety", pattern=variety, country_iso=iso,
-                              city="", county="", confirmed=True)
-            idx = by_norm.get(_norm(variety))
+                              city="", county="", confirmed=True, stone_type=(stone_type or ""))
+            idx = by_key.get((_norm(variety), _norm(stone_type)))
             if idx is not None:
-                self.rules[idx] = rule       # operator override wins over the CSV
+                self.rules[idx] = rule       # operator override wins over the CSV, for THIS (variety, type)
             else:
                 self.rules.append(rule)
             added += 1
-        if hasattr(self, "_variety_index"):
-            del self._variety_index          # force a rebuild so the overlay is visible
+        for attr in ("_variety_index", "_variety_by_name"):
+            if hasattr(self, attr):
+                delattr(self, attr)          # force a rebuild so the overlay is visible
         return added
 
 
@@ -564,13 +594,17 @@ def load_origin_map(path: Path | None = None) -> OriginMap:
         log.warning("origin_map missing -- all origins fall back to supplier default / unresolved",
                     extra={"extra_fields": {"path": str(path)}})
         return origin
-    seen: dict[str, str] = {}  # normalized variety name -> iso, to catch conflicting duplicates
+    seen: dict[tuple[str, str], str] = {}  # (norm variety, norm type) -> iso, to catch conflicting dups
     skipped = 0
     with path.open(newline="", encoding="utf-8-sig") as handle:
         for record in csv.DictReader(handle):
             mt = (record.get("match_type") or "").strip().casefold()
             pat = (record.get("pattern") or "").strip()
             iso = (record.get("country_iso") or "").strip().upper()
+            # 'stone_type' is OPTIONAL and defaults to '' (type-blind): a CSV without the column, or a blank
+            # cell, loads the rule as applying to the name under ANY type -- exactly the old behavior. A value
+            # scopes the rule to that type so a homonym can carry a type-specific origin.
+            st = (record.get("stone_type") or "").strip()
             # A usable rule needs a known kind, a pattern, AND a country -- a row missing any of these
             # must NOT become a hit that stamps a blank/garbage country at medium confidence.
             if mt not in ("variety", "pattern") or not pat or not iso:
@@ -578,11 +612,13 @@ def load_origin_map(path: Path | None = None) -> OriginMap:
                     skipped += 1
                 continue
             if mt == "variety":
-                prior = seen.get(_norm(pat))
+                key = (_norm(pat), _norm(st))
+                prior = seen.get(key)
                 if prior and prior != iso:
                     log.warning("origin_map duplicate variety with conflicting country (last wins)",
-                                extra={"extra_fields": {"variety": pat, "iso": iso, "prior": prior}})
-                seen[_norm(pat)] = iso
+                                extra={"extra_fields": {"variety": pat, "stone_type": st,
+                                                        "iso": iso, "prior": prior}})
+                seen[key] = iso
             # 'confirmed' is optional (absent -> unconfirmed, so the frozen snapshot rows surface for
             # review until an operator verifies each one). Backward-compatible: a CSV without the column
             # loads every row as unconfirmed.
@@ -590,7 +626,7 @@ def load_origin_map(path: Path | None = None) -> OriginMap:
             origin.rules.append(OriginRule(match_type=mt, pattern=pat, country_iso=iso,
                                            city=(record.get("city") or "").strip(),
                                            county=(record.get("county") or "").strip(),
-                                           confirmed=confirmed))
+                                           confirmed=confirmed, stone_type=st))
     if skipped:
         log.warning("origin_map rows skipped (need match_type variety|pattern + pattern + country_iso)",
                     extra={"extra_fields": {"skipped": skipped, "path": str(path)}})
@@ -691,8 +727,9 @@ def load_all() -> ReferenceData:
         },
     )
     # The effective origin map = the curated CSV grown by operator-minted origins (variety_decision
-    # .seed_country), overlaid in memory here -- the one place ref is built, mirroring the leaf overlay.
-    ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_countries())
+    # seed_type + seed_country), overlaid in memory here -- the one place ref is built, mirroring the leaf
+    # overlay. Type-scoped, so a mint under one type never clobbers a homonym's origin under another.
+    ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_country_rules())
     _assert_pack_defaults_resolve(ref)   # a pack default value not in Medusa's vocabulary fails loud here
     log.info(
         "reference loaded",
