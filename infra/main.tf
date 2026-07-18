@@ -210,6 +210,7 @@ module "gpu_enhance_dev" {
   # FAL_KEY for the FAL FLUX Fill de-watermarker (watermarked sources). Wired by convention to the known
   # dev SSM param, exactly like the scraper/produce secrets, so a plain apply can never strip it.
   ssm_secret_arns = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
+  alert_email     = var.alert_email
 }
 
 locals {
@@ -231,6 +232,7 @@ module "gpu_enhance_prod" {
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
   image_tag      = var.prod_gpu_image_tag
   region         = var.region
+  alert_email    = var.alert_email
 }
 
 # =============================================================================

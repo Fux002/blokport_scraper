@@ -63,3 +63,9 @@ variable "log_retention_days" {
   type    = number
   default = 30
 }
+
+variable "alert_email" {
+  description = "Ops email for a proactive alert when an auto-texture job FAILS. The texture loop is fire-and-forget with a one-cycle hold, so a failed batch otherwise surfaces only as products missing from Pull. Empty = no alerting resources are created. The SNS email subscription must be CONFIRMED manually (AWS sends a confirmation link on first apply)."
+  type        = string
+  default     = ""
+}
