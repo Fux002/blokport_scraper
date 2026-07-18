@@ -109,6 +109,10 @@ def process_images():
 
 if __name__ == "__main__":
     # exit non-zero when any image failed so the caller's failure accounting is truthful (a partial BEN2
-    # failure must flag those variants HELD, not look like a clean run).
+    # failure must flag those variants HELD, not look like a clean run). os._exit (like genetate) so a
+    # lingering torch/CUDA worker thread can never block prompt handoff to the upload stage.
     import sys
-    sys.exit(1 if process_images() else 0)
+    failed = process_images()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(1 if failed else 0)
