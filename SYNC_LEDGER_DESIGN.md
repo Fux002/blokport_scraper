@@ -208,6 +208,10 @@ Tables (columns abbreviated; every table has `created_at`, `updated_at`):
 - `sku` (PK) = `{source_code}-{surrogate_key}` uppercased
 - `source`, `variation_key` (FK), `color`, `finish`, `quality`
 - `dims` (weight, length, width, height), `image_keys`, `origin_country_code`
+- `ports` (JSON array of Medusa port ids) = the SUPPLIER's shipping ports, sent to Medusa as
+  `port_ids` = the port of origin. Sent RESOLVED so Medusa links them directly; Medusa MUST NOT
+  derive ports from `origin_country_code` (the quarry country), which fanned every product out to
+  all ports in its quarry country. `origin_country_code` remains the stone's origin display only.
 - `payload_hash`, `medusa_id` (nullable), `state`, `last_synced`
 
 `inventory`

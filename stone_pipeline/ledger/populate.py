@@ -22,6 +22,13 @@ from stone_pipeline.stages.emit import _sku
 from stone_pipeline.stages.emit_catalog import _COLS as _VARIANTS_FULL_COLS
 from stone_pipeline.stages.product_state import inventory_for
 
+# Bump when the PRODUCT SYNC PAYLOAD SHAPE changes (a new field Medusa must receive) while the underlying
+# data would hash the same -- included in the product payload_hash so it flips every product 'dirty' exactly
+# once, re-syncing the whole catalog with the new payload. v2: adds port_ids to the sync payload so Medusa
+# links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
+# origin_country_code (which fanned every product out to all ports in its quarry country).
+_PRODUCT_PAYLOAD_CONTRACT = "v2-port_ids"
+
 
 def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     """Reflect the produced 1_variants_full.csv onto the variation table: update each
@@ -180,6 +187,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "bundle_size": r.bundle_size,
             "inventory_quantity": inventory_for(r),
             "payload_hash": (ph := payload_hash([
+                _PRODUCT_PAYLOAD_CONTRACT,   # bump forces a one-time full re-sync on a payload-shape change
                 variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
                 r.title, r.description, r.handle, r.weight, r.length, r.width, r.height,
                 r.origin_country_code, json.dumps(r.product_image_keys or []),
