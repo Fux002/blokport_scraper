@@ -239,7 +239,10 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
 
     The payload carries ZERO Medusa ids (the review's red flag): everything is an
     external reference Medusa resolves on its side. `vendor` (the source) resolves to the
-    company + sales channel; ports are derived by Medusa from `origin_country_code`;
+    company + sales channel. `port_ids` are the SUPPLIER's shipping ports (already Medusa
+    port ids, from ports.csv) -- the true port of origin (where the goods ship FROM), sent
+    resolved so Medusa links them directly and does NOT derive ports from the quarry
+    `origin_country_code` (that gave every product all ports in its quarry country).
     `image_urls` are ingestion sources Medusa copies into its own storage."""
     # atomically LEASE the eligible products to 'syncing' (in-flight guard, same as variations).
     reap_stale_syncing(ledger, "product")
@@ -269,7 +272,11 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "title": p["title"], "description": p["description"], "handle": p["handle"],
             "weight": p["weight"], "length": p["length"],
             "width": p["width"], "height": p["height"],
-            "origin_country_code": p["origin_country_code"],   # Medusa derives ports from this
+            "origin_country_code": p["origin_country_code"],   # the stone's quarry country (origin display)
+            # the SUPPLIER's shipping ports = the port of origin. Already Medusa port ids, so Medusa links
+            # them directly instead of deriving ports from the quarry country (which fanned out to every
+            # port in that country). Empty means "no port", never "re-derive".
+            "port_ids": json.loads(p["ports"] or "[]"),
             "bundle_size": p["bundle_size"],   # under coordination: pallet model is retiring the multiplier
             # Images -- the SAME set the working CSV import carried, so Medusa builds the same media:
             #   thumbnail      = the CSV 'Product Thumbnail' (the product's MAIN display image)

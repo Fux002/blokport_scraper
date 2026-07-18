@@ -576,3 +576,31 @@ def test_requeue_endpoint_recovers_dead_lettered(tmp_path):
         assert code == 200 and body["requeued"] == 1
         assert ledger.get("product", "sku", "P-1")["state"] == "dirty"      # re-served
         assert server.dispatch(ledger, "POST", "requeue", {}, {"type": "bogus"})[0] == 400  # bad type -> 400
+
+
+def test_product_payload_sends_supplier_port_ids_not_derived_from_country(tmp_path):
+    # Port of origin = the SUPPLIER's shipping ports, sent RESOLVED as port_ids so Medusa links them
+    # directly, instead of Medusa deriving ports from the quarry origin_country_code (which fanned every
+    # product out to all ports in its quarry country). origin_country_code stays as the origin display.
+    import json
+    from stone_pipeline.ledger.sync import ready
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-0", "slab_v1", state="pending")
+        ledger.execute("UPDATE product SET ports = ?, origin_country_code = 'BR' WHERE sku = 'P-0'",
+                       (json.dumps(["PORT_BRINDISI", "PORT_CIVITA"]),))
+        [item] = ready(ledger, "products")
+        assert item["payload"]["port_ids"] == ["PORT_BRINDISI", "PORT_CIVITA"]   # supplier ports, resolved
+        assert item["payload"]["origin_country_code"] == "BR"                    # quarry country kept apart
+
+
+def test_product_payload_empty_ports_is_empty_list_not_missing(tmp_path):
+    # a product with no ports sends [] (Medusa links no port), never absent -> Medusa must not re-derive.
+    import json
+    from stone_pipeline.ledger.sync import ready
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-0", "slab_v1", state="pending")
+        ledger.execute("UPDATE product SET ports = NULL WHERE sku = 'P-0'")
+        [item] = ready(ledger, "products")
+        assert item["payload"]["port_ids"] == []
