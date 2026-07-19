@@ -13115,7 +13115,8 @@
       "category": "Blocks",
       "stone_type": "Dolomite",
       "color": [
-        "Gold"
+        "Gold",
+        "White"
       ],
       "finishes": [
         "Raw",
@@ -13128,13 +13129,21 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
         "A"
       ],
       "aliases": [
-        "Matarazzo Dolomite"
+        "Matarazzo Dolomite",
+        "Matarazzo"
       ],
       "image_file": "block_rb_651_dolomite_matarazzo.png",
       "exists": "no",
@@ -286119,7 +286128,14 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
         "A"
@@ -414034,13 +414050,21 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
         "A"
       ],
       "aliases": [
-        "Avalon Quartzite"
+        "Avalon Quartzite",
+        "Avalon"
       ],
       "image_file": "block_rb_10530_quartzite_avalon.png",
       "exists": "no",
@@ -414306,17 +414330,26 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
-        "A"
+        "A",
+        "B"
       ],
       "aliases": [
         "Bianco Superiore Quartzite",
         "White Superiore",
         "White Superiore Quartzite",
         "Superiore Bianco",
-        "Superiore Bianco Quartzite"
+        "Superiore Bianco Quartzite",
+        "Bianco Superiore"
       ],
       "image_file": "block_rb_10538_quartzite_bianco_superiore.png",
       "exists": "no",
@@ -415037,13 +415070,21 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
         "A"
       ],
       "aliases": [
-        "Cappadocia Quartzite"
+        "Cappadocia Quartzite",
+        "Cappadocia"
       ],
       "image_file": "block_rb_10558_quartzite_cappadocia.png",
       "exists": "no",
@@ -416381,7 +416422,14 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
         "A"
@@ -416395,7 +416443,8 @@
         "Infinity Grigio",
         "Infinity Grigio Quartzite",
         "Grey Infinity",
-        "Grey Infinity Quartzite"
+        "Grey Infinity Quartzite",
+        "Infinity Grey"
       ],
       "image_file": "block_rb_10597_quartzite_infinity_grey.png",
       "exists": "no",
@@ -417619,7 +417668,14 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
         "A"
@@ -417633,7 +417689,8 @@
         "Oxford Bleu",
         "Oxford Bleu Quartzite",
         "Blue Oxford",
-        "Blue Oxford Quartzite"
+        "Blue Oxford Quartzite",
+        "Oxford Blue"
       ],
       "image_file": "block_rb_10633_quartzite_oxford_blue.png",
       "exists": "no",
@@ -418815,13 +418872,21 @@
         "Flame Jet & Squared",
         "Flame Jet & Un-squared",
         "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
+        "Water Jet Cut & Un-squared",
+        "Polished",
+        "Honed",
+        "Leathered",
+        "Brushed",
+        "Flamed",
+        "Sandblasted",
+        "Sawn Cut"
       ],
       "qualities": [
         "A"
       ],
       "aliases": [
-        "Vanilla Sky Quartzite"
+        "Vanilla Sky Quartzite",
+        "Vanilla Sky"
       ],
       "image_file": "block_rb_10667_quartzite_vanilla_sky.png",
       "exists": "no",
@@ -477627,38 +477692,6 @@
       "key": "block_marble_rosa_levanto_afb4bdfe-6241-44df-95d7-a6a891341e97"
     },
     {
-      "variant_id": 115,
-      "variant": "Rosa Porriño",
-      "category": "Blocks",
-      "stone_type": "Granite",
-      "color": [
-        "Pink",
-        "Rose"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_115_granite_rosa_porrino.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_granite_rosa_porrino_e7f2768e-b9a2-4269-a10b-c7571768b33b"
-    },
-    {
       "variant_id": 127,
       "variant": "Scabos Travertine",
       "category": "Blocks",
@@ -478260,36 +478293,6 @@
       "key": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb"
     },
     {
-      "variant_id": 12195,
-      "variant": "Matarazzo",
-      "category": "Blocks",
-      "stone_type": "Dolomite",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Matarazzo"
-      ],
-      "image_file": "block_dolomite_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_dolomite_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed"
-    },
-    {
       "variant_id": 12196,
       "variant": "Antibes",
       "category": "Blocks",
@@ -478316,66 +478319,6 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "block_quartzite_antibes_34c75b9d-d697-5ad8-8119-fb80bdfb096f"
-    },
-    {
-      "variant_id": 12197,
-      "variant": "Avalon",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "Beige"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Avalon"
-      ],
-      "image_file": "block_quartzite_avalon_29e2b8a0-57f4-5574-8808-92a8e21b5bde.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_avalon_29e2b8a0-57f4-5574-8808-92a8e21b5bde"
-    },
-    {
-      "variant_id": 12198,
-      "variant": "Bianco Superiore",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "B"
-      ],
-      "aliases": [
-        "Bianco Superiore"
-      ],
-      "image_file": "block_quartzite_bianco_superiore_9ca52ff2-4e09-5c76-9a40-78db0f593fb5.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_bianco_superiore_9ca52ff2-4e09-5c76-9a40-78db0f593fb5"
     },
     {
       "variant_id": 12199,
@@ -478460,36 +478403,6 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "block_crystal_botanic_crystal_0314fe0f-fbb5-5482-a5ff-bffdacc5005b"
-    },
-    {
-      "variant_id": 12202,
-      "variant": "Cappadocia",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "Beige"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Cappadocia"
-      ],
-      "image_file": "block_quartzite_cappadocia_1576a970-b843-5061-bd6b-6a13d3b07b0b.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_cappadocia_1576a970-b843-5061-bd6b-6a13d3b07b0b"
     },
     {
       "variant_id": 12203,
@@ -478744,67 +478657,6 @@
       "key": "block_crystal_crystal_saint_5c728237-16e9-5532-8940-286a31e8f4ee"
     },
     {
-      "variant_id": 12212,
-      "variant": "Everest",
-      "category": "Blocks",
-      "stone_type": "Marble",
-      "color": [
-        "White",
-        "Green"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Everest"
-      ],
-      "image_file": "block_marble_everest_1df7837b-1e3c-5c24-81ad-77ad9e51b043.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_marble_everest_1df7837b-1e3c-5c24-81ad-77ad9e51b043"
-    },
-    {
-      "variant_id": 12213,
-      "variant": "Infinity Grey",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "Grey"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Infinity Grey"
-      ],
-      "image_file": "block_quartzite_infinity_grey_489e38bb-40ee-5cf5-a00b-1849da0b7f0a.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_infinity_grey_489e38bb-40ee-5cf5-a00b-1849da0b7f0a"
-    },
-    {
       "variant_id": 12214,
       "variant": "Kronos",
       "category": "Blocks",
@@ -478892,36 +478744,6 @@
       "key": "block_dolomite_mona_lisa_7fa1747f-da1a-5474-ad22-0b55e4e0d4a9"
     },
     {
-      "variant_id": 12217,
-      "variant": "Oxford Blue",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "Blue"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Oxford Blue"
-      ],
-      "image_file": "block_quartzite_oxford_blue_0c8102f3-f58c-5d68-bb3d-3dc539a095a8.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_oxford_blue_0c8102f3-f58c-5d68-bb3d-3dc539a095a8"
-    },
-    {
       "variant_id": 12218,
       "variant": "Scandinavo",
       "category": "Blocks",
@@ -478948,38 +478770,6 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "block_quartzite_scandinavo_7b1c1517-2c17-5d89-a155-7a86a6c45913"
-    },
-    {
-      "variant_id": 12219,
-      "variant": "Vanilla Sky",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "White",
-        "Beige",
-        "Blue"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Vanilla Sky"
-      ],
-      "image_file": "block_quartzite_vanilla_sky_a319731b-a379-539a-959c-ab7c7d354f0f.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_vanilla_sky_a319731b-a379-539a-959c-ab7c7d354f0f"
     }
   ]
 }

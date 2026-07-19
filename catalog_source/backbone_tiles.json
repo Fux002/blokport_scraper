@@ -14374,7 +14374,8 @@
       "category": "Tiles",
       "stone_type": "Dolomite",
       "color": [
-        "Gold"
+        "Gold",
+        "White"
       ],
       "finishes": [
         "Polished",
@@ -14394,13 +14395,15 @@
         "Bush Hammered and Brushed",
         "Brushed and Tumbled",
         "Antique",
-        "Raw"
+        "Raw",
+        "Flamed"
       ],
       "qualities": [
         "A"
       ],
       "aliases": [
-        "Matarazzo Dolomite"
+        "Matarazzo Dolomite",
+        "Matarazzo"
       ],
       "image_file": "tile_dolomite_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060.png",
       "exists": "no",
@@ -487357,7 +487360,8 @@
         "A"
       ],
       "aliases": [
-        "Cappadocia Quartzite"
+        "Cappadocia Quartzite",
+        "Cappadocia"
       ],
       "image_file": "tile_quartzite_cappadocia_2471f91d-5b95-5a38-8f87-913dce356fc3.png",
       "exists": "no",
@@ -560788,45 +560792,6 @@
       "merged_from": []
     },
     {
-      "key": "tile_granite_rosa_porrino_daedba54-612e-5021-875a-7d2b81cf96cb",
-      "variant": "Rosa Porriño",
-      "category": "Tiles",
-      "stone_type": "Granite",
-      "color": [
-        "Pink",
-        "Rose"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_granite_rosa_porrino_daedba54-612e-5021-875a-7d2b81cf96cb.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
       "key": "tile_travertine_scabos_travertine_81c32d30-a810-5190-b187-bb0e64255af2",
       "variant": "Scabos Travertine",
       "category": "Tiles",
@@ -561464,35 +561429,6 @@
       "merged_from": []
     },
     {
-      "key": "tile_dolomite_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060",
-      "variant": "Matarazzo",
-      "category": "Tiles",
-      "stone_type": "Dolomite",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Matarazzo"
-      ],
-      "image_file": "tile_dolomite_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
       "key": "tile_quartzite_antibes_546785f5-196d-50dd-b386-19e3d03ad134",
       "variant": "Antibes",
       "category": "Tiles",
@@ -561596,35 +561532,6 @@
       ],
       "aliases": [],
       "image_file": "tile_crystal_botanic_crystal_77e52264-4fcc-5f57-b004-3bd658a72b40.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_quartzite_cappadocia_2471f91d-5b95-5a38-8f87-913dce356fc3",
-      "variant": "Cappadocia",
-      "category": "Tiles",
-      "stone_type": "Quartzite",
-      "color": [
-        "Beige"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Cappadocia"
-      ],
-      "image_file": "tile_quartzite_cappadocia_2471f91d-5b95-5a38-8f87-913dce356fc3.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
