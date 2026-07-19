@@ -383261,6 +383261,56 @@
       "key": "slab_marble_lilac_gray_0cdb403c-1124-405a-bbaa-6512ab381af8"
     },
     {
+      "variant_id": 8142,
+      "variant": "Lilac White",
+      "category": "Slabs",
+      "stone_type": "Marble",
+      "color": [
+        "White",
+        "Lilac",
+        "Purple"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Brushed",
+        "Leathered",
+        "Sandblasted",
+        "Bush Hammered",
+        "Tumbled",
+        "Acid Washed",
+        "Sawn Cut",
+        "Split Face",
+        "Chiseled",
+        "Waterjet",
+        "Honed and Brushed",
+        "Sandblasted and Brushed",
+        "Bush Hammered and Brushed",
+        "Brushed and Tumbled",
+        "Antique",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Lilac White Marble",
+        "Lilac Bianco",
+        "Lilac Bianco Marble",
+        "Lilac Blanco",
+        "Lilac Blanco Marble",
+        "Lilac Branco",
+        "Lilac Branco Marble",
+        "White Lilac",
+        "White Lilac Marble"
+      ],
+      "image_file": "slab_rb_8142_marble_lilac_white.png",
+      "exists": "no",
+      "in_csv": "yes",
+      "merged_from": [],
+      "key": "slab_marble_lilac_white_ced6603a-198b-45ea-a55e-3f1865fe22e3"
+    },
+    {
       "variant_id": 8143,
       "variant": "Lilia",
       "category": "Slabs",
@@ -476687,6 +476737,50 @@
       "key": "slab_onyx_honey_onyx_1b623bee-4d79-4c04-a0b2-7073681878af"
     },
     {
+      "variant_id": 159,
+      "variant": "White Onyx",
+      "category": "Slabs",
+      "stone_type": "Onyx",
+      "color": [
+        "White"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Brushed",
+        "Leathered",
+        "Sandblasted",
+        "Sawn Cut",
+        "Split Face",
+        "Tumbled",
+        "Honed and Brushed",
+        "Antique",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "White",
+        "Branco",
+        "Marmo Onix White",
+        "White Marmo Onyx",
+        "White Marmo",
+        "Onix White"
+      ],
+      "image_file": "slab_rb_159_onyx_white_onyx.png",
+      "exists": "yes",
+      "in_csv": "no",
+      "merged_from": [
+        {
+          "variant": "White",
+          "variant_id": 10446,
+          "reason": "stone_suffix"
+        }
+      ],
+      "key": "slab_onyx_white_onyx_c83160aa-4436-4182-ab09-755f35e464b1"
+    },
+    {
       "variant_id": 160,
       "variant": "Green Onyx",
       "category": "Slabs",
@@ -540681,6 +540775,68 @@
         }
       ],
       "key": "slab_travertine_gold_travertine_06775ae3-0280-40e0-b75e-2bffadff4322"
+    },
+    {
+      "variant_id": 123,
+      "variant": "Yellow Travertine",
+      "category": "Slabs",
+      "stone_type": "Travertine",
+      "color": [
+        "Yellow",
+        "Gold"
+      ],
+      "finishes": [
+        "Polished",
+        "Honed",
+        "Brushed",
+        "Leathered",
+        "Sandblasted",
+        "Bush Hammered",
+        "Tumbled",
+        "Sawn Cut",
+        "Split Face",
+        "Chiseled",
+        "Antique",
+        "Filled",
+        "Unfilled",
+        "Honed and Filled",
+        "Honed and Unfilled",
+        "Polished and Filled",
+        "Polished and Unfilled",
+        "Brushed and Filled",
+        "Brushed and Unfilled",
+        "Sandblasted and Filled",
+        "Sandblasted and Unfilled",
+        "Tumbled and Unfilled",
+        "Brushed and Tumbled",
+        "Raw"
+      ],
+      "qualities": [
+        "A"
+      ],
+      "aliases": [
+        "Amarillo",
+        "Amber Travertine",
+        "Mexican Gold Travertine",
+        "Mexican Yellow Travertine",
+        "Travertino Amarillo",
+        "Travertino Oro",
+        "Amber",
+        "Mexican Gold",
+        "Mexican Yellow",
+        "Oro"
+      ],
+      "image_file": "slab_rb_123_travertine_yellow_travertine.png",
+      "exists": "yes",
+      "in_csv": "no",
+      "merged_from": [
+        {
+          "variant": "Amarillo",
+          "variant_id": 11598,
+          "reason": "translation"
+        }
+      ],
+      "key": "slab_travertine_yellow_travertine_27b2c455-dba3-4a5d-8a12-327b4cfdb8f6"
     },
     {
       "variant_id": 124,

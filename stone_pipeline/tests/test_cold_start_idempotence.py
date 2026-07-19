@@ -46,6 +46,29 @@ def test_committed_base_is_already_a_fixed_point():
     assert stats["clean"], "committed seed is not clean (fixed_point and/or duplicate_varieties failed)"
 
 
+@pytest.mark.skipif(not _BASE.exists(), reason="no committed seed")
+def test_no_orphan_mirror_backbone_rows():
+    """Every mirror-category (tile) post's (stone_type, variant) must have a matching source (slab) post.
+    emit's mirror join is by (stone_type, variant), so a tile with no source slab is silently dropped from
+    the mirror. A seed edit that removes a slab but leaves its tile creates exactly that orphan -- a real
+    regression once caused by a dedup keeping a base-only slab key and deleting the backbone-backed one."""
+    import json
+    from stone_pipeline.config.settings import CATEGORIES, category
+    from stone_pipeline.stages.emit_catalog import _posts_of
+    for cat in CATEGORIES:
+        if not cat.mirror_of:
+            continue
+        src_path, mir_path = category(cat.mirror_of).backbone_path, cat.backbone_path
+        if not (src_path.exists() and mir_path.exists()):
+            continue
+        src = {(p.get("stone_type"), p.get("variant"))
+               for p in _posts_of(json.loads(src_path.read_text(encoding="utf-8-sig")))}
+        orphans = [(p.get("stone_type"), p.get("variant"))
+                   for p in _posts_of(json.loads(mir_path.read_text(encoding="utf-8-sig")))
+                   if (p.get("stone_type"), p.get("variant")) not in src]
+        assert not orphans, f"{cat.name}: {len(orphans)} orphan mirror rows with no source slab: {orphans[:5]}"
+
+
 def test_alias_normalization_is_idempotent():
     # The base-drift source: comma-joined blobs, a (bracket) alias, and mixed case all normalize on the
     # first pass; a second pass must be a no-op, or the base never reaches a fixed point.
