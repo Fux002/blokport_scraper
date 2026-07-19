@@ -622,31 +622,29 @@ def test_reconcile_variations_to_seed_drops_and_tombstones_old_sides(tmp_path):
     deletes it -- while valid minted varieties (no twin) are untouched. This is what makes the factory
     reset converge Medusa, not just the scraper ledger."""
     from stone_pipeline.ledger.sync import reconcile_variations_to_seed
-    SURV = "slab_granite_verde_ubatuba_11111111-1111-4111-8111-111111111111"      # seed survivor
-    TWIN = "slab_granite_verde_ubatuba_ubatuba_22222222-2222-4222-8222-222222222222"  # dup old side
-    MARB = "slab_dolomite_marble_matarazzo_33333333-3333-4333-8333-333333333333"  # malformed-type old side
-    MATS = "slab_dolomite_matarazzo_44444444-4444-4444-8444-444444444444"         # its seed survivor
-    MINT = "slab_granite_amazon_green_55555555-5555-4555-8555-555555555555"       # valid mint, no twin
+    SURV = "slab_granite_verde_ubatuba_11111111-1111-4111-8111-111111111111"          # seed survivor
+    TWIN = "slab_granite_verde_ubatuba_ubatuba_22222222-2222-4222-8222-222222222222"  # alias-in-slug old side
+    HOM1 = "tile_marble_super_white_33333333-3333-4333-8333-333333333333"             # homonym: marble
+    HOM2 = "tile_onyx_super_white_44444444-4444-4444-8444-444444444444"               # homonym: onyx (KEEP)
+    MINT = "slab_granite_amazon_green_55555555-5555-4555-8555-555555555555"           # valid mint, no twin
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _named_variation(ledger, SURV, "Verde Ubatuba")
         _named_variation(ledger, TWIN, "Verde Ubatuba")
-        _named_variation(ledger, MARB, "Matarazzo")
-        _named_variation(ledger, MATS, "Matarazzo")
+        _named_variation(ledger, HOM1, "Super White")
+        _named_variation(ledger, HOM2, "Super White")
         _named_variation(ledger, MINT, "Amazon Green")
         _product(ledger, "P-TWIN", TWIN, "pending")           # a child of the old side -> must cascade
 
-        out = reconcile_variations_to_seed(ledger, seed_keys={SURV, MATS})
+        out = reconcile_variations_to_seed(ledger, seed_keys={SURV, HOM1, HOM2})
 
         live = {r["key"] for r in ledger.execute("SELECT key FROM variation").fetchall()}
         tombs = {r["external_id"] for r in
                  ledger.execute("SELECT external_id FROM removed WHERE kind='variation' AND state='pending'").fetchall()}
         prods = {r["sku"] for r in ledger.execute("SELECT sku FROM product").fetchall()}
 
-    assert out["tombstoned_dropped"] == 2
-    assert set(out["dropped_keys"]) == {TWIN, MARB}
-    # survivors (seed keys) + the valid mint stay; the two old sides are gone
-    assert live == {SURV, MATS, MINT}
-    # Medusa is told to delete BOTH old sides by Key (the crux Blokport flagged)
-    assert tombs == {TWIN, MARB}
-    # the old side's product cascaded away (FK-safe drop)
-    assert prods == set()
+    # only the alias-in-slug old side collapses; the multi-type homonyms + the mint are all preserved
+    assert out["tombstoned_dropped"] == 1
+    assert set(out["dropped_keys"]) == {TWIN}
+    assert live == {SURV, HOM1, HOM2, MINT}
+    assert tombs == {TWIN}                                     # Medusa is told to delete the old side by Key
+    assert prods == set()                                      # the old side's product cascaded away

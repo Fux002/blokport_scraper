@@ -109,3 +109,37 @@ def test_a_refused_ledger_reset_does_not_touch_config(tmp_path, monkeypatch):
     assert code == 409
     # a 409 (a pull is mid-flight) must leave the config queue + ids intact
     assert decisions_store.list_pending("variety") and decisions_store.attribute_ids()
+
+
+def test_pristine_reset_restores_the_self_mutating_base_from_the_seed(tmp_path):
+    """The reconcile cleans the ledger, but emit seeds from variants_export_base.csv, which self-mutates
+    (base := 1_variants_full each produce) -- so a produce on a dirty ledger rewrites that base with dup
+    old-sides and the next produce reads them back. A pristine reset must restore the base from the baked
+    pristine seed and drop the stale live-export/delta, or the dedup does not survive a produce."""
+    from stone_pipeline import lifecycle
+    from stone_pipeline.config.settings import SETTINGS
+
+    seed = tmp_path / "variants_export_base.seed.csv"
+    base = tmp_path / "variants_export_base.csv"
+    seed.write_text("Key,Name\nslab_granite_verde_ubatuba_571d,Verde Ubatuba\n", encoding="utf-8")
+    # base is DIRTY: carries the dup old-side a prior produce wrote back
+    base.write_text("Key,Name\nslab_granite_verde_ubatuba_571d,Verde Ubatuba\n"
+                    "slab_granite_verde_ubatuba_ubatuba_d0f6,Verde Ubatuba\n", encoding="utf-8")
+    live = tmp_path / "variants_export.csv"; live.write_text("stale\n", encoding="utf-8")
+    delta = tmp_path / "1_variants_update.csv"; delta.write_text("stale\n", encoding="utf-8")
+
+    saved = {n: getattr(SETTINGS.paths, n) for n in
+             ("variants_export_base_seed_csv", "variants_export_base_csv", "variants_export_csv", "to_upload_dir")}
+    try:
+        object.__setattr__(SETTINGS.paths, "variants_export_base_seed_csv", seed)
+        object.__setattr__(SETTINGS.paths, "variants_export_base_csv", base)
+        object.__setattr__(SETTINGS.paths, "variants_export_csv", live)
+        object.__setattr__(SETTINGS.paths, "to_upload_dir", tmp_path)
+        out = lifecycle._restore_pristine_seed_files()
+    finally:
+        for n, v in saved.items():
+            object.__setattr__(SETTINGS.paths, n, v)
+
+    assert out["base_restored_from_seed"] is True
+    assert "d0f6" not in base.read_text()          # the dup old-side is gone from the base
+    assert not live.exists() and not delta.exists()  # stale emit inputs dropped

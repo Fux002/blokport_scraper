@@ -529,26 +529,6 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
     return ledger.execute(f"UPDATE {table} SET {', '.join(sets)}{where}", (now, *params)).rowcount
 
 
-def _variety_identity(key: str, name: str) -> tuple[str, str, str]:
-    """(branch, type-slug, accent-folded name) -- the identity a variety is deduped by. Branch + type come
-    from the Key PREFIX, never the row's `type` column: a re-key old side can carry a malformed type
-    ('Dolomite Marble'), but its Key prefix ('slab_dolomite_...') still collapses to the same identity as
-    its clean survivor. Name is accent-folded so 'Corumba'/'Corumbá' are one identity."""
-    import unicodedata
-    parts = key.split("_")
-    branch = parts[0] if parts else ""
-    typ = parts[1] if len(parts) > 1 else ""
-    folded = "".join(c for c in unicodedata.normalize("NFKD", name or "") if not unicodedata.combining(c))
-    return (branch, typ, folded.casefold().strip())
-
-
-def _key_nameslug(key: str) -> str:
-    """The name-slug portion of a Key (between the type and the trailing uuid)."""
-    parts = key.split("_")
-    uuid_at = next((i for i, p in enumerate(parts) if "-" in p), len(parts))
-    return "_".join(parts[2:uuid_at])
-
-
 def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str]) -> dict:
     """Make the variation table dup-free and seed-consistent -- the missing half of a TRUE cold start.
 
@@ -559,20 +539,20 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str]) -> dict:
     -- and TOMBSTONES + drops the rest on the ONE removed lane (kind='variation'). The tombstone is what
     makes Medusa delete the old side by Key on the removals pull; Medusa's own consumer blocks a variety
     that still has products, so a live one can never be wrongly deleted. A minted variety with no twin is
-    untouched (it re-mints deterministically). Global-only. Returns counts + the dropped Keys."""
+    untouched (it re-mints deterministically). Global-only. Returns counts + the dropped Keys.
+
+    Uses the SAME variety_identity + survivor rule as the emit dedup gate (loaders), so the ledger, the
+    matcher reference, and the emitted catalog all agree on exactly one Key per variety."""
     import collections
-    import re
+    from stone_pipeline.reference.loaders import survivor_of, variety_identity
     groups: dict[tuple, list[str]] = collections.defaultdict(list)
     for v in ledger.execute("SELECT key, name FROM variation").fetchall():
-        groups[_variety_identity(v["key"], v["name"])].append(v["key"])
+        groups[variety_identity(v["key"], v["name"])].append(v["key"])
     dropped: list[str] = []
-    for (_branch, _typ, folded), keys in groups.items():
+    for keys in groups.values():
         if len(keys) <= 1:
             continue
-        clean = re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", folded)).strip("_")
-        # survivor: prefer a committed-seed Key, then the clean-slug Key, then shortest, then lexical.
-        survivor = min(keys, key=lambda k: (k not in seed_keys, _key_nameslug(k) != clean,
-                                             len(_key_nameslug(k)), k))
+        survivor = survivor_of(keys, seed_keys)
         dropped += [k for k in keys if k != survivor]
     if dropped:
         record_tombstones(ledger, [(k, None) for k in dropped], reason="reseed_dedup", kind="variation")
@@ -628,6 +608,19 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
         out[t] = 0 if scoped else _reset_overlay(ledger, t, now)
 
     if hard:                                   # drop the scraper output; re-scrape rebuilds it
+        # TOMBSTONE every SYNCED product before deleting it, so Medusa deletes it too. Without this a hard
+        # / factory reset drops products locally but never tells Medusa, and its upsert-only catalogue pull
+        # leaves them as orphans forever. Only synced products (Medusa has them) need a tombstone; a
+        # never-synced product is dropped silently. Mirrors retire_variation's E2 synced-only rule.
+        # the SELECT already has a WHERE, so fold a scoped source filter in as AND (not a second WHERE)
+        src_and = where.replace(" WHERE ", " AND ", 1) if scoped else ""
+        synced = ledger.execute(
+            f"SELECT sku, source FROM product WHERE medusa_id IS NOT NULL AND medusa_id != ''{src_and}",
+            params).fetchall()
+        if synced:
+            record_tombstones(ledger, [(r["sku"], r["source"]) for r in synced],
+                              reason="reset_dropped", kind="product")
+        out["product_tombstoned"] = len(synced)
         out["inventory"] = ledger.execute(
             f"DELETE FROM inventory WHERE sku IN (SELECT sku FROM product{where})", params).rowcount \
             if scoped else ledger.execute("DELETE FROM inventory").rowcount

@@ -30,7 +30,7 @@ from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.core.manifest import content_hash
-from stone_pipeline.core.text import looks_code_shaped, match_key
+from stone_pipeline.core.text import ascii_fold, looks_code_shaped, match_key
 
 
 _TYPE_SLUGS: Optional[set[str]] = None
@@ -62,6 +62,93 @@ def type_slug_from_key(key: str) -> str:
     after_branch = "_".join(parts[1:])
     return max((t for t in _type_slugs() if after_branch == t or after_branch.startswith(t + "_")),
                key=len, default=parts[1].casefold())
+
+
+# -- variety identity: the ONE rule the whole pipeline dedups by ---------------
+# A variety is (branch, stone-type, name). Two Keys with the same identity are the SAME variety twice --
+# the class that ships duplicate products (a legacy Key whose name-slug baked in an alias:
+# `..._verde_ubatuba_ubatuba_...` vs the clean `..._verde_ubatuba_...`). Type comes from type_slug_from_key
+# (multi-word aware, so `sodalite_syenite` is one type and a genuine multi-type homonym like Aqua Blue as
+# gneiss/granite/marble/onyx stays distinct). Name is the DISPLAY Name accent-folded + slugged, so an
+# alias in a legacy Key's slug never splits the variety. This single function is used by emit (collapse
+# before write), the matcher reference (exclude non-survivors), and the ledger reconcile -- one identical
+# rule everywhere, so a dup can never enter from any path.
+
+def _name_slug(name: str) -> str:
+    return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", ascii_fold(name or "").casefold())).strip("_")
+
+
+def variety_identity(key: str, name: str) -> tuple[str, str, str]:
+    """(branch, type-slug, folded name-slug) -- the dedup identity of a variety. See the block comment."""
+    return (key.split("_", 1)[0] if key else "", type_slug_from_key(key), _name_slug(name))
+
+
+def _key_name_slug(key: str) -> str:
+    """The name-slug portion of a Key (between the type and the trailing uuid) -- for survivor choice."""
+    parts = key.split("_")
+    uuid_at = next((i for i, p in enumerate(parts) if "-" in p), len(parts))
+    return "_".join(parts[2:uuid_at])
+
+
+def survivor_of(keys, seed_keys) -> str:
+    """The one Key to keep for an identity group: prefer a committed-seed Key, then the cleanest name-slug
+    (shortest -- an alias-laden legacy slug loses), then lexical. Deterministic and stable across runs."""
+    return min(keys, key=lambda k: (k not in seed_keys, len(_key_name_slug(k)), k))
+
+
+@lru_cache(maxsize=1)
+def pristine_seed_keys() -> frozenset:
+    """The Key set of the committed CLEAN seed -- the survivor authority for the identity collapse. Read
+    from the read-only baked pristine copy; falls back to the live base (which IS the committed seed on a
+    clean checkout). Empty if neither exists (collapse then just prefers the clean-slug Key)."""
+    for p in (SETTINGS.paths.variants_export_base_seed_csv, SETTINGS.paths.variants_export_base_csv):
+        if p.exists():
+            with p.open(encoding="utf-8-sig", newline="") as h:
+                return frozenset((r.get("Key") or "").strip()
+                                 for r in csv.DictReader(h) if (r.get("Key") or "").strip())
+    return frozenset()
+
+
+def collapse_to_survivors(rows, seed_keys=None, key_col="Key", name_col="Name",
+                          alias_col="Aliases", image_col="Image"):
+    """Collapse every `variety_identity` group in `rows` to ONE survivor: fold the losers' name + aliases
+    into the survivor (nothing searchable lost) and inherit a loser's image when the survivor has none,
+    then drop the losers. Order-preserving on survivors. This is the load-bearing dedup -- run on the
+    emitted variant set it makes the whole catalog a fixed point, so a duplicate can never ship regardless
+    of a dirty base or a stale live export."""
+    seed_keys = pristine_seed_keys() if seed_keys is None else seed_keys
+    groups: dict = {}
+    for r in rows:
+        groups.setdefault(variety_identity(r.get(key_col, ""), r.get(name_col, "")), []).append(r)
+    survivors: dict = {}
+    for grp in groups.values():
+        if len(grp) == 1:
+            survivors[grp[0][key_col]] = grp[0]
+            continue
+        keep_key = survivor_of([r[key_col] for r in grp], seed_keys)
+        keep = dict(next(r for r in grp if r[key_col] == keep_key))
+        aliases = [a for a in (keep.get(alias_col) or "").split("|") if a]
+        seen = {a.casefold() for a in aliases}
+        own = (keep.get(name_col) or "").casefold()
+        for r in grp:
+            if r[key_col] == keep_key:
+                continue
+            for a in [r.get(name_col)] + (r.get(alias_col) or "").split("|"):
+                a = (a or "").strip()
+                if a and a.casefold() != own and a.casefold() not in seen:
+                    aliases.append(a)
+                    seen.add(a.casefold())
+            if not (keep.get(image_col) or "").strip() and (r.get(image_col) or "").strip():
+                keep[image_col] = r[image_col]
+        keep[alias_col] = "|".join(aliases)
+        survivors[keep_key] = keep
+    out, emitted = [], set()
+    for r in rows:                       # preserve original order on the surviving keys
+        k = r[key_col]
+        if k in survivors and k not in emitted:
+            out.append(survivors[k])
+            emitted.add(k)
+    return out
 
 
 def is_mistyped_variant(key: str, name: str) -> bool:
@@ -198,34 +285,44 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
     if not path.exists():
         log.warning(f"variants file absent for branch {branch}: {path}")
         return table
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        for record in csv.DictReader(handle):
-            vid = (record.get("Id") or "").strip()
-            name = (record.get("Name") or "").strip()
-            key = (record.get("Key") or "").strip()
-            if not vid or not name:
-                continue
-            # Never match products to a JUNK existing variant -- a bare-code one ('Mgt','Gs', a
-            # supplier code/brand abbreviation wrongly minted) OR a mis-typed one ('Azul White
-            # Quartzite' under a slab_ONYX_ key). Both are surfaced in review/<env>/variants_to_delete.csv
-            # for deletion from Medusa; the cleaning flow re-mints the mis-typed ones correctly.
-            if looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name) or key in delete_keys:
-                continue
-            if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
-                continue
-            aliases_raw = (record.get("Aliases") or "").strip()
-            aliases = [a.strip() for a in aliases_raw.split("|") if a.strip()] if aliases_raw else []
-            variant = Variant(
-                variation_id=vid,
-                key=(record.get("Key") or "").strip(),
-                name=name,
-                image=(record.get("Image") or "").strip(),
-                aliases=aliases,
-            )
-            table.by_id[vid] = variant
-            # NOTE: surface_to_id is intentionally NOT populated here -- production matching builds its
-            # own exact index in matching/index.py; this per-row normalize+insert over ~24k variants was
-            # pure wasted work (the field stays for the test that clears it).
+    records = list(csv.DictReader(path.open(newline="", encoding="utf-8-sig")))
+    # DEDUP the reference to survivors only: the live Medusa export can still list a re-key OLD SIDE that
+    # is being deleted. If the matcher can stamp that Key onto a product, the product re-links onto a
+    # variety emit will have collapsed away (an orphan / FK-fail on ack). Exclude every non-survivor of a
+    # variety_identity group here, using the SAME survivor rule emit uses, so the matcher and emit agree on
+    # exactly one Key per variety. Homonyms (different type) are separate identities and all survive.
+    _seed = pristine_seed_keys()
+    _by_identity: dict = {}
+    for rec in records:
+        k = (rec.get("Key") or "").strip()
+        if k:
+            _by_identity.setdefault(variety_identity(k, (rec.get("Name") or "").strip()), []).append(k)
+    dup_losers = {k for keys in _by_identity.values() if len(keys) > 1
+                  for k in keys if k != survivor_of(keys, _seed)}
+    delete_keys = delete_keys | dup_losers
+    for record in records:
+        vid = (record.get("Id") or "").strip()
+        name = (record.get("Name") or "").strip()
+        key = (record.get("Key") or "").strip()
+        if not vid or not name:
+            continue
+        # Never match products to a JUNK existing variant -- a bare-code one ('Mgt','Gs', a supplier
+        # code/brand abbreviation wrongly minted) OR a mis-typed one ('Azul White Quartzite' under a
+        # slab_ONYX_ key) OR a re-key OLD SIDE (dup_losers above). All are surfaced for deletion from
+        # Medusa; the cleaning flow re-mints the mis-typed ones correctly.
+        if looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name) or key in delete_keys:
+            continue
+        if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
+            continue
+        aliases_raw = (record.get("Aliases") or "").strip()
+        aliases = [a.strip() for a in aliases_raw.split("|") if a.strip()] if aliases_raw else []
+        table.by_id[vid] = Variant(
+            variation_id=vid, key=key, name=name,
+            image=(record.get("Image") or "").strip(), aliases=aliases,
+        )
+        # NOTE: surface_to_id is intentionally NOT populated here -- production matching builds its own
+        # exact index in matching/index.py; this per-row normalize+insert over ~24k variants was pure
+        # wasted work (the field stays for the test that clears it).
     return table
 
 

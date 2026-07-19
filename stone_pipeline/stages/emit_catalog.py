@@ -218,6 +218,15 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
         r["Name"] = title_case(clean_name)               # consistent casing for the whole catalog
         r["Aliases"] = "|".join(clean_alias_list(clean_name, raw_aliases))
 
+    # THE dedup gate: collapse every (branch,type,name) that resolves to more than one Key to a single
+    # survivor before write. 1_variants_full feeds BOTH the committed base (base := full) AND the ledger,
+    # so gating uniqueness here makes the whole catalog a fixed point: a duplicate variety cannot ship
+    # no matter how it entered (dirty base, stale live-export union, a re-key old side still in Medusa).
+    # Keyed on (branch, type, name) so genuine multi-type homonyms (Aqua Blue as gneiss/granite/...) are
+    # preserved. This is the one place the pipeline enforces variety identity.
+    from stone_pipeline.reference import loaders
+    rows = loaders.collapse_to_survivors(rows)
+
     path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
     # Name/Alias would corrupt the catalog data. (Operator review of scraped names is the sanitized
