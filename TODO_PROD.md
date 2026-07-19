@@ -8,16 +8,30 @@ The code fails loud on the values that have NO fallback, so a missed item errors
 silently. Work top to bottom.
 
 ## 1. Provision the prod infra (Terraform)
-- [ ] Set `prod_staging_bucket` in `infra/terraform.tfvars` to the prod S3 staging bucket. This flips
-      `local.prod_enabled` and creates every prod module (`scraper_prod`, `sync_service_prod`,
-      `gpu_enhance_prod`) -- until it is set, **no prod resource exists**.
+CROSS-TEAM PREREQUISITE (do first): the scraper's prod control plane runs INSIDE Blokport's prod platform
+VPC. Today only `scraper_prod` and `gpu_enhance_prod` are defined (count-gated on `prod_staging_bucket`);
+the produce/sync/config service (`sync_service`) has **only a dev instance** and there is **no `sync_service_prod`**.
+- [ ] **Blokport prod platform up + remote state available.** `sync_service_dev` wires VPC / ECS cluster /
+      service-discovery namespace / service SG from `data.terraform_remote_state.platform_dev`. There is no
+      `platform_prod` referenced. Blokport must stand up the prod platform and expose its remote-state
+      outputs before the prod sync service can be created.
+- [ ] **Create prod SSM params:** `/blokport-prod/BLOKPORT_SYNC_TOKEN`, `/blokport-prod/BLOKPORT_CONFIG_TOKEN`,
+      the prod `FAL_KEY` (set `fal_key_ssm_name`), and the prod scraper proxy if used. Only the `/blokport-dev/*`
+      ones exist today.
+- [ ] **DEFINE `module "sync_service_prod"`** in `infra/main.tf` -- a mirror of `sync_service_dev` with
+      `target_env="production"`, the prod bucket, the `platform_prod` remote-state outputs, the prod token/secret
+      ARNs, `gpu_enhance_prod`'s queue/jobdef, and the prod auto_texture/enhance vars. Without it there is NO
+      prod produce, NO `/sync/v1` for prod Medusa to pull, and NO `/config/v1` admin.
+- [ ] Set `prod_staging_bucket` in `infra/terraform.tfvars` (flips `local.prod_enabled` -> `scraper_prod` +
+      `gpu_enhance_prod`). Until set, no prod resource exists.
 - [ ] Wire the prod GPU `FAL_KEY`: `module.gpu_enhance_prod` currently gets **no** `ssm_secret_arns`
-      (unlike dev). Add the prod FAL_KEY SSM param, or texture generation + de-watermark **fail in prod**.
-- [ ] `alert_email` (optional): set it to route auto-texture failure alerts for prod too; confirm the
-      SNS subscription email AWS sends.
-- [ ] IAM parity: apply the same `batch:SubmitJob` bare+`:*` ARN allowance the dev fix uses, for the
-      prod scheduled-scrape + produce roles.
-- [ ] `terraform plan` then `apply`; confirm the prod ECS services + Batch queue/jobdef come up.
+      (unlike dev). Add it, or texture generation + de-watermark **fail in prod**.
+- [ ] `alert_email` (optional): route auto-texture failure alerts for prod too; confirm the SNS email.
+- [ ] IAM parity: the same `batch:SubmitJob` bare+`:*` ARN allowance for the prod scrape + produce roles.
+- [ ] Reconcile the pre-existing ECR state drift (root `aws_ecr_repository` "refactored but never applied")
+      before a clean prod apply.
+- [ ] `terraform plan` then `apply`; confirm the prod ECS services (incl. the new sync_service_prod) + Batch
+      queue/jobdef come up.
 
 ## 2. Prod environment variables (on the prod ECS task defs)
 - [ ] `BLOKPORT_ENV=production` (selects prod bucket/keys/ids). **Enforced:** prod refuses to fall back
