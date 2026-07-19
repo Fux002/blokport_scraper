@@ -21,7 +21,7 @@ from typing import Optional
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
-from stone_pipeline.config.settings import COMPANY_ID, IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS
+from stone_pipeline.config.settings import IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core import csvio
 from stone_pipeline.core import ids as ids_mod
@@ -581,12 +581,14 @@ def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = N
 def main(argv: Optional[list[str]] = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     target = argv[0] if argv else SETTINGS.spine_source
-    # Fail fast in production if the owner ids are unset: settings returns "" (never a dev id) and
-    # nothing downstream rejects a blank company/sales-channel, so without this guard a prod run
-    # would emit a "valid" import of unowned, channel-less (invisible) products.
-    if IS_PRODUCTION and not (SALES_CHANNEL_ID and COMPANY_ID):
-        log.error("production run requires BLOKPORT_SALES_CHANNEL_ID and BLOKPORT_COMPANY_ID "
-                  "(refusing to emit unowned, channel-less products)")
+    # Fail fast in production if the SALES CHANNEL is unset: it is a single per-env id with no fallback
+    # (settings returns "" in prod, never a dev id), and a blank sales channel emits channel-less =
+    # INVISIBLE products. company_id is NOT required here: it is set per-scraper (source_cfg.company_id,
+    # constants.py) and an empty one resolves by vendor name on Medusa's side, so a global company id is
+    # not needed for a valid prod run.
+    if IS_PRODUCTION and not SALES_CHANNEL_ID:
+        log.error("production run requires BLOKPORT_SALES_CHANNEL_ID "
+                  "(refusing to emit channel-less, invisible products)")
         return 1
     try:
         if target == "all":
