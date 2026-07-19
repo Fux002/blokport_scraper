@@ -106,6 +106,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nscraped {len(results)} source(s):")
     for src, path in results.items():
         print(f"  {src}: {path}")
+    # A source that was REQUESTED (in order) but produced no result FAILED. Surface it as a non-zero rc:
+    # produce._live_scrape and run_pipeline.sh (set -euo pipefail) both rely on this exit code to abort
+    # before building against stale/absent data (the docstring at produce._live_scrape). The old always-0
+    # silently defeated that abort, so a scrape failure proceeded to build on stale data with no signal.
+    # Per-source isolation is unchanged: run_many still attempts EVERY source; only the exit code reflects
+    # the failures. An empty `order` (every source disabled) is not a failure.
+    failed = [s for s in order if s not in results]
+    if failed:
+        print(f"\nFAILED to scrape {len(failed)} source(s): {failed}")
+        return 1
     return 0
 
 

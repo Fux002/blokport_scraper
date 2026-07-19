@@ -311,8 +311,10 @@ class S3Config:
     credentials_profile: str = os.environ.get("BLOKPORT_AWS_PROFILE", "")
     # When true the image stage does not hit S3; it derives keys deterministically
     # and records them, but performs no network IO. Used when creds are absent.
-    # Default true in dev; set BLOKPORT_S3_DRY_RUN=false to actually upload.
-    dry_run: bool = _env_bool("BLOKPORT_S3_DRY_RUN", True)
+    # Env-aware default: dev defaults dry (no accidental writes); PROD defaults to actually uploading, so a
+    # prod deploy that forgets BLOKPORT_S3_DRY_RUN can't silently no-op every S3 write while emitting URLs
+    # to objects that were never uploaded. Explicit BLOKPORT_S3_DRY_RUN still overrides in either env.
+    dry_run: bool = _env_bool("BLOKPORT_S3_DRY_RUN", not IS_PRODUCTION)
 
 
 @dataclass(frozen=True)
