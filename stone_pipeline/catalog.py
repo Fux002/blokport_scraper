@@ -621,7 +621,7 @@ def verify_consistency() -> tuple[list[str], list[str]]:
 
     from stone_pipeline.stages.product_state import load_known_products
     known = load_known_products()
-    return _consistency_errors(
+    errors, warnings = _consistency_errors(
         export_ids=_ids(p.variants_export_csv, "Id"),
         combo_ids=_ids(p.to_upload_dir / "2_valid_combinations.csv", "variation_id"),
         prod_ids=_ids(p.to_upload_dir / "3_products_all.csv", "STN Variation Id"),
@@ -630,6 +630,27 @@ def verify_consistency() -> tuple[list[str], list[str]]:
         prod_tuples=_tuples(p.to_upload_dir / "3_products_all.csv", prod_cols),
         combo_tuples=_tuples(p.to_upload_dir / "2_valid_combinations.csv", combo_cols),
     )
+    # Variety-identity uniqueness: emit collapses every (branch,type,name) to one survivor, so the emitted
+    # full set must have NO identity appearing under two Keys. A failure here means a duplicate variety
+    # would ship -- fail the whole produce loud rather than let it through (the bug this gate closes).
+    errors += _identity_dup_errors(p.to_upload_dir / "1_variants_full.csv")
+    return errors, warnings
+
+
+def _identity_dup_errors(full_path: Path) -> list[str]:
+    """Every (branch, type, name) in 1_variants_full must resolve to exactly ONE Key (emit's dedup gate)."""
+    import collections
+    from stone_pipeline.reference.loaders import variety_identity
+    try:
+        with full_path.open(encoding="utf-8-sig", newline="") as h:
+            groups = collections.defaultdict(list)
+            for r in csv.DictReader(h):
+                if (r.get("Key") or "").strip():
+                    groups[variety_identity(r["Key"], r.get("Name") or "")].append(r["Key"])
+    except FileNotFoundError:
+        return []
+    return [f"duplicate variety {ident} under {len(keys)} Keys: {keys}"
+            for ident, keys in groups.items() if len(keys) > 1]
 
 
 def main(argv: list[str] | None = None) -> int:
