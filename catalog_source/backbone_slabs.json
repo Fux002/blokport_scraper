@@ -20029,79 +20029,6 @@
       "key": "slab_granite_verde_butterfly_ef57badf-62d4-4bb3-91a0-47e57bb7c86d"
     },
     {
-      "variant_id": 70,
-      "variant": "Verde Ubatuba (Ubatuba)",
-      "category": "Slabs",
-      "stone_type": "Granite",
-      "color": [
-        "Green",
-        "Black",
-        "Gold"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Bahia Green",
-        "Bahia Green Granite",
-        "Granito Verde Ubatuba",
-        "Green Obatooba",
-        "Green Obatooba Granite",
-        "Green Ubatuba",
-        "Green Ubatuba Granite",
-        "Summer Green",
-        "Uba Tuba",
-        "Uba Tuba Granite",
-        "Ubatuba",
-        "Ubatuba Gold",
-        "Ubatuba Gold Granite",
-        "Ubatuba Granite",
-        "Ubatuba Green",
-        "Ubatuba Green Granite",
-        "Verde Bahia",
-        "Verde Bahia Granite",
-        "Verde Bahia Green",
-        "Verde Bahia Green Granite",
-        "Verde Dorada",
-        "Verde Dorada Granite",
-        "Verde Dorado",
-        "Verde Dorato",
-        "Verde Uba Tuba",
-        "Verde Uba Tuba Granite",
-        "Verde Ubatuba Gold",
-        "Verde Ubatuba Gold Granite",
-        "Verde Ubatuba Granite",
-        "Verde Ubatuba Light",
-        "Verde Ubatuba Light Granite"
-      ],
-      "image_file": "slab_rb_70_granite_verde_ubatuba_ubatuba.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_granite_verde_ubatuba_ubatuba_d0f65094-1f03-45f8-8dec-ce4ce370a42b"
-    },
-    {
       "variant_id": 71,
       "variant": "Tropical Green",
       "category": "Slabs",
@@ -21510,65 +21437,6 @@
       "key": "slab_granite_steel_grey_0f6e7bf7-ecb8-417b-b114-759a5096bf0a"
     },
     {
-      "variant_id": 98,
-      "variant": "Paradiso (Bash Paradiso)",
-      "category": "Slabs",
-      "stone_type": "Granite",
-      "color": [
-        "Grey",
-        "Brown",
-        "Purple",
-        "Multicolor"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Classic Paradiso",
-        "Z B Classic Paradiso",
-        "Paradisio Granite",
-        "Paradiso Bash Granite",
-        "Paradiso Purple Granite",
-        "Paradisso Granite",
-        "Pradiso Granite",
-        "Paradiso Bush Granite",
-        "Paradisio",
-        "Paradiso Bash",
-        "Paradiso Purple",
-        "Paradisso",
-        "Pradiso",
-        "Paradiso Bush",
-        "紫彩麻",
-        "Zǐ cǎi má"
-      ],
-      "image_file": "slab_rb_98_granite_paradiso_bash_paradiso.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_granite_paradiso_bash_paradiso_183e4e40-d7c6-4344-a74c-539a4ce6876f"
-    },
-    {
       "variant_id": 99,
       "variant": "Lavender Blue",
       "category": "Slabs",
@@ -21606,76 +21474,6 @@
       "in_csv": "no",
       "merged_from": [],
       "key": "slab_granite_lavender_blue_5fd1536c-a12c-4baf-9987-47ebafd87bea"
-    },
-    {
-      "variant_id": 100,
-      "variant": "Tiger Skin (Yellow & White)",
-      "category": "Slabs",
-      "stone_type": "Granite",
-      "color": [
-        "Pink",
-        "Red",
-        "Rose",
-        "Grey"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "G656",
-        "Morning Mist",
-        "Qianmi Pink",
-        "Sadina Pink",
-        "Sadiana Pink",
-        "Three Gorges Red",
-        "Tiger Skin Red Granite",
-        "Tiger Skin Gray Granite",
-        "Tiger Skin Wave Granite",
-        "Tiger Skin India Granite",
-        "Piel de Tigre Granite",
-        "Tiger Skin Pink Granite",
-        "Tiger Skin Red",
-        "Tiger Skin Gray",
-        "Tiger Skin Wave",
-        "Tiger Skin India",
-        "Piel de Tigre",
-        "Tiger Skin Pink",
-        "Tiger Skin Granite",
-        "Tiger Red Granite",
-        "China Rosa Porrino Granite",
-        "China Pink Porrino Granite",
-        "Tiger Red",
-        "China Rosa Porrino",
-        "China Pink Porrino",
-        "三峡红",
-        "Sānxiá hóng"
-      ],
-      "image_file": "slab_rb_100_granite_tiger_skin_yellow_white.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_granite_tiger_skin_yellow_white_6af28a10-4656-4945-b4d8-7980190efd5a"
     },
     {
       "variant_id": 101,
@@ -147217,7 +147015,11 @@
         "Paradiso Purple",
         "Paradiso Bush",
         "紫彩麻",
-        "Zǐ cǎi má"
+        "Zǐ cǎi má",
+        "Paradisio",
+        "Paradisso",
+        "Pradiso",
+        "Paradiso (Bash Paradiso)"
       ],
       "image_file": "slab_rb_3325_granite_paradiso.png",
       "exists": "no",
@@ -187235,7 +187037,8 @@
         "China Rosa Porrino",
         "China Pink Porrino",
         "三峡红",
-        "Sānxiá hóng"
+        "Sānxiá hóng",
+        "Tiger Skin (Yellow & White)"
       ],
       "image_file": "slab_rb_4141_granite_tiger_skin.png",
       "exists": "no",
@@ -193863,7 +193666,19 @@
         "Verde Ubatuba Gold Granite",
         "Verde Ubatuba Granite",
         "Verde Ubatuba Light",
-        "Verde Ubatuba Light Granite"
+        "Verde Ubatuba Light Granite",
+        "Bahia Green",
+        "Bahia Green Granite",
+        "Summer Green",
+        "Verde Bahia",
+        "Verde Bahia Granite",
+        "Verde Bahia Green",
+        "Verde Bahia Green Granite",
+        "Verde Dorada",
+        "Verde Dorada Granite",
+        "Verde Dorado",
+        "Verde Dorato",
+        "Verde Ubatuba (Ubatuba)"
       ],
       "image_file": "slab_rb_4279_granite_verde_ubatuba.png",
       "exists": "no",
@@ -383446,56 +383261,6 @@
       "key": "slab_marble_lilac_gray_0cdb403c-1124-405a-bbaa-6512ab381af8"
     },
     {
-      "variant_id": 8142,
-      "variant": "Lilac White",
-      "category": "Slabs",
-      "stone_type": "Marble",
-      "color": [
-        "White",
-        "Lilac",
-        "Purple"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Lilac White Marble",
-        "Lilac Bianco",
-        "Lilac Bianco Marble",
-        "Lilac Blanco",
-        "Lilac Blanco Marble",
-        "Lilac Branco",
-        "Lilac Branco Marble",
-        "White Lilac",
-        "White Lilac Marble"
-      ],
-      "image_file": "slab_rb_8142_marble_lilac_white.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_marble_lilac_white_ced6603a-198b-45ea-a55e-3f1865fe22e3"
-    },
-    {
       "variant_id": 8143,
       "variant": "Lilia",
       "category": "Slabs",
@@ -476922,50 +476687,6 @@
       "key": "slab_onyx_honey_onyx_1b623bee-4d79-4c04-a0b2-7073681878af"
     },
     {
-      "variant_id": 159,
-      "variant": "White Onyx",
-      "category": "Slabs",
-      "stone_type": "Onyx",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Sawn Cut",
-        "Split Face",
-        "Tumbled",
-        "Honed and Brushed",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "White",
-        "Branco",
-        "Marmo Onix White",
-        "White Marmo Onyx",
-        "White Marmo",
-        "Onix White"
-      ],
-      "image_file": "slab_rb_159_onyx_white_onyx.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [
-        {
-          "variant": "White",
-          "variant_id": 10446,
-          "reason": "stone_suffix"
-        }
-      ],
-      "key": "slab_onyx_white_onyx_c83160aa-4436-4182-ab09-755f35e464b1"
-    },
-    {
       "variant_id": 160,
       "variant": "Green Onyx",
       "category": "Slabs",
@@ -540962,68 +540683,6 @@
       "key": "slab_travertine_gold_travertine_06775ae3-0280-40e0-b75e-2bffadff4322"
     },
     {
-      "variant_id": 123,
-      "variant": "Yellow Travertine",
-      "category": "Slabs",
-      "stone_type": "Travertine",
-      "color": [
-        "Yellow",
-        "Gold"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Antique",
-        "Filled",
-        "Unfilled",
-        "Honed and Filled",
-        "Honed and Unfilled",
-        "Polished and Filled",
-        "Polished and Unfilled",
-        "Brushed and Filled",
-        "Brushed and Unfilled",
-        "Sandblasted and Filled",
-        "Sandblasted and Unfilled",
-        "Tumbled and Unfilled",
-        "Brushed and Tumbled",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Amarillo",
-        "Amber Travertine",
-        "Mexican Gold Travertine",
-        "Mexican Yellow Travertine",
-        "Travertino Amarillo",
-        "Travertino Oro",
-        "Amber",
-        "Mexican Gold",
-        "Mexican Yellow",
-        "Oro"
-      ],
-      "image_file": "slab_rb_123_travertine_yellow_travertine.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [
-        {
-          "variant": "Amarillo",
-          "variant_id": 11598,
-          "reason": "translation"
-        }
-      ],
-      "key": "slab_travertine_yellow_travertine_27b2c455-dba3-4a5d-8a12-327b4cfdb8f6"
-    },
-    {
       "variant_id": 124,
       "variant": "Silver Travertine",
       "category": "Slabs",
@@ -541129,50 +540788,6 @@
       "in_csv": "no",
       "merged_from": [],
       "key": "slab_travertine_grey_travertine_e5316d01-09b6-45e9-8677-5f66d345196a"
-    },
-    {
-      "variant_id": 126,
-      "variant": "Red Travertine (Persian Red)",
-      "category": "Slabs",
-      "stone_type": "Travertine",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Leathered",
-        "Brushed and Filled",
-        "Chiseled",
-        "Antique",
-        "Polished and Unfilled",
-        "Honed and Filled",
-        "Honed and Unfilled",
-        "Raw",
-        "Polished and Filled",
-        "Sawn Cut",
-        "Honed",
-        "Brushed and Unfilled",
-        "Tumbled and Unfilled",
-        "Sandblasted and Unfilled",
-        "Bush Hammered",
-        "Sandblasted",
-        "Polished",
-        "Filled",
-        "Brushed and Tumbled",
-        "Tumbled",
-        "Split Face",
-        "Brushed",
-        "Unfilled",
-        "Sandblasted and Filled"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_126_travertine_red_travertine_persian_red.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [],
-      "key": "slab_travertine_red_travertine_persian_red_223654de-e2e2-49d7-9d5a-1f2668fea0e5"
     },
     {
       "variant_id": 128,
