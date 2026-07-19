@@ -233,6 +233,9 @@ module "gpu_enhance_prod" {
   image_tag      = var.prod_gpu_image_tag
   region         = var.region
   alert_email    = var.alert_email
+  # FAL_KEY (+ proxy) for FLUX texture gen + FAL de-watermark, by convention like dev. Empty until the
+  # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
+  ssm_secret_arns = local.prod_ssm_secrets
 }
 
 # =============================================================================
@@ -295,4 +298,67 @@ module "sync_service_dev" {
   auto_enhance_enabled     = var.dev_auto_enhance
   auto_texture_enabled     = var.dev_auto_texture
   require_enhanced_enabled = var.dev_require_enhanced
+}
+
+# =============================================================================
+# In-VPC sync/config SERVICE (PROD) -- the mirror of the dev service, count-gated on prod_staging_bucket
+# so it is INERT until prod is provisioned: with prod disabled the prod platform remote state and the
+# /blokport-prod/ tokens are never read, so a dev apply is unaffected. It runs in Blokport's PROD platform
+# VPC over Cloud Map, so before enabling it the prod platform stack must exist (blokport/prod/terraform.tfstate)
+# and the prod SSM tokens + FAL_KEY must be created (see TODO_PROD.md, section 1).
+# =============================================================================
+data "terraform_remote_state" "platform_prod" {
+  count   = local.prod_enabled ? 1 : 0
+  backend = "s3"
+  config = {
+    bucket = "blokport-tfstate"
+    key    = "blokport/prod/terraform.tfstate"
+    region = var.region
+  }
+}
+
+data "aws_ssm_parameter" "sync_token_prod" {
+  count = local.prod_enabled ? 1 : 0
+  name  = "/blokport-prod/BLOKPORT_SYNC_TOKEN"
+}
+
+data "aws_ssm_parameter" "config_token_prod" {
+  count = local.prod_enabled ? 1 : 0
+  name  = "/blokport-prod/BLOKPORT_CONFIG_TOKEN"
+}
+
+locals {
+  # Revision-agnostic prod job-def ARN for the auto-enhance/texture SubmitJob IAM (see dev_gpu_jobdef_iam_arn).
+  # Guarded by prod_enabled so the count-gated module index [0] is only reached when prod exists.
+  prod_gpu_jobdef_iam_arn = local.prod_enabled ? replace(module.gpu_enhance_prod[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
+}
+
+module "sync_service_prod" {
+  source = "./modules/sync_service"
+  count  = local.prod_enabled ? 1 : 0
+
+  target_env     = "production"
+  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_tag      = var.prod_image_tag
+  region         = var.region
+  staging_bucket = var.prod_staging_bucket
+  memory         = 8192 # same catalog RAM peak as dev (produce ~1.5 GB + servers ~0.5 GB)
+
+  vpc_id                = data.terraform_remote_state.platform_prod[0].outputs.vpc_id
+  private_subnet_ids    = data.terraform_remote_state.platform_prod[0].outputs.private_subnet_ids
+  ecs_cluster_arn       = data.terraform_remote_state.platform_prod[0].outputs.ecs_cluster_arn
+  medusa_service_sg_id  = data.terraform_remote_state.platform_prod[0].outputs.service_sg_id
+  internal_namespace_id = data.terraform_remote_state.platform_prod[0].outputs.internal_namespace_id
+
+  sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_prod[0].arn
+  config_token_ssm_arn = data.aws_ssm_parameter.config_token_prod[0].arn
+  produce_secret_arns  = local.prod_ssm_secrets
+
+  gpu_job_queue_name       = module.gpu_enhance_prod[0].job_queue
+  gpu_job_definition_name  = module.gpu_enhance_prod[0].job_definition
+  gpu_job_queue_arn        = module.gpu_enhance_prod[0].job_queue_arn
+  gpu_job_definition_arn   = local.prod_gpu_jobdef_iam_arn
+  auto_enhance_enabled     = var.prod_auto_enhance
+  auto_texture_enabled     = var.prod_auto_texture
+  require_enhanced_enabled = var.prod_require_enhanced
 }

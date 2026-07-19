@@ -8,30 +8,33 @@ The code fails loud on the values that have NO fallback, so a missed item errors
 silently. Work top to bottom.
 
 ## 1. Provision the prod infra (Terraform)
-CROSS-TEAM PREREQUISITE (do first): the scraper's prod control plane runs INSIDE Blokport's prod platform
-VPC. Today only `scraper_prod` and `gpu_enhance_prod` are defined (count-gated on `prod_staging_bucket`);
-the produce/sync/config service (`sync_service`) has **only a dev instance** and there is **no `sync_service_prod`**.
-- [ ] **Blokport prod platform up + remote state available.** `sync_service_dev` wires VPC / ECS cluster /
-      service-discovery namespace / service SG from `data.terraform_remote_state.platform_dev`. There is no
-      `platform_prod` referenced. Blokport must stand up the prod platform and expose its remote-state
-      outputs before the prod sync service can be created.
-- [ ] **Create prod SSM params:** `/blokport-prod/BLOKPORT_SYNC_TOKEN`, `/blokport-prod/BLOKPORT_CONFIG_TOKEN`,
-      the prod `FAL_KEY` (set `fal_key_ssm_name`), and the prod scraper proxy if used. Only the `/blokport-dev/*`
-      ones exist today.
-- [ ] **DEFINE `module "sync_service_prod"`** in `infra/main.tf` -- a mirror of `sync_service_dev` with
-      `target_env="production"`, the prod bucket, the `platform_prod` remote-state outputs, the prod token/secret
-      ARNs, `gpu_enhance_prod`'s queue/jobdef, and the prod auto_texture/enhance vars. Without it there is NO
-      prod produce, NO `/sync/v1` for prod Medusa to pull, and NO `/config/v1` admin.
-- [ ] Set `prod_staging_bucket` in `infra/terraform.tfvars` (flips `local.prod_enabled` -> `scraper_prod` +
-      `gpu_enhance_prod`). Until set, no prod resource exists.
-- [ ] Wire the prod GPU `FAL_KEY`: `module.gpu_enhance_prod` currently gets **no** `ssm_secret_arns`
-      (unlike dev). Add it, or texture generation + de-watermark **fail in prod**.
-- [ ] `alert_email` (optional): route auto-texture failure alerts for prod too; confirm the SNS email.
-- [ ] IAM parity: the same `batch:SubmitJob` bare+`:*` ARN allowance for the prod scrape + produce roles.
+The full prod stack is now DEFINED and count-gated on `prod_staging_bucket`: `scraper_prod`,
+`gpu_enhance_prod` (now with FAL_KEY via `local.prod_ssm_secrets`), and `sync_service_prod` (the
+produce + `/sync/v1` + `/config/v1` control plane). All three are **inert** until prod is enabled --
+a dev apply never reads the prod platform state or the `/blokport-prod/` params. Activating prod is
+now config + the cross-team prerequisite below, not new module code.
+
+CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's prod platform VPC.
+- [ ] **Blokport prod platform up + remote state available** at `blokport/prod/terraform.tfstate`
+      (bucket `blokport-tfstate`), exposing the same outputs as dev (`vpc_id`, `private_subnet_ids`,
+      `ecs_cluster_arn`, `service_sg_id`, `internal_namespace_id`). `sync_service_prod` reads these via
+      `data.terraform_remote_state.platform_prod` once prod is enabled.
+- [ ] **Create prod SSM params:** `/blokport-prod/BLOKPORT_SYNC_TOKEN`, `/blokport-prod/BLOKPORT_CONFIG_TOKEN`
+      (read by name when prod is enabled), and set `fal_key_ssm_name` (+ `scraper_proxy_ssm_name` if used) to
+      the prod FAL_KEY / proxy SSM params so `local.prod_ssm_secrets` wires them into the prod scraper, GPU,
+      and produce.
+- [ ] Set `prod_staging_bucket` in `infra/terraform.tfvars` -- this flips `local.prod_enabled` and creates
+      ALL prod resources at once (`scraper_prod`, `gpu_enhance_prod`, `sync_service_prod` + prod data sources).
+- [ ] Set the prod flags as desired: `prod_image_tag`, `prod_gpu_image_tag`, `prod_schedule_enabled`,
+      `prod_auto_enhance` / `prod_auto_texture` / `prod_require_enhanced` (all default OFF for a quiet start).
+- [ ] `alert_email` in `terraform.tfvars` (also makes the DEV alert persistent -- a full apply otherwise
+      removes the dev SNS alert created by the earlier targeted apply).
+- [ ] IAM parity: the prod scrape + produce roles get the `batch:SubmitJob` bare+`:*` allowance from the
+      module (same as dev); confirm on apply.
 - [ ] Reconcile the pre-existing ECR state drift (root `aws_ecr_repository` "refactored but never applied")
       before a clean prod apply.
-- [ ] `terraform plan` then `apply`; confirm the prod ECS services (incl. the new sync_service_prod) + Batch
-      queue/jobdef come up.
+- [ ] `terraform plan` -- with the prod platform state present it should now create the prod services; then
+      `apply` and confirm the prod ECS services (incl. `sync_service_prod`) + Batch queue/jobdef come up.
 
 ## 2. Prod environment variables (on the prod ECS task defs)
 - [ ] `BLOKPORT_ENV=production` (selects prod bucket/keys/ids). **Enforced:** prod refuses to fall back
