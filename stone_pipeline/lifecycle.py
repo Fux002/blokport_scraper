@@ -64,6 +64,24 @@ def active() -> str | None:
         return _active
 
 
+def _load_pristine_seed_keys() -> set[str]:
+    """The Key set of the committed CLEAN seed, read from the PRISTINE copy baked read-only at image build
+    (`variants_export_base.seed.csv`). The live base self-mutates at runtime (`base := 1_variants_full`
+    each produce), so it is not a trustworthy clean source; the pristine copy is. Falls back to the live
+    base only when the pristine copy is absent (local dev, where the committed base IS pristine). Empty set
+    if neither exists -- the reconcile then still dedups, just without a seed-Key survivor preference."""
+    import csv
+    from stone_pipeline.config.settings import SETTINGS
+    seed = SETTINGS.paths.variants_export_base_seed_csv
+    if not seed.exists():
+        seed = SETTINGS.paths.variants_export_base_csv
+    if not seed.exists():
+        log.warning("no committed seed to reconcile the variation table against; dedup runs seedless")
+        return set()
+    with seed.open(encoding="utf-8-sig", newline="") as handle:
+        return {(r.get("Key") or "").strip() for r in csv.DictReader(handle) if (r.get("Key") or "").strip()}
+
+
 _snapshot_on_mutation = False   # set True ONLY by the config server (serve); off in tests, laptop, and the
                                 # produce subprocess, so a lifecycle op there never attempts a real S3 call.
 
@@ -238,8 +256,24 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     _names, codes, err = _resolve(sources, require_non_empty=False)
     if err:
         return err
-    result, code = _ledger_op("reset", lambda lg, sync: sync.reset_sync_state(
-        lg, source_codes=codes, hard=bool(hard), prune_stale=pristine))
+    # pristine = TRUE cold start: reconcile the variation table to the committed seed BEFORE the sync-state
+    # reset, so duplicate / re-key OLD SIDES seeded before a seed cleanup are tombstoned (Medusa deletes
+    # them on the removals pull) AND dropped locally -- not left to re-render every produce. Read from the
+    # PRISTINE seed (baked read-only at image build): the live variants_export_base.csv self-mutates
+    # (base := 1_variants_full each produce), so it is not a trustworthy clean source at runtime.
+    seed_keys = _load_pristine_seed_keys() if pristine else None
+
+    def _do_reset(lg, sync):
+        # reconcile (drop + tombstone dup old sides) BEFORE the sync-state reset, so the tombstones are
+        # recorded and the dropped rows are gone before prune/overlay run. Keep reset_sync_state's shape
+        # flat (callers read body["reset"]["variation"] etc.); attach the reconcile result as a sibling.
+        reseed = sync.reconcile_variations_to_seed(lg, seed_keys) if (pristine and seed_keys is not None) else None
+        out = sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard), prune_stale=pristine)
+        if reseed is not None:
+            out["reseed"] = reseed
+        return out
+
+    result, code = _ledger_op("reset", _do_reset)
     if code != 200:
         return result, code                    # ledger refused (e.g. 409 in-flight): touch nothing else
     out = {"mode": "pristine" if pristine else ("hard" if hard else "soft"), "reset": result}

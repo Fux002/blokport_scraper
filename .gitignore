@@ -51,3 +51,4 @@ from_medusa/**/variants_export.csv
 crash.log
 infra/**/terraform.tfvars
 infra/**/*.auto.tfvars
+variants_export_base.seed.csv
