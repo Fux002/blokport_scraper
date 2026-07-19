@@ -36,10 +36,26 @@ def _rows(path: Path) -> list[dict]:
         return [{c: (r.get(c) or "") for c in COLS} for r in csv.DictReader(h)]
 
 
+def _duplicate_varieties(rows: list[dict]) -> list[tuple[str, str, str]]:
+    """Every (branch, type, Name) that resolves to MORE THAN ONE Key. A variety is identified by its
+    stone type + display name; two Keys for the same (type, Name) are the same stone twice -- the class
+    that ships duplicate products. This is invisible to the fixed-point check (distinct Keys make base a
+    stable fixed point WITH the dup present), so it is asserted separately. branch/type come from the Key
+    prefix (branch_type_nameslug_uuid); Name is the display column."""
+    seen: dict[tuple[str, str, str], int] = {}
+    for r in rows:
+        parts = (r.get("Key") or "").split("_")
+        branch = parts[0] if parts else ""
+        stype = parts[1] if len(parts) > 1 else ""
+        seen[(branch, stype, (r.get("Name") or "").casefold())] = seen.get((branch, stype, (r.get("Name") or "").casefold()), 0) + 1
+    return sorted(k for k, n in seen.items() if n > 1)
+
+
 def verify(base_path: Path = BASE) -> dict:
-    """Rebuild 1_variants_full from the committed base and assert it projects back to the SAME base -- the
-    fixed-point property that makes repeated cold starts reproducible. Non-destructive: only the generated
-    1_variants_full is (re)written; the committed base is read, never modified.
+    """Rebuild 1_variants_full from the committed base and assert (1) it projects back to the SAME base --
+    the fixed-point property that makes repeated cold starts reproducible -- and (2) no (branch,type,Name)
+    variety is present under more than one Key. Non-destructive: only the generated 1_variants_full is
+    (re)written; the committed base is read, never modified.
 
     Run from a clean tree with no pending 1_variants_update delta (the cold-start seed state); a stale
     delta legitimately makes base != full, which this correctly reports as not-a-fixed-point."""
@@ -48,11 +64,13 @@ def verify(base_path: Path = BASE) -> dict:
     base, full = _rows(base_path), _rows(FULL)
     first = next((i for i, (b, f) in enumerate(zip(base, full)) if b != f), None)
     fixed = base == full
-    stats = {"fixed_point": fixed, "base_rows": len(base), "full_rows": len(full), "first_diff_row": first}
-    (log.info if fixed else log.error)(
-        "seed is a fixed point (base == rebuilt full)" if fixed
-        else "seed is NOT a fixed point: base would drift on the next build",
-        extra={"extra_fields": stats})
+    dups = _duplicate_varieties(base)          # a duplicate variety is invisible to the fixed-point check
+    stats = {"fixed_point": fixed, "base_rows": len(base), "full_rows": len(full),
+             "first_diff_row": first, "duplicate_varieties": len(dups), "clean": fixed and not dups}
+    (log.info if stats["clean"] else log.error)(
+        "seed is a fixed point with no duplicate varieties" if stats["clean"]
+        else "seed FAILED: not a fixed point and/or duplicate varieties present",
+        extra={"extra_fields": {**stats, "dups": dups[:20]}})
     return stats
 
 
@@ -76,9 +94,10 @@ def main(argv: list[str] | None = None) -> int:
     cmd = argv[0] if argv else "verify"
     if cmd == "verify":
         s = verify()
-        print(f"seed fixed point: {s['fixed_point']} (base {s['base_rows']} rows"
+        print(f"seed clean: {s['clean']} (base {s['base_rows']} rows, fixed_point={s['fixed_point']}, "
+              f"duplicate_varieties={s['duplicate_varieties']}"
               + (f", first diff at row {s['first_diff_row']}" if not s['fixed_point'] else "") + ")")
-        return 0 if s["fixed_point"] else 1
+        return 0 if s["clean"] else 1
     if cmd == "reset":
         s = reset()
         print(f"reset {s['reset']} to committed seed ({s['rows']} rows)")

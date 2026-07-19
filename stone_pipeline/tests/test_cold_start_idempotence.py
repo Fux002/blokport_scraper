@@ -39,6 +39,11 @@ def test_committed_base_is_already_a_fixed_point():
     from stone_pipeline.reference import seed
     stats = seed.verify()
     assert stats["fixed_point"], f"committed base drifts on rebuild (first diff at row {stats['first_diff_row']})"
+    # A (branch,type,Name) variety may exist under ONLY ONE Key. Two Keys for the same stone+name is a
+    # duplicate variety -- invisible to the fixed-point check (distinct Keys stay a stable fixed point),
+    # so it is guarded explicitly here; it is the class that shipped duplicate products.
+    assert stats["duplicate_varieties"] == 0, f"committed base has {stats['duplicate_varieties']} duplicate varieties"
+    assert stats["clean"], "committed seed is not clean (fixed_point and/or duplicate_varieties failed)"
 
 
 def test_alias_normalization_is_idempotent():

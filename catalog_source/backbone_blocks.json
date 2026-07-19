@@ -453607,37 +453607,6 @@
       "key": "block_travertine_grey_travertine_04388223-33d7-41dd-96be-f0e5626881fb"
     },
     {
-      "variant_id": 126,
-      "variant": "Red Travertine (Persian Red)",
-      "category": "Blocks",
-      "stone_type": "Travertine",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_126_travertine_red_travertine_persian_red.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [],
-      "key": "block_travertine_red_travertine_persian_red_d70dfed3-f3e1-4fec-b505-d0db5166b198"
-    },
-    {
       "variant_id": 128,
       "variant": "Chocolate Travertine",
       "category": "Blocks",
