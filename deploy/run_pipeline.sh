@@ -13,7 +13,7 @@ set -euo pipefail
 # RUN_MODE selects what this task does (default = the full pipeline):
 #   pipeline            scrape -> pipeline -> catalog -> upload   (default)
 #   validate-dewatermark   de-watermark a sample of existing scraped/ originals and
-#                          write before/after pairs to S3 (no scrape) — eyeball gate.
+#                          write before/after pairs to S3 (no scrape); an eyeball gate.
 #   reprocess           re-run enhance/de-watermark on a source's scraped/ originals,
 #                       writing into improved/ in place (no scrape). Slice with
 #                       SLICE_OFFSET / SLICE_COUNT to parallelise across tasks.
