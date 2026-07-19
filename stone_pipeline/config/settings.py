@@ -163,6 +163,11 @@ class Paths:
     # catalog seeds from THIS, not the live export -- so a cold start (Medusa emptied -> thin live export)
     # still rebuilds the whole catalog and only grows from there. sync_variants_base keeps it == full.
     variants_export_base_csv: Path = _FROM_MEDUSA / "variants_export_base.csv"
+    # PRISTINE, read-only copy of the base, baked at image build (Dockerfile) and never written at runtime
+    # (the live base above self-mutates: base := 1_variants_full each produce). The factory reset reconciles
+    # the ledger against THIS so a seed cleanup actually reaches the running ledger. Absent locally -> the
+    # committed base itself is pristine, so lifecycle falls back to it.
+    variants_export_base_seed_csv: Path = _FROM_MEDUSA / "variants_export_base.seed.csv"
 
     # per-category backbone files derive from the CATEGORIES registry.
     @property

@@ -529,6 +529,66 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
     return ledger.execute(f"UPDATE {table} SET {', '.join(sets)}{where}", (now, *params)).rowcount
 
 
+def _variety_identity(key: str, name: str) -> tuple[str, str, str]:
+    """(branch, type-slug, accent-folded name) -- the identity a variety is deduped by. Branch + type come
+    from the Key PREFIX, never the row's `type` column: a re-key old side can carry a malformed type
+    ('Dolomite Marble'), but its Key prefix ('slab_dolomite_...') still collapses to the same identity as
+    its clean survivor. Name is accent-folded so 'Corumba'/'Corumbá' are one identity."""
+    import unicodedata
+    parts = key.split("_")
+    branch = parts[0] if parts else ""
+    typ = parts[1] if len(parts) > 1 else ""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", name or "") if not unicodedata.combining(c))
+    return (branch, typ, folded.casefold().strip())
+
+
+def _key_nameslug(key: str) -> str:
+    """The name-slug portion of a Key (between the type and the trailing uuid)."""
+    parts = key.split("_")
+    uuid_at = next((i for i, p in enumerate(parts) if "-" in p), len(parts))
+    return "_".join(parts[2:uuid_at])
+
+
+def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str]) -> dict:
+    """Make the variation table dup-free and seed-consistent -- the missing half of a TRUE cold start.
+
+    A pristine reset zeroes sync state but by its old invariant never removed a live variety, so a
+    duplicate / re-key OLD SIDE seeded before a seed cleanup lingers forever and every produce re-renders
+    it (the ledger is the render source). This collapses every (branch,type,name) that resolves to MORE
+    THAN ONE Key to a single survivor -- the committed-seed Key if one is present, else the clean-slug Key
+    -- and TOMBSTONES + drops the rest on the ONE removed lane (kind='variation'). The tombstone is what
+    makes Medusa delete the old side by Key on the removals pull; Medusa's own consumer blocks a variety
+    that still has products, so a live one can never be wrongly deleted. A minted variety with no twin is
+    untouched (it re-mints deterministically). Global-only. Returns counts + the dropped Keys."""
+    import collections
+    import re
+    groups: dict[tuple, list[str]] = collections.defaultdict(list)
+    for v in ledger.execute("SELECT key, name FROM variation").fetchall():
+        groups[_variety_identity(v["key"], v["name"])].append(v["key"])
+    dropped: list[str] = []
+    for (_branch, _typ, folded), keys in groups.items():
+        if len(keys) <= 1:
+            continue
+        clean = re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", folded)).strip("_")
+        # survivor: prefer a committed-seed Key, then the clean-slug Key, then shortest, then lexical.
+        survivor = min(keys, key=lambda k: (k not in seed_keys, _key_nameslug(k) != clean,
+                                             len(_key_nameslug(k)), k))
+        dropped += [k for k in keys if k != survivor]
+    if dropped:
+        record_tombstones(ledger, [(k, None) for k in dropped], reason="reseed_dedup", kind="variation")
+        q = ",".join("?" * len(dropped))
+        # FK order: inventory -> product -> combination -> variation. Post-reset there are no products,
+        # but reconcile is safe to run independently, so cascade defensively.
+        ledger.execute(f"DELETE FROM inventory WHERE sku IN "
+                       f"(SELECT sku FROM product WHERE variation_key IN ({q}))", tuple(dropped))
+        ledger.execute(f"DELETE FROM product WHERE variation_key IN ({q})", tuple(dropped))
+        ledger.execute(f"DELETE FROM combination WHERE variation_key IN ({q})", tuple(dropped))
+        ledger.execute(f"DELETE FROM variation WHERE key IN ({q})", tuple(dropped))
+    log.warning("variation table reconciled to seed (dedup old sides)", extra={"extra_fields": {
+        "tombstoned_dropped": len(dropped)}})
+    return {"tombstoned_dropped": len(dropped), "dropped_keys": dropped}
+
+
 def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
                      hard: bool = False, prune_stale: bool = False) -> dict[str, int]:
     """CLEAN START of the sync overlay, so the ledger stops drifting from a wiped Medusa.

@@ -12,6 +12,10 @@
 #   docker build --target imageproc -t blokport-scraper:imageproc .
 #   docker build --target gpu       -t blokport-scraper:gpu .
 
+# PRISTINE_SEED_BAKE (core): after COPY, snapshot each env's committed base to a read-only *.seed.csv the
+# runtime never writes (the live base self-mutates: base := 1_variants_full each produce). The factory
+# reset reconciles the ledger against this so a seed cleanup reaches the running ledger. See settings
+# variants_export_base_seed_csv + lifecycle._load_pristine_seed_keys.
 FROM python:3.12-slim AS core
 
 ENV PYTHONUNBUFFERED=1 \
@@ -33,6 +37,8 @@ COPY stone_pipeline/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
 COPY . /app
+# bake the read-only pristine seed (see PRISTINE_SEED_BAKE note): one *.seed.csv per env's committed base
+RUN for f in /app/from_medusa/*/variants_export_base.csv; do [ -e "$f" ] && cp "$f" "${f%.csv}.seed.csv"; done
 RUN chmod +x /app/deploy/run_pipeline.sh
 
 # Default run: scrape -> pipeline -> catalog -> push artifacts to S3 (staging).
@@ -132,5 +138,7 @@ ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
     HF_HUB_DOWNLOAD_TIMEOUT=15 \
     BLOKPORT_REQUIRE_CUDA=1
 COPY . /app
+# bake the read-only pristine seed (see PRISTINE_SEED_BAKE note): one *.seed.csv per env's committed base
+RUN for f in /app/from_medusa/*/variants_export_base.csv; do [ -e "$f" ] && cp "$f" "${f%.csv}.seed.csv"; done
 RUN chmod +x /app/deploy/run_pipeline.sh
 ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
