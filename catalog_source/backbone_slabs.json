@@ -14741,7 +14741,8 @@
       "category": "Slabs",
       "stone_type": "Dolomite",
       "color": [
-        "Gold"
+        "Gold",
+        "White"
       ],
       "finishes": [
         "Polished",
@@ -14761,19 +14762,21 @@
         "Bush Hammered and Brushed",
         "Brushed and Tumbled",
         "Antique",
-        "Raw"
+        "Raw",
+        "Flamed"
       ],
       "qualities": [
         "A"
       ],
       "aliases": [
-        "Matarazzo Dolomite"
+        "Matarazzo Dolomite",
+        "Matarazzo"
       ],
       "image_file": "slab_rb_651_dolomite_matarazzo.png",
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_dolomite_matarazzo_681fd142-fe3d-43cd-b0b2-462ae08b4277"
+      "key": "slab_dolomite_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7"
     },
     {
       "variant_id": 652,
@@ -20885,7 +20888,7 @@
           "reason": "typo-corrected duplicate"
         }
       ],
-      "key": "slab_granite_rosa_porrino_d433528d-f993-4273-bca3-b1739b931c08"
+      "key": "slab_granite_rosa_porrino_828e54b1-76b1-584e-8633-239770c2876a"
     },
     {
       "variant_id": 85,
@@ -497983,13 +497986,14 @@
         "A"
       ],
       "aliases": [
-        "Cappadocia Quartzite"
+        "Cappadocia Quartzite",
+        "Cappadocia"
       ],
       "image_file": "slab_rb_10558_quartzite_cappadocia.png",
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [],
-      "key": "slab_quartzite_cappadocia_8228f20d-dac2-4c0c-997b-9908a0937c97"
+      "key": "slab_quartzite_cappadocia_5abea2d7-cc74-5cd9-b9ae-0c3a2b143455"
     },
     {
       "variant_id": 10559,
@@ -573242,46 +573246,6 @@
       "key": "slab_marble_rosa_levanto_a647cd24-2afc-4865-ae48-cdab6bc0968d"
     },
     {
-      "variant_id": 115,
-      "variant": "Rosa Porriño",
-      "category": "Slabs",
-      "stone_type": "Granite",
-      "color": [
-        "Pink",
-        "Rose"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_115_granite_rosa_porrino.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_granite_rosa_porrino_f3414355-aeb1-41f5-b22e-4bcad0ca0daa"
-    },
-    {
       "variant_id": 127,
       "variant": "Scabos Travertine",
       "category": "Slabs",
@@ -573937,36 +573901,6 @@
       "key": "slab_soapstone_alberene_soapstone_4bc6e2b0-fba1-44dd-9471-fa68bf7b845a"
     },
     {
-      "variant_id": 12194,
-      "variant": "Matarazzo",
-      "category": "Slabs",
-      "stone_type": "Dolomite",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Matarazzo"
-      ],
-      "image_file": "slab_dolomite_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_dolomite_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7"
-    },
-    {
       "variant_id": 12195,
       "variant": "Antibes",
       "category": "Slabs",
@@ -574077,36 +574011,6 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "slab_crystal_botanic_crystal_3934b539-1b6d-5608-bfe9-bd0bb8ca1471"
-    },
-    {
-      "variant_id": 12199,
-      "variant": "Cappadocia",
-      "category": "Slabs",
-      "stone_type": "Quartzite",
-      "color": [
-        "Beige"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Cappadocia"
-      ],
-      "image_file": "slab_quartzite_cappadocia_5abea2d7-cc74-5cd9-b9ae-0c3a2b143455.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_quartzite_cappadocia_5abea2d7-cc74-5cd9-b9ae-0c3a2b143455"
     },
     {
       "variant_id": 12200,
