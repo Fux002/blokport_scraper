@@ -52,6 +52,36 @@ def seed_attributes(ledger: Ledger, path: str | Path | None = None) -> int:
     return n
 
 
+def restore_category_ids(ledger: Ledger, path: str | Path | None = None) -> int:
+    """Re-stamp the category (Slabs/Blocks/Tiles) pcat ids from attributes.csv, marking
+    those rows `synced`. Returns the number restored.
+
+    A category's pcat id is a PRE-EXISTING Medusa product-category (env identity carried in
+    from_medusa/<env>/attributes.csv), never a scraper-assigned sync id. A global sync reset
+    nulls it via the attribute overlay reset, but products reverse-map pcat_id <-> category
+    name through this table at populate/render time, so a nulled category id yields an empty
+    category on every product and Medusa cannot attach it. Restore ONLY the category rows
+    (the rest of the overlay stays reset), so a factory reset does not break categories."""
+    path = Path(path or SETTINGS.paths.attributes_csv)
+    if not path.exists():
+        return 0
+    now = now_iso()
+    n = 0
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        for r in csv.DictReader(handle):
+            if (r.get("category") or "").strip() != "category":
+                continue
+            value = (r.get("value") or "").strip()
+            sourceid = (r.get("sourceid") or "").strip()
+            if not value or not sourceid:
+                continue
+            n += ledger.execute(
+                "UPDATE attribute SET medusa_id = ?, state = 'synced', updated_at = ? "
+                "WHERE category = 'category' AND value = ?",
+                (sourceid, now, value)).rowcount
+    return n
+
+
 def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
     """Load variants_export.csv (Id, Key, Name, Image, Aliases, Volume) into the
     `variation` table, each `synced` with its Medusa Id (the variation half of the
