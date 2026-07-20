@@ -150,13 +150,42 @@ def test_dimensions_prefer_parsed(ref, cfg):
     assert "length:parsed" in row.dimension_method
 
 
-def test_dimension_range_uses_midpoint_not_low_metres(ref, cfg):
-    # regression: '2-3 cm' must parse to the 2.5 cm midpoint (0.025 m), NOT the low endpoint '2'
-    # read as 2 metres (the old first-number-only parse made a 2 cm slab 2 m thick).
+def test_thickness_range_defaults_to_standard(ref, cfg):
+    # policy: a thickness given as a range ('2-3 cm') is ambiguous -> the standard 2 cm (the European stocked
+    # depth), flagged. NOT the 2.5 cm midpoint and NEVER the low '2' read as 2 metres (the old parse bug).
     row = _slab_row(raw_dimensions="length=2.80m;height=1.97m", raw_thickness="2-3 cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.width == 0.025, f"range thickness should be the 2.5 cm midpoint, got {row.width}"
+    assert row.width == 0.02, f"range thickness should default to the 2 cm standard, got {row.width}"
+    assert any(f.code == FlagCode.dimension_defaulted and f.field == "width" for f in row.review_flags)
+
+
+def test_face_range_uses_maximum(ref, cfg):
+    # a face dimension given as a range ('105 to 145cm') resolves to its MAX (1.45 m) -- cut smaller later.
+    row = _slab_row(raw_dimensions="length=105 to 145cm;height=1.97m", raw_thickness="2cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length == 1.45 and "length:parsed" in row.dimension_method
+
+
+def test_multi_thickness_defaults_to_standard_keeps_faces(ref, cfg):
+    # a bundle with several thicknesses ('MULTI') is ambiguous -> standard 2 cm, flagged; real faces kept.
+    row = _slab_row(raw_dimensions="length=3.20m;height=1.90m", raw_thickness="MULTI")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length == 3.2 and row.height == 1.9 and row.width == 0.02
+    assert any(f.code == FlagCode.dimension_defaulted and f.field == "width" for f in row.review_flags)
+
+
+def test_free_length_fills_only_missing_and_keeps_real_dims(ref, cfg):
+    # a cut-to-size tile ('length=Free') keeps its real height + thickness; only the missing length is
+    # filled from the tile standard (0.6 m), flagged.
+    row = _slab_row(raw_format="Tile", raw_dimensions="length=Free;height=40cm", raw_thickness="1.8cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.height == 0.4 and row.width == 0.018      # real values preserved
+    assert row.length == 0.6                             # tile standard fills the 'Free' length only
+    assert any(f.code == FlagCode.dimension_defaulted and f.field == "length" for f in row.review_flags)
 
 
 def test_bundle_count_from_slabs_array_is_robust():
@@ -180,17 +209,30 @@ def test_description_uses_resolved_format_not_slab_default(ref, cfg):
     assert "is a natural " not in d, f"invented a colour: {row.description}"
 
 
-def test_missing_dimensions_are_rejected_not_fabricated(ref, cfg):
-    # dimensions are REQUIRED and never synthesised: a product with no scraped dims keeps None,
-    # so validate rejects it rather than invent a size.
+def test_missing_dimensions_filled_from_pack_default(ref, cfg):
+    # a row with NO scraped dims is filled entirely from the category standard (slab 3.3 x 2.0 x 0.02 m),
+    # every filled dim flagged, so validate no longer rejects it as dimension_invalid.
     from stone_pipeline.stages import validate
     row = _slab_row()   # no raw_dimensions / raw_thickness on the row
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length is None and row.width is None and row.height is None and row.weight is None
+    assert (row.length, row.height, row.width) == (3.3, 2.0, 0.02)
+    assert {f.field for f in row.review_flags if f.code == FlagCode.dimension_defaulted} \
+        == {"length", "height", "width"}
     validate.validate_row(row)
-    assert not row.is_emittable
-    assert any(r.rule == "dimension_invalid" for r in row.reject_reasons)   # rejected, not fabricated
+    assert not any(r.rule == "dimension_invalid" for r in row.reject_reasons)   # filled, not rejected
+
+
+def test_parsed_zero_dimension_is_kept_and_rejected(ref, cfg):
+    # a real 0 is a data error, NOT a missing value: it is kept (never defaulted) so validate rejects it.
+    from stone_pipeline.stages import validate
+    row = _slab_row(raw_dimensions="length=0m;height=1.97m", raw_thickness="2cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length == 0.0
+    assert not any(f.code == FlagCode.dimension_defaulted and f.field == "length" for f in row.review_flags)
+    validate.validate_row(row)
+    assert any(r.rule == "dimension_invalid" for r in row.reject_reasons)
 
 
 def test_weight_derived_from_dimensions_and_density(ref, cfg):

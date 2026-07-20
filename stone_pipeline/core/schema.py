@@ -35,6 +35,7 @@ class FlagCode(str, Enum):
     format_inferred = "format_inferred"
     format_unresolved = "format_unresolved"
     dimension_out_of_range = "dimension_out_of_range"
+    dimension_defaulted = "dimension_defaulted"    # a missing/ambiguous dim filled from the pack's dimension_defaults
     weight_derived = "weight_derived"
     attr_last_resort = "attr_last_resort"
     multi_value = "multi_value"

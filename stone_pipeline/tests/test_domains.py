@@ -81,6 +81,7 @@ def _valid_pack_dict():
         "ambiguous_type_words": ["z"], "default_finishes": ["F"], "fallback_color": "N",
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
+        "dimension_defaults": {"x": {"length": 1.0, "height": 1.0, "thickness": 0.02}},
         "finish_phrases": {"f": "p"}, "finish_phrase_default": "p"})
 
 
@@ -127,6 +128,9 @@ block_finish: Standard
 dimension_ranges:
   shirt: {weight: [0.1, 0.3], length: [0.5, 0.8], width: [0.4, 0.6], height: [0.01, 0.02]}
   pants: {weight: [0.2, 0.5], length: [0.9, 1.2], width: [0.3, 0.5], height: [0.01, 0.02]}
+dimension_defaults:
+  shirt: {length: 0.7, height: 0.015, thickness: 0.5}
+  pants: {length: 1.0, height: 0.015, thickness: 0.4}
 finish_phrases: {standard: "a standard finish"}
 finish_phrase_default: "a standard finish"
 """

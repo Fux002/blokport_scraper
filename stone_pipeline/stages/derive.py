@@ -33,6 +33,10 @@ _NUM_UNIT = re.compile(r"(-?\d[\d.,]*\d|-?\d)\s*([a-zµ\"'″′’”]+)?", fla
 # the old first-number-only parse read '2-3 cm' as 2 (then metres). Average the endpoints and take
 # the trailing unit. Requires a digit before the dash, so a lone negative '-3' is NOT a range.
 _RANGE = re.compile(r"(\d[\d.,]*)\s*[-–—]\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
+# a DIMENSION range 'lo to hi [unit]' / 'lo-hi [unit]' ('105 to 145cm', '2-3 cm'): the unit trails the whole
+# range. Face dimensions take the MAX endpoint ("cut smaller later"); thickness never uses a range. Kept
+# separate from _RANGE (which midpoints, for weight/generic callers) so their behaviour is unchanged.
+_DIM_RANGE = re.compile(r"(\d[\d.,]*)\s*(?:to|[-–—])\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
 # per-slab key in a scraped slabs-array, case/space/quote-insensitive ('"n":', "'N' :", '"Numero":')
 _SLAB_KEY = re.compile(r"""["']\s*(?:n|numero)\s*["']\s*:""", flags=re.IGNORECASE)
 
@@ -125,38 +129,86 @@ def _derive_weight(row: CanonicalRow, ref: ReferenceData,
     return weight, "weight:derived"
 
 
+_FACE_DIMS = ("length", "height")
+
+
+def _dimension_category(row: CanonicalRow) -> str:
+    """The row's dimension bucket: 'block' | 'tile' | 'slab' (a tile keeps its own size, not the slab's)."""
+    fmt = (row.format_value or "").casefold()
+    if row.is_block or fmt == "block":
+        return "block"
+    return "tile" if fmt == "tile" else "slab"
+
+
+def _parse_face(text: str, ref: ReferenceData) -> float | None:
+    """A face dimension (length/height) in metres: a range resolves to its MAX endpoint, a single measure
+    parses normally. None when absent/unparseable, so the caller fills the pack default."""
+    if not text:
+        return None
+    rng = _DIM_RANGE.search(text)
+    if rng:
+        return _parse_measure(f"{rng.group(2)}{rng.group(3) or ''}", ref)   # hi endpoint carries the unit
+    return _parse_measure(text, ref)
+
+
+def _parse_thickness(text: str, ref: ReferenceData) -> float | None:
+    """The depth (canonical `width`) in metres: only a single clean measure counts. A range ('2-3cm') or a
+    non-numeric token ('MULTI') is AMBIGUOUS -> None, so the caller fills the standard thickness (a 2-3cm
+    slab is stocked as the 2cm standard, not the midpoint)."""
+    if not text or _DIM_RANGE.search(text):
+        return None
+    return _parse_measure(text, ref)
+
+
+def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, default: float,
+                       category: str, methods: list[str]) -> float:
+    """Keep a real parsed value (INCLUDING 0, which validate then rejects as a data error); fill only a
+    genuinely MISSING one (None) from the pack default, flagged. Never fills over a real value."""
+    if value is not None:
+        methods.append(f"{field}:parsed")
+        return value
+    methods.append(f"{field}:defaulted")
+    row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_defaulted,
+                            best_guess=f"{default}m ({category} standard)",
+                            confidence=Confidence.low, method="pack_default", src_url=row.src_url))
+    return default
+
+
 def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
-    parsed: dict[str, float] = {}
+    """Resolve length/width/height in metres. length+height are the two FACE dimensions (a range takes its
+    MAX); width is the depth/thickness. Each parses from the scraped strings; anything still missing or
+    ambiguous (MULTI thickness, 'Free' length, absent) is filled from the pack's dimension_defaults for the
+    row's category and provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
+    validate rejects it (a wrong real size breaks area/volume pricing + freight)."""
+    category = _dimension_category(row)
+    defaults = active_pack().dimension_defaults[category]
+
+    faces: dict[str, float] = {}
     if row.raw_dimensions:
         for part in row.raw_dimensions.split(";"):
-            if "=" in part:
-                key, val = part.split("=", 1)
-                meters = _parse_measure(val, ref)
-                if meters is not None:
-                    parsed[key.strip().lower()] = meters
-    width = _parse_measure(row.raw_thickness, ref) if row.raw_thickness else None
-    if width is None:                         # fall back to a width=/thickness= entry in raw_dimensions
-        # explicit membership (not `or`) so a PARSED width of 0 is KEPT (-> validate rejects the bad
-        # product) instead of silently falling through to thickness/synthetic.
-        width = parsed["width"] if "width" in parsed else parsed.get("thickness")
+            if "=" not in part:
+                continue
+            key, val = part.split("=", 1)
+            key = key.strip().lower()
+            meters = _parse_face(val, ref) if key in _FACE_DIMS else _parse_thickness(val, ref)
+            if meters is not None:
+                faces[key] = meters
 
-    fmt = (row.format_value or "").casefold()
-    _range_key = "block" if (row.is_block or fmt == "block") else "tile" if fmt == "tile" else "slab"
-    ranges = active_pack().dimension_ranges[_range_key]
-    methods = []
+    # thickness: the row's own field first, then a width=/thickness= entry in the dims string.
+    width = _parse_thickness(row.raw_thickness, ref) if row.raw_thickness else None
+    if width is None and not row.raw_thickness:
+        width = faces.get("width", faces.get("thickness"))
 
-    length = parsed.get("length")
-    height = parsed.get("height")
-    # Dimensions are REQUIRED and never fabricated: an absent one stays None, an invalid one stays <= 0,
-    # and validate rejects the product (no real size breaks area/volume pricing + freight).
-    for name, value in (("length", length), ("height", height), ("width", width)):
-        methods.append(f"{name}:{'parsed' if value is not None else 'missing'}")
+    methods: list[str] = []
+    length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods)
+    height = _resolve_dimension(row, "height", faces.get("height"), defaults["height"], category, methods)
+    width = _resolve_dimension(row, "width", width, defaults["thickness"], category, methods)
 
     weight, weight_method = _derive_weight(row, ref, length, width, height)
     methods.append(weight_method)
 
-    # range sanity: flag an out-of-range parsed/derived value (a mis-scaled scraped weight, or a
-    # dimension typo). Skip None (a genuinely missing value that validate will reject).
+    # range sanity: flag a parsed/derived value wildly outside the category's expected band.
+    ranges = active_pack().dimension_ranges[category]
     for name, value in (("length", length), ("width", width), ("height", height), ("weight", weight)):
         if value is None:
             continue
@@ -166,7 +218,6 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
                                     raw_value=str(value), confidence=Confidence.low,
                                     method="range_check", src_url=row.src_url))
 
-    # keep None where a value is genuinely missing (validate rejects it); round the real ones.
     row.length = round(length, 3) if length is not None else None
     row.width = round(width, 3) if width is not None else None
     row.height = round(height, 3) if height is not None else None
@@ -511,9 +562,11 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
         derive_description(row)
         _apply_overrides(row, ref)  # overrides win over the derived values
         derive_handle(row, source_cfg)  # handle follows the (possibly overridden) title
-    # A required dimension left None (never fabricated) means validate will reject the row; a high share
-    # signals a source that stopped shipping sizes. A provenance gap is an invariant breach -> DEGRADED.
-    incomplete = sum(1 for r in rows if r.length is None or r.width is None or r.height is None)
+    # A dimension filled from the pack default (always flagged, never silent) means the source did not ship
+    # a real size for that row; a high share signals a source that stopped shipping sizes. A provenance gap
+    # is an invariant breach. Either way -> DEGRADED (the per-row default still emits, but the batch is flagged).
+    incomplete = sum(1 for r in rows
+                     if any(f.code == FlagCode.dimension_defaulted for f in r.review_flags))
     provenance_gaps = sum(1 for r in rows if _provenance_gap(r))
     degraded = (rows and incomplete / len(rows) >= SETTINGS.thresholds.derive_incomplete_degraded) or provenance_gaps
     log.info("derive done", extra={"extra_fields": {"rows": len(rows), "incomplete_dims": incomplete}})

@@ -67,13 +67,20 @@ Run the source once and confirm it clears, in order:
   (catches a unit/scale error -- e.g. mm read as cm). This is the backstop for a wrong `dimension_unit`.
 - **process gate**: the Medusa import contract (origin country code, etc.).
 - **validate** (`stages/validate.py`): required attribute ids, variation id, no unresolved tree gap, active
-  category, unique handle/slug, owner ids (company + sales channel), valid dimensions (never fabricated), and
-  the image rule. A row missing any of these is rejected, never emitted half-formed.
+  category, unique handle/slug, owner ids (company + sales channel), valid dimensions, and the image rule.
+  A row missing any of these is rejected, never emitted half-formed.
 
 ## 6. Invariants the source must honor
 
-- **Never guess a value into output** -- an unresolved attribute / absent dimension / unknown unit becomes a
-  review flag or a reject, not a fabricated value.
+- **Never guess a value into output** -- an unresolved attribute / unknown unit becomes a review flag or a
+  reject, not a fabricated value.
+- **Dimensions: shared fallback toolbox, never per-adapter.** A dimension that is missing, unparseable, or
+  ambiguous (a `MULTI` thickness, a `Free`/cut-to-size length) is filled from `dimension_defaults` in the
+  domain pack (`config/domains/<pack>.yaml`) by the shared `derive_dimensions`, and every fill carries a
+  `FlagCode.dimension_defaulted` provenance flag -- so behaviour is identical across all sources. A face
+  dimension given as a range takes its MAX; a thickness range/`MULTI` takes the standard depth. A real
+  parsed `0` is a data error: kept, never defaulted, so validate rejects it. Do NOT add dimension defaults
+  in an adapter; add a category to the pack toolbox.
 - **Capture raw** (`capture_raw = True`) so no source field is ever lost (mine more later without re-scraping).
 - **Deterministic + idempotent** -- the same scrape produces byte-identical emit; safe to re-run.
 - **Vendor isolation** -- the source only touches products in `scraper_sync_ref` by SKU, never by company_id.
