@@ -76,16 +76,6 @@ _ENTITY = {
 # hardcoded name->label).
 _CATEGORY = {c.name: c.label for c in CATEGORIES}
 
-
-def _as_number(text):
-    """Stored decimals are TEXT (for exact CSV round-trip); send them as JSON numbers."""
-    if text is None or str(text).strip() == "":
-        return None
-    try:
-        return float(text)
-    except (TypeError, ValueError):
-        return None
-
 # tables that carry a sync `state` column (combination is empty until materialized)
 _STATE_TABLES = ("attribute", "variation", "combination", "product", "gap", "removed")
 
@@ -208,7 +198,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "UPDATE variation SET state = 'syncing', updated_at = ? WHERE key IN ("
         "  SELECT key FROM variation WHERE " + _ELIGIBLE_VARIATION +
         "  ORDER BY created_at, key" + _sub_limit(limit) + ") "
-        "RETURNING key, branch, type, name, aliases, image_url, volume, payload_hash",
+        "RETURNING key, branch, type, name, aliases, image_url, payload_hash",
         (now_iso(),)).fetchall()
     return _isolate(ledger, "variation", "key", rows, lambda v: {
         "external_id": v["key"],
@@ -219,7 +209,6 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "name": v["name"],
             "aliases": json.loads(v["aliases"] or "[]"),
             "image_url": v["image_url"] or "",
-            "volume": _as_number(v["volume"]),   # m3/kg as a number, not a string
         },
     })
 

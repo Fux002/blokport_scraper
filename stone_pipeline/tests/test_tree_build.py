@@ -49,6 +49,16 @@ def _export(tmp_path, rows):  # rows: (Id, Key, Name)
     return p
 
 
+def _export_no_volume(tmp_path, rows):  # 5-column export: Blokport's file after packing_factor removal
+    p = tmp_path / "export_5col.csv"
+    with p.open("w", newline="", encoding="utf-8") as h:
+        w = csv.writer(h)
+        w.writerow(["Id", "Key", "Name", "Image", "Aliases"])   # NO "Volume per kg (m³/kg)" column
+        for vid, key, nm in rows:
+            w.writerow([vid, key, nm, "", ""])
+    return p
+
+
 def _products(tmp_path, rows):
     p = tmp_path / "products.csv"
     with p.open("w", newline="", encoding="utf-8") as h:
@@ -81,6 +91,18 @@ def test_every_variation_gets_all_category_finishes(tmp_path):
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
     assert {c[FIN] for c in _for(combos, "v1")} == {"f_pol", "f_raw", "f_hon"}
     assert not unc
+
+
+def test_build_tolerates_export_without_volume_column(tmp_path):
+    # Blokport drops the 'Volume per kg (m³/kg)' column (freight volume is computed from dimensions now).
+    # tree_build reads the export by header (Id/Key/Name), so the catalog builds IDENTICALLY from the
+    # 5-column file -- no reader requires the dropped column.
+    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
+    prod = _products(tmp_path, [_prow()])
+    rows = [("v1", "slab_marble_carrara_1", "Carrara")]
+    six, _, _ = tree_build.build_combinations(_export(tmp_path, rows), _attrs(tmp_path), [bb], prod)
+    five, _, _ = tree_build.build_combinations(_export_no_volume(tmp_path, rows), _attrs(tmp_path), [bb], prod)
+    assert five and five == six      # the dropped column changes nothing
 
 
 def test_combination_tuple_shape_and_csv(tmp_path):
