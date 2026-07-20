@@ -19,6 +19,13 @@ declaration on the scraper/adapter/config, never an inline guess or an order-dep
 ambiguous (a unit a label omits, which category level is the material), DECLARE the rule from a live sample;
 do not decide it at extraction time. See NEW_SOURCE_CHECKLIST.md section 0.
 
+**Dimensions capture only; fallbacks are shared.** An adapter's job is to hand `derive` the raw values it can
+find (`raw_dimensions`, `raw_thickness`); it must NOT invent or default a size. Missing / unparseable /
+ambiguous dimensions (a `MULTI` thickness, a `Free` cut-to-size length, a `A to B` range) are resolved once,
+for every source, by the shared `stages/derive.derive_dimensions` from the `dimension_defaults` toolbox in the
+domain pack (`config/domains/<pack>.yaml`), always provenance-flagged (`FlagCode.dimension_defaulted`). Tune a
+size or add a category THERE, never in an adapter. See NEW_SOURCE_CHECKLIST.md section 6.
+
 1. **Scraper** — `scrapers/<source>.py`: copy `scrapers/_template.py`, subclass `ScraperBase`,
    set `source`/`columns`/`id_field` and a per-product `format` (`slab`/`block`/`tile`),
    implement `list_products()` + `parse_product()` (return an `image_urls` list). Register it

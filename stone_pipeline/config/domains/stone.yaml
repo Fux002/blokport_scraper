@@ -54,6 +54,21 @@ dimension_ranges:
   block: {weight: [18.0, 23.0],  length: [1.5, 3.0], width: [1.5, 3.0],   height: [1.5, 3.0]}
   tile:  {weight: [0.005, 0.012], length: [0.3, 0.6], width: [0.01, 0.02], height: [0.3, 0.6]}
 
+# Fallback dimensions in METRES, applied by the shared derive stage (stages/derive.derive_dimensions) ONLY
+# when a real scraped value is missing / unparseable / ambiguous. Every fill is provenance-flagged
+# (FlagCode.dimension_defaulted) -- never silent. A real parsed value ALWAYS wins; a parsed 0 is a data
+# error and is left to be rejected, never defaulted. This is the single shared toolbox every scraper uses,
+# so dimensions behave identically across sources -- add a category here, never per-adapter dimension logic.
+# Values are data-derived: the most common real slab is ~3.3x2.0m, tiles are 60x60cm, and the modal /
+# European-standard slab+tile depth is 2cm. width == the depth (thickness); length+height are the two faces.
+# Resolution rule (in derive): a range "A to B" on a FACE dimension (length/height) resolves to its MAX
+# ("cut smaller later"); a thickness that is a range or MULTI resolves to `thickness` here, because a
+# 2-3cm slab is stocked as the 2cm standard, not the midpoint.
+dimension_defaults:
+  slab:  {length: 3.30, height: 2.00, thickness: 0.02}
+  block: {length: 2.80, height: 1.50, thickness: 1.50}
+  tile:  {length: 0.60, height: 0.60, thickness: 0.02}
+
 # Finish -> surface phrase for the generated product description (was stages/derive.py _FINISH_PHRASE).
 # Benefit-led but finish-true: each line describes what the finish actually is, so it sells without
 # inventing a claim. This is the one honest place the description carries a sensory hook.

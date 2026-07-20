@@ -24,7 +24,7 @@ _DEFAULT_PACK = "stone"
 _REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories",
              "ambiguous_type_words", "default_finishes", "fallback_color",
              "last_resort_finishes", "last_resort_quality", "block_finish",
-             "dimension_ranges", "finish_phrases", "finish_phrase_default")
+             "dimension_ranges", "dimension_defaults", "finish_phrases", "finish_phrase_default")
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,8 @@ class DomainPack:
     block_finish: str                      # the standard finish applied to a raw/unfinished block
     # format -> {weight|length|width|height: (lo, hi)} in metres/tonnes
     dimension_ranges: dict[str, dict[str, tuple[float, float]]]
+    # format -> {length, height, thickness} fallback size in metres (derive fills a missing dim from this)
+    dimension_defaults: dict[str, dict[str, float]]
     finish_phrases: dict[str, str]
     finish_phrase_default: str
 
@@ -81,6 +83,10 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
             if not (isinstance(vals, (list, tuple)) and len(vals) == 2
                     and all(isinstance(v, (int, float)) for v in vals)):
                 bad(f"dimension_ranges[{fmt!r}][{dim!r}] must be a [lo, hi] pair of numbers, got {vals!r}")
+    for fmt, dims in data["dimension_defaults"].items():
+        for dim in ("length", "height", "thickness"):
+            if not isinstance(dims.get(dim), (int, float)) or dims[dim] <= 0:
+                bad(f"dimension_defaults[{fmt!r}][{dim!r}] must be a positive number, got {dims.get(dim)!r}")
 
 
 def load_pack(name: str | None = None) -> DomainPack:
@@ -112,6 +118,8 @@ def load_pack(name: str | None = None) -> DomainPack:
         last_resort_quality=data["last_resort_quality"],
         block_finish=data["block_finish"],
         dimension_ranges=ranges,
+        dimension_defaults={fmt: {k: float(v) for k, v in dims.items()}
+                            for fmt, dims in data["dimension_defaults"].items()},
         finish_phrases=dict(data["finish_phrases"]),
         finish_phrase_default=data["finish_phrase_default"],
     )
