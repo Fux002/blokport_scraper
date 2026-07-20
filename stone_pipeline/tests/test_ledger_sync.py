@@ -237,6 +237,16 @@ def test_serve_isolates_a_row_with_corrupt_json(tmp_path):
         assert ledger.get("variation", "key", "slab_good")["state"] == "syncing"    # leased normally
 
 
+def test_variation_payload_omits_volume(tmp_path):
+    # Blokport computes freight volume from dimensions now, so the scraper no longer sends `volume`.
+    from stone_pipeline.ledger.sync import ready_variations
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v", state="pending")
+        payload = ready_variations(ledger)[0]["payload"]
+    assert "volume" not in payload
+    assert set(payload) == {"category", "type", "name", "aliases", "image_url"}
+
+
 def test_serve_in_flight_detects_a_lease(tmp_path):
     from stone_pipeline.ledger.sync import serve_in_flight, ready
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
