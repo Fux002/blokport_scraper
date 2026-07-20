@@ -82,30 +82,6 @@ def _load_pristine_seed_keys() -> set[str]:
         return {(r.get("Key") or "").strip() for r in csv.DictReader(handle) if (r.get("Key") or "").strip()}
 
 
-def _restore_pristine_seed_files() -> dict:
-    """Restore the SELF-MUTATING emit inputs to a clean state on a pristine reset. emit seeds the catalog
-    from variants_export_base.csv, and `base := 1_variants_full` rewrites it every produce -- so a produce
-    on a dirty ledger leaves the base carrying dup old-sides that the next produce reads straight back in.
-    Restore the base from the read-only pristine seed baked at image build, and drop the stale live export
-    + incremental delta so emit cannot union old rows. No pristine seed (local dev) -> leave the base as-is
-    (it is the committed, pristine copy there)."""
-    import shutil
-    from stone_pipeline.config.settings import SETTINGS
-    out = {}
-    seed, base = SETTINGS.paths.variants_export_base_seed_csv, SETTINGS.paths.variants_export_base_csv
-    if seed.exists() and seed.resolve() != base.resolve():
-        shutil.copy(seed, base)
-        out["base_restored_from_seed"] = True
-    for stale in (SETTINGS.paths.variants_export_csv,
-                  SETTINGS.paths.to_upload_dir / "1_variants_update.csv",
-                  SETTINGS.paths.to_upload_dir / "1_variants_full.csv"):
-        if stale.exists():
-            stale.unlink()
-            out[stale.name] = "dropped"
-    log.warning("pristine reset: restored emit seed files", extra={"extra_fields": out})
-    return out
-
-
 _snapshot_on_mutation = False   # set True ONLY by the config server (serve); off in tests, laptop, and the
                                 # produce subprocess, so a lifecycle op there never attempts a real S3 call.
 
@@ -286,12 +262,6 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     # PRISTINE seed (baked read-only at image build): the live variants_export_base.csv self-mutates
     # (base := 1_variants_full each produce), so it is not a trustworthy clean source at runtime.
     seed_keys = _load_pristine_seed_keys() if pristine else None
-    # A pristine reset must also clean the FILES emit seeds from, not only the ledger. emit seeds the
-    # catalog from variants_export_base.csv, which self-mutates (base := 1_variants_full each produce) --
-    # so a produce that ran on a dirty ledger BEFORE this reset rewrote that base with the dups, and the
-    # next produce would read them straight back in (re-inserting the exact old-side Keys). Restore the
-    # base from the pristine baked seed and drop the stale live-export/delta so emit cannot union old rows.
-    seed_files = _restore_pristine_seed_files() if pristine else {}
 
     def _do_reset(lg, sync):
         # reconcile (drop + tombstone dup old sides) BEFORE the sync-state reset, so the tombstones are
@@ -307,8 +277,6 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     if code != 200:
         return result, code                    # ledger refused (e.g. 409 in-flight): touch nothing else
     out = {"mode": "pristine" if pristine else ("hard" if hard else "soft"), "reset": result}
-    if seed_files:
-        out["seed_files"] = seed_files
     if codes is None:                          # global reset only -> pair the config.db clean-start
         from stone_pipeline.config import decisions_store, store
         config = {"review_pending": decisions_store.clear_review_pending(),
