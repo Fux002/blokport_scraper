@@ -607,6 +607,15 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
     for t in ("attribute", "variation"):
         out[t] = 0 if scoped else _reset_overlay(ledger, t, now)
 
+    # Category pcat ids are pre-existing Medusa product-categories (env identity from attributes.csv),
+    # NOT scraper-assigned sync state, and products reverse-map pcat_id <-> category name through the
+    # attribute table at populate/render time. The overlay reset above nulls them, which would leave
+    # every product with an empty category and wedge the pull, so restore them from the authoritative
+    # export immediately (global reset only). See bootstrap.restore_category_ids.
+    if not scoped:
+        from stone_pipeline.ledger.bootstrap import restore_category_ids
+        out["category_ids_restored"] = restore_category_ids(ledger)
+
     if hard:                                   # drop the scraper output; re-scrape rebuilds it
         # TOMBSTONE every SYNCED product before deleting it, so Medusa deletes it too. Without this a hard
         # / factory reset drops products locally but never tells Medusa, and its upsert-only catalogue pull
