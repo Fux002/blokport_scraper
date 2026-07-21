@@ -34,7 +34,7 @@ class ZucchiAdapter(AdapterBase):
         "raw_quality": lambda r: AdapterBase.clean(r.get("classification")),
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
-        "raw_dimensions": lambda r: _dims(r),   # lambda defers to _dims defined below
+        "raw_dimensions": lambda r: AdapterBase.build_dims(r.get("length_m"), r.get("height_m"), unit="m"),
         "raw_weight": lambda r: _per_piece_kg(r),   # per-BUNDLE net -> canonical PER-PIECE (see below)
         "raw_total_m2": lambda r: AdapterBase.clean(r.get("area_m2")),
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
@@ -55,14 +55,6 @@ def _color(r: dict) -> str:
         if colour:
             return colour
     return ""
-
-
-def _dims(r: dict) -> str:
-    length = AdapterBase.clean(r.get("length_m"))
-    height = AdapterBase.clean(r.get("height_m"))
-    if not length and not height:
-        return ""
-    return f"length={length}m;height={height}m"
 
 
 def _per_piece_kg(r: dict) -> str:

@@ -74,13 +74,21 @@ Run the source once and confirm it clears, in order:
 
 - **Never guess a value into output** -- an unresolved attribute / unknown unit becomes a review flag or a
   reject, not a fabricated value.
-- **Dimensions: shared fallback toolbox, never per-adapter.** A dimension that is missing, unparseable, or
-  ambiguous (a `MULTI` thickness, a `Free`/cut-to-size length) is filled from `dimension_defaults` in the
-  domain pack (`config/domains/<pack>.yaml`) by the shared `derive_dimensions`, and every fill carries a
-  `FlagCode.dimension_defaulted` provenance flag -- so behaviour is identical across all sources. A face
-  dimension given as a range takes its MAX; a thickness range/`MULTI` takes the standard depth. A real
-  parsed `0` is a data error: kept, never defaulted, so validate rejects it. Do NOT add dimension defaults
-  in an adapter; add a category to the pack toolbox.
+- **Dimensions: capture with the shared helper; fallbacks are the shared toolbox, never per-adapter.** Build
+  `raw_dimensions` with `AdapterBase.build_dims(length, height, unit=...)` (never hand-roll the string);
+  declare the source's unit via the scraper's `dimension_unit`; thickness rides in `raw_thickness`;
+  `AdapterBase.na(...)` blanks an `N/A` sentinel. A dimension that is missing, unparseable, or ambiguous (a
+  `MULTI` thickness, a `Free`/cut-to-size length) is filled from `dimension_defaults` in the domain pack
+  (`config/domains/<pack>.yaml`) by the shared `derive_dimensions`, every fill flagged
+  `FlagCode.dimension_defaulted` -- identical across all sources. A face dimension given as a range takes its
+  MAX; a thickness range/`MULTI` takes the standard depth. A real parsed `0` is a data error: kept, never
+  defaulted, so validate rejects it. Do NOT add dimension defaults in an adapter; add a category to the pack.
+- **A fetch FAILURE holds the row; it is never defaulted.** A value missing because its sub-fetch failed
+  (e.g. a rate-limited detail page) is recoverable, so the scraper marks it with
+  `self.mark_fetch_failed(row, "dims", ...)` (carried in the reserved `fetch_failed` column, auto-mapped to
+  `CanonicalRow.fetch_failed_fields`); `derive` leaves it `None` + flags `dimension_unavailable` and
+  `validate` HOLDS the row (`rule="dimension_unavailable"`), which retries on the next scrape -- never
+  shipping a fabricated size. This is distinct from a genuine source absence (which defaults, above).
 - **Capture raw** (`capture_raw = True`) so no source field is ever lost (mine more later without re-scraping).
 - **Deterministic + idempotent** -- the same scrape produces byte-identical emit; safe to re-run.
 - **Vendor isolation** -- the source only touches products in `scraper_sync_ref` by SKU, never by company_id.

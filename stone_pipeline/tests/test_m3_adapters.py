@@ -70,6 +70,19 @@ def test_adapter_carries_fetch_failed_signal_with_zero_per_adapter_work():
     assert all(r.fetch_failed_fields == [] for r in rows[1:])     # others stay empty
 
 
+def test_build_dims_and_na_contract():
+    # the ONE shared dimension-string builder (was copy-pasted per adapter). Locks the contract the 4
+    # migrated adapters + every future one rely on.
+    from stone_pipeline.adapters.base import AdapterBase as A
+    assert A.build_dims("3.2", "2.0", unit="m") == "length=3.2m;height=2.0m"
+    assert A.build_dims("250", "160") == "length=250;height=160"          # unit="" -> no suffix (marenostone)
+    assert A.build_dims("", "") == ""                                     # both blank -> empty
+    assert A.build_dims("3.2", "", unit="m") == "length=3.2m;height=m"    # single side keeps the shape
+    assert A.build_dims("N/A", "160", unit="", blank_na=True) == "length=;height=160"   # N/A -> blank
+    assert A.build_dims("N/A", "N/A", blank_na=True) == ""                # both N/A -> empty
+    assert A.na("N/A") == "" and A.na(" x ") == "x" and A.na(None) == ""
+
+
 def test_contract_generated_from_adapter_matches_required():
     frame = read_scrape_csv(
         SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv"

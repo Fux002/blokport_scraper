@@ -55,22 +55,16 @@ class VarshaAdapter(AdapterBase):
         "raw_quality": lambda r: AdapterBase.clean(r.get("quality")),
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
-        "raw_dimensions": lambda r: _dims(r),   # lambda defers to _dims defined below
+        # width is the long edge on these exports -> map it to length (first arg), height to height
+        "raw_dimensions": lambda r: AdapterBase.build_dims(
+            AdapterBase.first_of(r.get("slab_widths_m"), "|"),
+            AdapterBase.first_of(r.get("slab_heights_m"), "|"), unit="m"),
         "raw_total_m2": lambda r: AdapterBase.clean(r.get("total_sqmt")),
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
         "raw_origin": lambda r: AdapterBase.clean(r.get("country_code")),
         "raw_description": lambda r: AdapterBase.clean(r.get("description")),
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("photo_urls"), "|"),
     }
-
-
-def _dims(r: dict) -> str:
-    width = AdapterBase.first_of(r.get("slab_widths_m"), "|")
-    height = AdapterBase.first_of(r.get("slab_heights_m"), "|")
-    if not width and not height:
-        return ""
-    # width is the long edge on these exports; map it to length, height to height
-    return f"length={width}m;height={height}m"
 
 
 ADAPTER = VarshaAdapter()

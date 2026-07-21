@@ -105,6 +105,24 @@ class AdapterBase:
         parts = AdapterBase.split_list(value, sep)
         return parts[0] if parts else ""
 
+    @staticmethod
+    def na(value: Any) -> str:
+        """clean(), but a literal 'N/A' sentinel becomes blank (so it reads downstream as 'no value',
+        not the string 'N/A'). Use for a source that writes 'N/A' for an absent field."""
+        text = AdapterBase.clean(value)
+        return "" if text.upper() == "N/A" else text
+
+    @staticmethod
+    def build_dims(length: Any, height: Any, unit: str = "", blank_na: bool = False) -> str:
+        """The canonical raw_dimensions string 'length=<l><unit>;height=<h><unit>' that derive re-parses,
+        built ONCE for every adapter (was copy-pasted per source). length/height are the two FACE
+        dimensions; thickness is carried separately as raw_thickness. Returns '' when BOTH faces are
+        blank. `unit` is the source's declared unit ('m', or '' when the value already carries its own,
+        e.g. marenostone's cm). `blank_na=True` treats an 'N/A' sentinel as blank (via na())."""
+        clean = AdapterBase.na if blank_na else AdapterBase.clean
+        l, h = clean(length), clean(height)
+        return "" if (not l and not h) else f"length={l}{unit};height={h}{unit}"
+
     # --- the engine -----------------------------------------------------------
     def _apply_rule(self, rule: FieldRule, record: dict[str, Any]) -> Any:
         if callable(rule):

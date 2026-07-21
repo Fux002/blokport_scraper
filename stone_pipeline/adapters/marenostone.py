@@ -49,27 +49,17 @@ class MarenostoneAdapter(AdapterBase):
         # the product name and structure as fallbacks (no blind default here)
         "raw_format": lambda r: AdapterBase.clean(r.get("attr_format")),
         # the scraper puts the depth (Thickness) in dimensions_width -> our thickness/width
-        "raw_thickness": lambda r: _na(r.get("dimensions_width")),
-        "raw_dimensions": lambda r: _dims(r),   # lambda defers to _dims defined below
-        "raw_weight": lambda r: _na(r.get("weight")),
+        "raw_thickness": lambda r: AdapterBase.na(r.get("dimensions_width")),
+        # marenostone renders dims in cm and the value already carries no unit here -> unit="" (the
+        # source's declared unit is applied at scrape time); 'N/A' -> blank via na().
+        "raw_dimensions": lambda r: AdapterBase.build_dims(
+            r.get("dimensions_length"), r.get("dimensions_height"), unit="", blank_na=True),
+        "raw_weight": lambda r: AdapterBase.na(r.get("weight")),
         "raw_description": lambda r: AdapterBase.clean(r.get("description")) or AdapterBase.clean(r.get("short_description")),
         # full-size images: current scraper emits `image_urls`, the legacy format (kept in the
         # adapter fixture) emits `image_urls_full`. Never thumbnails. Blank in both -> no image.
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls") or r.get("image_urls_full"), "|"),
     }
-
-
-def _na(value) -> str:
-    text = AdapterBase.clean(value)
-    return "" if text.upper() == "N/A" else text
-
-
-def _dims(r: dict) -> str:
-    length = _na(r.get("dimensions_length"))
-    height = _na(r.get("dimensions_height"))
-    if not length and not height:
-        return ""
-    return f"length={length};height={height}"
 
 
 ADAPTER = MarenostoneAdapter()

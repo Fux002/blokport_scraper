@@ -13,16 +13,6 @@ from __future__ import annotations
 from stone_pipeline.adapters.base import AdapterBase
 
 
-def _dimensions(record: dict) -> str:
-    """Pack length and height (both metres on polonine) into one unparsed string;
-    Stage 6 parses it. Width comes from thickness, kept in raw_thickness."""
-    length = AdapterBase.clean(record.get("dimension_length"))
-    height = AdapterBase.clean(record.get("dimension_height"))
-    if not length and not height:
-        return ""
-    return f"length={length}m;height={height}m"
-
-
 class PolonineAdapter(AdapterBase):
     source = "polonine"
     adapter_version = "1.1.0"
@@ -59,7 +49,9 @@ class PolonineAdapter(AdapterBase):
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_origin": lambda r: AdapterBase.clean(r.get("origin")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
-        "raw_dimensions": _dimensions,
+        # length + height both metres on polonine; width comes from thickness (kept in raw_thickness)
+        "raw_dimensions": lambda r: AdapterBase.build_dims(
+            r.get("dimension_length"), r.get("dimension_height"), unit="m"),
         "raw_weight": lambda r: AdapterBase.clean(r.get("weight")),
         "raw_total_m2": lambda r: AdapterBase.clean(r.get("area_sqmt")),
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
