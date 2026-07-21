@@ -20,11 +20,22 @@ ambiguous (a unit a label omits, which category level is the material), DECLARE 
 do not decide it at extraction time. See NEW_SOURCE_CHECKLIST.md section 0.
 
 **Dimensions capture only; fallbacks are shared.** An adapter's job is to hand `derive` the raw values it can
-find (`raw_dimensions`, `raw_thickness`); it must NOT invent or default a size. Missing / unparseable /
-ambiguous dimensions (a `MULTI` thickness, a `Free` cut-to-size length, a `A to B` range) are resolved once,
-for every source, by the shared `stages/derive.derive_dimensions` from the `dimension_defaults` toolbox in the
-domain pack (`config/domains/<pack>.yaml`), always provenance-flagged (`FlagCode.dimension_defaulted`). Tune a
-size or add a category THERE, never in an adapter. See NEW_SOURCE_CHECKLIST.md section 6.
+find (`raw_dimensions`, `raw_thickness`); it must NOT invent or default a size. Build `raw_dimensions` with
+the ONE shared helper `AdapterBase.build_dims(length, height, unit=...)` (never hand-roll `length=..;height=..`);
+`unit="m"` if the source's values carry no unit, `unit=""` if they already do (declare the source's unit via the
+scraper's `dimension_unit`); `AdapterBase.na(...)` blanks an `N/A` sentinel. Thickness (the depth) rides in
+`raw_thickness`. Missing / unparseable / ambiguous dimensions (a `MULTI` thickness, a `Free` cut-to-size length,
+an `A to B` range) are resolved once, for every source, by the shared `stages/derive.derive_dimensions` from the
+`dimension_defaults` toolbox in the domain pack (`config/domains/<pack>.yaml`), always provenance-flagged
+(`FlagCode.dimension_defaulted`). Tune a size or add a category THERE, never in an adapter.
+
+**A FETCH failure holds the row; it is never defaulted.** A genuine source absence defaults (above); a value
+missing because its SUB-FETCH failed (e.g. a rate-limited detail page) is recoverable, so it must be HELD for
+retry, not shipped with a fabricated size. The scraper marks it -- `self.mark_fetch_failed(row, "dims", ...)` --
+which the base carries in the reserved `fetch_failed` column; `AdapterBase` auto-maps it to
+`CanonicalRow.fetch_failed_fields` (zero per-adapter work), `derive` leaves the dim `None` + flags
+`dimension_unavailable`, and `validate` holds the row (a fresh scrape retries it). See NEW_SOURCE_CHECKLIST.md
+section 6.
 
 1. **Scraper** — `scrapers/<source>.py`: copy `scrapers/_template.py`, subclass `ScraperBase`,
    set `source`/`columns`/`id_field` and a per-product `format` (`slab`/`block`/`tile`),
