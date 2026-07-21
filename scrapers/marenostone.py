@@ -124,26 +124,26 @@ class MarenoStoneScraper(ScraperBase):
                 break
             page += 1
 
-    def _page_dims(self, url: str) -> dict:
-        """Fetch the product page and read its real Length/Width/Thickness from the attributes
-        table (the Store API does not expose these custom attributes). Cached per permalink (the same
-        product recurs across listing pages) so it is fetched at most once."""
+    def _page_dims(self, url: str) -> tuple[dict, bool]:
+        """Fetch the product page and read its real Length/Width/Thickness from the attributes table (the
+        Store API does not expose these custom attributes). Returns (dims, ok): ok=False ONLY when the
+        fetch FAILED (recoverable, e.g. a rate-limit) so the caller HOLDS the row for retry rather than
+        defaulting a fabricated size; an empty page (no url / no dims) is ok=True (a genuine absence).
+        Cached per permalink (the same product recurs across listing pages) so it is fetched at most once."""
         if not url:
-            return {}
+            return {}, True                       # no page to read == genuine absence, NOT a failure
         cache = self.__dict__.setdefault("_dims_cache", {})
         if url in cache:
-            return cache[url]
+            return cache[url], True
         try:
             dims = _dims_from_html(self.get(url).text, self.dimension_unit)
         except Exception as exc:  # never let a missing page kill the row
-            # record_failure (not just a warning) so silently-blank dimensions are AUDITABLE rather
-            # than looking like a genuine source gap. Do NOT cache the failure: a later row sharing this
-            # permalink can retry, instead of being permanently blanked by one transient miss.
-            self.record_failure("dims", url=url, error=str(exc))
+            # Do NOT cache the failure: a later row sharing this permalink can retry, instead of being
+            # permanently blanked by one transient miss. The caller marks + audits it (mark_fetch_failed).
             self.log.warning("dimension fetch failed for %s: %s", url, exc)
-            return {}
+            return {}, False
         cache[url] = dims                         # cache only successful fetches
-        return dims
+        return dims, True
 
     def parse_product(self, p: dict) -> Optional[dict]:
         attributes = p.get("attributes") or []
@@ -158,9 +158,10 @@ class MarenoStoneScraper(ScraperBase):
                 thumbs.append((img.get("thumbnail") or src).strip())
         # real dimensions live on the product page, not the Store API; 'Width' is the second face
         # dimension (-> our height), 'Thickness' is the depth (-> our width).
-        pd = self._page_dims(p.get("permalink"))
+        permalink = p.get("permalink")
+        pd, dims_ok = self._page_dims(permalink)
         stock = p.get("stock_availability") or {}
-        return {
+        row = {
             "product_id": p.get("id"),
             "name": _clean(p.get("name", "")),
             "slug": p.get("slug"),
@@ -182,6 +183,11 @@ class MarenoStoneScraper(ScraperBase):
             "image_urls": fulls,
             "format": _format(attrs.get("attr_format"), p.get("name", "")),  # item 3
         }
+        if not dims_ok:
+            # the real dimensions exist on the page but the fetch failed (recoverable): HOLD this row for
+            # retry next scrape rather than let derive default a fabricated size (freight-critical).
+            self.mark_fetch_failed(row, "dims", url=permalink, error="dimension page fetch failed")
+        return row
 
 
 if __name__ == "__main__":

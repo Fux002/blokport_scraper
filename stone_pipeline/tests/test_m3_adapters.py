@@ -54,6 +54,22 @@ def test_adapter_isolates_bad_rows():
     assert len(rows) == frame.height - 3
 
 
+def test_adapter_carries_fetch_failed_signal_with_zero_per_adapter_work():
+    # the scraper's reserved `fetch_failed` column auto-maps to CanonicalRow.fetch_failed_fields for EVERY
+    # adapter (no field_map entry), so "hold, never default a fetch-failed dimension" works everywhere.
+    import polars as pl
+    frame = read_scrape_csv(
+        SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv"
+    )
+    assert all(r.fetch_failed_fields == [] for r in POLONINE.adapt(frame))   # absent column -> []
+    marked = frame.with_columns(
+        pl.when(pl.int_range(pl.len()) == 0).then(pl.lit("dims")).otherwise(pl.lit("")).alias("fetch_failed")
+    )
+    rows = POLONINE.adapt(marked)
+    assert rows[0].fetch_failed_fields == ["dims"]                # the marked row carries it
+    assert all(r.fetch_failed_fields == [] for r in rows[1:])     # others stay empty
+
+
 def test_contract_generated_from_adapter_matches_required():
     frame = read_scrape_csv(
         SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv"

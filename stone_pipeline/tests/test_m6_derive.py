@@ -235,6 +235,48 @@ def test_parsed_zero_dimension_is_kept_and_rejected(ref, cfg):
     assert any(r.rule == "dimension_invalid" for r in row.reject_reasons)
 
 
+def test_fetch_failed_dimensions_held_not_defaulted(ref, cfg):
+    # a dimension whose source FETCH failed (recoverable) is HELD -- left None + flagged
+    # dimension_unavailable, NEVER defaulted -- so freight is never computed from a fabricated size.
+    # Contrast with a genuine absence (test_missing_dimensions_filled_from_pack_default), which defaults.
+    from stone_pipeline.stages import validate
+    row = _slab_row(fetch_failed_fields=["dims"])   # no raw dims + a recorded fetch failure
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length is None and row.width is None and row.height is None
+    codes = {f.code for f in row.review_flags}
+    assert FlagCode.dimension_unavailable in codes and FlagCode.dimension_defaulted not in codes
+    assert "length:unavailable" in row.dimension_method
+    validate.validate_row(row)
+    assert any(r.rule == "dimension_unavailable" for r in row.reject_reasons)   # held for retry
+    assert not any(r.rule == "dimension_invalid" for r in row.reject_reasons)   # not "bad data"
+    assert not row.is_emittable
+
+
+def test_fetch_failed_thickness_only_holds_width_keeps_real_faces(ref, cfg):
+    # partial failure: only the thickness fetch failed -> width HELD, the real faces kept (not held).
+    row = _slab_row(raw_dimensions="length=3.2;height=2.0", fetch_failed_fields=["thickness"])
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length == 3.2 and row.height == 2.0     # real faces preserved
+    assert row.width is None                            # thickness held, not defaulted
+    assert any(f.code == FlagCode.dimension_unavailable and f.field == "width" for f in row.review_flags)
+    assert not any(f.code == FlagCode.dimension_unavailable and f.field in ("length", "height")
+                   for f in row.review_flags)
+
+
+def test_fetch_failed_dim_retries_and_emits_when_present_next_scrape(ref, cfg):
+    # the retry is stateless (like no_image): the SAME product with dims present next scrape derives a real
+    # size and no longer holds. (No fetch_failed marker -> normal parse.)
+    from stone_pipeline.stages import validate
+    row = _slab_row(raw_dimensions="length=2.8m;height=1.97m", raw_thickness="2cm")   # fetch succeeded
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert (row.length, row.height, row.width) == (2.8, 1.97, 0.02)
+    validate.validate_row(row)
+    assert not any(r.rule in ("dimension_unavailable", "dimension_invalid") for r in row.reject_reasons)
+
+
 def test_weight_derived_from_dimensions_and_density(ref, cfg):
     # no scraped weight -> weight = volume(real dims) x per-type density, in tonnes, flagged.
     # 3.2 x 0.03 x 2.0 x 2700(Granite) / 1000 = 0.5184 t

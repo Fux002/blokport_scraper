@@ -98,10 +98,16 @@ class ScraperBase:
     # Set False for very large scrapes where the raw blob bloats the CSV.
     capture_raw: bool = True
 
+    # Reserved column that carries a per-row fetch-failure signal from the scraper INTO the pipeline: a
+    # pipe-list of field-groups whose sub-fetch failed for THIS product (e.g. "dims" when a detail-page
+    # fetch was rate-limited). The adapter maps it to CanonicalRow.fetch_failed_fields, and derive then
+    # HOLDS the row (never defaults a recoverable-but-missing value) instead of shipping a fabricated one.
+    FETCH_FAILED_COL = "fetch_failed"
+
     # always-present columns the base adds to every row (one consistent naming for
     # every scraper, so the pipeline adapters all read the same columns)
     BASE_COLUMNS = ["format", "image_count", "image_urls", "image_filenames_local",
-                    "scrape_timestamp", "raw_json"]
+                    "scrape_timestamp", "raw_json", FETCH_FAILED_COL]
 
     def __init__(self, data_dir: Path | None = None):
         if not self.source:
@@ -348,6 +354,17 @@ class ScraperBase:
 
     def record_failure(self, kind: str, **details) -> None:
         self._failures.append({"kind": kind, **details})
+
+    def mark_fetch_failed(self, row: dict, group: str, **details) -> None:
+        """A sub-fetch for THIS product failed recoverably (e.g. a rate-limited detail page): mark the row
+        so the pipeline HOLDS it for retry instead of defaulting the missing value, AND audit it. Marking
+        both in one call keeps the carried signal and the audit trail in sync. `group` is the field-group
+        (e.g. "dims"); appended to the reserved column as a deduped pipe-list."""
+        existing = [g for g in (row.get(self.FETCH_FAILED_COL) or "").split("|") if g]
+        if group not in existing:
+            existing.append(group)
+            self.record_failure(group, **details)   # audit once per (row, group)
+        row[self.FETCH_FAILED_COL] = "|".join(existing)
 
     def _write_csv(self, rows: list[dict]) -> None:
         cols = list(dict.fromkeys([*self.columns, *self.BASE_COLUMNS]))

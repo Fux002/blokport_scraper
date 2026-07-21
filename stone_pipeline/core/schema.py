@@ -35,7 +35,10 @@ class FlagCode(str, Enum):
     format_inferred = "format_inferred"
     format_unresolved = "format_unresolved"
     dimension_out_of_range = "dimension_out_of_range"
-    dimension_defaulted = "dimension_defaulted"    # a missing/ambiguous dim filled from the pack's dimension_defaults
+    dimension_defaulted = "dimension_defaulted"    # a genuinely-absent dim filled from the pack's dimension_defaults
+    # transient: a required dimension's FETCH failed (recoverable, e.g. HTTP 429) -> the row is HELD for
+    # retry, NOT defaulted. The twin of no_image, the deliberate counterpart to dimension_defaulted.
+    dimension_unavailable = "dimension_unavailable"
     weight_derived = "weight_derived"
     attr_last_resort = "attr_last_resort"
     multi_value = "multi_value"
@@ -149,6 +152,11 @@ class CanonicalRow(BaseModel):
     raw_slabs_array: Optional[str] = None
     raw_image_urls: list[str] = Field(default_factory=list)
     raw_description: Optional[str] = None
+    # Field-groups whose sub-fetch FAILED for this product (from the scraper's reserved `fetch_failed`
+    # column, e.g. ["dims"]). A failed-fetch value is recoverable, so derive HOLDS it (never defaults a
+    # fabricated value) and the row retries next scrape. Deliberately NOT `src_/raw_`-prefixed, so it is
+    # invisible to the adapter fixture compare (adapters/selftest.row_to_comparable).
+    fetch_failed_fields: list[str] = Field(default_factory=list)
     raw_inventory_quantity: Optional[str] = None
 
     # resolved attributes (Stage 3 / Stage 5)

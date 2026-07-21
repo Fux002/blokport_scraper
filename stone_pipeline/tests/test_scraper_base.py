@@ -229,6 +229,45 @@ def test_user_agent_stable_across_a_run(tmp_path, monkeypatch):
     assert cap.uas == [s._ua, s._ua]   # one stable UA per session, not per request
 
 
+# --- fetch-failed signal: carry + audit + producer (WS2) ----------------------
+def test_mark_fetch_failed_carries_and_audits(tmp_path):
+    s = _Fake(data_dir=tmp_path)
+    row: dict = {}
+    s.mark_fetch_failed(row, "dims", url="http://x/p", error="boom")
+    s.mark_fetch_failed(row, "dims")     # same group again -> deduped, not re-audited
+    s.mark_fetch_failed(row, "weight")
+    assert row[ScraperBase.FETCH_FAILED_COL] == "dims|weight"   # carried, deduped pipe-list
+    assert [f["kind"] for f in s._failures] == ["dims", "weight"]   # audited once per (row, group)
+
+
+def test_fetch_failed_column_is_a_base_column(tmp_path):
+    # the reserved column MUST be in BASE_COLUMNS or products.csv's extrasaction="ignore" would drop it
+    assert ScraperBase.FETCH_FAILED_COL in ScraperBase.BASE_COLUMNS
+
+
+def _boom(*a, **k):
+    raise RuntimeError("rate limited (HTTP 429)")
+
+
+def test_marenostone_page_dims_signals_failure_vs_absence(tmp_path, monkeypatch):
+    from scrapers.marenostone import MarenoStoneScraper
+    s = MarenoStoneScraper(data_dir=tmp_path)
+    assert s._page_dims("") == ({}, True)             # no page == genuine absence, NOT a failure
+    monkeypatch.setattr(s, "get", _boom)
+    assert s._page_dims("http://marenostone/p") == ({}, False)          # fetch failed
+    assert "http://marenostone/p" not in s.__dict__.get("_dims_cache", {})   # failure not cached -> retryable
+
+
+def test_marenostone_parse_product_marks_dims_fetch_failure(tmp_path, monkeypatch):
+    from scrapers.marenostone import MarenoStoneScraper
+    s = MarenoStoneScraper(data_dir=tmp_path)
+    monkeypatch.setattr(s, "get", _boom)
+    row = s.parse_product({"id": 1, "name": "X Marble Slab",
+                           "permalink": "http://marenostone/x", "attributes": [], "images": []})
+    assert row[ScraperBase.FETCH_FAILED_COL] == "dims"     # the row carries the hold signal
+    assert any(f["kind"] == "dims" for f in s._failures)   # and it is audited
+
+
 def test_curl_cffi_uses_proxy_only_when_needs_proxy(tmp_path, monkeypatch):
     # the residential proxy is metered; a curl_cffi site applies it ONLY when needs_proxy is set (its
     # Cloudflare tenant blocks the datacenter IP). A curl_cffi site that works direct spends no proxy.
