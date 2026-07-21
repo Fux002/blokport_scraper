@@ -11,50 +11,43 @@ source. Add a scraper to REGISTRY as it is migrated onto ScraperBase.
 
 from __future__ import annotations
 
+import importlib
 import sys
 from typing import Type
 
+# Resolve the import path ONCE: `-m scrapers.run` gives the `scrapers.` package; running the file directly
+# (`python scrapers/run.py`) does not, so fall back to a bare import with this dir on the path.
 try:
     from scrapers.base import ScraperBase
-    from scrapers.brumagran import BrumagranScraper
-    from scrapers.develi import DeveliScraper
-    from scrapers.ferraz import FerrazScraper
-    from scrapers.fulei import FuleiScraper
-    from scrapers.marenostone import MarenoStoneScraper
-    from scrapers.polonine import PolonineScraper
-    from scrapers.temmer import TemmerScraper
-    from scrapers.tureks import TureksScraper
-    from scrapers.varsha import VarshaScraper
-    from scrapers.zucchi import ZucchiScraper
+    _PKG = "scrapers."
 except ImportError:
     import os
     sys.path.insert(0, os.path.dirname(__file__))
     from base import ScraperBase
-    from brumagran import BrumagranScraper
-    from develi import DeveliScraper
-    from ferraz import FerrazScraper
-    from fulei import FuleiScraper
-    from marenostone import MarenoStoneScraper
-    from polonine import PolonineScraper
-    from temmer import TemmerScraper
-    from tureks import TureksScraper
-    from varsha import VarshaScraper
-    from zucchi import ZucchiScraper
+    _PKG = ""
 
-# source id -> ScraperBase subclass. slabware (Playwright, polonine + tenants) and
-# stonevip (empty) are not migrated yet.
-REGISTRY: dict[str, Type[ScraperBase]] = {
-    "marenostone": MarenoStoneScraper,
-    "polonine": PolonineScraper,
-    "zucchi": ZucchiScraper,
-    "develi": DeveliScraper,
-    "ferraz": FerrazScraper,
-    "fulei": FuleiScraper,
-    "temmer": TemmerScraper,
-    "tureks": TureksScraper,
-    "brumagran": BrumagranScraper,
-    "varsha": VarshaScraper,
-}
+# ONE source of truth: add a scraper here (a single line) once its module defines a ScraperBase subclass.
+# The class is DISCOVERED from the module (mirrors adapter auto-discovery), so there is no import list or
+# class name to keep in sync. Order is the `all` run order. slabware (helper module) + stonevip (empty)
+# are not scrapers, so they are not listed.
+_SOURCES = ("marenostone", "polonine", "zucchi", "develi", "ferraz", "fulei",
+            "temmer", "tureks", "brumagran", "varsha")
+
+
+def _discover(source: str) -> Type[ScraperBase]:
+    """The one ScraperBase subclass DEFINED in scrapers/<source>.py (imported bases are ignored)."""
+    module = importlib.import_module(f"{_PKG}{source}")
+    subs = [obj for obj in vars(module).values()
+            if isinstance(obj, type) and issubclass(obj, ScraperBase)
+            and obj is not ScraperBase and obj.__module__ == module.__name__]
+    if len(subs) != 1:
+        raise RuntimeError(
+            f"scrapers/{source}.py must define exactly one ScraperBase subclass, found {len(subs)}: {subs}")
+    return subs[0]
+
+
+# source id -> ScraperBase subclass, in _SOURCES order (preserved by dict insertion).
+REGISTRY: dict[str, Type[ScraperBase]] = {name: _discover(name) for name in _SOURCES}
 
 
 def run_one(source: str):
