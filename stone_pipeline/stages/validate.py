@@ -68,10 +68,19 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     # image instead of being rejected, so a real stone whose only photos were spec sheets/logos is not lost.
     if require_images and not row.image_keys and not _no_publishable_image(row):
         row.add_reject(RejectReason(rule="no_image", detail=""))
-    # Dimensions are REQUIRED and never fabricated: derive leaves a missing size None and an invalid one
-    # <= 0. Either way reject the product -- a stone with no/wrong real size breaks the category's
-    # area/volume pricing and freight. (`None or 0` -> 0 <= 0, so a missing size rejects here too.)
+    # A dimension whose source FETCH FAILED (recoverable) is HELD as a distinct TRANSIENT reject -- "retry
+    # me next scrape", not "bad data" -- and is exempt from the dimension_invalid check below so the hold
+    # reads cleanly. Retries exactly like no_image (a fresh scrape re-derives; it emits once the fetch
+    # succeeds). derive left these None + flagged dimension_unavailable; it never defaulted a fabricated size.
+    unavailable = {f.field for f in row.review_flags if f.code == FlagCode.dimension_unavailable}
+    if unavailable:
+        row.add_reject(RejectReason(rule="dimension_unavailable", detail="|".join(sorted(unavailable))))
+    # Dimensions are REQUIRED: a genuinely-absent one was defaulted in derive (flagged), so a size that is
+    # still <= 0 / None here is a data error -- reject it (a wrong real size breaks area/volume pricing and
+    # freight). (`None or 0` -> 0 <= 0, so a missing size rejects too.) Skip a fetch-failed dim (held above).
     for dim in ("length", "width", "height"):
+        if dim in unavailable:
+            continue
         if (getattr(row, dim, None) or 0) <= 0:
             row.add_reject(RejectReason(rule="dimension_invalid", detail=dim))
             break
