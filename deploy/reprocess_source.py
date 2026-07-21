@@ -27,6 +27,7 @@ from stone_pipeline.io.image_processing import ImageProcessor
 def main() -> int:
     src = os.environ.get("SRC", "varsha")
     watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
+    enhance = os.environ.get("ENHANCE", "true").lower() in ("1", "true", "yes")
     classify = os.environ.get("CLASSIFY", "true").lower() in ("1", "true", "yes")
     full = os.environ.get("FULL", "false").lower() in ("1", "true", "yes")  # redo ALL (else only the delta)
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
@@ -59,7 +60,7 @@ def main() -> int:
         return 2
 
     print(f"==> reprocess {src}: slice[{offset}:{offset + len(sliced)}] of {total} full={full} "
-          f"watermarked={watermarked} classify={classify} -> s3://{S3_BUCKET}/{dst_prefix}")
+          f"watermarked={watermarked} enhance={enhance} classify={classify} -> s3://{S3_BUCKET}/{dst_prefix}")
     proc = ImageProcessor(ImageProcessingConfig(
         enabled=True, dewatermark=watermarked, classify=classify, write_preview=False))
     price, max_usd = proc.cfg.fal_price_per_mp, proc.cfg.fal_max_usd
@@ -86,7 +87,7 @@ def main() -> int:
                 discarded += 1
                 continue
             # 2) FAL de-watermark (watermarked sources) + ESRGAN enhance.
-            res = proc.process(data, watermarked=watermarked)
+            res = proc.process(data, watermarked=watermarked, enhance=enhance)
             fal_cost += res.billed_mp * price
             # HOLD (no improved/, NO marker) when de-watermarking a watermarked image failed, or the image
             # did not enhance (ESRGAN down / undecodable): the enhanced marker must mean "clean + enhanced",

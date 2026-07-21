@@ -330,3 +330,18 @@ def test_evaluate_from_outputs_records_once_and_skips_replays(tmp_path, monkeypa
     assert len(store.read_run_events("polonine")) == 1
     assert admission.evaluate_from_outputs(outputs_dir=outputs) == 0        # same run_id -> replay skipped
     assert len(store.read_run_events("polonine")) == 1                      # no double-count
+
+
+def test_enhance_flag_defaults_on_and_round_trips(tmp_path):
+    # the per-source GPU-upscale switch: default ON, editable per source, exposed to the :4200 UI. Mirrors
+    # `watermarked`. No env var -- purely config-store driven.
+    from stone_pipeline.config.sources import SourceConfig
+    p = tmp_path / "config.db"
+    store.upsert_source(SourceConfig(source="a", adapter="a"), path=p)
+    assert store.read_sources(p)["a"].enhance is True                   # default ON
+    store.upsert_source(SourceConfig(source="b", adapter="a", enhance=False), path=p)
+    assert store.read_sources(p)["b"].enhance is False                  # per-source OFF
+    row = store.get_row("b", p)
+    assert row["enhance"] is False                                      # exposed to the admin UI
+    store.upsert_row({**row, "enhance": True}, p)                       # UI flips it
+    assert store.get_row("b", p)["enhance"] is True

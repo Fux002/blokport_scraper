@@ -36,7 +36,7 @@ class FakeS3:
 
 
 class FakeProc:
-    def process(self, data, watermarked=False):
+    def process(self, data, watermarked=False, enhance=True):
         return ProcessResult(data + b"-treated")   # a visible marker that treatment ran
 
 
@@ -86,9 +86,37 @@ def test_repoint_leaves_other_sources_and_already_improved_alone():
 
 def test_treat_source_never_crashes_on_a_bad_image():
     class Boom:
-        def process(self, data, watermarked=False):
+        def process(self, data, watermarked=False, enhance=True):
             raise RuntimeError("corrupt")
     s3 = FakeS3({f"{ENV_SEGMENT}/products/zucchi/aa.jpg": b"x",
                  f"{ENV_SEGMENT}/products/_manifest.json": b"{}"})
     stats = treat.treat_source("zucchi", s3=s3, processor=Boom())
     assert stats.failed == 1 and stats.errors                          # recorded, not raised
+
+
+def test_enhance_flag_gates_gpu_upscale_but_always_size_reduces():
+    # enhance ON -> GPU upscale path; enhance OFF -> NO upscale but still CPU size-reduced (long edge capped)
+    # + re-encoded, and still marked processed. No GPU/torch needed (ESRGAN faked).
+    import numpy as np
+    import cv2
+    from stone_pipeline.io.image_processing import ImageProcessor, ImageProcessingConfig
+    proc = ImageProcessor(ImageProcessingConfig(enabled=True))
+
+    class _FakeESR:
+        def available(self):
+            return True
+
+        def enhance(self, bgr):
+            return bgr                      # identity; the point is the flag routes here or not
+
+    proc._esr = _FakeESR()
+    big = np.full((3000, 4000, 3), 128, np.uint8)                        # oversized -> must be downscaled
+    data = cv2.imencode(".jpg", big)[1].tobytes()
+
+    on = proc.process(data, watermarked=False, enhance=True)
+    assert on.enhanced and on.upscaled                                  # upscale path ran
+
+    off = proc.process(data, watermarked=False, enhance=False)
+    assert off.enhanced and not off.upscaled                            # processed but NOT upscaled
+    out = cv2.imdecode(np.frombuffer(off.data, np.uint8), cv2.IMREAD_COLOR)
+    assert max(out.shape[:2]) <= proc.cfg.target_long_edge             # size-reduced (CPU, no GPU)

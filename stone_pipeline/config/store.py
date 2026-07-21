@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS source (
     origin_default      TEXT NOT NULL DEFAULT '',      -- supplier ISO-2 country
     ports               TEXT,                          -- JSON array of port names / LOCODEs
     mode                TEXT NOT NULL DEFAULT 'review',
-    watermarked         INTEGER NOT NULL DEFAULT 0,
+    watermarked         INTEGER NOT NULL DEFAULT 0,     -- de-watermark this source's photos (FAL)
+    enhance             INTEGER NOT NULL DEFAULT 1,     -- upscale this source's photos (Real-ESRGAN, GPU)
     emit_on_review      INTEGER NOT NULL DEFAULT 1,
     default_bundle_size INTEGER NOT NULL DEFAULT 6,
     min_expected_rows   INTEGER NOT NULL DEFAULT 0,
@@ -90,6 +91,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.commit()
     if "lifecycle" not in cols:   # active | paused | delisted -- the label Medusa reads (NULL == active)
         conn.execute("ALTER TABLE source ADD COLUMN lifecycle TEXT")
+        conn.commit()
+    if "enhance" not in cols:   # per-source GPU upscale switch; DBs created before it default ON
+        conn.execute("ALTER TABLE source ADD COLUMN enhance INTEGER NOT NULL DEFAULT 1")
         conn.commit()
     # durable run records so GET /config/v1/run can return `last` across a config-server restart
     # (the in-memory run dict is lost on restart).
@@ -193,7 +197,7 @@ def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
         source=r["source"], adapter=r["adapter"], source_code=r["source_code"],
         vendor=r["vendor"], company_id=r["company_id"], origin_default=r["origin_default"],
         ports_default=json.loads(r["ports"] or "[]"), mode=r["mode"],
-        watermarked=bool(r["watermarked"]), emit_on_review=bool(r["emit_on_review"]),
+        watermarked=bool(r["watermarked"]), enhance=bool(r["enhance"]), emit_on_review=bool(r["emit_on_review"]),
         default_bundle_size=r["default_bundle_size"], min_expected_rows=r["min_expected_rows"],
     )
 
@@ -204,7 +208,7 @@ def _params(cfg: SourceConfig, enabled: bool, schedule: str | None) -> dict:
         "adapter": cfg.adapter, "source_code": cfg.source_code, "vendor": cfg.vendor,
         "company_id": cfg.company_id,
         "origin_default": cfg.origin_default, "ports": json.dumps(cfg.ports_default or []),
-        "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0,
+        "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0, "enhance": 1 if cfg.enhance else 0,
         "emit_on_review": 1 if cfg.emit_on_review else 0,
         "default_bundle_size": cfg.default_bundle_size, "min_expected_rows": cfg.min_expected_rows,
         "updated_at": _now(),
@@ -226,7 +230,7 @@ def _row_dict(r: sqlite3.Row) -> dict:
         "adapter": r["adapter"], "source_code": r["source_code"], "vendor": r["vendor"],
         "company_id": r["company_id"],
         "origin_default": r["origin_default"], "ports": json.loads(r["ports"] or "[]"),
-        "mode": r["mode"], "watermarked": bool(r["watermarked"]),
+        "mode": r["mode"], "watermarked": bool(r["watermarked"]), "enhance": bool(r["enhance"]),
         "emit_on_review": bool(r["emit_on_review"]),
         "default_bundle_size": r["default_bundle_size"], "min_expected_rows": r["min_expected_rows"],
         # last run (for the admin list's "last run" label); null until this source has ever been produced.
@@ -256,6 +260,7 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
         company_id=data.get("company_id", ""),
         origin_default=data.get("origin_default", ""), ports_default=data.get("ports") or [],
         mode=data.get("mode", "review"), watermarked=bool(data.get("watermarked", False)),
+        enhance=bool(data.get("enhance", True)),
         emit_on_review=bool(data.get("emit_on_review", True)),
         default_bundle_size=int(data.get("default_bundle_size", 6)),
         min_expected_rows=int(data.get("min_expected_rows", 0)),

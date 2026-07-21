@@ -49,6 +49,13 @@ def pending_shas(client, source: str) -> set[str]:
     return _shas_under(client, imagestore.scraped_prefix(source)) - done_shas(client, source)
 
 
+def _enhance_sources() -> set[str]:
+    """Sources with the GPU-upscale switch ON (per-source `enhance`, default on). A source with it OFF is
+    still size-reduced + re-hosted by the reprocess, just not upscaled -- no GPU-model pass."""
+    from stone_pipeline.config.sources import load_sources
+    return {name for name, cfg in load_sources().items() if getattr(cfg, "enhance", True)}
+
+
 def _watermarked_sources() -> set[str]:
     from stone_pipeline.config.sources import load_sources
 
@@ -79,6 +86,7 @@ def submit_pending(sources: list[str] | None = None) -> list[str]:
     from stone_pipeline.config.sources import load_sources
     srcs = sources if sources is not None else list(load_sources().keys())
     watermarked = _watermarked_sources()
+    enhance = _enhance_sources()
     size = cfg.slice_size
     submitted: list[str] = []
     for src in srcs:
@@ -108,6 +116,7 @@ def submit_pending(sources: list[str] | None = None) -> list[str]:
                     containerOverrides={"environment": [
                         {"name": "SRC", "value": src},
                         {"name": "WATERMARKED", "value": "true" if src in watermarked else "false"},
+                        {"name": "ENHANCE", "value": "true" if src in enhance else "false"},
                         {"name": "CLASSIFY", "value": "false"},   # auto-enhance never auto-discards
                         {"name": "SLICE_OFFSET", "value": str(offset)},
                         {"name": "SLICE_COUNT", "value": str(size)},
