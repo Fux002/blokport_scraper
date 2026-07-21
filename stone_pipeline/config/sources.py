@@ -40,6 +40,10 @@ class SourceConfig:
     # The source burns a visible watermark into its product photos (e.g. varsha).
     # When true the image stage de-watermarks before re-hosting (local/s3 modes).
     watermarked: bool = False
+    # Upscale (Real-ESRGAN, GPU) this source's photos before re-host. A per-source switch like
+    # watermarked, set from the admin UI -- default on. When off the GPU upscale is skipped; images are
+    # still size-reduced (CPU, no GPU) and re-hosted. Independent of watermarked.
+    enhance: bool = True
     # Trust level for auto-loading into Medusa: "review" (default) quarantines the
     # source's output to the stage-for-sign-off lane; "auto" lets it load
     # automatically. Promote review->auto only after `python -m stone_pipeline.certify

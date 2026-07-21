@@ -173,6 +173,13 @@ def _watermarked_sources() -> set[str]:
     return {name for name, cfg in load_sources().items() if getattr(cfg, "watermarked", False)}
 
 
+def _enhance_sources() -> set[str]:
+    """Source names with the GPU-upscale switch ON (`enhance`, default on). Off -> size-reduce only."""
+    from stone_pipeline.config.sources import load_sources
+
+    return {name for name, cfg in load_sources().items() if getattr(cfg, "enhance", True)}
+
+
 def _write_preview(rows: list[dict]) -> None:
     """Append a source -> processed audit row so a human can eyeball results
     before they go live (de-watermarking is detect-then-inpaint, not perfect)."""
@@ -294,11 +301,13 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     # optional faithful enhancement / de-watermark before re-host (off by default)
     processor = None
     watermarked_sources: set[str] = set()
+    enhance_sources: set[str] = set()
     if getattr(cfg, "processing", None) and cfg.processing.enabled:
         from stone_pipeline.io.image_processing import ImageProcessor
 
         processor = ImageProcessor(cfg.processing)
         watermarked_sources = _watermarked_sources()
+        enhance_sources = _enhance_sources()
     preview: list[dict] = []
 
     # cross-run idempotency on the SOURCE URL: a URL processed in a prior scrape is
@@ -365,7 +374,8 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         else:
             out = data
             if processor is not None:
-                pr = processor.process(data, watermarked=src_site in watermarked_sources)
+                pr = processor.process(data, watermarked=src_site in watermarked_sources,
+                                       enhance=src_site in enhance_sources)
                 out = pr.data
                 stats.processed += 1
                 # keep the raw download in the sibling scraped/ folder (same filename)

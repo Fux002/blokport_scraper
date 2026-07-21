@@ -474,18 +474,18 @@ class ImageProcessor:
             log.warning("classify failed; keeping image", extra={"extra_fields": {"error": str(exc)}})
             return ClassifyResult(keep=True, ran=False)
 
-    def process(self, data: bytes, *, watermarked: bool = False) -> ProcessResult:
+    def process(self, data: bytes, *, watermarked: bool = False, enhance: bool = True) -> ProcessResult:
         if not self.cfg.enabled:
             return ProcessResult(data)
         try:
-            return self._process(data, watermarked)
+            return self._process(data, watermarked, enhance)
         except Exception as exc:  # faithful fallback: original bytes, never crash
             log.warning("image processing failed; keeping original",
                         extra={"extra_fields": {"error": str(exc)}})
             # a failure on a WATERMARKED image must hold it (never publish the original, watermarked).
             return ProcessResult(data, dewatermark_failed=watermarked)
 
-    def _process(self, data: bytes, watermarked: bool) -> ProcessResult:
+    def _process(self, data: bytes, watermarked: bool, enhance: bool = True) -> ProcessResult:
         res = ProcessResult(data)
 
         # 1) de-watermark (flagged sources only) via FAL. If the source is watermarked but de-watermarking
@@ -510,16 +510,21 @@ class ImageProcessor:
                 res.data = data
                 return res
 
-        # 2) enhancement: Real-ESRGAN (learned clean + sharpen + 4x), then a gentle
-        #    faithful beautify. If the torch stack/weights are unavailable the image
-        #    passes through un-enhanced (available() logs one warning) -- no fallback.
-        if self._esr.available():
+        # 2) enhancement: Real-ESRGAN (learned clean + sharpen + 4x), then a gentle faithful beautify --
+        #    ONLY when this source has `enhance` on AND the torch stack/weights are present. When enhance is
+        #    off (per-source switch) or ESRGAN is unavailable, the image is still SIZE-REDUCED (cap the long
+        #    edge, CPU / cv2 -- no GPU) and re-encoded, so it is never re-hosted bloated. Either way the sha
+        #    is marked processed so the publish gate treats it as done and it is not reprocessed.
+        if enhance and self._esr.available():
             bgr = self._esr.enhance(bgr)
             bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)      # cap the 4x output
             bgr = _levels(bgr, self.cfg.levels_lo_pct, self.cfg.levels_hi_pct)  # exposure lift
             bgr = _vibrance(bgr, self.cfg.vibrance)                      # restore muted colour
             res.enhanced = True
             res.upscaled = True
+        else:
+            bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)      # CPU size-reduce only (no upscale)
+            res.enhanced = True                                          # processed (size-reduced), not upscaled
 
         ok, enc = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, self.cfg.jpeg_quality])
         res.data = enc.tobytes() if ok else data
