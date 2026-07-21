@@ -370,29 +370,41 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         # If it already exists, reuse the URL and skip processing entirely -- each
         # source image is only ever enhanced/de-watermarked once.
         if backend.exists(dest_key):
+            # already treated (this run or a prior one) -> reuse, never re-process
             public = backend.url_for(dest_key)
+        elif processor is None:
+            # no processing -> store the raw bytes at the root content key
+            public = backend.put(dest_key, data)
+            stats.bytes_uploaded += len(data)
         else:
-            out = data
-            if processor is not None:
-                pr = processor.process(data, watermarked=src_site in watermarked_sources,
-                                       enhance=src_site in enhance_sources)
-                out = pr.data
-                stats.processed += 1
-                # keep the raw download in the sibling scraped/ folder (same filename)
-                if cfg.processing.keep_scraped and out is not data:
-                    skey = f"{imagestore.SCRAPED_SUBDIR}/{ck}"
-                    if not backend.exists(skey):
-                        backend.put(skey, data)
-                        stats.bytes_uploaded += len(data)
-                if cfg.processing.write_preview:
-                    preview.append({
-                        "src_site": src_site, "source_url": url,
-                        "processed_url": backend.url_for(dest_key),
-                        "watermarked": src_site in watermarked_sources,
-                        "dewatermarked": pr.dewatermarked, "enhanced": pr.enhanced,
-                        "upscaled": pr.upscaled})
-            public = backend.put(dest_key, out)
-            stats.bytes_uploaded += len(out)
+            pr = processor.process(data, watermarked=src_site in watermarked_sources,
+                                   enhance=src_site in enhance_sources)
+            stats.processed += 1
+            # Persist the raw original UNCONDITIONALLY (keep_scraped): it is the GPU reprocess's INPUT.
+            # A watermarked source cannot de-watermark on the torch/FAL-free :core, so :core leaves the
+            # image for the GPU -- which reads scraped/. Writing scraped/ only when :core changed the
+            # bytes stranded every watermarked image: scraped/ stayed empty, the GPU delta never saw it,
+            # and the product HELD forever. Idempotent: skip if already present.
+            if cfg.processing.keep_scraped:
+                skey = f"{imagestore.SCRAPED_SUBDIR}/{ck}"
+                if not backend.exists(skey):
+                    backend.put(skey, data)
+                    stats.bytes_uploaded += len(data)
+            if pr.dewatermark_failed:
+                # :core could not finalize a watermarked image (no FAL here). Leave improved/ for the GPU
+                # (that folder must only ever hold treated images) and HOLD the image this run -- neither
+                # linked nor recorded in the manifest, so the next produce re-derives it and it links only
+                # once the GPU has written improved/ + the enhanced marker. Held regardless of the gate.
+                continue
+            if cfg.processing.write_preview:
+                preview.append({
+                    "src_site": src_site, "source_url": url,
+                    "processed_url": backend.url_for(dest_key),
+                    "watermarked": src_site in watermarked_sources,
+                    "dewatermarked": pr.dewatermarked, "enhanced": pr.enhanced,
+                    "upscaled": pr.upscaled})
+            public = backend.put(dest_key, pr.data)
+            stats.bytes_uploaded += len(pr.data)
         hash_to_public[digest] = public
         url_to_public[url] = public
         manifest[url] = public

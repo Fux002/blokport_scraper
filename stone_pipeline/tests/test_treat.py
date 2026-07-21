@@ -120,3 +120,21 @@ def test_enhance_flag_gates_gpu_upscale_but_always_size_reduces():
     assert off.enhanced and not off.upscaled                            # processed but NOT upscaled
     out = cv2.imdecode(np.frombuffer(off.data, np.uint8), cv2.IMREAD_COLOR)
     assert max(out.shape[:2]) <= proc.cfg.target_long_edge             # size-reduced (CPU, no GPU)
+
+
+def test_process_result_is_complete_requires_upscale_when_enhance_on():
+    """The enhanced/ marker (the publish-unlock) may be written ONLY when the pipe finished AS A WHOLE:
+    de-watermark ok, treated, and -- when enhance is on -- actually UPSCALED. A de-watermarked-but-not-
+    upscaled image (e.g. ESRGAN down on a GPU run) MUST be held, never shipped half-done to Medusa."""
+    # enhance ON, fully upscaled -> complete
+    assert ProcessResult(b"x", enhanced=True, upscaled=True).is_complete(enhance_requested=True)
+    # enhance ON, only size-reduced (upscale did NOT run) -> NOT complete (the exact gap this guards)
+    assert not ProcessResult(b"x", enhanced=True, upscaled=False).is_complete(enhance_requested=True)
+    # dw failed -> never complete, even if upscaled
+    assert not ProcessResult(b"x", enhanced=True, upscaled=True,
+                             dewatermark_failed=True).is_complete(enhance_requested=True)
+    # enhance OFF -> size-reduce alone IS the whole pipe -> complete
+    assert ProcessResult(b"x", enhanced=True, upscaled=False).is_complete(enhance_requested=False)
+    # undecodable (never treated) -> not complete either way
+    assert not ProcessResult(b"x", enhanced=False).is_complete(enhance_requested=False)
+    assert not ProcessResult(b"x", enhanced=False).is_complete(enhance_requested=True)
