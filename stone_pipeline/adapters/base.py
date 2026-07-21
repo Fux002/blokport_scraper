@@ -125,6 +125,11 @@ class AdapterBase:
         # adapter only needs `format_field = "format"` (no boilerplate field_map entry).
         if self.format_field and "raw_format" not in data:
             data["raw_format"] = self.clean(record.get(self.format_field))
+        # carry the scraper's reserved per-row fetch-failure signal through automatically, so EVERY source
+        # gets "hold, never default a fetch-failed dimension" with zero per-adapter work. Absent column ->
+        # empty list. ("fetch_failed" == scrapers.base.ScraperBase.FETCH_FAILED_COL.)
+        if "fetch_failed_fields" not in data:
+            data["fetch_failed_fields"] = [g for g in self.clean(record.get("fetch_failed")).split("|") if g]
         # smart name cleanup: strip supplier-code artifacts so matching AND minting see a
         # clean variety name: generic structural rules + data-discovered codes (_lead_codes)
         # + any explicit code_prefixes override -- so codes are removed without hardcoding them.

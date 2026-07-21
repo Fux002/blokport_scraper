@@ -160,13 +160,31 @@ def _parse_thickness(text: str, ref: ReferenceData) -> float | None:
     return _parse_measure(text, ref)
 
 
+def _dim_fetch_failed(row: CanonicalRow, field: str) -> bool:
+    """True when THIS dimension's source fetch FAILED (recoverable), so it must be HELD, not defaulted. A
+    scraper marks the field-group in fetch_failed_fields: a blanket "dims"/"dimensions" covers all three;
+    the canonical field name covers itself; "thickness" is the raw alias of the canonical `width` (depth)."""
+    failed = set(row.fetch_failed_fields or ())
+    if not failed:
+        return False
+    return ("dims" in failed or "dimensions" in failed or field in failed
+            or (field == "width" and "thickness" in failed))
+
+
 def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, default: float,
-                       category: str, methods: list[str]) -> float:
-    """Keep a real parsed value (INCLUDING 0, which validate then rejects as a data error); fill only a
-    genuinely MISSING one (None) from the pack default, flagged. Never fills over a real value."""
+                       category: str, methods: list[str]) -> float | None:
+    """Keep a real parsed value (INCLUDING 0, which validate then rejects as a data error). A value missing
+    because its FETCH FAILED is HELD (left None + flagged dimension_unavailable) so the row retries next
+    scrape -- never defaulted, so freight is never computed from a fabricated size. A GENUINELY-absent value
+    is filled from the pack default, flagged. Never fills over a real value."""
     if value is not None:
         methods.append(f"{field}:parsed")
         return value
+    if _dim_fetch_failed(row, field):
+        methods.append(f"{field}:unavailable")
+        row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_unavailable,
+                                confidence=Confidence.none, method="fetch_failed", src_url=row.src_url))
+        return None
     methods.append(f"{field}:defaulted")
     row.add_flag(ReviewFlag(field=field, code=FlagCode.dimension_defaulted,
                             best_guess=f"{default}m ({category} standard)",
@@ -567,8 +585,16 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
     # is an invariant breach. Either way -> DEGRADED (the per-row default still emits, but the batch is flagged).
     incomplete = sum(1 for r in rows
                      if any(f.code == FlagCode.dimension_defaulted for f in r.review_flags))
+    # a fetch-failed dimension is HELD (validate rejects it), never defaulted; a high share signals a source
+    # under rate-limiting/outage this run. Counted separately (it is recoverable, not a source gap) but also
+    # trips DEGRADED so a systemic fetch failure is loud.
+    unavailable = sum(1 for r in rows
+                      if any(f.code == FlagCode.dimension_unavailable for f in r.review_flags))
     provenance_gaps = sum(1 for r in rows if _provenance_gap(r))
-    degraded = (rows and incomplete / len(rows) >= SETTINGS.thresholds.derive_incomplete_degraded) or provenance_gaps
-    log.info("derive done", extra={"extra_fields": {"rows": len(rows), "incomplete_dims": incomplete}})
+    degraded = (rows and (incomplete + unavailable) / len(rows) >= SETTINGS.thresholds.derive_incomplete_degraded) \
+        or provenance_gaps
+    log.info("derive done", extra={"extra_fields": {
+        "rows": len(rows), "incomplete_dims": incomplete, "unavailable_dims": unavailable}})
     return StageMetric(stage="derive", status=DEGRADED if degraded else OK, rows_in=len(rows), rows_out=len(rows),
-                       extra={"incomplete_dims": incomplete, "provenance_gaps": provenance_gaps})
+                       extra={"incomplete_dims": incomplete, "unavailable_dims": unavailable,
+                              "provenance_gaps": provenance_gaps})
