@@ -30,6 +30,11 @@ class ApiSourceAdapter(AdapterBase):
         "src_natural_key": lambda r: AdapterBase.clean(r.get("product_id")),
         "raw_name": lambda r: AdapterBase.clean(r.get("name")),
         "raw_type": lambda r: AdapterBase.clean(r.get("stone_type")),
+        # DIMENSIONS: capture only -- build the canonical string with the SHARED helper (never hand-roll
+        # 'length=..;height=..'). `unit="m"` if the source's values carry no unit, or "" if they already do.
+        # Thickness (the depth) rides separately in raw_thickness. derive resolves/holds; NEVER default here.
+        "raw_dimensions": lambda r: AdapterBase.build_dims(r.get("length"), r.get("height"), unit="m"),
+        "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
         # ... colour / finish / dimensions / image url, as the source provides
     }
 

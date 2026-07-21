@@ -92,6 +92,11 @@ class ScraperBase:
     # is only reactive, after the block already happened). A generous default: correctness over speed -- a
     # scrape may run for hours. A source that still rate-limits raises this; set (0, 0) to disable.
     request_delay: tuple[float, float] = (1.0, 2.5)
+    # DECLARED source convention (source-isolation): the unit a source renders dimensions in when a value
+    # carries none of its own (e.g. marenostone renders cm). Read by a scraper's dimension extractor so it
+    # never guesses a unit; "" means values already carry their unit. First-class here so a new scraper
+    # declares it rather than reinventing a per-scraper constant.
+    dimension_unit: str = ""
 
     # capture the full source object as raw_json on every row, so no available
     # field is ever lost (the pipeline can mine more later without re-scraping).

@@ -42,6 +42,10 @@ class StandaloneAdapterTemplate(AdapterBase):
         # add the rest of the accessory-specific raw_ fields here as needed
         # (sku, brand, material, dimensions, price, ...). They flow through as raw_
         # inputs that the accessory matcher / derive stage interpret.
+        # DIMENSIONS: capture only, via the SHARED helper (never hand-roll the string). Thickness rides
+        # in raw_thickness. derive resolves/holds; NEVER default in an adapter.
+        "raw_dimensions": lambda r: AdapterBase.build_dims(r.get("length"), r.get("height"), unit="m"),
+        "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls"), "|"),
     }
 
