@@ -183,6 +183,33 @@ def test_processing_enhances_and_is_idempotent(tmp_path):
     assert second.processed == 0 and second.bytes_uploaded == 0
 
 
+def test_watermarked_kept_in_scraped_and_held_when_fal_unavailable(tmp_path, monkeypatch):
+    """A watermarked source cannot de-watermark on the torch/FAL-free :core. The raw MUST still land in
+    scraped/ (the GPU reprocess's INPUT) and the product is HELD -- improved/ is left for the GPU, never a
+    watermarked original. Regression: scraped/ was written only when :core changed the bytes, so a
+    watermarked image stranded (scraped/ empty -> GPU delta never saw it -> product held forever)."""
+    import stone_pipeline.io.image_processing as ip
+    from stone_pipeline.config.settings import ImageProcessingConfig
+
+    # force the :core reality deterministically (no FAL here), independent of the test host's FAL_KEY
+    monkeypatch.setattr(ip._Dewatermarker, "available", lambda self: False)
+    monkeypatch.setattr(images, "_watermarked_sources", lambda: {"varsha"})
+    monkeypatch.setattr(images, "_enhance_sources", lambda: {"varsha"})
+    cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
+                       processing=ImageProcessingConfig(enabled=True, dewatermark=True,
+                                                        keep_scraped=True, write_preview=False))
+    row = CanonicalRow(src_site="varsha", surrogate_key="w1", is_block=False,
+                       raw_image_urls=["http://x/wm.jpg"])
+    stats = images.run([row], fetch=_fake_fetch({"http://x/wm.jpg": _jpeg_bytes()}), cfg=cfg)
+    # HELD this run: no linked image, transient no_image (retries next produce once the GPU has run)
+    assert row.image_keys == [] and stats.no_image == 1
+    assert any(f.code == FlagCode.no_image for f in row.review_flags)
+    # raw kept under scraped/ (the GPU's input); NOTHING written under improved/ (left for the GPU)
+    jpgs = list((tmp_path / "s").rglob("*.jpg"))
+    assert len([p for p in jpgs if "scraped" in p.parts]) == 1
+    assert [p for p in jpgs if "improved" in p.parts] == []
+
+
 def test_rescrape_same_url_different_bytes_not_reprocessed(tmp_path):
     """A repeated scrape where the supplier RE-ENCODES the same photo (same URL,
     different bytes) must NOT create a duplicate or re-process -- the url->key
