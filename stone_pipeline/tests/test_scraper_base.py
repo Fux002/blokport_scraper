@@ -229,6 +229,25 @@ def test_user_agent_stable_across_a_run(tmp_path, monkeypatch):
     assert cap.uas == [s._ua, s._ua]   # one stable UA per session, not per request
 
 
+# --- ergonomics: single-source registry + stable failure schema (WS4) ---------
+def test_registry_single_source_of_truth_auto_discovers_classes():
+    from scrapers.run import REGISTRY, _SOURCES
+    # names are declared ONCE (_SOURCES); each class is discovered from its module, no import list to sync
+    assert list(REGISTRY) == list(_SOURCES)
+    assert all(issubclass(c, ScraperBase) and c is not ScraperBase for c in REGISTRY.values())
+    assert REGISTRY["marenostone"].__name__ == "MarenoStoneScraper"
+
+
+def test_record_failure_has_a_stable_triage_schema(tmp_path):
+    s = _Fake(data_dir=tmp_path)
+    s.record_failure("dims", bundle_id="B7", url="http://x/p", error=RuntimeError("boom"))
+    f = s._failures[-1]
+    assert f["kind"] == "dims" and f["ref"] == "B7"      # ref derived from the id-like kwarg
+    assert f["url"] == "http://x/p" and f["error"] == "boom"   # error stringified
+    s.record_failure("parse", error="bad")               # no id -> ref blank, still keyed by kind
+    assert s._failures[-1]["ref"] == "" and s._failures[-1]["kind"] == "parse"
+
+
 # --- fetch-failed signal: carry + audit + producer (WS2) ----------------------
 def test_mark_fetch_failed_carries_and_audits(tmp_path):
     s = _Fake(data_dir=tmp_path)
