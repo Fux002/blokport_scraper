@@ -24,6 +24,7 @@ import os
 import random
 import time
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -40,10 +41,18 @@ class _SSRFBlocked(Exception):
     """A fetch target resolved to a non-public host (or non-http(s) scheme) -- never retried."""
 
 VALID_FORMATS = ("slab", "block", "tile")
+# A pool of current desktop UAs; ONE is picked per scraper INSTANCE (per run), not per request, so a
+# session looks like a single human browser rather than a client whose UA flips on every hop.
 _USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
+# Upper bound on a server-provided Retry-After wait, so a hostile/misconfigured header can never park a
+# scrape for hours. A real rate-limit cooldown is well under this.
+_RETRY_AFTER_MAX = 300.0
 
 
 class ScraperBase:
@@ -78,6 +87,11 @@ class ScraperBase:
     max_retries: int = 5
     backoff_base: float = 2.0
     image_delay: tuple[float, float] = (0.3, 0.9)
+    # PREVENTIVE inter-request delay (random seconds in [lo, hi]) paid once before each non-image request,
+    # so page/detail GETs are spaced out and do not PROVOKE a 429 in the first place (the 429 backoff below
+    # is only reactive, after the block already happened). A generous default: correctness over speed -- a
+    # scrape may run for hours. A source that still rate-limits raises this; set (0, 0) to disable.
+    request_delay: tuple[float, float] = (1.0, 2.5)
 
     # capture the full source object as raw_json on every row, so no available
     # field is ever lost (the pipeline can mine more later without re-scraping).
@@ -110,6 +124,8 @@ class ScraperBase:
         # follow_redirects=False: _request follows hops manually so the SSRF guard
         # validates every one (a public source must not 30x into an internal host).
         self._client = httpx.Client(timeout=self.timeout, follow_redirects=False)
+        # one stable UA for the whole run (a real browser does not change UA mid-session)
+        self._ua = random.choice(_USER_AGENTS)
         self.log = self._make_logger()
 
     # --- HTTP ----------------------------------------------------------------
@@ -153,10 +169,32 @@ class ScraperBase:
             self._cffi_session = cffi_requests.Session(**opts)
         return self._cffi_session
 
-    def _request(self, method: str, url: str, **kwargs):
-        """HTTP with retry, backoff, a rotating UA, and 429 handling. Routes
-        through curl_cffi when use_curl_cffi is set (Cloudflare-fronted sites)."""
-        headers = {"User-Agent": random.choice(_USER_AGENTS), **kwargs.pop("headers", {})}
+    def _retry_after_seconds(self, header: str | None, attempt: int) -> float:
+        """Seconds to wait after a 429, honoring Retry-After in BOTH forms (delta-seconds and an HTTP-date),
+        clamped to _RETRY_AFTER_MAX; falls back to exponential backoff when the header is absent/unparseable."""
+        fallback = self.backoff_base ** attempt * 5
+        if not header:
+            return fallback
+        header = header.strip()
+        try:
+            return min(float(header), _RETRY_AFTER_MAX)          # delta-seconds form
+        except ValueError:
+            pass
+        try:                                                      # HTTP-date form
+            delta = (parsedate_to_datetime(header) - datetime.now(timezone.utc)).total_seconds()
+            return min(max(delta, 0.0), _RETRY_AFTER_MAX) if delta > 0 else fallback
+        except (TypeError, ValueError):
+            return fallback
+
+    def _request(self, method: str, url: str, throttle: bool = True, **kwargs):
+        """HTTP with a preventive throttle, retry, backoff, a per-session UA, and 429 handling. Routes
+        through curl_cffi when use_curl_cffi is set (Cloudflare-fronted sites). `throttle=False` skips the
+        preventive delay (used by image downloads, which pace themselves via image_delay)."""
+        # Preventive spacing, ONCE per logical request (not per redirect hop, not per retry): keep page/detail
+        # GETs from provoking a 429. Reactive 429/transient backoffs below still apply on top when needed.
+        if throttle and self.request_delay[1] > 0:
+            time.sleep(random.uniform(*self.request_delay))
+        headers = {"User-Agent": self._ua, **kwargs.pop("headers", {})}
         if self.use_curl_cffi and "content" in kwargs:  # httpx 'content' -> curl_cffi 'data'
             kwargs["data"] = kwargs.pop("content")
         last_exc = None
@@ -184,14 +222,9 @@ class ScraperBase:
                         return r
                     if r.status_code == 429:
                         # record WHY (else the final raise reports last_exc=None for a pure-429 run) and
-                        # honor the server's Retry-After (seconds) when present, else exponential backoff.
+                        # honor the server's Retry-After (delta-seconds OR HTTP-date), else exponential backoff.
                         last_exc = RuntimeError(f"rate limited (HTTP 429): {url}")
-                        ra = r.headers.get("Retry-After")
-                        try:
-                            wait = float(ra) if ra else self.backoff_base ** attempt * 5
-                        except ValueError:
-                            wait = self.backoff_base ** attempt * 5   # HTTP-date form -> fall back
-                        time.sleep(wait)
+                        time.sleep(self._retry_after_seconds(r.headers.get("Retry-After"), attempt))
                         break  # retry from the top
                     r.raise_for_status()
                     break
@@ -232,7 +265,7 @@ class ScraperBase:
                 saved.append(filename)
                 continue
             try:
-                r = self.get(url)
+                r = self.get(url, throttle=False)   # images pace themselves via image_delay below
                 path.write_bytes(r.content)
                 saved.append(filename)
             except Exception as exc:
