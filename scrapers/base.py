@@ -357,8 +357,17 @@ class ScraperBase:
             self.log.warning("unknown format %r for product %s", fmt, row.get("product_id"))
         return fmt
 
+    # id-like kwargs a caller may pass; the first present one becomes the stable `ref` triage column.
+    _REF_KEYS = ("id", "product_id", "bundle_id", "slug", "sku")
+
     def record_failure(self, kind: str, **details) -> None:
-        self._failures.append({"kind": kind, **details})
+        """Record a failure with a STABLE, triageable schema: always `kind`, a derived `ref` (whatever
+        id-like field the caller passed, so every row is traceable), `url`, and `error` -- then any extra
+        keys. Callers keep passing whatever kwargs they like; the core columns are always present + ordered
+        (see _write_failures), so failures.csv does not shift shape run to run."""
+        ref = next((str(details[k]) for k in self._REF_KEYS if details.get(k)), "")
+        self._failures.append({**details, "kind": kind, "ref": ref,
+                               "url": str(details.get("url", "")), "error": str(details.get("error", ""))})
 
     def mark_fetch_failed(self, row: dict, group: str, **details) -> None:
         """A sub-fetch for THIS product failed recoverably (e.g. a rate-limited detail page): mark the row
@@ -381,7 +390,10 @@ class ScraperBase:
     def _write_failures(self) -> None:
         if not self._failures:
             return
-        keys = sorted({k for f in self._failures for k in f})
+        # stable column ORDER: the core schema first, then any extra keys sorted -- so failures.csv is
+        # predictable and every row leads with kind/ref/url/error for triage.
+        core = ["kind", "ref", "url", "error"]
+        keys = core + sorted({k for f in self._failures for k in f} - set(core))
         with self.failures_csv.open("w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
             writer.writeheader()
