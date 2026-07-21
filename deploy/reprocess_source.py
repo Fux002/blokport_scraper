@@ -89,10 +89,11 @@ def main() -> int:
             # 2) FAL de-watermark (watermarked sources) + ESRGAN enhance.
             res = proc.process(data, watermarked=watermarked, enhance=enhance)
             fal_cost += res.billed_mp * price
-            # HOLD (no improved/, NO marker) when de-watermarking a watermarked image failed, or the image
-            # did not enhance (ESRGAN down / undecodable): the enhanced marker must mean "clean + enhanced",
-            # so the publish gate never links a watermarked or un-enhanced image. A re-run retries a held one.
-            if res.dewatermark_failed or not res.enhanced:
+            # HOLD (no improved/, NO marker) unless the pipeline completed AS A WHOLE (ProcessResult.
+            # is_complete): de-watermark ok, treated, AND -- when enhance is on -- actually UPSCALED, not
+            # merely size-reduced. The enhanced/ marker must mean "clean + fully enhanced", so the publish
+            # gate never links a watermarked OR a de-watermarked-but-not-upscaled image. A re-run retries it.
+            if not res.is_complete(enhance_requested=enhance):
                 held += 1
             else:
                 client.put_object(Bucket=S3_BUCKET, Key=f"{dst_prefix}{name}",

@@ -437,6 +437,18 @@ class ProcessResult:
     dewatermark_failed: bool = False
     billed_mp: int = 0             # FAL billed megapixels for this image (0 when no FAL call was made)
 
+    def is_complete(self, *, enhance_requested: bool) -> bool:
+        """The image pipeline completed AS A WHOLE for what this source requires -- the ONLY condition
+        under which the enhanced/ marker (which unlocks publishing to Medusa) may be written:
+          - de-watermark did not fail, AND
+          - the image was treated (decoded + re-encoded), AND
+          - when enhance is ON, it was actually UPSCALED (Real-ESRGAN), not merely size-reduced.
+        So a de-watermarked-but-not-upscaled image (e.g. a GPU run where ESRGAN was unavailable) is HELD,
+        never shipped half-done; a source with enhance OFF completes on the size-reduce alone. The pipe
+        goes in as a whole or not at all."""
+        return ((not self.dewatermark_failed) and self.enhanced
+                and (self.upscaled or not enhance_requested))
+
 
 @dataclass
 class ClassifyResult:
