@@ -6,6 +6,7 @@ Network is stubbed so the test runs offline.
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timezone
 
 import pytest
 
@@ -125,6 +126,107 @@ def test_marenostone_declared_unit_and_free_length():
     # a non-numeric 'Free' length keeps its raw text (no fabricated 'Freecm') -> rejects downstream as no size
     free = f'<table><tr><th class="{L}">Length (cm)</th><td class="{V}"><p>Free</p></td></tr></table>'
     assert _dims_from_html(free) == {"length": "Free"}
+
+
+# --- HTTP preventive throttle + 429 handling (WS1) ----------------------------
+class _StubResp:
+    def __init__(self, status=200, headers=None):
+        self.status_code = status
+        self.headers = headers or {}
+        self.content = b"ok"
+
+    def raise_for_status(self):
+        pass
+
+
+class _SeqClient:
+    """Returns the given status codes in order, recording each request's User-Agent."""
+    def __init__(self, statuses, headers=None):
+        self.statuses = list(statuses)
+        self.headers = headers or {}
+        self.i = 0
+        self.uas: list[str] = []
+
+    def request(self, method, url, headers=None, **kw):
+        self.uas.append((headers or {}).get("User-Agent"))
+        status = self.statuses[min(self.i, len(self.statuses) - 1)]
+        self.i += 1
+        return _StubResp(status, self.headers)
+
+
+def _sleepless(monkeypatch):
+    """Collect sleep durations and allow the fake test hosts past the SSRF guard."""
+    sleeps: list[float] = []
+    monkeypatch.setattr("scrapers.base.time.sleep", lambda t: sleeps.append(t))
+    monkeypatch.setattr("scrapers.base.url_allowed", lambda u: True)
+    return sleeps
+
+
+def test_request_delay_spaces_each_request(tmp_path, monkeypatch):
+    class _Throttled(_Fake):
+        request_delay = (0.5, 0.5)   # fixed so the value is assertable
+    s = _Throttled(data_dir=tmp_path)
+    s._client = _SeqClient([200])
+    sleeps = _sleepless(monkeypatch)
+    s.get("http://x/a")
+    assert sleeps == [0.5]            # exactly one preventive delay per logical request
+
+
+def test_request_delay_default_off_no_sleep(tmp_path, monkeypatch):
+    class _Off(_Fake):
+        request_delay = (0.0, 0.0)
+    s = _Off(data_dir=tmp_path)
+    s._client = _SeqClient([200])
+    sleeps = _sleepless(monkeypatch)
+    s.get("http://x/a")
+    assert sleeps == []              # disabled -> no preventive delay
+
+
+def test_image_path_is_not_throttled(tmp_path, monkeypatch):
+    class _Throttled(_Fake):
+        request_delay = (0.5, 0.5)
+    s = _Throttled(data_dir=tmp_path)
+    s._client = _SeqClient([200])
+    sleeps = _sleepless(monkeypatch)
+    s.get("http://x/img.jpg", throttle=False)   # how download_images calls it
+    assert sleeps == []
+
+
+def test_preventive_delay_paid_once_then_429_backoff_separate(tmp_path, monkeypatch):
+    class _Throttled(_Fake):
+        request_delay = (0.5, 0.5)
+    s = _Throttled(data_dir=tmp_path)
+    s._client = _SeqClient([429, 200], headers={"Retry-After": "1"})
+    sleeps = _sleepless(monkeypatch)
+    s.get("http://x/a")
+    # preventive delay is paid ONCE at entry (not per retry); the 429 Retry-After wait is on top
+    assert sleeps == [0.5, 1.0]
+
+
+def test_retry_after_both_forms_and_clamp(tmp_path):
+    from datetime import timedelta
+    from email.utils import format_datetime
+    from scrapers.base import _RETRY_AFTER_MAX
+    s = _Fake(data_dir=tmp_path)
+    assert s._retry_after_seconds("30", 0) == 30.0                 # delta-seconds
+    assert s._retry_after_seconds("99999", 0) == _RETRY_AFTER_MAX  # clamped
+    assert s._retry_after_seconds(None, 0) == s.backoff_base ** 0 * 5   # absent -> backoff (5)
+    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=45))
+    assert 30 < s._retry_after_seconds(future, 0) <= _RETRY_AFTER_MAX   # HTTP-date -> ~45s
+    past = format_datetime(datetime.now(timezone.utc) - timedelta(seconds=45))
+    assert s._retry_after_seconds(past, 2) == s.backoff_base ** 2 * 5   # past date -> backoff (20)
+
+
+def test_user_agent_stable_across_a_run(tmp_path, monkeypatch):
+    from scrapers.base import _USER_AGENTS
+    _sleepless(monkeypatch)
+    s = _Fake(data_dir=tmp_path)
+    cap = _SeqClient([200, 200])
+    s._client = cap
+    s._request("GET", "http://x/1", throttle=False)
+    s._request("GET", "http://x/2", throttle=False)
+    assert s._ua in _USER_AGENTS
+    assert cap.uas == [s._ua, s._ua]   # one stable UA per session, not per request
 
 
 def test_curl_cffi_uses_proxy_only_when_needs_proxy(tmp_path, monkeypatch):
