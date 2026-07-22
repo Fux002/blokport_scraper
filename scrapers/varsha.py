@@ -70,8 +70,12 @@ class VarshaScraper(ScraperBase):
     category = "slab"        # Varsha is slab inventory (bundles of slabs); item 3 explicit format
     id_field = "bundle_id"   # images named varsha_<bundle_id>_<idx>
     use_curl_cffi = True     # Cloudflare-fronted SlabWare tenant
-    # needs_proxy stays False (base default): tested from the AWS egress, this tenant serves the
-    # curl_cffi Chrome fingerprint from a datacenter IP, so no residential proxy is needed.
+    # Route through the residential proxy, like polonine (same SlabWare/Cloudflare stack). The datacenter
+    # egress was accepted intermittently but Cloudflare blocks it unpredictably -- a cold start died when
+    # the warm-up GET was blocked (fatal). A residential IP passes reliably (polonine has been rock-solid on
+    # it), so this removes the coin-flip. Declared as a capability (config/proxies.yaml maps it to the proxy
+    # + secret); the JSON API is light on bandwidth and images bypass the proxy, so the SOAX cost is modest.
+    proxy_capability = "cloudflare_residential"
     page_delay = 4.0
 
     columns = [
