@@ -165,8 +165,12 @@ def test_processing_disabled_is_noop(local_cfg, monkeypatch):
     assert stats.processed == 0
 
 
-def test_processing_enhances_and_is_idempotent(tmp_path):
+def test_processing_enhances_and_is_idempotent(tmp_path, monkeypatch):
     from stone_pipeline.config.settings import ImageProcessingConfig
+    # deterministic page flags: enhance=off + watermarked=off -> the source finishes on :core (resize),
+    # independent of the ambient config store; routing reads these.
+    monkeypatch.setattr(images, "_enhance_sources", lambda: set())
+    monkeypatch.setattr(images, "_watermarked_sources", lambda: set())
     cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s",
                        public_base="https://cdn/x/",
                        processing=ImageProcessingConfig(enabled=True, dewatermark=False,
@@ -184,17 +188,18 @@ def test_processing_enhances_and_is_idempotent(tmp_path):
 
 
 def test_watermarked_kept_in_scraped_and_held_when_fal_unavailable(tmp_path, monkeypatch):
-    """A watermarked source cannot de-watermark on the torch/FAL-free :core. The raw MUST still land in
-    scraped/ (the GPU reprocess's INPUT) and the product is HELD -- improved/ is left for the GPU, never a
-    watermarked original. Regression: scraped/ was written only when :core changed the bytes, so a
-    watermarked image stranded (scraped/ empty -> GPU delta never saw it -> product held forever)."""
+    """A watermarked + enhance=off source finishes on :core (de-watermark is FAL, no GPU) -- but if FAL is
+    unavailable, :core cannot de-watermark, so the raw MUST still land in scraped/ (the GPU reprocess's
+    INPUT) and the product is HELD, never a watermarked original in improved/. Regression: scraped/ was
+    written only when :core changed the bytes, so a watermarked image stranded (scraped/ empty -> GPU delta
+    never saw it -> held forever)."""
     import stone_pipeline.io.image_processing as ip
     from stone_pipeline.config.settings import ImageProcessingConfig
 
-    # force the :core reality deterministically (no FAL here), independent of the test host's FAL_KEY
+    # FAL unavailable here so :core cannot de-watermark (enhance=off means it WOULD try -> falls to a hold)
     monkeypatch.setattr(ip._Dewatermarker, "available", lambda self: False)
     monkeypatch.setattr(images, "_watermarked_sources", lambda: {"varsha"})
-    monkeypatch.setattr(images, "_enhance_sources", lambda: {"varsha"})
+    monkeypatch.setattr(images, "_enhance_sources", lambda: set())
     cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
                        processing=ImageProcessingConfig(enabled=True, dewatermark=True,
                                                         keep_scraped=True, write_preview=False))
