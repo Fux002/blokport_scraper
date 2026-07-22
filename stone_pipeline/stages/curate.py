@@ -105,10 +105,16 @@ def _review_evidence(row) -> dict:
     """The scraped EVIDENCE surfaced on a review hold, so a human can judge the correct type/variety
     (which of the Gneiss/Granite/Marble/Onyx 'Aqua Blue' this product is) from the actual product, not
     just the name: the source, the ORIGINAL supplier listing url (so the operator can open the product
-    and verify it before minting), ONE product image (the processed S3 render when present, else the raw
-    scrape url), and the supplier description. All optional -- empty when the row carried none (e.g. an
-    API-only source with no public product page leaves src_url empty)."""
-    imgs = (getattr(row, "image_keys", None) or []) or (getattr(row, "raw_image_urls", None) or [])
+    and verify it before minting), ONE product image, and the supplier description. All optional -- empty
+    when the row carried none (e.g. an API-only source with no public product page leaves src_url empty).
+
+    The image PREFERS the raw supplier url over the processed improved/ S3 key. The improved/ render is
+    coupled to the Medusa product lifecycle -- a Blokport clear/remove hard-deletes the product AND its
+    improved/ image, leaving the review queue pointing at a since-deleted key (404) until the next produce
+    re-uploads it. The supplier url lives on the supplier CDN, so it survives product churn, it is the
+    actual scraped photo (a watermark is fine for internal verification), and it exists for a NOT-yet-minted
+    variety (a variant texture does not). Falls back to the improved/ key only when no raw url was captured."""
+    imgs = (getattr(row, "raw_image_urls", None) or []) or (getattr(row, "image_keys", None) or [])
     return {"src": getattr(row, "src_site", "") or "",
             "src_url": getattr(row, "src_url", "") or "",
             "image": next((u for u in imgs if u), ""),
