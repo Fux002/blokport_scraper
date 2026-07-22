@@ -440,6 +440,11 @@ def list_pending(kind: str) -> list[dict]:
     out: list[dict] = []
     for r in rows:
         item = json.loads(r["payload"])
+        # Surface the stable queue key the review PUT takes (/review/{kind}/<ref>). The payload holds only
+        # display fields; the composite backbone-leaf ref (variety_norm|stone_type_norm|attribute|value_norm)
+        # cannot be reconstructed client-side from those, so without this the UI has no valid ref to send and
+        # correctly disables approve/reject. list_decided_leaves already exposes ref; pending now matches.
+        item["ref"] = r["ref"]
         item["sources"] = json.loads(r["sources"]) if r["sources"] else []
         if kind == "variety":
             item["current_action"] = actions.get(r["ref"], {}).get("action")
