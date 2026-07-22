@@ -208,7 +208,7 @@ rest. Every matched or derived field has a sibling `_confidence` and `_method` (
 | `sold_in_bundle, bundle_size` | derived | with `bundle_size_confidence`, `bundle_size_method` |
 | `weight, length, width, height` | derived | normalized units; each with `_method` |
 | `origin_country_code, origin_city, origin_county` | derived | with `origin_confidence`, `origin_source` |
-| `title` | generated | constructed from variety, finish, format (section 10.3); raw_name used only as fallback |
+| `title` | generated | constructed from variety + finish (NOT format -- format is a variant dimension) (section 10.3); raw_name used only as fallback |
 | `description` | generated | templated from variety, colour, type, finish, format, origin (section 10.4); raw_description used when present |
 | `image_keys, thumbnail_key, oriented_image_keys, product_image_keys` | image stage | staged S3 keys, slotted by branch |
 | `company_id, sales_channel_id, port_ids, visibility, discountable` | config | |
@@ -570,9 +570,11 @@ Run the remaining Resolvers. The non-trivial ones:
   back into `origin_map.csv`.
 - **Ports**: from `origin_country_code` against `ports.csv`, 1 to 2 ids; fallback to
   `port_ids_default` only with a flag.
-- **Title** (generated, section 10.3): construct from the resolved variety, finish, and format
-  (e.g. "Walnut Travertine Honed Slab"); use `raw_name` only as a fallback when no variety
-  resolved. Built here, after variation and attribute resolution, never in the adapter.
+- **Title** (generated, section 10.3): construct from the resolved variety and finish; the FORMAT word
+  (Slab/Block/Tile) is NOT in the title -- format is a variant dimension, not product identity
+  (e.g. "Walnut Travertine Honed", never "Walnut Travertine Honed Slab"). The format word stays in the
+  description prose only. Use `raw_name` only as a fallback when no variety resolved. Built here, after
+  variation and attribute resolution, never in the adapter.
 - **Description** (generated, section 10.4): if `raw_description` is present and usable, keep it;
   otherwise template from variety, colour, type, finish, format, and origin. Because the template
   reads origin, run after origin resolution.

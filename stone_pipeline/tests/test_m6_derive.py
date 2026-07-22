@@ -91,11 +91,13 @@ def test_block_has_no_bundle(ref, cfg):
 
 
 def test_title_is_listing_style_with_material_and_format(ref, cfg):
-    # a sellable, searchable title: variety + finish + material + format
+    # a sellable, searchable title: variety + finish + material. The format word (Slab/Tile/Block) is
+    # NOT in the title -- format is a variant dimension, not product identity.
     row = _slab_row(variation_name="Carrara", finish_name="Honed", type_name="Marble")
-    derive.derive_category(row, ref)
+    derive.derive_category(row, ref)   # format resolves to Slab ...
     derive.derive_title(row)
-    assert row.title == "Carrara Honed Marble Slab"
+    assert row.title == "Carrara Honed Marble"   # ... but the title never carries it
+    assert "Slab" not in row.title
 
 
 def test_title_skips_material_already_in_variety_name(ref, cfg):
@@ -103,7 +105,7 @@ def test_title_skips_material_already_in_variety_name(ref, cfg):
     row = _slab_row(variation_name="Walnut Travertine", finish_name="Honed", type_name="Travertine")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Walnut Travertine Honed Slab"
+    assert row.title == "Walnut Travertine Honed"
 
 
 def test_title_multiword_material_not_doubled(ref, cfg):
@@ -112,24 +114,26 @@ def test_title_multiword_material_not_doubled(ref, cfg):
                     type_name="Quartzitic Sandstone")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Rain Forest Sandstone Honed Slab"
+    assert row.title == "Rain Forest Sandstone Honed"
     assert row.title.lower().count("sandstone") == 1
 
 
 def test_block_title_drops_finish_and_raw(ref, cfg):
-    # a block is uncut stone -> no finish word in the title (no 'Blue Pearl Raw'); material + Block stay
+    # a block is uncut stone -> no finish word in the title (no 'Blue Pearl Raw'); material stays, and the
+    # format word (Block) is not in the title
     row = _slab_row(raw_format="Block", variation_name="Blue Pearl", finish_name="Raw",
                     type_name="Granite")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Blue Pearl Granite Block"
-    assert "Raw" not in row.title
+    assert row.title == "Blue Pearl Granite"
+    assert "Raw" not in row.title and "Block" not in row.title
 
 
-def test_title_omits_format_word_when_unresolved(ref, cfg):
-    # an unresolved format must not put a neutral 'Piece' in the title (unlike the description prose)
+def test_title_omits_format_word(ref, cfg):
+    # the format word is never in the title, whether the format resolves or not (it lives only in the
+    # description prose). Here it is unresolved; test_sellable_title covers the resolved case.
     row = _slab_row(variation_name="Carrara", finish_name="Honed", type_name="Marble", raw_format="")
-    derive.derive_title(row)   # no derive_category -> format stays unresolved
+    derive.derive_title(row)
     assert row.title == "Carrara Honed Marble"
 
 
@@ -137,7 +141,7 @@ def test_title_strips_parenthetical_alias(ref, cfg):
     row = _slab_row(variation_name="Carrara (Bianco Carrara)", finish_name="Polished", type_name="Marble")
     derive.derive_category(row, ref)
     derive.derive_title(row)
-    assert row.title == "Carrara Polished Marble Slab"
+    assert row.title == "Carrara Polished Marble"
     assert "Bianco" not in row.title
 
 
@@ -329,8 +333,8 @@ def test_handle_is_decoupled_from_the_enriched_title(ref, cfg):
     derive.derive_category(row, ref)
     derive.derive_title(row)
     derive.derive_handle(row, cfg)
-    assert row.title == "Carrara Honed Marble Slab"          # display carries material + format
-    assert row.handle == "carrara-honed-pol-620"             # URL does not
+    assert row.title == "Carrara Honed Marble"               # display carries material, NOT format
+    assert row.handle == "carrara-honed-pol-620"             # URL keys off variety+finish only
     assert "marble" not in row.handle and "slab" not in row.handle
     assert row.handle == row.slug
 

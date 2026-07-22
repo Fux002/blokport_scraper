@@ -460,11 +460,12 @@ def _material_suffix(variety_name: str, type_name: str | None) -> str:
 
 
 def derive_title(row: CanonicalRow) -> None:
-    # A listing-style title: variety, then finish, material and format when they add information.
-    # Finish is dropped for blocks (uncut stone has no finish; avoids 'Carrara Raw'); material is
-    # omitted when the variety name already implies it (_material_suffix); the format word is
-    # omitted when unresolved (a title must not carry a neutral 'Piece'). The handle keys off
-    # variety+finish INDEPENDENTLY (derive_handle), so enriching the display title never moves a URL.
+    # A listing-style title: variety, then finish and material when they add information. The FORMAT word
+    # (Slab/Block/Tile) is deliberately NOT in the title -- format is a variant dimension in Medusa, not
+    # product identity, so 'Cream Marble Polished', never 'Cream Marble Polished Tile' (the format word
+    # stays only in the description, via _FORMAT_WORD). Finish is dropped for blocks (uncut stone has no
+    # finish; avoids 'Carrara Raw'); material is omitted when the variety name already implies it
+    # (_material_suffix). The handle keys off variety+finish INDEPENDENTLY (derive_handle).
     if not row.variation_name:
         row.title = title_case(row.raw_name or "")
         row.title_method = "raw_name_fallback"
@@ -475,8 +476,6 @@ def derive_title(row: CanonicalRow) -> None:
         parts.append(row.finish_name)
     if material := _material_suffix(variety, row.type_name):
         parts.append(material)
-    if fmt := _FORMAT_WORD.get((row.format_value or "").strip().casefold(), ""):
-        parts.append(fmt)
     row.title = title_case(" ".join(p for p in parts if p))
     row.title_method = "construct"
 
