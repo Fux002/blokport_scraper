@@ -181,6 +181,38 @@ def test_multi_thickness_defaults_to_standard_keeps_faces(ref, cfg):
     assert any(f.code == FlagCode.dimension_defaulted and f.field == "width" for f in row.review_flags)
 
 
+def test_dimension_unit_correction_cm_read_as_m(ref, cfg):
+    # a SlabWare row storing the face size in CENTIMETRES (332, 205) tagged as metres reads ~100x too big
+    # and would inflate the freight weight to thousands of tonnes; the general unit sanity corrects it once.
+    row = _slab_row(variation_name="Colonial White", type_name="Granite",
+                    raw_dimensions="length=332m;height=205m", raw_thickness="3cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length == 3.32 and row.height == 2.05 and row.width == 0.03   # cm -> m
+    assert row.weight is not None and row.weight < 2.0                        # a real slab, not 5512 tonnes
+    assert any(f.code == FlagCode.dimension_unit_corrected for f in row.review_flags)
+
+
+def test_dimension_valid_metres_never_touched(ref, cfg):
+    # a correct metre value is never changed by the unit sanity (it is not physically impossible as metres)
+    row = _slab_row(variation_name="Alpine", type_name="Granite",
+                    raw_dimensions="length=2.8m;height=1.97m", raw_thickness="2cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length == 2.8 and row.height == 1.97 and row.width == 0.02
+    assert not any(f.code == FlagCode.dimension_unit_corrected for f in row.review_flags)
+
+
+def test_dimension_ambiguous_large_value_left_for_review(ref, cfg):
+    # 6.44 is odd (too big as a slab metre, too small as cm/100) -> NOT auto-corrected, left as-is/flagged
+    row = _slab_row(variation_name="Misty Black", type_name="Granite",
+                    raw_dimensions="length=6.44m;height=3.64m", raw_thickness="2cm")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert row.length == 6.44                                                # not silently divided
+    assert not any(f.code == FlagCode.dimension_unit_corrected for f in row.review_flags)
+
+
 def test_free_length_fills_only_missing_and_keeps_real_dims(ref, cfg):
     # a cut-to-size tile ('length=Free') keeps its real height + thickness; only the missing length is
     # filled from the tile standard (0.6 m), flagged.
