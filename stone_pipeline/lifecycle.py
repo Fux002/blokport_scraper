@@ -247,8 +247,12 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     products) -- tombstoning re-key old sides and dropped varieties so MEDUSA converges to the seed too,
     not just the sync state. Without (b), a seed change (e.g. a retype) leaves the old variety live in
     Medusa forever (seed vs Medusa out of line). It is global-only (a scoped factory reset is meaningless)
-    and forces hard=True (a cold start starts from no scraped products). Registered sources and run history
-    are left alone -- neither affects the catalog output."""
+    and forces hard=True (a cold start starts from no scraped products), and (c) WIPES the hosted product
+    images (raw scraped + treated improved + markers + manifest, via deploy.wipe_all_product_images) so the
+    next scrape re-downloads + re-processes from scratch -- the "spend GPU/FAL for fresh images" restart. The
+    cheaper 'clean raw scraped data' (stone_pipeline.clean) KEEPS the images so the manifest reuses them (no
+    GPU/FAL). Variant textures (<env>/variations/) are never touched by either. Registered sources and run
+    history are left alone -- neither affects the catalog output."""
     if pristine and sources is not None:
         return {"error": "pristine (factory) reset is global-only; do not pass sources"}, 400
     if pristine:
@@ -286,6 +290,19 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
             config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
             config["retired_keys"] = store.clear_retired()
         out["config"] = config
+    if pristine:
+        # FRESH-IMAGES cold start: a factory reset also wipes the hosted product images (raw scraped +
+        # treated improved + markers + manifest), so the next scrape re-downloads and re-processes from
+        # scratch -- the "spend GPU/FAL" restart. The cheaper 'clean raw scraped data' KEEPS them, so the
+        # manifest reuses the existing processed images (no GPU/FAL). Variant textures (<env>/variations/)
+        # are never touched. Best-effort + LOUD: a wipe failure (e.g. missing s3:DeleteObject) never fails
+        # the reset (the catalog/ledger are already reset) but is surfaced so the operator knows images stayed.
+        try:
+            from deploy.cleanup_images import wipe_all_product_images
+            out["images_wiped"] = wipe_all_product_images()
+        except Exception as exc:
+            log.exception("pristine reset: product-image wipe FAILED; images were kept")
+            out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
     return out, 200
 
 
