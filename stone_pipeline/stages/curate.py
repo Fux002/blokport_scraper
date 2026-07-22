@@ -104,10 +104,13 @@ def _attr_surface(row, vocab: str) -> str:
 def _review_evidence(row) -> dict:
     """The scraped EVIDENCE surfaced on a review hold, so a human can judge the correct type/variety
     (which of the Gneiss/Granite/Marble/Onyx 'Aqua Blue' this product is) from the actual product, not
-    just the name: the source, ONE product image (the processed S3 render when present, else the raw
-    scrape url), and the supplier description. All optional -- empty when the row carried none."""
+    just the name: the source, the ORIGINAL supplier listing url (so the operator can open the product
+    and verify it before minting), ONE product image (the processed S3 render when present, else the raw
+    scrape url), and the supplier description. All optional -- empty when the row carried none (e.g. an
+    API-only source with no public product page leaves src_url empty)."""
     imgs = (getattr(row, "image_keys", None) or []) or (getattr(row, "raw_image_urls", None) or [])
     return {"src": getattr(row, "src_site", "") or "",
+            "src_url": getattr(row, "src_url", "") or "",
             "image": next((u for u in imgs if u), ""),
             "description": getattr(row, "description", "") or ""}
 
