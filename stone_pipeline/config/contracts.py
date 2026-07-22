@@ -24,11 +24,13 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import csvio
 
 
-# Columns every ScraperBase subclass emits (scrapers/base.py BASE_COLUMNS). They
-# are always present and source-independent, so the health check must treat them
-# as known rather than flagging them as unexpected drift.
+# Columns every ScraperBase subclass emits (scrapers/base.py BASE_COLUMNS). They are always present and
+# source-independent, so the health check treats them as known rather than flagging them as unexpected drift.
+# This MUST stay a superset of BASE_COLUMNS -- a framework column missing here is falsely flagged as a
+# "new_column" drift for EVERY source (that is what happened when `fetch_failed` was added to BASE_COLUMNS
+# but not here). test_contracts asserts the two never diverge, so a future BASE_COLUMNS addition can't slip.
 FRAMEWORK_COLUMNS = ["format", "image_count", "image_urls", "image_filenames_local",
-                     "scrape_timestamp", "raw_json"]
+                     "scrape_timestamp", "raw_json", "fetch_failed"]
 
 
 @dataclass
