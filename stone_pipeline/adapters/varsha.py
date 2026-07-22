@@ -35,7 +35,7 @@ def _composition_type(record) -> str:
 
 class VarshaAdapter(AdapterBase):
     source = "varsha"
-    adapter_version = "1.3.0"
+    adapter_version = "1.4.0"
     variety_match_key = "material_name"
     format_field = "format"  # scraper should emit the explicit block/slab/tile tag here
     required_columns = ["bundle_id", "material_name", "finish", "quality",
@@ -44,6 +44,7 @@ class VarshaAdapter(AdapterBase):
 
     field_map = {
         "src_natural_key": lambda r: AdapterBase.clean(r.get("bundle_id")),
+        "src_url": lambda r: AdapterBase.clean(r.get("detail_url")),
         "scrape_timestamp": lambda r: AdapterBase.clean(r.get("scrape_timestamp")),
         "raw_name": _variety,
         "variety_match_key": _variety,

@@ -1,6 +1,6 @@
 [
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Gold",
     "raw_description": "",
@@ -26,11 +26,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "1",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=1",
     "variety_match_key": "ALASKA GOLD"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Gold",
     "raw_description": "",
@@ -57,11 +57,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "1547",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=1547",
     "variety_match_key": "ALASKA GOLD"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Gold",
     "raw_description": "",
@@ -93,11 +93,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "486",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=486",
     "variety_match_key": "ALASKA GOLD"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Gold",
     "raw_description": "",
@@ -128,11 +128,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "3012",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=3012",
     "variety_match_key": "ALASKA GOLD"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Gold",
     "raw_description": "",
@@ -157,11 +157,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2",
     "variety_match_key": "ALASKA GOLD"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -189,11 +189,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2391",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2391",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -224,11 +224,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2193",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2193",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -255,11 +255,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "1696",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=1696",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -285,11 +285,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2592",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2592",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -316,11 +316,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2174",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2174",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -349,11 +349,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "3303",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=3303",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -384,11 +384,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2763",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2763",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -419,11 +419,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2685",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2685",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -452,11 +452,11 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2998",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2998",
     "variety_match_key": "ALPINUS"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -488,7 +488,7 @@
     "scrape_timestamp": "2026-05-08 21:38:12",
     "src_natural_key": "2876",
     "src_site": "varsha",
-    "src_url": null,
+    "src_url": "https://varshastones.slabware.com/Product-Details.aspx?ID=2876",
     "variety_match_key": "ALPINUS"
   }
 ]
