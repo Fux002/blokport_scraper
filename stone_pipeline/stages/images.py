@@ -377,7 +377,14 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             public = backend.put(dest_key, data)
             stats.bytes_uploaded += len(data)
         else:
-            pr = processor.process(data, watermarked=src_site in watermarked_sources,
+            # ROUTE BY THE PAGE FLAGS. The GPU is needed ONLY for the ESRGAN upscale (enhance=on); de-watermark
+            # is a hosted FAL call (no GPU) and resize is CPU, so :core FINISHES every enhance=off source here,
+            # de-watermarking it too when the page marks it watermarked. :core must NOT de-watermark an
+            # enhance=on source: the GPU de-watermarks + upscales it in one pass, and doing FAL here as well
+            # would bill it twice -- so request de-wm on :core only for a source we complete on :core.
+            finish_on_core = src_site not in enhance_sources
+            watermarked_src = src_site in watermarked_sources
+            pr = processor.process(data, watermarked=finish_on_core and watermarked_src,
                                    enhance=src_site in enhance_sources)
             stats.processed += 1
             # Persist the raw original UNCONDITIONALLY (keep_scraped): it is the GPU reprocess's INPUT.
@@ -390,11 +397,14 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                 if not backend.exists(skey):
                     backend.put(skey, data)
                     stats.bytes_uploaded += len(data)
-            if pr.dewatermark_failed:
-                # :core could not finalize a watermarked image (no FAL here). Leave improved/ for the GPU
-                # (that folder must only ever hold treated images) and HOLD the image this run -- neither
-                # linked nor recorded in the manifest, so the next produce re-derives it and it links only
-                # once the GPU has written improved/ + the enhanced marker. Held regardless of the gate.
+            if pr.dewatermark_failed or (watermarked_src and not finish_on_core):
+                # HOLD this run (no improved/, no marker), leaving the image for the GPU, whenever :core did
+                # NOT finish it: either de-watermarking FAILED here (dewatermark_failed), OR the source is
+                # enhance=on + watermarked so it was deferred to the GPU (which de-watermarks + upscales in one
+                # pass) -- :core must never write a still-watermarked image into improved/. The raw is in
+                # scraped/ for the GPU; the manifest is not written, so the next produce re-derives it and it
+                # links only once the GPU has written the treated improved/ + the marker. Held regardless of
+                # the require_enhanced gate, so a watermarked image can never publish before it is cleaned.
                 continue
             if cfg.processing.write_preview:
                 preview.append({

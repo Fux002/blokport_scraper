@@ -10,10 +10,17 @@ curl_cffi>=0.7          # Cloudflare-fronted SlabWare scrapers (chrome TLS imper
 boto3>=1.34             # S3 image staging backend (images.mode = s3)
 
 # Image stage — faithful enhancement + Lanczos upscale (CPU, always available).
-# De-watermarking adds the heavier torch stack: see requirements-imageproc.txt.
 opencv-python-headless>=4.9
 numpy>=1.26
 pillow>=10.0
+
+# De-watermarking is FAL FLUX Fill -- a HOSTED API call (no torch, no GPU), so it belongs in :core: a
+# source the page marks watermarked=off/enhance=off finishes entirely on :core (resize + de-watermark),
+# and the GPU (torch/ESRGAN, requirements-imageproc.txt) is reserved for enhance=on. fal-client + requests
+# are the only libs the de-watermarker needs; they are lightweight. FAL runs only when a source is
+# watermarked=on AND enhance=off (else the GPU de-watermarks + upscales in one pass).
+fal-client>=0.4
+requests>=2.31
 
 # Optional (lazy-imported, config-gated)
 browser_cookie3>=0.19   # only if a scraper needs browser cookie auth (none do today)

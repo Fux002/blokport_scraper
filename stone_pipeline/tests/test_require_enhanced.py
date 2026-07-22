@@ -171,6 +171,58 @@ def test_core_does_not_mark_watermarked_source(tmp_path, monkeypatch, core_no_gp
     assert stats.no_image == 1 and row.image_keys == []                    # held for the GPU de-watermark
 
 
+def _spy_dewatermarker(monkeypatch):
+    """Make the FAL de-watermarker AVAILABLE on :core and record every call; ESRGAN stays unavailable (no
+    torch on :core). Returns the call list so a test can assert whether :core de-watermarked."""
+    import stone_pipeline.io.image_processing as ip
+    calls = []
+    monkeypatch.setattr(ip._ESRGANEnhancer, "available", lambda self: False)
+    monkeypatch.setattr(ip._Dewatermarker, "available", lambda self: True)
+
+    def _fake_dw(self, pil):
+        calls.append("dw")
+        return ip.DewatermarkResult(pil, applied=True, failed=False)
+
+    monkeypatch.setattr(ip._Dewatermarker, "process", _fake_dw)
+    return calls
+
+
+def test_core_dewatermarks_resize_only_watermarked_source(tmp_path, monkeypatch):
+    """PAGE watermarked=on + enhance=off: de-watermark is a hosted FAL call (no GPU), so :core does it +
+    resize + marks -> publishes THIS run, NO GPU trip. FAL runs on :core precisely because the source needs
+    no ESRGAN."""
+    calls = _spy_dewatermarker(monkeypatch)
+    monkeypatch.setattr(images, "_enhance_sources", lambda: set())              # page: enhance OFF
+    monkeypatch.setattr(images, "_watermarked_sources", lambda: {"varsha"})     # page: watermarked ON
+    monkeypatch.setattr(images, "_load_enhanced_set", lambda cfg=None: _local_marker_shas(tmp_path / "s"))
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())
+    cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
+                       require_enhanced=True, processing=_proc_cfg())
+    row = CanonicalRow(src_site="varsha", surrogate_key="1", is_block=False, raw_image_urls=["http://x/a.jpg"])
+    stats = images.run([row], fetch=_fake_fetch({"http://x/a.jpg": _jpeg()}), cfg=cfg)
+    assert calls == ["dw"]                                                      # :core de-watermarked (FAL)
+    assert _local_marker_shas(tmp_path / "s")                                   # marked complete on :core
+    assert stats.staged == 1 and len(row.product_image_keys) == 1              # publishes, no GPU
+
+
+def test_core_defers_dewatermark_for_enhance_on_source(tmp_path, monkeypatch):
+    """PAGE watermarked=on + enhance=on: the GPU de-watermarks + upscales in ONE pass, so :core must NOT
+    de-watermark (FAL would be billed twice). :core holds it for the GPU; the de-watermarker is never called
+    here, and no marker is written."""
+    calls = _spy_dewatermarker(monkeypatch)
+    monkeypatch.setattr(images, "_enhance_sources", lambda: {"varsha"})         # page: enhance ON
+    monkeypatch.setattr(images, "_watermarked_sources", lambda: {"varsha"})     # page: watermarked ON
+    monkeypatch.setattr(images, "_load_enhanced_set", lambda cfg=None: _local_marker_shas(tmp_path / "s"))
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())
+    cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
+                       require_enhanced=True, processing=_proc_cfg())
+    row = CanonicalRow(src_site="varsha", surrogate_key="2", is_block=False, raw_image_urls=["http://x/a.jpg"])
+    stats = images.run([row], fetch=_fake_fetch({"http://x/a.jpg": _jpeg()}), cfg=cfg)
+    assert calls == []                                                          # :core did NOT de-watermark
+    assert not _local_marker_shas(tmp_path / "s")                              # not complete on :core
+    assert stats.no_image == 1 and row.image_keys == []                        # held for the GPU
+
+
 def test_passthrough_gate_off_links_all_improved(monkeypatch):
     h_ok, h_raw = "c" * 64, "d" * 64
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {
