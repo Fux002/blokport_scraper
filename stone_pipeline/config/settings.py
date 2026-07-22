@@ -37,8 +37,19 @@ WORKSPACE_ROOT = REPO_ROOT.parent
 # the env vars are set. See DEV_PROD_PIPELINE.md for the promotion checklist.
 BLOKPORT_ENV = os.environ.get("BLOKPORT_ENV", "development").strip().lower()
 IS_PRODUCTION = BLOKPORT_ENV in ("production", "prod")
-ENV_SEGMENT = "prod" if IS_PRODUCTION else "dev"      # S3 path/key namespace (dev/... vs prod/...)
-ENV_NAME = "production" if IS_PRODUCTION else "development"  # workspace folder per env
+# Two DELIBERATELY separate S3 top-level prefixes per environment, split by lifecycle (not by accident --
+# each is owned by a different subsystem, and the boundary is REGENERABLE-vs-DURABLE):
+#   ENV_SEGMENT (dev|prod)          -- the REGENERABLE data + integration plane. products/, variations/,
+#                                      scraper/{to_upload,from_medusa,review,texture_queues}. A produce
+#                                      rebuilds all of it and Blokport/Medusa read it; a factory reset may
+#                                      wipe it (that is why a reset empties dev/products/ but nothing else).
+#   ENV_NAME (development|production) -- the local workspace folder AND the S3 namespace for DURABLE state
+#                                      that must survive a cold task: scraper/{config/config.db, ledger/<env>.db,
+#                                      artifacts/*.tar.gz}. A produce does NOT regenerate these; the snapshot
+#                                      layer (ledger/snapshot.py) owns this prefix, reading+writing it consistently.
+# Same rule in prod (prod/ + production/), in a SEPARATE guarded bucket. See DEPLOY.md "S3 layout".
+ENV_SEGMENT = "prod" if IS_PRODUCTION else "dev"
+ENV_NAME = "production" if IS_PRODUCTION else "development"
 
 # Dev and prod hold SEPARATE Medusa downloads and upload sets, because the Medusa ids
 # (pcat / attribute / variation) differ per environment. What is SHARED is the "core":

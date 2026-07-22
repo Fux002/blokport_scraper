@@ -205,6 +205,35 @@ bucket under a single canonical home — `s3://<staging-bucket>/<env>/scraper/`:
 `prod/scraper/…` in the prod bucket once it exists.) Local per-env folders
 (`to_upload/<env>/`, `from_medusa/<env>/`) map 1:1 onto these.
 
+### S3 layout: two DELIBERATE prefixes per environment (regenerable vs durable)
+
+Each environment uses **two** top-level S3 prefixes, on purpose, split by lifecycle. This is a
+designed boundary, not an accident of naming — each prefix is owned by a different subsystem:
+
+```
+dev/          (ENV_SEGMENT = dev|prod)  -- REGENERABLE data + the Blokport/Medusa integration surface
+  products/          hosted product images (scraped/ improved/ enhanced/ markers) -- wiped by a factory reset
+  variations/        variant textures (kept across a factory reset)
+  scraper/
+    from_medusa/     INPUT  the Medusa export the matcher reads
+    to_upload/       OUTPUT the upload set Blokport imports
+    review/          OUTPUT look-before-upload files
+    texture_queues/  transient texture-generation work queues
+  A produce rebuilds ALL of this; a factory reset may wipe dev/products/. Nothing here is irreplaceable.
+
+development/  (ENV_NAME = development|production)  -- DURABLE state that MUST survive a cold task
+  scraper/
+    config/config.db    source lifecycle (pause/delist) + the operator overlay (curation decisions)
+    ledger/<env>.db     sync state (what Medusa already has)
+    artifacts/*.tar.gz  data/ + outputs/ backups for a fast cold-start restore
+  A produce does NOT regenerate this; the snapshot layer (ledger/snapshot.py) owns it, restoring on a cold task.
+```
+
+**Rule of thumb:** if a produce can rebuild it, or Blokport/Medusa read it, it goes under `ENV_SEGMENT`
+(`dev/`|`prod/`). If losing it loses real state (decisions, sync history), it goes under `ENV_NAME`
+(`development/`|`production/`). Prod mirrors this exactly, in the SEPARATE prod bucket. The images
+(`products/`, `variations/`) are siblings of `scraper/` under `ENV_SEGMENT`, not inside it.
+
 The run wires both ends automatically:
 - **start:** `deploy/fetch_inputs.py` downloads `from_medusa/` from S3 into the task.
 - **end:** `deploy/upload_artifacts.py` uploads `to_upload/` + `review/` back to S3.
