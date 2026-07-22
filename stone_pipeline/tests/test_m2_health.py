@@ -87,3 +87,15 @@ def test_smoke_test_failure_fails(contract):
     report = health.run_health(frame, contract, baseline=None, smoke_test=broken_adapter)
     assert report.status == health.FAILED
     assert any(d.kind == "parse_fail" for d in report.drift)
+
+
+def test_framework_columns_stay_in_sync_with_base_columns():
+    """FRAMEWORK_COLUMNS (the drift allowlist) MUST be a superset of scrapers/base.py BASE_COLUMNS. A base
+    column missing here is falsely flagged as a 'new_column' drift for EVERY source -- exactly what happened
+    when `fetch_failed` was added to BASE_COLUMNS but not the allowlist. This guard fails on any future drift."""
+    from scrapers.base import ScraperBase
+
+    missing = [c for c in ScraperBase.BASE_COLUMNS if c not in contracts.FRAMEWORK_COLUMNS]
+    assert not missing, (
+        f"BASE_COLUMNS not in FRAMEWORK_COLUMNS -> the health check will false-flag these as new_column "
+        f"drift for every source: {missing}. Add them to contracts.FRAMEWORK_COLUMNS.")
