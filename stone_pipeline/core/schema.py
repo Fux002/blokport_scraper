@@ -35,6 +35,9 @@ class FlagCode(str, Enum):
     format_inferred = "format_inferred"
     format_unresolved = "format_unresolved"
     dimension_out_of_range = "dimension_out_of_range"
+    # a dimension stored in the wrong unit (centimetres read as metres, ~100x too large) was corrected to
+    # metres against the category's physical range, before weight -- flagged so the source can be verified.
+    dimension_unit_corrected = "dimension_unit_corrected"
     dimension_defaulted = "dimension_defaulted"    # a genuinely-absent dim filled from the pack's dimension_defaults
     # transient: a required dimension's FETCH failed (recoverable, e.g. HTTP 429) -> the row is HELD for
     # retry, NOT defaulted. The twin of no_image, the deliberate counterpart to dimension_defaulted.

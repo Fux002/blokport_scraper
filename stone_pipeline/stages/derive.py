@@ -192,6 +192,23 @@ def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, defau
     return default
 
 
+def _normalize_unit(value: float | None, field: str, category: str) -> tuple[float | None, bool]:
+    """General unit sanity for one linear dimension, in metres. A stone dimension stored in CENTIMETRES
+    (a real SlabWare data inconsistency -- a face recorded as 332 rather than 3.32) reads ~100x too large in
+    metres and blows up the freight weight. Correct it once, against the SAME per-category physical range the
+    range check uses: a value far above the plausible max (> hi*3) whose value/100 lands back in the plausible
+    band [lo*0.3, hi*3] was centimetres -> divide by 100. This is deterministic and source-agnostic, and by
+    construction it can ONLY touch a value that is already physically impossible as metres, so a correct value
+    is never changed (2.8 stays 2.8; a genuinely odd 6.44 whose /100 is implausibly small is left for review).
+    Returns (value, corrected)."""
+    if value is None:
+        return value, False
+    lo, hi = active_pack().dimension_ranges.get(category, {}).get(field, (0.0, 5.0))
+    if value > hi * 3 and lo * 0.3 <= value / 100.0 <= hi * 3:
+        return round(value / 100.0, 3), True
+    return value, False
+
+
 def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     """Resolve length/width/height in metres. length+height are the two FACE dimensions (a range takes its
     MAX); width is the depth/thickness. Each parses from the scraped strings; anything still missing or
@@ -221,6 +238,19 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods)
     height = _resolve_dimension(row, "height", faces.get("height"), defaults["height"], category, methods)
     width = _resolve_dimension(row, "width", width, defaults["thickness"], category, methods)
+
+    # Unit sanity BEFORE weight: a dimension stored in centimetres reads ~100x too large in metres and would
+    # inflate the freight weight to thousands of tonnes. Correct it generally (every source, every dimension)
+    # against the category's physical range; never touches a value that is valid as metres. See _normalize_unit.
+    length, _lc = _normalize_unit(length, "length", category)
+    height, _hc = _normalize_unit(height, "height", category)
+    width, _wc = _normalize_unit(width, "width", category)
+    for _name, _corr, _val in (("length", _lc, length), ("height", _hc, height), ("width", _wc, width)):
+        if _corr:
+            methods.append(f"{_name}:cm_to_m")
+            row.add_flag(ReviewFlag(field=_name, code=FlagCode.dimension_unit_corrected,
+                                    best_guess=f"{_val}m (read as centimetres)",
+                                    confidence=Confidence.medium, method="cm_to_m", src_url=row.src_url))
 
     weight, weight_method = _derive_weight(row, ref, length, width, height)
     methods.append(weight_method)
