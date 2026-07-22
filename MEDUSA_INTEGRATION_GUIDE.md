@@ -161,7 +161,7 @@ Only products whose variation is synced and whose texture is live.
     "color": "Brown", "finish": "Honed", "quality": "First",
     "vendor": "polonine",
     "company_id": "comp_01J...",
-    "title": "Walnut Travertine Honed Slab",
+    "title": "Walnut Travertine Honed",
     "description": "Walnut Travertine is a brown travertine ...",
     "handle": "walnut-travertine-honed-slab-polonine-7f3a2b19",
     "length": 2.5, "width": 0.2, "height": 2.0, "weight": 0.3,
