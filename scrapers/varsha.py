@@ -101,7 +101,7 @@ class VarshaScraper(ScraperBase):
         'price_total_bundle',
         'price_1', 'price_old_1', 'price_2', 'price_old_2',
         # Description, video, links
-        'description', 'video_url', 'kitchen_visualizer_url',
+        'description', 'video_url', 'kitchen_visualizer_url', 'detail_url',
         # Image references
         'image_filename_remote', 'image_url_full', 'image_url_thumb',
         'photo_urls', 'photo_count',
@@ -175,6 +175,10 @@ class VarshaScraper(ScraperBase):
             'image_filename_remote': filename,
             'image_url_full': full_url,
             'image_url_thumb': thumb_url,
+            # Public per-bundle listing page on the SlabWare viewer (same tenant software as polonine, which
+            # builds the identical URL). Surfaced as src_url so an operator can open the original listing to
+            # verify a variety before minting it. Constructed from the bundle id (no separate fetch needed).
+            'detail_url': f"{BASE}/Product-Details.aspx?ID={bundle_id}" if bundle_id else '',
             # Filled in by the detail call below
             'classification': '', 'color': '', 'location': '', 'currency': '',
             'description': '', 'video_url': '', 'slabs_available': '',

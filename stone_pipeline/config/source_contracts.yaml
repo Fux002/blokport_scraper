@@ -211,6 +211,7 @@ varsha:
   - description
   - video_url
   - kitchen_visualizer_url
+  - detail_url
   - image_filename_remote
   - image_url_full
   - image_url_thumb
