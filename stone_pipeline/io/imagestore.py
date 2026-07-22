@@ -32,11 +32,14 @@ IMPROVED_MARKER = f"/products/{IMPROVED_SUBDIR}/"   # a treated image's S3 url/k
 DISCARDED_PREFIX_ALL = f"{_PRODUCTS}/{DISCARDED_SUBDIR}/"  # list this to load the whole discard set
 ENHANCED_PREFIX_ALL = f"{_PRODUCTS}/{ENHANCED_SUBDIR}/"    # list this for the whole enhanced-marker set (publish gate)
 
-# "Done" markers, written ONLY by the GPU reprocess (deploy/reprocess_source), one per image it handles:
-# an ENHANCED marker when it enhances, a DISCARDED marker when it rejects. These are the incremental signal
-# for auto-enhance -- an image "needs processing" iff it is in scraped/ but has NEITHER marker. We CANNOT
-# use improved/ presence for this: produce on the torch-free :core writes a raw re-encode into improved/
-# without enhancing, so improved/ presence does not mean "enhanced". Only the GPU writes these markers.
+# "Done" markers, one per image: an ENHANCED marker when a source's configured image pipeline COMPLETED for
+# that image, a DISCARDED marker when the classifier rejected it. They are the publish gate (require_enhanced)
+# AND the incremental signal for auto-enhance -- an image "needs the GPU" iff it is in scraped/ but has NEITHER
+# marker. Who writes the ENHANCED marker follows the PER-SOURCE page settings: the :core produce writes it when
+# the CPU size-reduce is the whole job (page enhance=off AND watermarked=off), so a resize-only source needs no
+# GPU trip; the GPU reprocess writes it after it upscales/de-watermarks a source the page marks enhance=on or
+# watermarked=on. We CANNOT infer "done" from improved/ presence alone: for an enhance=on source, :core writes a
+# pre-upscale re-encode into improved/ that is NOT yet complete -- only the marker means the configured job ran.
 
 # every image object is content-addressed as <site>/<sha256>.<ext>, so the sha is recoverable from any
 # hosted url or key -- the one identity that the reprocess (filename) and Stage 7 (improved url) share.

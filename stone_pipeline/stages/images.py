@@ -405,6 +405,18 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                     "upscaled": pr.upscaled})
             public = backend.put(dest_key, pr.data)
             stats.bytes_uploaded += len(pr.data)
+            # PUBLISH MARKER (the require_enhanced unlock), PAGE-DRIVEN: write it here on :core ONLY when
+            # this source's configured pipeline is COMPLETE on :core -- i.e. the CPU size-reduce IS the whole
+            # job because the page has enhance=off AND watermarked=off (is_complete reads the per-source
+            # enhance flag). Then a resize-only source publishes straight from :core in this same run, with no
+            # GPU trip -- exactly what the scraper page dictates. A source the page marks enhance=on (needs the
+            # GPU upscale) or watermarked=on (needs FAL) is NOT complete here, so :core writes no marker and
+            # the GPU reprocess stamps it after doing that work. So the publish gate follows the page settings,
+            # never a blanket env override, and auto-enhance skips resize-only sources (they are already "done").
+            if pr.is_complete(enhance_requested=src_site in enhance_sources):
+                mkey = f"{imagestore.ENHANCED_SUBDIR}/{src_site}/{digest}.txt"
+                if not backend.exists(mkey):
+                    backend.put(mkey, b"", content_type="text/plain")
         hash_to_public[digest] = public
         url_to_public[url] = public
         manifest[url] = public
