@@ -40,14 +40,18 @@ def _s3():
 
 
 def snapshot_key(env: str = ENV_NAME) -> str:
-    """S3 key for the ledger snapshot, under the env's staging tree (alongside from_medusa/ and to_upload/)."""
+    """S3 key for the ledger snapshot. Keyed by ENV_NAME (development|production), NOT ENV_SEGMENT (dev|prod):
+    this is DURABLE state, so it lives under the durable-state prefix (development/scraper/...), a sibling of --
+    NOT inside -- the regenerable data plane (dev/scraper/{from_medusa,to_upload}). See settings ENV_SEGMENT/
+    ENV_NAME for the boundary."""
     return f"{env}/scraper/ledger/{env}.db"
 
 
 def config_key(env: str = ENV_NAME) -> str:
-    """S3 key for the config-store snapshot. config.db holds the source lifecycle (pause/delist/enabled),
-    which is ephemeral on the task's /app disk -- snapshot it the same way as the ledger so a redeploy
-    does not silently re-seed every source back to active."""
+    """S3 key for the config-store snapshot, under the same DURABLE-state prefix as the ledger (ENV_NAME, e.g.
+    development/scraper/config/config.db). config.db holds the source lifecycle (pause/delist/enabled) + the
+    operator overlay, which are ephemeral on the task's /app disk -- snapshot it the same way as the ledger so a
+    redeploy does not silently re-seed every source back to active or lose curation decisions."""
     return f"{env}/scraper/config/config.db"
 
 
