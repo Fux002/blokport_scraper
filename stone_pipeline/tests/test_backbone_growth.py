@@ -134,6 +134,17 @@ def test_get_lists_pending_with_current_action():
     assert body["backbone"][0]["current_action"] is None                # undecided
 
 
+def test_pending_item_carries_the_ref_the_put_accepts():
+    # The review UI enables approve/reject off b.ref; the composite leaf ref cannot be rebuilt client-side
+    # from the display fields, so the GET must hand it over -- and it must be exactly the ref the PUT resolves.
+    decisions.write_backbone_leaf_pending([_suggestion()])
+    item = server.dispatch("GET", ["review", "backbone"], None)[1]["backbone"][0]
+    assert item["ref"] == "|".join(("tiger black", "granite", "quality", "b"))
+    # round-trip: the ref straight off the list decides the leaf (the frontend sends it back verbatim)
+    code, _ = server.dispatch("PUT", ["review", "backbone", item["ref"]], {"action": "approve"})
+    assert code == 200 and ds.backbone_leaf_overlay() == {("tiger black", "granite"): {"quality": ["B"]}}
+
+
 def test_put_single_verdict_then_reflected():
     decisions.write_backbone_leaf_pending([_suggestion()])
     ref = "|".join(("tiger black", "granite", "quality", "b"))
