@@ -270,3 +270,24 @@ def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
     assert posts and all(p["stone_type"] == "Granite" for p in posts)   # minted with the assigned type
     assert all("granite" in p["key"] for p in posts)                    # and a typed Key slug
     assert not any(p["variant"] == "Karur Special White" for p in res2.pending_confirm)
+
+
+# -- review evidence image: durable supplier url over the churn-deleted improved/ key ---------------
+
+def test_review_evidence_prefers_durable_supplier_url_over_improved_key():
+    # The improved/ render is hard-deleted with the product on a Blokport clear/remove, so the review
+    # queue would 404 until the next produce. The supplier url survives churn, so it wins when present.
+    row = CanonicalRow(src_site="varsha", src_url="https://varshastones.slabware.com/Product-Details.aspx?ID=1")
+    row.raw_image_urls = ["https://varshastones.slabware.com/backendGranite/.../photo.jpg"]
+    row.image_keys = ["https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/products/improved/varsha/abc.jpg"]
+    ev = curate._review_evidence(row)
+    assert ev["image"] == row.raw_image_urls[0]          # durable supplier photo, not the ephemeral improved/ key
+    assert ev["src_url"].endswith("ID=1")
+
+
+def test_review_evidence_falls_back_to_improved_key_when_no_supplier_url():
+    # An API row that captured no raw url still gets a thumbnail from the processed key (better than none).
+    row = CanonicalRow(src_site="varsha")
+    row.raw_image_urls = []
+    row.image_keys = ["https://.../dev/products/improved/varsha/abc.jpg"]
+    assert curate._review_evidence(row)["image"] == row.image_keys[0]
