@@ -426,6 +426,13 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # (that returned an inconsistent /config/v1/sources); seed re-adds any missing yaml source while keeping
     # each source's restored lifecycle state, and never resurrects a permanently-removed one.
     store.seed_from_yaml()
+    # A produce the prior server was mid-run on cannot survive its restart (the in-memory run record and its
+    # produce subprocess died with the old process). Any source still stamped `running` in the restored
+    # snapshot is stale -- reconcile it to `interrupted` so it reads terminal and is runnable again, else a
+    # redeploy (or crash) during a run pins that source `running` forever and the next Run is a no-op.
+    if interrupted := store.reconcile_interrupted_runs(config_db):
+        log.warning("reconciled interrupted run(s) from a prior restart",
+                    extra={"extra_fields": {"sources": interrupted}})
     # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
     # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
     snapshot.restore(writethrough.ledger_path())
