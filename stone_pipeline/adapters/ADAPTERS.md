@@ -51,6 +51,11 @@ section 6.
      `Z`/`ZB`) add one regex to `code_prefixes = (...)` — see `varsha.py`.
    - Set `format_field = "format"` to wire the scraper's format tag (no `raw_format` boilerplate
      needed). Use `generic_descriptor = True` for sources whose name is a colour+type descriptor.
+   - **If the source sells more than one format in one feed, the SCRAPER classifies per row** (sets
+     `row["format"]` from a structured field), so a block never ships as a slab. See the checklist
+     section 0 and `slabware.classify_format` (varsha: `thickness == "MULTI"` => block). The adapter still
+     just wires `format_field`; the same variety then legitimately appears as both slab and block (identity
+     is name+type, format is separate), which is why the `Z`/`ZB` name strip above collapses them to one.
 
 3. **Config** — add a `<source>:` block to `config/sources.yaml` (adapter, source_code,
    company/sales-channel ids, `ports_default`, `origin_default`).

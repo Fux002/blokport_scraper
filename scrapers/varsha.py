@@ -6,8 +6,9 @@ paginated listing POST (/FullInventory.aspx/ObterListaBundles, `inicio` offset,
 classification, per-slab arrays, photos and pricing. Varsha uses the upgraded
 detail endpoint DetalheBundleNovo.
 
-Varsha sells slab inventory (bundles of slabs), so the format is the constant
-`slab`. The site sits behind Cloudflare, so use_curl_cffi routes HTTP through a
+Varsha sells slab bundles AND solid blocks in the same feed, so the format is set
+PER ROW off the thickness field (MULTI => block, else slab; see slabware.classify_format),
+not a constant. The site sits behind Cloudflare, so use_curl_cffi routes HTTP through a
 Chrome TLS fingerprint. The viewer is PUBLIC (no login/cookies needed) once the
 TLS fingerprint passes; a warm-up GET seeds the session.
 
@@ -67,7 +68,7 @@ def build_image_urls(bundle_id, filename):
 
 class VarshaScraper(ScraperBase):
     source = "varsha"
-    category = "slab"        # Varsha is slab inventory (bundles of slabs); item 3 explicit format
+    category = "slab"        # fallback format only; parse_product sets a per-row format (slab vs block)
     id_field = "bundle_id"   # images named varsha_<bundle_id>_<idx>
     use_curl_cffi = True     # Cloudflare-fronted SlabWare tenant
     # Route through the residential proxy, like polonine (same SlabWare/Cloudflare stack). The datacenter
@@ -151,6 +152,7 @@ class VarshaScraper(ScraperBase):
         bundle_id = item.get('id')
         filename = item.get('fotoPrincipal') or ''
         full_url, thumb_url = build_image_urls(bundle_id, filename)
+        thickness = _get(item, 'nomeEspessura')   # also the slab/block signal (MULTI => a solid block)
 
         row = {
             # From listing
@@ -164,7 +166,11 @@ class VarshaScraper(ScraperBase):
             'slabs': _get(item, 'chapas'),
             'average_size': _get(item, 'averageSize'),
             'quality': _get(item, 'nomeQualidade'),
-            'thickness': _get(item, 'nomeEspessura'),
+            'thickness': thickness,
+            # Varsha sells slabs AND solid blocks in the same feed. Classify PER-ROW off the structured
+            # thickness field (MULTI => block) so a block is never shipped as a slab (wrong category, Key,
+            # and freight geometry). _resolve_format honours this over the `category` default below.
+            'format': slabware.classify_format(thickness),
             'price_1': _get(item, 'preco1'),
             'price_old_1': _get(item, 'precoAntigo1'),
             'price_2': _get(item, 'preco2'),

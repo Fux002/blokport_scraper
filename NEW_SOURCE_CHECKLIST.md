@@ -21,6 +21,12 @@ a shared stage. Lock these in on the scraper/adapter class + config:
   `category` OR the per-product format via the adapter's `format_field`. Declare source conventions:
   `dimension_unit` if it parses dimensions (see marenostone), `proxy_capability` if it needs a proxy (Phase 5),
   `acquisition` (`scraper` | `load_frame` | `file_drop`), `use_curl_cffi`.
+  - **Mixed formats (slab / block / tile): classify PER ROW off a structured field, never a constant.** A
+    supplier that sells more than one format in one feed must NOT be pinned to a single class-level `category`
+    -- `parse_product` sets `row["format"]` from a real field (`_resolve_format` honours it over the default),
+    and a still-ambiguous row is HELD, never guessed into a format. Example: varsha sells slabs AND solid
+    blocks; a block is marked by `thickness == "MULTI"`, so it classifies off that (`slabware.classify_format`),
+    not off the "Z B" name prefix. A block shipped as a slab gets the wrong category, Key, and freight geometry.
 - **Adapter** (`stone_pipeline/adapters/<source>.py`, `AdapterBase`): `variety_match_key`, `field_map`,
   `required_columns`, `code_prefixes`, `adapter_version`. A non-scrape feed overrides `load_frame`.
 - **Config** (`config/sources.yaml`): `source_code` (unique -- SKU provenance), `vendor`, `origin_default`,
