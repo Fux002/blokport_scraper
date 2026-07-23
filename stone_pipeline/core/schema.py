@@ -28,6 +28,7 @@ class FlagCode(str, Enum):
     bundle_ratio_noninteger = "bundle_ratio_noninteger"
     origin_unresolved = "origin_unresolved"
     origin_supplier_default = "origin_supplier_default"
+    origin_multi_home_absent = "origin_multi_home_absent"
     image_placeholder = "image_placeholder"
     image_download_failed = "image_download_failed"
     near_duplicate = "near_duplicate"

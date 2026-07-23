@@ -204,6 +204,10 @@ class Paths:
     # like ports.csv -- it is NOT generated from any export. Fallback to reference/ for back-compat.
     origin_map_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_map.csv"
     origin_map_csv_fallback: Path = REPO_ROOT / "reference" / "origin_map.csv"
+    # Per-SUPPLIER origin overrides: (source, variety, stone_type) -> ISO2, for a supplier that sells a
+    # stone it does NOT quarry in its home country (a reseller). Scoped to one source, so it never leaks
+    # to other suppliers. Optional -- absent file = no overrides.
+    origin_overrides_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_supplier_overrides.csv"
     country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
     standard_slab_area_csv: Path = REPO_ROOT / "reference" / "standard_slab_area.csv"
