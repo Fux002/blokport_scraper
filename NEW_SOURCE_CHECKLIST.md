@@ -29,6 +29,14 @@ a shared stage. Lock these in on the scraper/adapter class + config:
     not off the "Z B" name prefix. A block shipped as a slab gets the wrong category, Key, and freight geometry.
 - **Adapter** (`stone_pipeline/adapters/<source>.py`, `AdapterBase`): `variety_match_key`, `field_map`,
   `required_columns`, `code_prefixes`, `adapter_version`. A non-scrape feed overrides `load_frame`.
+  - **Product link + images (never silently missing).** The scraper captures the public product-page URL
+    (build it deterministically if the feed has no direct link -- e.g. zucchi is a Salesforce feed, so the
+    URL is built from the English name + bundle id: `{SITE}/product?{Name-Hyphenated}-{bundle_id}`), and the
+    adapter maps it to `src_url` (the review "view original listing" link). A source with genuinely no public
+    page maps `src_url` to `""` explicitly -- a conscious decision, never a missing link.
+    `test_every_adapter_maps_a_product_url` enforces the mapping exists. Likewise map the full-size image
+    URL(s) to `raw_image_urls`; when the primary image is on the listing but the gallery needs a detail call,
+    FALL BACK to the listing image so a failed detail fetch never drops the image (the varsha lesson).
 - **Config** (`config/sources.yaml`): `source_code` (unique -- SKU provenance), `vendor`, `origin_default`,
   `ports`, `min_expected_rows`, `mode: review` (always start in review).
 - Rule: NO order-dependent heuristics and NO silent unit/format guesses. Declare the source's rule; if the

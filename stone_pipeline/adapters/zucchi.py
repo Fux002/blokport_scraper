@@ -25,6 +25,7 @@ class ZucchiAdapter(AdapterBase):
 
     field_map = {
         "src_natural_key": lambda r: AdapterBase.clean(r.get("bundle_id")),
+        "src_url": lambda r: AdapterBase.clean(r.get("detail_url")),
         "scrape_timestamp": lambda r: AdapterBase.clean(r.get("scrape_timestamp")),
         "raw_name": lambda r: AdapterBase.clean(r.get("product_name_en")),
         "variety_match_key": lambda r: AdapterBase.clean(r.get("product_name_en")),

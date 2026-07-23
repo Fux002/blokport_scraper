@@ -33,6 +33,15 @@ def test_every_adapter_has_a_fixture_and_config():
         assert source in configured, f"{source}: missing from sources.yaml"
 
 
+def test_every_adapter_maps_a_product_url():
+    # onboarding gate: every source must surface its product page as src_url (the review "view original
+    # listing" link). A source with genuinely no public page maps it to "" explicitly -- a conscious
+    # decision in the adapter, never a silently-missing link (this is what caught zucchi).
+    for source, adapter in selftest.REGISTRY.items():
+        assert "src_url" in adapter.field_map, \
+            f"{source}: adapter must map src_url (the product-page URL, or \"\" if the source has none)"
+
+
 def test_generic_descriptor_yields_empty_variety():
     # a pure colour+type+format descriptor has no named variety
     assert strip_variety("Cream Marble Tile") == ""
