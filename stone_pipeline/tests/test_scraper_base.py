@@ -362,9 +362,10 @@ def test_slabware_classify_format_reads_thickness_not_the_name():
     # every real gauge is a slab (including thick slabs), regardless of any "Z"/"ZB" naming.
     for t in ("2cm", "3cm", "5cm", "8CM", "14 CM"):
         assert slabware.classify_format(t) == "slab", t
-    # missing thickness falls to the default kind -- never a fabricated block.
-    assert slabware.classify_format("") == "slab"
-    assert slabware.classify_format(None) == "slab"
+    # an ABSENT thickness is NOT guessed into a kind: return '' so the flagged format resolver settles it
+    # (format_unresolved -> review), never a silent 'slab'.
+    assert slabware.classify_format("") == ""
+    assert slabware.classify_format(None) == ""
 
 
 def test_slabware_classifier_output_is_a_valid_scrape_format():
@@ -383,3 +384,22 @@ def test_varsha_parse_product_sets_per_row_format_from_thickness(monkeypatch):
     slab = s.parse_product({"id": "2", "nomeEspessura": "2cm", "fotoPrincipal": ""})
     assert block["format"] == "block"
     assert slab["format"] == "slab"
+
+
+def test_varsha_holds_the_row_when_the_detail_fetch_fails(monkeypatch):
+    # A recoverable detail-fetch failure (dims live ONLY in the detail's chapas) must HOLD the row for retry,
+    # not ship it with defaulted dims salvaged past the image gate by the listing photo. _fetch_detail returns
+    # None on failure; parse_product marks fetch_failed 'dims' so derive holds it.
+    from scrapers.varsha import VarshaScraper
+    s = VarshaScraper.__new__(VarshaScraper)
+    s._failures = []                                       # record_failure appends here (skipped __init__)
+    monkeypatch.setattr(s, "_fetch_detail", lambda bundle_id: None)   # simulate the fetch failing
+    row = s.parse_product({"id": "42", "nomeEspessura": "2cm", "fotoPrincipal": "x.jpg"})
+    assert "dims" in (row.get("fetch_failed") or "").split("|")   # carried -> derive holds it
+    assert any(f["kind"] == "dims" for f in s._failures)          # and audited
+
+    s._failures = []
+    monkeypatch.setattr(s, "_fetch_detail", lambda bundle_id: {})    # success-but-empty is NOT a failure
+    ok = s.parse_product({"id": "43", "nomeEspessura": "2cm", "fotoPrincipal": "x.jpg"})
+    assert not (ok.get("fetch_failed") or "")                     # genuine absence -> no hold, no audit
+    assert s._failures == []
