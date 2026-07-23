@@ -34,9 +34,8 @@ a shared stage. Lock these in on the scraper/adapter class + config:
     URL is built from the English name + bundle id: `{SITE}/product?{Name-Hyphenated}-{bundle_id}`), and the
     adapter maps it to `src_url` (the review "view original listing" link). A source with genuinely no public
     page maps `src_url` to `""` explicitly -- a conscious decision, never a missing link.
-    `test_every_adapter_maps_a_product_url` enforces the mapping exists. Likewise map the full-size image
-    URL(s) to `raw_image_urls`; when the primary image is on the listing but the gallery needs a detail call,
-    FALL BACK to the listing image so a failed detail fetch never drops the image (the varsha lesson).
+    `test_every_adapter_maps_a_product_url` enforces the mapping exists. Likewise map the source's full-size
+    image URL(s) to `raw_image_urls` from the field that actually holds them (never a thumbnail).
 - **Config** (`config/sources.yaml`): `source_code` (unique -- SKU provenance), `vendor`, `origin_default`,
   `ports`, `min_expected_rows`, `mode: review` (always start in review).
 - Rule: NO order-dependent heuristics and NO silent unit/format guesses. Declare the source's rule; if the
