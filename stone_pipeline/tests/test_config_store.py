@@ -49,6 +49,23 @@ def test_record_run_stamps_last_run_per_source(tmp_path, monkeypatch):
     assert store.get_row("polonine")["last_run_status"] == "succeeded"
 
 
+def test_reconcile_interrupted_runs_clears_stale_running(tmp_path, monkeypatch):
+    # a run killed mid-produce by a redeploy leaves its source stamped `running` in the restored snapshot;
+    # startup reconciles it to `interrupted` (terminal, runnable), leaving other statuses untouched.
+    yaml_path = _seed_yaml(tmp_path)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=yaml_path)
+    store.record_run(["varsha"], "running", "all")               # a run that never finished
+    store.record_run(["polonine"], "succeeded", "scrape")        # a clean terminal run
+
+    assert store.reconcile_interrupted_runs() == ["varsha"]      # only the stale one
+    rows = {r["source"]: r for r in store.list_rows()}
+    assert rows["varsha"]["last_run_status"] == "interrupted"
+    assert rows["polonine"]["last_run_status"] == "succeeded"    # terminal status untouched
+
+    assert store.reconcile_interrupted_runs() == []             # idempotent: nothing left running
+
+
 def test_run_log_persists_the_last_finished_run(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     assert store.last_run_log() is None

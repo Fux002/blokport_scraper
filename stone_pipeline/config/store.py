@@ -485,6 +485,23 @@ def record_run(sources, status: str, stage: str, at: str | None = None,
         conn.commit()
 
 
+def reconcile_interrupted_runs(path: str | Path | None = None) -> list[str]:
+    """A source stamped `running` at server boot has no owning process: the in-memory run record and its
+    produce subprocess died with the PRIOR config server (a redeploy, crash, or spot reclaim killed the run
+    mid-produce). The durable stamp is therefore stale -- a fresh boot never has an in-flight run. Mark it
+    `interrupted` so it reads terminal and the source is runnable again, instead of being pinned `running`
+    forever. Called once at startup after the snapshot restore. Returns the reconciled source names."""
+    with closing(open_store(path)) as conn:
+        names = [r["source"] for r in
+                 conn.execute("SELECT source FROM source WHERE last_run_status = 'running'")]
+        if names:
+            conn.execute(
+                "UPDATE source SET last_run_status = 'interrupted', updated_at = ? "
+                "WHERE last_run_status = 'running'", (_now(),))
+            conn.commit()
+        return names
+
+
 def seed_from_yaml(yaml_path: str | Path | None = None, path: str | Path | None = None) -> int:
     """RECONCILE the store's source LIST with sources.yaml, INSERT-OR-IGNORE so it never clobbers a row
     the admin already edited (a pause/delist/last-run stays put). Safe to run on EVERY boot: it re-adds
