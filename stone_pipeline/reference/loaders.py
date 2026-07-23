@@ -563,14 +563,22 @@ def load_synonyms(vocab: str, directory: Path | None = None) -> dict[str, str]:
 # --- origin_map.csv -----------------------------------------------------------
 @dataclass
 class OriginRule:
-    # One per-variety origin: (variety, stone_type) -> country. Keyed by type so a homonym (Onyx vs Granite
-    # "Aqua Blue") carries a different origin. The map IS the source of truth -- every row is authoritative,
-    # so there is no confirmed/unconfirmed state and no pattern/suggestion rules.
+    # One per-variety origin: (variety, stone_type) -> country/countries. Keyed by type so a homonym (Onyx vs
+    # Granite "Aqua Blue") carries a different origin. The map IS the source of truth -- every row is
+    # authoritative. country_iso may list MORE THAN ONE country (comma-separated, e.g. "BR,IN") when the same
+    # trade name is quarried in several countries; derive picks the one matching the supplier's home country.
     variety: str
     country_iso: str
     city: str
     county: str
     stone_type: str = ""
+
+    @property
+    def countries(self) -> list[str]:
+        """The ordered ISO-2 candidates parsed from country_iso ("BR,IN" -> ["BR","IN"]). A single-country
+        row yields a 1-element list, so existing single-origin behaviour is unchanged. Duplicates are folded
+        (order-preserving) so a stray "BR,BR" is treated as the single origin it means."""
+        return list(dict.fromkeys(c.strip().upper() for c in self.country_iso.split(",") if c.strip()))
 
 
 @dataclass
@@ -667,6 +675,43 @@ def load_origin_map(path: Path | None = None) -> OriginMap:
     return origin
 
 
+# --- origin_supplier_overrides.csv -------------------------------------------
+@dataclass
+class OriginOverrides:
+    # (source, variety, stone_type) -> ISO2. A curated per-SUPPLIER origin for a stone a supplier SELLS but
+    # does NOT quarry in its home country (a reseller/trader). Scoped to ONE source, so it never affects
+    # another supplier of the same variety. This is the resolution of an origin_multi_home_absent review
+    # where the supplier's stone is one of the KNOWN candidate origins (not a new quarry country).
+    rules: dict[tuple[str, str, str], str] = field(default_factory=dict)
+
+    def lookup(self, source: str, variety: str, stone_type: str | None) -> Optional[str]:
+        return self.rules.get((_norm(source), _norm(variety), _norm(stone_type or "")))
+
+
+def load_origin_overrides(path: Path | None = None) -> OriginOverrides:
+    path = Path(path) if path else SETTINGS.paths.origin_overrides_csv
+    ov = OriginOverrides()
+    if not path.exists():
+        return ov                                    # optional file: no overrides is the normal case
+    skipped = 0
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for record in csv.DictReader(handle):
+            source = (record.get("source") or "").strip()
+            variety = (record.get("variety") or "").strip()
+            st = (record.get("stone_type") or "").strip()
+            iso = (record.get("country_iso") or "").strip().upper()
+            # A usable override needs all four -- source + variety + type identify the row, iso is the answer.
+            if not (source and variety and st and iso):
+                if source or variety:
+                    skipped += 1
+                continue
+            ov.rules[(_norm(source), _norm(variety), _norm(st))] = iso
+    if skipped:
+        log.warning("origin overrides rows skipped (need source + variety + stone_type + country_iso)",
+                    extra={"extra_fields": {"skipped": skipped, "path": str(path)}})
+    return ov
+
+
 # --- the bundle of all reference data + version pinning -----------------------
 @dataclass
 class ReferenceData:
@@ -682,6 +727,7 @@ class ReferenceData:
     country_codes: dict[str, str]   # country name (normalized) -> ISO-2
     synonyms: dict[str, dict[str, str]]
     versions: dict[str, str]
+    origin_overrides: OriginOverrides = field(default_factory=OriginOverrides)  # per-supplier origin picks
     overrides: object = None  # state.overrides.Overrides; lazy import to avoid cycle
 
     @cached_property
@@ -744,6 +790,7 @@ def load_all() -> ReferenceData:
         ports=load_ports(),
         units=load_units(),
         origin_map=load_origin_map(),
+        origin_overrides=load_origin_overrides(),
         country_codes=load_country_codes(),
         synonyms={v: load_synonyms(v) for v in VOCAB_CATEGORIES},
         overrides=load_overrides(),
