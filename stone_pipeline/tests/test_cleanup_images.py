@@ -10,8 +10,9 @@ from stone_pipeline.config.settings import ENV_SEGMENT
 class _FakeS3:
     """Minimal in-memory S3: paginated list-by-prefix + delete_objects. Records deletes for assertions."""
 
-    def __init__(self, keys):
+    def __init__(self, keys, bodies=None):
         self.keys = set(keys)
+        self.bodies = dict(bodies or {})       # key -> bytes, for the manifest get/put path
         self.deleted: list[str] = []
 
     def get_paginator(self, _op):
@@ -26,7 +27,19 @@ class _FakeS3:
     def delete_objects(self, Bucket, Delete):
         for o in Delete["Objects"]:
             self.keys.discard(o["Key"])
+            self.bodies.pop(o["Key"], None)
             self.deleted.append(o["Key"])
+        return {}
+
+    def get_object(self, Bucket, Key):
+        import io
+        if Key not in self.bodies:
+            raise Exception("NoSuchKey")
+        return {"Body": io.BytesIO(self.bodies[Key])}
+
+    def put_object(self, Bucket, Key, Body, ContentType=None):
+        self.bodies[Key] = Body
+        self.keys.add(Key)
         return {}
 
 
@@ -60,3 +73,62 @@ def test_wipe_dry_run_reports_but_deletes_nothing():
     counts = cleanup_images.wipe_all_product_images(client=fake, dry_run=True)
     assert counts["improved"] == 1 and fake.deleted == []          # counted, nothing removed
     assert f"{seg}/products/improved/varsha/aaa.jpg" in fake.keys   # still there
+
+
+# -- wipe_source_product_images: the SCOPED (per-source) expensive restart -------------------------
+
+import json as _json
+import pytest
+
+
+def _seed_multi(seg):
+    keys = [
+        f"{seg}/products/scraped/varsha/aaa.jpg",
+        f"{seg}/products/improved/varsha/aaa.jpg",
+        f"{seg}/products/enhanced/varsha/aaa.txt",
+        f"{seg}/products/scraped/zucchi/ccc.jpg",       # OTHER source -- must survive
+        f"{seg}/products/improved/zucchi/ccc.jpg",       # OTHER source -- must survive
+        f"{seg}/products/_manifest.json",
+        f"{seg}/variations/slab_carrara.png",            # TEXTURE -- must survive
+    ]
+    manifest = {
+        "http://varsha/a": f"https://b/{seg}/products/improved/varsha/aaa.jpg",   # pruned
+        "http://zucchi/c": f"https://b/{seg}/products/improved/zucchi/ccc.jpg",   # kept
+    }
+    bodies = {f"{seg}/products/_manifest.json": _json.dumps(manifest).encode()}
+    return keys, bodies
+
+
+def test_wipe_source_deletes_only_that_source_and_prunes_its_manifest_entries():
+    seg = ENV_SEGMENT
+    keys, bodies = _seed_multi(seg)
+    fake = _FakeS3(keys, bodies)
+    counts = cleanup_images.wipe_source_product_images("varsha", client=fake)
+    # varsha product images gone
+    assert not any(k.startswith(f"{seg}/products/") and "/varsha/" in k for k in fake.keys)
+    # OTHER source + variant textures UNTOUCHED
+    assert f"{seg}/products/scraped/zucchi/ccc.jpg" in fake.keys
+    assert f"{seg}/products/improved/zucchi/ccc.jpg" in fake.keys
+    assert f"{seg}/variations/slab_carrara.png" in fake.keys
+    # the shared manifest is KEPT (not deleted), with only varsha's entry pruned
+    assert f"{seg}/products/_manifest.json" in fake.keys
+    man = _json.loads(fake.bodies[f"{seg}/products/_manifest.json"])
+    assert "http://zucchi/c" in man and "http://varsha/a" not in man
+    assert counts["scraped"] == counts["improved"] == counts["enhanced"] == 1
+    assert counts["manifest_pruned"] == 1
+
+
+def test_wipe_source_dry_run_deletes_nothing():
+    seg = ENV_SEGMENT
+    keys, bodies = _seed_multi(seg)
+    fake = _FakeS3(keys, bodies)
+    cleanup_images.wipe_source_product_images("varsha", client=fake, dry_run=True)
+    assert not fake.deleted
+    assert f"{seg}/products/improved/varsha/aaa.jpg" in fake.keys
+    man = _json.loads(fake.bodies[f"{seg}/products/_manifest.json"])
+    assert "http://varsha/a" in man            # manifest untouched on dry-run
+
+
+def test_wipe_source_rejects_a_name_that_would_widen_the_prefix():
+    with pytest.raises(ValueError):
+        cleanup_images.wipe_source_product_images("../varsha", client=_FakeS3([]))

@@ -231,8 +231,10 @@ def purge(sources=None) -> tuple[dict, int]:
 
 def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
-    re-scrape; hard also drops the scraped products. Variation/backbone rows are never deleted; a
-    'retiring' variety is preserved (not un-retired). `sources` scopes; None = global.
+    re-scrape; hard also drops the scraped products AND wipes the hosted product images (scoped -> only the
+    named sources' images, global -> all), so a re-scrape regenerates them from scratch (the "spend GPU/FAL"
+    restart); soft KEEPS the images. Variation/backbone rows are never deleted; a 'retiring' variety is
+    preserved (not un-retired). `sources` scopes; None = global.
 
     A GLOBAL reset ALSO clears the config.db review queue + operator-pasted attribute ids, so a clean start
     is coherent across BOTH stores in one call: the :4200 queue is blank immediately (not stale until the
@@ -247,12 +249,11 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     products) -- tombstoning re-key old sides and dropped varieties so MEDUSA converges to the seed too,
     not just the sync state. Without (b), a seed change (e.g. a retype) leaves the old variety live in
     Medusa forever (seed vs Medusa out of line). It is global-only (a scoped factory reset is meaningless)
-    and forces hard=True (a cold start starts from no scraped products), and (c) WIPES the hosted product
-    images (raw scraped + treated improved + markers + manifest, via deploy.wipe_all_product_images) so the
-    next scrape re-downloads + re-processes from scratch -- the "spend GPU/FAL for fresh images" restart. The
-    cheaper 'clean raw scraped data' (stone_pipeline.clean) KEEPS the images so the manifest reuses them (no
-    GPU/FAL). Variant textures (<env>/variations/) are never touched by either. Registered sources and run
-    history are left alone -- neither affects the catalog output."""
+    and forces hard=True (a cold start starts from no scraped products), so it inherits the hard reset's
+    GLOBAL image wipe. The cheaper 'clean raw scraped data' (stone_pipeline.clean, a SEPARATE endpoint) and a
+    SOFT reset KEEP the images so the manifest reuses them (no GPU/FAL). Variant textures (<env>/variations/)
+    are never touched by any of these. Registered sources and run history are left alone -- neither affects
+    the catalog output."""
     if pristine and sources is not None:
         return {"error": "pristine (factory) reset is global-only; do not pass sources"}, 400
     if pristine:
@@ -290,18 +291,21 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
             config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
             config["retired_keys"] = store.clear_retired()
         out["config"] = config
-    if pristine:
-        # FRESH-IMAGES cold start: a factory reset also wipes the hosted product images (raw scraped +
-        # treated improved + markers + manifest), so the next scrape re-downloads and re-processes from
-        # scratch -- the "spend GPU/FAL" restart. The cheaper 'clean raw scraped data' KEEPS them, so the
-        # manifest reuses the existing processed images (no GPU/FAL). Variant textures (<env>/variations/)
-        # are never touched. Best-effort + LOUD: a wipe failure (e.g. missing s3:DeleteObject) never fails
-        # the reset (the catalog/ledger are already reset) but is surfaced so the operator knows images stayed.
+    if hard:
+        # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces
+        # hard) wipes the hosted product images (raw scraped + treated improved + markers + manifest), so the
+        # next scrape re-downloads and re-processes from scratch -- the "spend GPU/FAL" restart. SCOPED wipes
+        # ONLY the named sources' images (products/<folder>/<source>/); GLOBAL wipes all. The cheaper 'clean
+        # raw scraped data' (/clean) and a SOFT reset KEEP them, so the manifest reuses the existing processed
+        # images (no GPU/FAL). Variant textures (<env>/variations/) are never touched. Best-effort + LOUD: a
+        # wipe failure (e.g. missing s3:DeleteObject) never fails the reset (catalog/ledger are already reset)
+        # but is surfaced so the operator knows images stayed.
         try:
-            from deploy.cleanup_images import wipe_all_product_images
-            out["images_wiped"] = wipe_all_product_images()
+            from deploy.cleanup_images import wipe_all_product_images, wipe_source_product_images
+            out["images_wiped"] = ({s: wipe_source_product_images(s) for s in sources}
+                                   if sources else wipe_all_product_images())
         except Exception as exc:
-            log.exception("pristine reset: product-image wipe FAILED; images were kept")
+            log.exception("reset: product-image wipe FAILED; images were kept")
             out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
     return out, 200
 

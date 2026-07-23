@@ -71,6 +71,63 @@ def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
     return counts
 
 
+def wipe_source_product_images(source: str, client=None, dry_run: bool = False) -> dict:
+    """Delete ONE source's hosted product images + markers under <env>/products/<folder>/<source>/ (scraped
+    raw, improved treated, enhanced/discarded markers) and prune that source's entries from the shared
+    url->image manifest, so the NEXT scrape of THIS source re-downloads and re-processes it from scratch.
+    This is the SCOPED 'expensive' restart -- a per-source hard reset ('Remove data (keep config)' on one
+    source) that also drops its images so re-scraping re-spends GPU/FAL; the global twin is
+    wipe_all_product_images. It NEVER touches <env>/variations/ (variant textures), another source's images,
+    or any other prefix: it lists+deletes ONLY the hardcoded <env>/products/<folder>/<source>/ prefixes and
+    refuses if any key is somehow outside them or under variations/. Env-scoped bucket, with the production
+    dev-bucket guard. Idempotent. Returns per-folder delete counts + how many manifest entries were pruned."""
+    from stone_pipeline.config.settings import IS_PRODUCTION, _DEV_S3_BUCKET
+
+    if not source or "/" in source:                       # a stray '/' would widen the prefix -- refuse
+        raise ValueError(f"invalid source name for image wipe: {source!r}")
+    if IS_PRODUCTION and S3_BUCKET == _DEV_S3_BUCKET:
+        raise RuntimeError(
+            f"production image wipe targeting the DEV bucket {_DEV_S3_BUCKET} -- refusing (set BLOKPORT_S3_BUCKET)")
+    client = client or boto3.client("s3", region_name=S3_REGION)
+    products_root = f"{ENV_SEGMENT}/products/"
+    variations_root = f"{ENV_SEGMENT}/variations/"        # the protected sibling -- must never appear in a key
+    counts: dict[str, int] = {}
+    for folder in _PRODUCT_IMAGE_FOLDERS:
+        prefix = f"{products_root}{folder}/{source}/"
+        keys: list[str] = []
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix):
+            keys.extend(o["Key"] for o in page.get("Contents", []))
+        for k in keys:                                    # HARD GUARD: refuse the whole wipe on any stray key
+            if not k.startswith(prefix) or variations_root in k:
+                raise RuntimeError(f"refusing image wipe: key {k!r} is outside {prefix!r} or under variations/")
+        counts[folder] = len(keys)
+        if not dry_run:
+            for i in range(0, len(keys), 1000):           # S3 delete_objects caps at 1000 keys per call
+                client.delete_objects(
+                    Bucket=S3_BUCKET, Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]]})
+    counts["manifest_pruned"] = _prune_manifest_for_source(client, source, products_root, dry_run)
+    return counts
+
+
+def _prune_manifest_for_source(client, source: str, products_root: str, dry_run: bool) -> int:
+    """Drop `source`'s entries from the SHARED url->image manifest so a re-scrape re-processes them (a stale
+    entry would make the re-scrape reuse a just-deleted image). The manifest is cross-source, so we rewrite
+    it minus this source's entries -- never delete the whole file (that is the global wipe's job). Matches an
+    entry by its hosted value pointing into any of this source's product-image prefixes. Best-effort."""
+    key = f"{products_root}_manifest.json"
+    try:
+        man = json.loads(client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
+    except Exception:
+        return 0                                          # no manifest yet -> nothing to prune
+    markers = tuple(f"/products/{folder}/{source}/" for folder in _PRODUCT_IMAGE_FOLDERS) + (f"/products/{source}/",)
+    kept = {u: v for u, v in man.items() if not any(m in (v or "") for m in markers)}
+    pruned = len(man) - len(kept)
+    if pruned and not dry_run:
+        client.put_object(Bucket=S3_BUCKET, Key=key, Body=json.dumps(kept, sort_keys=True).encode("utf-8"),
+                          ContentType="application/json")
+    return pruned
+
+
 def _catalog_text(client, override: str | None) -> str:
     if override:
         return open(override, encoding="utf-8").read()
