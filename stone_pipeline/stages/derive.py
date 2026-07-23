@@ -389,6 +389,21 @@ def _to_iso(value: str, ref: ReferenceData) -> str | None:
     return None
 
 
+def _select_origin(candidates: list[str], home_iso: str) -> tuple[str, Confidence, FlagCode | None]:
+    """Pick ONE origin from a variety's candidate countries, given the supplier's home country:
+      * one candidate               -> it (the variety has a single known origin).                  [rule c]
+      * many + home is a candidate  -> home (a supplier sells its own country's quarry output).      [rule b]
+      * many + home not a candidate -> first candidate, LOW confidence + review flag: the stone is   [rule d]
+        quarried in several countries, none the supplier's, so we cannot infer which (the list is not
+        priority-ordered) -- an operator resolves it (new origin in the list, or a per-supplier override).
+    """
+    if len(candidates) == 1:
+        return candidates[0], Confidence.high, None
+    if home_iso and home_iso in candidates:
+        return home_iso, Confidence.high, None
+    return candidates[0], Confidence.low, FlagCode.origin_multi_home_absent
+
+
 def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
     # 1. scraped country: an ISO code OR a country name (the real data when present)
     if row.raw_origin:
@@ -398,19 +413,35 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
             row.origin_source = "scrape_field"
             row.origin_confidence = _conf_name(Confidence.high)
             return
-    # 2. the per-variety origin map = curated origin_map.csv + operator-minted overlay (seed_country).
-    #    Strict (name, type) match; the map is the source of truth, so a hit is the real origin and ships
-    #    clean at high confidence. A name+type with no rule falls through to the supplier default (flagged),
-    #    never a country guessed from another type of the same name.
-    rule = ref.origin_map.exact(row.variation_name or row.raw_name or "", row.type_name)
-    if rule:
-        row.origin_country_code = rule.country_iso
+    name = row.variation_name or row.raw_name or ""
+    # 2. per-SUPPLIER override (source, variety, type) -> country: a curated decision for a supplier that
+    #    sells a stone it does NOT quarry at home (a reseller). Highest curated truth; scoped to one source,
+    #    so it never affects another supplier of the same variety.
+    override = ref.origin_overrides.lookup(row.src_site, name, row.type_name)
+    if override:
+        row.origin_country_code = override
+        row.origin_source = "supplier_override"
+        row.origin_confidence = _conf_name(Confidence.high)
+        return
+    # 3. the per-variety origin map = curated origin_map.csv + operator-minted overlay (seed_country).
+    #    Strict (name, type) match; the map is the source of truth. A row may list SEVERAL candidate
+    #    countries (same trade name quarried in more than one place) -- pick the one that fits the
+    #    supplier's home country (see _select_origin), never a country guessed from another type.
+    rule = ref.origin_map.exact(name, row.type_name)
+    if rule and rule.countries:
+        home = _to_iso(source_cfg.origin_default, ref) or ""
+        iso, conf, flag = _select_origin(rule.countries, home)
+        row.origin_country_code = iso
         row.origin_city = rule.city
         row.origin_county = rule.county
         row.origin_source = "origin_map"
-        row.origin_confidence = _conf_name(Confidence.high)
+        row.origin_confidence = _conf_name(conf)
+        if flag:
+            row.add_flag(ReviewFlag(field="origin", code=flag, raw_value=",".join(rule.countries),
+                                    best_guess=iso, confidence=conf, method="multi_home_absent",
+                                    src_url=row.src_url))
         return
-    # 3. supplier-country fallback. Strictly, the supplier's country is where the stone is SOLD FROM,
+    # 4. supplier-country fallback. Strictly, the supplier's country is where the stone is SOLD FROM,
     #    not necessarily where it was quarried (a trader can ship stone from many countries) -- so the
     #    accurate origin is the scraped field or origin_map above. But Medusa REQUIRES an origin for
     #    its pricing-rule lookup, so a blank breaks the import. We stamp the supplier's default country
@@ -425,8 +456,8 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
                                 raw_value=row.raw_origin, best_guess=iso, confidence=Confidence.low,
                                 method="supplier_default", src_url=row.src_url))
         return
-    # 4. no scrape, no map, no supplier default: leave UNRESOLVED and flag. The Process gate rejects
-    #    such a row (origin is required downstream) rather than emit a Medusa-breaking blank.
+    # 5. no scrape, no override, no map, no supplier default: leave UNRESOLVED and flag. The Process gate
+    #    rejects such a row (origin is required downstream) rather than emit a Medusa-breaking blank.
     row.origin_source = "unresolved"
     row.origin_confidence = _conf_name(Confidence.none)
     row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_unresolved,

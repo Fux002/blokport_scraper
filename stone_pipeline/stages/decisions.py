@@ -31,7 +31,7 @@ ATTR_COLUMNS = ["medusa_id", "kind", "value", "count", "suggested_value", "actio
 # (which of the Gneiss/Granite/Marble/Onyx 'Aqua Blue' this product is) needs to see the actual product,
 # not just the name. Empty when the row that raised the hold carried none. Not display-cased (URLs/free text).
 CONFIRM_COLUMNS = ["confirm", "variant", "reason", "stone_type", "color", "nearest_existing",
-                   "score", "model_prob", "src", "image", "description"]
+                   "score", "model_prob", "src", "src_url", "image", "description"]
 _PENDING_VARIETY_FIELDS = [c for c in CONFIRM_COLUMNS if c != "confirm"]   # 'confirm' now lives as `action`
 # scrape-derived display names title-cased at the write boundary (uniform casing regardless of curate path).
 # nearest_existing is included: the code-shaped hold writes a raw supplier-cased base there while the

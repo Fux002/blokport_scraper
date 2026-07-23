@@ -31,6 +31,19 @@ def test_get_pending_variants_and_attributes(seeded_queue):
     assert code == 200 and [a["value"] for a in body["attributes"]] == ["Leathered"]
 
 
+def test_pending_variant_carries_src_url_to_the_endpoint():
+    # Regression (Blokport proof): the review-variant item must emit src_url end-to-end, not just src (the
+    # source code). It was dropped because src_url was absent from CONFIRM_COLUMNS -> the payload allowlist.
+    decisions.write_confirm_file([
+        {"confirm": "", "variant": "Zucchi Blue X", "stone_type": "granite", "src": "zucchi",
+         "src_url": "https://inventory.zucchistones.com/product?Zucchi-Blue-X-BD00000001"}])
+    code, body = server.dispatch("GET", ["review", "variants"], None)
+    assert code == 200
+    item = body["variants"][0]
+    assert item["src_url"] == "https://inventory.zucchistones.com/product?Zucchi-Blue-X-BD00000001"
+    assert item["src"] == "zucchi"   # both present: src is the code, src_url is the product page
+
+
 def test_put_mint_then_reject_decision(seeded_queue):
     code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "mint"})
     assert code == 200 and body["action"] == "mint"
