@@ -24,6 +24,22 @@ def slab_get(d, key, default=''):
     return v
 
 
+# A SlabWare tenant that sells BOTH slabs and solid blocks marks a block with the thickness sentinel
+# "MULTI" -- a block has no single slab thickness, so the backend stores that instead of a "2cm"/"3cm"
+# gauge. This is a platform convention (observed on varsha; shared here so any block-selling tenant reuses
+# it). The block names also tend to carry a "Z B"/"ZB" prefix, but the thickness field is the STRUCTURED
+# signal, so we classify off it and never off the brittle name string.
+BLOCK_THICKNESS_MARKER = "MULTI"
+
+
+def classify_format(thickness):
+    """The product format for a SlabWare row, read from its thickness field: 'block' when the tenant marks a
+    solid block (thickness == the MULTI sentinel), else 'slab'. Case/space insensitive. This reads the
+    supplier's own field -- it does NOT guess from the name -- so a missing thickness falls to 'slab' (the
+    default kind), never a fabricated block."""
+    return "block" if (thickness or "").strip().upper() == BLOCK_THICKNESS_MARKER else "slab"
+
+
 def parse_display_status(html):
     """The displayProduct field is a tiny HTML span. Extract a clean status."""
     if not html:

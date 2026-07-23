@@ -350,3 +350,24 @@ def test_legacy_needs_proxy_still_honoured(tmp_path, monkeypatch):
 def test_no_capability_no_needs_proxy_is_direct(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_SCRAPER_PROXY", "http://x:1")
     assert _Fake(data_dir=tmp_path)._resolve_proxy() is None   # default: metered proxy never spent
+
+
+# -- SlabWare slab/block classifier (varsha and any block-selling SlabWare tenant) ------------------
+
+def test_slabware_classify_format_reads_thickness_not_the_name():
+    from scrapers import slabware
+    # MULTI thickness is the block sentinel (a solid block has no single slab gauge); case/space insensitive.
+    assert slabware.classify_format("MULTI") == "block"
+    assert slabware.classify_format(" multi ") == "block"
+    # every real gauge is a slab (including thick slabs), regardless of any "Z"/"ZB" naming.
+    for t in ("2cm", "3cm", "5cm", "8CM", "14 CM"):
+        assert slabware.classify_format(t) == "slab", t
+    # missing thickness falls to the default kind -- never a fabricated block.
+    assert slabware.classify_format("") == "slab"
+    assert slabware.classify_format(None) == "slab"
+
+
+def test_slabware_classifier_output_is_a_valid_scrape_format():
+    from scrapers import slabware
+    from scrapers.base import VALID_FORMATS
+    assert {slabware.classify_format("MULTI"), slabware.classify_format("2cm")} <= set(VALID_FORMATS)
