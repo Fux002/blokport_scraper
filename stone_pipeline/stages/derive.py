@@ -399,28 +399,16 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
             row.origin_confidence = _conf_name(Confidence.high)
             return
     # 2. the per-variety origin map = curated origin_map.csv + operator-minted overlay (seed_country).
-    #    EXACT variety rules only -- a name PATTERN is never emitted (a look-alike named after a famous
-    #    stone is not quarried in that stone's country); the pattern lives on only as the :4200 mint
-    #    suggestion. A CONFIRMED rule (operator-minted, or a CSV row marked confirmed) is the real origin
-    #    and ships clean; an UNCONFIRMED rule (the frozen snapshot) still ships -- Medusa requires an
-    #    origin -- but is FLAGGED, so the unverified ones surface for review and confirmation.
-    # pass the resolved stone type so a homonym (same name, different type) can carry a type-specific origin;
-    # exact() falls back to the type-blind rule when no type-scoped one exists (the common case).
+    #    Strict (name, type) match; the map is the source of truth, so a hit is the real origin and ships
+    #    clean at high confidence. A name+type with no rule falls through to the supplier default (flagged),
+    #    never a country guessed from another type of the same name.
     rule = ref.origin_map.exact(row.variation_name or row.raw_name or "", row.type_name)
     if rule:
         row.origin_country_code = rule.country_iso
         row.origin_city = rule.city
         row.origin_county = rule.county
-        if rule.confirmed:
-            row.origin_source = "origin_confirmed"
-            row.origin_confidence = _conf_name(Confidence.high)
-        else:
-            row.origin_source = "origin_unconfirmed"
-            row.origin_confidence = _conf_name(Confidence.medium)
-            row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_unconfirmed,
-                                    raw_value=rule.country_iso, best_guess=rule.country_iso,
-                                    confidence=Confidence.medium, method="origin_map_unconfirmed",
-                                    src_url=row.src_url))
+        row.origin_source = "origin_map"
+        row.origin_confidence = _conf_name(Confidence.high)
         return
     # 3. supplier-country fallback. Strictly, the supplier's country is where the stone is SOLD FROM,
     #    not necessarily where it was quarried (a trader can ship stone from many countries) -- so the

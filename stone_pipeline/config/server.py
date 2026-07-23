@@ -184,14 +184,6 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         from stone_pipeline.config import decisions_store, varieties
         if len(segments) == 2 and segments[1] == "variants" and method == "GET":
             return 200, {"variants": decisions_store.list_pending("variety")}
-        # a suggested origin to PRE-FILL the mint dialog (exact map OR name pattern) -- a hint the
-        # operator confirms or overrides; nothing is emitted from it. null when the map has no guess.
-        if len(segments) == 4 and segments[1] == "variants" and segments[3] == "origin-suggestion" \
-                and method == "GET":
-            from stone_pipeline.reference.loaders import load_origin_map
-            rule = load_origin_map().lookup(unquote(segments[2]))
-            return 200, {"variant": unquote(segments[2]),
-                         "suggested_country": rule.country_iso if rule else None}
         if len(segments) == 3 and segments[1] == "variants" and method == "PUT":
             if not isinstance(body, dict):
                 return 400, {"error": "body must be a JSON object {action, alias_of?}"}
@@ -200,7 +192,7 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             # percent-encoded ('Alpine%20Luxe'), and norm keeps the literal '%20' ('alpine 20luxe'), so a
             # raw segment would store the decision under a key that never matches the pending ref and the
             # UI reads back current_action=null. unquote first, so ref == variant_norm holds by construction
-            # (mirrors the GET at origin-suggestion and the backbone PUT).
+            # (mirrors the backbone PUT).
             variant = unquote(segments[2])
             action = body.get("action", "")
             alias_of = body.get("alias_of")

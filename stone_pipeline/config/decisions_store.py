@@ -98,9 +98,10 @@ def variety_seed_countries() -> dict[str, str]:
 
 def variety_seed_country_rules() -> dict[tuple[str, str], str]:
     """(norm(variant), norm(stone_type)) -> the operator-chosen ISO origin, for every MINT that set a
-    country. TYPE-SCOPED so a homonym minted under different types carries different origins; a mint with no
-    type keys ('', ) type-blind. This is the shape apply_origin_overlay consumes (variety_seed_countries is
-    the flat name->iso accessor). No side effect on a fresh store (load_all reads it every build)."""
+    country. TYPE-SCOPED so a homonym minted under different types carries different origins. A mint with no
+    stone_type keys ('', ); apply_origin_overlay SKIPS it -- origin is (name, type) and a type-less origin can
+    never emit. This is the shape apply_origin_overlay consumes (variety_seed_countries is the flat name->iso
+    accessor). No side effect on a fresh store (load_all reads it every build)."""
     if not store.config_db_path().exists():
         return {}
     return {(n, _norm(d["seed_type"])): d["seed_country"]
