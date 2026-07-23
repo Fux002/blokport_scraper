@@ -120,6 +120,7 @@ zucchi:
   optional_columns:
   - product_name_pt
   - product_full_name
+  - detail_url
   - block
   - height_m
   - height_in

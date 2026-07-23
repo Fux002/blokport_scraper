@@ -24,6 +24,7 @@ except ImportError:
     from base import ScraperBase
 
 API_URL = "https://inventory.zucchistones.com/webruntime/api/apex/execute"
+SITE_URL = "https://inventory.zucchistones.com"   # public storefront (product page base)
 CHV_LOCATION = "AoVaGsGxUNGRCNi(AKb3#2vvuBn6EBCYBEpU3#C$"
 STANDARD_LOCATION = "Padrão"
 PAGE_SIZE = 12
@@ -41,6 +42,16 @@ def _get(d, *keys, default=""):
     return cur if cur not in (None, "") else default
 
 
+def _product_url(name_en: str, bundle_id: str) -> str:
+    """Public product page: {SITE}/product?{English-Name-Hyphenated}-{bundle_id}
+    (e.g. 'Acadian Night' + 'BD00183438' -> .../product?Acadian-Night-BD00183438). Empty when either
+    part is missing -- never a half-built link."""
+    slug = "-".join((name_en or "").split())
+    if not slug or not bundle_id:
+        return ""
+    return f"{SITE_URL}/product?{slug}-{bundle_id}"
+
+
 class ZucchiScraper(ScraperBase):
     source = "zucchi"
     category = "slab"      # Zucchi is slab inventory (item 3: explicit format)
@@ -56,6 +67,7 @@ class ZucchiScraper(ScraperBase):
         "water_absorption", "apparent_density", "compressive_strength", "flexural_strength",
         "description", "situation", "situation_real", "situation_commercial",
         "location_code", "days_in_stock", "date_available", "last_modified", "video_url",
+        "detail_url",   # public product page, for the review "view original listing" link (src_url)
     ]
 
     def _fetch_page(self, pagination: int, count: bool = False) -> dict:
@@ -110,9 +122,12 @@ class ZucchiScraper(ScraperBase):
                 video_url = url
         si = ("prod", "Stock_Item__r")
         pr = (*si, "Produto__r")
+        bundle_id = _get(item, *si, "Codigo__c") or _get(item, "prod", "Name")
+        name_en = _get(item, *pr, "NomeMaterialEn__c")
         return {
-            "bundle_id": _get(item, *si, "Codigo__c") or _get(item, "prod", "Name"),
-            "product_name_en": _get(item, *pr, "NomeMaterialEn__c"),
+            "bundle_id": bundle_id,
+            "product_name_en": name_en,
+            "detail_url": _product_url(name_en, bundle_id),
             "product_name_pt": _get(item, *pr, "NomeMaterialPt__c"),
             "product_full_name": _get(item, *pr, "Name"),
             "family": _get(item, *pr, "FamilyVitrine__c") or _get(item, *si, "Familia__c"),
