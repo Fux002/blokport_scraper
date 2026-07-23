@@ -10,6 +10,19 @@ import pytest
 from stone_pipeline.config import decisions_store, store
 
 
+def _fake_ledger_op(name, work):
+    """Invoke `work` with a stub ledger+sync so the reset's config-clear + image-wipe (which now run INSIDE
+    the exclusive slot, via _do_reset) actually execute, without opening a real ledger. A test that wants to
+    simulate a REFUSED op (409) returns without calling work instead."""
+    class _Sync:
+        def reset_sync_state(self, lg, source_codes=None, hard=False, prune_stale=False):
+            return {"variation": 1}
+
+        def reconcile_variations_to_seed(self, lg, seed_keys):
+            return {}
+    return work(None, _Sync()), 200
+
+
 def _seed_config(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     # a review queue (2 kinds), a pasted attribute id, a mint+seed decision, a retired key, an approved leaf
@@ -48,7 +61,7 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
     _seed_config(tmp_path, monkeypatch)
     store.seed_from_yaml(yaml_path=yaml_path)
     # the ledger reset itself is covered in test_ledger_sync; here we test only the config coordination
-    monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: ({"variation": 1}, 200))
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
 
     # SCOPED reset -> config.db untouched (matches the ledger reset leaving the shared base layer alone)
     out, code = lifecycle.reset(sources=["polonine"], hard=False)
@@ -74,7 +87,7 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     yaml_path.write_text("polonine:\n  adapter: polonine\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
     _seed_config(tmp_path, monkeypatch)
     store.seed_from_yaml(yaml_path=yaml_path)
-    monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: ({"variation": 1}, 200))
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
 
     out, code = lifecycle.reset(sources=None, pristine=True)
     assert code == 200 and out["mode"] == "pristine"
@@ -122,7 +135,7 @@ def test_hard_reset_wipes_images_scoped_per_source_soft_keeps_them(tmp_path, mon
                          "zucchi:\n  adapter: zucchi\n  source_code: zuc\n  vendor: Z\n", encoding="utf-8")
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=yaml_path)
-    monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: ({"variation": 1}, 200))
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
 
     wiped_sources: list[str] = []
     wiped_global: list[bool] = []
@@ -144,3 +157,13 @@ def test_hard_reset_wipes_images_scoped_per_source_soft_keeps_them(tmp_path, mon
     wiped_sources.clear()
     lifecycle.reset(sources=None, hard=True)
     assert wiped_global == [True] and wiped_sources == []
+
+
+def test_reset_rejects_an_explicit_empty_sources_list(tmp_path, monkeypatch):
+    """[] is neither global (null/omit) nor scoped (named) -- almost always a UI bug that would otherwise
+    trigger a full global reset+wipe. Refuse it, and touch nothing."""
+    from stone_pipeline import lifecycle
+    _seed_config(tmp_path, monkeypatch)
+    out, code = lifecycle.reset(sources=[], hard=True)
+    assert code == 400 and "empty list" in out["error"]
+    assert decisions_store.list_pending("variety") and decisions_store.attribute_ids()   # nothing cleared

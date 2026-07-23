@@ -64,7 +64,25 @@ def wipe_all_product_images(client=None, dry_run: bool = False) -> dict:
             for i in range(0, len(keys), 1000):           # S3 delete_objects caps at 1000 keys per call
                 client.delete_objects(
                     Bucket=S3_BUCKET, Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]]})
+    # Also the RAW-ROOT layout products/<source>/<sha>.jpg (any source staged with NO processor): siblings of
+    # the four folders. Sweep everything directly under products/ that is not a reserved folder or the
+    # manifest, so "delete EVERY hosted product image" holds. variations/ is a sibling of products/ (never
+    # under it), so it can never appear here.
+    reserved = tuple(f"{products_root}{f}/" for f in _PRODUCT_IMAGE_FOLDERS)
     manifests = [f"{products_root}_manifest.json", f"{products_root}_manifest.backup.json"]
+    root_keys: list[str] = []
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=products_root):
+        for o in page.get("Contents", []):
+            k = o["Key"]
+            if k in manifests or any(k.startswith(r) for r in reserved):
+                continue
+            if variations_root in k:
+                raise RuntimeError(f"refusing image wipe: key {k!r} is under variations/")
+            root_keys.append(k)
+    counts["raw_root"] = len(root_keys)
+    if not dry_run and root_keys:
+        for i in range(0, len(root_keys), 1000):
+            client.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": [{"Key": k} for k in root_keys[i:i + 1000]]})
     if not dry_run:                                       # drop the manifest so a re-scrape can't reuse a wiped image
         client.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": [{"Key": k} for k in manifests]})
     counts["manifest"] = len(manifests)
@@ -105,26 +123,44 @@ def wipe_source_product_images(source: str, client=None, dry_run: bool = False) 
             for i in range(0, len(keys), 1000):           # S3 delete_objects caps at 1000 keys per call
                 client.delete_objects(
                     Bucket=S3_BUCKET, Delete={"Objects": [{"Key": k} for k in keys[i:i + 1000]]})
+    # Also the RAW-ROOT layout products/<source>/<sha>.jpg (a source staged in s3 mode with NO processor):
+    # a sibling of the four subfolders, so it needs its own prefix. The trailing '/' keeps products/<source>/
+    # from matching a folder prefix (products/scraped/ etc.). Same hard guard.
+    root_prefix = f"{products_root}{source}/"
+    root_keys: list[str] = []
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=root_prefix):
+        root_keys.extend(o["Key"] for o in page.get("Contents", []))
+    for k in root_keys:
+        if not k.startswith(root_prefix) or variations_root in k:
+            raise RuntimeError(f"refusing image wipe: key {k!r} is outside {root_prefix!r} or under variations/")
+    counts["raw_root"] = len(root_keys)
+    if not dry_run:
+        for i in range(0, len(root_keys), 1000):
+            client.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": [{"Key": k} for k in root_keys[i:i + 1000]]})
     counts["manifest_pruned"] = _prune_manifest_for_source(client, source, products_root, dry_run)
     return counts
 
 
 def _prune_manifest_for_source(client, source: str, products_root: str, dry_run: bool) -> int:
-    """Drop `source`'s entries from the SHARED url->image manifest so a re-scrape re-processes them (a stale
-    entry would make the re-scrape reuse a just-deleted image). The manifest is cross-source, so we rewrite
-    it minus this source's entries -- never delete the whole file (that is the global wipe's job). Matches an
-    entry by its hosted value pointing into any of this source's product-image prefixes. Best-effort."""
-    key = f"{products_root}_manifest.json"
-    try:
-        man = json.loads(client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
-    except Exception:
-        return 0                                          # no manifest yet -> nothing to prune
+    """Drop `source`'s entries from the SHARED url->image manifest AND its backup, so a re-scrape re-processes
+    them (a stale entry would make the re-scrape reuse a just-deleted image; a stale BACKUP would resurrect
+    them on a manual restore). The manifest is cross-source, so we rewrite it minus this source's entries --
+    never delete the whole file (that is the global wipe's job). Matches an entry by its hosted value pointing
+    into any of this source's product-image prefixes. Best-effort. Returns total entries pruned across both."""
     markers = tuple(f"/products/{folder}/{source}/" for folder in _PRODUCT_IMAGE_FOLDERS) + (f"/products/{source}/",)
-    kept = {u: v for u, v in man.items() if not any(m in (v or "") for m in markers)}
-    pruned = len(man) - len(kept)
-    if pruned and not dry_run:
-        client.put_object(Bucket=S3_BUCKET, Key=key, Body=json.dumps(kept, sort_keys=True).encode("utf-8"),
-                          ContentType="application/json")
+    pruned = 0
+    for name in ("_manifest.json", "_manifest.backup.json"):
+        key = f"{products_root}{name}"
+        try:
+            man = json.loads(client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
+        except Exception:
+            continue                                      # this manifest absent -> nothing to prune
+        kept = {u: v for u, v in man.items() if not any(m in (v or "") for m in markers)}
+        n = len(man) - len(kept)
+        pruned += n
+        if n and not dry_run:
+            client.put_object(Bucket=S3_BUCKET, Key=key, Body=json.dumps(kept, sort_keys=True).encode("utf-8"),
+                              ContentType="application/json")
     return pruned
 
 

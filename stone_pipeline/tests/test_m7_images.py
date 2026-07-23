@@ -80,6 +80,22 @@ def test_rerun_uploads_nothing(local_cfg):
     assert second.bytes_uploaded == 0  # idempotent: nothing re-uploaded
 
 
+def test_rerun_reuploads_when_the_manifest_target_was_deleted(local_cfg):
+    # A manifest hit is authoritative ONLY if its object still exists. If the object was deleted (e.g. an
+    # external Blokport clear) but the manifest survived, the re-run must RE-FETCH + RE-UPLOAD, never re-link
+    # a dead URL. Regression guard for the manifest-vs-object decoupling.
+    row = CanonicalRow(src_site="x", surrogate_key="9", is_block=False, raw_image_urls=["http://x/a.jpg"])
+    fetch = _fake_fetch({"http://x/a.jpg": b"DATA"})
+    assert images.run([row], fetch=fetch, cfg=local_cfg).bytes_uploaded > 0
+    # simulate an external wipe: delete the staged object(s), keep the (.json) manifest
+    for f in (local_cfg.local_staging_dir / "staging").rglob("*.jpg"):
+        f.unlink()
+    row2 = CanonicalRow(src_site="x", surrogate_key="9", is_block=False, raw_image_urls=["http://x/a.jpg"])
+    second = images.run([row2], fetch=fetch, cfg=local_cfg)
+    assert second.bytes_uploaded > 0     # re-uploaded, did NOT reuse the dead manifest URL
+    assert row2.product_image_keys       # and the row is linked again
+
+
 def test_download_failure_flags_and_skips(local_cfg):
     row = CanonicalRow(src_site="x", surrogate_key="5", is_block=False,
                        raw_image_urls=["http://x/missing.jpg"])

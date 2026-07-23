@@ -371,3 +371,15 @@ def test_slabware_classifier_output_is_a_valid_scrape_format():
     from scrapers import slabware
     from scrapers.base import VALID_FORMATS
     assert {slabware.classify_format("MULTI"), slabware.classify_format("2cm")} <= set(VALID_FORMATS)
+
+
+def test_varsha_parse_product_sets_per_row_format_from_thickness(monkeypatch):
+    # End-to-end scraper hop: a thickness=MULTI item becomes format=block in the products.csv row, a gauge
+    # item stays slab. Closes the gap that classify_format alone (unit) did not prove the wiring.
+    from scrapers.varsha import VarshaScraper
+    s = VarshaScraper.__new__(VarshaScraper)              # skip __init__/network; parse_product needs neither
+    monkeypatch.setattr(s, "_fetch_detail", lambda bundle_id: {})
+    block = s.parse_product({"id": "99001", "nomeEspessura": "MULTI", "fotoPrincipal": ""})
+    slab = s.parse_product({"id": "2", "nomeEspessura": "2cm", "fotoPrincipal": ""})
+    assert block["format"] == "block"
+    assert slab["format"] == "slab"
