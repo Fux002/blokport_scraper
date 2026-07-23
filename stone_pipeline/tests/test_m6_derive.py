@@ -430,47 +430,34 @@ def test_pattern_only_variety_no_longer_auto_emits_origin(ref, cfg):
     assert any(f.code == FlagCode.origin_supplier_default for f in row.review_flags)
 
 
-def test_origin_map_exact_ignores_name_patterns():
-    from stone_pipeline.reference.loaders import OriginMap, OriginRule
-    m = OriginMap(rules=[OriginRule("variety", "Blue Pearl", "NO", "", ""),
-                         OriginRule("pattern", "persa", "BR", "", "")])
-    assert m.exact("Blue Pearl").country_iso == "NO"        # exact variety rule
-    assert m.exact("Verde Persa") is None                   # a pattern is NOT an exact origin
-    assert m.lookup("Verde Persa").country_iso == "BR"      # but IS a suggestion (for :4200)
-
-
-def test_minted_origin_overlays_map_as_confirmed():
-    # the effective per-variety map = CSV + minted seed_country, overlaid as CONFIRMED, operator wins
+def test_minted_origin_overlays_map():
+    # the effective per-variety map = CSV + minted seed_country (type-scoped); the operator's mint wins
     from stone_pipeline.reference.loaders import OriginMap, OriginRule, _norm
-    m = OriginMap(rules=[OriginRule("variety", "Blue Pearl", "NO", "", "", confirmed=False)])
-    added = m.apply_origin_overlay({(_norm("Blue Pearl"), ""): "IN", (_norm("Brand New Stone"), ""): "CN"})
+    m = OriginMap(rules=[OriginRule("Blue Pearl", "NO", "", "", stone_type="Granite")])
+    added = m.apply_origin_overlay({(_norm("Blue Pearl"), "granite"): "IN",
+                                    (_norm("Brand New Stone"), "granite"): "CN"})
     assert added == 2
-    bp = m.exact("Blue Pearl")
-    assert bp.country_iso == "IN" and bp.confirmed is True   # minted overrides the CSV country
-    assert m.exact("Brand New Stone").country_iso == "CN"    # a new variety is added, confirmed
+    assert m.exact("Blue Pearl", "Granite").country_iso == "IN"        # minted overrides the CSV country
+    assert m.exact("Brand New Stone", "Granite").country_iso == "CN"   # a new (name,type) is added
 
 
-def test_derive_origin_unconfirmed_map_hit_is_flagged(ref, cfg):
-    # a real exact rule from the (unverified) origin_map.csv ships the country but FLAGS it for review
+def test_apply_origin_overlay_skips_a_type_less_mint():
+    # origin is (name, TYPE): a mint with no stone_type can never emit under strict exact() -> skipped.
+    from stone_pipeline.reference.loaders import OriginMap, _norm
+    m = OriginMap()
+    assert m.apply_origin_overlay({(_norm("Foo"), ""): "IN"}) == 0
+    assert m.exact("Foo") is None and m.exact("Foo", "Granite") is None
+
+
+def test_derive_origin_map_hit_ships_clean(ref, cfg):
+    # the map is the source of truth: an exact (name, type) hit is the real origin, no review flag
     from stone_pipeline.reference.loaders import OriginMap, OriginRule
     r = dataclasses.replace(ref, origin_map=OriginMap(
-        rules=[OriginRule("variety", "Testonia", "BR", "", "", confirmed=False)]))
-    row = _slab_row(variation_name="Testonia", raw_origin="")
+        rules=[OriginRule("Testonia", "BR", "", "", stone_type="Granite")]))
+    row = _slab_row(variation_name="Testonia", raw_origin="")   # type_name="Granite" matches the typed rule
     derive.derive_origin(row, r, cfg)
     assert row.origin_country_code == "BR"
-    assert row.origin_source == "origin_unconfirmed"
-    assert any(f.code == FlagCode.origin_unconfirmed for f in row.review_flags)
-
-
-def test_derive_origin_confirmed_map_hit_ships_clean(ref, cfg):
-    # a confirmed rule (operator-minted or verified) is the real origin: no review flag
-    from stone_pipeline.reference.loaders import OriginMap, OriginRule
-    r = dataclasses.replace(ref, origin_map=OriginMap(
-        rules=[OriginRule("variety", "Testonia", "BR", "", "", confirmed=True)]))
-    row = _slab_row(variation_name="Testonia", raw_origin="")
-    derive.derive_origin(row, r, cfg)
-    assert row.origin_country_code == "BR"
-    assert row.origin_source == "origin_confirmed"
+    assert row.origin_source == "origin_map"
     assert not any(f.field == "origin" for f in row.review_flags)
 
 

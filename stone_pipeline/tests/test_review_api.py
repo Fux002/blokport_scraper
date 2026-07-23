@@ -198,10 +198,3 @@ def test_reject_ignores_a_seed_country(seeded_queue):
     server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
                     {"action": "reject", "country": "brazil"})
     assert decisions_store.variety_seed_countries() == {}      # only mint carries a seed country
-
-
-def test_origin_suggestion_endpoint():
-    # the :4200 mint dialog pre-fills the country from the suggestion (exact map OR name pattern) -- a hint
-    code, body = server.dispatch("GET", ["review", "variants", "Verde Persa", "origin-suggestion"], None)
-    assert code == 200
-    assert body["suggested_country"] == "BR"                   # 'persa' pattern -> BR (suggestion only)
