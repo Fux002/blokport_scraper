@@ -576,8 +576,9 @@ class OriginRule:
     @property
     def countries(self) -> list[str]:
         """The ordered ISO-2 candidates parsed from country_iso ("BR,IN" -> ["BR","IN"]). A single-country
-        row yields a 1-element list, so existing single-origin behaviour is unchanged."""
-        return [c.strip().upper() for c in self.country_iso.split(",") if c.strip()]
+        row yields a 1-element list, so existing single-origin behaviour is unchanged. Duplicates are folded
+        (order-preserving) so a stray "BR,BR" is treated as the single origin it means."""
+        return list(dict.fromkeys(c.strip().upper() for c in self.country_iso.split(",") if c.strip()))
 
 
 @dataclass
