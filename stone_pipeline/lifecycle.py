@@ -256,6 +256,10 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     the catalog output."""
     if pristine and sources is not None:
         return {"error": "pristine (factory) reset is global-only; do not pass sources"}, 400
+    if sources is not None and not sources:
+        # An EXPLICIT empty list is almost always a UI bug (a global reset+wipe is a big hammer to trigger by
+        # accident). A GLOBAL reset is null/omit, a scoped one names sources -- [] is neither, so refuse it.
+        return {"error": "sources was an empty list; omit it (or pass null) for a global reset, or name sources"}, 400
     if pristine:
         hard = True                            # a factory cold start begins from zero scraped products
     _names, codes, err = _resolve(sources, require_non_empty=False)
@@ -273,41 +277,42 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
         # recorded and the dropped rows are gone before prune/overlay run. Keep reset_sync_state's shape
         # flat (callers read body["reset"]["variation"] etc.); attach the reconcile result as a sibling.
         reseed = sync.reconcile_variations_to_seed(lg, seed_keys) if (pristine and seed_keys is not None) else None
-        out = sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard), prune_stale=pristine)
+        reset_result = sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard), prune_stale=pristine)
         if reseed is not None:
-            out["reseed"] = reseed
+            reset_result["reseed"] = reseed
+        # Build the FULL response INSIDE the exclusive slot, so the config.db clear AND the image wipe are
+        # covered by the same "no run / other op mid-flight" guard as the ledger reset. A run's start_run
+        # checks lifecycle.active(), which stays held until this returns -- closing the window where a produce
+        # could start and re-stage images while the wipe is mid-delete (interleaved/partial wipe).
+        out = {"mode": "pristine" if pristine else ("hard" if hard else "soft"), "reset": reset_result}
+        if codes is None:                          # global reset only -> pair the config.db clean-start
+            from stone_pipeline.config import decisions_store, store
+            config = {"review_pending": decisions_store.clear_review_pending(),
+                      "attribute_ids": decisions_store.clear_attribute_ids()}
+            if pristine:                           # factory reset: also forget the durable operator overlay
+                config["variety_decisions"] = decisions_store.clear_variety_decisions()
+                config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
+                config["retired_keys"] = store.clear_retired()
+            out["config"] = config
+        if hard:
+            # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces
+            # hard) wipes the hosted product images (raw scraped + treated improved + markers + manifest), so
+            # the next scrape re-downloads and re-processes from scratch -- the "spend GPU/FAL" restart. SCOPED
+            # wipes ONLY the named sources' images (products/<folder>/<source>/); GLOBAL wipes all. The cheaper
+            # 'clean raw scraped data' (/clean) and a SOFT reset KEEP them, so the manifest reuses the existing
+            # processed images (no GPU/FAL). Variant textures (<env>/variations/) are never touched. Best-effort
+            # + LOUD: a wipe failure (e.g. missing s3:DeleteObject) never fails the reset (catalog/ledger are
+            # already reset) but is surfaced so the operator knows images stayed.
+            try:
+                from deploy.cleanup_images import wipe_all_product_images, wipe_source_product_images
+                out["images_wiped"] = ({s: wipe_source_product_images(s) for s in sources}
+                                       if sources else wipe_all_product_images())
+            except Exception as exc:
+                log.exception("reset: product-image wipe FAILED; images were kept")
+                out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
         return out
 
-    result, code = _ledger_op("reset", _do_reset)
-    if code != 200:
-        return result, code                    # ledger refused (e.g. 409 in-flight): touch nothing else
-    out = {"mode": "pristine" if pristine else ("hard" if hard else "soft"), "reset": result}
-    if codes is None:                          # global reset only -> pair the config.db clean-start
-        from stone_pipeline.config import decisions_store, store
-        config = {"review_pending": decisions_store.clear_review_pending(),
-                  "attribute_ids": decisions_store.clear_attribute_ids()}
-        if pristine:                           # factory reset: also forget the durable operator overlay
-            config["variety_decisions"] = decisions_store.clear_variety_decisions()
-            config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
-            config["retired_keys"] = store.clear_retired()
-        out["config"] = config
-    if hard:
-        # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces
-        # hard) wipes the hosted product images (raw scraped + treated improved + markers + manifest), so the
-        # next scrape re-downloads and re-processes from scratch -- the "spend GPU/FAL" restart. SCOPED wipes
-        # ONLY the named sources' images (products/<folder>/<source>/); GLOBAL wipes all. The cheaper 'clean
-        # raw scraped data' (/clean) and a SOFT reset KEEP them, so the manifest reuses the existing processed
-        # images (no GPU/FAL). Variant textures (<env>/variations/) are never touched. Best-effort + LOUD: a
-        # wipe failure (e.g. missing s3:DeleteObject) never fails the reset (catalog/ledger are already reset)
-        # but is surfaced so the operator knows images stayed.
-        try:
-            from deploy.cleanup_images import wipe_all_product_images, wipe_source_product_images
-            out["images_wiped"] = ({s: wipe_source_product_images(s) for s in sources}
-                                   if sources else wipe_all_product_images())
-        except Exception as exc:
-            log.exception("reset: product-image wipe FAILED; images were kept")
-            out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
-    return out, 200
+    return _ledger_op("reset", _do_reset)
 
 
 def remove_source(name: str) -> tuple[dict, int]:

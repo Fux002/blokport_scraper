@@ -110,6 +110,21 @@ def _save_manifest(backend, manifest: dict[str, str]) -> None:
         log.warning("could not persist image manifest", extra={"extra_fields": {"error": str(exc)}})
 
 
+def _hosted_object_exists(backend, hosted_url: str) -> bool:
+    """Does a manifest entry's stored hosted URL still point at a real object? `url_for(key)` is
+    `public_base + key`, so stripping the base yields the exact key `exists()` checks. This closes the
+    manifest-vs-object gap: an EXTERNAL delete (e.g. a Blokport clear) removes the object but not this
+    scraper's manifest, so a blind reuse would re-link a product to a dead URL and never re-upload. dry-run
+    derives URLs with no network (`exists()` is always False there), so trust the manifest in dry-run; a URL
+    not under this backend's base cannot be verified, so treat it as absent and re-fetch."""
+    if getattr(backend, "dry_run", False):
+        return True
+    base = getattr(backend, "public_base", "")
+    if not base or not hosted_url.startswith(base):
+        return False
+    return backend.exists(hosted_url[len(base):])
+
+
 def _load_discard_set(cfg=None) -> set[str]:
     """The content sha256 of every image the pipeline classified as non-stone (the products/discarded/
     pool written by the GPU reprocess). A linked url whose embedded sha is in this set is NEVER published;
@@ -326,13 +341,22 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                 all_urls.append(u)
                 url_to_site.setdefault(u, row.src_site)
 
-    # known urls reuse their stored public url; only NEW urls are fetched
+    # known urls reuse their stored public url; only NEW urls are fetched. A manifest hit is authoritative
+    # ONLY if its object still exists: an external delete (a Blokport clear) removes the object but not this
+    # manifest, so a blind reuse would re-link a product to a dead URL and never re-upload. Drop a stale
+    # entry so the source URL re-fetches + re-hosts, and self-heals the manifest.
     url_to_public: dict[str, Optional[str]] = {}
     new_urls: list[str] = []
+    stale_pruned = 0
     for u in dict.fromkeys(all_urls):
-        if u in manifest:
-            url_to_public[u] = manifest[u]
+        hosted = manifest.get(u)
+        if hosted and _hosted_object_exists(backend, hosted):
+            url_to_public[u] = hosted
         else:
+            if u in manifest:                      # entry points at a since-deleted object -> drop + re-host
+                del manifest[u]
+                manifest_dirty = True
+                stale_pruned += 1
             new_urls.append(u)
     # validation cap: process only N new images per run, so de-watermark/enhance
     # output can be eyeballed on a sample before a full run. 0 = no cap.
@@ -477,5 +501,6 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     log.info("images done", extra={"extra_fields": {
         "mode": cfg.mode, "staged": stats.staged, "no_image": stats.no_image,
         "download_failed": stats.download_failed, "placeholders": stats.placeholders,
-        "bytes_uploaded": stats.bytes_uploaded, "processed": stats.processed}})
+        "bytes_uploaded": stats.bytes_uploaded, "processed": stats.processed,
+        "stale_manifest_pruned": stale_pruned}})
     return stats

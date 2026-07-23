@@ -132,3 +132,34 @@ def test_wipe_source_dry_run_deletes_nothing():
 def test_wipe_source_rejects_a_name_that_would_widen_the_prefix():
     with pytest.raises(ValueError):
         cleanup_images.wipe_source_product_images("../varsha", client=_FakeS3([]))
+
+
+# -- raw-root layout (products/<source>/<sha>.jpg, processor-less s3 staging) is also wiped -----------
+
+def test_wipe_source_also_deletes_raw_root_objects():
+    seg = ENV_SEGMENT
+    fake = _FakeS3([
+        f"{seg}/products/varsha/rawroot.jpg",            # raw-root varsha -> deleted
+        f"{seg}/products/improved/varsha/aaa.jpg",       # folder varsha -> deleted
+        f"{seg}/products/zucchi/keep.jpg",               # raw-root OTHER source -> survives
+        f"{seg}/variations/x.png",                       # texture -> survives
+    ])
+    counts = cleanup_images.wipe_source_product_images("varsha", client=fake)
+    assert f"{seg}/products/varsha/rawroot.jpg" not in fake.keys
+    assert f"{seg}/products/improved/varsha/aaa.jpg" not in fake.keys
+    assert f"{seg}/products/zucchi/keep.jpg" in fake.keys
+    assert f"{seg}/variations/x.png" in fake.keys
+    assert counts["raw_root"] == 1
+
+
+def test_wipe_all_also_deletes_raw_root_objects():
+    seg = ENV_SEGMENT
+    fake = _FakeS3([
+        f"{seg}/products/varsha/rawroot.jpg",
+        f"{seg}/products/improved/varsha/aaa.jpg",
+        f"{seg}/variations/x.png",
+    ])
+    counts = cleanup_images.wipe_all_product_images(client=fake)
+    assert not any(k.startswith(f"{seg}/products/") for k in fake.keys)   # every product image gone
+    assert f"{seg}/variations/x.png" in fake.keys                        # texture kept
+    assert counts["raw_root"] == 1
