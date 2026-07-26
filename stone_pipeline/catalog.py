@@ -84,13 +84,20 @@ def run(outputs_root: Path | None = None) -> Path:
     sync = write_sync_md(counts=result.counts, sources=sorted(set(sources)),
                          products=products, inventory=inventory, discontinued=discontinued)
     images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
-    # Give each new colour-less variety a real colour read from its fresh texture (then propagate to
-    # mirrors), so a no-colour source like zucchi never nulls colour_id; 'Natural' only if no texture.
+    # Give each colour-less variety a real colour read from its REAL PRODUCT IMAGE (the de-watermarked
+    # scraped photo, keyed by variation_key), then propagate to mirrors, so a no-colour source like
+    # varsha/zucchi never nulls colour_id; 'Natural' only if no photo. NOT the generated variant icon --
+    # an icon can be a stale/placeholder render that diverges from the actual stone.
     from stone_pipeline.stages import variety_color
     from stone_pipeline.config.settings import CATEGORIES
     _additions = sorted((SETTINGS.paths.catalog_source_dir / "backbone_additions").glob("*.json"))
     _merged = [c.backbone_path for c in CATEGORIES]   # read-only: lets a new tile/block mirror inherit
-    color_stats = variety_color.fill_colors(backbone_paths=_additions, reference_paths=_merged)
+    product_images: dict[str, str] = {}                # variation_key -> its product photo (first wins)
+    for r in rows:
+        if r.variation_key and r.image_keys and r.variation_key not in product_images:
+            product_images[r.variation_key] = r.image_keys[0]
+    color_stats = variety_color.fill_colors(backbone_paths=_additions, reference_paths=_merged,
+                                            product_images=product_images)
     to_delete = write_variants_to_delete()         # surface junk variants (bare-code + mis-typed) for deletion
     migrated = migrate_retyped_variant_images(ref) # a re-typed variant keeps its image at its new Key
     held = gate_on_images()                        # AFTER migration: hold only the genuinely-imageless new

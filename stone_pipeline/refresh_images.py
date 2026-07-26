@@ -7,6 +7,10 @@ every Key already refreshed, so a re-run never regenerates -- and re-charges -- 
 
     python -m stone_pipeline.refresh_images            # DRY RUN: how many + estimated cost, nothing spent
     BLOKPORT_REFRESH_APPLY=1 python -m stone_pipeline.refresh_images   # generate + upload + mark
+    BLOKPORT_REFRESH_BATCH=500 BLOKPORT_REFRESH_APPLY=1 ...            # cap this run to 500 (cost spread)
+
+Drain the legacy backlog gradually by scheduling the --apply form with a BATCH cap: each run upgrades the
+next batch and marks them, so over successive runs every legacy image lands on the best model exactly once.
 
 Selection = product-backed AND already-imaged AND not-yet-refreshed. A variant with no product, or no image
 yet (that is build()'s new-image queue), is never touched. Requires the generator stack (fal_client + torch
@@ -30,6 +34,14 @@ BEST_MODEL = "flux-2-max"                       # the model the refresh re-makes
 PER_IMAGE_USD = 0.100                            # FLUX.2 [max] approx per edit (genetate_images MODELS[max])
 MARKER_KEY = f"{ENV_SEGMENT}/variations/_refreshed.json"   # durable "already refreshed" set, next to the images
 APPLY_ENV = "BLOKPORT_REFRESH_APPLY"             # set to "1" to spend; unset = dry run
+BATCH_ENV = "BLOKPORT_REFRESH_BATCH"             # max images to refresh THIS run (cost spread); 0/unset = all
+
+
+def _batch_cap() -> int:
+    """Per-run ceiling so a scheduled refresh drains the legacy backlog gradually (the marker makes each
+    Key once-only). 0/unset = no cap (do every eligible image this run)."""
+    raw = os.environ.get(BATCH_ENV, "").strip()
+    return int(raw) if raw.isdigit() else 0
 _GEN_DEPS = ("fal_client", "torch")             # the generator stack the actual run needs
 
 
@@ -108,15 +120,21 @@ def run() -> int:
     """Dry run by default (report count + cost, spend nothing); BLOKPORT_REFRESH_APPLY=1 generates,
     uploads, and marks. Returns the number of images refreshed (0 on a dry run)."""
     refreshed = load_refreshed()
-    targets, cost = plan(refreshed)
+    targets, _cost = plan(refreshed)
+    # Cost spread: cap THIS run to a batch; the rest stay eligible and drain on later (scheduled) runs.
+    cap = _batch_cap()
+    batch = targets[:cap] if cap and cap < len(targets) else targets
+    cost = round(len(batch) * PER_IMAGE_USD, 2)
     apply = os.environ.get(APPLY_ENV) == "1"
     log.info("image refresh plan", extra={"extra_fields": {
-        "eligible": len(targets), "already_refreshed": len(refreshed),
+        "eligible": len(targets), "this_run": len(batch), "already_refreshed": len(refreshed),
         "model": BEST_MODEL, "est_cost_usd": cost, "apply": apply}})
     if not targets:
         print("Nothing to refresh: every product-backed image is already on the best model.")
         return 0
-    print(f"{len(targets)} product-backed image(s) to refresh with {BEST_MODEL}, est. ~${cost:.2f}.")
+    remaining = len(targets) - len(batch)
+    print(f"{len(targets)} eligible; this run refreshes {len(batch)} with {BEST_MODEL}, est. ~${cost:.2f}"
+          + (f" ({remaining} left for later runs)." if remaining else "."))
     if not apply:
         print(f"DRY RUN. Set {APPLY_ENV}=1 to generate + upload + mark. Nothing was spent.")
         return 0
@@ -127,6 +145,8 @@ def run() -> int:
         print(f"Queue written, but the generator can't run here (missing {missing or 'FAL_KEY'}). "
               f"Run image_pipeline where the stack is present; nothing was marked.")
         return 0
+    if len(batch) < len(targets):
+        image_prompts.build_for_keys(batch)        # narrow the generator queue to just this run's batch
     from stone_pipeline.catalog import _generate_queued_images
     failed = _generate_queued_images()             # FLUX.2 max -> BEN2 -> local {Key}.png (reused runner)
     from deploy import upload_artifacts
@@ -135,11 +155,11 @@ def run() -> int:
         # some scripts failed: mark nothing this run so the failed Keys stay eligible and re-cost nothing
         # already spent. A clean re-run picks them up.
         log.error("refresh generation had failures; marker NOT advanced",
-                  extra={"extra_fields": {"failed": failed, "eligible": len(targets)}})
+                  extra={"extra_fields": {"failed": failed, "eligible": len(batch)}})
         return 0
-    save_refreshed(refreshed | set(targets))
-    print(f"Refreshed + marked {len(targets)} image(s).")
-    return len(targets)
+    save_refreshed(refreshed | set(batch))         # mark only this run's batch as done
+    print(f"Refreshed + marked {len(batch)} image(s)." + (f" {remaining} remain for later runs." if remaining else ""))
+    return len(batch)
 
 
 if __name__ == "__main__":
