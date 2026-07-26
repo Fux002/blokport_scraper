@@ -147,7 +147,7 @@ class ZucchiScraper(ScraperBase):
             "slab_sequence": _get(item, *si, "SequenciaChapas__c"),
             "unit_price_usd_per_ft2": _get(item, "parsedData", "UnitPrice") or _get(item, *si, "PrecoFFt2__c"),
             "total_price_usd": _get(item, "parsedData", "TotalPrice") or _get(item, *si, "PrecoTotal__c"),
-            "currency": _get(item, "parsedData", "CurrencyIsoCode") or _get(item, *si, "CurrencyIsoCode", default="USD"),
+            "currency": _get(item, "parsedData", "CurrencyIsoCode") or _get(item, *si, "CurrencyIsoCode"),
             "water_absorption": _get(item, *pr, "WatAbs__c"),
             "apparent_density": _get(item, *pr, "AppDde__c"),
             "compressive_strength": _get(item, *pr, "ComStr__c"),

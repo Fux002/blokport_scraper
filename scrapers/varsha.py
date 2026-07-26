@@ -120,13 +120,15 @@ class VarshaScraper(ScraperBase):
         d = (r.json().get('d') or {})
         return json.loads(d.get('Bundles') or '[]')
 
-    def _fetch_detail(self, bundle_id) -> dict:
+    def _fetch_detail(self, bundle_id) -> dict | None:
+        """The per-bundle detail (dimensions from `chapas`, gallery, colour). None on a RECOVERABLE fetch
+        failure (rate limit / proxy) so the caller HOLDS the row for retry and never ships defaulted dims;
+        {} when the detail is genuinely empty."""
         payload = {"IdBundle": bundle_id, "IdCampanha": 0}
         try:
             r = self.post(DETAIL_API_URL, headers=API_HEADERS, content=json.dumps(payload))
-        except Exception as exc:
-            self.record_failure('detail', bundle_id=bundle_id, error=str(exc))
-            return {}
+        except Exception:
+            return None
         d = (r.json().get('d') or {})
         return d.get('Bundle') or {}
 
@@ -200,6 +202,12 @@ class VarshaScraper(ScraperBase):
 
         # Enrich with the DetalheBundle response.
         detail = self._fetch_detail(bundle_id)
+        if detail is None:
+            # a recoverable detail-fetch failure (rate limit / proxy): HOLD this row for retry instead of
+            # shipping it with defaulted dimensions (dims come only from the detail's chapas) -- mirrors
+            # marenostone's dims hold. Never a salvaged half-formed row.
+            self.mark_fetch_failed(row, "dims", bundle_id=bundle_id, error="detail fetch failed")
+            detail = {}
         photo_url_list = self._merge_detail(row, detail)
 
         # image_urls for the base: full source photo URLs (from fotos[]), falling

@@ -34,10 +34,14 @@ BLOCK_THICKNESS_MARKER = "MULTI"
 
 def classify_format(thickness):
     """The product format for a SlabWare row, read from its thickness field: 'block' when the tenant marks a
-    solid block (thickness == the MULTI sentinel), else 'slab'. Case/space insensitive. This reads the
-    supplier's own field -- it does NOT guess from the name -- so a missing thickness falls to 'slab' (the
-    default kind), never a fabricated block."""
-    return "block" if (thickness or "").strip().upper() == BLOCK_THICKNESS_MARKER else "slab"
+    solid block (thickness == the MULTI sentinel), 'slab' for any real thickness value. Case/space
+    insensitive. Reads the supplier's own field -- it does NOT guess from the name. An ABSENT thickness
+    returns '' (not 'slab'): the format is genuinely unknown, so it is left for the flagged format resolver
+    to settle (format_unresolved -> review) rather than silently asserting a kind."""
+    t = (thickness or "").strip().upper()
+    if not t:
+        return ""
+    return "block" if t == BLOCK_THICKNESS_MARKER else "slab"
 
 
 def parse_display_status(html):
