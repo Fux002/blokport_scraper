@@ -118,22 +118,33 @@ def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Pa
             if item:
                 seen.add(key)
                 items.append(item)
-    # (2) BACKFILL: product-backed variants with NO image in Medusa yet. Signal is the immutable
-    # EXPORT Image (blank), NOT 1_variants_full -- emit may have just stamped the CSV link, but the
-    # real S3 image isn't generated until this queue runs. Once generated + uploaded + re-exported,
-    # the export Image is non-blank and it drops out of the queue.
+    # (2) BACKFILL: every category variant of a STOCKED variety that has NO image yet. A variety is stocked
+    # when ANY of its category keys is product-backed; then EACH of its slab/block/tile variants needs its
+    # OWN image, generated from that category's base image (a tile is not a copy of the slab -- different
+    # base, different render). This is why a stocked variety's tile/block was blank: it is not itself
+    # product-backed (the product references the slab), so keying the backfill on the product-backed KEY
+    # missed it. Signal is the immutable EXPORT Image (blank), NOT 1_variants_full -- emit may have just
+    # stamped the CSV link, but the real S3 image isn't generated until this queue runs; once generated +
+    # uploaded + re-exported, the export Image is non-blank and it drops out of the queue.
     backed, ktype = (product_backed_keys(), _backbone_types()) if run_backfill else (set(), {})
     exp = SETTINGS.paths.export_file
     if run_backfill and exp.exists():
         with exp.open(encoding="utf-8-sig", newline="") as h:
-            for r in csv.DictReader(h):
-                key = (r.get("Key") or "").strip()
-                if not key or key in seen or key not in backed or (r.get("Image") or "").strip():
-                    continue
-                item = _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip())
-                if item:
-                    seen.add(key)
-                    items.append(item)
+            rows = list(csv.DictReader(h))
+
+        def _ident(r) -> tuple[str, str]:
+            k = (r.get("Key") or "").strip()
+            return (ktype.get(k, ""), (r.get("Name") or "").strip())   # (stone_type, variant): the variety
+
+        stocked = {_ident(r) for r in rows if (r.get("Key") or "").strip() in backed}
+        for r in rows:
+            key = (r.get("Key") or "").strip()
+            if not key or key in seen or _ident(r) not in stocked or (r.get("Image") or "").strip():
+                continue
+            item = _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip())
+            if item:
+                seen.add(key)
+                items.append(item)
     return _write(items, out_path, "new")
 
 
