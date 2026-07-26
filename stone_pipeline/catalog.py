@@ -76,6 +76,10 @@ def run(outputs_root: Path | None = None) -> Path:
     # so rebuilding it here makes tiles a pure derivation of slabs that can never silently rot. (The manual
     # build_tile_backbone step used to be forgotten, leaving polluted tiles inconsistent with cleaned slabs.)
     build_tile_backbone.build()
+    # Tiles are the SAME stone as their slab but have no product/texture of their own, so their {Key}.png is
+    # never generated. Copy each slab's image to its tile Key BEFORE emit reads the S3 key set, so tiles
+    # advertise an image instead of being emitted imageless (was ~12k blank tiles).
+    mirror_slab_images_to_tiles()
     emit_catalog.build()                          # -> to_upload/1_variants_full.csv -- AFTER products, so its
                                                   #    product-backed image stamping reads THIS run's products
                                                   #    (their variation ids), never a stale prior set
@@ -291,6 +295,71 @@ def _s3_image_copier():
         except Exception:
             return False
     return copy
+
+
+def _s3_variation_etags() -> dict[str, str] | None:
+    """Key -> S3 ETag for every <env>/variations/{Key}.png, via ONE paginated list. None when S3 is
+    unreachable. Lets the tile mirror copy a tile ONLY when its slab image actually differs (the tile is
+    missing, or the slab was regenerated), never redundantly re-copying an already-in-sync tile."""
+    from stone_pipeline.config.settings import ENV_SEGMENT
+    s3 = SETTINGS.s3
+    try:
+        import boto3
+        from botocore.config import Config
+        cfg = Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 3, "mode": "standard"})
+        client = boto3.Session(profile_name=s3.credentials_profile or None,
+                               region_name=s3.region).client("s3", config=cfg)
+        prefix = f"{ENV_SEGMENT}/variations/"
+        etags: dict[str, str] = {}
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                name = obj["Key"][len(prefix):]
+                if name.endswith(".png"):
+                    etags[name[:-4]] = obj["ETag"].strip('"')
+        return etags
+    except Exception:
+        return None
+
+
+def mirror_slab_images_to_tiles(etags=None, copier=None) -> int:
+    """Copy each slab's image to its tile mirror's Key on S3 so a tile (the SAME stone) advertises an image
+    instead of referencing a {Key}.png that no step ever creates. Tiles are mirror COMBINATIONS with no
+    product or texture of their own, so ~12k are otherwise emitted imageless (the export's _image_link blanks
+    a Key whose object is absent). Join slab<->tile on (stone_type, variant), the identity
+    emit_catalog._mirror_rows uses. A tile is (re)copied ONLY when its image differs from its slab's --
+    compared by S3 ETag -- so a missing tile is filled, a REGENERATED slab propagates to its tile, and an
+    in-sync tile is never re-copied. Idempotent; no-op when S3 is unreachable, so the sandbox is unchanged
+    and AWS does it in-build. Must run BEFORE emit_catalog reads the S3 key set, so the freshly-copied tile
+    images are advertised (and synced to Medusa) the same run."""
+    import json
+
+    from stone_pipeline.config.settings import CATEGORIES, category
+    from stone_pipeline.stages.emit_catalog import _posts_of
+    tags = etags if etags is not None else _s3_variation_etags()
+    copy = copier if copier is not None else _s3_image_copier()
+    if tags is None or copy is None:
+        return 0
+    copied = 0
+    for cat in CATEGORIES:
+        if not (cat.mirror_of and cat.active):
+            continue
+        src = category(cat.mirror_of)
+        slab_key = {(p.get("stone_type"), p.get("variant")): p["key"]
+                    for p in _posts_of(json.loads(src.backbone_path.read_text(encoding="utf-8-sig")))
+                    if p.get("key")}
+        for mp in _posts_of(json.loads(cat.backbone_path.read_text(encoding="utf-8-sig"))):
+            tk = mp.get("key")
+            sk = slab_key.get((mp.get("stone_type"), mp.get("variant")))
+            if not (tk and sk):
+                continue
+            se = tags.get(sk)
+            if not se or tags.get(tk) == se:
+                continue                    # slab image not ready yet, or the tile is already in sync
+            if copy(sk, tk):
+                tags[tk] = se               # now in sync -> not re-copied next pass
+                copied += 1
+    log.info("mirrored slab images to tiles", extra={"extra_fields": {"copied": copied}})
+    return copied
 
 
 def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
