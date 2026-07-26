@@ -61,9 +61,72 @@ CLASSIFIABLE_COLORS = frozenset({"Black", "Grey", "White", "Cream", "Red", "Brow
                                  "Gold", "Beige", "Yellow", "Green", "Blue", "Purple", "Pink"})
 
 
+# --- perceptual dominant colour ----------------------------------------------
+# A stone is named for its saturated ACCENT, not its statistical average: a green quartzite with cream/gold
+# veining medians to a warm tone, so a per-channel median mislabels it. Name a stone by its dominant
+# CHROMATIC hue when it has a real coloured fraction; fall to the neutral lightness ramp only for a
+# genuinely neutral (grey/white/cream) stone.
+_CHROMA_S = 0.25             # a pixel is "coloured" (not neutral matrix) at or above this saturation
+_CHROMA_MIN_FRACTION = 0.12  # the stone counts as "coloured" when this fraction of pixels are chromatic
+_HUE_BINS = 24               # 15-degree hue buckets for the dominant-hue vote
+
+
+def dominant_color(arr) -> str | None:
+    """Perceived colour of a bg-removed stone image (HxWx4 or HxWx3 numpy array). None if too few opaque
+    pixels. A stone with a real coloured fraction is named by the dominant hue of its CHROMATIC pixels (so a
+    saturated green survives light veining); a genuinely neutral stone falls to the lightness ramp."""
+    import numpy as np
+    a = arr.reshape(-1, arr.shape[-1])
+    opaque = (a[a[:, 3] > 200][:, :3] if a.shape[1] == 4 else a[:, :3]).astype(float)
+    if len(opaque) < 50:
+        return None
+    rgbn = opaque / 255.0
+    mx = rgbn.max(1); mn = rgbn.min(1); v = mx
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s = np.where(mx > 0, (mx - mn) / mx, 0.0)
+    chrom = (s >= _CHROMA_S) & (v > 0.15) & (v < 0.97)
+    if int(chrom.sum()) >= 50 and float(chrom.mean()) >= _CHROMA_MIN_FRACTION:
+        d = mx - mn
+        r, g, b = rgbn[:, 0], rgbn[:, 1], rgbn[:, 2]
+        h = np.zeros(len(rgbn))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            nz = d > 1e-6
+            i = (mx == r) & nz; h[i] = ((g[i] - b[i]) / d[i]) % 6
+            i = (mx == g) & nz; h[i] = ((b[i] - r[i]) / d[i]) + 2
+            i = (mx == b) & nz; h[i] = ((r[i] - g[i]) / d[i]) + 4
+        h = (h * 60.0) % 360.0
+        hc = h[chrom]
+        hist, edges = np.histogram(hc, bins=_HUE_BINS, range=(0, 360))
+        peak = int(hist.argmax()); lo, hi = edges[peak], edges[peak + 1]
+        rep = np.median(opaque[chrom][(hc >= lo) & (hc < hi)], axis=0)
+        return classify(tuple(int(x) for x in rep))
+    return classify(tuple(int(x) for x in np.median(opaque, axis=0)))
+
+
+def _color_from_array(arr) -> str | None:
+    return dominant_color(arr)
+
+
+def color_from_image_bytes(data: bytes) -> str | None:
+    """Perceived colour of an encoded product image (bytes). None if undecodable / too few opaque pixels.
+    Used by the image stage to colour a variety from its REAL product photo, not its generated icon."""
+    try:
+        import io
+
+        import numpy as np
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        arr = np.asarray(Image.open(io.BytesIO(data)).convert("RGBA"))
+    except Exception:
+        return None
+    return _color_from_array(arr)
+
+
 def color_from_texture(path: Path) -> str | None:
-    """Dominant colour of the OPAQUE pixels of a bg-removed texture, classified. None if unreadable
-    or too few opaque pixels (PIL/numpy are optional deps; absence just means no inference)."""
+    """Perceived colour of a bg-removed image file. None if unreadable / too few opaque pixels
+    (PIL/numpy are optional deps; absence just means no inference)."""
     try:
         import numpy as np
         from PIL import Image
@@ -73,10 +136,7 @@ def color_from_texture(path: Path) -> str | None:
         arr = np.asarray(Image.open(path).convert("RGBA"))
     except Exception:
         return None
-    opaque = arr[arr[..., 3] > 200][:, :3]
-    if len(opaque) < 50:
-        return None
-    return classify(tuple(int(x) for x in np.median(opaque, 0)))
+    return _color_from_array(arr)
 
 
 def _texture_dir() -> Path:
