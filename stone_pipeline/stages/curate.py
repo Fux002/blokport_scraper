@@ -335,16 +335,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     review_candidates: dict[str, set[str]] = {}
 
     def _by_name_owner(nm: str) -> tuple[str, str] | None:
-        """The (name, type) owner for a bare variety NAME that carries no type of its own -- an operator
-        alias target (alias_of is a name), or a matched row missing its variation_key. Mirrors the old
-        name-only lookup: the existing variety of that name in the first branch that has one (arbitrary
-        among types for a multi-type name -- the decision API cannot yet name a type). Returns None if no
-        such variety exists."""
-        for b in active_branches():
-            v = imports[b].by_name.get(nm)
-            if v:
-                return (nm, v["type"])
-        return None
+        """The single (name, TYPE) owner for a bare variety NAME that carries no type of its own -- an
+        operator alias target (alias_of is a name), or a matched row missing its variation_key. Resolves
+        ONLY when that name is unambiguous: exactly one existing variety carries it as its canonical name.
+        A multi-type name ('Aqua Blue' = gneiss/granite/marble/onyx) has several owners and no single
+        answer, so it returns None and the caller falls through to HOLD -- never an arbitrary stone (the
+        cross-type-merge bug). Owners are filtered to canonical-name matches so a name that is another
+        variety's ALIAS does not falsely make its own canonical owner look ambiguous."""
+        same_name = {o for o in existing_surface.get(nm, set()) if o[0] == nm}
+        return next(iter(same_name)) if len(same_name) == 1 else None
 
     for row in rows:
         # fall back to the raw name MINUS its format word, so a generic-descriptor

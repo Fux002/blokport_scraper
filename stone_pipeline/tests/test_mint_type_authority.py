@@ -85,3 +85,21 @@ def test_non_exact_match_aliases_onto_the_matched_type_never_the_same_name_other
     on_marble = [a for a in slab_aliases if a["Key"] == MARBLE_KEY]
     assert on_granite, f"spelling should alias onto the Granite variety, got {slab_aliases}"
     assert not on_marble, f"spelling must NOT touch the same-name Marble variety, got {on_marble}"
+
+
+def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(monkeypatch):
+    # A match that carries NO stable Key (keyless -- e.g. a forced override at a stale id, or an operator
+    # alias-by-name) on a name that exists as SEVERAL stones must NOT silently attach to an arbitrary one.
+    # _by_name_owner refuses the ambiguous name, so no alias is emitted on either variety (the caller HOLDs).
+    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    ref = loaders.load_all()
+
+    row = CanonicalRow(src_site="polonine", surrogate_key="a2",
+                       variety_match_key="Arabesk",
+                       variation_id="v1", variation_key=None,          # keyless -> name-only resolution
+                       variation_name="Arabescato", variation_method="model")
+    result = curate.build_curation([row], ref)
+
+    touched = [a for a in result.alias_additions["slab"] if a["Key"] in (MARBLE_KEY, GRANITE_KEY)]
+    assert not touched, f"multi-type name must not resolve to an arbitrary stone, got {touched}"
