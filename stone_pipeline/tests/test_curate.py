@@ -29,25 +29,28 @@ def test_key_is_deterministic_and_matches_format():
 
 
 def test_alias_addition_preserves_and_augments(ref):
-    # a confirmed non-exact match proposes adding the scraped spelling as an alias
-    # use a spelling not already on the live variant (its real aliases now include
-    # "ALPINE"), so the test asserts the ADD path, not idempotent no-op.
+    # a confirmed non-exact match proposes adding the scraped spelling as an alias. A real match carries the
+    # matched variety's stable Key ('Alpine' exists as BOTH Granite and Marble, so the Key -- its type is
+    # the authority -- is what disambiguates which one the spelling attaches to). Use a spelling not already
+    # on the live variant, so the test asserts the ADD path, not an idempotent no-op.
+    alpine_granite = curate.load_existing("slab").by_name_type[("alpine", "granite")]
     row = CanonicalRow(src_site="polonine", surrogate_key="1",
                        variety_match_key="Alpine Qx9", variation_id="x",
-                       variation_name="Alpine", variation_method="fuzzy")
+                       variation_key=alpine_granite["Key"], variation_name="Alpine",
+                       variation_method="fuzzy")
     result = curate.build_curation([row], ref)
     slab = result.alias_additions["slab"]
     assert slab, "expected an alias addition for Alpine"
-    entry = next(e for e in slab if e["Name"] == "Alpine")
+    entry = next(e for e in slab if e["Key"] == alpine_granite["Key"])
     assert "Alpine Qx9" in entry["_added"]
     assert entry["_status"] == "confirmed"
     # existing aliases are preserved (not overwritten)
     assert "|" in entry["Aliases"] and len(entry["Aliases"]) > len("ALPINE")
-    existing = curate.load_existing("slab").by_name["alpine"]
-    assert entry["Key"] == existing["Key"]
+    # the spelling attaches to the Granite Alpine (matched Key), never the same-named Marble one
+    assert entry["Key"] == alpine_granite["Key"]
     # Image is re-linked to the clean deterministic {Key}.png (blank if the variant has none),
     # never the export's internal/blank value
-    expect = curate.image_url(curate.image_filename(existing["Key"])) if (existing.get("Image") or "").strip() else ""
+    expect = curate.image_url(curate.image_filename(alpine_granite["Key"])) if (alpine_granite.get("Image") or "").strip() else ""
     assert entry["Image"] == expect
 
 
@@ -152,6 +155,45 @@ def test_backbone_update_flags_missing_value_with_verdict(ref):
     assert upd["attribute"] == "color"
     assert upd["add_value"] == bad_color
     assert upd["verdict"] == "likely_real"  # exact match -> trust the missing-value signal
+
+
+def test_backbone_update_flags_missing_finish(ref):
+    # SAME leaf-growth path as colour, for the FINISH vocab: an existing variety sold in a finish not yet in
+    # its allowed set surfaces a finish leaf-addition (not a new variety, not a duplicate).
+    variety = ref.backbone.lookup("Verde Ubatuba")
+    finish_vocab = [c for c, _ in ref.attributes.by_category.get("finish", {}).values()]
+    bad_finish = next(f for f in finish_vocab if f not in variety.finishes)
+    row = CanonicalRow(src_site="polonine", surrogate_key="fu1",
+                       variation_id="x", variation_name="Verde Ubatuba", variation_method="exact",
+                       variation_confidence="high", type_name=variety.stone_type,
+                       color_name=variety.colors[0], finish_name=bad_finish,
+                       quality_name=variety.qualities[0])
+    from stone_pipeline.stages import reconcile_tree
+    reconcile_tree.reconcile_row(row, ref, reconcile_tree.ReconcileStats())
+    result = curate.build_curation([row], ref)
+    upd = next(u for u in result.backbone_updates
+               if u["variety"] == "Verde Ubatuba" and u["attribute"] == "finish")
+    assert upd["add_value"] == bad_finish
+    assert upd["verdict"] == "likely_real"
+
+
+def test_backbone_update_flags_missing_quality(ref):
+    # SAME leaf-growth path for the QUALITY vocab.
+    variety = ref.backbone.lookup("Verde Ubatuba")
+    qual_vocab = [c for c, _ in ref.attributes.by_category.get("quality", {}).values()]
+    bad_quality = next(q for q in qual_vocab if q not in variety.qualities)
+    row = CanonicalRow(src_site="polonine", surrogate_key="qu1",
+                       variation_id="x", variation_name="Verde Ubatuba", variation_method="exact",
+                       variation_confidence="high", type_name=variety.stone_type,
+                       color_name=variety.colors[0], finish_name=variety.finishes[0],
+                       quality_name=bad_quality)
+    from stone_pipeline.stages import reconcile_tree
+    reconcile_tree.reconcile_row(row, ref, reconcile_tree.ReconcileStats())
+    result = curate.build_curation([row], ref)
+    upd = next(u for u in result.backbone_updates
+               if u["variety"] == "Verde Ubatuba" and u["attribute"] == "quality")
+    assert upd["add_value"] == bad_quality
+    assert upd["verdict"] == "likely_real"
 
 
 def test_attribute_curation_suggests_synonym(ref):
