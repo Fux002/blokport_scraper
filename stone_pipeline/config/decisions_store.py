@@ -133,13 +133,24 @@ def alias_map() -> dict[str, str]:
             if d["action"] == "alias" and d["alias_of"]}
 
 
+def alias_type_map() -> dict[str, str]:
+    """norm(spelling) -> the alias TARGET's stone type, for alias decisions where the operator picked one.
+    Disambiguates a multi-type target name (Black Sea = andesite + soapstone): the spelling aliases into
+    the target variety of THIS type, not an arbitrary same-name one. Absent (no entry) when the operator
+    did not choose a type; the router then falls back to the scraped row's own type, and holds if neither
+    disambiguates."""
+    return {n: d["seed_type"] for n, d in variety_actions().items()
+            if d["action"] == "alias" and d.get("seed_type")}
+
+
 def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
                          seed_color: str | None = None, seed_type: str | None = None,
                          seed_country: str | None = None) -> None:
     """Upsert ONE operator decision. Raises InvalidDecision on a bad action or an alias with no target.
-    Idempotent: re-deciding a variety overwrites the prior decision. `seed_color`, `seed_type` and
-    `seed_country` (mint only) are the colour / stone type / ISO origin country to mint the variety
-    with; ignored for reject/alias. The caller validates seed_country is a real ISO code."""
+    Idempotent: re-deciding a variety overwrites the prior decision. For a MINT, `seed_color`, `seed_type`
+    and `seed_country` are the colour / stone type / ISO origin to mint the variety with. For an ALIAS,
+    `seed_type` is the TARGET variety's stone type (which of a multi-type name to alias into); seed_color /
+    seed_country are ignored. reject ignores all three. The caller validates seed_country is a real ISO code."""
     action = (action or "").strip().lower()
     if action not in _ACTIONS:
         raise InvalidDecision(f"action must be one of {_ACTIONS}, got {action!r}")
@@ -151,8 +162,14 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
     seed_color = (seed_color or "").strip() or None
     seed_type = (seed_type or "").strip() or None
     seed_country = (seed_country or "").strip().upper() or None
-    if action != "mint":
-        seed_color = seed_type = seed_country = None   # only mint carries the seed colour / type / origin
+    # mint carries colour + type + country to create the variety with. alias ALSO carries seed_type, but
+    # meaning the TARGET's stone type: a target NAME can exist under several types (Black Sea = andesite +
+    # soapstone), so the operator picks WHICH one to alias into, else the alias cannot resolve. reject
+    # carries nothing.
+    if action == "alias":
+        seed_color = seed_country = None
+    elif action != "mint":
+        seed_color = seed_type = seed_country = None
     norm = _norm(variant)
     if not norm:
         raise InvalidDecision("variant name is empty")

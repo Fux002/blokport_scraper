@@ -173,7 +173,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so
         # an edit takes effect on the following run -- same "applies next run" contract as the run guard).
         #   GET /config/v1/review/variants               pending varieties (+ current_action)
-        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?}
+        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?,"type"?}
+        #     for alias, "type" is the TARGET's stone type (which of a multi-type name to alias into)
         #   GET /config/v1/review/attributes             pending attribute values (need a Medusa id)
         #   PUT /config/v1/review/attributes/<value>     {"kind":..., "medusa_id":...}
         #   GET  /config/v1/review/backbone              pending leaf additions (value not yet on a variety)

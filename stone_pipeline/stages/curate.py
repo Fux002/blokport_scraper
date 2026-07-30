@@ -312,6 +312,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     from stone_pipeline.stages import decisions
     confirm_decisions = decisions.load_confirm_decisions()
     alias_decisions = decisions.load_alias_decisions()   # norm(spelling) -> existing variety NAME to alias onto
+    alias_types = decisions.load_alias_types()            # norm(spelling) -> operator-chosen TARGET type (multi-type)
     rejected = decisions.load_rejected()
     seed_colors = decisions.load_variety_seed_colors()   # norm(variant) -> operator mint colour (over 'Natural')
     seed_types = decisions.load_variety_seed_types()     # norm(variant) -> operator-assigned stone type (fills a void)
@@ -451,6 +452,35 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             "nearest_existing": " | ".join(title_case(t) for t in cand_types),
             "score": "", "model_prob": "", **_review_evidence(row)})
 
+    def _apply_operator_alias(clean: str, name: str, row, stone_type: str) -> bool:
+        """Route an operator ALIAS decision for `clean` onto its target variety, disambiguated by the
+        operator's chosen TARGET type (else the scraped row's own type). Returns True if it aliased OR held
+        the row (caller should `continue`), False if there is NO alias decision (caller proceeds). A target
+        NAME that exists under several types with no type to pick by is HELD LOUDLY -- naming the types and
+        asking which -- never a silent no-op onto an arbitrary same-name stone (the bug an alias to a
+        multi-type target like 'Black Sea' = andesite + soapstone otherwise causes)."""
+        alias_to = alias_decisions.get(proj.norm(clean))
+        if not alias_to:
+            return False
+        target_type = alias_types.get(proj.norm(clean)) or stone_type
+        if own := _by_name_owner(proj.norm(alias_to), target_type):
+            alias_new.setdefault(own, set()).add(name)
+            return True
+        owner_types = sorted({o[1] for o in existing_surface.get(proj.norm(alias_to), set())})
+        if owner_types:
+            reason = (f"Alias target '{title_case(alias_to)}' exists as "
+                      f"{_human_join([title_case(t) for t in owner_types])}. Choose which type to alias "
+                      f"'{title_case(clean)}' into (one name can exist under several stone types).")
+        else:
+            reason = (f"Alias target '{title_case(alias_to)}' is not an existing variety here. "
+                      f"Reject '{title_case(clean)}' or choose a real target.")
+        pending_confirm.append({
+            "confirm": "", "variant": clean, "reason": reason,
+            "stone_type": "", "color": "",
+            "nearest_existing": " | ".join(title_case(t) for t in owner_types),
+            "score": "", "model_prob": "", **_review_evidence(row)})
+        return True
+
     for row in rows:
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         if not gaps:
@@ -497,9 +527,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 continue
         if code_why:
             base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
-            alias_to = alias_decisions.get(proj.norm(clean))
-            if alias_to and (own := _by_name_owner(proj.norm(alias_to), stone_type)):  # operator: this code is a spelling of X
-                alias_new.setdefault(own, set()).add(name)
+            if _apply_operator_alias(clean, name, row, stone_type):  # operator: this code is a spelling of X
                 continue
             dec = confirm_decisions.get(proj.norm(clean))
             if dec == "no":                            # honour 'no' so the code stops re-appearing
@@ -561,20 +589,22 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     continue
                 if d.verdict == "review":
                     # uncertain -> the human decides (mint / reject / alias) via the review API
-                    alias_to = alias_decisions.get(proj.norm(clean))
-                    if alias_to and (own := _by_name_owner(proj.norm(alias_to), stone_type)):  # operator: this spelling is variety X
-                        alias_new.setdefault(own, set()).add(name)
+                    if _apply_operator_alias(clean, name, row, stone_type):  # operator: this spelling is variety X
                         continue
                     dec = confirm_decisions.get(proj.norm(clean))
                     if dec == "no":
                         rejected.add(proj.norm(clean))
                         continue
                     if dec != "yes":               # pending: hold out of the upload, ask for a decision
+                        near_types = sorted({o[1] for o in existing_surface.get(proj.norm(nearest), set())})
+                        type_note = (f" ({_human_join([title_case(t) for t in near_types])})"
+                                     if near_types else "")
+                        pick_type = " and pick the matching type" if len(near_types) > 1 else ""
                         pending_confirm.append({
                             "confirm": "", "variant": clean,
-                            "reason": f"Very similar to existing '{title_case(nearest)}'. If it is the same "
-                                      f"stone, alias it to '{title_case(nearest)}'. Mint only if it is "
-                                      f"genuinely a different variety.",
+                            "reason": f"Very similar to existing '{title_case(nearest)}'{type_note}. If it is "
+                                      f"the same stone, alias it to '{title_case(nearest)}'{pick_type}. Mint "
+                                      f"as a new variety only if it is genuinely different.",
                             "stone_type": stone_type, "color": gap.suggested_color or "",
                             "nearest_existing": nearest, "score": gap.nearest_score or "",
                             "model_prob": round(d.prob, 2), **_review_evidence(row)})
