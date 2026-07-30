@@ -129,6 +129,11 @@ def test_recognize_type_reads_a_type_field_against_live_vocab():
     assert recognize_type("Stock Clearance") == ""
     assert recognize_type("Rough Blocks") == ""
     assert recognize_type("") == ""
+    # 'Semi-Precious Stone' is often supplied without the 'Stone' word or hyphen -- all forms map to canonical
+    # (else the type is dropped and a real variety like Smoky Semi-Precious Stone falls to manual review)
+    assert recognize_type("Semiprecious") == "Semi-Precious Stone"
+    assert recognize_type("Semi Precious") == "Semi-Precious Stone"
+    assert recognize_type("Semi-Precious") == "Semi-Precious Stone"
 
 
 def test_varsha_reads_stone_type_from_composition_head_only_when_real():
