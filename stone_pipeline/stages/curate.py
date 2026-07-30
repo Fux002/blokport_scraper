@@ -334,17 +334,22 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     alias_new: dict[tuple[str, str], set[str]] = {}
     review_candidates: dict[str, set[str]] = {}
 
-    def _by_name_owner(nm: str) -> tuple[str, str] | None:
-        """The (name, type) owner for a bare variety NAME that carries no type of its own -- an operator
-        alias target (alias_of is a name), or a matched row missing its variation_key. Mirrors the old
-        name-only lookup: the existing variety of that name in the first branch that has one (arbitrary
-        among types for a multi-type name -- the decision API cannot yet name a type). Returns None if no
-        such variety exists."""
-        for b in active_branches():
-            v = imports[b].by_name.get(nm)
-            if v:
-                return (nm, v["type"])
-        return None
+    def _by_name_owner(nm: str, prefer_type: str = "") -> tuple[str, str] | None:
+        """The (name, TYPE) owner for a bare variety NAME (an operator alias target, or a matched row
+        missing its variation_key). Resolution, in order:
+          1. the ROW's own resolved type disambiguates a multi-type name -- if `prefer_type` is known and a
+             (nm, prefer_type) variety exists, use it ('White G' typed Granite aliased to 'Alpine' -> Alpine
+             GRANITE, not the also-existing Alpine Marble);
+          2. else, if exactly ONE existing variety carries nm as its canonical name -> that one;
+          3. else None -- genuinely ambiguous (multi-type name with no type to pick by) -> the caller HOLDS,
+             never an arbitrary stone (the cross-type-merge bug).
+        Owners are filtered to canonical-name matches so a name that is another variety's ALIAS does not
+        falsely make its own canonical owner look ambiguous."""
+        same_name = {o for o in existing_surface.get(nm, set()) if o[0] == nm}
+        pt = proj.norm(prefer_type)
+        if pt and (typed := next((o for o in same_name if o[1] == pt), None)):
+            return typed
+        return next(iter(same_name)) if len(same_name) == 1 else None
 
     for row in rows:
         # fall back to the raw name MINUS its format word, so a generic-descriptor
@@ -356,7 +361,8 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             # attach to the variety the row MATCHED, by its (name, Key-type) -- the Key is the authority;
             # fall back to the by-name owner when the match carries no key (defensive / test rows).
             nnm = proj.norm(row.variation_name or "")
-            owner = (nnm, proj.norm(type_slug_from_key(row.variation_key))) if row.variation_key else _by_name_owner(nnm)
+            owner = (nnm, proj.norm(type_slug_from_key(row.variation_key))) if row.variation_key \
+                else _by_name_owner(nnm, row.type_name or row.raw_type or "")
             if owner:
                 alias_new.setdefault(owner, set()).add(spelling)
         elif (row.variation_method or "") in ("review", "semantic_review", "review_generic"):
@@ -401,7 +407,16 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         alias_new.setdefault(owner, set()).add(spelling)
         backed = variety_branches.get(proj.norm(clean), set())
         if backed:
-            new_variant_rows.append((clean, title_case(clean), stype,
+            # Backfill the missing cross-branch sibling of the RESOLVED OWNER, under its OWN canonical name
+            # -- never the scraped spelling. Minting under the alias spelling ('Monalisa') gives the sibling
+            # a Key core the existing-cores guard cannot match against the owner ('Mona Lisa'), so it
+            # duplicates the owner in every branch (the confirmed bug). Using the owner name makes the guard
+            # skip every branch where the owner already lives -- a resolved same-typed variety mints NOTHING
+            # -- and fills only a genuinely-missing branch, as a true same-named sibling (carrying the scraped
+            # spelling as its alias via sib_aliases, which keys on owner[0] == norm(title)).
+            owner_name = next((imports[b].by_name_type[owner]["Name"] for b in active_branches()
+                               if owner in imports[b].by_name_type), title_case(owner[0]))
+            new_variant_rows.append((owner_name, owner_name, stype,
                                      title_case(_attr_surface(row, "color")),
                                      (row.quality_name or last_resort_quality).strip() or last_resort_quality,
                                      title_case(_attr_surface(row, "finish")), gap, backed, _review_evidence(row)))
@@ -464,7 +479,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if code_why:
             base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
             alias_to = alias_decisions.get(proj.norm(clean))
-            if alias_to and (own := _by_name_owner(proj.norm(alias_to))):  # operator: this code is a spelling of X
+            if alias_to and (own := _by_name_owner(proj.norm(alias_to), stone_type)):  # operator: this code is a spelling of X
                 alias_new.setdefault(own, set()).add(name)
                 continue
             dec = confirm_decisions.get(proj.norm(clean))
@@ -528,7 +543,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 if d.verdict == "review":
                     # uncertain -> the human decides (mint / reject / alias) via the review API
                     alias_to = alias_decisions.get(proj.norm(clean))
-                    if alias_to and (own := _by_name_owner(proj.norm(alias_to))):  # operator: this spelling is variety X
+                    if alias_to and (own := _by_name_owner(proj.norm(alias_to), stone_type)):  # operator: this spelling is variety X
                         alias_new.setdefault(own, set()).add(name)
                         continue
                     dec = confirm_decisions.get(proj.norm(clean))
