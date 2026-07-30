@@ -22,7 +22,7 @@ _FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
 def test_emit_build_from_seed_is_idempotent():
     # Build the full variant list from the committed base twice; the outputs must be byte-identical.
     # emit_catalog reads only the seed + generated artifacts (absent in CI -> empty), so this exercises
-    # the real normalize + mirror + consolidate path that writes the base each run.
+    # the real normalize + union-fill + consolidate path that writes the base each run.
     from stone_pipeline.stages import emit_catalog
     emit_catalog.build()
     first = _FULL.read_bytes()
@@ -61,26 +61,16 @@ def test_malformed_type_keys_flags_type_less_keys():
 
 
 @pytest.mark.skipif(not _BASE.exists(), reason="no committed seed")
-def test_no_orphan_mirror_backbone_rows():
-    """Every mirror-category (tile) post's (stone_type, variant) must have a matching source (slab) post.
-    emit's mirror join is by (stone_type, variant), so a tile with no source slab is silently dropped from
-    the mirror. A seed edit that removes a slab but leaves its tile creates exactly that orphan -- a real
-    regression once caused by a dedup keeping a base-only slab key and deleting the backbone-backed one."""
-    import json
-    from stone_pipeline.config.settings import CATEGORIES, category
-    from stone_pipeline.stages.emit_catalog import _posts_of
-    for cat in CATEGORIES:
-        if not cat.mirror_of:
-            continue
-        src_path, mir_path = category(cat.mirror_of).backbone_path, cat.backbone_path
-        if not (src_path.exists() and mir_path.exists()):
-            continue
-        src = {(p.get("stone_type"), p.get("variant"))
-               for p in _posts_of(json.loads(src_path.read_text(encoding="utf-8-sig")))}
-        orphans = [(p.get("stone_type"), p.get("variant"))
-                   for p in _posts_of(json.loads(mir_path.read_text(encoding="utf-8-sig")))
-                   if (p.get("stone_type"), p.get("variant")) not in src]
-        assert not orphans, f"{cat.name}: {len(orphans)} orphan mirror rows with no source slab: {orphans[:5]}"
+def test_every_category_carries_the_full_variety_union():
+    """A variety belongs to the stone, not a format, so every active category must carry the FULL UNION of
+    varieties across all categories -- no slab without its block/tile, and a block-only variety must also
+    appear in slab and tile (no category is a master). The emit's union gap-fill establishes this and
+    `seed.verify` guards it; assert it on the committed base so a base edit or an emit regression that
+    breaks category uniformity is caught. Supersedes the old slab-master mirror / backbone-orphan checks."""
+    from stone_pipeline.reference import seed
+    base = seed._rows(_BASE)
+    assert seed._non_uniform_categories(base) == [], \
+        "a category does not carry the full variety union -- the seed is not category-uniform"
 
 
 def test_alias_normalization_is_idempotent():

@@ -40,14 +40,19 @@ def _duplicate_varieties(rows: list[dict]) -> list[tuple[str, str, str]]:
     """Every (branch, type, Name) that resolves to MORE THAN ONE Key. A variety is identified by its
     stone type + display name; two Keys for the same (type, Name) are the same stone twice -- the class
     that ships duplicate products. This is invisible to the fixed-point check (distinct Keys make base a
-    stable fixed point WITH the dup present), so it is asserted separately. branch/type come from the Key
-    prefix (branch_type_nameslug_uuid); Name is the display column."""
+    stable fixed point WITH the dup present), so it is asserted separately.
+
+    The type is the FULL type slug (type_slug_from_key), NOT the Key's first token: a multi-word type
+    (dolomite marble, semi precious stone, lava stone) has several tokens, so keying on parts[1] alone
+    conflates 'dolomite marble' with 'dolomite' and false-flags two genuinely different-typed varieties
+    of the same name as a duplicate. Identity matches the emit's union-fill (proj.norm type + name)."""
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import type_slug_from_key
     seen: dict[tuple[str, str, str], int] = {}
     for r in rows:
-        parts = (r.get("Key") or "").split("_")
-        branch = parts[0] if parts else ""
-        stype = parts[1] if len(parts) > 1 else ""
-        seen[(branch, stype, (r.get("Name") or "").casefold())] = seen.get((branch, stype, (r.get("Name") or "").casefold()), 0) + 1
+        key = r.get("Key") or ""
+        ident = (key.split("_", 1)[0], proj.norm(type_slug_from_key(key)), proj.norm(r.get("Name") or ""))
+        seen[ident] = seen.get(ident, 0) + 1
     return sorted(k for k, n in seen.items() if n > 1)
 
 
@@ -62,6 +67,25 @@ def _malformed_type_keys(rows: list[dict]) -> list[str]:
     valid = {proj.norm(t) for t in load_attributes().canonical_names("type")}
     return sorted(r["Key"] for r in rows
                   if (ts := proj.norm(type_slug_from_key(r.get("Key") or ""))) and ts not in valid)
+
+
+def _non_uniform_categories(rows: list[dict]) -> list[str]:
+    """Categories whose variety set (type, name) is not the FULL UNION across all categories. A variety
+    belongs to the stone, not a format, so every category must carry every variety any category has -- a
+    variety present in one category but not another (a slab with no block, a block-only variety missing
+    from slab) means a cold start would ship an inconsistent catalog. Compared against the UNION, not a
+    master category, so a block-only variety flags slab AND tile (no category is privileged); a future
+    category is covered automatically -- any category present in the base must equal the union."""
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import type_slug_from_key
+    by_cat: dict[str, set] = {}
+    for r in rows:
+        br = (r.get("Key") or "").split("_")[0]
+        if br:
+            by_cat.setdefault(br, set()).add(
+                (proj.norm(type_slug_from_key(r["Key"])), proj.norm(r.get("Name", ""))))
+    union: set = set().union(*by_cat.values()) if by_cat else set()
+    return sorted(c for c, s in by_cat.items() if s != union)
 
 
 def verify(base_path: Path = BASE) -> dict:
@@ -79,12 +103,14 @@ def verify(base_path: Path = BASE) -> dict:
     fixed = base == full
     dups = _duplicate_varieties(base)          # a duplicate variety is invisible to the fixed-point check
     malformed = _malformed_type_keys(base)     # type-less / mis-keyed varieties, also fixed-point-invisible
+    nonuniform = _non_uniform_categories(base)  # every category must carry the full variety union
     stats = {"fixed_point": fixed, "base_rows": len(base), "full_rows": len(full),
              "first_diff_row": first, "duplicate_varieties": len(dups),
-             "malformed_type_keys": len(malformed), "clean": fixed and not dups and not malformed}
+             "malformed_type_keys": len(malformed), "non_uniform_categories": nonuniform,
+             "clean": fixed and not dups and not malformed and not nonuniform}
     (log.info if stats["clean"] else log.error)(
-        "seed is a fixed point with no duplicate or type-less varieties" if stats["clean"]
-        else "seed FAILED: not a fixed point and/or duplicate/type-less varieties present",
+        "seed is a fixed point: no duplicate/type-less varieties, categories uniform" if stats["clean"]
+        else "seed FAILED: not a fixed point and/or duplicate/type-less/non-uniform categories",
         extra={"extra_fields": {**stats, "dups": dups[:20], "malformed": malformed[:20]}})
     return stats
 
