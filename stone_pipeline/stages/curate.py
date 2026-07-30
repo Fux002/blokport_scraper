@@ -188,8 +188,25 @@ def _alias_list(raw: str) -> list[str]:
 # stone pack reproduces the historical values. The human still refines the finish set per the backbone.
 # Why a code-shaped name is held for confirmation -- shown in the review 'reason' column (a supplier code
 # has no colour, so it never belongs in the colour field). Keyed by looks_code_shaped's return.
-_CODE_REASON = {"lone_letter": "trailing grade letter (e.g. 'Rosal C')",
-                "bare_code": "supplier code, not a variety name"}
+def _human_join(items: list[str]) -> str:
+    """'A' / 'A and B' / 'A, B, and C' -- a readable list for a review reason string."""
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return items[0] if items else ""
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _code_reason(code_why: str, base: str) -> str:
+    """The review 'reason' for a code-shaped name: says what it looks like AND what to do, naming the
+    likely base variety so the operator can alias in one read."""
+    kind = ("a trailing grade letter (e.g. 'Rosal C')" if code_why == "lone_letter"
+            else "a supplier code")
+    lead = f"Looks like {kind}, not a variety name."
+    if base:
+        return f"{lead} Alias it to '{title_case(base)}' if it is that stone, otherwise reject."
+    return f"{lead} Alias it to the real variety if it is a spelling of one, otherwise reject."
 
 
 # format words to strip from a variety name (singular + plural of every category)
@@ -425,9 +442,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         """A type-less scrape whose name is a REAL variety under SEVERAL stone types: hold it for the human
         to assign the correct type, surfacing the candidate types -- never a typeless clone onto an
         arbitrary type. (Stage C adds the scraped evidence to help the human decide.)"""
+        types_txt = _human_join([title_case(t) for t in cand_types])
         pending_confirm.append({
             "confirm": "", "variant": clean,
-            "reason": "name exists as several stone types -- assign the correct one",
+            "reason": f"'{title_case(clean)}' already exists as {types_txt}. Pick one of those types to add "
+                      f"this to the existing variety, or choose a different type to create a new one.",
             "stone_type": "", "color": title_case(_attr_surface(row, "color")),
             "nearest_existing": " | ".join(title_case(t) for t in cand_types),
             "score": "", "model_prob": "", **_review_evidence(row)})
@@ -488,7 +507,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 continue
             if dec != "yes":                           # blank -> hold out of the upload and ask
                 pending_confirm.append({"confirm": "", "variant": clean,
-                                        "reason": _CODE_REASON.get(code_why, "looks like a supplier code"),
+                                        "reason": _code_reason(code_why, base),
                                         "stone_type": stone_type, "color": "", "nearest_existing": base,
                                         "score": "", "model_prob": "", **_review_evidence(row)})
                 continue
@@ -553,7 +572,9 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     if dec != "yes":               # pending: hold out of the upload, ask for a decision
                         pending_confirm.append({
                             "confirm": "", "variant": clean,
-                            "reason": "uncertain: new variety or a spelling of the nearest existing",
+                            "reason": f"Very similar to existing '{title_case(nearest)}'. If it is the same "
+                                      f"stone, alias it to '{title_case(nearest)}'. Mint only if it is "
+                                      f"genuinely a different variety.",
                             "stone_type": stone_type, "color": gap.suggested_color or "",
                             "nearest_existing": nearest, "score": gap.nearest_score or "",
                             "model_prob": round(d.prob, 2), **_review_evidence(row)})
@@ -664,7 +685,8 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             # of guessing or shipping it type-less. This is the single enforcement point for the invariant.
             # Carry the scraped evidence (src/image/description) so the human can judge the type.
             pending_confirm.append({"confirm": "", "variant": title,
-                                    "reason": "needs a stone type -- assign one to mint",
+                                    "reason": "No stone type detected. Assign the correct type to mint it. "
+                                              "A variety cannot exist without a type.",
                                     "stone_type": "", "color": title_case(obs_color or ""),
                                     "nearest_existing": (gap.nearest_existing or "") if gap else "",
                                     "score": "", "model_prob": "", **evidence})

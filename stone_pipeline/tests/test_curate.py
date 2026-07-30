@@ -260,10 +260,10 @@ def test_alias_decision_routes_spelling_onto_target_and_mints_nothing(ref):
     base = curate_white_g()
     assert "White G" in [p["variant"] for p in base.pending_confirm]
     assert not any(r["Name"] == "White G" for b in base.new_variants.values() for r in b)
-    # the held row states WHY in a dedicated 'reason' (sourced from the one _CODE_REASON map, not a
-    # duplicated literal) and never puts the raw code token in the colour field
+    # the held row states WHY in a dedicated 'reason' (built by the one _code_reason helper, naming the
+    # likely base variety to alias to) and never puts the raw code token in the colour field
     held = next(p for p in base.pending_confirm if p["variant"] == "White G")
-    assert held["reason"] == curate._CODE_REASON["lone_letter"] and held["color"] == ""
+    assert held["reason"] == curate._code_reason("lone_letter", "White") and held["color"] == ""
 
     # decide: alias 'White G' onto the existing variety 'Alpine'
     decisions_store.set_variety_decision("White G", "alias", alias_of="Alpine")
@@ -302,7 +302,8 @@ def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
 
     res = curate.build_curation([typeless()], ref)
     held = next(p for p in res.pending_confirm if p["variant"] == "Karur Special White")
-    assert held["reason"] == "needs a stone type -- assign one to mint"
+    assert held["reason"] == ("No stone type detected. Assign the correct type to mint it. "
+                              "A variety cannot exist without a type.")
     assert not any(r["Name"] == "Karur Special White" for b in res.new_variants.values() for r in b)
 
     decisions_store.set_variety_decision("Karur Special White", "mint", seed_type="Granite")
