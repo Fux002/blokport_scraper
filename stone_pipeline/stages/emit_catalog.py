@@ -8,8 +8,8 @@ This stage assembles the full file the user uploads, so nothing is hand-merged o
 stamped in place and re-running yields an identical file:
 
   existing export            ─┐
-  1_variants_update.csv       ├─►  1_variants_full.csv    (existing ∪ new ∪ mirror,
-  mirror backbones (tiles)   ─┘                            Image + Volume stamped)
+  1_variants_update.csv       ├─►  1_variants_full.csv    (existing ∪ new ∪ union-fill,
+  union gap-fill (all cats)  ─┘                            Image + Volume stamped)
 """
 
 from __future__ import annotations
@@ -124,33 +124,50 @@ def _posts_of(data) -> list[dict]:
         data if isinstance(data, list) else [])
 
 
-def _mirror_rows(by_key: dict[str, dict]) -> list[dict]:
-    """One variant row per source variety for each active mirror category (tiles
-    mirror slabs). The mirror's deterministic Key carries the source variant's
-    Name and Aliases, so a tile stays identical to its slab."""
-    # keyed by the mirror Key so a Key is emitted ONCE even when two source varieties share the same
-    # (stone_type, variant) and both resolve to the same mirror post -- first source wins. A list-append
-    # here produced duplicate tile Keys (the downstream dedup only checks against existing variants,
-    # not among mirror rows).
-    out: dict[str, dict] = {}
-    for cat in CATEGORIES:
-        if not (cat.mirror_of and cat.active):
+def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
+    """Category uniformity by UNION: a variety belongs to the STONE, not a format, so every variety present
+    in ANY active fan-out category must exist in ALL of them -- no category is a master. Collect the union
+    of varieties (identified by (type, clean name)) across every fan-out category, then for each fan-out
+    category emit the rows it is MISSING, with a deterministic gen_key and the variety's Name/Aliases.
+
+    Presence is tested by (type, name), NOT by Key: the base carries LEGACY uuid4 keys (from the original
+    Medusa export) while gen_key mints uuid5, so a Key match would treat every existing variety as missing
+    and duplicate all of them under a second key. Checking the identity means an existing variety -- under
+    any key form -- is left untouched (additive; images preserved) and only a genuinely-absent category
+    gets a fresh row. This makes the base a fixed point (every category is carried forward) and means a
+    block-only variety is added to slab and tile, and a NEWLY activated category is fully backfilled the
+    first time it emits, with no code change (the future-category requirement). Derived from the CLEANED
+    base rows, never the raw backbone, so cleaned names/aliases are what propagate."""
+    from stone_pipeline.reference.loaders import type_slug_from_key
+    from stone_pipeline.stages.curate import gen_key
+    from stone_pipeline.matching import projections as proj
+    fanout = [c.name for c in CATEGORIES if c.active and c.fan_out]
+    fanout_set = set(fanout)
+    present: dict[str, set[tuple[str, str]]] = {b: set() for b in fanout}
+    # canonical variety -> (type_slug, Name, Aliases). First-seen wins, but a row that carries aliases is
+    # preferred so the union never loses aliases to an alias-less duplicate in another category.
+    varieties: dict[tuple[str, str], tuple[str, str, str]] = {}
+    for k, s in by_key.items():
+        br = k.split("_", 1)[0]
+        if br not in fanout_set:
             continue
-        src = category(cat.mirror_of)
-        # tolerate either backbone shape the same way reference.loaders does (a bare list OR {"posts": [...]}),
-        # and skip a post with no key, so a malformed backbone file degrades a mirror rather than crashing emit.
-        src_posts = _posts_of(json.loads(src.backbone_path.read_text(encoding="utf-8-sig")))
-        mir_posts = _posts_of(json.loads(cat.backbone_path.read_text(encoding="utf-8-sig")))
-        # join slab<->tile on variety identity (type, variant), NOT positional zip: the two
-        # backbones can drift in order and a zip would silently mis-pair varieties.
-        mir_by = {(mp.get("stone_type"), mp.get("variant")): mp for mp in mir_posts}
-        for sp in src_posts:
-            s = by_key.get(sp.get("key"))
-            mp = mir_by.get((sp.get("stone_type"), sp.get("variant")))
-            mk = mp.get("key") if mp else None
-            if s and mk and mk not in out:
-                out[mk] = {"Key": mk, "Name": s.get("Name", ""), "Image": "",
-                           "Aliases": s.get("Aliases", ""), "Volume per kg (m³/kg)": ""}
+        ts = type_slug_from_key(k)
+        ident = (proj.norm(ts), proj.norm(s.get("Name", "")))
+        present[br].add(ident)
+        cand = (ts, s.get("Name", ""), s.get("Aliases", ""))
+        cur = varieties.get(ident)
+        if cur is None or (not cur[2] and cand[2]):
+            varieties[ident] = cand
+    out: dict[str, dict] = {}
+    for br in fanout:
+        for ident, (ts, disp, aliases) in varieties.items():
+            if ident in present[br]:
+                continue                          # category already carries this variety (any key form)
+            mk = gen_key(br, ts, disp)
+            if mk in by_key or mk in out:         # defensive: never collide with an existing key
+                continue
+            out[mk] = {"Key": mk, "Name": disp, "Image": "",
+                       "Aliases": aliases, "Volume per kg (m³/kg)": ""}
     return list(out.values())
 
 
@@ -182,8 +199,8 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
         else:
             by_key[r["Key"]] = r
             order.append(r["Key"])                            # genuinely new variant
-    mirror = [m for m in _mirror_rows(by_key) if m["Key"] not in by_key]  # tiles for existing varieties
-    rows = [by_key[k] for k in order] + mirror
+    filled = [m for m in _uniform_rows(by_key) if m["Key"] not in by_key]  # union-fill missing categories
+    rows = [by_key[k] for k in order] + filled
     # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
     # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
     from stone_pipeline.stages import decisions
@@ -235,9 +252,9 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     # count GENUINELY new rows from the FINAL set (after artifact-filter + consolidation), not from
     # the pre-filter `order` -- else dropped/folded rows inflate the 'new' metric.
     existing_keys = set(order[:n_existing])
-    mirror_keys = {m["Key"] for m in mirror}
-    new_count = sum(1 for r in rows if r["Key"] not in existing_keys and r["Key"] not in mirror_keys)
+    filled_keys = {m["Key"] for m in filled}
+    new_count = sum(1 for r in rows if r["Key"] not in existing_keys and r["Key"] not in filled_keys)
     log.info("variants_full emitted", extra={"extra_fields": {
         "rows": len(rows), "existing": n_existing,
-        "new": new_count, "mirror": len(mirror)}})
+        "new": new_count, "union_filled": len(filled)}})
     return path

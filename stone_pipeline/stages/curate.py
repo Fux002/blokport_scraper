@@ -620,17 +620,17 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # the import file.
     def _core(key: str, branch: str) -> str:
         return key[len(branch) + 1:].rsplit("_", 1)[0]
-    existing_cores: dict[str, set[str]] = {}
+    # A variety belongs to the STONE, not a format: if it exists in ANY active category it exists in all,
+    # because the emit's union-fill materializes the row for every category it is missing from. So a
+    # variety's "already exists" set is the UNION of cores across every category (the core -- type+name slug
+    # -- is branch-independent). curate therefore never re-mints a variety any category already carries; a
+    # genuinely new variety (absent everywhere) is minted into every active branch by the fan-out below.
+    # This also survives a sparse live export (a category Medusa has not fully populated): its varieties are
+    # still counted via the categories that do carry them, so they are never spuriously re-minted.
+    union_cores: set[str] = set()
     for b in BRANCHES:
-        cat = category(b)
-        if cat.mirror_of:
-            try:
-                posts = json.loads(cat.backbone_path.read_text(encoding="utf-8-sig")).get("posts", [])
-                existing_cores[b] = {_core(p["key"], b) for p in posts if p.get("key")}
-            except FileNotFoundError:
-                existing_cores[b] = set()
-        else:
-            existing_cores[b] = {_core(v["Key"], b) for v in imports[b].varieties if v.get("Key")}
+        union_cores |= {_core(v["Key"], b) for v in imports[b].varieties if v.get("Key")}
+    existing_cores: dict[str, set[str]] = {b: union_cores for b in BRANCHES}
 
     # --- 4. emit genuinely-new variants: import row + backbone post + image entry -
     # A variety is the same material in any format, so it is emitted into every

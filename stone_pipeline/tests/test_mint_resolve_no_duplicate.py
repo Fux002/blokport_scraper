@@ -64,14 +64,15 @@ def test_resolve_to_existing_alias_never_mints_the_scraped_spelling(ref, monkeyp
     assert not any("mona_lisa" in k for k in minted), f"re-minted the existing owner (guard failed): {minted}"
 
 
-def test_missing_branch_backfill_uses_the_owner_name_not_the_scraped_spelling(ref, monkeypatch):
-    # Mona Lisa Granite exists in slab only; the block sibling is genuinely missing. The backfill must fill
-    # block under the OWNER name ('Mona Lisa'), never the scraped 'Monalisa'.
+def test_resolve_to_existing_mints_nothing_in_the_uniform_union_model(ref, monkeypatch):
+    # Under the uniform UNION model, a variety belongs to the stone not a format: curate's existing_cores is
+    # the union of cores across all categories, so a variety present in slab already 'exists' in block/tile
+    # -- there is no 'missing branch' to backfill; the emit's union gap-fill provides the other categories.
+    # Resolving 'Monalisa' onto the existing Mona Lisa Granite must therefore mint NOTHING in any branch --
+    # not the scraped spelling (no duplicate), and not a spurious owner-named backfill (union-fill handles it).
     _seed_granite(monkeypatch, _imports_with_mona_lisa({"slab"}))
     res = curate.build_curation([_monalisa_row()], ref)
 
     minted = [r["Key"] for b in ("slab", "block", "tile") for r in res.new_variants[b]]
     assert not any("monalisa" in k for k in minted), f"duplicate under scraped spelling: {minted}"
-    block = [r for r in res.new_variants["block"] if r["Name"] == "Mona Lisa"]
-    assert block and block[0]["Key"].startswith("block_granite_mona_lisa"), \
-        f"missing-branch sibling not filled under the owner name: {res.new_variants['block']}"
+    assert not any("mona_lisa" in k for k in minted), f"spurious backfill; union-fill provides block/tile: {minted}"
