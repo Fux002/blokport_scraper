@@ -43,7 +43,21 @@ def test_committed_base_is_already_a_fixed_point():
     # duplicate variety -- invisible to the fixed-point check (distinct Keys stay a stable fixed point),
     # so it is guarded explicitly here; it is the class that shipped duplicate products.
     assert stats["duplicate_varieties"] == 0, f"committed base has {stats['duplicate_varieties']} duplicate varieties"
-    assert stats["clean"], "committed seed is not clean (fixed_point and/or duplicate_varieties failed)"
+    # Every Key must carry a real stone type. A type-less / mis-keyed variety (slab_alpine_luxe, minted
+    # before the type-less-mint guard) is fixed-point-invisible too, and ships type-less to Medusa.
+    assert stats["malformed_type_keys"] == 0, f"committed base has {stats['malformed_type_keys']} type-less/mis-keyed varieties"
+    assert stats["clean"], "committed seed is not clean (fixed_point / duplicate / type-less check failed)"
+
+
+def test_malformed_type_keys_flags_type_less_keys():
+    # deterministic (no S3, no seed): the guard flags a Key whose type slug is not a real stone type
+    from stone_pipeline.reference import seed
+    rows = [{"Key": "slab_marble_carrara_x"},                 # real type -> ok
+            {"Key": "slab_semi_precious_stone_smoky_x"},      # real multi-word type -> ok
+            {"Key": "slab_alpine_luxe_x"},                    # 'alpine' is not a stone type -> flagged
+            {"Key": "block_ice_burg_x"}]                      # 'ice' is not a stone type -> flagged
+    bad = seed._malformed_type_keys(rows)
+    assert bad == ["block_ice_burg_x", "slab_alpine_luxe_x"]  # sorted, only the type-less ones
 
 
 @pytest.mark.skipif(not _BASE.exists(), reason="no committed seed")

@@ -51,6 +51,19 @@ def _duplicate_varieties(rows: list[dict]) -> list[tuple[str, str, str]]:
     return sorted(k for k, n in seen.items() if n > 1)
 
 
+def _malformed_type_keys(rows: list[dict]) -> list[str]:
+    """Keys whose type slug is NOT a real Medusa stone type -- a type-less / mis-keyed variety
+    (e.g. `slab_alpine_luxe`, minted before the type-less-mint guard existed: gen_key drops an empty
+    type, so the branch is followed straight by the name). Like a duplicate, this is invisible to the
+    fixed-point check (a distinct malformed Key is a stable fixed point), so it is asserted separately --
+    the base must carry only properly-typed Keys, or a cold start ships type-less varieties to Medusa."""
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import load_attributes, type_slug_from_key
+    valid = {proj.norm(t) for t in load_attributes().canonical_names("type")}
+    return sorted(r["Key"] for r in rows
+                  if (ts := proj.norm(type_slug_from_key(r.get("Key") or ""))) and ts not in valid)
+
+
 def verify(base_path: Path = BASE) -> dict:
     """Rebuild 1_variants_full from the committed base and assert (1) it projects back to the SAME base --
     the fixed-point property that makes repeated cold starts reproducible -- and (2) no (branch,type,Name)
@@ -65,12 +78,14 @@ def verify(base_path: Path = BASE) -> dict:
     first = next((i for i, (b, f) in enumerate(zip(base, full)) if b != f), None)
     fixed = base == full
     dups = _duplicate_varieties(base)          # a duplicate variety is invisible to the fixed-point check
+    malformed = _malformed_type_keys(base)     # type-less / mis-keyed varieties, also fixed-point-invisible
     stats = {"fixed_point": fixed, "base_rows": len(base), "full_rows": len(full),
-             "first_diff_row": first, "duplicate_varieties": len(dups), "clean": fixed and not dups}
+             "first_diff_row": first, "duplicate_varieties": len(dups),
+             "malformed_type_keys": len(malformed), "clean": fixed and not dups and not malformed}
     (log.info if stats["clean"] else log.error)(
-        "seed is a fixed point with no duplicate varieties" if stats["clean"]
-        else "seed FAILED: not a fixed point and/or duplicate varieties present",
-        extra={"extra_fields": {**stats, "dups": dups[:20]}})
+        "seed is a fixed point with no duplicate or type-less varieties" if stats["clean"]
+        else "seed FAILED: not a fixed point and/or duplicate/type-less varieties present",
+        extra={"extra_fields": {**stats, "dups": dups[:20], "malformed": malformed[:20]}})
     return stats
 
 
