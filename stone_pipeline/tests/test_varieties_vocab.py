@@ -58,6 +58,22 @@ def test_exists_uses_the_same_ledger_source(ledger_with_varieties):
 def test_q_and_limit_narrow_the_result(ledger_with_varieties):
     assert [v["name"] for v in varieties.list_all(q="nero")] == ["Nero Assoluto"]
     assert varieties.list_all(q="zzz") == []
+
+
+def test_multi_type_name_keeps_both_types_as_distinct_alias_targets(tmp_path, monkeypatch):
+    # A legitimately multi-type name ('Coffee' = Marble AND Onyx) must appear as TWO alias targets, not one
+    # -- else the alias dropdown hides one stone (dedup on (name,type), not name). Same (name,type) across
+    # branches still collapses to one.
+    p = tmp_path / "dev.ledger"
+    _seed(p, [
+        ("slab_marble_coffee_0001", "Coffee", "Marble"),
+        ("tile_marble_coffee_0002", "Coffee", "Marble"),   # same name+type, other branch -> ONE target
+        ("slab_onyx_coffee_0003", "Coffee", "Onyx"),        # same name, DIFFERENT type -> a SECOND target
+    ])
+    monkeypatch.setattr(writethrough, "ledger_path", lambda: p)
+    monkeypatch.setattr("stone_pipeline.stages.decisions.load_retired", lambda: set())
+    pairs = sorted((v["name"], v["stone_type"]) for v in varieties.list_all(q="coffee"))
+    assert pairs == [("Coffee", "Marble"), ("Coffee", "Onyx")]
     assert len(varieties.list_all(limit=1)) == 1
     # a % in the search term is a literal, not a wildcard
     assert varieties.list_all(q="100%") == []
