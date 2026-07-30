@@ -60,6 +60,12 @@ def load_alias_decisions() -> dict[str, str]:
     return decisions_store.alias_map()
 
 
+def load_alias_types() -> dict[str, str]:
+    """norm(spelling) -> the alias TARGET's stone type, where the operator chose one. Disambiguates a
+    multi-type target name so the spelling aliases into the right stone (paired with load_alias_decisions)."""
+    return decisions_store.alias_type_map()
+
+
 def load_rejected() -> set[str]:
     """Varieties the operator said 'no' to before -- never propose them again."""
     return decisions_store.rejected_names()

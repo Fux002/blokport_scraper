@@ -57,6 +57,19 @@ def test_mint_reject_alias_actions_map_correctly():
     assert decisions.load_alias_decisions() == {"bianco spelling": "Bianco Carrara"}
 
 
+def test_alias_carries_the_target_type_to_disambiguate_a_multitype_name():
+    # A target NAME can exist under several stone types (Black Sea = andesite + soapstone), so an alias
+    # must carry WHICH type to route into, else it cannot resolve. mint keeps seed_type as the new type;
+    # alias keeps seed_type as the TARGET type; reject keeps none.
+    ds.set_variety_decision("Black Turtle", "alias", alias_of="Black Sea", seed_type="Andesite")
+    ds.set_variety_decision("Karur White", "mint", seed_type="Granite")
+    ds.set_variety_decision("Junk Code", "reject", seed_type="Granite")
+    assert decisions.load_alias_decisions() == {"black turtle": "Black Sea"}
+    assert decisions.load_alias_types() == {"black turtle": "Andesite"}     # the target type is kept
+    assert ds.variety_actions()["karur white"]["seed_type"] == "Granite"    # mint still carries its type
+    assert ds.variety_actions()["junk code"]["seed_type"] is None           # reject carries none
+
+
 def test_re_deciding_a_variety_overwrites():
     ds.set_variety_decision("Flip Stone", "mint")
     assert decisions.load_confirm_decisions() == {"flip stone": "yes"}
