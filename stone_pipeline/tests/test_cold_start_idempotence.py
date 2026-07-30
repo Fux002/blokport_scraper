@@ -46,7 +46,11 @@ def test_committed_base_is_already_a_fixed_point():
     # Every Key must carry a real stone type. A type-less / mis-keyed variety (slab_alpine_luxe, minted
     # before the type-less-mint guard) is fixed-point-invisible too, and ships type-less to Medusa.
     assert stats["malformed_type_keys"] == 0, f"committed base has {stats['malformed_type_keys']} type-less/mis-keyed varieties"
-    assert stats["clean"], "committed seed is not clean (fixed_point / duplicate / type-less check failed)"
+    # A MIS-TYPED variety (name's stone-type word contradicts the Key's type, e.g. 'Agata White' keyed
+    # semi_precious_stone) is a data error the pipeline deletes and the emit drops. Left in the base it
+    # survives in one category and vanishes from another (uneven Medusa cleaning), breaking uniformity.
+    assert stats["mistyped_variants"] == 0, f"committed base has {stats['mistyped_variants']} mistyped varieties"
+    assert stats["clean"], "committed seed is not clean (fixed_point / duplicate / type-less / mistyped check failed)"
 
 
 def test_malformed_type_keys_flags_type_less_keys():

@@ -207,9 +207,15 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     retired = decisions.load_retired()
     if retired:
         rows = [r for r in rows if r["Key"] not in retired]
-    # keep code-like names (e.g. a stale 'Z Astoria' still in the export) OUT of the upload
-    # file -- only clean variety names ever reach Medusa. Their varieties are to be deleted there.
-    rows = [r for r in rows if not looks_like_artifact(r["Name"])]
+    # Only clean, correctly-typed variety names reach Medusa. Drop the two junk classes the rest of the
+    # pipeline already excludes from matching and lists for deletion (loaders/catalog): code-like names
+    # (a stale 'Z Astoria') and MIS-TYPED variants whose name carries a stone-type word that disagrees
+    # with the Key's type ('Agata White' -- an agate -- keyed as semi_precious_stone). The same rule
+    # applies here so the union-fill can never carry a mistyped variety into another category: one notion
+    # of "a real variety" everywhere, so a cold start stays uniform (the correctly-typed variety survives).
+    from stone_pipeline.reference import loaders
+    rows = [r for r in rows
+            if not looks_like_artifact(r["Name"]) and not loaders.is_mistyped_variant(r["Key"], r["Name"])]
     rows = _consolidate(rows)                                 # 'Rosal C/T/B' -> one 'Rosal' + aliases
 
     from stone_pipeline.stages.image_prompts import product_backed_keys
@@ -241,7 +247,6 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     # no matter how it entered (dirty base, stale live-export union, a re-key old side still in Medusa).
     # Keyed on (branch, type, name) so genuine multi-type homonyms (Aqua Blue as gneiss/granite/...) are
     # preserved. This is the one place the pipeline enforces variety identity.
-    from stone_pipeline.reference import loaders
     rows = loaders.collapse_to_survivors(rows)
 
     path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"

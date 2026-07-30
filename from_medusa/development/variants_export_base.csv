@@ -24698,19 +24698,7 @@ tile_agate_agata_natural_768269e3-68ef-5e9c-adc4-6810db828766,Agata Natural,,,0.
 tile_agate_agata_tropicalia_311b9a19-e88c-5c7c-aa63-4ccfbfe51838,Agata Tropicalia,,,0.0014348
 tile_agate_agata_white_cbe65dfe-0006-54ae-93a5-3860c4ebd22f,Agata White,,,0.0014348
 slab_marble_white_super_es_766b5d96-2853-4680-9f62-a28d65f7d319,White Super Es,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_marble_white_super_es_766b5d96-2853-4680-9f62-a28d65f7d319.png,Branco White Super Es,0.0017
-slab_semi_precious_stone_agata_brown_1e3d5381-6a9c-4fd2-bd4a-0f0f8c86a1e0,Agata Brown,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_semi_precious_stone_agata_brown_1e3d5381-6a9c-4fd2-bd4a-0f0f8c86a1e0.png,Marrom Agata|Agata Marrom|Agate Brown,0.0017
-slab_semi_precious_stone_agata_natural_fa15e553-4e45-4a8c-8e3d-7f60ec64dbc0,Agata Natural,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_semi_precious_stone_agata_natural_fa15e553-4e45-4a8c-8e3d-7f60ec64dbc0.png,Branco Agata|Agate Natural|Agate Natural Classic,0.0017
-slab_semi_precious_stone_agata_colors_73d9b64f-0fe5-4f00-af96-233eb548cb97,Agata Colors,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_semi_precious_stone_agata_colors_73d9b64f-0fe5-4f00-af96-233eb548cb97.png,Branco Agata Colors|Agate Colors,0.0017
-slab_semi_precious_stone_agata_tropicalia_e9f74efb-514b-4bae-8b19-066e75b0527d,Agata Tropicalia,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_semi_precious_stone_agata_tropicalia_e9f74efb-514b-4bae-8b19-066e75b0527d.png,Agata Tropi|Agate Tropicalia,0.0017
-slab_semi_precious_stone_agata_white_852991c5-58ff-4d18-868e-31f30abbca5d,Agata White,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_semi_precious_stone_agata_white_852991c5-58ff-4d18-868e-31f30abbca5d.png,Branco Agata|Agate White,0.0017
-slab_semi_precious_stone_agata_blue_spiral_f5748e14-820f-4f0f-a9b1-f62dfcf551b1,Agata Blue Spiral,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_semi_precious_stone_agata_blue_spiral_f5748e14-820f-4f0f-a9b1-f62dfcf551b1.png,Azul Agata Spiral|Agata Spiral|Agate Blue Spiral,0.0017
 tile_marble_white_super_es_9c6525b9-8618-5ca3-9414-69fdc8e9cbad,White Super Es,,Branco White Super Es,0.0014348
-tile_semi_precious_stone_agata_brown_6bbfc923-e399-58e5-83d6-9fb52c36d4b4,Agata Brown,,Marrom Agata|Agata Marrom|Agate Brown,0.0014348
-tile_semi_precious_stone_agata_blue_spiral_0fd17070-0003-5a30-8286-241988bf08f4,Agata Blue Spiral,,Azul Agata Spiral|Agata Spiral|Agate Blue Spiral,0.0014348
-tile_semi_precious_stone_agata_colors_36237841-9e18-52e4-a9ed-d19851aca9fc,Agata Colors,,Branco Agata Colors|Agate Colors,0.0014348
-tile_semi_precious_stone_agata_tropicalia_311b9a19-e88c-5c7c-aa63-4ccfbfe51838,Agata Tropicalia,,Agata Tropi|Agate Tropicalia,0.0014348
-tile_semi_precious_stone_agata_natural_768269e3-68ef-5e9c-adc4-6810db828766,Agata Natural,,Branco Agata|Agate Natural|Agate Natural Classic,0.0014348
-tile_semi_precious_stone_agata_white_cbe65dfe-0006-54ae-93a5-3860c4ebd22f,Agata White,,Branco Agata|Agate White,0.0014348
 tile_granite_cinza_corumba_71907c87-7f63-59ea-a894-5a189bc82216,Cinza Corumba,,Cinza Corumba Granite|Brazil Grey Granite|Brazil Grey,0.0014348
 tile_granite_sao_gabriel_4f65b224-40a7-5d1a-b851-05b03d718fc0,Sao Gabriel,,Sao Gabriel Granite,0.0014348
 tile_marble_super_white_bea4f3ba-a202-540e-9922-5722e8124efa,Super White,,Super White Marble|Brazil Arabescato Marble|Brazil Arabescato|Yudu Hui|Brazilian White|White Super|White Super Es,0.0014348
@@ -36519,12 +36507,6 @@ block_agate_agata_natural_37bb1729-deeb-5bc8-bf5f-e9bdf81ee8ab,Agata Natural,,,0
 block_agate_agata_tropicalia_98a240d2-0366-53d7-90cc-5eccaf508f2c,Agata Tropicalia,,,0.0014348
 block_agate_agata_white_2583c363-baf1-5164-b55d-ddc3761c900e,Agata White,,,0.0014348
 block_marble_white_super_es_6dbbad5f-6b93-5560-b848-8cc837459096,White Super Es,,Branco White Super Es,0.0014348
-block_semi_precious_stone_agata_brown_2dc4832d-1041-550d-afeb-1c6d3ad731a4,Agata Brown,,Marrom Agata|Agata Marrom|Agate Brown,0.0014348
-block_semi_precious_stone_agata_natural_37bb1729-deeb-5bc8-bf5f-e9bdf81ee8ab,Agata Natural,,Branco Agata|Agate Natural|Agate Natural Classic,0.0014348
-block_semi_precious_stone_agata_colors_dcdcd7c0-e1f9-5019-a5c4-0a6444db6de5,Agata Colors,,Branco Agata Colors|Agate Colors,0.0014348
-block_semi_precious_stone_agata_tropicalia_98a240d2-0366-53d7-90cc-5eccaf508f2c,Agata Tropicalia,,Agata Tropi|Agate Tropicalia,0.0014348
-block_semi_precious_stone_agata_white_2583c363-baf1-5164-b55d-ddc3761c900e,Agata White,,Branco Agata|Agate White,0.0014348
-block_semi_precious_stone_agata_blue_spiral_629082a1-e33d-565e-8417-ec1a7964e512,Agata Blue Spiral,,Azul Agata Spiral|Agata Spiral|Agate Blue Spiral,0.0014348
 block_conglomerate_red_conglomerate_14d82ebf-dff1-56ee-ab49-43d9f8bdd6d0,Red Conglomerate,,,0.0014348
 block_dolomite_wonderful_black_1ccbb1b1-e485-5f96-bbf1-b1e321107913,Wonderful Black,,,0.0014348
 block_marble_white_super_b8aaaa69-2922-5200-9e69-8e3ce688de0e,White Super,,White Super Es,0.0014348

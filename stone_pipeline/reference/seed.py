@@ -88,6 +88,16 @@ def _non_uniform_categories(rows: list[dict]) -> list[str]:
     return sorted(c for c, s in by_cat.items() if s != union)
 
 
+def _mistyped_variants(rows: list[dict]) -> list[str]:
+    """Keys whose NAME carries a stone-type word that contradicts the Key's type (loaders.
+    is_mistyped_variant) -- e.g. 'Agata White' (an agate) keyed as semi_precious_stone. The pipeline
+    treats these as errors (excluded from matching, listed for deletion) and the emit drops them, so the
+    committed base must carry none. Left in, a mistyped variety survives in whichever category has not yet
+    been cleaned in Medusa and vanishes from the rest, breaking uniformity."""
+    from stone_pipeline.reference.loaders import is_mistyped_variant
+    return sorted(r["Key"] for r in rows if is_mistyped_variant(r.get("Key") or "", r.get("Name") or ""))
+
+
 def verify(base_path: Path = BASE) -> dict:
     """Rebuild 1_variants_full from the committed base and assert (1) it projects back to the SAME base --
     the fixed-point property that makes repeated cold starts reproducible -- and (2) no (branch,type,Name)
@@ -104,14 +114,16 @@ def verify(base_path: Path = BASE) -> dict:
     dups = _duplicate_varieties(base)          # a duplicate variety is invisible to the fixed-point check
     malformed = _malformed_type_keys(base)     # type-less / mis-keyed varieties, also fixed-point-invisible
     nonuniform = _non_uniform_categories(base)  # every category must carry the full variety union
+    mistyped = _mistyped_variants(base)         # name's type word contradicts the Key type; emit drops these
     stats = {"fixed_point": fixed, "base_rows": len(base), "full_rows": len(full),
              "first_diff_row": first, "duplicate_varieties": len(dups),
              "malformed_type_keys": len(malformed), "non_uniform_categories": nonuniform,
-             "clean": fixed and not dups and not malformed and not nonuniform}
+             "mistyped_variants": len(mistyped),
+             "clean": fixed and not dups and not malformed and not nonuniform and not mistyped}
     (log.info if stats["clean"] else log.error)(
-        "seed is a fixed point: no duplicate/type-less varieties, categories uniform" if stats["clean"]
-        else "seed FAILED: not a fixed point and/or duplicate/type-less/non-uniform categories",
-        extra={"extra_fields": {**stats, "dups": dups[:20], "malformed": malformed[:20]}})
+        "seed is a fixed point: no duplicate/type-less/mistyped varieties, categories uniform" if stats["clean"]
+        else "seed FAILED: not a fixed point and/or duplicate/type-less/mistyped/non-uniform categories",
+        extra={"extra_fields": {**stats, "dups": dups[:20], "malformed": malformed[:20], "mistyped": mistyped[:20]}})
     return stats
 
 
