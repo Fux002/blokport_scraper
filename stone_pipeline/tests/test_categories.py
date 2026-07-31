@@ -137,6 +137,49 @@ def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
         settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF = saved
 
 
+def test_uniform_fill_follows_the_runtime_registry_not_the_frozen_tuple(monkeypatch):
+    # The slab-only-mint bug: emit's union-fill gated the fan-out on the FROZEN import-time CATEGORIES
+    # tuple, which refresh_category_pcats never rebuilds. So when block/tile pcats were absent at import,
+    # a genuinely-new variety fanned to slab ONLY, even after the registry was refreshed -- and the fill,
+    # meant to be the safety net, could not heal it. The fill must read the runtime registry
+    # (active_categories) so it agrees with curate.active_branches().
+    from dataclasses import replace
+    from stone_pipeline.config import settings
+    from stone_pipeline.stages import emit_catalog
+
+    cats = list(settings._BY_NAME.values())
+    saved = settings._BY_NAME
+    # runtime registry: ALL categories active (post-refresh state); frozen tuple: block/tile still inactive
+    active = {c.name: replace(c, pcat_id=f"pcat_{c.name}") for c in cats}
+    frozen_stale = tuple(replace(c, pcat_id=("pcat_slab" if c.name == "slab" else "")) for c in cats)
+    monkeypatch.setattr(settings, "_BY_NAME", active)
+    monkeypatch.setattr(emit_catalog, "CATEGORIES", frozen_stale)  # the never-rebuilt import snapshot
+
+    slab_only = {"slab_granite_novum_abc12345-0000-5000-8000-000000000000":
+                 {"Key": "slab_granite_novum_abc12345-0000-5000-8000-000000000000", "Name": "Novum",
+                  "Aliases": "", "Image": "", "Volume per kg (m³/kg)": ""}}
+    filled = emit_catalog._uniform_rows(slab_only)
+    branches = {r["Key"].split("_", 1)[0] for r in filled}
+    settings._BY_NAME = saved
+    assert branches == {"block", "tile"}, f"union-fill must fan to the runtime-active categories, got {branches}"
+
+
+def test_load_all_refreshes_the_category_registry(monkeypatch):
+    # Every pipeline stage funnels through load_all with the export on disk, so refreshing the pcat
+    # registry there makes EVERY entrypoint (not just produce) reflect the live pcats -- a non-produce
+    # republish that never fetched must not run on the stale import snapshot. Assert load_all calls the
+    # refresh FIRST, before any heavy load that could fail without full fixtures.
+    from stone_pipeline.config import settings
+    from stone_pipeline.reference import loaders
+    called = []
+    monkeypatch.setattr(settings, "refresh_category_pcats", lambda: called.append(True))
+    try:
+        loaders.load_all()
+    except Exception:
+        pass  # may fail later without the export fixture; we only assert the refresh ran first
+    assert called == [True]
+
+
 def test_owner_ids_are_env_vars_with_prod_guard(monkeypatch):
     # company + sales-channel are operational env vars, never hardcoded: an explicit env var wins;
     # dev falls back to a local default; prod with no env var stays "" (never a dev id).

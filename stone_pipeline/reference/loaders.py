@@ -779,9 +779,16 @@ def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
 
 def load_all() -> ReferenceData:
     from stone_pipeline.state.overrides import load_overrides
-    from stone_pipeline.config import decisions_store
+    from stone_pipeline.config import decisions_store, settings
 
     paths = SETTINGS.paths
+    # Realign the category registry with the export NOW on disk, BEFORE any stage reads category
+    # activation. The pcats are read once at import (bootstrap), which for a run whose export landed after
+    # import (a cold start, or any non-produce entrypoint like catalog/build/republish that never fetched)
+    # leaves block/tile inactive on the frozen snapshot -- silently disabling new-variety fan-out into
+    # those categories. load_all is the single point every pipeline stage passes through with the export on
+    # disk, so refreshing here makes EVERY path (not just produce) reflect the live pcats. Idempotent.
+    settings.refresh_category_pcats()
     # The effective backbone = the committed seed grown by the operator-approved leaf overlay (config.db).
     # The seed file is never mutated; the overlay is applied in memory, here, in the one place ref is built.
     backbone = load_backbone()
