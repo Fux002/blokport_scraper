@@ -452,7 +452,12 @@ def run_source(
     # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
     if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
         from stone_pipeline.ledger import writethrough
-        writethrough.record_source(validation.emit, tuple(discontinued), source_cfg)
+        if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg):
+            # the ledger is the live sync source; a failed write-through means Medusa will not receive this
+            # source until a successful re-run. Surface it LOUDLY on the run (do not report a clean success).
+            manifest.write_backs.append(f"LEDGER_WRITETHROUGH_FAILED:{source_cfg.source_code}")
+            run_log.error("ledger write-through failed; Medusa will not receive this source until a "
+                          "successful re-run", extra={"extra_fields": {"source": source_cfg.source_code}})
 
     written = writeback.flush(writeback_path)
     if written:

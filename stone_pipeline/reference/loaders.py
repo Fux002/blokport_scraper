@@ -764,10 +764,17 @@ def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
         + [("finish", pack.block_finish), ("quality", pack.last_resort_quality),
            ("color", pack.fallback_color)]
         + [("color", c) for c in CLASSIFIABLE_COLORS])
+    # every SYNONYM's canonical target must also be a real Medusa value: a synonym 'Grigio'->'Gray' while
+    # attributes.csv has only 'Grey' otherwise resolves to a null id PER PRODUCT (a quiet per-row reject
+    # for every product routing through it) instead of one loud config error here at load. Skip the 'none'
+    # sentinel (a deliberate resolve-to-no-id). Symmetric with the pack-default checks above.
+    for vocab in pack.attributes:
+        checks += [(vocab, c) for c in load_synonyms(vocab).values()
+                   if c and c.strip().casefold() != "none"]
     missing = sorted({(v, val) for v, val in checks if val and not ref.attributes.resolve_id(v, val)})
     if missing:
-        raise ValueError("domain pack default values absent from attributes.csv (a value Medusa does not "
-                         "have): " + ", ".join(f"{v}={val!r}" for v, val in missing))
+        raise ValueError("pack default OR synonym-target values absent from attributes.csv (a value Medusa "
+                         "does not have): " + ", ".join(f"{v}={val!r}" for v, val in missing))
 
 
 def load_all() -> ReferenceData:
