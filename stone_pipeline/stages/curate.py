@@ -439,6 +439,16 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                                      (row.quality_name or last_resort_quality).strip() or last_resort_quality,
                                      title_case(_attr_surface(row, "finish")), gap, backed, _review_evidence(row)))
 
+    def _named_with_types(name: str) -> str:
+        """'Name (Type1, Type2)' for the review's nearest-existing column: an existing variety name
+        annotated with the stone type(s) it exists under, so the operator sees which type(s) to alias
+        into. Bare name when it exists under none / is unknown here."""
+        if not name:
+            return ""
+        types = sorted({o[1] for o in existing_surface.get(proj.norm(name), set())})
+        return (f"{title_case(name)} ({_human_join([title_case(t) for t in types])})" if types
+                else title_case(name))
+
     def _hold_for_type(clean: str, row, gap, cand_types: list[str]) -> None:
         """A type-less scrape whose name is a REAL variety under SEVERAL stone types: hold it for the human
         to assign the correct type, surfacing the candidate types -- never a typeless clone onto an
@@ -449,7 +459,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             "reason": f"'{title_case(clean)}' already exists as {types_txt}. Pick one of those types to add "
                       f"this to the existing variety, or choose a different type to create a new one.",
             "stone_type": "", "color": title_case(_attr_surface(row, "color")),
-            "nearest_existing": " | ".join(title_case(t) for t in cand_types),
+            "nearest_existing": _named_with_types(clean),
             "score": "", "model_prob": "", **_review_evidence(row)})
 
     def _apply_operator_alias(clean: str, name: str, row, stone_type: str) -> bool:
@@ -477,7 +487,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         pending_confirm.append({
             "confirm": "", "variant": clean, "reason": reason,
             "stone_type": "", "color": "",
-            "nearest_existing": " | ".join(title_case(t) for t in owner_types),
+            "nearest_existing": _named_with_types(alias_to),
             "score": "", "model_prob": "", **_review_evidence(row)})
         return True
 
@@ -536,7 +546,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             if dec != "yes":                           # blank -> hold out of the upload and ask
                 pending_confirm.append({"confirm": "", "variant": clean,
                                         "reason": _code_reason(code_why, base),
-                                        "stone_type": stone_type, "color": "", "nearest_existing": base,
+                                        "stone_type": stone_type, "color": "", "nearest_existing": _named_with_types(base),
                                         "score": "", "model_prob": "", **_review_evidence(row)})
                 continue
             # dec == "yes" -> the human confirmed it IS a real variety -> fall through to mint
@@ -606,7 +616,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                                       f"the same stone, alias it to '{title_case(nearest)}'{pick_type}. Mint "
                                       f"as a new variety only if it is genuinely different.",
                             "stone_type": stone_type, "color": gap.suggested_color or "",
-                            "nearest_existing": nearest, "score": gap.nearest_score or "",
+                            "nearest_existing": _named_with_types(nearest), "score": gap.nearest_score or "",
                             "model_prob": round(d.prob, 2), **_review_evidence(row)})
                         continue
                     # dec == "yes" -> the human confirmed it IS a new variety -> fall through to mint
@@ -718,7 +728,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                                     "reason": "No stone type detected. Assign the correct type to mint it. "
                                               "A variety cannot exist without a type.",
                                     "stone_type": "", "color": title_case(obs_color or ""),
-                                    "nearest_existing": (gap.nearest_existing or "") if gap else "",
+                                    "nearest_existing": _named_with_types(gap.nearest_existing) if gap else "",
                                     "score": "", "model_prob": "", **evidence})
             continue
         _u = obs_union.get((proj.norm(stone_type), proj.norm(title)),
