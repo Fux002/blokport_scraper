@@ -60,10 +60,11 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
 def record_source(emit_rows: Sequence[CanonicalRow],
                   discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *,
                   path: str | Path | None = None) -> None:
-    """Shadow-record one source's emitted products, their stock, and the discontinued
-    delist into the ledger. No-op when the flag is off; never raises (a shadow failure
-    must not fail a run). Recorded the same in full and inventory-only runs: the emitted
-    rows are valid products in both.
+    """Record one source's emitted products, their stock, and the discontinued delist into the ledger.
+    No-op (returns True) when the flag is off. Never RAISES, but returns False if the write failed so the
+    caller can surface it -- the ledger is the live sync source, so a swallowed failure would silently drop
+    a catalog/stock change. Recorded the same in full and inventory-only runs: the emitted rows are valid
+    products in both.
 
     Inventory is seeded from the FULL emit set (every product's current stock), not a
     pre-computed delta. The ledger tracks `last_synced_qty` per sku, so it derives the
@@ -71,7 +72,7 @@ def record_source(emit_rows: Sequence[CanonicalRow],
     is what makes a first/baseline-less load (no products_export) carry initial stock -- the
     old delta-only feed left the lane empty there, so Medusa loaded every product at qty 0."""
     if not enabled():
-        return
+        return True
     try:
         with open_ledger(path) as ledger:
             n_products = populate.populate_products(ledger, emit_rows, cfg)
@@ -80,9 +81,15 @@ def record_source(emit_rows: Sequence[CanonicalRow],
         log.info("ledger write-through recorded source", extra={"extra_fields": {
             "source": cfg.source_code, "products": n_products,
             "inventory": n_stock, "discontinued": n_gone}})
+        return True
     except Exception:
-        log.exception("ledger write-through failed (shadow only; run unaffected)",
-                      extra={"extra_fields": {"source": cfg.source_code}})
+        # NOT "shadow only" anymore: the ledger IS the live sync source (Medusa pulls it). A failure here
+        # means this source's products/stock/delist did NOT reach the ledger, so Medusa never gets them --
+        # the run still finishes (the CSVs are written) but the caller MUST surface it, not report a clean
+        # success, or a stock/catalog change silently fails to propagate until a later run happens to work.
+        log.exception("ledger write-through FAILED: source did not reach the ledger; Medusa will not "
+                      "receive it until a successful re-run", extra={"extra_fields": {"source": cfg.source_code}})
+        return False
 
 
 def record_catalog(path: str | Path | None = None) -> None:
