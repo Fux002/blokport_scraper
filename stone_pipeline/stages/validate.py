@@ -75,6 +75,13 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     unavailable = {f.field for f in row.review_flags if f.code == FlagCode.dimension_unavailable}
     if unavailable:
         row.add_reject(RejectReason(rule="dimension_unavailable", detail="|".join(sorted(unavailable))))
+    # A genuinely-absent dimension was filled from the pack DEFAULT in derive (flagged dimension_defaulted).
+    # A fabricated size feeds area/volume pricing + freight, so it must NOT ship: HOLD it for review like an
+    # unavailable one (the operator supplies a real size before the product can be sold). No guessed freight
+    # basis reaches a live order.
+    defaulted = {f.field for f in row.review_flags if f.code == FlagCode.dimension_defaulted}
+    if defaulted:
+        row.add_reject(RejectReason(rule="dimension_defaulted", detail="|".join(sorted(defaulted))))
     # Dimensions are REQUIRED: a genuinely-absent one was defaulted in derive (flagged), so a size that is
     # still <= 0 / None here is a data error -- reject it (a wrong real size breaks area/volume pricing and
     # freight). (`None or 0` -> 0 <= 0, so a missing size rejects too.) Skip a fetch-failed dim (held above).

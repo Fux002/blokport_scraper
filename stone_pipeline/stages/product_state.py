@@ -21,7 +21,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.numbers import parse_number
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 
 log = logfmt.get_logger("product_state")
 
@@ -69,15 +69,26 @@ def sku_for(row: CanonicalRow, cfg: SourceConfig) -> str:
 
 
 def inventory_for(row: CanonicalRow) -> str:
+    """The product's stock quantity. A positive parseable count wins ('1,000'->1000, '1.0'->1,
+    '12 pcs'->12). With NO positive signal the product is OUT OF STOCK -> '0', never a guessed '1':
+    stock NEVER gates whether a product is prepared and published (a 0-stock item still ships and
+    becomes sellable when a later scrape restocks it -- availability is the inventory step's job).
+    A literal 0 is trusted; an UNPARSEABLE stock is surfaced via a review flag in classify() rather
+    than silently defaulted, so a supplier format change can never masquerade as 'available'."""
     for candidate in (row.raw_slab_count, row.bundle_size, row.raw_inventory_quantity):
         text = str(candidate).strip() if candidate is not None else ""
-        # parse_number (the shared numeric front door) coerces messy stock that a bare .isdigit()
-        # silently dropped to the '1' default: '1,000' -> 1000, '1.0' -> 1, '12 pcs' -> 12. require
-        # > 0: a literal 0 (or unparseable) is not a real quantity -> next candidate / in-stock '1'.
         n = parse_number(text)
         if n is not None and int(n) > 0:
             return str(int(n))
-    return "1"
+    return "0"
+
+
+def _stock_is_unparseable(row: CanonicalRow) -> bool:
+    """True when a stock field was present but no candidate parsed to a number -- a supplier format
+    change we should surface (flagged in classify), distinct from a genuine 0 / absent field."""
+    present = [str(c).strip() for c in (row.raw_slab_count, row.bundle_size, row.raw_inventory_quantity)
+               if c is not None and str(c).strip()]
+    return bool(present) and all(parse_number(t) is None for t in present)
 
 
 @dataclass
@@ -91,6 +102,9 @@ def classify(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) 
     """Tag each row new/existing by SKU; for existing, flag inventory change."""
     stats = ClassifyStats()
     for row in rows:
+        if _stock_is_unparseable(row):
+            row.add_flag(ReviewFlag(field="inventory", code=FlagCode.stock_unparseable,
+                                    detail="stock field present but unparseable; shipped out-of-stock (0)"))
         sku = sku_for(row, cfg)
         entry = known.by_sku.get(sku)
         if entry is None:
@@ -102,7 +116,7 @@ def classify(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) 
             # Compare like-for-like: new_inv is normalized (inventory_for -> str(int(...))), so the export's
             # raw value must be normalized the SAME way or messy formatting ('10.0', '1,000', ' 10 ') reads
             # as a phantom change every run -- emitting spurious inventory deltas and breaking byte-identical
-            # re-runs. A real 0 is preserved (differs from inventory_for's in-stock floor of 1).
+            # re-runs. A real 0 is preserved (inventory_for floors to 0, not 1: no positive stock = out of stock).
             old_raw = (entry.get("inventory") or "").strip()
             _old_n = parse_number(old_raw) if old_raw else None
             old_inv = str(int(_old_n)) if _old_n is not None else old_raw
