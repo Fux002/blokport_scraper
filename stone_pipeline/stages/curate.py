@@ -356,6 +356,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         clean = _clean_variety(name, stone_type)
         if not stone_type:
             stone_type = seed_types.get(proj.norm(clean), "")
+            # the operator seed_type must ALSO be canonical -- the :4200 API validates it, but curate does
+            # not trust that boundary: a non-canonical seed value is dropped so the variety stays type-less
+            # (held) rather than minting a garbage-slug Key. Same rule as the scraped-type gate above.
+            if stone_type and proj.norm(stone_type) not in valid_type_norms:
+                stone_type = ""
         return name, stone_type, clean
 
     # alias_new / review_candidates now key on the (name, TYPE) OWNER, so a spelling is attached to the

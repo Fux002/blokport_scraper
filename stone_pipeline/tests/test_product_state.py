@@ -15,13 +15,18 @@ def _row(surrogate, slab_count="5"):
 
 
 def test_inventory_for_coerces_messy_stock_strings():
-    # regression: '1,000' / '1.0' / '12 pcs' must NOT silently floor to the in-stock '1' default;
-    # the shared parse_number coerces them. A literal 0 (or unparseable) still floors to 1 (in stock).
+    # regression: '1,000' / '1.0' / '12 pcs' must NOT silently floor to '1'; parse_number coerces them.
+    # No positive stock signal => OUT OF STOCK ('0'), NOT a guessed '1' (stock never gates publishing; a
+    # 0-stock product still ships and sells when restocked). A literal 0 is trusted; an unparseable stock
+    # also reads 0 but is flagged separately (see _stock_is_unparseable).
     assert product_state.inventory_for(_row("a", slab_count="1,000")) == "1000"
     assert product_state.inventory_for(_row("a", slab_count="1.0")) == "1"
     assert product_state.inventory_for(_row("a", slab_count="12 pcs")) == "12"
     assert product_state.inventory_for(_row("a", slab_count="7")) == "7"
-    assert product_state.inventory_for(_row("a", slab_count="0")) == "1"    # 0 is not a real qty
+    assert product_state.inventory_for(_row("a", slab_count="0")) == "0"      # real 0 -> out of stock
+    assert product_state.inventory_for(_row("a", slab_count="junk")) == "0"   # unparseable -> out of stock
+    assert product_state._stock_is_unparseable(_row("a", slab_count="junk"))  # ...and flagged
+    assert not product_state._stock_is_unparseable(_row("a", slab_count="0")) # a real 0 is not "unparseable"
 
 
 def test_emit_num_never_scientific_or_truncated():

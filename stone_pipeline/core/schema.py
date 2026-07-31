@@ -26,6 +26,7 @@ class FlagCode(str, Enum):
     bundle_default = "bundle_default"
     bundle_estimated = "bundle_estimated"
     bundle_ratio_noninteger = "bundle_ratio_noninteger"
+    stock_unparseable = "stock_unparseable"        # stock field present but unparseable -> shipped out-of-stock (0)
     origin_unresolved = "origin_unresolved"
     origin_supplier_default = "origin_supplier_default"
     origin_multi_home_absent = "origin_multi_home_absent"
