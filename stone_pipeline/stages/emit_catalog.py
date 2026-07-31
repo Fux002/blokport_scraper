@@ -228,12 +228,26 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
             order.append(r["Key"])                            # genuinely new variant
     filled = [m for m in _uniform_rows(by_key) if m["Key"] not in by_key]  # union-fill missing categories
     rows = [by_key[k] for k in order] + filled
+    # DIAGNOSTIC (pure logging): snapshot each variety's per-category coverage after every filter, so a
+    # slab-only outcome names the EXACT stage that removed its other categories (input drift vs a specific
+    # filter) instead of us inferring it. Identity = the branch-independent Key core (type+name slug).
+    _stages: list[tuple[str, set]] = []
+    def _snap(label: str) -> None:
+        s = set()
+        for r in rows:
+            head = r["Key"].rsplit("_", 1)[0]
+            if "_" in head:
+                b, core = head.split("_", 1)
+                s.add((b, core))
+        _stages.append((label, s))
+    _snap("assembled")
     # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
     # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
     from stone_pipeline.stages import decisions
     retired = decisions.load_retired()
     if retired:
         rows = [r for r in rows if r["Key"] not in retired]
+    _snap("retired")
     # Only clean, correctly-typed variety names reach Medusa. Drop the two junk classes the rest of the
     # pipeline already excludes from matching and lists for deletion (loaders/catalog): code-like names
     # (a stale 'Z Astoria') and MIS-TYPED variants whose name carries a stone-type word that disagrees
@@ -243,7 +257,9 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     from stone_pipeline.reference import loaders
     rows = [r for r in rows
             if not looks_like_artifact(r["Name"]) and not loaders.is_mistyped_variant(r["Key"], r["Name"])]
+    _snap("artifact_mistyped")
     rows = _consolidate(rows)                                 # 'Rosal C/T/B' -> one 'Rosal' + aliases
+    _snap("consolidate")
 
     from stone_pipeline.stages.image_prompts import product_backed_keys
     backed = product_backed_keys()                            # variants a product references
@@ -275,6 +291,30 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     # Keyed on (branch, type, name) so genuine multi-type homonyms (Aqua Blue as gneiss/granite/...) are
     # preserved. This is the one place the pipeline enforces variety identity.
     rows = loaders.collapse_to_survivors(rows)
+    _snap("collapse")
+    # Report any variety left in some-but-not-all fan-out categories, naming the filter stage that dropped
+    # each missing category (the first snapshot where it went absent after having been present).
+    _fanout = {c.name for c in active_categories() if c.fan_out}
+    _cov: dict = {}
+    for _b, _core in _stages[-1][1]:
+        _cov.setdefault(_core, set()).add(_b)
+    _nonuniform = {c: brs for c, brs in _cov.items() if 0 < len(brs) < len(_fanout)}
+    if _nonuniform:
+        _detail = {}
+        for _core, _brs in list(_nonuniform.items())[:20]:
+            _miss = {}
+            for _mb in sorted(_fanout - _brs):
+                _dropped_by, _seen = "not_in_input", False
+                for _lbl, _s in _stages:
+                    if (_mb, _core) in _s:
+                        _seen = True
+                    elif _seen:
+                        _dropped_by = _lbl        # was present, gone at this stage -> this filter dropped it
+                        break
+                _miss[_mb] = _dropped_by
+            _detail[_core] = {"have": sorted(_brs), "dropped_by": _miss}
+        log.warning("catalog left non-uniform varieties", extra={"extra_fields": {
+            "fanout": sorted(_fanout), "non_uniform_count": len(_nonuniform), "detail": _detail}})
 
     path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
