@@ -165,15 +165,36 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
         if cur is None or (not cur[2] and cand[2]):
             varieties[ident] = cand
     out: dict[str, dict] = {}
+    skipped: dict[tuple, list] = {}   # ident -> [(branch, reason)]: a category that could NOT be filled
     for br in fanout:
         for ident, (ts, disp, aliases) in varieties.items():
             if ident in present[br]:
                 continue                          # category already carries this variety (any key form)
             mk = gen_key(br, ts, disp)
-            if mk in by_key or mk in out:         # defensive: never collide with an existing key
+            if mk in by_key:                      # a row with this exact key already exists in the input
+                skipped.setdefault(ident, []).append((br, "key_already_in_by_key"))
+                continue
+            if mk in out:                         # already queued this run (defensive dedup)
+                skipped.setdefault(ident, []).append((br, "key_already_queued"))
                 continue
             out[mk] = {"Key": mk, "Name": disp, "Image": "",
                        "Aliases": aliases, "Volume per kg (m³/kg)": ""}
+    # DIAGNOSTIC (pure logging, no behaviour change): a variety present in SOME but not ALL fan-out
+    # categories after this pass is non-uniform -- the slab-only-mint symptom. Log why each missing
+    # category was not filled (which categories it has, and the skip reason per missing one), so the run
+    # EXPLAINS the outcome in its own logs instead of us inferring it from artifacts. Bounded: only
+    # non-uniform varieties are logged (a clean run has none), capped so the line can never flood.
+    non_uniform: dict[str, dict] = {}
+    for ident, (ts, disp, aliases) in varieties.items():
+        have = [b for b in fanout if ident in present[b] or gen_key(b, ts, disp) in out]
+        if 0 < len(have) < len(fanout):
+            non_uniform[f"{disp}|{ident[0]}"] = {
+                "have": sorted(have),
+                "skips": [f"{b}:{r}" for b, r in skipped.get(ident, [])]}
+    if non_uniform:
+        log.warning("uniform-fill left non-uniform varieties", extra={"extra_fields": {
+            "fanout": fanout, "fills_generated": len(out), "non_uniform_count": len(non_uniform),
+            "detail": dict(list(non_uniform.items())[:20])}})
     return list(out.values())
 
 
