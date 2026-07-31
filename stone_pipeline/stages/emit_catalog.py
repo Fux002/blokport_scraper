@@ -18,7 +18,7 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, category, category_for_key
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category, category_for_key
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
     clean_alias_list,
@@ -141,7 +141,13 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
     from stone_pipeline.reference.loaders import type_slug_from_key
     from stone_pipeline.stages.curate import gen_key
     from stone_pipeline.matching import projections as proj
-    fanout = [c.name for c in CATEGORIES if c.active and c.fan_out]
+    # Read the RUNTIME registry (active_categories), never the frozen CATEGORIES tuple: a category's
+    # active flag depends on its Medusa pcat, which is refreshed from the on-disk export after import
+    # (refresh_category_pcats). Iterating CATEGORIES here would gate the union-fill on the stale import
+    # snapshot, so when block/tile pcats were absent at import the fan-out silently dropped to slab-only
+    # and a genuinely-new variety was minted in one category only. curate.active_branches() already reads
+    # the runtime registry; this makes the emit safety net agree with it.
+    fanout = [c.name for c in active_categories() if c.fan_out]
     fanout_set = set(fanout)
     present: dict[str, set[tuple[str, str]]] = {b: set() for b in fanout}
     # canonical variety -> (type_slug, Name, Aliases). First-seen wins, but a row that carries aliases is
