@@ -315,6 +315,22 @@ def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
     assert not any(p["variant"] == "Karur Special White" for p in res2.pending_confirm)
 
 
+def test_non_canonical_type_holds_instead_of_minting_a_malformed_variety(ref):
+    # A raw supplier type that no synonym maps to a canonical Medusa type (e.g. 'Notarealtype') is NOT a
+    # real type: the variety must HOLD for review (type-less), never mint under a garbage type slug -- the
+    # class that produced the 'slab_semiprecious_smoky' stray. Validates the RESULT, so a canonical type
+    # still passes; only an un-normalized non-canonical value is rejected.
+    r = CanonicalRow(src_site="varsha", surrogate_key="n1", variety_match_key="Weird Novel Stone",
+                     raw_type="Notarealtype")
+    r.add_gap(TreeGap(src_site="varsha", surrogate_key="n1", raw_name="Weird Novel Stone",
+                      gap_kind=GapKind.missing_variation, nearest_existing="", nearest_score=0.0))
+    res = curate.build_curation([r], ref)
+    assert any(p["variant"] == "Weird Novel Stone" for p in res.pending_confirm)   # held, asked for a type
+    minted = [row["Key"] for b in res.new_variants.values() for row in b]
+    assert not any("weird_novel_stone" in k for k in minted), f"minted under a non-canonical type: {minted}"
+    assert not any("notarealtype" in k for k in minted), f"garbage type slug reached a Key: {minted}"
+
+
 # -- review evidence image: durable supplier url over the churn-deleted improved/ key ---------------
 
 def test_review_evidence_prefers_durable_supplier_url_over_improved_key():
