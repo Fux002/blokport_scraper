@@ -323,6 +323,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         backbone_new={b: [] for b in BRANCHES},
     )
     alias_floor = SETTINGS.curation.alias_suggest_floor
+    # The canonical Medusa stone types. A scraped type that is not one of these is not a real type (an
+    # un-normalized supplier spelling like 'Semiprecious') and must NEVER be minted into a Key -- it holds
+    # for review instead. Computed once; the mint identity below gates on it.
+    valid_type_norms = {proj.norm(t) for t in ref.attributes.canonical_names("type")}
 
     # --- 1. collect alias additions: scraped spellings to add to an EXISTING variety
     # variety norm-name -> set of new alias spellings ; confirmed vs needs-review
@@ -333,12 +337,19 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         ONE way so the dedup, variety_branches, obs_union and the mint all agree on the identity (and
         its (type, name) key). Type: the corrected type_name, else the raw tag, else the first
         missing_variation gap's suggested type, else the OPERATOR-ASSIGNED type (seed_type) for a
-        type-less variety -- never guessed. Name: the match key, else the raw name MINUS its format word
-        (so 'Brown Onyx Slab' is 'Brown Onyx' everywhere, not just at mint)."""
+        type-less variety -- never guessed, and never NON-CANONICAL (see the gate below). Name: the match
+        key, else the raw name MINUS its format word (so 'Brown Onyx Slab' is 'Brown Onyx' everywhere)."""
         mv = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         suggested = (mv[0].suggested_type if mv else "") or next(
             (g.suggested_type for g in row.tree_gaps if g.suggested_type), "")
         stone_type = row.type_name or row.raw_type or suggested or ""
+        # A stone type MUST be a canonical Medusa type. When none of the sources above resolved to one
+        # (e.g. a raw supplier spelling 'Semiprecious' that no synonym mapped to 'Semi-Precious Stone'),
+        # the value is not a real type -- treat it as type-less so it HOLDS for review (or an operator
+        # seed_type fills it below), NEVER minting a variety under a garbage type slug. This validates the
+        # RESULT, so a legitimate raw_type that happens to be canonical still passes untouched.
+        if stone_type and proj.norm(stone_type) not in valid_type_norms:
+            stone_type = ""
         name = (row.variety_match_key or strip_format(row.raw_name or "")).strip()
         # clean is derived from the BASE (pre-seed) type, so the seed only fills the final stone_type and
         # never changes the name/clean/Key uuid -- the seed lookup key norm(clean) stays stable run to run.
