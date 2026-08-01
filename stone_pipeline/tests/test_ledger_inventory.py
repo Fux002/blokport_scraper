@@ -32,9 +32,12 @@ def _seed_variations(ledger: Ledger) -> None:
 
 
 def _rows() -> list[CanonicalRow]:
+    from stone_pipeline.stages.derive import derive_inventory
     def row(sk, vid, handle, qty):
-        return CanonicalRow(src_site="polonine", surrogate_key=sk, variation_id=vid,
-                            handle=handle, raw_slab_count=qty)
+        r = CanonicalRow(src_site="polonine", surrogate_key=sk, variation_id=vid,
+                         handle=handle, raw_slab_count=qty)
+        derive_inventory(r)   # Stage 6 sets inventory_quantity before the ledger reads it
+        return r
     # two with stock, one discontinued (qty 0)
     return [row("AAA", "V1", "h-aaa", "5"), row("BBB", "V2", "h-bbb", "10"),
             row("CCC", "V2", "h-ccc", "0")]
@@ -88,7 +91,7 @@ def test_reinventory_preserves_last_synced_qty(tmp_path):
     # or the product re-serves as a delta on every run forever.
     cfg = load_source("polonine")
     r = CanonicalRow(src_site="polonine", surrogate_key="AAA", variation_id="V1",
-                     handle="h", raw_slab_count="5")
+                     handle="h", raw_slab_count="5", inventory_quantity=5)
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _seed_variations(ledger)               # provides V1
         populate_products(ledger, [r], cfg)

@@ -20,7 +20,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow
-from stone_pipeline.stages.product_state import inventory_for
+from stone_pipeline.stages.product_state import inventory_str
 
 log = logfmt.get_logger("emit")
 
@@ -46,7 +46,7 @@ def _sku(row: CanonicalRow, cfg: SourceConfig) -> str:
 
 
 # single source of truth so the imported stock and the change-feed (product_state) agree
-_inventory = inventory_for
+_inventory = inventory_str  # reads the derived stock field; never recomputes stock
 
 
 def _slot(keys: list[str], index: int) -> str:
@@ -169,13 +169,13 @@ def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
     the full structure is written so the file loads. `discontinued` (sku, handle) pairs -- products
     the supplier dropped -- are written at quantity 0: a reversible delist (a later scrape that
     carries the stone again simply sets it back)."""
-    from stone_pipeline.stages.product_state import inventory_for, sku_for
+    from stone_pipeline.stages.product_state import inventory_str, sku_for
 
     cells = [{
         "Variant Sku": sku_for(row, cfg),          # read by importer
         "Product Handle": row.handle or "",
         "Variant Title": SETTINGS.backend.variant_title,
-        "Inventory Quantity": inventory_for(row),  # read by importer
+        "Inventory Quantity": inventory_str(row),  # read by importer
         "Reserved Quantity": "",
     } for row in rows]
     cells += [{

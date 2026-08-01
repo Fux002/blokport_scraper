@@ -20,7 +20,7 @@ from stone_pipeline.core.text import match_key
 from stone_pipeline.ledger.db import Ledger, now_iso, payload_hash
 from stone_pipeline.stages.emit import _sku
 from stone_pipeline.stages.emit_catalog import _COLS as _VARIANTS_FULL_COLS
-from stone_pipeline.stages.product_state import inventory_for
+from stone_pipeline.stages.product_state import inventory_str
 
 # Bump when the PRODUCT SYNC PAYLOAD SHAPE changes (a new field Medusa must receive) while the underlying
 # data would hash the same -- included in the product payload_hash so it flips every product 'dirty' exactly
@@ -185,7 +185,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "discountable": r.discountable,
             "sold_in_bundle": 1 if r.sold_in_bundle else 0,
             "bundle_size": r.bundle_size,
-            "inventory_quantity": inventory_for(r),
+            "inventory_quantity": inventory_str(r),
             "payload_hash": (ph := payload_hash([
                 _PRODUCT_PAYLOAD_CONTRACT,   # bump forces a one-time full re-sync on a payload-shape change
                 variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
@@ -218,14 +218,14 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
 
 
 def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
-    """Write per-product stock into the `inventory` table (qty = emit.inventory_for).
+    """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field).
     `last_synced_qty` is left null, so a freshly populated row is a delta to serve
     (design section 7). Products must be populated first (the sku FK)."""
     now = now_iso()
     n = 0
     for r in rows:
         sku = _sku(r, cfg)
-        resolved = inventory_for(r)
+        resolved = inventory_str(r)
         qty = int(resolved) if str(resolved).isdigit() else 0
         # keep last_synced_qty on update: it is owned by the ack, not the write-through.
         # Overwriting it to NULL each run would re-serve every product as a delta forever.

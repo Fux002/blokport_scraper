@@ -199,6 +199,11 @@ class CanonicalRow(BaseModel):
     bundle_size: Optional[int] = None
     bundle_size_confidence: str = "none"
     bundle_size_method: str = ""
+    # Stock level (units available), derived ONCE in Stage 6 -- SEPARATE from bundle_size (the
+    # slabs-per-bundle multiplier). Every writer reads this field; nothing recomputes stock at write time.
+    inventory_quantity: Optional[int] = None
+    inventory_confidence: str = "none"
+    inventory_method: str = ""
     weight: Optional[float] = None
     length: Optional[float] = None
     width: Optional[float] = None

@@ -85,7 +85,7 @@ class MedusaApiSink:
                 "sku": f"{cfg.source_code}-{row.surrogate_key}".upper(),
                 "title": "Default",
                 "manage_inventory": True,
-                "inventory_quantity": row.bundle_size or 1,
+                "inventory_quantity": row.inventory_quantity if row.inventory_quantity is not None else 0,
             }],
         }
 

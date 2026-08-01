@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS product (
     discountable         TEXT,                          -- null -> render the config constant
     sold_in_bundle       INTEGER,                       -- 0/1
     bundle_size          INTEGER,
-    inventory_quantity   TEXT,                          -- the resolved stock string (emit.inventory_for)
+    inventory_quantity   TEXT,                          -- the resolved stock string (derive.derive_inventory)
     medusa_id            TEXT,                          -- null until synced
     payload_hash         TEXT,
     state                TEXT NOT NULL DEFAULT 'pending'
