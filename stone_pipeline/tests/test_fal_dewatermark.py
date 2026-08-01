@@ -55,6 +55,28 @@ def test_locate_returns_none_on_clean_slab():
     assert dw._locate(_slab_with_logo(logo=False)) is None    # presence-gated -> no FAL cost
 
 
+def _pink_stone(h=600, w=1024):
+    """A naturally pink/magenta STONE (pink onyx, Rosa): the whole slab is magenta, no watermark."""
+    bgr = np.full((h, w, 3), (190, 40, 200), np.uint8)        # BGR magenta across the ENTIRE image
+    bgr[:, :, 0] = (bgr[:, :, 0].astype(int) + (np.arange(w) % 12)).astype(np.uint8)   # slight texture
+    return bgr
+
+
+def test_locate_ignores_a_naturally_pink_stone():
+    # T3-6: pink dominates the search band -> it is the STONE's colour, not ink. The old pink term masked
+    # the whole field and FAL inpainted real veining away; now the pink term is dropped when it dominates.
+    dw = _Dewatermarker(_cfg())
+    assert dw._locate(_pink_stone()) is None                  # no phantom watermark on a pink stone
+
+
+def test_locate_still_finds_a_logo_on_a_pink_stone():
+    # the guard must not blind detection: a localized LOGO on a pink stone still deviates in luminance, so
+    # the strokes term catches it even though the dominant pink term is dropped -- it is not ignored.
+    bgr = _pink_stone()
+    bgr[300:316, 500:560] = (30, 30, 30)                      # a dark logo patch (luminance strokes fire)
+    assert _Dewatermarker(_cfg())._locate(bgr) is not None
+
+
 def test_crop_box_pads_snaps_and_clamps():
     dw = _Dewatermarker(_cfg(crop_pad=64, crop_min_side=512, crop_snap=16))
     x0, y0, x1, y1 = dw._crop_box((460, 290, 560, 330), 1024, 600)

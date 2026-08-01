@@ -127,6 +127,7 @@ class _Dewatermarker:
     HUE_LO, HUE_HI, SAT_MIN = 148, 180, 35  # the mark's pink/magenta ink in OpenCV HSV
     INK_MEDIAN, INK_DELTA = 31, 9           # text strokes deviate this much from the local stone
     MIN_INK = 25                            # px of ink needed to trust a mark is present
+    PINK_STONE_FRACTION = 0.35              # pink over >this share of the ROI is the STONE's colour, not ink
     DILATE = 4                              # grow the logo mask so FAL covers anti-aliased edges (px)
     FEATHER = 9                             # composite feather radius (px)
     MAX_RETRIES = 3
@@ -170,6 +171,12 @@ class _Dewatermarker:
         strokes = cv2.absdiff(gray, cv2.medianBlur(gray, self.INK_MEDIAN)) > self.INK_DELTA
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         pink = ((hsv[:, :, 0] >= self.HUE_LO) & (hsv[:, :, 0] <= self.HUE_HI) & (hsv[:, :, 1] >= self.SAT_MIN))
+        # A watermark's pink/magenta ink is a small localized cluster; a naturally pink/magenta STONE (pink
+        # onyx, Rosa) is pink across a large share of the search band. When pink DOMINATES the ROI it is the
+        # stone's own colour, not ink -- drop the pink term (the luminance `strokes` term still catches real
+        # ink) so genuine pink veining/fields are never masked and inpainted away as a phantom watermark.
+        if pink.mean() > self.PINK_STONE_FRACTION:
+            pink = np.zeros_like(pink)
         ink = cv2.dilate(((strokes | pink) * 255).astype(np.uint8), np.ones((5, 5), np.uint8), iterations=2)
         ys, xs = np.where(ink > 0)
         if len(xs) < self.MIN_INK:
