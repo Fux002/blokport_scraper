@@ -77,9 +77,12 @@ def test_billed_megapixels_floor_and_roundup():
 def test_process_composites_only_the_logo(monkeypatch):
     dw = _Dewatermarker(_cfg())
     # FAL returns a solid GREEN crop; the composite must recolour only the logo region, nothing else.
-    monkeypatch.setattr(dw, "_fal_fill",
-                        lambda crop_bgr, cmask: np.full((crop_bgr.shape[0], crop_bgr.shape[1], 3),
-                                                        (0, 255, 0), np.uint8))
+    # The fake stands in for a real successful generation, so it bills the tile (process reads the
+    # accumulator that the real _fal_fill increments per generation).
+    def _fake_fill(crop_bgr, cmask):
+        dw._billed_mp += dw.billed_megapixels(crop_bgr.shape[1], crop_bgr.shape[0])
+        return np.full((crop_bgr.shape[0], crop_bgr.shape[1], 3), (0, 255, 0), np.uint8)
+    monkeypatch.setattr(dw, "_fal_fill", _fake_fill)
     pil = Image.fromarray(cv2.cvtColor(_slab_with_logo(logo=True), cv2.COLOR_BGR2RGB))
     r = dw.process(pil)
     assert r.applied is True and r.failed is False and r.billed_mp >= 1
@@ -153,3 +156,30 @@ def test_fal_fill_rejects_blank_output(monkeypatch):
     crop = np.full((32, 32, 3), 100, np.uint8)
     with pytest.raises(Exception):
         dw._fal_fill(crop, np.full((32, 32), 255, np.uint8))     # blank -> raises -> process holds
+
+
+def test_fal_fill_bills_every_generation_not_just_success(monkeypatch):
+    # F5 regression: _fal_fill retries up to MAX_RETRIES and EACH subscribe is a billed generation. A run
+    # that generates N times then fails must report billed_mp = N * tile, not 0 -- otherwise fal_cost stays
+    # $0 while FAL bills for nothing and the cost breaker never trips.
+    import sys
+    import types
+    dw = _Dewatermarker(_cfg())
+    dw._billed_mp = 0
+    calls = {"n": 0}
+    fake = types.ModuleType("fal_client")
+
+    def _subscribe(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("503 transient error")          # every generation is billed, then errors
+    fake.subscribe = _subscribe
+    fake.upload_file = lambda p: "https://fal/upload"
+    monkeypatch.setitem(sys.modules, "fal_client", fake)
+    monkeypatch.setattr(ip.time, "sleep", lambda *_: None)  # skip real backoff
+
+    crop = np.zeros((100, 100, 3), np.uint8)
+    cmask = np.zeros((100, 100), np.uint8)
+    with pytest.raises(Exception):
+        dw._fal_fill(crop, cmask)
+    assert calls["n"] == dw.MAX_RETRIES                                       # 3 generations submitted
+    assert dw._billed_mp == dw.MAX_RETRIES * dw.billed_megapixels(100, 100)   # ALL billed, not 0
