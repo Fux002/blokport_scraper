@@ -28,7 +28,7 @@ def cfg():
 def _slab_row(**kw):
     base = dict(src_site="polonine", surrogate_key="620", raw_format="Slab",
                 variation_name="Verde Ubatuba", finish_name="Polished", type_name="Granite",
-                color_name="Green")
+                color_name="Green", type_method="variety_authoritative")
     base.update(kw)
     return CanonicalRow(**base)
 

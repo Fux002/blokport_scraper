@@ -115,8 +115,8 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
     # variation a product is attached to is what its Key says. Pinning it here keeps type and variation on
     # the SAME variety, so a product can never price or ship as a stone different from the variety it links
     # to (which tree_build would otherwise absorb into a self-consistent but WRONG cross-type combination).
-    bound_type = _bound_type(row)
-    _apply_type(row, bound_type, ref, stats)
+    bound_type, type_from_key = _bound_type(row)
+    _apply_type(row, bound_type, ref, stats, from_key=type_from_key)
 
     # Membership record: the backbone variety of this name AND the bound type, for its colour/finish/
     # quality sets. A foreign same-name record of a DIFFERENT type is never used -- it would validate
@@ -156,23 +156,27 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
     _finalize_ids(row, ref)
 
 
-def _bound_type(row: CanonicalRow) -> str:
-    """The canonical stone type of the variation the matcher bound, read from its Key (the type
-    authority). type_slug_from_key takes the LONGEST known type slug so multi-word types resolve
-    ('slab_dolomite_marble_..' -> 'Dolomite Marble'). Falls back to the Stage-3 resolved type only when
-    there is no variation_key or the Key carries no known type (defensive; a matched row normally has a
-    Key whose type is known)."""
+def _bound_type(row: CanonicalRow) -> tuple[str, bool]:
+    """(type, from_key). The canonical stone type of the variation the matcher bound, read from its Key
+    (the type authority), and whether it GENUINELY came from the Key. type_slug_from_key takes the LONGEST
+    known type slug so multi-word types resolve ('slab_dolomite_marble_..' -> 'Dolomite Marble'). Falls
+    back to the Stage-3 resolved (name-derived) type only when there is no variation_key or the Key carries
+    no known type -- that fallback is NOT variation-authoritative (from_key=False), so downstream (origin)
+    must not trust it for the curated (name, type) lookups."""
     if row.variation_key:
         canon = recognize_type(type_slug_from_key(row.variation_key))
         if canon:
-            return canon
-    return row.type_name or row.raw_type or ""
+            return canon, True
+    return (row.type_name or row.raw_type or ""), False
 
 
-def _apply_type(row: CanonicalRow, new_type: str, ref: ReferenceData, stats: ReconcileStats) -> None:
+def _apply_type(row: CanonicalRow, new_type: str, ref: ReferenceData, stats: ReconcileStats,
+                *, from_key: bool) -> None:
     if not new_type:
         return
-    if row.type_name and proj.norm(row.type_name) != proj.norm(new_type):
+    # Only a KEY-authoritative type genuinely OVERRIDES a name-derived one; a fallback that merely echoes
+    # the name-derived type is not an override, and must not claim variety-authoritative provenance.
+    if from_key and row.type_name and proj.norm(row.type_name) != proj.norm(new_type):
         stats.type_overridden += 1
         row.add_flag(
             ReviewFlag(
@@ -187,8 +191,16 @@ def _apply_type(row: CanonicalRow, new_type: str, ref: ReferenceData, stats: Rec
         )
     row.type_name = new_type
     row.type_id = _map_id(ref, "type", new_type)
-    row.type_method = "variety_authoritative"
-    row.type_confidence = Confidence.high.name
+    if from_key:
+        row.type_method = "variety_authoritative"
+        row.type_confidence = Confidence.high.name
+    else:
+        # State 2: the variation bound but its Key carries no known type slug, so this is the name-derived
+        # type kept as a best-guess fallback -- NOT variation-authoritative. Mark it so derive_origin will
+        # not trust it for the curated (name, type) origin lookups (which would confidently resolve a
+        # homonym's WRONG origin). The type VALUE stays (best available); only its provenance is honest.
+        row.type_method = "type_name_fallback"
+        row.type_confidence = Confidence.low.name
 
 
 def _reconcile_attribute(

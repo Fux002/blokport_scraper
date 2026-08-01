@@ -32,8 +32,11 @@ def cfg():
 
 
 def _row(**kw):
+    # A normally-reconciled row: its type is variation-authoritative (from the variation Key), which is
+    # what the curated (name, type) origin lookups require. Override type_method to test the fallback path.
     base = dict(src_site="t", surrogate_key="1", raw_format="Slab",
-                finish_name="Polished", type_name="Granite", color_name="Green")
+                finish_name="Polished", type_name="Granite", color_name="Green",
+                type_method="variety_authoritative")
     base.update(kw)
     return CanonicalRow(**base)
 
@@ -196,3 +199,24 @@ def test_derive_origin_uses_row_type_for_homonym(ref, cfg):
     derive.derive_origin(granite, r, cfg)
     assert onyx.origin_country_code == "IR"
     assert granite.origin_country_code == "BR"
+
+
+def test_derive_origin_refuses_curated_lookup_when_type_not_authoritative(ref, cfg):
+    # F2 regression: a homonym whose type is NOT variation-authoritative (name-derived fallback, e.g. the
+    # variation bound but its Key carried no known type slug) must NOT resolve a curated origin -- that
+    # shipped a confidently-WRONG homonym origin. It drops to the supplier default and is flagged for type
+    # verification, instead of silently picking one homonym's country.
+    r = dataclasses.replace(ref, origin_map=OriginMap(rules=[
+        OriginRule("Azul White", "BR", "", "", stone_type="Quartzite"),
+        OriginRule("Azul White", "IR", "", "", stone_type="Onyx"),
+    ]))
+    row = _row(variation_name="Azul White", type_name="Quartzite", raw_origin="",
+               type_method="type_name_fallback")               # NOT variation-authoritative
+    derive.derive_origin(row, r, _cfg_with_default(cfg, "IN"))
+    assert row.origin_source == "supplier_default"              # not "origin_map"
+    assert row.origin_country_code == "IN"                      # the supplier default, not BR/IR
+    assert any(f.code == FlagCode.origin_type_unverified for f in row.review_flags)
+    # sanity: the SAME row WITH authoritative type does resolve the curated origin
+    ok = _row(variation_name="Azul White", type_name="Quartzite", raw_origin="")  # variety_authoritative
+    derive.derive_origin(ok, r, cfg)
+    assert ok.origin_country_code == "BR" and ok.origin_source == "origin_map"
