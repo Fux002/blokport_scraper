@@ -54,7 +54,7 @@ def test_atomic_write_happy_path(tmp_path):
     p = tmp_path / "out.txt"
     csvio.atomic_write(p, lambda h: h.write("done"))
     assert p.read_text() == "done"
-    assert not (tmp_path / "out.txt.tmp").exists()    # temp cleaned up
+    assert not list(tmp_path.glob("*.tmp"))           # temp cleaned up
 
 def test_atomic_write_leaves_prior_file_intact_on_failure(tmp_path):
     p = tmp_path / "out.txt"
@@ -65,7 +65,7 @@ def test_atomic_write_leaves_prior_file_intact_on_failure(tmp_path):
     with pytest.raises(RuntimeError):
         csvio.atomic_write(p, boom)
     assert p.read_text() == "ORIGINAL"                # never a partial overwrite
-    assert not (tmp_path / "out.txt.tmp").exists()    # temp cleaned up in finally
+    assert not list(tmp_path.glob("*.tmp"))           # temp cleaned up in finally
 
 def test_atomic_write_new_file_absent_on_failure(tmp_path):
     p = tmp_path / "new.txt"
@@ -75,4 +75,20 @@ def test_atomic_write_new_file_absent_on_failure(tmp_path):
     with pytest.raises(RuntimeError):
         csvio.atomic_write(p, boom)
     assert not p.exists()                              # a failed first write leaves nothing
-    assert not (tmp_path / "new.txt.tmp").exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_atomic_write_uses_a_unique_temp_per_writer(tmp_path, monkeypatch):
+    # F8: a FIXED '.tmp' sibling meant two overlapping writers to the same path clobbered each other's temp
+    # mid-write and produced a corrupt file. The temp must be UNIQUE per writer (pid + random) so their
+    # writes never interleave -- each os.replace is atomic, so the final file is one writer's full output.
+    import os as _os
+    p = tmp_path / "shared.csv"
+    seen = []
+    real = _os.replace
+    monkeypatch.setattr(_os, "replace", lambda src, dst: (seen.append(str(src)), real(src, dst))[1])
+    csvio.atomic_write(p, lambda h: h.write("A"))
+    csvio.atomic_write(p, lambda h: h.write("B"))
+    assert len(set(seen)) == 2                         # two DIFFERENT temp files, not a shared '.tmp'
+    assert all(s.endswith(".tmp") and s != str(p) for s in seen)
+    assert p.read_text() == "B" and not list(tmp_path.glob("*.tmp"))

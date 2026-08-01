@@ -28,10 +28,15 @@ def safe_cell(value) -> str:
 
 
 def atomic_write(path: Path | str, write_fn: Callable) -> None:
-    """Write through a temp file then os.replace, so `path` is never a partial/truncated file."""
+    """Write through a temp file then os.replace, so `path` is never a partial/truncated file. The temp
+    name is UNIQUE per writer (pid + random): the deploy runs overlapping produce / build / GPU processes,
+    and a FIXED `.tmp` sibling meant two concurrent writers to the same path clobbered each other's temp
+    mid-write and produced a corrupt/interleaved file. Each writer's os.replace is atomic, so the final
+    file is always one writer's complete output (last-writer-wins is fine; a torn file is not)."""
+    import uuid
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     try:
         with tmp.open("w", newline="", encoding="utf-8") as handle:
             write_fn(handle)
