@@ -74,6 +74,21 @@ def test_bundle_zero_count_falls_through_to_default(ref, cfg):
     assert row.bundle_size != 0
 
 
+def test_bundle_unicode_digit_count_does_not_crash_the_row(ref, cfg):
+    # T3-3: a scraped count field carrying a Unicode digit/superscript (e.g. a 'm2' fragment leaking in)
+    # passes str.isdigit() but int() rejects it. The old gate crashed the WHOLE source batch; now the bad
+    # value falls through to the default like any unparseable count -- one row flagged, run survives.
+    for bad in ("²", "³", "12²", "①"):   # superscript 2/3, '12'+superscript, circled-1
+        row = _slab_row(raw_slab_count=bad)
+        derive.derive_category(row, ref)
+        derive.derive_bundle_size(row, ref, cfg)             # must not raise
+        assert row.bundle_size == cfg.default_bundle_size
+        row2 = _slab_row(raw_bundle_size=bad)
+        derive.derive_category(row2, ref)
+        derive.derive_bundle_size(row2, ref, cfg)
+        assert row2.bundle_size == cfg.default_bundle_size
+
+
 def test_bundle_from_area_division(ref, cfg):
     row = _slab_row(raw_total_m2="55.0", raw_per_slab_m2="5.5")
     derive.derive_category(row, ref)

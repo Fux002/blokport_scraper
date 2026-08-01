@@ -293,11 +293,11 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
                                     confidence=conf, method=method, src_url=row.src_url))
 
     # 2. explicit bundle size (a literal '0' is not a real count -- fall through)
-    if row.raw_bundle_size and row.raw_bundle_size.strip().isdigit() and int(row.raw_bundle_size) > 0:
-        return _accept(int(row.raw_bundle_size), "explicit_bundle_size", Confidence.high)
+    if (n := _pos_int(row.raw_bundle_size)) is not None:
+        return _accept(n, "explicit_bundle_size", Confidence.high)
     # 3. explicit slab count (likewise reject a non-positive count)
-    if row.raw_slab_count and row.raw_slab_count.strip().isdigit() and int(row.raw_slab_count) > 0:
-        return _accept(int(row.raw_slab_count), "explicit_slab_count", Confidence.high)
+    if (n := _pos_int(row.raw_slab_count)) is not None:
+        return _accept(n, "explicit_slab_count", Confidence.high)
     # 4. slabs array length
     if row.raw_slabs_array:
         count = _count_slab_entries(row.raw_slabs_array)
@@ -400,6 +400,20 @@ def _type_density(type_name: str | None) -> float:
 
 def _to_float(text: str | None) -> float | None:
     return parse_number(text) if text else None
+
+
+def _pos_int(raw) -> int | None:
+    """A strictly-positive integer, or None. str.isdigit() is UNSAFE as an int() gate: it is True for
+    Unicode digits and superscripts ('2'-superscript, '3'-superscript) that int() then rejects with
+    ValueError. A scraped 'm2'/dimension fragment leaking into a count field therefore crashed the whole
+    source batch (violating fail-loud-and-ISOLATED: one bad value must flag its row, never kill the run).
+    int() is the real predicate; a non-positive or unparseable value simply falls through to the next
+    strategy, exactly as a missing value does."""
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
 
 
 # --- origin (section 7 Stage 6) -----------------------------------------------
@@ -627,8 +641,8 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
         return
     def get(f):
         return ref.overrides.get(row.src_site, row.surrogate_key or "", f)
-    if (v := get("bundle_size")) and str(v).isdigit():
-        row.bundle_size, row.bundle_size_method, row.bundle_size_confidence = int(v), "override", "high"
+    if (n := _pos_int(get("bundle_size"))) is not None:
+        row.bundle_size, row.bundle_size_method, row.bundle_size_confidence = n, "override", "high"
     if v := get("origin_country_code"):
         iso = _to_iso(v, ref)   # validate the override to ISO-2 like a scraped value; don't stamp 'BRASIL'
         if iso:
