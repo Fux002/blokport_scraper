@@ -318,6 +318,33 @@ def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
     assert not any(p["variant"] == "Karur Special White" for p in res2.pending_confirm)
 
 
+def test_new_type_on_existing_multitype_name_holds_not_mint(ref):
+    # BUG6 / HOLD-never-guess: 'Ocean Blue' exists under granite/limestone/marble/travertine but NOT
+    # quartzite. A scrape typed 'Quartzite' (a NEW type for the name) must HOLD for the operator to confirm
+    # it is a genuinely new variety, never silently mint 'Ocean Blue Quartzite' (a mis-tag would phantom it).
+    from stone_pipeline.config import decisions_store
+
+    def ocean_blue_quartzite():
+        r = CanonicalRow(src_site="varsha", surrogate_key="ob1", variety_match_key="Ocean Blue",
+                         raw_type="Quartzite")
+        r.add_gap(TreeGap(src_site="varsha", surrogate_key="ob1", raw_name="Ocean Blue",
+                          gap_kind=GapKind.missing_variation, nearest_existing="Ocean Blue", nearest_score=100.0))
+        return r
+
+    res = curate.build_curation([ocean_blue_quartzite()], ref)
+    assert any(p["variant"] == "Ocean Blue" for p in res.pending_confirm)   # held for confirmation
+    assert not any("ocean_blue" in row["Key"] and "quartzite" in row["Key"]
+                   for b in res.new_variants.values() for row in b)          # NOT silently minted
+
+    # operator confirms it IS a genuinely new variety -> the next produce mints it as the scraped new type
+    decisions_store.set_variety_decision("Ocean Blue", "mint")
+    res2 = curate.build_curation([ocean_blue_quartzite()], ref)
+    posts = [p for b in ("slab", "block", "tile")
+             for p in res2.backbone_new[b] if p["variant"] == "Ocean Blue" and p["stone_type"] == "Quartzite"]
+    assert posts, "an explicit mint decision un-holds the new-type variety"
+    assert all("quartzite" in p["key"] for p in posts)                      # minted under the new typed Key
+
+
 def test_non_canonical_type_holds_instead_of_minting_a_malformed_variety(ref):
     # A raw supplier type that no synonym maps to a canonical Medusa type (e.g. 'Notarealtype') is NOT a
     # real type: the variety must HOLD for review (type-less), never mint under a garbage type slug -- the
