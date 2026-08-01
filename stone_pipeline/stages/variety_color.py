@@ -142,7 +142,14 @@ def _fetch_product_image(url: str) -> bytes | None:
         client = boto3.Session(profile_name=s3.credentials_profile or None,
                                region_name=s3.region).client("s3")
         return client.get_object(Bucket=s3.bucket, Key=key)["Body"].read()
-    except Exception:
+    except Exception as exc:
+        # An AccessDenied is an IAM misconfig that would silently default every variety's colour to Natural;
+        # fail loud on it. A missing object / transient error degrades to None (colour falls back) as before.
+        from stone_pipeline.stages.emit_catalog import _s3_access_denied
+        if _s3_access_denied(exc):
+            log.error("S3 AccessDenied reading a colour-source image; refusing to silently default colours. "
+                      "Fix the IAM.", extra={"extra_fields": {"error": str(exc)}})
+            raise
         return None
 
 

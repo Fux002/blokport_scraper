@@ -177,6 +177,7 @@ def _write_diagnostics(manifest, layout) -> None:
 def run_source(
     source: str, scrape_path: Optional[Path] = None, outputs_dir: Optional[Path] = None,
     state_dir: Optional[Path] = None, inventory_only: bool = False,
+    known_products_path: Optional[Path] = None,
 ) -> Manifest:
     # inventory_only: a lightweight stock refresh for EXISTING products. Runs the same scrape ->
     # match -> classify path, then emits ONLY inventory_update.csv (Variant Sku + Inventory
@@ -395,7 +396,19 @@ def run_source(
 
     # Item 4: tag emitted products new vs existing (by SKU) against the Medusa
     # product export, and flag inventory changes (feeds item 5).
-    known = product_state.load_known_products()
+    known_path = Path(known_products_path or SETTINGS.paths.products_known_csv)
+    # F9: an inventory-only refresh computes a stock DELTA against the Medusa export. If that export is
+    # absent (fetch failed / not seeded), load returns empty, every row looks new, the delta is empty and
+    # the run exits 0 "0 changed" -- a silent success that masks the missing export and drops real stock
+    # moves. Full mode legitimately has no export on a cold start (everything is new), so guard ONLY the
+    # inventory-only path: it cannot produce a trustworthy delta without the export, so fail loud.
+    if inventory_only and not known_path.exists():
+        run_log.error("inventory-only refresh aborted: the Medusa product export is missing, so no stock "
+                      "delta can be computed (a '0 changed' result would be a lie)",
+                      extra={"extra_fields": {"expected": str(known_path)}})
+        _write_diagnostics(manifest, layout)
+        raise SystemExit(2)
+    known = product_state.load_known_products(known_path)
     pstats = product_state.classify(validation.emit, source_cfg, known)
     manifest.totals.update(products_new=pstats.new, products_existing=pstats.existing,
                            inventory_changed=pstats.inventory_changed)

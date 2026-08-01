@@ -40,11 +40,11 @@ class TreatStats:
 
 
 def _is_watermarked(source: str) -> bool:
-    try:
-        from stone_pipeline.config.sources import load_sources
-        return bool(getattr(load_sources().get(source), "watermarked", False))
-    except Exception:
-        return False
+    # No except-False swallow: a broken sources config must fail loud, not silently return False and ship a
+    # watermarked source un-de-watermarked. An unknown source is already handled (get -> None -> getattr
+    # default False) without raising, so only a genuinely broken config surfaces here.
+    from stone_pipeline.config.sources import load_sources
+    return bool(getattr(load_sources().get(source), "watermarked", False))
 
 
 def _list(s3, prefix: str) -> list[str]:

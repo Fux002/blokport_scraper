@@ -53,15 +53,35 @@ def test_minted_surrogate_is_order_independent():
     assert mint_surrogate("s", "", "", 1) != mint_surrogate("s", "", "", 2)
 
 
+def _known_products_export(tmp_path):
+    # a Medusa product export must exist for an inventory refresh to compute a delta against (F9)
+    p = tmp_path / "products_export.csv"
+    with p.open("w", newline="", encoding="utf-8") as h:
+        w = csv.writer(h)
+        w.writerow(["Product Handle", "Variant Sku", "Inventory Quantity"])
+        w.writerow(["some-slab", "MNS-EXISTING-1", "7"])
+    return p
+
+
 def test_inventory_only_run_skips_images_products_and_canonical(tmp_path):
     # the core guarantee: an inventory refresh writes NO product import and NO canonical (so it
     # neither re-imports products nor feeds the catalog), yet the run completes.
-    manifest = run_source("marenostone", inventory_only=True,
-                          outputs_dir=tmp_path, state_dir=tmp_path)
+    manifest = run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path,
+                          known_products_path=_known_products_export(tmp_path))
     run_dir = tmp_path / manifest.run_id
     assert not (run_dir / "4_products_import" / "medusa_import.csv").exists()
     assert not (run_dir / "diagnostics" / "canonical.parquet").exists()
     assert (run_dir / "diagnostics" / "manifest.json").exists()  # but it did run
+
+
+def test_inventory_only_aborts_loud_when_the_export_is_missing(tmp_path):
+    # F9: no Medusa export => no delta can be computed. A silent '0 changed' would mask a failed export
+    # fetch and drop real stock moves, so the refresh must fail loud instead.
+    import pytest
+    missing = tmp_path / "does_not_exist.csv"
+    with pytest.raises(SystemExit):
+        run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path,
+                   known_products_path=missing)
 
 
 def test_gate_on_images_holds_imageless_new_variants(tmp_path):

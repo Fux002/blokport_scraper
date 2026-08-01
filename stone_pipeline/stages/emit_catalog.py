@@ -33,6 +33,16 @@ log = logfmt.get_logger("emit_catalog")
 _COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
 
 
+def _s3_access_denied(exc) -> bool:
+    """True for an S3 PERMISSION error (an IAM misconfig to fail loud on), vs a transient/network error or
+    a missing client (degrade). Read structurally off the botocore ClientError response, so no hard botocore
+    import is needed and a non-ClientError (e.g. ImportError) is simply not a permission error."""
+    resp = getattr(exc, "response", None)
+    code = resp.get("Error", {}).get("Code", "") if isinstance(resp, dict) else ""
+    return code in ("AccessDenied", "AllAccessDisabled", "InvalidAccessKeyId",
+                    "SignatureDoesNotMatch", "AuthorizationHeaderMalformed", "403")
+
+
 def _s3_variation_keys():
     """Set of variant Keys that have a {Key}.png in <env>/variations/ on S3, via ONE list call --
     or None when S3 is genuinely unreachable (no boto3/creds, e.g. CI/local), so the caller falls
@@ -60,7 +70,16 @@ def _s3_variation_keys():
                 if name.endswith(".png"):
                     keys.add(name[:-4])
         return keys
-    except Exception:
+    except Exception as exc:
+        # AccessDenied is an IAM MISCONFIG, not "S3 unreachable". Swallowing it returned None, so the caller
+        # fell back to the has_export_image/backed heuristic and advertised {Key}.png for objects it never
+        # confirmed exist -> Medusa 404s. Fail loud on a permission error; degrade only on transient/network.
+        if _s3_access_denied(exc):
+            log.error("S3 AccessDenied listing variation images; refusing to guess image links (would 404). "
+                      "Fix the task IAM.", extra={"extra_fields": {"error": str(exc)}})
+            raise
+        log.warning("S3 unreachable listing variation images; image gate falls back to the heuristic",
+                    extra={"extra_fields": {"error": str(exc)}})
         return None
 
 
