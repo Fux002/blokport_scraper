@@ -68,25 +68,19 @@ def sku_for(row: CanonicalRow, cfg: SourceConfig) -> str:
     return f"{cfg.source_code}-{row.surrogate_key}".upper()
 
 
-def inventory_for(row: CanonicalRow) -> str:
-    """The product's stock quantity. A positive parseable count wins ('1,000'->1000, '1.0'->1,
-    '12 pcs'->12). With NO positive signal the product is OUT OF STOCK -> '0', never a guessed '1':
-    stock NEVER gates whether a product is prepared and published (a 0-stock item still ships and
-    becomes sellable when a later scrape restocks it -- availability is the inventory step's job).
-    A literal 0 is trusted; an UNPARSEABLE stock is surfaced via a review flag in classify() rather
-    than silently defaulted, so a supplier format change can never masquerade as 'available'."""
-    for candidate in (row.raw_slab_count, row.bundle_size, row.raw_inventory_quantity):
-        text = str(candidate).strip() if candidate is not None else ""
-        n = parse_number(text)
-        if n is not None and int(n) > 0:
-            return str(int(n))
-    return "0"
+def inventory_str(row: CanonicalRow) -> str:
+    """String form of the stock field for CSV cells / change-detection. Stock is derived ONCE in Stage 6
+    (derive.derive_inventory) from the raw signals only, never bundle_size; this just FORMATS that field,
+    it never recomputes it -- so every writer agrees. A None reads 0 (an out-of-stock; also covers a
+    ledger-render row that set the field explicitly)."""
+    return str(row.inventory_quantity if row.inventory_quantity is not None else 0)
 
 
 def _stock_is_unparseable(row: CanonicalRow) -> bool:
-    """True when a stock field was present but no candidate parsed to a number -- a supplier format
-    change we should surface (flagged in classify), distinct from a genuine 0 / absent field."""
-    present = [str(c).strip() for c in (row.raw_slab_count, row.bundle_size, row.raw_inventory_quantity)
+    """True when a RAW stock field was present but did not parse to a number -- a supplier format change to
+    surface (flagged in classify), distinct from a genuine 0 / absent field. Inspects the RAW inputs only
+    (not the derived bundle_size, which always parses -- that dead-flagged messy slab stock before)."""
+    present = [str(c).strip() for c in (row.raw_slab_count, row.raw_inventory_quantity)
                if c is not None and str(c).strip()]
     return bool(present) and all(parse_number(t) is None for t in present)
 
@@ -113,14 +107,14 @@ def classify(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) 
         else:
             row.product_status = "existing"
             stats.existing += 1
-            # Compare like-for-like: new_inv is normalized (inventory_for -> str(int(...))), so the export's
+            # Compare like-for-like: new_inv is the normalized derived stock (inventory_str), so the export's
             # raw value must be normalized the SAME way or messy formatting ('10.0', '1,000', ' 10 ') reads
             # as a phantom change every run -- emitting spurious inventory deltas and breaking byte-identical
-            # re-runs. A real 0 is preserved (inventory_for floors to 0, not 1: no positive stock = out of stock).
+            # re-runs. A real 0 is preserved (derive_inventory trusts a literal 0: no positive stock = out of stock).
             old_raw = (entry.get("inventory") or "").strip()
             _old_n = parse_number(old_raw) if old_raw else None
             old_inv = str(int(_old_n)) if _old_n is not None else old_raw
-            new_inv = inventory_for(row)
+            new_inv = inventory_str(row)
             row.product_changed = bool(old_inv) and old_inv != new_inv
             if row.product_changed:
                 stats.inventory_changed += 1

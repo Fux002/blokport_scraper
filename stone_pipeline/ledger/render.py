@@ -86,9 +86,10 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
         visibility=p["visibility"], discountable=p["discountable"],
         sold_in_bundle=bool(p["sold_in_bundle"]),
         bundle_size=p["bundle_size"],
-        # emit.inventory_for reads raw_slab_count first; feeding it the resolved stock
-        # string reproduces the same Variant Inventory Quantity cell.
-        raw_slab_count=p["inventory_quantity"],
+        # emit reads the derived inventory_quantity field; set it directly from the stored stock so a
+        # ledger-render re-emit reproduces the same Variant Inventory Quantity cell (a rebuilt row skips
+        # Stage 6, so nothing else would populate it).
+        inventory_quantity=(int(_q) if (_q := str(p["inventory_quantity"] or "").strip()).lstrip("-").isdigit() else 0),
     )
 
 
@@ -125,14 +126,14 @@ def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int
         "WHERE i.last_synced_qty IS NULL OR i.last_synced_qty != i.qty "
         "ORDER BY i.rowid"
     ).fetchall()
-    # qty 0 is the reversible delist: emit only ever writes 0 via its discontinued
-    # path (inventory_for floors a real stock at 1), so split by qty to match it.
+    # qty 0 is the reversible delist: emit writes 0 only via its discontinued path, so split by qty and
+    # feed the positive-stock rows through `changed`.
     changed = [
         CanonicalRow(
             src_site=cfg.source_code,
             surrogate_key=r["surrogate_key"],
             handle=r["handle"],
-            raw_slab_count=str(r["qty"]),  # emit.inventory_for reads this first
+            inventory_quantity=int(r["qty"]),  # emit reads the derived stock field directly
         )
         for r in served if r["qty"] and int(r["qty"]) > 0
     ]

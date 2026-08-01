@@ -323,6 +323,36 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
     _accept(source_cfg.default_bundle_size, "config_default", Confidence.low, FlagCode.bundle_default)
 
 
+# Medusa integer sanity ceiling: a parsed 1e20 must never ship as stock (import reject / overflow).
+_INVENTORY_MAX = 1_000_000
+
+
+def derive_inventory(row: CanonicalRow) -> None:
+    """Stock level (units available), derived ONCE -- SEPARATE from bundle_size (the slabs-per-bundle
+    multiplier). Conflating them oversold 0-stock slabs (a literal '0' fell through to the bundle default)
+    and pinned others at the config default forever. The live stock signal is raw_slab_count (or
+    raw_inventory_quantity if a source ever ships it); bundle_size is NEVER a stock source. A literal '0' is
+    a TRUSTED out-of-stock, not a fall-through. No parseable signal -> 0, uniform across categories: stock
+    never gates publishing (a 0-stock product still ships and sells when a later scrape restocks it -- the
+    inventory step owns real availability). An unparseable stock field is surfaced by classify (via
+    _stock_is_unparseable), not silently defaulted."""
+    for candidate, method in ((row.raw_slab_count, "raw_slab_count"),
+                              (row.raw_inventory_quantity, "raw_inventory_quantity")):
+        text = str(candidate).strip() if candidate is not None else ""
+        if not text:
+            continue
+        n = parse_number(text)
+        if n is None or int(n) < 0:
+            continue                                   # unparseable/negative -> no signal (flagged in classify)
+        row.inventory_quantity = min(int(n), _INVENTORY_MAX)
+        row.inventory_method = method
+        row.inventory_confidence = _conf_name(Confidence.high)
+        return
+    row.inventory_quantity = 0
+    row.inventory_method = "no_signal"
+    row.inventory_confidence = _conf_name(Confidence.high)   # a definite out-of-stock, not a guess
+
+
 @functools.lru_cache(maxsize=1)
 def _standard_areas() -> tuple[float | None, dict[str, float]]:
     """Parse standard_slab_area.csv once: (default area, {type_casefold: area})."""
@@ -622,6 +652,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
         derive_category(row, ref)
         derive_dimensions(row, ref)
         derive_bundle_size(row, ref, source_cfg)
+        derive_inventory(row)                          # stock, once, from raw signals only (never bundle_size)
         derive_origin(row, ref, source_cfg)
         derive_ports(row, ref, source_cfg)
         derive_title(row)
