@@ -226,6 +226,9 @@ def test_looks_like_artifact_heuristic():
     assert not (f("Carrara") or f("Mona Lisa") or f("Verde Star") or f("Blue Pearl"))
     assert not (f("La Perla") or f("El Dorado") or f("Mt Blanc"))               # real 2-char leads kept
     assert not (f("G682") or f("G032") or f("G682 (Sunset Gold)"))              # granite G-codes kept
+    # L#10: a purely non-Latin name folds to an empty match_key (two would mint the SAME Key) -> artifact
+    assert f("大理石") and f("Мрамор")                                            # CJK / Cyrillic -> rejected
+    assert not f("São Gabriel")                                                  # accented Latin still folds fine
 
 
 def test_code_like_name_flagged_not_minted(ref):

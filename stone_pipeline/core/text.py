@@ -262,6 +262,10 @@ def looks_like_artifact(name: str) -> bool:
     n = (name or "").strip()
     if len(n) < 2 or not any(c.isalpha() for c in n):
         return True                                     # empty, single char, or no letters
+    if not any(c.isalpha() for c in ascii_fold(n)):
+        return True                                     # only NON-Latin letters (CJK/Cyrillic): they fold to
+                                                        # an empty match_key, so two such names would mint the
+                                                        # SAME uuid5 Key and collapse -- route to review instead
     toks = n.split()
     if any(_is_number_code(t) for t in toks):
         return True                                     # carries a loose number/series code

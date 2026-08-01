@@ -32,6 +32,14 @@ def test_mixed_separators_unchanged():
     assert parse_number("1,234.56") == 1234.56  # US decimal
     assert parse_number("1,234") == 1234        # comma grouping
 
+def test_leading_dot_decimal_keeps_its_separator():
+    # L#7: a bare leading-separator decimal must keep the point, not drop it and 10x mis-scale.
+    assert parse_number(".5") == 0.5
+    assert parse_number(",5") == 0.5
+    assert parse_number("thickness: .8 cm") == 0.8
+    assert parse_number("2.5") == 2.5           # ordinary decimals unchanged
+    assert parse_number("5") == 5.0
+
 
 # --- SSRF guard (io/ssrf.url_allowed) ----------------------------------------
 def _resolve_to(monkeypatch, ip):
