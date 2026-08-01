@@ -82,6 +82,33 @@ def _load_pristine_seed_keys() -> set[str]:
         return {(r.get("Key") or "").strip() for r in csv.DictReader(handle) if (r.get("Key") or "").strip()}
 
 
+def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
+    """Factory reset: reset the LIVE base FILE to the pristine committed seed -- locally AND on S3 -- so the
+    next produce truly derives from the seed. The reset already reconciles the LEDGER to the seed, but the
+    live variants_export_base.csv self-mutates each produce (base := 1_variants_full) and is republished to
+    S3 (the S0 single-source-of-truth); without also reseeding that file, a factory reset would leave the
+    drifted base in place and the 'cold start' would silently start from it, not the seed. Best-effort +
+    loud: a failure never fails the reset (the ledger/config are already reset) but is surfaced."""
+    import shutil
+    from pathlib import Path
+    from stone_pipeline.config.settings import SETTINGS
+    seed = Path(seed_path or SETTINGS.paths.variants_export_base_seed_csv)
+    base = Path(base_path or SETTINGS.paths.variants_export_base_csv)
+    if not seed.exists():
+        log.warning("reset: no pristine base seed baked; leaving the base file as-is (local dev)")
+        return {"reseeded": False, "reason": "no pristine seed"}
+    try:
+        shutil.copyfile(seed, base)                     # local base := pristine seed
+        from stone_pipeline.reference.sync_variants_base import publish_base_to_s3
+        published = publish_base_to_s3(base)            # S3 base := pristine seed, so the cold start reads it
+        log.info("reset: base file reseeded from the pristine seed",
+                 extra={"extra_fields": {"s3_published": published}})
+        return {"reseeded": True, "s3_published": published}
+    except Exception as exc:
+        log.exception("reset: base-file reseed FAILED; the base may still be the drifted copy")
+        return {"reseeded": False, "error": str(exc)}
+
+
 _snapshot_on_mutation = False   # set True ONLY by the config server (serve); off in tests, laptop, and the
                                 # produce subprocess, so a lifecycle op there never attempts a real S3 call.
 
@@ -293,6 +320,7 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
                 config["variety_decisions"] = decisions_store.clear_variety_decisions()
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()
+                out["base_reseed"] = _reseed_base_from_pristine()   # S0: the base file itself starts pristine
             out["config"] = config
         if hard:
             # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces

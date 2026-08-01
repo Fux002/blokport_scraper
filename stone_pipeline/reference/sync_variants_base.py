@@ -43,9 +43,30 @@ def _row_count(path: Path) -> int:
         return sum(1 for _ in csv.DictReader(h))
 
 
-def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True) -> dict:
+def publish_base_to_s3(base_path: Path) -> bool:
+    """Publish the base to S3 (from_medusa/<name>) so it is the SINGLE source of truth, not a per-container
+    scratch file. fetch_inputs pulls it every run, so any container -- fresh or long-lived -- reads the SAME
+    base each run, eliminating the scratch-disk drift that shipped varieties in one category only. Best
+    effort: a failed publish logs LOUD and leaves the local base (the run still succeeded); the next run
+    republishes it. The corruption guard in sync() already refuses to write/publish a thin base."""
+    from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+    key = f"{ENV_SEGMENT}/scraper/from_medusa/{Path(base_path).name}"
+    try:
+        import boto3
+        boto3.client("s3", region_name=S3_REGION).upload_file(str(base_path), S3_BUCKET, key)
+        log.info("base seed published to S3 (single source of truth)", extra={"extra_fields": {"key": key}})
+        return True
+    except Exception:
+        log.exception("base seed S3 publish FAILED: the next run may read a stale base until a later run "
+                      "republishes it", extra={"extra_fields": {"key": key}})
+        return False
+
+
+def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, publish: bool = True) -> dict:
     """base := 1_variants_full (the one complete list). No-op if full hasn't been built yet; a corruption
-    guard refuses a produce that would collapse the base below _MIN_KEEP_FRACTION of its current size."""
+    guard refuses a produce that would collapse the base below _MIN_KEEP_FRACTION of its current size. When
+    `publish`, the written base is uploaded to S3 as the single source of truth (see publish_base_to_s3),
+    so the container's local base can never silently drift from S3 -- the S0 determinism fix."""
     full_path, base_path = Path(full_path), Path(base_path)
     if not full_path.exists():
         log.warning("no 1_variants_full to seed base from; leaving base unchanged")
@@ -63,6 +84,8 @@ def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True) -> 
             w = csv.DictWriter(h, fieldnames=COLS)
             w.writeheader()
             w.writerows(rows)
+        if publish:
+            publish_base_to_s3(base_path)          # S0: make S3 the single source of truth for the base
     stats = {"base_rows": len(rows), "skipped": False}
     log.info("base seed updated (base == 1_variants_full)", extra={"extra_fields": stats})
     return stats
