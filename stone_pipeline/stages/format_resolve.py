@@ -62,8 +62,14 @@ def _conf(c: Confidence) -> str:
 
 
 def _set(row: CanonicalRow, value: str, method: str, confidence: Confidence) -> None:
-    row.format_value = value.title()  # Block / Slab / Tile
-    row.is_block = value.casefold() == "block"
+    # Canonicalise to the registry's SINGULAR name. A scraper may tag its format in the plural
+    # ('Tiles'/'Blocks'); category() accepts that, but storing the raw plural broke downstream: the
+    # dimension bucket compares format_value == 'tile' (so 'Tiles' fell to the slab dims/weight/freight)
+    # and is_block compares == 'block' (so a 'Blocks' tag shipped a block as a slab). Resolve once here.
+    c = category(value)
+    canonical = c.name if c else value            # canonical singular; a truly unresolved value passes through
+    row.format_value = canonical.title()          # Block / Slab / Tile -- never a plural
+    row.is_block = canonical.casefold() == "block"
     row.format_method = method
     row.format_confidence = _conf(confidence)
 

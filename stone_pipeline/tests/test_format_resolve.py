@@ -35,6 +35,18 @@ def test_explicit_tag_wins(ref):
         assert row.format_confidence == "high"
 
 
+def test_plural_tag_canonicalises_to_singular(ref):
+    # L#9: a scraper may tag the format in the plural. category() accepts it, but format_value must be the
+    # canonical SINGULAR -- else the dimension bucket ('tile') and is_block ('block') comparisons miss, so a
+    # 'Tiles' row gets slab dims/weight and a 'Blocks' row ships as a slab.
+    for tag, expected, is_block in [("Tiles", "Tile", False), ("Blocks", "Block", True),
+                                    ("slabs", "Slab", False)]:
+        row = _resolve(ref, raw_format=tag)
+        assert row.format_value == expected           # singular, never 'Tiles'/'Blocks'
+        assert row.is_block is is_block               # a plural 'Blocks' still sets is_block
+        assert row.format_method == "explicit_tag"
+
+
 def test_name_word_when_no_tag(ref):
     row = _resolve(ref, raw_format="", raw_name="Pietra Gray Marble Slab")
     assert row.format_value == "Slab"
