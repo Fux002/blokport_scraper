@@ -181,6 +181,35 @@ def test_removed_source_is_not_resurrected_by_reconcile_seed(tmp_path, monkeypat
     assert "varsha" in {r["source"] for r in store.list_rows()}       # re-add cleared the tombstone
 
 
+def test_duplicate_source_code_is_rejected_by_the_db(tmp_path, monkeypatch):
+    # F8: two DISTINCT sources must not share a non-empty source_code (their SKU namespaces would collide).
+    # The DB UNIQUE(source_code) backstop rejects it even if two concurrent PUTs slip past the app check.
+    import sqlite3
+
+    import pytest
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.upsert_row({"source": "alpha", "adapter": "alpha", "source_code": "ZUC", "vendor": "A"})
+    with pytest.raises(sqlite3.IntegrityError):
+        store.upsert_row({"source": "beta", "adapter": "beta", "source_code": "ZUC", "vendor": "B"})
+    # empty codes are the default and must stay non-unique (many sources can be code-less)
+    store.upsert_row({"source": "gamma", "adapter": "gamma", "source_code": "", "vendor": "C"})
+    store.upsert_row({"source": "delta", "adapter": "delta", "source_code": "", "vendor": "D"})
+    assert {r["source"] for r in store.list_rows()} >= {"alpha", "gamma", "delta"}
+
+
+def test_readd_clears_tombstone_atomically(tmp_path, monkeypatch):
+    # F8: the source upsert and its removal-tombstone clear happen in ONE transaction, so a re-added source
+    # is never left both present AND tombstoned. (Functional check of the single-transaction upsert_row.)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.upsert_row({"source": "zucchi", "adapter": "zucchi", "source_code": "zuc", "vendor": "Z"})
+    assert store.delete_source("zucchi") is True
+    store.upsert_row({"source": "zucchi", "adapter": "zucchi", "source_code": "zuc", "vendor": "Z"})
+    from contextlib import closing
+    with closing(store.open_store()) as conn:
+        tomb = conn.execute("SELECT COUNT(*) AS n FROM removed_source WHERE source = 'zucchi'").fetchone()["n"]
+    assert tomb == 0                       # tombstone cleared in the same transaction as the re-add
+
+
 def test_enabled_names_is_none_without_a_store(tmp_path, monkeypatch):
     # no config store -> enabled_names() is None so callers run everything (pre-store behaviour)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))

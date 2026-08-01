@@ -20,6 +20,7 @@ import hmac
 import json
 import os
 import signal
+import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -323,7 +324,12 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         err = _validate_source_put(name, body)
         if err:
             return err
-        store.upsert_row(body)
+        try:
+            store.upsert_row(body)
+        except sqlite3.IntegrityError:
+            # the DB's UNIQUE(source_code) backstop tripped: a concurrent PUT claimed the same code between
+            # the app-level check and this write. Report a clean 400, not a 500.
+            return 400, {"error": f"source_code {body.get('source_code', '')!r} is already in use by another source"}
         return 200, store.get_row(name)
     if method == "DELETE":
         # stage 2 of a vendor removal ('Remove permanently'): purge the source's qty-0 products and drop
