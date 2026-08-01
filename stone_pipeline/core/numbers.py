@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import re
 
-# a numeric token: a run of digits that may contain grouping/decimal separators
-_NUM_RE = re.compile(r"-?\d[\d.,]*\d|-?\d")
+# a numeric token: a run of digits that may contain grouping/decimal separators, optionally led by a
+# bare decimal separator ('.5'/',5'). Without the optional leading [.,], a leading-dot decimal lost its
+# separator -- '.5' matched only '5' and parsed as 5.0 (a 10x mis-scale, exactly what this module guards).
+_NUM_RE = re.compile(r"-?[.,]?\d[\d.,]*\d|-?[.,]?\d")
 
 
 def parse_number(text: str | float | int | None) -> float | None:
