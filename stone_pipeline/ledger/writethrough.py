@@ -92,20 +92,25 @@ def record_source(emit_rows: Sequence[CanonicalRow],
         return False
 
 
-def record_catalog(path: str | Path | None = None) -> None:
-    """Shadow-record the consolidated catalog: reflect the produced 1_variants_full
-    onto the variation table (mark the produced set, add new variants). Call after
-    catalog finalizes the file. No-op when the flag is off; never raises."""
+def record_catalog(path: str | Path | None = None) -> bool:
+    """Record the consolidated catalog: reflect the produced 1_variants_full onto the variation table (mark
+    the produced set, add new variants). Call after catalog finalizes the file. Returns True on success or a
+    no-op (flag off / file not built yet); returns False if the write FAILED. Never raises, but the failure
+    is a status the caller MUST surface: the ledger is the live sync source Medusa pulls, so a swallowed
+    failure silently keeps the produced variations OUT of Medusa until a later run happens to succeed."""
     if not enabled():
-        return
+        return True
     try:
         full = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
         if not full.exists():
-            return
+            return True
         with open_ledger(path) as ledger:
             n = populate.populate_variations_full(ledger, full)
             typed = populate.fill_variation_types(ledger)
         log.info("ledger write-through recorded catalog variations",
                  extra={"extra_fields": {"variants_full": n, "types_filled": typed}})
+        return True
     except Exception:
-        log.exception("ledger catalog write-through failed (shadow only; run unaffected)")
+        log.exception("ledger catalog write-through FAILED: produced variations did NOT reach the ledger; "
+                      "Medusa will not sync them until a successful re-run")
+        return False

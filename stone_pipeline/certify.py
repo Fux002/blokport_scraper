@@ -32,6 +32,9 @@ from stone_pipeline.adapters import REGISTRY as ADAPTERS
 from stone_pipeline.adapters.selftest import fixture_dir, run_fixture
 from stone_pipeline.config.contracts import load_contract
 from stone_pipeline.config.sources import load_source, load_sources
+from stone_pipeline.core import logfmt
+
+log = logfmt.get_logger("certify")
 
 _VALID_MODES = ("review", "auto")
 _MIN_VOCAB_VALUES = 5  # need enough non-empty values for a swap signal to be meaningful
@@ -82,7 +85,13 @@ def check_vocab(source: str) -> tuple[bool, str]:
                               "cross": {o: rate(vals, o) for o in VOCAB_FIELDS if o != attr}}
         swaps = _vocab_swaps(per_attr)
     except Exception as exc:
-        return True, f"skipped (could not evaluate: {exc})"
+        # FAIL LOUD, do not skip: the genuinely-benign cases (no adapter / no fixture) already returned
+        # "skipped" above, and certify runs in CI where the reference + fixtures are present. So an error
+        # HERE is a real breakage (a crashing resolver, a malformed fixture, a reference bug) -- swallowing
+        # it as a PASS would let a source with a mis-mapped attribute column be promoted to auto. Surface it.
+        log.error("vocab-mapping certification could not evaluate; failing the check (not skipping)",
+                  extra={"extra_fields": {"source": source, "error": str(exc)}}, exc_info=True)
+        return False, f"FAILED to evaluate vocab mapping (surfaced, not skipped): {exc}"
     return (not swaps, "; ".join(swaps) if swaps else "attribute columns map to the right vocabularies")
 
 

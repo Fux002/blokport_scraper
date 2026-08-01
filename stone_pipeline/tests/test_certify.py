@@ -34,3 +34,14 @@ def test_every_source_certifies_clean():
         res = certify.certify_source(source)
         assert res.passed, f"{source} failed: " + "; ".join(
             f"{c.name}={c.detail}" for c in res.checks if not c.ok)
+
+
+def test_check_vocab_fails_loud_when_evaluation_errors(monkeypatch):
+    # F9: an ERROR during vocab evaluation (a crashing resolver, a reference/fixture bug) must FAIL the
+    # check, not be swallowed as a PASS -- a swallowed error could green-light a swapped-attribute-column
+    # source to auto. The genuinely-benign no-adapter/no-fixture cases return "skipped" BEFORE the try.
+    from stone_pipeline.reference import loaders
+    source = next(s for s in REGISTRY if (certify.fixture_dir(s) / "input.csv").exists())
+    monkeypatch.setattr(loaders, "load_all", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    ok, msg = certify.check_vocab(source)
+    assert ok is False and "FAILED to evaluate" in msg
