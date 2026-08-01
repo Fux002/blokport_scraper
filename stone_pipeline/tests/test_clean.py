@@ -17,9 +17,12 @@ def test_clean_keeps_latest_per_source(tmp_path):
     _touch(data / "a" / "20260101_000000" / "products.csv")
     _touch(data / "a" / "20260102_000000" / "products.csv")
     _touch(data / "b" / "20260101_000000" / "products.csv")
-    # source a: an old + a newer run folder
-    (out / "a_20260101_000000" / "diagnostics").mkdir(parents=True)
-    (out / "a_20260102_000000" / "diagnostics").mkdir(parents=True)
+    # source a: an old + a newer run folder, each a COMPLETED run (carries its canonical.parquet, the
+    # marker latest_run_dirs keys on -- an aborted run with no parquet is not an authoritative 'latest')
+    for ts in ("20260101_000000", "20260102_000000"):
+        d = out / f"a_{ts}" / "diagnostics"
+        d.mkdir(parents=True)
+        (d / "canonical.parquet").write_bytes(b"PAR1")
 
     dry = clean.run(dry_run=True, data_dir=data, outputs=out)
     assert dry["superseded_scrapes"] == 1 and dry["superseded_runs"] == 1

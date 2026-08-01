@@ -37,22 +37,30 @@ log = logfmt.get_logger("catalog")
 IMAGE_SCRIPT_TIMEOUT_S = 3600
 
 
+def _is_complete_run(run_dir: Path) -> bool:
+    """A run is COMPLETE only once it has emitted its canonical.parquet. That file is written solely on a
+    successful emit (run.py); every abort path (scrape-floor / health / gate / ingest) writes diagnostics
+    but NO parquet. So the parquet is the authoritative completeness marker at the catalog layer."""
+    return (run_dir / "diagnostics" / "canonical.parquet").exists()
+
+
 def latest_run_dirs(outputs_root: Path) -> list[Path]:
-    """The NEWEST run folder per source under outputs_root. A run id is `<source>_<date>_<time>`,
-    so the lexically-greatest folder for a source is its latest scrape; older folders are stale.
-    Consolidation MUST ignore the stale ones -- each scrape is a full snapshot, so including two
-    run folders for one source would double-count it (duplicate SKUs). This makes the catalog
-    idempotent and leftover-proof: a forgotten old run folder can never inflate the output."""
+    """The newest COMPLETE run folder per source under outputs_root. A run id is `<source>_<date>_<time>`,
+    so the lexically-greatest folder is the newest scrape -- but an ABORTED newer run (which writes
+    diagnostics but no canonical.parquet) must NOT supersede the last good run: consolidation would drop
+    the source entirely and prune/clean would delete its last recoverable snapshot in favour of an empty
+    newer folder (a source silently vanishing from the catalog + its data destroyed). So completeness, not
+    lexical recency alone, picks the authoritative folder per source. Older + aborted folders are stale.
+    This keeps the catalog idempotent and leftover-proof AND crash/abort-safe."""
     latest: dict[str, Path] = {}
-    for d in sorted(Path(outputs_root).glob("*_*_*")):   # <source>_<YYYYMMDD>_<HHMMSS>
-        if d.is_dir():
-            latest[d.name.rsplit("_", 2)[0]] = d          # sorted asc -> newest wins
+    for d in sorted(Path(outputs_root).glob("*_*_*")):   # <source>_<YYYYMMDD>_<HHMMSS>, sorted asc
+        if d.is_dir() and _is_complete_run(d):
+            latest[d.name.rsplit("_", 2)[0]] = d          # newest COMPLETE wins
     return list(latest.values())
 
 
 def find_canonical(outputs_root: Path) -> list[Path]:
-    return [c for d in latest_run_dirs(outputs_root)
-            if (c := d / "diagnostics" / "canonical.parquet").exists()]
+    return [d / "diagnostics" / "canonical.parquet" for d in latest_run_dirs(outputs_root)]
 
 
 def run(outputs_root: Path | None = None) -> Path:
