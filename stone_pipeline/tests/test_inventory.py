@@ -84,27 +84,28 @@ def test_inventory_only_aborts_loud_when_the_export_is_missing(tmp_path):
                    known_products_path=missing)
 
 
-def test_gate_on_images_holds_imageless_new_variants(tmp_path):
-    # a new variant (not in the export) whose image isn't on S3 is dropped from BOTH upload files;
-    # one with an image stays. No-op when the checker can't verify (returns None upstream).
+def test_drop_deleted_variants_keeps_imageless_new_but_drops_to_delete(tmp_path):
+    # New model: a variety is prepared in Medusa for ALL categories, so an imageless NEW variant (a fan-out
+    # block/tile with no product yet) is KEPT (blank image, textured per-category when a product appears).
+    # Only variants flagged in variants_to_delete are dropped from the upload files.
     from stone_pipeline import catalog
     import csv as _csv
-    export = tmp_path / "variants_export.csv"
-    with export.open("w", newline="") as h:
-        w = _csv.writer(h); w.writerow(["Key", "Name"]); w.writerow(["slab_existing_1", "Existing"])
+    delete_file = tmp_path / "variants_to_delete.csv"
+    with delete_file.open("w", newline="") as h:
+        w = _csv.writer(h); w.writerow(["Key", "Name"]); w.writerow(["slab_junk_del", "Junk"])
     for fname in ("1_variants_update.csv", "1_variants_full.csv"):
         with (tmp_path / fname).open("w", newline="") as h:
             w = _csv.writer(h); w.writerow(["Key", "Name"])
-            w.writerow(["slab_existing_1", "Existing"])      # in export -> not gated
-            w.writerow(["slab_new_ready", "Ready"])          # new, has image -> kept
-            w.writerow(["slab_new_missing", "Missing"])      # new, no image -> dropped
-    has_image = lambda k: k == "slab_new_ready"
-    held = catalog.gate_on_images(checker=has_image, to_upload=tmp_path, export_file=export)
-    assert held == 1
+            w.writerow(["slab_new_imaged", "Imaged"])        # new, product-backed slab -> kept
+            w.writerow(["block_new_blank", "Blank"])         # new fan-out, NO image -> KEPT now (was held)
+            w.writerow(["slab_junk_del", "Junk"])            # flagged for delete -> dropped
+    dropped = catalog.drop_deleted_variants(to_upload=tmp_path, delete_file=delete_file)
+    assert dropped == 1
     for fname in ("1_variants_update.csv", "1_variants_full.csv"):
         keys = {r["Key"] for r in _csv.DictReader((tmp_path / fname).open(encoding="utf-8-sig"))}
-        assert "slab_new_missing" not in keys                # imageless new -> held out
-        assert {"slab_existing_1", "slab_new_ready"} <= keys # existing + image-ready kept
+        assert "block_new_blank" in keys                     # imageless fan-out record is KEPT (Medusa-prepared)
+        assert "slab_new_imaged" in keys
+        assert "slab_junk_del" not in keys                   # to-delete junk still dropped
 
 
 def test_delete_variant_images_dry_run_counts(tmp_path):

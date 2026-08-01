@@ -102,11 +102,12 @@ def product_backed_keys() -> set[str]:
 
 
 def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Path:
-    """Product-backed variants needing an image. Two sources: (1) the new-variety backbone deltas
-    (fan-out copies with no product are skipped), and (2) BACKFILL -- existing variants that have a
-    product but still no image (e.g. a tile/block that gained a product after its slab was created;
-    these are never in backbone_additions, so without this they'd never be generated)."""
-    run_backfill = additions_dir is None         # backfill is whole-catalog; skip on a scoped call
+    """Product-backed variants needing an image, from the new-variety backbone deltas. A category's texture
+    is generated ONLY when a PRODUCT for that variant+category is scraped (the delta marks it
+    product_backed); a fan-out copy with no product is skipped and stays imageless (a record in Medusa,
+    placeholdered by Blokport) until its own product appears. No whole-catalog backfill: the old backfill
+    pre-textured EVERY category of a stocked variety, which made block/tile images for varieties only ever
+    sold as slabs. The rule is now one line -- image a category exactly when it has a product to list."""
     additions_dir = Path(additions_dir or SETTINGS.paths.catalog_source_dir / "backbone_additions")
     items, seen = [], set()
     for f in sorted(additions_dir.glob("*.json")):
@@ -115,33 +116,6 @@ def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Pa
             if not key or key in seen or not p.get("product_backed", False):
                 continue
             item = _prompt_item(key, (p.get("stone_type") or "").strip(), (p.get("variant") or "").strip())
-            if item:
-                seen.add(key)
-                items.append(item)
-    # (2) BACKFILL: every category variant of a STOCKED variety that has NO image yet. A variety is stocked
-    # when ANY of its category keys is product-backed; then EACH of its slab/block/tile variants needs its
-    # OWN image, generated from that category's base image (a tile is not a copy of the slab -- different
-    # base, different render). This is why a stocked variety's tile/block was blank: it is not itself
-    # product-backed (the product references the slab), so keying the backfill on the product-backed KEY
-    # missed it. Signal is the immutable EXPORT Image (blank), NOT 1_variants_full -- emit may have just
-    # stamped the CSV link, but the real S3 image isn't generated until this queue runs; once generated +
-    # uploaded + re-exported, the export Image is non-blank and it drops out of the queue.
-    backed, ktype = (product_backed_keys(), _backbone_types()) if run_backfill else (set(), {})
-    exp = SETTINGS.paths.export_file
-    if run_backfill and exp.exists():
-        with exp.open(encoding="utf-8-sig", newline="") as h:
-            rows = list(csv.DictReader(h))
-
-        def _ident(r) -> tuple[str, str]:
-            k = (r.get("Key") or "").strip()
-            return (ktype.get(k, ""), (r.get("Name") or "").strip())   # (stone_type, variant): the variety
-
-        stocked = {_ident(r) for r in rows if (r.get("Key") or "").strip() in backed}
-        for r in rows:
-            key = (r.get("Key") or "").strip()
-            if not key or key in seen or _ident(r) not in stocked or (r.get("Image") or "").strip():
-                continue
-            item = _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip())
             if item:
                 seen.add(key)
                 items.append(item)
