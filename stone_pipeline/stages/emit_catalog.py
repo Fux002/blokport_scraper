@@ -179,22 +179,34 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
                 continue
             out[mk] = {"Key": mk, "Name": disp, "Image": "",
                        "Aliases": aliases, "Volume per kg (m³/kg)": ""}
-    # DIAGNOSTIC (pure logging, no behaviour change): a variety present in SOME but not ALL fan-out
-    # categories after this pass is non-uniform -- the slab-only-mint symptom. Log why each missing
-    # category was not filled (which categories it has, and the skip reason per missing one), so the run
-    # EXPLAINS the outcome in its own logs instead of us inferring it from artifacts. Bounded: only
-    # non-uniform varieties are logged (a clean run has none), capped so the line can never flood.
-    non_uniform: dict[str, dict] = {}
+    # DIAGNOSTIC (pure logging, no behaviour change): log the EXACT per-category fill decision for any
+    # variety whose NAME is present in some-but-not-all fan-out categories (the real slab-only symptom).
+    # Keyed on PRESENCE only (not on `out`), so a fill that lands in `out` cannot mask the case. For each
+    # missing category: was it FILLED (queued in out), skipped because the deterministic key already exists
+    # in by_key, or not reached at all -- plus, for a filled row, whether that key is ALSO in by_key (which
+    # means build()'s `filled = [... if key not in by_key]` will DISCARD the fill). This is the line that
+    # ends the guessing: it states, in the run's own log, why block/tile were not created.
+    name_nonuniform: dict[str, dict] = {}
     for ident, (ts, disp, aliases) in varieties.items():
-        have = [b for b in fanout if ident in present[b] or gen_key(b, ts, disp) in out]
-        if 0 < len(have) < len(fanout):
-            non_uniform[f"{disp}|{ident[0]}"] = {
-                "have": sorted(have),
-                "skips": [f"{b}:{r}" for b, r in skipped.get(ident, [])]}
-    if non_uniform:
-        log.warning("uniform-fill left non-uniform varieties", extra={"extra_fields": {
-            "fanout": fanout, "fills_generated": len(out), "non_uniform_count": len(non_uniform),
-            "detail": dict(list(non_uniform.items())[:20])}})
+        present_in = [b for b in fanout if ident in present[b]]
+        if not (0 < len(present_in) < len(fanout)):
+            continue
+        miss = {}
+        for b in fanout:
+            if b in present_in:
+                continue
+            mk = gen_key(b, ts, disp)
+            if mk in out:
+                miss[b] = "filled_AND_in_by_key(discarded)" if mk in by_key else "filled"
+            elif mk in by_key:
+                miss[b] = "skip:key_in_by_key"
+            else:
+                miss[b] = "not_reached"
+        name_nonuniform[f"{disp}|{ident[0]}"] = {"present_in": sorted(present_in), "missing": miss}
+    if name_nonuniform:
+        log.warning("uniform-fill: name-non-uniform varieties + per-category decision",
+                    extra={"extra_fields": {"fanout": fanout, "count": len(name_nonuniform),
+                                            "detail": dict(list(name_nonuniform.items())[:25])}})
     return list(out.values())
 
 
