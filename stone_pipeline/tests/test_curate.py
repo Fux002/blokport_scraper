@@ -318,31 +318,55 @@ def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
     assert not any(p["variant"] == "Karur Special White" for p in res2.pending_confirm)
 
 
-def test_new_type_on_existing_multitype_name_holds_not_mint(ref):
-    # BUG6 / HOLD-never-guess: 'Ocean Blue' exists under granite/limestone/marble/travertine but NOT
-    # quartzite. A scrape typed 'Quartzite' (a NEW type for the name) must HOLD for the operator to confirm
-    # it is a genuinely new variety, never silently mint 'Ocean Blue Quartzite' (a mis-tag would phantom it).
+def _inject_existing(monkeypatch, *entries):
+    """Populate curate's existing-variety index with (name, type) varieties across every branch. The index
+    normally comes from variants_export (Id-bearing, ABSENT locally), so without this the multi-type BUG6
+    path never executes and a test would pass through an unrelated branch (false confidence)."""
+    from stone_pipeline.matching import projections as proj
+
+    def load(branch):
+        imp = curate.ImportFile(branch=branch, path=None, present=True)
+        for name, typ in entries:
+            key = f"{branch}_{proj.norm(typ)}_{proj.norm(name).replace(' ', '_')}_x"
+            v = {"Key": key, "Name": name, "Image": "", "Aliases": "", "Volume": "", "type": proj.norm(typ)}
+            imp.varieties.append(v)
+            imp.by_name_type[(proj.norm(name), proj.norm(typ))] = v
+            imp.by_name[proj.norm(name)] = v
+        return imp
+    monkeypatch.setattr(curate, "load_existing", load)
+
+
+def _ocean_blue(raw_type):
+    r = CanonicalRow(src_site="varsha", surrogate_key="ob", variety_match_key="Ocean Blue", raw_type=raw_type)
+    r.add_gap(TreeGap(src_site="varsha", surrogate_key="ob", raw_name="Ocean Blue",
+                      gap_kind=GapKind.missing_variation, nearest_existing="Ocean Blue", nearest_score=100.0))
+    return r
+
+
+def test_new_type_on_existing_multitype_name_holds_not_mint(ref, monkeypatch):
+    # BUG6 / HOLD-never-guess: 'Ocean Blue' exists as Granite + Marble but NOT Onyx. A scrape typed 'Onyx' (a
+    # NEW type for the name) must HOLD for the operator to confirm, never silently mint 'Ocean Blue Onyx'.
     from stone_pipeline.config import decisions_store
+    _inject_existing(monkeypatch, ("Ocean Blue", "Granite"), ("Ocean Blue", "Marble"))
+    res = curate.build_curation([_ocean_blue("Onyx")], ref)
+    assert any(p["variant"] == "Ocean Blue" for p in res.pending_confirm)         # held for confirmation
+    assert not any("onyx" in row["Key"] for b in res.new_variants.values() for row in b
+                   if row["Name"] == "Ocean Blue")                                 # NOT silently minted
 
-    def ocean_blue_quartzite():
-        r = CanonicalRow(src_site="varsha", surrogate_key="ob1", variety_match_key="Ocean Blue",
-                         raw_type="Quartzite")
-        r.add_gap(TreeGap(src_site="varsha", surrogate_key="ob1", raw_name="Ocean Blue",
-                          gap_kind=GapKind.missing_variation, nearest_existing="Ocean Blue", nearest_score=100.0))
-        return r
 
-    res = curate.build_curation([ocean_blue_quartzite()], ref)
-    assert any(p["variant"] == "Ocean Blue" for p in res.pending_confirm)   # held for confirmation
-    assert not any("ocean_blue" in row["Key"] and "quartzite" in row["Key"]
-                   for b in res.new_variants.values() for row in b)          # NOT silently minted
-
-    # operator confirms it IS a genuinely new variety -> the next produce mints it as the scraped new type
+def test_confirmed_new_type_mints_not_absorbed_into_a_same_name_sibling(ref, monkeypatch):
+    # The absorption bug behind "I can only mint it as a preset type": a CONFIRMED new type on an existing
+    # multi-type name fell through to the fuzzy aliaser, which (nearest = the same name under a different
+    # type) aliased it onto that sibling instead of minting ('Jasper Green Dolomite' -> 'Jasper Green
+    # Marble'). With the operator's mint decision it must MINT the new type in every category instead.
+    from stone_pipeline.config import decisions_store
+    _inject_existing(monkeypatch, ("Ocean Blue", "Granite"), ("Ocean Blue", "Marble"))
     decisions_store.set_variety_decision("Ocean Blue", "mint")
-    res2 = curate.build_curation([ocean_blue_quartzite()], ref)
-    posts = [p for b in ("slab", "block", "tile")
-             for p in res2.backbone_new[b] if p["variant"] == "Ocean Blue" and p["stone_type"] == "Quartzite"]
-    assert posts, "an explicit mint decision un-holds the new-type variety"
-    assert all("quartzite" in p["key"] for p in posts)                      # minted under the new typed Key
+    res = curate.build_curation([_ocean_blue("Onyx")], ref)
+    minted = {rw["Key"].split("_", 1)[0] for b in res.new_variants.values() for rw in b
+              if rw["Name"] == "Ocean Blue" and "onyx" in rw["Key"]}
+    assert minted == {"slab", "block", "tile"}, \
+        "a confirmed new type must MINT in every category, not be absorbed into a same-name sibling"
 
 
 def test_non_canonical_type_holds_instead_of_minting_a_malformed_variety(ref):
