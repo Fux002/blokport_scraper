@@ -176,7 +176,9 @@ class AdapterBase:
         batch continues; the count of dropped rows is logged."""
         # DISCOVER this source's leading code prefixes from the whole batch (data-driven, no
         # hardcoded strings), so adapt_record strips them from every variety -- generalises to
-        # a new scraper's own codes without listing them.
+        # a new scraper's own codes without listing them. Reset FIRST, unconditionally: a later
+        # adapt() on a frame WITHOUT the variety column must never inherit a prior batch's codes.
+        self._lead_codes = frozenset()
         if self.variety_match_key and self.variety_match_key in frame.columns:
             names = [self.clean(v) for v in frame[self.variety_match_key].to_list()]
             self._lead_codes = detect_code_prefixes(names)

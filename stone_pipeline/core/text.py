@@ -176,13 +176,30 @@ def _is_number_code(tok: str) -> bool:
     return any(c.isdigit() for c in t)                   # any other digit-bearing token -> drop
 
 
+# Real short leading WORDS that front legitimate multi-word variety names -- they read like names, not
+# supplier codes, so they must not be shape-flagged just for being 2 chars. The romance articles/particles
+# (El, La, Di ...) all carry a vowel and are handled by the vowel test; this set is only the vowel-LESS
+# real abbreviations (Saint/Mount/Fort) that would otherwise look code-shaped ('St Laurent', 'Mt Blanc').
+_REAL_SHORT_LEADS = frozenset({"st", "mt", "ft"})
+
+
 def looks_codey(tok: str) -> bool:
-    """A token that does NOT read like a real name word: <=2 chars, contains a digit, or has
-    no vowel (un-pronounceable). Used to spot supplier codes by SHAPE, not by enumerating them."""
+    """A token that does NOT read like a real name word -- used to spot supplier codes by SHAPE, not by
+    enumerating them: it contains a digit, or is un-pronounceable (no vowel), or is a bare <=2-char token
+    that is neither a vowel-bearing word ('El', 'La', 'Di') nor a known short lead word ('St', 'Mt', 'Ft').
+    A 2-char lead with a vowel or a real abbreviation is a NAME word ('El Dorado', 'St Laurent'), not a
+    code, so it is never stripped."""
     t = tok.strip("().[]{}-–—,.")
     if not t:
         return False
-    return len(t) <= 2 or any(c.isdigit() for c in t) or not any(c.casefold() in "aeiou" for c in t)
+    if any(c.isdigit() for c in t):
+        return True                                      # any digit-bearing token -> code-shaped
+    has_vowel = any(c.casefold() in "aeiou" for c in t)
+    if len(t) <= 2:
+        # a 2-char lead is a supplier code only if it does NOT read like a word: no vowel AND not a known
+        # short lead ('Z', 'ZB', 'Xy' -> code; 'El', 'La', 'St', 'Mt' -> real lead, kept).
+        return not has_vowel and t.casefold() not in _REAL_SHORT_LEADS
+    return not has_vowel                                 # 3+ chars with no vowel -> un-pronounceable -> code
 
 
 def detect_code_prefixes(names: list[str], min_fanout: int = 2) -> frozenset[str]:
