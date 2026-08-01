@@ -143,3 +143,27 @@ def test_no_job_when_nothing_pending(monkeypatch):
           AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD"))
     assert et.submit_pending(["varsha"]) == []
     assert batch.calls == []
+
+
+def test_fan_out_is_capped_to_max_jobs(monkeypatch):
+    # F13: each Batch job carries its own fal_max_usd ceiling, so the TOTAL job count per trigger is capped
+    # to bound worst-case FAL spend. 10 pending -> 5 windows of 2, but max_jobs=3 -> only 3 jobs submitted;
+    # the deferred windows stay un-done and ride the next trigger.
+    batch = FakeBatch()
+    shas = [f"{i:064x}" for i in range(10)]
+    s3 = FakeS3(_keys(scraped=shas))
+    _wire(monkeypatch, s3, batch,
+          AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD", slice_size=2, max_jobs=3),
+          watermarked=())
+    ids = et.submit_pending(["varsha"])
+    assert len(ids) == 3 and len(batch.calls) == 3          # capped at 3, not 5
+
+
+def test_max_jobs_zero_disables_the_cap(monkeypatch):
+    batch = FakeBatch()
+    shas = [f"{i:064x}" for i in range(10)]                  # 5 windows
+    s3 = FakeS3(_keys(scraped=shas))
+    _wire(monkeypatch, s3, batch,
+          AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD", slice_size=2, max_jobs=0),
+          watermarked=())
+    assert len(et.submit_pending(["varsha"])) == 5          # <=0 -> no cap, all windows submitted

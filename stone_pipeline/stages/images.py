@@ -367,6 +367,13 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
 
     # content-address: bytes hash -> public url (so identical bytes upload once)
     hash_to_public: dict[str, str] = {}
+    # F13: bound the FAL de-watermark spend on THIS :core run. Each de-watermarked image bills FAL, and a
+    # large produce would otherwise call FAL unbounded (no ceiling on this path). Once the accrued cost
+    # reaches fal_max_usd, watermarked images stop being de-watermarked here and are HELD for the GPU (the
+    # existing deferred path) -- so a runaway can never silently overspend. <=0 disables the ceiling.
+    fal_cost = 0.0
+    fal_ceiling = cfg.processing.fal_max_usd if processor is not None else 0.0
+    fal_budget_logged = False
     for url, data in fetched.items():
         if data is None:
             url_to_public[url] = None
@@ -406,11 +413,20 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             # de-watermarking it too when the page marks it watermarked. :core must NOT de-watermark an
             # enhance=on source: the GPU de-watermarks + upscales it in one pass, and doing FAL here as well
             # would bill it twice -- so request de-wm on :core only for a source we complete on :core.
-            finish_on_core = src_site not in enhance_sources
             watermarked_src = src_site in watermarked_sources
+            # de-watermark on :core only when we complete the source here AND the run's FAL budget remains;
+            # once spent, a watermarked image is deferred to the GPU (held) rather than billed unbounded.
+            fal_budget_ok = fal_ceiling <= 0 or fal_cost < fal_ceiling
+            finish_on_core = (src_site not in enhance_sources) and fal_budget_ok
+            if watermarked_src and not fal_budget_ok and not fal_budget_logged:
+                log.warning("FAL de-watermark budget reached on :core; deferring remaining watermarked "
+                            "images to the GPU", extra={"extra_fields": {"fal_cost": round(fal_cost, 2),
+                                                                         "ceiling": fal_ceiling}})
+                fal_budget_logged = True
             pr = processor.process(data, watermarked=finish_on_core and watermarked_src,
                                    enhance=src_site in enhance_sources)
             stats.processed += 1
+            fal_cost += pr.billed_mp * cfg.processing.fal_price_per_mp   # every billed generation (F5)
             # Persist the raw original UNCONDITIONALLY (keep_scraped): it is the GPU reprocess's INPUT.
             # A watermarked source cannot de-watermark on the torch/FAL-free :core, so :core leaves the
             # image for the GPU -- which reads scraped/. Writing scraped/ only when :core changed the

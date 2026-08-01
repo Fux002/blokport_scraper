@@ -667,6 +667,11 @@ class AutoEnhanceConfig:
     queue: str = os.environ.get("BLOKPORT_GPU_QUEUE", "")
     job_definition: str = os.environ.get("BLOKPORT_GPU_JOBDEF", "")
     slice_size: int = _env_int("BLOKPORT_ENHANCE_SLICE", 200)
+    # Global fan-out cap: at most this many Batch jobs per trigger. Each job carries its OWN per-process
+    # fal_max_usd ceiling, so without a cap a large backlog fans out one job per window (unbounded jobs) and
+    # multiplies the FAL ceiling N-fold. With the cap, the worst-case FAL exposure per trigger is bounded at
+    # max_jobs * fal_max_usd; deferred windows stay un-done and ride the next trigger. <=0 disables the cap.
+    max_jobs: int = _env_int("BLOKPORT_ENHANCE_MAX_JOBS", 8)
 
 
 @dataclass(frozen=True)
