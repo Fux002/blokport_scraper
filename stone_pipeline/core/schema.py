@@ -99,6 +99,7 @@ class ReviewFlag(BaseModel):
     confidence: Confidence = Confidence.none
     method: str = ""
     src_url: Optional[str] = None
+    detail: Optional[str] = None      # free-text reviewer note; callers pass detail= (was silently dropped)
 
 
 class RejectReason(BaseModel):
