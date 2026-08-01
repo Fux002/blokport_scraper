@@ -88,7 +88,11 @@ def submit_pending(sources: list[str] | None = None) -> list[str]:
     watermarked = _watermarked_sources()
     enhance = _enhance_sources()
     size = cfg.slice_size
-    submitted: list[str] = []
+    # COLLECT every pending window across all sources first, then CAP the TOTAL fan-out before submitting.
+    # Each Batch job carries its own fal_max_usd ceiling, so an uncapped one-job-per-window fan-out would
+    # multiply that ceiling N-fold on a large backlog (the F13 exposure). Deferred windows stay un-done and
+    # are picked up by the next trigger, so nothing is lost -- only the per-trigger spend is bounded.
+    jobs: list[tuple[str, int]] = []   # (src, offset)
     for src in srcs:
         try:
             scraped = sorted(_keys_under(s3, imagestore.scraped_prefix(src)))  # STABLE list, == reprocess sort
@@ -100,33 +104,41 @@ def submit_pending(sources: list[str] | None = None) -> list[str]:
         # Windows (offset/size buckets) of the STABLE full sorted list that contain at least one un-done
         # image. We submit offsets into the FULL list (not the delta) so the reprocess -- which slices that
         # same stable list -- never misaligns under concurrency; it skips already-done images inside each
-        # window per-image. Submitting only non-empty windows keeps the fan-out cheap (no idle GPU jobs).
+        # window per-image. Only non-empty windows are collected (no idle GPU jobs).
         pending_positions = [i for i, k in enumerate(scraped)
                              if (imagestore.sha_from_url(k) or "") not in done]
         if not pending_positions:
             continue
-        windows = sorted({p // size for p in pending_positions})
-        for w in windows:
-            offset = w * size
-            try:
-                resp = batch.submit_job(
-                    jobName=f"autoenh-{src}-{offset}",
-                    jobQueue=cfg.queue,
-                    jobDefinition=cfg.job_definition,
-                    containerOverrides={"environment": [
-                        {"name": "SRC", "value": src},
-                        {"name": "WATERMARKED", "value": "true" if src in watermarked else "false"},
-                        {"name": "ENHANCE", "value": "true" if src in enhance else "false"},
-                        {"name": "CLASSIFY", "value": "false"},   # auto-enhance never auto-discards
-                        {"name": "SLICE_OFFSET", "value": str(offset)},
-                        {"name": "SLICE_COUNT", "value": str(size)},
-                    ]})
-                submitted.append(resp["jobId"])
-            except Exception as exc:  # a submit failure is loud but non-fatal to the produce
-                log.error("auto-enhance: submit_job failed",
-                          extra={"extra_fields": {"source": src, "offset": offset, "error": str(exc)}})
-        log.info("auto-enhance submitted", extra={"extra_fields": {
-            "source": src, "pending": len(pending_positions), "windows": len(windows)}})
+        jobs.extend((src, w * size) for w in sorted({p // size for p in pending_positions}))
+
+    requested = len(jobs)
+    if cfg.max_jobs and cfg.max_jobs > 0 and requested > cfg.max_jobs:
+        log.warning("auto-enhance fan-out CAPPED; deferred windows ride the next trigger (bounds FAL spend)",
+                    extra={"extra_fields": {"requested": requested, "cap": cfg.max_jobs,
+                                            "deferred": requested - cfg.max_jobs}})
+        jobs = jobs[:cfg.max_jobs]
+
+    submitted: list[str] = []
+    for src, offset in jobs:
+        try:
+            resp = batch.submit_job(
+                jobName=f"autoenh-{src}-{offset}",
+                jobQueue=cfg.queue,
+                jobDefinition=cfg.job_definition,
+                containerOverrides={"environment": [
+                    {"name": "SRC", "value": src},
+                    {"name": "WATERMARKED", "value": "true" if src in watermarked else "false"},
+                    {"name": "ENHANCE", "value": "true" if src in enhance else "false"},
+                    {"name": "CLASSIFY", "value": "false"},   # auto-enhance never auto-discards
+                    {"name": "SLICE_OFFSET", "value": str(offset)},
+                    {"name": "SLICE_COUNT", "value": str(size)},
+                ]})
+            submitted.append(resp["jobId"])
+        except Exception as exc:  # a submit failure is loud but non-fatal to the produce
+            log.error("auto-enhance: submit_job failed",
+                      extra={"extra_fields": {"source": src, "offset": offset, "error": str(exc)}})
+    log.info("auto-enhance submitted", extra={"extra_fields": {
+        "requested_windows": requested, "submitted": len(submitted), "cap": cfg.max_jobs}})
     return submitted
 
 
