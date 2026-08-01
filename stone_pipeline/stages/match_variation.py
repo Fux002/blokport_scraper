@@ -168,12 +168,21 @@ class VariationStage:
             forced = overrides.get(row.src_site, row.surrogate_key or "", "variation_id")
             if forced:
                 cand = engine.index.candidates.get(forced)
-                row.variation_id = forced
-                row.variation_key = self._key_for(forced)
-                row.variation_name = cand.canonical if cand else (row.variety_match_key or "")
-                row.variation_confidence = Confidence.high.name
-                row.variation_method = "override"
-                return
+                key = self._key_for(forced)
+                if cand is not None and key:
+                    row.variation_id = forced
+                    row.variation_key = key
+                    row.variation_name = cand.canonical
+                    row.variation_confidence = Confidence.high.name
+                    row.variation_method = "override"
+                    return
+                # The override id is NOT a candidate in THIS branch (a stale pre-remint id, or a slab id on
+                # the block branch). Committing it anyway stamped variation_id=forced with a NULL key at high
+                # confidence -- an orphan link that bypasses the gap/review path and FK-fails on ack. Ignore
+                # the unusable override and fall through to the normal match/gap path, loudly.
+                log.warning("variation_id override ignored: id is not a candidate in this branch",
+                            extra={"extra_fields": {"forced": forced, "src_site": row.src_site,
+                                                    "surrogate_key": row.surrogate_key}})
 
         query = (row.variety_match_key or "").strip()
         if not query:
