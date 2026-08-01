@@ -136,11 +136,15 @@ def check(rows: list[CanonicalRow], source: str, path: Path | None = None) -> tu
                               "baseline": base_med, "now": now_med})
     report = {"source": source, "status": status, "medians": current, "drift": drift}
     if status == OK:
-        # MERGE, do not replace: a format transiently below _MIN_SAMPLE (a short scrape, a category briefly
-        # out of stock) is absent from `current`; carrying its last-good median forward keeps the gate
-        # armed for it next run. Formats present this run refresh; absent ones are preserved.
-        merged = dict(baseline.medians) if baseline else {}
-        merged.update(current)
+        # MERGE per FIELD, do not replace: a format transiently below _MIN_SAMPLE (a short scrape, a
+        # category briefly out of stock) is absent from `current`, AND a single field can be absent within a
+        # present format (all weights null this run). Both must carry their last-good median forward, or that
+        # field silently loses its drift guard -- a later 1000x unit rescale on it would ship uncaught. A
+        # per-format dict.update would drop the absent FIELD; deep-merge each format's inner {field: median}
+        # so present fields refresh and absent ones are preserved.
+        merged = {fmt: dict(fields) for fmt, fields in baseline.medians.items()} if baseline else {}
+        for fmt, cur_fields in current.items():
+            merged.setdefault(fmt, {}).update(cur_fields)
         save_baseline(MagnitudeBaseline(source=source, medians=merged, updated_at=_now()), path)
     log.info(f"magnitude drift {status} for {source}",
              extra={"extra_fields": {"status": status, "drift": len(drift), "fields": list(current)}})
