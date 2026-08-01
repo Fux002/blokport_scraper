@@ -493,6 +493,19 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             "nearest_existing": _named_with_types(clean),
             "score": "", "model_prob": "", **_review_evidence(row)})
 
+    def _mint(clean: str, stone_type: str, row, gap) -> None:
+        """Create a NEW variety row (clean + stone_type) -- the PHASE 5 last-resort mint. Shared with the
+        BUG6 confirm path so an operator's confirmed NEW type on an existing multi-type name mints DIRECTLY,
+        instead of the fuzzy aliaser absorbing it onto a same-name sibling of a different type."""
+        new_variant_rows.append((
+            clean, title_case(clean), stone_type,
+            title_case(_attr_surface(row, "color")),
+            (row.quality_name or last_resort_quality).strip() or last_resort_quality,
+            title_case(_attr_surface(row, "finish")), gap,
+            variety_branches.get(proj.norm(clean), set()),
+            _review_evidence(row),
+        ))
+
     def _apply_operator_alias(clean: str, name: str, row, stone_type: str) -> bool:
         """Route an operator ALIAS decision for `clean` onto its target variety, disambiguated by the
         operator's chosen TARGET type (else the scraped row's own type). Returns True if it aliased OR held
@@ -617,8 +630,14 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             if confirm_decisions.get(proj.norm(clean)) != "yes":
                 _hold_new_type(clean, stone_type, row, gap, sorted({o[1] for o in owners}))
                 continue
-            # operator confirmed -> fall through to PHASE 5 (mint the new-type variety),
-            # guarded by the type-aware existing_cores (no duplicate).
+            # operator confirmed a genuinely-new type -> MINT it DIRECTLY as that type, and continue. Do NOT
+            # fall through to the fuzzy aliaser (4b): the nearest existing variety shares this exact NAME
+            # under a DIFFERENT type, so 4b would alias the operator's new-type variety onto that sibling
+            # ('Jasper Green Dolomite' -> 'Jasper Green Marble') and silently discard the decision -- the bug
+            # behind "I can only mint it as a preset type". The operator is the type authority here; the
+            # type-aware existing_cores guard below still prevents a duplicate.
+            _mint(clean, stone_type, row, gap)
+            continue
         # 4b. fuzzy nearest: alias-vs-new decision against the nearest existing variety. The tier-7
         # model uses name + type + colour to tell a real alias ('Marjan' -> 'Marjan Silver') from a
         # distinct sibling ('Cristallo Divine' vs 'Cristallo Bianco'): P>=hi auto-confirms the alias,
@@ -664,14 +683,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 continue
         # PHASE 5 -- MINT a new variety: nothing rejected it, nothing existing claims it -> it is a
         # clean, novel, product-backed name, so create it (the last resort).
-        new_variant_rows.append((
-            clean, title_case(clean), stone_type,
-            title_case(_attr_surface(row, "color")),
-            (row.quality_name or last_resort_quality).strip() or last_resort_quality,
-            title_case(_attr_surface(row, "finish")), gap,
-            variety_branches.get(proj.norm(clean), set()),  # product-backed branches
-            _review_evidence(row),
-        ))
+        _mint(clean, stone_type, row, gap)
 
     # A spelling already CONFIRMED as an alias of its real owner (gap loop above) must NOT also be
     # proposed as a needs-review alias onto a different fuzzy-near variety (the match-review path's
