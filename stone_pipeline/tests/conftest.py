@@ -59,6 +59,8 @@ _DATA_DEPENDENT_TESTS = {
     "test_curate::test_borderline_gap_becomes_alias_candidate_not_new_variant",
     "test_curate::test_alias_decision_routes_spelling_onto_target_and_mints_nothing",
     "test_inventory::test_inventory_only_run_skips_images_products_and_canonical",
+    "test_inventory::test_inventory_only_aborts_loud_when_the_export_is_missing",  # run_source needs a scrape
+
     "test_ledger_writethrough::test_writethrough_products_match_emitted_csv",
     "test_m11_adapters::test_marenostone_routes_generic_to_gaps_not_guesses",
     "test_stage_reports::test_run_writes_per_stage_diagnostics",
