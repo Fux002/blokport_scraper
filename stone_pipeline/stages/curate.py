@@ -478,6 +478,21 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             "nearest_existing": _named_with_types(clean),
             "score": "", "model_prob": "", **_review_evidence(row)})
 
+    def _hold_new_type(clean: str, stone_type: str, row, gap, existing_types: list[str]) -> None:
+        """BUG6 / HOLD-never-guess: the scrape carries a stone type NOT among the types this name already
+        exists under (e.g. 'Ocean Blue' exists as granite/marble, scrape says quartzite). Do not silently
+        mint a new-type variety -- a mis-tag would become a phantom. Hold it for the operator to confirm it
+        is a genuinely new variety (mint) or a mis-tag. An explicit mint decision on this name un-holds it."""
+        types_txt = _human_join([title_case(t) for t in existing_types])
+        pending_confirm.append({
+            "confirm": "", "variant": clean,
+            "reason": f"'{title_case(clean)}' already exists as {types_txt}, but this scrape is typed "
+                      f"'{title_case(stone_type)}'. Confirm it is a genuinely NEW variety to mint "
+                      f"'{title_case(clean)} {title_case(stone_type)}', or reject it as a mis-tag.",
+            "stone_type": title_case(stone_type), "color": title_case(_attr_surface(row, "color")),
+            "nearest_existing": _named_with_types(clean),
+            "score": "", "model_prob": "", **_review_evidence(row)})
+
     def _apply_operator_alias(clean: str, name: str, row, stone_type: str) -> bool:
         """Route an operator ALIAS decision for `clean` onto its target variety, disambiguated by the
         operator's chosen TARGET type (else the scraped row's own type). Returns True if it aliased OR held
@@ -595,8 +610,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     continue
                 review_candidates.setdefault(proj.norm(clean), set()).add(name)  # alias family -> review
                 continue
-            # st is set but NOT among the existing types -> a genuinely NEW variety of this name+type;
-            # fall through to PHASE 5 (mint), guarded by the now type-aware existing_cores (no duplicate).
+            # st is set but NOT among the existing types -> the scrape claims a NEW stone type on an
+            # EXISTING multi-type name. BUG6 / HOLD-never-guess: do not silently mint (a mis-tagged
+            # 'Ocean Blue Quartzite' would become a phantom variety). Mint ONLY if the operator explicitly
+            # confirmed this name; otherwise hold for them to confirm mint-new-type vs mis-tag.
+            if confirm_decisions.get(proj.norm(clean)) != "yes":
+                _hold_new_type(clean, stone_type, row, gap, sorted({o[1] for o in owners}))
+                continue
+            # operator confirmed -> fall through to PHASE 5 (mint the new-type variety),
+            # guarded by the type-aware existing_cores (no duplicate).
         # 4b. fuzzy nearest: alias-vs-new decision against the nearest existing variety. The tier-7
         # model uses name + type + colour to tell a real alias ('Marjan' -> 'Marjan Silver') from a
         # distinct sibling ('Cristallo Divine' vs 'Cristallo Bianco'): P>=hi auto-confirms the alias,
