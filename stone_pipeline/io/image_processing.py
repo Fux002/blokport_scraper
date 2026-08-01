@@ -103,7 +103,8 @@ class DewatermarkResult:
     image: Image.Image           # the de-watermarked image (or the original when skipped/failed)
     applied: bool = False        # the logo was found AND FAL filled it
     failed: bool = False         # FAL (or its config) failed -> caller MUST hold the image, never publish
-    billed_mp: int = 0           # billed megapixels for this image (0 when no FAL call was made)
+    billed_mp: int = 0           # TOTAL billed megapixels across ALL FAL generations for this image
+                                 # (every retry + blank/refused generation counts, not just a final success)
 
 
 class _Dewatermarker:
@@ -132,6 +133,7 @@ class _Dewatermarker:
     BASE_BACKOFF = 2.0
 
     def __init__(self, cfg: ImageProcessingConfig):
+        self._billed_mp = 0                     # billed megapixels accrued for the image being processed
         self.model = cfg.fal_model
         self.prompt = cfg.fal_prompt
         self.seed = cfg.fal_seed
@@ -216,19 +218,24 @@ class _Dewatermarker:
         cmask = logo_mask[y0:y1, x0:x1]
         if crop.size == 0 or int(cmask.max()) == 0:                 # nothing to fill after cropping
             return DewatermarkResult(pil_image, applied=False)
+        # Count EVERY billed FAL generation, not just a final success: _fal_fill retries up to MAX_RETRIES
+        # and a blank/refused output triggers another billed generation. Reset here and let _fal_fill
+        # accumulate, so a run that generated 3x then FAILED still reports its true cost to the breaker
+        # (the old code reported billed_mp=0 on failure, so the circuit breaker never tripped).
+        self._billed_mp = 0
         try:
             filled_rgb = self._fal_fill(crop, cmask)                # RGB uint8, same HxW as crop
         except Exception as exc:                                    # network/validation/refusal -> HOLD
             log.error("de-watermark FAL failed; holding image (never publishing watermarked)",
-                      extra={"extra_fields": {"error": str(exc)}})
-            return DewatermarkResult(pil_image, applied=False, failed=True)
+                      extra={"extra_fields": {"error": str(exc), "billed_mp": self._billed_mp}})
+            return DewatermarkResult(pil_image, applied=False, failed=True, billed_mp=self._billed_mp)
         filled_bgr = cv2.cvtColor(filled_rgb, cv2.COLOR_RGB2BGR).astype(np.float32)
         # feathered composite THROUGH the logo mask: outside-logo pixels stay byte-identical, logo blends
         feather = cv2.GaussianBlur(cmask.astype(np.float32) / 255.0, (0, 0), self.FEATHER)[..., None]
         blended = crop.astype(np.float32) * (1 - feather) + filled_bgr * feather
         bgr[y0:y1, x0:x1] = np.clip(blended, 0, 255).astype(np.uint8)
         out = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-        return DewatermarkResult(out, applied=True, billed_mp=self.billed_megapixels(x1 - x0, y1 - y0))
+        return DewatermarkResult(out, applied=True, billed_mp=self._billed_mp)   # every generation billed
 
     def _fal_fill(self, crop_bgr, cmask):
         """Send the crop + logo mask to FAL FLUX Fill; return the filled crop as RGB uint8 (same size).
@@ -244,9 +251,12 @@ class _Dewatermarker:
         try:
             crop_rgb.save(ti)
             mask_l.save(tm)
+            crop_h, crop_w = crop_bgr.shape[:2]
+            tile_mp = self.billed_megapixels(crop_w, crop_h)        # FAL bills per generation of this tile
             last = None
             for attempt in range(1, self.MAX_RETRIES + 1):
-                try:
+                self._billed_mp += tile_mp                          # every submitted generation is billed,
+                try:                                                # whether it succeeds, blanks, or errors
                     result = fal_client.subscribe(self.model, arguments={
                         "image_url": fal_client.upload_file(ti),
                         "mask_url": fal_client.upload_file(tm),
@@ -435,7 +445,7 @@ class ProcessResult:
     # True iff de-watermarking a WATERMARKED image could not complete (FAL unavailable / failed / an
     # unexpected error). The caller MUST hold the image (no marker), never publish it watermarked.
     dewatermark_failed: bool = False
-    billed_mp: int = 0             # FAL billed megapixels for this image (0 when no FAL call was made)
+    billed_mp: int = 0             # TOTAL FAL billed megapixels across all generations (incl retries/failures)
 
     def is_complete(self, *, enhance_requested: bool) -> bool:
         """The image pipeline completed AS A WHOLE for what this source requires -- the ONLY condition
