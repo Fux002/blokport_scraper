@@ -45,3 +45,17 @@ def test_review_source_is_never_blocked_even_when_failed():
     results = {"x": _manifest({"ingest": "OK", "clean": "OK", "process": "FAILED"})}
     blocked = run.auto_sources_blocked(results, ["x"], mode_lookup=lambda s: "review")
     assert blocked == []
+
+
+def test_failed_clean_process_gate_emits_but_blocks_auto_ingest_aborts():
+    # F11 contract anchor (matches gates/__init__.py): a FAILED clean/process gate does NOT abort -- the
+    # source is PRESENT in results (it emitted its survivors to review) and is merely blocked from auto-load;
+    # a FAILED INGEST gate aborts before emit, so that source is ABSENT from results entirely.
+    emitted_but_failed = {"proc": _manifest({"ingest": "OK", "clean": "OK", "process": "FAILED"})}
+    assert "proc" in emitted_but_failed                            # completed + emitted, not aborted
+    assert run.auto_sources_blocked(emitted_but_failed, ["proc"], mode_lookup=lambda s: "auto") \
+        == [("proc", "gate(s) FAILED: process")]                   # blocked from auto-load, not aborted
+    # an ingest failure aborts before emit -> the source never reaches results
+    aborted = {}                                                   # run_source raised SystemExit on ingest
+    assert run.auto_sources_blocked(aborted, ["ing"], mode_lookup=lambda s: "auto") \
+        == [("ing", "aborted before emit")]
