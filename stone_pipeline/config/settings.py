@@ -71,11 +71,16 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _env_int(name: str, default: int) -> int:
     """Read an integer env var; fall back to default when unset or non-numeric (fail soft to the default,
-    never crash config import on a bad override)."""
+    never crash config import on a bad override). Parse with int() itself, not an isdigit() pre-check:
+    isdigit() is True for a double sign ('--3', once dashes are stripped) and for Unicode digits ('3', '²'),
+    both of which int() then REJECTS -- so the heuristic let malformed values through to a crash at import."""
     raw = os.environ.get(name)
-    if raw is None or not raw.strip().lstrip("-").isdigit():
+    if raw is None:
         return default
-    return int(raw.strip())
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
 
 
 def _env_float(name: str, default: float) -> float:

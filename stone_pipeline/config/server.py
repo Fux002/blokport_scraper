@@ -28,6 +28,10 @@ from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("config.server")
 
+# Cap an authed request body so a bad/hostile Content-Length can't force an unbounded read into memory.
+# Config payloads are small JSON (a source config, a decision); 1 MiB is far above any real one.
+_MAX_BODY_BYTES = 1 << 20
+
 
 def _color_vocab() -> dict[str, str]:
     """norm(colour) -> canonical colour name, from the Medusa attribute vocab. Backs the mint colour
@@ -371,9 +375,14 @@ class ConfigHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _authorized(self) -> bool:
-        # constant-time compare so the token can't be recovered by response-timing (L1)
-        return hmac.compare_digest(
-            self.headers.get("Authorization", ""), f"Bearer {self.server.expected_token}")  # type: ignore[attr-defined]
+        # constant-time compare so the token can't be recovered by response-timing (L1). Compare on BYTES:
+        # hmac.compare_digest raises TypeError on a non-ASCII str, and a client controls the Authorization
+        # header value (latin-1 decoded, so a high byte yields a non-ASCII str) -- on str that TypeError
+        # escapes _authorized (called before the dispatch try/except) and drops the connection with a
+        # traceback instead of a clean 401. utf-8 encoding always succeeds and has no ASCII restriction.
+        header = self.headers.get("Authorization", "").encode("utf-8")
+        expected = f"Bearer {self.server.expected_token}".encode("utf-8")  # type: ignore[attr-defined]
+        return hmac.compare_digest(header, expected)
 
     def _handle(self, method: str) -> None:
         if not self._authorized():
@@ -384,7 +393,15 @@ class ConfigHandler(BaseHTTPRequestHandler):
             return self._respond(404, {"error": "not found; expected /config/v1/..."})
         body = None
         if method in ("PUT", "POST"):
-            length = int(self.headers.get("Content-Length") or 0)
+            # A malformed Content-Length ('abc') must be a 400, not an int() ValueError that escapes the
+            # handler (this parse sits BEFORE the dispatch try/except) and drops the connection; and the
+            # length is client-controlled, so cap it before read() to bound memory.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._respond(400, {"error": "invalid Content-Length"})
+            if length < 0 or length > _MAX_BODY_BYTES:
+                return self._respond(400, {"error": f"body too large (max {_MAX_BODY_BYTES} bytes)"})
             try:
                 body = json.loads(self.rfile.read(length) or b"null") if length else None
             except json.JSONDecodeError:
