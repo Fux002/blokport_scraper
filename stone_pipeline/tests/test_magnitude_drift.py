@@ -86,3 +86,21 @@ def test_a_transient_small_bucket_does_not_wipe_the_baseline(tmp_path):
     assert md.load_baseline("zucchi", p).medians["slab"]["weight"] == 0.3   # carried forward, not wiped
     status, _ = md.check(_rows([3.0] * 10), "zucchi", path=p)        # 10x -> still caught
     assert status == md.FAILED
+
+
+def test_a_field_absent_for_one_run_keeps_its_drift_guard(tmp_path):
+    # F6 regression: a single field absent within a PRESENT format (all weights null this run) must NOT
+    # lose its baselined median -- a per-format dict.update would drop it, and a later unit rescale on that
+    # field would then ship uncaught. Seed weight+length; run omitting weight (weight must be PRESERVED in
+    # the baseline); then a weight x1000 rescale must still FAIL against the preserved median.
+    p = tmp_path / "mag.json"
+    md.check(_rows([0.4] * 10), "zucchi", path=p)                    # seed: slab has weight ~0.4
+    no_weight = _rows([0.4] * 10)
+    for r in no_weight:
+        r.weight = None                                             # weight absent this run, format present
+    status, _ = md.check(no_weight, "zucchi", path=p)
+    assert status == md.OK
+    assert md.load_baseline("zucchi", p).medians["slab"]["weight"] > 0   # weight median PRESERVED, not dropped
+    status, report = md.check(_rows([400.0] * 10), "zucchi", path=p)     # kg (1000x) unit swap
+    assert status == md.FAILED
+    assert any(d["field"] == "weight" and d["format"] == "slab" for d in report["drift"])
