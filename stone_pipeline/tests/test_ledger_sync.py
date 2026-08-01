@@ -706,3 +706,59 @@ def test_reconcile_variations_to_seed_drops_and_tombstones_old_sides(tmp_path):
     assert live == {SURV, HOM1, HOM2, MINT}
     assert tombs == {TWIN}                                     # Medusa is told to delete the old side by Key
     assert prods == set()                                      # the old side's product cascaded away
+
+
+# --- F3/F4: lost-update guard (ack echoes the served version) -----------------
+
+def _synced_product(ledger, sku="S-1", vkey="slab_a_1", state="syncing", payload_hash="B"):
+    now = now_iso()
+    _variation(ledger, vkey, "synced")                      # eligibility: the product's variation is synced
+    ledger.upsert("product", {"sku": sku, "source": "s", "variation_key": vkey, "state": state,
+                              "payload_hash": payload_hash, "created_at": now, "updated_at": now},
+                  pk=("sku",))
+
+
+def test_product_ack_with_stale_hash_is_refused(tmp_path):
+    # F3: a produce re-dirtied the product to content B (payload_hash B) between the pull and the ack. An
+    # ack echoing the OLD served hash A is stale -> refused (0 rows) -> the row stays unsynced and re-serves
+    # content B, instead of being marked synced while Medusa still holds A.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _synced_product(ledger, state="syncing", payload_hash="B")   # current version = B
+        assert ack(ledger, "products", "S-1", "MID", "synced", payload_hash="A") == 0
+        assert ledger.get("product", "sku", "S-1")["state"] == "syncing"
+        # ack echoing the CURRENT hash B flips it synced
+        assert ack(ledger, "products", "S-1", "MID", "synced", payload_hash="B") == 1
+        assert ledger.get("product", "sku", "S-1")["state"] == "synced"
+
+
+def test_product_ack_without_hash_is_backward_compatible(tmp_path):
+    # rollout safety: an ack that does NOT echo a hash keeps the prior behavior (flips synced), so the guard
+    # engages only once the consumer opts in -- nothing breaks in the gap.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _synced_product(ledger, state="dirty", payload_hash="B")
+        assert ack(ledger, "products", "S-1", "MID", "synced") == 1
+        assert ledger.get("product", "sku", "S-1")["state"] == "synced"
+
+
+def test_inventory_ack_with_stale_qty_is_refused(tmp_path):
+    # F4: stock moved from the served 5 to 8 between pull and ack. An ack echoing 5 is stale -> refused ->
+    # the 8-delta persists and re-serves, instead of snapping last_synced_qty to 8 and losing the change.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _synced_product(ledger, state="synced")
+        now = now_iso()
+        ledger.upsert("inventory", {"sku": "S-1", "qty": 8, "last_synced_qty": None, "updated_at": now},
+                      pk=("sku",))
+        assert ack(ledger, "inventory", "S-1", quantity=5) == 0
+        assert ledger.get("inventory", "sku", "S-1")["last_synced_qty"] is None   # still a delta
+        assert ack(ledger, "inventory", "S-1", quantity=8) == 1                    # current qty
+        assert ledger.get("inventory", "sku", "S-1")["last_synced_qty"] == 8
+
+
+def test_inventory_ack_without_qty_is_backward_compatible(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _synced_product(ledger, state="synced")
+        now = now_iso()
+        ledger.upsert("inventory", {"sku": "S-1", "qty": 8, "last_synced_qty": None, "updated_at": now},
+                      pk=("sku",))
+        assert ack(ledger, "inventory", "S-1") == 1                               # legacy: clears delta
+        assert ledger.get("inventory", "sku", "S-1")["last_synced_qty"] == 8

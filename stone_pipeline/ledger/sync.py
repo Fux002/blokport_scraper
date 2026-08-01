@@ -330,7 +330,8 @@ def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
 # --- POST /sync/ack -----------------------------------------------------------
 
 def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = None,
-        status_: str = "synced", reason: str | None = None) -> int:
+        status_: str = "synced", reason: str | None = None,
+        payload_hash: str | None = None, quantity: int | None = None) -> int:
     """Medusa talks back for ONE entity. Returns the number of ledger rows changed (0 = the
     external_id was not found, or the ack was REFUSED as out-of-order -- see the eligibility guard).
       synced -> record the minted/matched id, mark synced, clear the failure counter+reason.
@@ -381,9 +382,18 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     if type_ == "inventory":
         if status_ == "failed":
             return 0                                    # leaves it a delta -> re-serves
+        # F4 lost-update guard: clear the delta only if the SERVED quantity is still the current one. When
+        # the ack echoes the applied quantity (the robust round-trip), require qty == that value: a produce
+        # that moved stock between serve and ack makes the live qty differ, so this ack is refused (0 rows)
+        # and the NEW qty re-serves as a delta -- instead of snapping last_synced_qty to a value Medusa
+        # never received. Without the echoed quantity (legacy pull) the prior behavior is kept.
+        qty_cond, qty_params = "", []
+        if quantity is not None:
+            qty_cond, qty_params = " AND qty = ?", [quantity]
         cur = ledger.execute(                            # only for a synced product (F2)
             "UPDATE inventory SET last_synced_qty = qty, updated_at = ? WHERE sku = ? "
-            "AND sku IN (SELECT sku FROM product WHERE state = 'synced')", (now, external_id))
+            "AND sku IN (SELECT sku FROM product WHERE state = 'synced')" + qty_cond,
+            (now, external_id, *qty_params))
         return cur.rowcount
     if type_ not in _ENTITY:
         raise ValueError(f"unsupported sync type {type_!r}")
@@ -412,10 +422,20 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     # would otherwise flip a 'retiring' row back to 'synced' while its variation tombstone still serves
     # /removed, diverging the two systems. (ack from pending/syncing/dirty stays allowed by design -- serve
     # leases are an optimization, not a precondition; only 'retiring' is protected.)
+    # F3 lost-update guard: flip to synced only if what Medusa applied is STILL the current version. When
+    # the ack echoes the served payload_hash (the robust round-trip), require it to equal the row's current
+    # hash -- a produce that re-dirtied the row since serve stored a NEW hash, so this stale ack no longer
+    # matches, is refused (0 rows), and the row re-serves the new content. Without the echoed hash (legacy
+    # pull) the prior behavior is kept unchanged, so this is a backward-compatible opt-in: the guard
+    # engages the moment the consumer starts echoing payload_hash, and nothing changes until it does.
+    if payload_hash is not None:
+        version_cond, version_params = " AND payload_hash = ?", [payload_hash]
+    else:
+        version_cond, version_params = "", []
     cur = ledger.execute(
         f"UPDATE {table} SET medusa_id = ?, state = 'synced', sync_attempts = 0, sync_error = NULL, "
-        f"last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}",
-        (medusa_id, now, now, external_id))
+        f"last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}{version_cond}",
+        (medusa_id, now, now, external_id, *version_params))
     if cur.rowcount == 0 and type_ == "products":
         log.warning("refused a product ack ahead of its variation (out-of-order / not resolvable)",
                     extra={"extra_fields": {"sku": external_id}})
@@ -431,7 +451,8 @@ def ack_batch(ledger: Ledger, acks: list[dict]) -> dict[str, int]:
     for a in acks:
         try:
             changed = ack(ledger, a["type"], a["external_id"], a.get("medusa_id"),
-                          a.get("status", "synced"), a.get("error") or a.get("reason"))
+                          a.get("status", "synced"), a.get("error") or a.get("reason"),
+                          payload_hash=a.get("payload_hash"), quantity=a.get("quantity"))
             if changed:
                 applied += 1
             else:
