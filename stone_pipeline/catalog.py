@@ -108,7 +108,7 @@ def run(outputs_root: Path | None = None) -> Path:
                                             product_images=product_images)
     to_delete = write_variants_to_delete()         # surface junk variants (bare-code + mis-typed) for deletion
     migrated = migrate_retyped_variant_images(ref) # a re-typed variant keeps its image at its new Key
-    held = gate_on_images()                        # AFTER migration: hold only the genuinely-imageless new
+    dropped = drop_deleted_variants()              # drop to-delete junk; imageless NEW records are KEPT now
     # ONE list: the committed seed of truth is exactly the freshly-gated full upload (base == full).
     from stone_pipeline.reference import sync_variants_base
     sync_variants_base.sync()
@@ -122,7 +122,7 @@ def run(outputs_root: Path | None = None) -> Path:
         "products": sum(products.values()), "inventory": inventory,
         "discontinued": discontinued, "pruned_stale_runs": pruned,
         "images_queued": images_queued, "variant_colors": color_stats,
-        "variants_held_no_image": held, "variants_to_delete": to_delete,
+        "variants_dropped_deleted": dropped, "variants_to_delete": to_delete,
         "retyped_images_migrated": migrated}})
     # Reflect the produced 1_variants_full onto the ledger variation table (flag-gated). This runs
     # BEFORE the consistency gate on purpose: in the pull model the ledger is the source of truth Medusa
@@ -336,37 +336,24 @@ def migrate_retyped_variant_images(ref, checker=None, copier=None) -> int:
     return copied
 
 
-def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Path | None = None) -> int:
-    """Keep BOTH upload files (1_variants_update + 1_variants_full) to variants that belong there:
-      * a genuinely-new variant (not in the Medusa export) whose {Key}.png is NOT on S3 is held out
-        until its image exists (the image-on-S3 invariant);
-      * a variant flagged in variants_to_delete is dropped so the full/seed file never re-imports
-        junk that is on its way out.
-    The image check no-ops when S3 is unreachable (local/CI), but the delete-exclusion always runs
-    since it needs no S3. Returns the count HELD for missing images."""
+def drop_deleted_variants(to_upload: Path | None = None, delete_file: Path | None = None) -> int:
+    """Drop variants flagged in variants_to_delete from BOTH upload files (1_variants_update +
+    1_variants_full), so the full/seed file never re-imports junk on its way out. Returns the count dropped.
+
+    A new variant is NO LONGER held for a missing image. Every variety is prepared in Medusa for ALL
+    categories: a fan-out record carries a BLANK Image (emit stamps {Key}.png only when the object exists,
+    so no 404) until its texture is generated. A texture is generated per-category only when a PRODUCT for
+    that category appears, and a product only LISTS once its texture is on S3 (the sync's H2 product gate).
+    So the catalog gates PRODUCTS on the image, never variant RECORDS -- every variety is a consistent full
+    set of category records, imaged per-category with its products. (Blokport placeholders an imageless
+    category record.) The old image-hold made minted varieties inconsistently category-partial."""
     to_upload = Path(to_upload or SETTINGS.paths.to_upload_dir)
-    export_file = Path(export_file or SETTINGS.paths.export_file)
     upd = to_upload / "1_variants_update.csv"
     if not upd.exists():
         return 0
-    dele = SETTINGS.paths.review_dir / "variants_to_delete.csv"
-    delete_keys = ({(r.get("Key") or "").strip() for r in csv.DictReader(dele.open(encoding="utf-8-sig"))
-                    if (r.get("Key") or "").strip()} if dele.exists() else set())
-    export_keys: set[str] = set()
-    if export_file.exists():
-        with export_file.open(encoding="utf-8-sig", newline="") as h:
-            export_keys = {(r.get("Key") or "").strip() for r in csv.DictReader(h)}
-    with upd.open(encoding="utf-8-sig", newline="") as h:
-        new_keys = {(r.get("Key") or "").strip() for r in csv.DictReader(h)
-                    if (r.get("Key") or "").strip() and r["Key"] not in export_keys}
-    checker = checker if checker is not None else _s3_image_checker()
-    if checker is None and new_keys:
-        # fail LOUD, not silent: the image-on-S3 invariant cannot run, so new variants are NOT
-        # verified to have an image. The operator must confirm {Key}.png exists before importing.
-        log.warning("S3 unreachable: image-on-S3 invariant NOT enforced; verify new-variant images "
-                    "exist before import", extra={"extra_fields": {"unverified_new_variants": len(new_keys)}})
-    missing = {k for k in new_keys if not checker(k)} if checker is not None else set()
-    drop = missing | delete_keys
+    dele = Path(delete_file or SETTINGS.paths.review_dir / "variants_to_delete.csv")
+    drop = ({(r.get("Key") or "").strip() for r in csv.DictReader(dele.open(encoding="utf-8-sig"))
+             if (r.get("Key") or "").strip()} if dele.exists() else set())
     if not drop:
         return 0
     for fname in ("1_variants_update.csv", "1_variants_full.csv"):
@@ -379,13 +366,8 @@ def gate_on_images(checker=None, to_upload: Path | None = None, export_file: Pat
             continue                                   # truncated/empty -> skip, never crash the run
         header, body = rows[0], [r for r in rows[1:] if r and r[0] not in drop]
         csvio.atomic_write(p, lambda h, _rows=[header, *body]: csv.writer(h).writerows(_rows))
-    if missing:
-        log.warning("held new variants with no S3 image out of the upload (still queued)",
-                    extra={"extra_fields": {"held": len(missing)}})
-    if delete_keys:
-        log.info("excluded to-delete variants from upload files",
-                 extra={"extra_fields": {"excluded": len(delete_keys)}})
-    return len(missing)
+    log.info("excluded to-delete variants from upload files", extra={"extra_fields": {"excluded": len(drop)}})
+    return len(drop)
 
 
 def prune_superseded_runs(outputs_root: Path) -> int:

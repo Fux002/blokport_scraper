@@ -13,7 +13,8 @@ Queue = the imageless, product-backed variants (image_prompts.build). A variant 
 whose {Key}.png is already on S3, is never listed -- so a re-run never regenerates (or re-charges) an image
 that exists: the S3 object is its own marker. Needs the generator stack (fal_client + torch + FAL_KEY); on
 the lean image (which omits them on purpose) the queue is still written and the run reports where to run it,
-spending nothing. gate_on_images never ships an imageless product, so a partial run just leaves those held.
+spending nothing. The sync's product gate never ships an imageless PRODUCT (a product lists only once its
+{Key}.png is on S3), so a partial run just leaves those products held; the variant RECORDS stay in Medusa.
 """
 
 from __future__ import annotations
@@ -241,7 +242,7 @@ def run() -> int:
     uploaded, missing = upload_variant_images(targets)
     if failed or missing:
         # loud: some images did not generate/upload, so their products stay HELD until a clean re-run.
-        # Safe (gate_on_images never ships an imageless product) but surfaced, never silent. Include where we
+        # Safe (the sync product gate never lists an imageless product) but surfaced, never silent. Include where we
         # looked, so a path/output-dir mismatch on a runner is diagnosable from the log rather than guessed.
         def _peek(p: Path):
             try:
