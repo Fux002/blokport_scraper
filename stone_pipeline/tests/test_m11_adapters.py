@@ -184,6 +184,27 @@ def test_codes_auto_detected_from_corpus_no_hardcoding():
     assert c("Carrara") == "Carrara" and c("Mt Blanc") == "Mt Blanc"  # real names untouched
 
 
+def test_short_real_leads_are_not_treated_as_codes():
+    # F7 regression: a 2-char leading WORD that reads like a name must never be mistaken for a supplier
+    # code just because it fans out. 'El/La/Di' (vowel) and 'St/Mt/Ft' (real abbreviations) front real
+    # multi-word varieties; a bug stripped them to 'Dorado'/'Laurent' when >=2 shared the lead.
+    from stone_pipeline.core.text import looks_codey, detect_code_prefixes, clean_variety_name
+    # SHAPE: real short leads are not code-shaped; genuine codes still are.
+    for real in ("El", "La", "Di", "Le", "St", "Mt", "Ft"):
+        assert not looks_codey(real), real
+    for code in ("Z", "ZB", "Xy", "G2", "Q7"):
+        assert looks_codey(code), code
+    # DISCOVERY: a fanned-out real lead is NOT discovered as a code; a fanned-out real code still is.
+    assert detect_code_prefixes(["El Dorado", "El Capitan"]) == frozenset()
+    assert detect_code_prefixes(["St Laurent", "St Tropez"]) == frozenset()
+    assert detect_code_prefixes(["Mt Blanc", "Mt Rushmore"]) == frozenset()
+    assert "z" in detect_code_prefixes(["Z Astoria", "Z Bianco"])   # a real code still fans out
+    # END TO END: the names survive cleaning intact.
+    codes = detect_code_prefixes(["El Dorado", "El Capitan", "St Laurent", "St Tropez"])
+    c = lambda s: clean_variety_name(s, (), codes)
+    assert c("El Dorado") == "El Dorado" and c("St Laurent") == "St Laurent"
+
+
 def test_clean_variety_name_generic_and_prefix():
     from stone_pipeline.core.text import clean_variety_name as c
     # lone-letter leading codes + stray punctuation
