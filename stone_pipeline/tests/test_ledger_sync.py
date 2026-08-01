@@ -111,52 +111,58 @@ def test_reset_sync_state_clean_start(tmp_path):
         assert [r["external_id"] for r in ready(ledger, "variations")] == ["slab_v1"]
 
 
-def test_restore_category_ids_touches_only_category_rows(tmp_path):
-    # unit: restore reads attributes.csv and re-stamps ONLY the category rows; ordinary attribute
-    # values (color/finish/...) are left exactly as they are.
-    from stone_pipeline.ledger.bootstrap import restore_category_ids
+def test_restore_attribute_ids_restores_every_kind_from_the_export(tmp_path):
+    # L#17: a global reset nulls ALL attribute ids; restore re-stamps EVERY kind present in attributes.csv
+    # (category AND color/finish/quality/type), so products don't emit empty attribute ids. A value NOT in
+    # the export (a scraped new colour) stays pending for normal sync.
+    from stone_pipeline.ledger.bootstrap import restore_attribute_ids
     attrs = tmp_path / "attributes.csv"
     attrs.write_text("category,value,sourceid\n"
                      "category,Slabs,pcat_SLAB\n"
-                     "color,Black,C1\n", encoding="utf-8")
+                     "color,Black,C1\n"
+                     "finish,Polished,F1\n"
+                     "type,Marble,T1\n", encoding="utf-8")
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
-        for cat, val in (("category", "Slabs"), ("color", "Black")):
+        for cat, val in (("category", "Slabs"), ("color", "Black"), ("finish", "Polished"),
+                         ("type", "Marble"), ("color", "ScrapedNew")):   # last one is NOT in the export
             ledger.upsert("attribute", {"category": cat, "value": val, "medusa_id": None,
                                         "state": "pending", "created_at": now, "updated_at": now},
                           pk=("category", "value"))
-        n = restore_category_ids(ledger, path=attrs)
-        cat = ledger.execute("SELECT medusa_id, state FROM attribute "
-                             "WHERE category='category' AND value='Slabs'").fetchone()
-        col = ledger.execute("SELECT medusa_id, state FROM attribute "
-                             "WHERE category='color' AND value='Black'").fetchone()
-    assert n == 1
-    assert cat["medusa_id"] == "pcat_SLAB" and cat["state"] == "synced"   # env identity restored
-    assert col["medusa_id"] is None and col["state"] == "pending"          # ordinary attr untouched
+        n = restore_attribute_ids(ledger, path=attrs)
+        rows = {(r["category"], r["value"]): (r["medusa_id"], r["state"])
+                for r in ledger.execute("SELECT category, value, medusa_id, state FROM attribute")}
+    assert n == 4                                                        # every export row restored
+    assert rows[("category", "Slabs")] == ("pcat_SLAB", "synced")        # category (as before)
+    assert rows[("color", "Black")] == ("C1", "synced")                  # AND ordinary attributes now too
+    assert rows[("finish", "Polished")] == ("F1", "synced")
+    assert rows[("type", "Marble")] == ("T1", "synced")
+    assert rows[("color", "ScrapedNew")] == (None, "pending")            # a NEW value stays pending for sync
 
 
-def test_global_reset_restores_category_pcat_ids(tmp_path):
-    # a category pcat id is a pre-existing Medusa product-category (env identity from attributes.csv),
-    # not scraper sync state -- the global overlay reset nulls it, but reset_sync_state must restore it,
-    # else products reverse-map to an empty category and the catalogue pull wedges. (Uses the committed
-    # real attributes.csv, which carries the Slabs/Blocks/Tiles pcat ids.)
+def test_global_reset_restores_attribute_ids_from_the_export(tmp_path):
+    # L#17: attribute ids (category AND color/finish/quality/type) are pre-existing Medusa identity from
+    # attributes.csv, not scraper sync state. The global overlay reset nulls them, but reset_sync_state must
+    # restore every kind that the export carries -- else products reverse-map to empty attributes (and, for
+    # category, the pull wedges). A value NOT in the export (a scraped-new one) stays pending for sync.
+    # (Uses the committed real attributes.csv, which carries the Slabs pcat + the base colour vocab.)
     from stone_pipeline.ledger.sync import reset_sync_state
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         now = now_iso()
         ledger.upsert("attribute", {"category": "category", "value": "Slabs", "medusa_id": "pcat_OLD",
                                     "state": "synced", "created_at": now, "updated_at": now},
                       pk=("category", "value"))
-        ledger.upsert("attribute", {"category": "color", "value": "Black", "medusa_id": "C1",
-                                    "state": "synced", "created_at": now, "updated_at": now},
-                      pk=("category", "value"))
+        ledger.upsert("attribute", {"category": "color", "value": "ZzScrapedOnly", "medusa_id": None,
+                                    "state": "pending", "created_at": now, "updated_at": now},
+                      pk=("category", "value"))   # deliberately NOT in the committed export
         out = reset_sync_state(ledger)
         cat = ledger.execute("SELECT medusa_id, state FROM attribute "
                              "WHERE category='category' AND value='Slabs'").fetchone()
-        col = ledger.execute("SELECT medusa_id, state FROM attribute "
-                             "WHERE category='color' AND value='Black'").fetchone()
-    assert out["category_ids_restored"] >= 1
-    assert cat["medusa_id"] and cat["state"] == "synced"          # category id survives a global reset
-    assert col["medusa_id"] is None and col["state"] == "pending"  # ordinary attr overlay cleared
+        new_col = ledger.execute("SELECT medusa_id, state FROM attribute "
+                                 "WHERE category='color' AND value='ZzScrapedOnly'").fetchone()
+    assert out["attribute_ids_restored"] >= 1
+    assert cat["medusa_id"] and cat["state"] == "synced"              # category id survives a global reset
+    assert new_col["medusa_id"] is None and new_col["state"] == "pending"  # a non-export value stays pending
 
 
 def test_reset_hard_drops_scraper_output_but_keeps_base_variations(tmp_path):
