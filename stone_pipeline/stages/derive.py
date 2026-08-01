@@ -444,10 +444,20 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
             row.origin_confidence = _conf_name(Confidence.high)
             return
     name = row.variation_name or row.raw_name or ""
+    # The curated (name, type) lookups below are strict and only SAFE when the row's type is
+    # variation-AUTHORITATIVE (from the variation's Key). A name-derived / fallback type would resolve a
+    # HOMONYM's WRONG origin ('Azul White' is a quartzite in one supplier, an onyx in another) and stamp it
+    # confidently with no flag. When the type is not authoritative, SKIP the curated lookups, flag the row
+    # to verify its variety type, and fall to the supplier default.
+    type_authoritative = row.type_method == "variety_authoritative"
+    if not type_authoritative:
+        row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_type_unverified,
+                                raw_value=row.type_name or "", confidence=Confidence.low,
+                                method=row.type_method or "type_unresolved", src_url=row.src_url))
     # 2. per-SUPPLIER override (source, variety, type) -> country: a curated decision for a supplier that
     #    sells a stone it does NOT quarry at home (a reseller). Highest curated truth; scoped to one source,
     #    so it never affects another supplier of the same variety.
-    override = ref.origin_overrides.lookup(row.src_site, name, row.type_name)
+    override = ref.origin_overrides.lookup(row.src_site, name, row.type_name) if type_authoritative else None
     if override:
         row.origin_country_code = override
         row.origin_source = "supplier_override"
@@ -457,7 +467,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
     #    Strict (name, type) match; the map is the source of truth. A row may list SEVERAL candidate
     #    countries (same trade name quarried in more than one place) -- pick the one that fits the
     #    supplier's home country (see _select_origin), never a country guessed from another type.
-    rule = ref.origin_map.exact(name, row.type_name)
+    rule = ref.origin_map.exact(name, row.type_name) if type_authoritative else None
     if rule and rule.countries:
         home = _to_iso(source_cfg.origin_default, ref) or ""
         iso, conf, flag = _select_origin(rule.countries, home)

@@ -49,7 +49,7 @@ def _cfg(home_iso):
 
 def _row(**kw):
     base = dict(src_site="t", surrogate_key="1", raw_format="Slab", finish_name="Polished",
-                type_name="Quartzite", color_name="White")
+                type_name="Quartzite", color_name="White", type_method="variety_authoritative")
     base.update(kw)
     return CanonicalRow(**base)
 

@@ -139,6 +139,26 @@ def test_type_overridden_by_variety(ref):
     assert any(f.code == FlagCode.type_overridden_by_variety for f in row.review_flags)
 
 
+def test_type_name_fallback_when_key_carries_no_known_type_slug(ref):
+    # F2 / State 2: the variation bound, but its Key carries no RECOGNIZED type slug, so the type falls back
+    # to the name-derived type_name -- which is NOT variation-authoritative. The value is kept (best guess)
+    # but its provenance must say 'type_name_fallback', so derive_origin will NOT trust it for the curated
+    # (name, type) origin lookup (the confidently-wrong homonym-origin bug). No override flag: nothing was
+    # overridden by an authoritative Key.
+    row = CanonicalRow(
+        src_site="polonine", surrogate_key="x",
+        variation_id="vid",
+        variation_key="slab_notarealtype_azul_white_00000000-0000-0000-0000-000000000000",
+        variation_name="Azul White",
+        type_name="Quartzite", color_name="White", finish_name="Polished", quality_name="A",
+    )
+    stats = reconcile_tree.ReconcileStats()
+    reconcile_tree.reconcile_row(row, ref, stats)
+    assert row.type_name == "Quartzite"                 # name-derived type kept as the best guess
+    assert row.type_method == "type_name_fallback"      # ...but explicitly NOT variety_authoritative
+    assert not any(f.code == FlagCode.type_overridden_by_variety for f in row.review_flags)
+
+
 def test_membership_validates_real_variety(ref):
     # Verde Ubatuba: Granite, Green, Polished, A  (seen resolving in the spine)
     variety = ref.backbone.lookup("Verde Ubatuba")

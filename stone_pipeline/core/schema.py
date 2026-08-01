@@ -30,6 +30,10 @@ class FlagCode(str, Enum):
     origin_unresolved = "origin_unresolved"
     origin_supplier_default = "origin_supplier_default"
     origin_multi_home_absent = "origin_multi_home_absent"
+    # the curated (name, type) origin lookups were SKIPPED because the row's type is not
+    # variation-authoritative (name-derived / fallback), so a homonym could not resolve the wrong stone's
+    # origin; the row fell to the supplier default and needs its variety type verified.
+    origin_type_unverified = "origin_type_unverified"
     image_placeholder = "image_placeholder"
     image_download_failed = "image_download_failed"
     near_duplicate = "near_duplicate"
