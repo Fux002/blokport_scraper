@@ -292,11 +292,21 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
     # variety_identity group here, using the SAME survivor rule emit uses, so the matcher and emit agree on
     # exactly one Key per variety. Homonyms (different type) are separate identities and all survive.
     _seed = pristine_seed_keys()
+    # Pick the survivor over ELIGIBLE keys only. survivor_of is blind to the exclusion predicates below
+    # (bare_code / mistyped / delete_keys), so if it picked an INELIGIBLE key (e.g. a re-key OLD SIDE that
+    # is in delete_keys) every eligible key of that identity would be dropped as a dup_loser AND the chosen
+    # survivor dropped by its own exclusion -- the whole variety vanishes from the matcher reference, so a
+    # scrape for it matches nothing and MINTS A DUPLICATE (the exact orphan dup-losing was meant to prevent).
+    # Excluding ineligible keys before grouping guarantees a good loser is promoted whenever one exists.
+    def _eligible(key: str, name: str) -> bool:
+        return not (looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name)
+                    or key in delete_keys)
     _by_identity: dict = {}
     for rec in records:
         k = (rec.get("Key") or "").strip()
-        if k:
-            _by_identity.setdefault(variety_identity(k, (rec.get("Name") or "").strip()), []).append(k)
+        nm = (rec.get("Name") or "").strip()
+        if k and _eligible(k, nm):
+            _by_identity.setdefault(variety_identity(k, nm), []).append(k)
     dup_losers = {k for keys in _by_identity.values() if len(keys) > 1
                   for k in keys if k != survivor_of(keys, _seed)}
     delete_keys = delete_keys | dup_losers
