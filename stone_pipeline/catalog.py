@@ -124,7 +124,9 @@ def run(outputs_root: Path | None = None) -> Path:
     # reconciles the gate against the ledger (held vs fatal). Inert unless BLOKPORT_LEDGER_WRITETHROUGH.
     if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
         from stone_pipeline.ledger import writethrough
-        writethrough.record_catalog()
+        if not writethrough.record_catalog():
+            log.error("ledger catalog write-through FAILED; the produced variations are NOT in the ledger "
+                      "and will not sync to Medusa until a successful re-run")
 
     # Deterministic consistency gate: fail loudly if the upload set is internally inconsistent
     # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check. In the
