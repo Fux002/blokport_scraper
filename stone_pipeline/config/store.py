@@ -23,6 +23,9 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
+from stone_pipeline.core import logfmt
+
+log = logfmt.get_logger("config.store")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS source (
@@ -95,6 +98,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "enhance" not in cols:   # per-source GPU upscale switch; DBs created before it default ON
         conn.execute("ALTER TABLE source ADD COLUMN enhance INTEGER NOT NULL DEFAULT 1")
         conn.commit()
+    # F8: source_code must be UNIQUE among real codes (the empty default stays non-unique), so two vendors
+    # can't collide their SKU namespace -- the app-level read-then-write check races under the threading
+    # server. Partial unique index, created idempotently. If a legacy DB already holds a duplicate code the
+    # index can't be built: log LOUD and continue rather than brick the control plane on startup (the
+    # app-level check still guards new writes; fix the duplicate then restart to activate the constraint).
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_source_code_unique "
+                     "ON source(source_code) WHERE source_code != ''")
+        conn.commit()
+    except sqlite3.IntegrityError:
+        log.error("cannot enforce UNIQUE(source_code): the config DB already holds a duplicate non-empty "
+                  "source_code; resolve it and restart to activate the constraint")
     # durable run records so GET /config/v1/run can return `last` across a config-server restart
     # (the in-memory run dict is lost on restart).
     conn.execute("CREATE TABLE IF NOT EXISTS run_log ("
@@ -265,12 +280,10 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
         default_bundle_size=int(data.get("default_bundle_size", 6)),
         min_expected_rows=int(data.get("min_expected_rows", 0)),
     )
+    # re-adding a source clears any prior removal tombstone (in ONE transaction with the upsert, so a crash
+    # between the two can't leave the source added yet still tombstoned).
     upsert_source(cfg, enabled=bool(data.get("enabled", True)),
-                  schedule=data.get("schedule"), path=path)
-    # re-adding a source clears any prior removal tombstone, so a re-added vendor seeds normally again.
-    with closing(open_store(path)) as conn:
-        conn.execute("DELETE FROM removed_source WHERE source = ?", (cfg.source,))
-        conn.commit()
+                  schedule=data.get("schedule"), clear_removed=True, path=path)
 
 
 def enabled_names(path: str | Path | None = None) -> set[str] | None:
@@ -286,7 +299,7 @@ def enabled_names(path: str | Path | None = None) -> set[str] | None:
 # -- writes (used by the seed + the admin API) ---------------------------------
 
 def upsert_source(cfg: SourceConfig, *, enabled: bool = True, schedule: str | None = None,
-                  path: str | Path | None = None) -> None:
+                  clear_removed: bool = False, path: str | Path | None = None) -> None:
     p = _params(cfg, enabled, schedule)
     cols = ", ".join(p)
     placeholders = ", ".join(f":{c}" for c in p)
@@ -295,6 +308,10 @@ def upsert_source(cfg: SourceConfig, *, enabled: bool = True, schedule: str | No
         conn.execute(
             f"INSERT INTO source ({cols}) VALUES ({placeholders}) "
             f"ON CONFLICT(source) DO UPDATE SET {updates}", p)
+        # F8: clear any prior removal tombstone in the SAME transaction as the source upsert, so a crash
+        # can never leave the source inserted but still tombstoned (a re-added vendor stuck as removed).
+        if clear_removed:
+            conn.execute("DELETE FROM removed_source WHERE source = ?", (cfg.source,))
         conn.commit()
 
 
