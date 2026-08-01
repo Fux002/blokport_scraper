@@ -93,6 +93,31 @@ def test_every_variation_gets_all_category_finishes(tmp_path):
     assert not unc
 
 
+def test_retired_key_gets_no_combinations(tmp_path):
+    # T3-4: a retired variety is excluded by its stable KEY, not the churn-prone export Id. Retired Keys
+    # are a DISTINCT namespace from exclude_ids (Ids); the export Id differs from the Key (as in Medusa).
+    bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"]),
+                              _post("slab_marble_statuario_1", "Statuario", ["Polished"])])
+    exp = _export(tmp_path, [("v_id_1", "slab_marble_carrara_1", "Carrara"),
+                             ("v_id_2", "slab_marble_statuario_1", "Statuario")])
+    prod = _products(tmp_path, [_prow()])
+    combos, _, _ = tree_build.build_combinations(
+        exp, _attrs(tmp_path), [bb], prod, retired_keys={"slab_marble_statuario_1"})
+    assert _for(combos, "v_id_1")          # Carrara still priced
+    assert not _for(combos, "v_id_2")      # retired Statuario gets NO combinations
+
+
+def test_retired_key_wrongly_placed_in_the_id_set_does_not_exclude(tmp_path):
+    # Guards the exact bug: a retired KEY folded into exclude_ids (the Id namespace) never matches the
+    # export Id, so the variety keeps every combination -- which is why retired must be its own Key set.
+    bb = _backbone(tmp_path, [_post("slab_marble_statuario_1", "Statuario", ["Polished"])])
+    exp = _export(tmp_path, [("v_id_2", "slab_marble_statuario_1", "Statuario")])
+    prod = _products(tmp_path, [_prow()])
+    combos, _, _ = tree_build.build_combinations(
+        exp, _attrs(tmp_path), [bb], prod, exclude_ids={"slab_marble_statuario_1"})
+    assert _for(combos, "v_id_2")          # NOT excluded: the Key-in-Id-set was inert (the old bug)
+
+
 def test_build_tolerates_export_without_volume_column(tmp_path):
     # Blokport drops the 'Volume per kg (m³/kg)' column (freight volume is computed from dimensions now).
     # tree_build reads the export by header (Id/Key/Name), so the catalog builds IDENTICALLY from the

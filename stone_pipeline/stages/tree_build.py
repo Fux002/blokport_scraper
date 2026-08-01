@@ -204,17 +204,20 @@ def _resolve_type(key: str, name: str, attr: dict) -> str | None:
 def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: list[Path],
                        products_csv: Path | None,
                        assigned_types: dict[str, str] | None = None,
-                       exclude_ids: set[str] | None = None) -> tuple[set, dict, list[dict]]:
+                       exclude_ids: set[str] | None = None,
+                       retired_keys: set[str] | None = None) -> tuple[set, dict, list[dict]]:
     """Build the set of valid combinations (6-tuples). Returns (combinations, stats,
-    uncovered). exclude_ids = variation ids slated for deletion in Medusa (variants_to_delete) --
-    they get NO combinations, so a mis-typed junk variant can't ship a combination that breaks the
-    moment the variant is deleted."""
+    uncovered). exclude_ids = variation IDs slated for deletion in Medusa (variants_to_delete);
+    retired_keys = variation KEYS the operator retired. Both get NO combinations, but they live in
+    DISTINCT namespaces (the export Id churns, the Key is stable) -- so a retired Key must be tested
+    against the Key column, never folded into the Id set (where it would never match and be inert)."""
     attr = _load_attributes(attributes_csv)
     # universal finish fallback: finishes are consistent per product category, so a variation in a
     # category that declares NO finish is still priceable in 'Raw' rather than dropping uncovered.
     _raw_finish = attr["finish"].get("raw")
     assigned_types = assigned_types or {}
     exclude_ids = exclude_ids or set()
+    retired_keys = retired_keys or set()
     by_key, by_cat_name, by_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
@@ -238,7 +241,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             name = (r.get("Name") or "").strip()
             # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
             # combination references a variation that will not exist after the Medusa cleanup.
-            if vid and key and vid not in exclude_ids and not looks_like_artifact(name):
+            if vid and key and vid not in exclude_ids and key not in retired_keys and not looks_like_artifact(name):
                 export_rows.append((key, vid, name))
                 name_of[vid] = match_key(name)
             elif (vid or key or name) and not (vid and key):
@@ -394,12 +397,14 @@ def run() -> Path:
         with delete_file.open(encoding="utf-8-sig") as h:   # close the handle (was leaked in a comprehension)
             exclude_ids = {(r.get("Id") or "").strip() for r in csv.DictReader(h) if (r.get("Id") or "").strip()}
     # E10: retired varieties (the operator's explicit removal / un-retire memory) also get no combinations,
-    # so a retired Key is never re-priced/re-served -- one exclusion source, never a runtime edit of the base.
+    # so a retired Key is never re-priced/re-served. load_retired() returns KEYS, which are a DISTINCT
+    # namespace from the export Ids in exclude_ids -- pass them separately so they are tested against the
+    # Key column, not silently merged into the Id set (where they would never match and leak combinations).
     from stone_pipeline.stages import decisions
-    exclude_ids |= decisions.load_retired()
+    retired_keys = decisions.load_retired()
     combinations, stats, uncovered = build_combinations(
         export, SETTINGS.paths.attributes_csv, _backbone_paths(),
-        products if products.exists() else None, assigned, exclude_ids)
+        products if products.exists() else None, assigned, exclude_ids, retired_keys)
 
     to_upload = SETTINGS.paths.to_upload_dir
     path = to_upload / "2_valid_combinations.csv"
