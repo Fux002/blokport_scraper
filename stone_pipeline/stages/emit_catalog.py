@@ -44,11 +44,15 @@ def _s3_access_denied(exc) -> bool:
 
 
 def _s3_variation_keys():
-    """Set of variant Keys that have a {Key}.png in <env>/variations/ on S3, via ONE list call --
-    or None when S3 is genuinely unreachable (no boto3/creds, e.g. CI/local), so the caller falls
-    back. READ-ONLY, so it runs even under s3.dry_run (dry_run only suppresses WRITES; variant images
-    are uploaded out-of-band by the image_pipeline). This is the authority for whether a variant may
-    advertise its image -- a Key with no object must NOT point Medusa at a 404."""
+    """Map {variant Key: S3 ETag} for every {Key}.png in <env>/variations/, via ONE list call -- or
+    None when S3 is genuinely unreachable (no boto3/creds, e.g. CI/local), so the caller falls back.
+    The ETag is the image's content fingerprint (free from the same listing); the ledger folds it into
+    the variation payload_hash so a REGENERATED texture (same {Key}.png URL, new bytes -- e.g. the
+    one-time best-model refresh) re-serves, which a URL-only hash misses. Membership (`key in keys`)
+    still answers "does the object exist", so the image gate is unchanged. READ-ONLY, so it runs even
+    under s3.dry_run (dry_run only suppresses WRITES; variant images are uploaded out-of-band by the
+    image_pipeline). This is the authority for whether a variant may advertise its image -- a Key with
+    no object must NOT point Medusa at a 404."""
     from stone_pipeline.config.settings import ENV_SEGMENT
     s3 = SETTINGS.s3
     try:
@@ -63,12 +67,12 @@ def _s3_variation_keys():
         client = boto3.Session(profile_name=s3.credentials_profile or None,
                                region_name=s3.region).client("s3", config=cfg)
         prefix = f"{ENV_SEGMENT}/variations/"
-        keys: set[str] = set()
+        keys: dict[str, str] = {}
         for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 name = obj["Key"][len(prefix):]
                 if name.endswith(".png"):
-                    keys.add(name[:-4])
+                    keys[name[:-4]] = (obj.get("ETag") or "").strip('"')   # content fingerprint, quotes stripped
         return keys
     except Exception as exc:
         # AccessDenied is an IAM MISCONFIG, not "S3 unreachable". Swallowing it returned None, so the caller
@@ -119,7 +123,7 @@ def _consolidate(rows: list[dict]) -> list[dict]:
 
 
 def _image_link(key: str, has_export_image: bool, backed: bool,
-                s3_keys: set[str] | None, base: str) -> str:
+                s3_keys: dict[str, str] | set[str] | None, base: str) -> str:
     """The variant's Image cell. When S3 is known (`s3_keys` not None) a variant advertises its
     link IFF the {Key}.png exists -- never a 404. When S3 is unreachable, fall back to the prior
     heuristic (already-imaged OR product-backed) so CI/local output is unchanged."""
@@ -352,6 +356,17 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     # Name/Alias would corrupt the catalog data. (Operator review of scraped names is the sanitized
     # review files' job, not this machine-consumed deliverable.)
     csvio.write_dicts(path, _COLS, rows, sanitize=False)
+    # Sidecar {Key: image content fingerprint (S3 ETag)} for every variant advertising an image. The
+    # ledger folds this into the variation payload_hash so a REGENERATED texture (same {Key}.png URL,
+    # new bytes) flips the variation dirty and re-serves -- a URL-only hash would miss it and Medusa
+    # would keep the stale image forever. Written ONLY when S3 was actually listed (s3_keys is a dict):
+    # when S3 is unreachable (CI/local, or a passed-in key set) the prior sidecar is left untouched, so a
+    # transient S3 blip can never blank every fingerprint and spuriously re-serve the whole catalog.
+    if isinstance(s3_keys, dict):
+        shas = {r["Key"]: s3_keys[r["Key"]]
+                for r in rows if (r.get("Image") or "").strip() and s3_keys.get(r["Key"])}
+        sha_path = SETTINGS.paths.to_upload_dir / "variant_image_shas.json"
+        sha_path.write_text(json.dumps(dict(sorted(shas.items())), ensure_ascii=False), encoding="utf-8")
     # count GENUINELY new rows from the FINAL set (after artifact-filter + consolidation), not from
     # the pre-filter `order` -- else dropped/folded rows inflate the 'new' metric.
     existing_keys = set(order[:n_existing])
