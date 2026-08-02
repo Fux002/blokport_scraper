@@ -7,6 +7,10 @@ covered by its parts; its local no-seed guard is asserted in test_lifecycle-styl
 
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import (abandon_dead_letter, cancel_variation_tombstone, failures,
                                         ready, reconcile_variations_to_seed, record_tombstones,
@@ -21,6 +25,29 @@ def _variation(ledger, key, state, medusa_id=None, name="x", in_full=1):
                                 "in_full": in_full, "payload_hash": "", "state": state,
                                 "first_seen": now, "last_synced": None,
                                 "created_at": now, "updated_at": now}, pk=("key",))
+
+
+# -- schema v4 -> v5 migration (the ALTER path a deployed ledger actually takes) --
+
+def test_v4_to_v5_migration_adds_abandoned_at_and_preserves_data(tmp_path):
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v4 shape")
+    p = tmp_path / "mig.ledger"
+    with Ledger.open(p, env="development") as lg:               # create current (v5) schema
+        _variation(lg, "slab_marble_keep_1", "gap_held", medusa_id="V9")
+    raw = sqlite3.connect(p)                                    # simulate a v4 ledger: strip the v5 column
+    for t in ("variation", "product", "removed"):
+        raw.execute(f"ALTER TABLE {t} DROP COLUMN abandoned_at")
+    raw.execute("PRAGMA user_version = 4")
+    raw.commit(); raw.close()
+
+    with Ledger.open(p, env="development") as lg:               # reopen with v5 code -> _migrate runs
+        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        for t in ("variation", "product", "removed"):
+            cols = [r[1] for r in lg.conn.execute(f"PRAGMA table_info({t})")]
+            assert "abandoned_at" in cols                       # column re-added by the ALTER migration
+        assert lg.get("variation", "key", "slab_marble_keep_1")["state"] == "gap_held"   # data intact
+        assert abandon_dead_letter(lg, "variations", "slab_marble_keep_1")["abandoned"] is True
 
 
 # -- C: abandon a dead-letter -------------------------------------------------
