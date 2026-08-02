@@ -113,7 +113,10 @@ def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
                 "image_model": None,
                 "volume": volume,
                 "medusa_id": medusa_id or None,
-                "payload_hash": payload_hash([branch, "", name, sorted(aliases), image_url, volume]),
+                # image_sha256 (None here: the export carries no fingerprint) is in the formula so it
+                # matches populate_variations_full; the first produce fills the real fingerprint from S3,
+                # which re-serves any variant Medusa holds without its now-existing texture.
+                "payload_hash": payload_hash([branch, "", name, sorted(aliases), image_url, None, volume]),
                 "state": "synced",
                 "first_seen": now,
                 "last_synced": now,

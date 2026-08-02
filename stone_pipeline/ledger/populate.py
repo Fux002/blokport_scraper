@@ -39,6 +39,18 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     them from the export); only the produced content moves."""
     _key, _name, _image, _aliases, _volume = _VARIANTS_FULL_COLS
     now = now_iso()
+    # {Key: image content fingerprint} emit wrote next to 1_variants_full.csv from the S3 listing. Folded
+    # into the payload_hash below so a REGENERATED texture (same {Key}.png URL, new bytes) re-serves; a
+    # URL-only hash misses it. Tolerant of absence (CI/local, S3 unreachable) -> no fingerprint, no churn.
+    shas: dict[str, str] = {}
+    sha_path = Path(path).parent / "variant_image_shas.json"
+    if sha_path.exists():
+        try:
+            loaded = json.loads(sha_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                shas = loaded
+        except (json.JSONDecodeError, OSError):
+            shas = {}   # a corrupt sidecar must never crash the write-through; degrade to no fingerprint
     ledger.execute("UPDATE variation SET in_full = 0")
     n = 0
     with Path(path).open(encoding="utf-8-sig", newline="") as handle:
@@ -48,11 +60,15 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 continue
             name = r.get(_name) or ""
             image_url = r.get(_image) or ""
+            image_sha256 = shas.get(key) or None
             aliases = [a for a in (r.get(_aliases) or "").split("|") if a]
             volume = r.get(_volume) or ""
             head = key.split("_", 1)[0]
             branch = head if head in ("slab", "block", "tile") else ""
-            ph = payload_hash([branch, "", name, sorted(aliases), image_url, volume])
+            # image_sha256 in the hash re-serves a variant whose texture bytes changed at the stable URL.
+            # Adding it to the formula also flips every imaged variant dirty ONCE (a one-time full variation
+            # re-sync, like the product payload contract bump), which heals variants Medusa ingested blank.
+            ph = payload_hash([branch, "", name, sorted(aliases), image_url, image_sha256, volume])
             ledger.execute(
                 "INSERT INTO variation (key, branch, type, name, aliases, image_url, "
                 "image_sha256, image_model, volume, medusa_id, in_full, payload_hash, "
@@ -60,6 +76,7 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET name = excluded.name, "
                 "aliases = excluded.aliases, image_url = excluded.image_url, "
+                "image_sha256 = excluded.image_sha256, "
                 "volume = excluded.volume, in_full = 1, payload_hash = excluded.payload_hash, "
                 # a content change re-serves (synced -> dirty); unchanged keeps its state. medusa_id
                 # and first_seen are never touched, so an acked id survives a re-run. E5/un-retire: a
@@ -69,7 +86,7 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "WHEN variation.payload_hash != excluded.payload_hash THEN 'dirty' "
                 "ELSE variation.state END, "
                 "updated_at = excluded.updated_at",
-                (key, branch, "", name, json.dumps(aliases), image_url, None, None, volume,
+                (key, branch, "", name, json.dumps(aliases), image_url, image_sha256, None, volume,
                  None, ph, "pending", now, None, now, now),
             )
             n += 1
