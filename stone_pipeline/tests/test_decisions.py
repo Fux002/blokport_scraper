@@ -19,6 +19,17 @@ def test_fresh_store_is_empty_never_raises():
     assert ds.list_pending("variety") == []
 
 
+def test_protected_variation_roundtrip_is_idempotent():
+    # 'Not a duplicate' verdicts: durable, idempotent, and cleared only by a pristine reset.
+    assert ds.protected_keys() == set()
+    ds.add_protected("slab_marble_aqua_blue_a")
+    ds.add_protected("slab_marble_aqua_blue_a")            # repeat is a no-op
+    ds.add_protected("slab_gneiss_aqua_blue_b")
+    assert ds.protected_keys() == {"slab_marble_aqua_blue_a", "slab_gneiss_aqua_blue_b"}
+    assert ds.clear_protected() == 2
+    assert ds.protected_keys() == set()
+
+
 def test_review_queue_uniformly_title_cases_display_names():
     # a supplier shouting 'VENATTO BLUE' must show 'Venatto Blue' in the review queue no matter which curate
     # path surfaced it: the code-shaped + alias-review holds used to write raw supplier casing while the mint

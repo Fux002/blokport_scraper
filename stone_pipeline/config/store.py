@@ -187,6 +187,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "attribute TEXT NOT NULL, value_norm TEXT NOT NULL, value_display TEXT NOT NULL DEFAULT '', "
                  "action TEXT NOT NULL CHECK (action IN ('approve','reject')), decided_at TEXT NOT NULL, "
                  "PRIMARY KEY (variety_norm, stone_type_norm, attribute, value_norm))")
+    # Operator "Not a duplicate" verdicts: variation Keys the reconcile dedup must NEVER drop, even when a
+    # Key shares a (branch,type,name) identity with another. A false-positive dup detection (two genuinely
+    # distinct varieties, e.g. multi-type homonyms) is exempted here so a future reconcile/pristine cannot
+    # re-tombstone it. Durable in config.db (survives a restart); cleared by a pristine reset like the other
+    # curation overlays, so a true cold start is seed-only. Keyed by the variation Key.
+    conn.execute("CREATE TABLE IF NOT EXISTS protected_variation ("
+                 "key TEXT PRIMARY KEY, decided_at TEXT NOT NULL)")
     # per-source pipeline diagnostics (Phase 1 layer diagnostics): the LATEST run's compact per-stage +
     # health/gate/magnitude/drift summary per source, so GET /config/v1/diagnostics serves the admin UI
     # durably (survives a config-server restart) without scanning the ephemeral outputs/ tree per request.

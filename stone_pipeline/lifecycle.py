@@ -298,12 +298,19 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     # PRISTINE seed (baked read-only at image build): the live variants_export_base.csv self-mutates
     # (base := 1_variants_full each produce), so it is not a trustworthy clean source at runtime.
     seed_keys = _load_pristine_seed_keys() if pristine else None
+    # 'not a duplicate' verdicts: a durable correctness override the seed-reconcile must honour, so a variety
+    # the operator already confirmed distinct is never re-dropped as a dup on the next pristine.
+    protected = None
+    if pristine:
+        from stone_pipeline.config import decisions_store as _decisions
+        protected = _decisions.protected_keys()
 
     def _do_reset(lg, sync):
         # reconcile (drop + tombstone dup old sides) BEFORE the sync-state reset, so the tombstones are
         # recorded and the dropped rows are gone before prune/overlay run. Keep reset_sync_state's shape
         # flat (callers read body["reset"]["variation"] etc.); attach the reconcile result as a sibling.
-        reseed = sync.reconcile_variations_to_seed(lg, seed_keys) if (pristine and seed_keys is not None) else None
+        reseed = (sync.reconcile_variations_to_seed(lg, seed_keys, protected)
+                  if (pristine and seed_keys is not None) else None)
         reset_result = sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard), prune_stale=pristine)
         if reseed is not None:
             reset_result["reseed"] = reseed
@@ -411,6 +418,67 @@ def un_retire(key: str) -> tuple[dict, int]:
     from stone_pipeline.stages import decisions
     decisions.remove_retired(key)
     return result, 200
+
+
+def not_a_duplicate(key: str) -> tuple[dict, int]:
+    """'Not a duplicate' (curation state 2 repair): cancel a dedup/reconcile tombstone that would delete a
+    variety the operator confirms is distinct, and record a DURABLE protection so a future seed-reconcile
+    never re-drops it. Idempotent: a repeat clears 0 and re-asserts the protection. 404 only if the key is
+    unknown AND had no pending tombstone to cancel (nothing to act on)."""
+    result, code = _ledger_op("not_a_duplicate", lambda lg, sync: sync.cancel_variation_tombstone(lg, key))
+    if code != 200:
+        return result, code
+    if not result.get("known") and not result.get("tombstone_cleared"):
+        return {"error": f"unknown variation {key!r} with no pending tombstone to cancel"}, 404
+    from stone_pipeline.config import decisions_store
+    decisions_store.add_protected(key)                 # durable: the reconcile dedup never re-drops it
+    result["protected"] = True
+    return result, 200
+
+
+def abandon_dead_letter(type_: str, external_id: str) -> tuple[dict, int]:
+    """Drop ONE structurally-re-rejecting dead-letter (curation state 3 repair): move it to a terminal
+    'abandoned' state (stops re-serving, requeue no longer resurrects it, still auditable in /failures).
+    Idempotent. 400 unknown type; 404 unknown id; 409 if the id is not actually dead-lettered."""
+    result, code = _ledger_op("abandon_dead_letter",
+                              lambda lg, sync: sync.abandon_dead_letter(lg, type_, external_id))
+    if code != 200:
+        return result, code
+    if "error" in result and "unknown type" in result["error"]:
+        return result, 400
+    if result.get("found") is False:
+        return {"error": f"unknown {type_} {external_id!r}"}, 404
+    if result.get("abandoned") is False and "error" in result:
+        return result, 409                              # not a dead-letter (still live/serving)
+    return result, 200
+
+
+def rebuild_curation() -> tuple[dict, int]:
+    """Global incremental curation rebuild (curation state 1 repair): reseed the base FILE from the
+    committed pristine seed (fixes base-file corruption/drift), then kick a catalog re-derive so every
+    source is re-curated from the clean base -- WITHOUT a factory reset's ledger wipe, image wipe, or
+    re-scrape. Returns a summary the operator can read. Refuses (409) if a produce/reset is already in
+    flight or a pull is mid-serve; Blokport also gates the button on 'no pull running'. Curation is global
+    (a variety belongs to the canonical catalog, not a source), so this is not per-source by design."""
+    # Guard against a mid-serve pull up front, in the exclusive slot, BEFORE touching the base file (the
+    # re-derive that follows mutates the ledger; a base swap racing a live pull is the one combo to block).
+    def _guard(lg, sync):
+        sync._lock_and_check_in_flight(lg)              # ServeInFlight -> 409 via _ledger_op
+        return {"ok": True}
+    guard, code = _ledger_op("rebuild_curation", _guard)
+    if code != 200:
+        return guard, code
+    reseed = _reseed_base_from_pristine()
+    if not reseed.get("reseeded"):
+        # no pristine seed baked (local dev): nothing to rebuild from -- report, do not silently re-derive
+        return {"rebuilt": False, "base_reseed": reseed,
+                "note": "no committed pristine seed to rebuild from"}, 409
+    from stone_pipeline.config import runner
+    rec, run_code = runner.start_run(None, "catalog")   # re-derive all sources from the clean base (async)
+    return {"rebuilt": True, "base_reseed": reseed, "rederive": rec, "rederive_status": run_code,
+            "scope": "global", "pristine_retired": True,
+            "note": "base reseeded from the committed seed; catalog re-derive dispatched (watch rederive.run_id). "
+                    "Curation is global, so this covers every source."}, 200
 
 
 def clean(sources=None) -> tuple[dict, int]:

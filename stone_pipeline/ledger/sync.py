@@ -469,18 +469,25 @@ def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
     operator can see what Medusa rejected and fix it. Item: {type, external_id, attempts, error,
     updated_at}. `updated_at` is the last-attempt ISO timestamp (the :4200 failures card renders it)."""
     out: list[dict] = []
-    for type_, table in (("variations", "variation"), ("products", "product")):
+    # `state` in the item distinguishes an ACTIVE dead-letter (gap_held/dead, still surfaced for repair)
+    # from one the operator ABANDONED (abandoned_at set, terminal): both render, so the Sync-failures view
+    # can show the abandoned ones too, tagged so the UI can style them differently.
+    def _row(type_, xid, state, attempts, error, updated, abandoned_at):
+        return {"type": type_, "external_id": xid, "state": "abandoned" if abandoned_at else state,
+                "abandoned": bool(abandoned_at), "attempts": attempts, "error": error,
+                "updated_at": updated}
+    for type_, table, active in (("variations", "variation", "gap_held"), ("products", "product", "gap_held")):
         pk = _ENTITY[type_][1]
         for r in ledger.execute(
-            f"SELECT {pk} AS xid, sync_attempts, sync_error, updated_at FROM {table} "
-            f"WHERE state = 'gap_held' ORDER BY updated_at DESC LIMIT ?", (limit,)):
-            out.append({"type": type_, "external_id": r["xid"], "attempts": r["sync_attempts"],
-                        "error": r["sync_error"], "updated_at": r["updated_at"]})
+            f"SELECT {pk} AS xid, state, sync_attempts, sync_error, updated_at, abandoned_at FROM {table} "
+            f"WHERE state = ? OR abandoned_at IS NOT NULL ORDER BY updated_at DESC LIMIT ?", (active, limit)):
+            out.append(_row(type_, r["xid"], r["state"], r["sync_attempts"], r["sync_error"],
+                            r["updated_at"], r["abandoned_at"]))
     for r in ledger.execute(                             # tombstones stuck 'dead' (Medusa kept blocking)
-        "SELECT external_id AS xid, sync_attempts, sync_error, updated_at FROM removed "
-        "WHERE state = 'dead' ORDER BY updated_at DESC LIMIT ?", (limit,)):
-        out.append({"type": "removed", "external_id": r["xid"], "attempts": r["sync_attempts"],
-                    "error": r["sync_error"], "updated_at": r["updated_at"]})
+        "SELECT external_id AS xid, state, sync_attempts, sync_error, updated_at, abandoned_at FROM removed "
+        "WHERE state = 'dead' OR abandoned_at IS NOT NULL ORDER BY updated_at DESC LIMIT ?", (limit,)):
+        out.append(_row("removed", r["xid"], r["state"], r["sync_attempts"], r["sync_error"],
+                        r["updated_at"], r["abandoned_at"]))
     return out
 
 
@@ -493,7 +500,7 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
     for table in tables:
         cur = ledger.execute(
             f"UPDATE {table} SET state = 'dirty', sync_attempts = 0, sync_error = NULL, updated_at = ? "
-            f"WHERE state = 'gap_held'", (now,))
+            f"WHERE state = 'gap_held' AND abandoned_at IS NULL", (now,))   # an abandoned dead-letter stays put
         n += cur.rowcount
     return n
 
@@ -532,14 +539,16 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
     # medusa_id is load-bearing for the retire/ack/un_retire state machine (it says "Medusa has this, delete
     # it"). Everything NOT retiring re-serves from zero.
     sets = ["state = CASE WHEN state = 'retiring' THEN 'retiring' ELSE 'pending' END", "updated_at = ?"]
+    # abandoned_at is cleared on a re-serve-from-zero reset: the reset IS the un-abandon escape hatch, so a
+    # dropped dead-letter gets one more chance (it re-serves; if it still structurally fails it re-dead-letters).
     sets += [f"{c} = CASE WHEN state = 'retiring' THEN {c} ELSE NULL END"
-             for c in ("medusa_id", "last_synced", "sync_error") if c in cols]
+             for c in ("medusa_id", "last_synced", "sync_error", "abandoned_at") if c in cols]
     if "sync_attempts" in cols:
         sets.append("sync_attempts = CASE WHEN state = 'retiring' THEN sync_attempts ELSE 0 END")
     return ledger.execute(f"UPDATE {table} SET {', '.join(sets)}{where}", (now, *params)).rowcount
 
 
-def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str]) -> dict:
+def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected: set[str] | None = None) -> dict:
     """Make the variation table dup-free and seed-consistent -- the missing half of a TRUE cold start.
 
     A pristine reset zeroes sync state but by its old invariant never removed a live variety, so a
@@ -551,10 +560,15 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str]) -> dict:
     that still has products, so a live one can never be wrongly deleted. A minted variety with no twin is
     untouched (it re-mints deterministically). Global-only. Returns counts + the dropped Keys.
 
+    `protected` is the operator's 'not a duplicate' set (decisions_store.protected_keys): a Key in it is
+    NEVER dropped, so a false-positive collapse the operator already overrode does not re-tombstone on the
+    next reconcile. It also can never be the sole reason a survivor is lost -- a protected Key just stays.
+
     Uses the SAME variety_identity + survivor rule as the emit dedup gate (loaders), so the ledger, the
     matcher reference, and the emitted catalog all agree on exactly one Key per variety."""
     import collections
     from stone_pipeline.reference.loaders import survivor_of, variety_identity
+    protected = protected or set()
     groups: dict[tuple, list[str]] = collections.defaultdict(list)
     for v in ledger.execute("SELECT key, name FROM variation").fetchall():
         groups[variety_identity(v["key"], v["name"])].append(v["key"])
@@ -563,7 +577,7 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str]) -> dict:
         if len(keys) <= 1:
             continue
         survivor = survivor_of(keys, seed_keys)
-        dropped += [k for k in keys if k != survivor]
+        dropped += [k for k in keys if k != survivor and k not in protected]
     if dropped:
         record_tombstones(ledger, [(k, None) for k in dropped], reason="reseed_dedup", kind="variation")
         q = ",".join("?" * len(dropped))
@@ -819,6 +833,53 @@ def un_retire_variation(ledger: Ledger, key: str) -> dict:
     cleared = ledger.execute("DELETE FROM removed WHERE kind = 'variation' AND external_id = ?",
                              (key,)).rowcount
     return {"un_retired": key, "tombstone_cleared": cleared}
+
+
+def cancel_variation_tombstone(ledger: Ledger, key: str) -> dict:
+    """'Not a duplicate': cancel a pending variation tombstone that a dedup/reconcile raised in error, so
+    Medusa does NOT delete this variety. Drops the pending removed row and, if the variation is still held
+    'retiring', flips it back to serving. Unlike un_retire it does NOT clear the retired-exclusion memory
+    (the variety was never operator-retired -- it was auto-tombstoned), and the CALLER records the durable
+    'protected' verdict so a future reconcile never re-drops it. Idempotent: a repeat clears 0 and returns
+    the current state. 404 (via caller) only if the key is unknown AND has no tombstone to cancel."""
+    _lock_and_check_in_flight(ledger)
+    var = ledger.get("variation", "key", key)
+    restored = False
+    if var is not None and var["state"] == "retiring":
+        ledger.set_state("variation", "key", key, "dirty" if var["medusa_id"] else "pending")
+        restored = True
+    cleared = ledger.execute("DELETE FROM removed WHERE kind = 'variation' AND external_id = ?",
+                             (key,)).rowcount
+    return {"key": key, "tombstone_cleared": cleared, "restored": restored,
+            "known": var is not None}
+
+
+def abandon_dead_letter(ledger: Ledger, type_: str, external_id: str) -> dict:
+    """Drop ONE dead-letter that structurally re-rejects on Requeue: stamp `abandoned_at` so it stops
+    re-serving AND Requeue no longer resurrects it, WITHOUT a blind DELETE (the row + its last error stay
+    auditable, and /failures still renders it, tagged abandoned). Terminal until a reset clears it (the
+    un-abandon escape hatch). type_ is 'variations' | 'products' (a 'gap_held' entity) or 'removed' (a
+    'dead' tombstone). Idempotent: an already-abandoned id changes 0 rows and reports it."""
+    now = now_iso()
+    if type_ == "removed":
+        table, pk, dead_state = "removed", "external_id", "dead"
+    elif type_ in _ENTITY:
+        table, pk, dead_state = _ENTITY[type_][0], _ENTITY[type_][1], "gap_held"
+    else:
+        return {"error": f"unknown type {type_!r}; expected variations, products or removed"}
+    _lock_and_check_in_flight(ledger)
+    row = ledger.execute(f"SELECT state, abandoned_at FROM {table} WHERE {pk} = ?", (external_id,)).fetchone()
+    if row is None:
+        return {"type": type_, "external_id": external_id, "abandoned": False, "found": False}
+    if row["abandoned_at"]:
+        return {"type": type_, "external_id": external_id, "abandoned": True, "already": True}
+    if row["state"] != dead_state:
+        # only a dead-lettered row may be abandoned: refuse to strand a live/serving entity
+        return {"type": type_, "external_id": external_id, "abandoned": False,
+                "state": row["state"], "error": f"not a dead-letter (state is not {dead_state})"}
+    ledger.execute(f"UPDATE {table} SET abandoned_at = ?, updated_at = ? WHERE {pk} = ?",
+                   (now, now, external_id))
+    return {"type": type_, "external_id": external_id, "abandoned": True, "was": row["state"]}
 
 
 def main(argv: list[str] | None = None) -> int:

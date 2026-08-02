@@ -120,6 +120,30 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             result, code = lifecycle.reset(srcs, hard, pristine=pristine)
             return code, result
         return 405, {"error": "POST /config/v1/reset to reset the ledger"}
+    if segments and segments[0] == "curation":
+        # global incremental curation rebuild (curation state 1 repair): reseed the base FILE from the
+        # committed pristine seed + kick a catalog re-derive, WITHOUT a factory reset's ledger/image wipe or
+        # re-scrape. Curation is global (a variety belongs to the canonical catalog, not a source), so this
+        # is not per-source. 409 if a produce/reset/pull is in flight; returns a summary (base_reseed +
+        # rederive run to watch). Blokport also gates the button on 'no pull running'.
+        from stone_pipeline import lifecycle
+        if len(segments) == 2 and segments[1] == "rebuild" and method == "POST":
+            result, code = lifecycle.rebuild_curation()
+            return code, result
+        return 405, {"error": "POST /config/v1/curation/rebuild to reseed the base + re-derive the catalog"}
+    if segments and segments[0] == "deadletters":
+        # drop ONE structurally-re-rejecting dead-letter (curation state 3 repair): move it to a terminal
+        # 'abandoned' state so it stops re-serving AND Requeue no longer resurrects it, still auditable in
+        # /failures. Body: {"type": "variations"|"products"|"removed", "external_id": "<key|sku>"}.
+        from stone_pipeline import lifecycle
+        if len(segments) == 2 and segments[1] == "abandon" and method == "POST":
+            type_ = body.get("type") if isinstance(body, dict) else None
+            xid = body.get("external_id") if isinstance(body, dict) else None
+            if not type_ or not xid:
+                return 400, {"error": "POST /config/v1/deadletters/abandon {type, external_id}"}
+            result, code = lifecycle.abandon_dead_letter(type_, xid)
+            return code, result
+        return 405, {"error": "POST /config/v1/deadletters/abandon {type, external_id}"}
     if segments and segments[0] == "purge":
         # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
         # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
@@ -163,16 +187,21 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         # variation lifecycle (the variety half): explicit removal + undo.
         #   POST /config/v1/variations/<key>/retire     {"force": true?}   remove a variety (E11 re-key old side)
         #   POST /config/v1/variations/<key>/un_retire                     reverse it (mirrors source resume)
+        #   POST /config/v1/variations/<key>/not_a_duplicate               cancel a false-positive dup tombstone
+        #     (curation state 2): keep the variety + record a durable 'protected' verdict so a future
+        #     seed-reconcile never re-drops it. Idempotent + scoped result.
         from stone_pipeline import lifecycle
-        if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "un_retire"):
+        if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "un_retire", "not_a_duplicate"):
             key = segments[1]
             if segments[2] == "retire":
                 force = bool(body.get("force")) if isinstance(body, dict) else False
                 result, code = lifecycle.retire_variation(key, force=force)
-            else:
+            elif segments[2] == "un_retire":
                 result, code = lifecycle.un_retire(key)
+            else:
+                result, code = lifecycle.not_a_duplicate(key)
             return code, result
-        return 404, {"error": "expected POST /config/v1/variations/<key>/{retire,un_retire}"}
+        return 404, {"error": "expected POST /config/v1/variations/<key>/{retire,un_retire,not_a_duplicate}"}
     if segments and segments[0] == "review":
         # the new-variant review queue for the :4200 admin. The produce SURFACES uncertain items; the
         # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so
