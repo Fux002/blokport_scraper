@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS variation (
                   CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
     sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive failed Medusa applies (dead-letter counter)
     sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
+    abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
     first_seen    TEXT NOT NULL,
     last_synced   TEXT,
     created_at    TEXT NOT NULL,
@@ -197,6 +198,7 @@ CREATE TABLE IF NOT EXISTS product (
                          CHECK (state IN ('pending','dirty','syncing','synced','needs_resync','gap_held','retiring')),
     sync_attempts        INTEGER NOT NULL DEFAULT 0,    -- consecutive failed Medusa applies (dead-letter counter)
     sync_error           TEXT,                          -- last Medusa failure reason; null once synced
+    abandoned_at         TEXT,                          -- set when the operator drops a structural dead-letter (terminal)
     last_synced          TEXT,
     created_at           TEXT NOT NULL,
     updated_at           TEXT NOT NULL
@@ -286,6 +288,7 @@ CREATE TABLE IF NOT EXISTS removed (
                   CHECK (state IN ('pending','dead')),  -- pending serves; 'done' deletes the row; dead = blocked cap
     sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive 'blocked' acks (dead-letter counter)
     sync_error    TEXT,
+    abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
 );

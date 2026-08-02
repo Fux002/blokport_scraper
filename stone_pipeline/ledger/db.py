@@ -27,7 +27,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 4   # v4: one removed lane for both kinds (`removed.kind` product|variation) + variation retire
+SCHEMA_VERSION = 5   # v5: `abandoned_at` on variation/product/removed -- a dead-letter the operator dropped
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -150,12 +150,16 @@ class Ledger:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0")
             if "sync_error" not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_error TEXT")
+            if "abandoned_at" not in cols:   # v5: a dead-letter the operator dropped (terminal, but auditable)
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN abandoned_at TEXT")
         inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
         removed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(removed)")}
         if "kind" not in removed_cols:   # v4: existing tombstones are all products (that was the only lane)
             self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")
+        if "abandoned_at" not in removed_cols:   # v5: a dead tombstone the operator dropped
+            self.conn.execute("ALTER TABLE removed ADD COLUMN abandoned_at TEXT")
         # covering index for the serve order (products before variations, E1). Created HERE, not in
         # schema.sql, because schema.sql runs BEFORE this ALTER on an old ledger, where an index on the
         # not-yet-added `kind` column would fail. Idempotent, so fresh ledgers pick it up here too.
