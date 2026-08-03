@@ -859,7 +859,8 @@ def abandon_dead_letter(ledger: Ledger, type_: str, external_id: str) -> dict:
     re-serving AND Requeue no longer resurrects it, WITHOUT a blind DELETE (the row + its last error stay
     auditable, and /failures still renders it, tagged abandoned). Terminal until a reset clears it (the
     un-abandon escape hatch). type_ is 'variations' | 'products' (a 'gap_held' entity) or 'removed' (a
-    'dead' tombstone). Idempotent: an already-abandoned id changes 0 rows and reports it."""
+    'dead' tombstone). Idempotent: an already-abandoned id changes 0 rows and reports it. Serve-safe (it
+    only touches a NON-served dead-letter row), so -- like requeue -- it takes no in-flight-pull lock."""
     now = now_iso()
     if type_ == "removed":
         table, pk, dead_state = "removed", "external_id", "dead"
@@ -867,7 +868,6 @@ def abandon_dead_letter(ledger: Ledger, type_: str, external_id: str) -> dict:
         table, pk, dead_state = _ENTITY[type_][0], _ENTITY[type_][1], "gap_held"
     else:
         return {"error": f"unknown type {type_!r}; expected variations, products or removed"}
-    _lock_and_check_in_flight(ledger)
     row = ledger.execute(f"SELECT state, abandoned_at FROM {table} WHERE {pk} = ?", (external_id,)).fetchone()
     if row is None:
         return {"type": type_, "external_id": external_id, "abandoned": False, "found": False}

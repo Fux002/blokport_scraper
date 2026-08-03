@@ -1,15 +1,18 @@
 # Curation-repair endpoints (retire the `{pristine}` factory reset in prod)
 
 Three incremental, prod-safe repair endpoints that fix the last scraper-side states that previously
-required a full factory reset. All live under `/config/v1/...`, bearer `BLOKPORT_CONFIG_TOKEN` (same proxy
-shape as the other curation ops). All are **idempotent** and return a **scoped summary** of what they acted
-on. Base URL below is the scraper config server.
+required a full factory reset. All are **idempotent** and return a **scoped summary** of what they acted on.
 
-| State that used to need `{pristine}` | Endpoint | Blokport action |
-|---|---|---|
-| 1. Curation base-file corruption / drift | `POST /config/v1/curation/rebuild` | "Rebuild curation" (Maintenance) |
-| 2. Duplicate-variety tombstone (false positive) | `POST /config/v1/variations/<key>/not_a_duplicate` | "Not a duplicate" on a tombstoned variety |
-| 3. Dead-letter that structurally re-rejects | `POST /config/v1/deadletters/abandon` | "Abandon" in the Sync-failures view |
+**Two planes** (matching the existing split): A and B are **config plane** (`/config/v1/*`, bearer
+`BLOKPORT_CONFIG_TOKEN`, via `configFetch`). C is **sync plane** (`/sync/v1/*`, bearer `BLOKPORT_SYNC_TOKEN`,
+via the scraper-sync module client) — it sits next to `requeue` and reads from the same `/sync/v1/failures`
+list, because it is the exact opposite of requeue on the same dead-letter object.
+
+| State that used to need `{pristine}` | Plane | Endpoint | Blokport action |
+|---|---|---|---|
+| 1. Curation base-file corruption / drift | config | `POST /config/v1/curation/rebuild` | "Rebuild curation" (Maintenance) |
+| 2. Duplicate-variety tombstone (false positive) | config | `POST /config/v1/variations/<key>/not_a_duplicate` | "Not a duplicate" on a tombstoned variety |
+| 3. Dead-letter that structurally re-rejects | **sync** | `POST /sync/v1/abandon` | "Abandon" per-row in the Sync-failures table |
 
 ---
 
@@ -76,11 +79,17 @@ protection.
 
 ---
 
-## C. Abandon a dead-letter — `POST /config/v1/deadletters/abandon`
+## C. Abandon a dead-letter — `POST /sync/v1/abandon` (SYNC plane)
+
+**Plane: sync** (`BLOKPORT_SYNC_TOKEN`, the scraper-sync module client — add an `abandon()` method to
+`ScraperSyncClient` next to `requeue`). It is the **exact opposite of `requeue`** and keys off the **same
+`{type, external_id}`** a `GET /sync/v1/failures` row already carries — so a per-row "Abandon" button passes
+the row's identifier straight through. **Same object, same plane, no id threading needed.**
 
 Drops one structurally-re-rejecting dead-letter to a **terminal** marker (`abandoned_at`): it stops
 re-serving, **Requeue no longer resurrects it**, and it stays **auditable** — no blind delete. A later
-`reset` is the un-abandon escape hatch (re-serves it for one more attempt).
+`reset` is the un-abandon escape hatch (re-serves it for one more attempt). Serve-safe (touches only a
+non-served dead-letter row), so — like `requeue` — it takes no in-flight-pull lock.
 
 **Body:**
 ```json
@@ -93,12 +102,11 @@ re-serving, **Requeue no longer resurrects it**, and it stays **auditable** — 
 ```
 Idempotent repeat: `{ "abandoned": true, "already": true }`.
 
-**Status codes:** `200` abandoned (or already) · `400` missing/unknown `type` · `404` unknown `external_id`
-· `409` the id is not actually dead-lettered (still live/serving — refused, `error` explains) or a pull is
-mid-serve.
+**Status codes:** `200` abandoned (or already) · `400` missing body or unknown `type` · `404` unknown
+`external_id` · `409` the id is not actually dead-lettered (still live/serving — refused, `error` explains).
 
-**Rendering the abandoned state:** `GET /config/v1/failures` (proxy of the sync `/failures`) now returns a
-`state` and an `abandoned` flag per item:
+**Rendering the abandoned state:** `GET /sync/v1/failures` now returns a `state` and an `abandoned` flag per
+item (backward compatible — new fields alongside the existing `type`/`external_id`/`attempts`/`error`):
 ```json
 { "type":"variations", "external_id":"…", "state":"abandoned", "abandoned":true,
   "attempts":5, "error":"…", "updated_at":"…" }

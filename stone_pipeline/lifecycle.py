@@ -436,23 +436,6 @@ def not_a_duplicate(key: str) -> tuple[dict, int]:
     return result, 200
 
 
-def abandon_dead_letter(type_: str, external_id: str) -> tuple[dict, int]:
-    """Drop ONE structurally-re-rejecting dead-letter (curation state 3 repair): move it to a terminal
-    'abandoned' state (stops re-serving, requeue no longer resurrects it, still auditable in /failures).
-    Idempotent. 400 unknown type; 404 unknown id; 409 if the id is not actually dead-lettered."""
-    result, code = _ledger_op("abandon_dead_letter",
-                              lambda lg, sync: sync.abandon_dead_letter(lg, type_, external_id))
-    if code != 200:
-        return result, code
-    if "error" in result and "unknown type" in result["error"]:
-        return result, 400
-    if result.get("found") is False:
-        return {"error": f"unknown {type_} {external_id!r}"}, 404
-    if result.get("abandoned") is False and "error" in result:
-        return result, 409                              # not a dead-letter (still live/serving)
-    return result, 200
-
-
 def rebuild_curation() -> tuple[dict, int]:
     """Global incremental curation rebuild (curation state 1 repair): reseed the base FILE from the
     committed pristine seed (fixes base-file corruption/drift), then kick a catalog re-derive so every

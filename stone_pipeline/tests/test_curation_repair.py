@@ -77,6 +77,24 @@ def test_abandon_dead_letter_is_terminal_and_auditable(tmp_path):
         assert again["abandoned"] is True and again.get("already") is True
 
 
+def test_abandon_sync_route_maps_status_codes(tmp_path):
+    # Abandon lives on the SYNC plane (next to requeue, same failures list), keyed by {type, external_id}.
+    from stone_pipeline.ledger.server import dispatch
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        _variation(lg, "slab_marble_dead_1", "gap_held", medusa_id="V4")
+        _variation(lg, "slab_marble_live_1", "synced", medusa_id="V5")
+
+        assert dispatch(lg, "POST", "abandon", {}, {})[0] == 400                       # missing body
+        assert dispatch(lg, "POST", "abandon", {}, {"type": "widgets", "external_id": "x"})[0] == 400
+        assert dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "nope"})[0] == 404
+        assert dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "slab_marble_live_1"})[0] == 409
+        code, body = dispatch(lg, "POST", "abandon", {}, {"type": "variations", "external_id": "slab_marble_dead_1"})
+        assert code == 200 and body["abandoned"] is True
+        # renders in the same /sync/v1/failures list, tagged abandoned
+        fs = {f["external_id"]: f for f in dispatch(lg, "GET", "failures", {}, None)[1]["failures"]}
+        assert fs["slab_marble_dead_1"]["state"] == "abandoned"
+
+
 def test_abandon_refuses_a_live_row_and_unknown_id(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
         _variation(lg, "slab_marble_live_1", "synced", medusa_id="V2")

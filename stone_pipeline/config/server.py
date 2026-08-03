@@ -131,19 +131,6 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             result, code = lifecycle.rebuild_curation()
             return code, result
         return 405, {"error": "POST /config/v1/curation/rebuild to reseed the base + re-derive the catalog"}
-    if segments and segments[0] == "deadletters":
-        # drop ONE structurally-re-rejecting dead-letter (curation state 3 repair): move it to a terminal
-        # 'abandoned' state so it stops re-serving AND Requeue no longer resurrects it, still auditable in
-        # /failures. Body: {"type": "variations"|"products"|"removed", "external_id": "<key|sku>"}.
-        from stone_pipeline import lifecycle
-        if len(segments) == 2 and segments[1] == "abandon" and method == "POST":
-            type_ = body.get("type") if isinstance(body, dict) else None
-            xid = body.get("external_id") if isinstance(body, dict) else None
-            if not type_ or not xid:
-                return 400, {"error": "POST /config/v1/deadletters/abandon {type, external_id}"}
-            result, code = lifecycle.abandon_dead_letter(type_, xid)
-            return code, result
-        return 405, {"error": "POST /config/v1/deadletters/abandon {type, external_id}"}
     if segments and segments[0] == "purge":
         # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
         # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
