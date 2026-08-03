@@ -15,6 +15,9 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
       if omitted, the prior behavior is kept, so the guard engages the moment the consumer starts echoing.
     POST /sync/v1/requeue   body (optional): {type: variations|products}  -- un-quarantine gap_held
       entities back to dirty after the Medusa-side cause is fixed (the recovery lever behind failures)
+    POST /sync/v1/abandon   body: {type: variations|products|removed, external_id}  -- the OPPOSITE of
+      requeue: drop ONE structurally-re-rejecting dead-letter to terminal (abandoned_at). Keyed by the
+      same {type, external_id} a /failures row carries. 404 unknown id, 409 if not a dead-letter.
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the
 design calls for; the server refuses to start without it. This is the contract
@@ -72,6 +75,23 @@ def dispatch(ledger: Ledger, method: str, resource: str,
         if type_ is not None and type_ not in ("variations", "products"):
             return 400, {"error": "type must be 'variations' or 'products' (or omitted for both)"}
         return 200, {"requeued": sync.requeue_dead_lettered(ledger, type_=type_)}
+    if method == "POST" and resource == "abandon":
+        # the opposite of requeue: drop ONE structurally-re-rejecting dead-letter to a terminal
+        # `abandoned_at` -- it stops re-serving, requeue no longer resurrects it, and it still renders in
+        # GET /sync/v1/failures tagged abandoned. Keyed by the SAME {type, external_id} a failures row
+        # carries, so a per-row 'Abandon' button passes it straight through. A reset un-abandons it.
+        type_ = body.get("type") if isinstance(body, dict) else None
+        xid = body.get("external_id") if isinstance(body, dict) else None
+        if not type_ or not xid:
+            return 400, {"error": "abandon body must be {type, external_id}"}
+        result = sync.abandon_dead_letter(ledger, type_, xid)
+        if "error" in result and "unknown type" in result["error"]:
+            return 400, result
+        if result.get("found") is False:
+            return 404, {"error": f"unknown {type_} {xid!r}"}
+        if result.get("abandoned") is False:                 # not a dead-letter (still live/serving)
+            return 409, result
+        return 200, result
     return 404, {"error": f"no route for {method} /sync/{resource}"}
 
 
