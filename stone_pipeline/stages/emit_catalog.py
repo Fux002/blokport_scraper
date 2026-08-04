@@ -285,14 +285,14 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     _snap("retired")
     # Only clean, correctly-typed variety names reach Medusa. Drop the two junk classes the rest of the
     # pipeline already excludes from matching and lists for deletion (loaders/catalog): code-like names
-    # (a stale 'Z Astoria') and MIS-TYPED variants whose name carries a stone-type word that disagrees
-    # with the Key's type ('Agata White' -- an agate -- keyed as semi_precious_stone). The same rule
-    # applies here so the union-fill can never carry a mistyped variety into another category: one notion
-    # of "a real variety" everywhere, so a cold start stays uniform (the correctly-typed variety survives).
+    # (a stale 'Z Astoria'). NOTE: a variety's stone TYPE is authoritative -- it is assigned from the Key
+    # at review (mint/alias), never re-judged against the name -- so emit NEVER drops a variety on a
+    # name-vs-type disagreement. That silent, catalog-wide, permanent delete (base := 1_variants_full +
+    # in_full=0) could remove a valid combination on type-vocabulary drift. A genuinely wrong-typed base
+    # entry is surfaced for review by seed.verify / the consistency report instead, never deleted here.
     from stone_pipeline.reference import loaders
-    rows = [r for r in rows
-            if not looks_like_artifact(r["Name"]) and not loaders.is_mistyped_variant(r["Key"], r["Name"])]
-    _snap("artifact_mistyped")
+    rows = [r for r in rows if not looks_like_artifact(r["Name"])]
+    _snap("artifact")
     rows = _consolidate(rows)                                 # 'Rosal C/T/B' -> one 'Rosal' + aliases
     _snap("consolidate")
 

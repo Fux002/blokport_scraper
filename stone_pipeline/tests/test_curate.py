@@ -62,12 +62,25 @@ def test_exact_match_is_not_proposed_as_alias(ref):
     assert all(e["Name"] != "Arabescato" for e in result.alias_additions["slab"])
 
 
-def test_new_variant_emitted_for_active_categories(ref):
-    row = CanonicalRow(src_site="polonine", surrogate_key="3",
-                       variety_match_key="Totally Novel Xyz", raw_type="Granite")
-    row.add_gap(TreeGap(src_site="polonine", surrogate_key="3", raw_name="Totally Novel Xyz",
-                        gap_kind=GapKind.missing_variation, nearest_existing="Something", nearest_score=40.0))
-    result = curate.build_curation([row], ref)
+def test_new_variant_emitted_for_active_categories(ref, monkeypatch):
+    from stone_pipeline.stages import decisions
+
+    def _row():
+        r = CanonicalRow(src_site="polonine", surrogate_key="3",
+                         variety_match_key="Totally Novel Xyz", raw_type="Granite")
+        r.add_gap(TreeGap(src_site="polonine", surrogate_key="3", raw_name="Totally Novel Xyz",
+                          gap_kind=GapKind.missing_variation, nearest_existing="Something", nearest_score=40.0))
+        return r
+
+    # 'every new variety is reviewed': a genuinely-new TYPED variety HOLDS for review, never auto-minted.
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
+    held = curate.build_curation([_row()], ref)
+    assert any(p["variant"] == "Totally Novel Xyz" for p in held.pending_confirm), "new variety must hold"
+    assert not held.new_variants["slab"], "must not auto-mint before confirmation"
+
+    # once the operator confirms it, the NEXT produce mints it into every active category (emit unchanged).
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"totally novel xyz": "yes"})
+    result = curate.build_curation([_row()], ref)
     # variant created in EVERY active category (uniform catalog): slab, block, tile.
     keys = {}
     for branch in ("slab", "block", "tile"):
@@ -123,13 +136,49 @@ def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref, monkeypatch
     assert target["_status"] == "needs_review"
 
 
-def test_new_variant_emits_backbone_entry_per_active_category(ref):
-    row = CanonicalRow(src_site="polonine", surrogate_key="bb1",
-                       variety_match_key="Brand New Stone", raw_type="Granite",
-                       color_name="Blue", quality_name="A", finish_name="Polished")
-    row.add_gap(TreeGap(src_site="polonine", surrogate_key="bb1", raw_name="Brand New Stone",
-                        gap_kind=GapKind.missing_variation, nearest_score=30.0))
-    result = curate.build_curation([row], ref)
+def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, monkeypatch):
+    # The 'all new reviewed' gate on the PHASE-5 mint tail: a genuinely-new TYPED variety is a review
+    # decision, never a silent auto-mint. blank -> hold; 'yes' -> mint; 'no' -> reject (stays gone).
+    from stone_pipeline.stages import decisions
+
+    def _row():
+        r = CanonicalRow(src_site="polonine", surrogate_key="g9",
+                         variety_match_key="Nebula Quartz Prime", raw_type="Quartzite")
+        r.add_gap(TreeGap(src_site="polonine", surrogate_key="g9", raw_name="Nebula Quartz Prime",
+                          gap_kind=GapKind.missing_variation, nearest_score=20.0))
+        return r
+
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
+    held = curate.build_curation([_row()], ref)
+    p = next(p for p in held.pending_confirm if p["variant"] == "Nebula Quartz Prime")
+    assert p["stone_type"] == "Quartzite" and "New variety" in p["reason"]
+    assert not held.new_variants["slab"]
+
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"nebula quartz prime": "yes"})
+    minted = curate.build_curation([_row()], ref)
+    assert any(r["Name"] == "Nebula Quartz Prime" for r in minted.new_variants["slab"])
+    assert not any(p["variant"] == "Nebula Quartz Prime" for p in minted.pending_confirm)
+
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"nebula quartz prime": "no"})
+    rejected = curate.build_curation([_row()], ref)
+    assert not rejected.new_variants["slab"], "a 'no' must not mint"
+    assert not any(p["variant"] == "Nebula Quartz Prime" for p in rejected.pending_confirm), "a 'no' must not re-surface"
+
+
+def test_new_variant_emits_backbone_entry_per_active_category(ref, monkeypatch):
+    from stone_pipeline.stages import decisions
+
+    def _row():
+        r = CanonicalRow(src_site="polonine", surrogate_key="bb1",
+                         variety_match_key="Brand New Stone", raw_type="Granite",
+                         color_name="Blue", quality_name="A", finish_name="Polished")
+        r.add_gap(TreeGap(src_site="polonine", surrogate_key="bb1", raw_name="Brand New Stone",
+                          gap_kind=GapKind.missing_variation, nearest_score=30.0))
+        return r
+
+    # unconfirmed new variety holds; once confirmed it mints its per-category backbone entry (below).
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"brand new stone": "yes"})
+    result = curate.build_curation([_row()], ref)
     for branch, cat in (("slab", "Slabs"), ("block", "Blocks"), ("tile", "Tiles")):
         post = next(p for p in result.backbone_new[branch] if p["variant"] == "Brand New Stone")
         assert post["category"] == cat
