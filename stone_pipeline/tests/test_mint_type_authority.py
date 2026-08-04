@@ -87,6 +87,48 @@ def test_non_exact_match_aliases_onto_the_matched_type_never_the_same_name_other
     assert not on_marble, f"spelling must NOT touch the same-name Marble variety, got {on_marble}"
 
 
+def _gap_row(name: str) -> CanonicalRow:
+    """A type-less scrape whose name matches an existing variety but gaps as missing_variation (the matcher
+    could not pick a type). Drives curate's gap-classification loop."""
+    from stone_pipeline.core.schema import GapKind, TreeGap
+    g = TreeGap(src_site="polonine", surrogate_key="g1", raw_name=name,
+                normalized_name=curate.proj.norm(name), gap_kind=GapKind.missing_variation)
+    return CanonicalRow(src_site="polonine", surrogate_key="g1", variety_match_key=name,
+                        variation_id=None, variation_key=None, variation_name=None,
+                        variation_method="exact_name_ambiguous", tree_gaps=[g])
+
+
+def test_alias_type_pick_resolves_a_multitype_hold_instead_of_reholding(tmp_path, monkeypatch):
+    # THE alias asymmetry fix: a type-less scrape of a name that exists as SEVERAL stones holds for a type.
+    # Once the operator answers that hold by picking a type ON AN ALIAS decision, variety_identity must read
+    # that chosen type (as it already does for a mint's seed_type) so the row RESOLVES onto that type next
+    # produce -- not re-hold forever (the Monalisa-stuck bug).
+    from stone_pipeline.stages import decisions
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))   # isolate: all other decisions empty
+    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    ref = loaders.load_all()
+
+    # (a) no decision -> HOLD for a type (unchanged behaviour), never an arbitrary stone
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {})
+    held = curate.build_curation([_gap_row("Arabescato")], ref)
+    assert any(p["variant"].lower() == "arabescato" for p in held.pending_confirm), "must hold for a type"
+    assert not held.alias_additions["slab"], "must not resolve onto any stone without a decision"
+
+    # (b) operator picked Granite on the alias -> resolves onto Granite ONLY, no hold
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {"arabescato": "Granite"})
+    done = curate.build_curation([_gap_row("Arabescato")], ref)
+    assert not any(p["variant"].lower() == "arabescato" for p in done.pending_confirm), "must stop holding"
+    on_granite = [a for a in done.alias_additions["slab"] if a["Key"] == GRANITE_KEY]
+    on_marble = [a for a in done.alias_additions["slab"] if a["Key"] == MARBLE_KEY]
+    assert on_granite and not on_marble, f"must resolve onto Granite only, got {done.alias_additions['slab']}"
+
+    # (c) a NON-CANONICAL picked type is dropped -> still held (never mints a garbage-slug Key)
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {"arabescato": "Wibble"})
+    bad = curate.build_curation([_gap_row("Arabescato")], ref)
+    assert any(p["variant"].lower() == "arabescato" for p in bad.pending_confirm), "non-canonical type -> still held"
+
+
 def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(monkeypatch):
     # A match that carries NO stable Key (keyless -- e.g. a forced override at a stale id, or an operator
     # alias-by-name) on a name that exists as SEVERAL stones must NOT silently attach to an arbitrary one.

@@ -355,10 +355,16 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # never changes the name/clean/Key uuid -- the seed lookup key norm(clean) stays stable run to run.
         clean = _clean_variety(name, stone_type)
         if not stone_type:
-            stone_type = seed_types.get(proj.norm(clean), "")
-            # the operator seed_type must ALSO be canonical -- the :4200 API validates it, but curate does
-            # not trust that boundary: a non-canonical seed value is dropped so the variety stays type-less
-            # (held) rather than minting a garbage-slug Key. Same rule as the scraped-type gate above.
+            # Operator-assigned type for a type-less variety: a MINT decision's seed_type, else an ALIAS
+            # decision's chosen TARGET type (both keyed by norm(clean)). Reading alias_types here is what
+            # lets a 'pick the type' answer on an ALIASED multi-type variety (e.g. Monalisa -> Mona Lisa,
+            # a 4-type target) actually resolve the row: with the type filled, PHASE-4a's same_type branch
+            # attaches it to the chosen-type owner. Without it the row stays type-less and re-holds forever
+            # -- the mint path already read seed_types; the alias path was the missing half of the symmetry.
+            stone_type = seed_types.get(proj.norm(clean), "") or alias_types.get(proj.norm(clean), "")
+            # the operator type must ALSO be canonical -- the :4200 API validates it, but curate does not
+            # trust that boundary: a non-canonical value is dropped so the variety stays type-less (held)
+            # rather than minting a garbage-slug Key. Same rule as the scraped-type gate above.
             if stone_type and proj.norm(stone_type) not in valid_type_norms:
                 stone_type = ""
         return name, stone_type, clean
@@ -681,8 +687,26 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             elif (gap.nearest_score or 0) >= alias_floor or _is_token_subset(clean, nearest):
                 review_candidates.setdefault(proj.norm(nearest), set()).add(name)
                 continue
-        # PHASE 5 -- MINT a new variety: nothing rejected it, nothing existing claims it -> it is a
-        # clean, novel, product-backed name, so create it (the last resort).
+        # PHASE 5 -- a genuinely NEW variety: nothing rejected it, nothing existing claims it. Per the
+        # 'every new variety is reviewed' policy, do NOT auto-create it -- HOLD for the operator to confirm
+        # (it mints on the next produce), reusing the SAME confirm gate as the code-shaped path so a prior
+        # 'yes' mints directly and a 'no' rejects. This is the one list: a new variety is a review decision,
+        # never a silent auto-mint. (Cross-branch backfill of an ALREADY-resolved variety still mints via
+        # _alias_and_backfill -- that is not a new variety, so it is not gated here.)
+        # A TYPE-LESS new variety is NOT gated here: it falls through to _mint -> the type-less hold below
+        # ("No stone type detected"), a more specific review ask than this one. Gate only typed new varieties.
+        dec = confirm_decisions.get(proj.norm(clean))
+        if stone_type and dec == "no":
+            rejected.add(proj.norm(clean))
+            continue
+        if stone_type and dec != "yes":
+            pending_confirm.append({"confirm": "", "variant": clean,
+                                    "reason": "New variety (no close existing match). Confirm to add it as a "
+                                              "new variety, or reject.",
+                                    "stone_type": stone_type, "color": title_case(_attr_surface(row, "color")),
+                                    "nearest_existing": _named_with_types(nearest) if nearest else "",
+                                    "score": gap.nearest_score or "", "model_prob": "", **_review_evidence(row)})
+            continue
         _mint(clean, stone_type, row, gap)
 
     # A spelling already CONFIRMED as an alias of its real owner (gap loop above) must NOT also be
