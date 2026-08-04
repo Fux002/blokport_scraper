@@ -18,7 +18,7 @@ def _fake_ledger_op(name, work):
         def reset_sync_state(self, lg, source_codes=None, hard=False, prune_stale=False):
             return {"variation": 1}
 
-        def reconcile_variations_to_seed(self, lg, seed_keys, protected=None):
+        def reconcile_variations_to_seed(self, lg, seed_keys, protected=None, seed_identities=None):
             return {}
     return work(None, _Sync()), 200
 

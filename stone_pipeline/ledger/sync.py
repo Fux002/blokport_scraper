@@ -548,7 +548,8 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
     return ledger.execute(f"UPDATE {table} SET {', '.join(sets)}{where}", (now, *params)).rowcount
 
 
-def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected: set[str] | None = None) -> dict:
+def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected: set[str] | None = None,
+                                 seed_identities: set[tuple] | None = None) -> dict:
     """Make the variation table dup-free and seed-consistent -- the missing half of a TRUE cold start.
 
     A pristine reset zeroes sync state but by its old invariant never removed a live variety, so a
@@ -559,6 +560,13 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
     makes Medusa delete the old side by Key on the removals pull; Medusa's own consumer blocks a variety
     that still has products, so a live one can never be wrongly deleted. A minted variety with no twin is
     untouched (it re-mints deterministically). Global-only. Returns counts + the dropped Keys.
+
+    `seed_identities` (the (branch,type,name) identity set of the committed seed): when given, a variety
+    whose identity is NOT in the seed -- a test mint or a Medusa-only leftover carried back by the export
+    union -- is dropped WHOLE (all its category Keys) and tombstoned, so a factory reset + removals pull
+    brings Medusa in line with the base instead of re-importing the leftover forever. Identity-keyed, so a
+    legacy Key and a seed Key for the SAME variety match and a real variety is never dropped for a key
+    mismatch. Omit it (None) to keep the old dedup-only behaviour.
 
     `protected` is the operator's 'not a duplicate' set (decisions_store.protected_keys): a Key in it is
     NEVER dropped, so a false-positive collapse the operator already overrode does not re-tombstone on the
@@ -572,14 +580,22 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
     groups: dict[tuple, list[str]] = collections.defaultdict(list)
     for v in ledger.execute("SELECT key, name FROM variation").fetchall():
         groups[variety_identity(v["key"], v["name"])].append(v["key"])
-    dropped: list[str] = []
-    for keys in groups.values():
+    dedup: list[str] = []           # dup-losers within a seed variety (keep the survivor)
+    stale: list[str] = []           # varieties whose identity is not in the committed seed (drop whole)
+    for ident, keys in groups.items():
+        if seed_identities is not None and ident not in seed_identities:
+            stale += [k for k in keys if k not in protected]
+            continue
         if len(keys) <= 1:
             continue
         survivor = survivor_of(keys, seed_keys)
-        dropped += [k for k in keys if k != survivor and k not in protected]
+        dedup += [k for k in keys if k != survivor and k not in protected]
+    dropped = dedup + stale
     if dropped:
-        record_tombstones(ledger, [(k, None) for k in dropped], reason="reseed_dedup", kind="variation")
+        if dedup:
+            record_tombstones(ledger, [(k, None) for k in dedup], reason="reseed_dedup", kind="variation")
+        if stale:
+            record_tombstones(ledger, [(k, None) for k in stale], reason="not_in_seed", kind="variation")
         q = ",".join("?" * len(dropped))
         # FK order: inventory -> product -> combination -> variation. Post-reset there are no products,
         # but reconcile is safe to run independently, so cascade defensively.
@@ -588,9 +604,11 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
         ledger.execute(f"DELETE FROM product WHERE variation_key IN ({q})", tuple(dropped))
         ledger.execute(f"DELETE FROM combination WHERE variation_key IN ({q})", tuple(dropped))
         ledger.execute(f"DELETE FROM variation WHERE key IN ({q})", tuple(dropped))
-    log.warning("variation table reconciled to seed (dedup old sides)", extra={"extra_fields": {
-        "tombstoned_dropped": len(dropped)}})
-    return {"tombstoned_dropped": len(dropped), "dropped_keys": dropped}
+    log.warning("variation table reconciled to seed (dedup old sides + drop non-seed leftovers)",
+                extra={"extra_fields": {"tombstoned_dropped": len(dropped),
+                                        "dedup": len(dedup), "not_in_seed": len(stale)}})
+    return {"tombstoned_dropped": len(dropped), "dedup": len(dedup),
+            "not_in_seed": len(stale), "dropped_keys": dropped}
 
 
 def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,

@@ -126,6 +126,35 @@ def test_cancel_variation_tombstone_restores_and_is_idempotent(tmp_path):
         assert again["tombstone_cleared"] == 0 and again["known"] is True
 
 
+def test_reconcile_drops_and_tombstones_non_seed_varieties(tmp_path):
+    # a factory reset must delete test mints / Medusa-only leftovers from Medusa: a variety whose identity
+    # is not in the committed seed is dropped WHOLE and tombstoned on the removed lane, so a removals pull
+    # deletes it. A seed variety is untouched.
+    from stone_pipeline.reference.loaders import variety_identity
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        _variation(lg, "slab_marble_carrara_seed1", "synced", name="Carrara")            # IN the seed
+        _variation(lg, "block_dolomite_venatto_blue_test", "synced", name="Venatto Blue")  # NOT in the seed
+        seed_ids = {variety_identity("slab_marble_carrara_seed1", "Carrara")}             # only Carrara is seed
+        r = reconcile_variations_to_seed(lg, seed_keys=set(), seed_identities=seed_ids)
+
+        assert r["not_in_seed"] == 1 and r["dedup"] == 0
+        remaining = {v["key"] for v in lg.execute("SELECT key FROM variation")}
+        assert remaining == {"slab_marble_carrara_seed1"}          # seed variety kept, non-seed dropped
+        tomb = lg.execute("SELECT external_id, kind, reason FROM removed").fetchall()
+        assert len(tomb) == 1
+        assert (tomb[0]["external_id"], tomb[0]["kind"], tomb[0]["reason"]) == \
+               ("block_dolomite_venatto_blue_test", "variation", "not_in_seed")
+
+
+def test_reconcile_without_seed_identities_only_dedups(tmp_path):
+    # backward compatible: omit seed_identities -> the old dedup-only behaviour, non-seed varieties untouched.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+        _variation(lg, "block_dolomite_venatto_blue_test", "synced", name="Venatto Blue")
+        r = reconcile_variations_to_seed(lg, seed_keys=set())     # no seed_identities
+        assert r["not_in_seed"] == 0
+        assert {v["key"] for v in lg.execute("SELECT key FROM variation")} == {"block_dolomite_venatto_blue_test"}
+
+
 def test_reconcile_never_drops_a_protected_key(tmp_path):
     # two DISTINCT varieties the dedup would collapse; protecting the loser keeps BOTH (operator override).
     with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:

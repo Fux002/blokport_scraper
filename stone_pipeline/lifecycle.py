@@ -82,6 +82,25 @@ def _load_pristine_seed_keys() -> set[str]:
         return {(r.get("Key") or "").strip() for r in csv.DictReader(handle) if (r.get("Key") or "").strip()}
 
 
+def _load_pristine_seed_identities() -> set[tuple]:
+    """The variety-IDENTITY set (branch,type,name) of the committed clean seed, so a pristine reconcile can
+    drop any ledger variation whose identity is NOT in the seed -- a test mint / Medusa-only leftover the
+    export union keeps re-importing -- and tombstone it for the removals pull. Identity-keyed (not raw Key),
+    so a legacy Key and a seed Key for the SAME variety share an identity and a real variety is never dropped
+    for a key mismatch. Same seed source as _load_pristine_seed_keys; empty set (no source) -> no stale drop."""
+    import csv
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.reference.loaders import variety_identity
+    seed = SETTINGS.paths.variants_export_base_seed_csv
+    if not seed.exists():
+        seed = SETTINGS.paths.variants_export_base_csv
+    if not seed.exists():
+        return set()
+    with seed.open(encoding="utf-8-sig", newline="") as handle:
+        return {variety_identity((r.get("Key") or "").strip(), (r.get("Name") or "").strip())
+                for r in csv.DictReader(handle) if (r.get("Key") or "").strip()}
+
+
 def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
     """Factory reset: reset the LIVE base FILE to the pristine committed seed -- locally AND on S3 -- so the
     next produce truly derives from the seed. The reset already reconciles the LEDGER to the seed, but the
@@ -298,6 +317,9 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     # PRISTINE seed (baked read-only at image build): the live variants_export_base.csv self-mutates
     # (base := 1_variants_full each produce), so it is not a trustworthy clean source at runtime.
     seed_keys = _load_pristine_seed_keys() if pristine else None
+    # The seed's variety IDENTITIES, so the reconcile drops + tombstones any ledger variety not in the seed
+    # (a test mint / Medusa-only leftover), bringing Medusa in line with the base on the removals pull.
+    seed_identities = _load_pristine_seed_identities() if pristine else None
     # 'not a duplicate' verdicts: a durable correctness override the seed-reconcile must honour, so a variety
     # the operator already confirmed distinct is never re-dropped as a dup on the next pristine.
     protected = None
@@ -306,10 +328,10 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
         protected = _decisions.protected_keys()
 
     def _do_reset(lg, sync):
-        # reconcile (drop + tombstone dup old sides) BEFORE the sync-state reset, so the tombstones are
-        # recorded and the dropped rows are gone before prune/overlay run. Keep reset_sync_state's shape
-        # flat (callers read body["reset"]["variation"] etc.); attach the reconcile result as a sibling.
-        reseed = (sync.reconcile_variations_to_seed(lg, seed_keys, protected)
+        # reconcile (drop + tombstone dup old sides AND non-seed leftovers) BEFORE the sync-state reset, so
+        # the tombstones are recorded and the dropped rows are gone before prune/overlay run. Keep
+        # reset_sync_state's shape flat (callers read body["reset"]["variation"] etc.); attach as a sibling.
+        reseed = (sync.reconcile_variations_to_seed(lg, seed_keys, protected, seed_identities)
                   if (pristine and seed_keys is not None) else None)
         reset_result = sync.reset_sync_state(lg, source_codes=codes, hard=bool(hard), prune_stale=pristine)
         if reseed is not None:
