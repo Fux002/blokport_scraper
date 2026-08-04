@@ -293,14 +293,13 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
     # exactly one Key per variety. Homonyms (different type) are separate identities and all survive.
     _seed = pristine_seed_keys()
     # Pick the survivor over ELIGIBLE keys only. survivor_of is blind to the exclusion predicates below
-    # (bare_code / mistyped / delete_keys), so if it picked an INELIGIBLE key (e.g. a re-key OLD SIDE that
+    # (bare_code / delete_keys), so if it picked an INELIGIBLE key (e.g. a re-key OLD SIDE that
     # is in delete_keys) every eligible key of that identity would be dropped as a dup_loser AND the chosen
     # survivor dropped by its own exclusion -- the whole variety vanishes from the matcher reference, so a
     # scrape for it matches nothing and MINTS A DUPLICATE (the exact orphan dup-losing was meant to prevent).
     # Excluding ineligible keys before grouping guarantees a good loser is promoted whenever one exists.
     def _eligible(key: str, name: str) -> bool:
-        return not (looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name)
-                    or key in delete_keys)
+        return not (looks_code_shaped(name) == "bare_code" or key in delete_keys)
     _by_identity: dict = {}
     for rec in records:
         k = (rec.get("Key") or "").strip()
@@ -317,10 +316,10 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
         if not vid or not name:
             continue
         # Never match products to a JUNK existing variant -- a bare-code one ('Mgt','Gs', a supplier
-        # code/brand abbreviation wrongly minted) OR a mis-typed one ('Azul White Quartzite' under a
-        # slab_ONYX_ key) OR a re-key OLD SIDE (dup_losers above). All are surfaced for deletion from
-        # Medusa; the cleaning flow re-mints the mis-typed ones correctly.
-        if looks_code_shaped(name) == "bare_code" or is_mistyped_variant(key, name) or key in delete_keys:
+        # code/brand abbreviation wrongly minted) OR a re-key OLD SIDE (dup_losers above). A variety's
+        # stone TYPE is authoritative (assigned from the Key at review), so it is NOT re-judged against
+        # the name here: a variety is matchable by its assigned type, never hidden on a name-vs-type guess.
+        if looks_code_shaped(name) == "bare_code" or key in delete_keys:
             continue
         if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
             continue

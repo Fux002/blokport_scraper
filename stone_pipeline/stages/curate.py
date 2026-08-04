@@ -627,7 +627,16 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 if len({o[0] for o in owners}) == 1:   # SAME name, several TYPES -> hold, assign the type
                     _hold_for_type(clean, row, gap, sorted({o[1] for o in owners}))
                     continue
-                review_candidates.setdefault(proj.norm(clean), set()).add(name)  # alias family -> review
+                # SAME surface across SEVERAL different varieties (an alias family): an uncertain IDENTITY ->
+                # the review list, where the operator picks which variety it is (which sets its type) or mints
+                # it new. Not a hidden advisory-alias suggestion (which could rubber-stamp a wrong merge): an
+                # uncertain identity is a review decision like every other -- one list, nothing filed away.
+                fam = _human_join(sorted({title_case(o[0]) for o in owners}))
+                pending_confirm.append({"confirm": "", "variant": clean,
+                                        "reason": f"Matches several existing varieties ({fam}). Alias it to the "
+                                                  f"right one, or mint as new.",
+                                        "stone_type": "", "color": "", "nearest_existing": fam,
+                                        "score": "", "model_prob": "", **_review_evidence(row)})
                 continue
             # st is set but NOT among the existing types -> the scrape claims a NEW stone type on an
             # EXISTING multi-type name. BUG6 / HOLD-never-guess: do not silently mint (a mis-tagged
