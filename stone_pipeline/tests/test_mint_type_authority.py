@@ -129,6 +129,36 @@ def test_alias_type_pick_resolves_a_multitype_hold_instead_of_reholding(tmp_path
     assert any(p["variant"].lower() == "arabescato" for p in bad.pending_confirm), "non-canonical type -> still held"
 
 
+def test_typeless_scrape_holds_for_type_even_when_name_has_one_existing_type(tmp_path, monkeypatch):
+    # A type the scrape did not make clear is set via REVIEW -- even when the name exists under exactly ONE
+    # type. The code no longer auto-completes it to that single type (that was the code guessing the type).
+    branches = {}
+    for b in ("slab", "block", "tile"):
+        imp = curate.ImportFile(branch=b, path=None, present=(b == "slab"))
+        if b == "slab":
+            key, nm = "slab_marble_solo_stone_1", "Solo Stone"
+            v = {"Key": key, "Name": nm, "Image": "", "Aliases": "", "Volume": "",
+                 "type": curate.proj.norm(loaders.type_slug_from_key(key))}
+            imp.varieties.append(v)
+            imp.by_name_type[(curate.proj.norm(nm), v["type"])] = v
+            imp.by_name[curate.proj.norm(nm)] = v
+        branches[b] = imp
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(curate, "load_existing", lambda b: branches[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    ref = loaders.load_all()
+
+    from stone_pipeline.core.schema import GapKind, TreeGap
+    g = TreeGap(src_site="polonine", surrogate_key="s1", raw_name="Solo Stone",
+                normalized_name="solo stone", gap_kind=GapKind.missing_variation)
+    row = CanonicalRow(src_site="polonine", surrogate_key="s1", variety_match_key="Solo Stone",
+                       variation_id=None, variation_key=None, variation_name=None,
+                       variation_method="exact_name_ambiguous", tree_gaps=[g])
+    result = curate.build_curation([row], ref)
+    assert any(p["variant"].lower() == "solo stone" for p in result.pending_confirm), "type-less must hold for a type"
+    assert not result.alias_additions["slab"], "must NOT auto-complete to the single existing type"
+
+
 def test_alias_family_surfaces_to_review_not_a_hidden_side_file(tmp_path, monkeypatch):
     # A type-less scrape whose surface is an ALIAS of SEVERAL different-named varieties is an uncertain
     # identity -> it must appear on the review list (pick which / mint new), never be filed away silently.

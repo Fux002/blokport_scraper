@@ -620,11 +620,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             if same_type:                              # product's type matches an existing variety -> alias
                 _alias_and_backfill(same_type[0], name, clean, stone_type, row, gap)
                 continue
-            if not st:                                 # type-less: decide by how the name resolves
-                if len(owners) == 1:                   # exactly one existing variety -> alias to it
-                    _alias_and_backfill(next(iter(owners)), name, clean, stone_type, row, gap)
-                    continue
-                if len({o[0] for o in owners}) == 1:   # SAME name, several TYPES -> hold, assign the type
+            if not st:                                 # TYPE-LESS scrape -> ALWAYS review to set the type.
+                # A type the scrape did not make clear is NEVER auto-completed -- not even to a single
+                # existing same-name pair. (type, variant) is the unique identity; the operator sets the type
+                # (confirm an existing one, or a new one) via review. The existing same-name types are only a
+                # hint on the card.
+                if len({o[0] for o in owners}) == 1:   # one variety (1+ existing types) -> pick/confirm a type
                     _hold_for_type(clean, row, gap, sorted({o[1] for o in owners}))
                     continue
                 # SAME surface across SEVERAL different varieties (an alias family): an uncertain IDENTITY ->
