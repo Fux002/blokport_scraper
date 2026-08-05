@@ -103,6 +103,41 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     assert "polonine" in store.read_sources()
 
 
+def test_publish_base_to_import_targets_the_to_upload_namespace(monkeypatch):
+    # bulk-restore phase 1: the base must land at the IMPORT key Medusa's /restore reads, NOT from_medusa/.
+    import boto3
+    from pathlib import Path
+    from stone_pipeline.reference import sync_variants_base
+
+    seen: dict = {}
+
+    class _S3:
+        def upload_file(self, path, bucket, key):
+            seen.update(path=path, bucket=bucket, key=key)
+
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _S3())
+    assert sync_variants_base.publish_base_to_import(Path("/tmp/variants_export_base.csv")) is True
+    assert seen["key"].endswith("scraper/to_upload/variants_export_base.csv"), seen["key"]
+
+
+def test_pristine_reseed_publishes_the_seed_to_the_import_namespace(tmp_path, monkeypatch):
+    # the pristine reseed publishes the SEED to BOTH from_medusa/ (matcher) and to_upload/ (Medusa restore).
+    from stone_pipeline import lifecycle
+    from stone_pipeline.reference import sync_variants_base
+
+    import_calls: list = []
+    monkeypatch.setattr(sync_variants_base, "publish_base_to_s3", lambda p: True)
+    monkeypatch.setattr(sync_variants_base, "publish_base_to_import",
+                        lambda p: (import_calls.append(str(p)), True)[1])
+    seed = tmp_path / "seed.csv"
+    seed.write_text("Key,Name\nslab_marble_x_1,X\n", encoding="utf-8")
+    base = tmp_path / "base.csv"
+
+    r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
+    assert r["reseeded"] and r.get("import_published") is True
+    assert import_calls == [str(base)], "reset must publish the reseeded base to the import namespace"
+
+
 def test_pristine_reset_is_global_only(tmp_path, monkeypatch):
     from stone_pipeline import lifecycle
     _seed_config(tmp_path, monkeypatch)

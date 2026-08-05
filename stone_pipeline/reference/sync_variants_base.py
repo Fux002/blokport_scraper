@@ -62,6 +62,28 @@ def publish_base_to_s3(base_path: Path) -> bool:
         return False
 
 
+def publish_base_to_import(base_path: Path) -> bool:
+    """Publish the base to the IMPORT namespace (to_upload/variants_export_base.csv), the key Medusa's
+    bulk-restore reads (POST /admin/variations/restore, scraper_file='variants_export_base'). ONLY the
+    pristine reset writes here -- so to_upload/ always holds the pristine SEED, never the produce-grown base
+    (publish_base_to_s3 keeps from_medusa/ current for the matcher; this keeps to_upload/ pinned to seed) --
+    and a 'Restore Medusa to base' therefore always restores Medusa to the seed. Best effort: a failed
+    publish logs LOUD; the restore then reads a stale/absent base (its own truncation guard refuses to delete
+    on a thin CSV), and the operator re-runs the reset -- it never restores a wrong catalog."""
+    from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+    key = f"{ENV_SEGMENT}/scraper/to_upload/variants_export_base.csv"
+    try:
+        import boto3
+        boto3.client("s3", region_name=S3_REGION).upload_file(str(base_path), S3_BUCKET, key)
+        log.info("base seed published to the import namespace (Medusa bulk-restore source)",
+                 extra={"extra_fields": {"key": key}})
+        return True
+    except Exception:
+        log.exception("base import-namespace publish FAILED: Medusa bulk-restore would read a stale/absent "
+                      "base until the reset is re-run", extra={"extra_fields": {"key": key}})
+        return False
+
+
 def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, publish: bool = True) -> dict:
     """base := 1_variants_full (the one complete list). No-op if full hasn't been built yet; a corruption
     guard refuses a produce that would collapse the base below _MIN_KEEP_FRACTION of its current size. When

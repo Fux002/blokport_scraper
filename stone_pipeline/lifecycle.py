@@ -118,11 +118,15 @@ def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
         return {"reseeded": False, "reason": "no pristine seed"}
     try:
         shutil.copyfile(seed, base)                     # local base := pristine seed
-        from stone_pipeline.reference.sync_variants_base import publish_base_to_s3
+        from stone_pipeline.reference.sync_variants_base import publish_base_to_import, publish_base_to_s3
         published = publish_base_to_s3(base)            # S3 base := pristine seed, so the cold start reads it
+        # ALSO publish the seed to the import namespace (to_upload/) so Medusa's bulk-restore reads the SEED.
+        # Only the pristine reset writes there, so to_upload/ is pinned to the seed (never the grown base) --
+        # a 'Restore Medusa to base' always restores to seed. Best-effort, same as the from_medusa/ publish.
+        import_published = publish_base_to_import(base)
         log.info("reset: base file reseeded from the pristine seed",
-                 extra={"extra_fields": {"s3_published": published}})
-        return {"reseeded": True, "s3_published": published}
+                 extra={"extra_fields": {"s3_published": published, "import_published": import_published}})
+        return {"reseeded": True, "s3_published": published, "import_published": import_published}
     except Exception as exc:
         log.exception("reset: base-file reseed FAILED; the base may still be the drifted copy")
         return {"reseeded": False, "error": str(exc)}
