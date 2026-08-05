@@ -424,6 +424,17 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if clean:
             variety_branches.setdefault(proj.norm(clean), set()).add(branch_of(row))
 
+    # First non-empty evidence image PER variety (across ALL its rows, gapped or not). A review card shows
+    # the triggering row's photo, but that one row may have none (a supplier listing with no photo) while a
+    # sibling row of the same variety has one -- fill from here so the card is not blank. Cosmetic only: the
+    # image is operator-verification evidence, never data; an empty stays empty when the variety has no photo.
+    variety_images: dict[str, str] = {}
+    for row in rows:
+        _, _, clean = variety_identity(row)
+        k = proj.norm(clean)
+        if clean and not variety_images.get(k) and (img := _review_evidence(row).get("image")):
+            variety_images[k] = img
+
     # --- 2. classify each gapped variety, in STRICT PRIORITY ORDER (the cleaning/verification flow).
     # The rule for the ordering: do the cheapest, most DECISIVE thing first, and REUSE before MINT.
     #   PHASE 1  CANONICALISE  the name (_clean_variety, using the RESOLVED type)
@@ -918,6 +929,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         "suspicious_names": len(suspicious),
         "pending_confirm": len(pending_confirm),
     }
+    # A review card whose own triggering row carried no photo falls back to a sibling row's image (same
+    # variety), keyed by norm(variant). Purely cosmetic post-fill -- never overwrites an image the row had.
+    for p in pending_confirm:
+        if not p.get("image"):
+            p["image"] = variety_images.get(proj.norm(p.get("variant", "")), "")
     result.suspicious_names = suspicious   # written to review by write_curation
     result.pending_confirm = pending_confirm
     result.rejected = rejected
