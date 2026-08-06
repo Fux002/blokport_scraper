@@ -165,6 +165,33 @@ def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, mon
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in rejected.pending_confirm), "a 'no' must not re-surface"
 
 
+def test_review_card_image_falls_back_to_a_sibling_row_of_the_same_variety(ref, monkeypatch):
+    # A review card shows the triggering row's photo; when that row has none but a SIBLING row of the same
+    # variety does, the card must fall back to the sibling's image (not go blank). A variety with no photo
+    # anywhere stays empty. Cosmetic evidence only -- must never affect the mint/hold decision.
+    from stone_pipeline.stages import decisions
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
+
+    def _gap(sk, name, imgs):
+        r = CanonicalRow(src_site="varsha", surrogate_key=sk, variety_match_key=name, raw_type="Quartzite",
+                         raw_image_urls=imgs)
+        r.add_gap(TreeGap(src_site="varsha", surrogate_key=sk, raw_name=name,
+                          gap_kind=GapKind.missing_variation, nearest_score=15.0))
+        return r
+
+    # triggering row (no photo) + a sibling of the SAME new variety WITH a photo
+    photo = "https://cdn.example/zephyr.jpg"
+    res = curate.build_curation([_gap("z1", "Zephyr Prime Xyz", []),
+                                 _gap("z2", "Zephyr Prime Xyz", [photo])], ref)
+    p = next(p for p in res.pending_confirm if p["variant"] == "Zephyr Prime Xyz")
+    assert p["image"] == photo, "review card must fall back to a sibling row's image"
+
+    # a variety with no photo on ANY row stays blank (no invented image)
+    res2 = curate.build_curation([_gap("n1", "Noimg Prime Xyz", [])], ref)
+    p2 = next(p for p in res2.pending_confirm if p["variant"] == "Noimg Prime Xyz")
+    assert p2["image"] == "", "no photo anywhere -> card stays empty, never fabricated"
+
+
 def test_new_variant_emits_backbone_entry_per_active_category(ref, monkeypatch):
     from stone_pipeline.stages import decisions
 
