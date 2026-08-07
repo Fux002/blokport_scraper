@@ -11,8 +11,15 @@ from stone_pipeline.io.image_processing import ProcessResult
 from stone_pipeline.stages import treat
 
 
+class _NoSuchKey(Exception):
+    """Shaped like a boto3 ClientError for a missing object (response Error Code), so the fake exercises
+    the real absence-vs-error branch in treat._load_manifest."""
+    response = {"Error": {"Code": "NoSuchKey"}}
+
+
 class FakeS3:
-    """Minimal in-memory S3: list (by prefix), get, put. Records puts for assertions."""
+    """Minimal in-memory S3: list (by prefix), get, put. Records puts for assertions. get_object raises a
+    NoSuchKey-shaped error for an absent key, exactly as real S3 does."""
 
     def __init__(self, objects: dict[str, bytes]):
         self.objects = dict(objects)
@@ -28,6 +35,8 @@ class FakeS3:
         return _P()
 
     def get_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise _NoSuchKey()
         return {"Body": io.BytesIO(self.objects[Key])}
 
     def put_object(self, Bucket, Key, Body, **_kw):
@@ -67,6 +76,23 @@ def test_idempotent_skips_already_treated():
     stats = treat.treat_source("zucchi", s3=s3, processor=FakeProc())
     assert stats.treated == 0 and stats.skipped == 1
     assert s3.objects[improved] == b"already"               # untouched
+
+
+def test_manifest_load_fails_loud_on_a_real_s3_error():
+    # A transient/permission S3 error must NOT be read as "no manifest" (which repoints nothing and
+    # silently reports repointed=0 while products stay on the raw watermarked urls). It must fail loud.
+    import pytest
+
+    class Denied(Exception):
+        response = {"Error": {"Code": "AccessDenied"}}
+
+    class DenyingS3(FakeS3):
+        def get_object(self, Bucket, Key):
+            raise Denied()
+
+    s3 = DenyingS3({f"{ENV_SEGMENT}/products/zucchi/aa.jpg": b"x"})
+    with pytest.raises(Denied):
+        treat.repoint_manifest(s3, "zucchi")
 
 
 def test_repoint_leaves_other_sources_and_already_improved_alone():

@@ -203,6 +203,38 @@ def test_preventive_delay_paid_once_then_429_backoff_separate(tmp_path, monkeypa
     assert sleeps == [0.5, 1.0]
 
 
+def test_allow_missing_returns_none_on_404_without_retrying(tmp_path, monkeypatch):
+    # A paginator uses this to detect 'past the last page': a 404 returns None immediately (no retry),
+    # distinct from a transient error. Regression guard for the temmer silent-truncation fix.
+    s = _Fake(data_dir=tmp_path)
+    client = _SeqClient([404])
+    s._client = client
+    _sleepless(monkeypatch)
+    assert s.get("http://x/page/99", allow_missing=True) is None
+    assert client.i == 1                      # definitive: NOT retried
+
+
+def test_allow_missing_still_raises_on_a_non_404_error(tmp_path, monkeypatch):
+    # allow_missing narrows ONLY the 404 case; a real transient error still retries then fails loud,
+    # so a fetch failure can never be silently read as end-of-pagination.
+    import pytest
+
+    class _Raising(_StubResp):
+        def raise_for_status(self):
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    class _RaisingClient(_SeqClient):
+        def request(self, method, url, headers=None, **kw):
+            self.i += 1
+            return _Raising(500)
+
+    s = _Fake(data_dir=tmp_path)
+    s._client = _RaisingClient([500])
+    _sleepless(monkeypatch)
+    with pytest.raises(RuntimeError):
+        s.get("http://x/page/3", allow_missing=True)
+
+
 def test_retry_after_both_forms_and_clamp(tmp_path):
     from datetime import timedelta
     from email.utils import format_datetime

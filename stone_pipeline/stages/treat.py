@@ -26,6 +26,7 @@ from stone_pipeline.config.settings import S3_BUCKET, S3_REGION
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.image_processing import ImageProcessingConfig, ImageProcessor
+from stone_pipeline.io.storage import s3_error_is_missing
 
 log = logfmt.get_logger("treat")
 
@@ -55,10 +56,18 @@ def _list(s3, prefix: str) -> list[str]:
 
 
 def _load_manifest(s3) -> dict:
+    # A silent {} here makes repoint_manifest a no-op that reports repointed=0 -- indistinguishable from
+    # "nothing needed repointing" while products stay on the raw (watermarked) urls. So only a GENUINE
+    # absence (fresh env, no manifest yet) returns {}; any real S3 error fails loud.
     try:
-        return json.loads(s3.get_object(Bucket=S3_BUCKET, Key=imagestore.MANIFEST_KEY)["Body"].read())
-    except Exception:
-        return {}
+        body = s3.get_object(Bucket=S3_BUCKET, Key=imagestore.MANIFEST_KEY)["Body"].read()
+    except Exception as exc:
+        if s3_error_is_missing(exc):
+            return {}
+        log.error("treat: manifest load failed (not a missing-object error); failing loud",
+                  extra={"extra_fields": {"key": imagestore.MANIFEST_KEY, "error": str(exc)}})
+        raise
+    return json.loads(body)
 
 
 def repoint_manifest(s3, source: str) -> int:

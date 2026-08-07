@@ -20,6 +20,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
+from stone_pipeline.core import logfmt
+
+log = logfmt.get_logger("io.storage")
+
+# The ONLY S3 error codes that mean "the object genuinely does not exist" (head_object returns 404,
+# get_object returns NoSuchKey). Every other error -- AccessDenied, throttling, a 5xx, a connection reset
+# -- is a real failure that must fail loud, never masquerade as absence (a silent absence read causes a
+# re-upload/re-process or, for the image manifest, a wipe). Single source of truth, shared with treat.py.
+_S3_MISSING_CODES = ("404", "NoSuchKey")
+
+
+def s3_error_is_missing(exc: Exception) -> bool:
+    """True iff a boto/S3 exception means the object is genuinely absent (404 / NoSuchKey), as opposed to
+    a transient or permission error. Callers return None/False on absence and RAISE on everything else."""
+    code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code", "")
+    return code in _S3_MISSING_CODES
+
 
 def content_key(src_site: str, sha256: str, ext: str = "jpg") -> str:
     """Deterministic, content-addressed key. No uuid (section 11.1). A re-run
@@ -108,8 +125,12 @@ class S3StorageBackend:
         try:
             client.head_object(Bucket=self.bucket, Key=self._full_key(key))
             return True
-        except Exception:
-            return False
+        except Exception as exc:
+            if s3_error_is_missing(exc):
+                return False
+            log.error("S3 head_object failed (not a missing-object error); failing loud",
+                      extra={"extra_fields": {"key": self._full_key(key), "error": str(exc)}})
+            raise
 
     def get(self, key: str) -> Optional[bytes]:
         if self.dry_run:
@@ -117,8 +138,12 @@ class S3StorageBackend:
         try:
             resp = self._get_client().get_object(Bucket=self.bucket, Key=self._full_key(key))
             return resp["Body"].read()
-        except Exception:
-            return None
+        except Exception as exc:
+            if s3_error_is_missing(exc):
+                return None
+            log.error("S3 get_object failed (not a missing-object error); failing loud",
+                      extra={"extra_fields": {"key": self._full_key(key), "error": str(exc)}})
+            raise
 
     def put(self, key: str, data: bytes, content_type: str = "image/jpeg", overwrite: bool = False) -> str:
         if not self.dry_run and (overwrite or not self.exists(key)):

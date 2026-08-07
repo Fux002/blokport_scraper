@@ -197,10 +197,14 @@ class ScraperBase:
         except (TypeError, ValueError):
             return fallback
 
-    def _request(self, method: str, url: str, throttle: bool = True, **kwargs):
+    def _request(self, method: str, url: str, throttle: bool = True, allow_missing: bool = False, **kwargs):
         """HTTP with a preventive throttle, retry, backoff, a per-session UA, and 429 handling. Routes
         through curl_cffi when use_curl_cffi is set (Cloudflare-fronted sites). `throttle=False` skips the
-        preventive delay (used by image downloads, which pace themselves via image_delay)."""
+        preventive delay (used by image downloads, which pace themselves via image_delay).
+
+        `allow_missing=True` returns None on a definitive 404 without retrying, so a paginator can tell
+        'past the last page' (a legitimate stop) from a transient failure (which still retries then raises).
+        Every other non-200 status is treated as a retryable error exactly as before."""
         # Preventive spacing, ONCE per logical request (not per redirect hop, not per retry): keep page/detail
         # GETs from provoking a 429. Reactive 429/transient backoffs below still apply on top when needed.
         if throttle and self.request_delay[1] > 0:
@@ -231,6 +235,8 @@ class ScraperBase:
                         continue
                     if r.status_code == 200:
                         return r
+                    if allow_missing and r.status_code == 404:
+                        return None   # definitive absence -> caller's end-of-list, not a transient error
                     if r.status_code == 429:
                         # record WHY (else the final raise reports last_exc=None for a pure-429 run) and
                         # honor the server's Retry-After (delta-seconds OR HTTP-date), else exponential backoff.
@@ -249,7 +255,8 @@ class ScraperBase:
         self.record_failure("http", method=method, url=url, error=str(last_exc))
         raise RuntimeError(f"{method} failed after {self.max_retries} tries: {url}")
 
-    def get(self, url: str, **kwargs) -> httpx.Response:
+    def get(self, url: str, **kwargs) -> Optional[httpx.Response]:
+        # Returns an httpx.Response, or None only when allow_missing=True and the server gave a 404.
         return self._request("GET", url, **kwargs)
 
     def post(self, url: str, **kwargs) -> httpx.Response:
