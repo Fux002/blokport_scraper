@@ -10,6 +10,8 @@ input for Stage 3. Slab bundles with real metric dimensions, weights, slab count
 
 from __future__ import annotations
 
+import re
+
 from stone_pipeline.adapters.base import AdapterBase
 from stone_pipeline.adapters.tokens import extract_color
 
@@ -49,10 +51,17 @@ class ZucchiAdapter(AdapterBase):
 # the authoritative PT colour beats a conflicting English trade name ("Wonderful Black" vs PT "Cinza").
 _COLOUR_SOURCE_FIELDS = ("product_name_pt", "product_name_en", "description")
 
+# Semiprecious rows read "CIN Quartz Semi Prec {colour} {trade}"; extract_color scans left-to-right and would
+# match "Semi" before the real colour word (and "Semi" resolves to a colour, so it ships wrong -- not held).
+# The "Semi Prec(ious)" marker is a grade, not a colour, so strip it before extraction. Source-isolated: it
+# is zucchi's own naming quirk, so it belongs here, not in the shared extractor.
+_SEMI_PREC = re.compile(r"\bsemi[\s-]*prec\w*\b", re.IGNORECASE)
+
 
 def _color(r: dict) -> str:
     for field in _COLOUR_SOURCE_FIELDS:
-        colour = extract_color(AdapterBase.clean(r.get(field)))
+        text = AdapterBase.clean(r.get(field)) or ""
+        colour = extract_color(_SEMI_PREC.sub(" ", text))
         if colour:
             return colour
     return ""

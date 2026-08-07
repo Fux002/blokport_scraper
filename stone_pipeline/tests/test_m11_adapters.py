@@ -346,3 +346,14 @@ def test_zucchi_weight_normalized_to_per_piece():
     assert _per_piece_kg({"weight_kg_net": "3000", "slab_count": "6"}) == "500.0"
     assert _per_piece_kg({"weight_kg_net": "3000", "slab_count": "0"}) == ""   # div0 -> blank (derive synthesizes)
     assert _per_piece_kg({"weight_kg_net": "", "slab_count": "6"}) == ""       # missing weight -> blank
+
+
+def test_zucchi_semiprecious_colour_is_the_real_colour_not_semi():
+    # "CIN Quartz Semi Prec {colour} {trade}": extract_color scans left-to-right and grabs "Semi" (which
+    # RESOLVES to a colour, so it ships WRONG rather than being held) before the real colour word. The zucchi
+    # adapter strips the "Semi Prec" grade marker (source-isolated) so the real colour wins.
+    from stone_pipeline.adapters.zucchi import _color
+    assert _color({"product_name_pt": "CIN Quartz Semi Prec Azul Agata Dark"}) == "Blue"
+    assert _color({"product_name_pt": "CIN Quartz Semi Prec Marrom Tigrado"}) == "Brown"
+    assert _color({"product_name_pt": "CIN Quartz Semi Prec Branco Cristal"}) == "White"
+    assert _color({"product_name_pt": "CIN Granito Preto Absoluto"}) == "Black"   # non-semiprecious unaffected
