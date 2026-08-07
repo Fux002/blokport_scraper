@@ -80,7 +80,7 @@ def test_config_snapshot_round_trip_preserves_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     src = tmp_path / "config.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(src))
-    store.upsert_row({"source": "polonine", "adapter": "polonine", "source_code": "pol", "vendor": "P"})
+    store.upsert_row({"source": "polonine",  "source_code": "pol", "vendor": "P"})
     store.set_state("polonine", lifecycle="paused", enabled=False)
 
     assert snapshot.save_config(src, env="development") is True

@@ -21,7 +21,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.numbers import parse_number
-from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
+from stone_pipeline.core.schema import CanonicalRow
 
 log = logfmt.get_logger("product_state")
 
@@ -76,15 +76,6 @@ def inventory_str(row: CanonicalRow) -> str:
     return str(row.inventory_quantity if row.inventory_quantity is not None else 0)
 
 
-def _stock_is_unparseable(row: CanonicalRow) -> bool:
-    """True when a RAW stock field was present but did not parse to a number -- a supplier format change to
-    surface (flagged in classify), distinct from a genuine 0 / absent field. Inspects the RAW inputs only
-    (not the derived bundle_size, which always parses -- that dead-flagged messy slab stock before)."""
-    present = [str(c).strip() for c in (row.raw_slab_count, row.raw_inventory_quantity)
-               if c is not None and str(c).strip()]
-    return bool(present) and all(parse_number(t) is None for t in present)
-
-
 @dataclass
 class ClassifyStats:
     new: int = 0
@@ -96,9 +87,8 @@ def classify(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProducts) 
     """Tag each row new/existing by SKU; for existing, flag inventory change."""
     stats = ClassifyStats()
     for row in rows:
-        if _stock_is_unparseable(row):
-            row.add_flag(ReviewFlag(field="inventory", code=FlagCode.stock_unparseable,
-                                    detail="stock field present but unparseable; shipped out-of-stock (0)"))
+        # stock determination (incl. unparseable / absent -> undetermined) is owned ENTIRELY by
+        # derive.derive_inventory now; classify only tags new/existing + inventory change.
         sku = sku_for(row, cfg)
         entry = known.by_sku.get(sku)
         if entry is None:

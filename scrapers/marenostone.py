@@ -74,16 +74,27 @@ def _dims_from_html(html: str, default_unit: str = "cm") -> dict:
     depth. The unit comes from the label ('Length (cm)'); when a label omits it, `default_unit` is the
     source's DECLARED convention (see MarenoStoneScraper.dimension_unit), never a hardcoded guess. A
     NON-NUMERIC value (e.g. 'Free' for a free-length slab) keeps its raw text -- it is not given a
-    fabricated unit, so it reads downstream as 'no real size' and rejects, instead of a bogus '<x>cm'."""
+    fabricated unit, so it reads downstream as 'no real size' and rejects, instead of a bogus '<x>cm'.
+
+    Also reads the 'Ready Stock' figure from the SAME table: marenostone publishes stock as square-metres
+    available, not a slab count, so it is captured as `ready_stock_sqm` ONLY when the sibling 'Unit' row
+    states SQM (never assume a unit for a stock magnitude). derive turns it into a piece count."""
     out: dict = {}
+    ready_stock = stock_unit = ""
     for label, value in _DIM_ROW.findall(html or ""):
         value = value.strip()
         if not value:
             continue
+        low = label.lower()
+        if "ready stock" in low:
+            ready_stock = value
+            continue
+        if low == "unit":
+            stock_unit = value
+            continue
         unit = re.search(r"\((\w+)\)", label)
         u = unit.group(1) if unit else default_unit
         valued = f"{value}{u}" if any(ch.isdigit() for ch in value) else value
-        low = label.lower()
         if "length" in low:
             out["length"] = valued
         elif "width" in low:
@@ -92,6 +103,8 @@ def _dims_from_html(html: str, default_unit: str = "cm") -> dict:
             out["thickness"] = valued
         elif "height" in low:
             out.setdefault("height", valued)
+    if ready_stock and stock_unit.upper() == "SQM":
+        out["ready_stock_sqm"] = ready_stock
     return out
 
 
@@ -108,6 +121,7 @@ class MarenoStoneScraper(ScraperBase):
         "attr_quality", "attr_priority", "categories",
         "is_in_stock", "stock_status", "stock_text",
         "weight", "dimensions_length", "dimensions_width", "dimensions_height",
+        "ready_stock_sqm",
         "short_description", "description", "image_urls_thumb",
     ]
 
@@ -176,6 +190,7 @@ class MarenoStoneScraper(ScraperBase):
             "dimensions_length": pd.get("length", ""),    # long face
             "dimensions_height": pd.get("width", ""),      # short face -> our height
             "dimensions_width": pd.get("thickness", ""),   # depth -> our width (thickness)
+            "ready_stock_sqm": pd.get("ready_stock_sqm", ""),  # available stock in m2 (Unit=SQM) -> derive: pieces
             "short_description": _clean(p.get("short_description", "")),
             "description": _clean(p.get("description", "")),
             "image_urls_thumb": " | ".join(thumbs),

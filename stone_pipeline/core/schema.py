@@ -26,7 +26,11 @@ class FlagCode(str, Enum):
     bundle_default = "bundle_default"
     bundle_estimated = "bundle_estimated"
     bundle_ratio_noninteger = "bundle_ratio_noninteger"
-    stock_unparseable = "stock_unparseable"        # stock field present but unparseable -> shipped out-of-stock (0)
+    # stock could not be DETERMINED (no parseable count: absent/garbage) AND could not be DERIVED from an
+    # available area -> UNDETERMINED, not a genuine 0. derive leaves inventory_quantity None + this flag;
+    # validate HOLDS the row for review, so a missing measurement never ships as a fabricated sold-out. The
+    # single stock-determination flag (owned by derive), and the stock twin of dimension_defaulted.
+    stock_undetermined = "stock_undetermined"
     origin_unresolved = "origin_unresolved"
     origin_supplier_default = "origin_supplier_default"
     origin_multi_home_absent = "origin_multi_home_absent"
@@ -156,6 +160,10 @@ class CanonicalRow(BaseModel):
     raw_weight: Optional[str] = None
     raw_total_m2: Optional[str] = None
     raw_per_slab_m2: Optional[str] = None
+    # available STOCK area in m2 (a source that publishes square-metres in stock, not a slab count, e.g.
+    # marenostone "Ready Stock"). derive_inventory turns it into a piece count via the face area. Kept
+    # SEPARATE from raw_total_m2 (a bundle's total area, which feeds bundle_size) so stock never corrupts it.
+    raw_stock_m2: Optional[str] = None
     raw_slab_count: Optional[str] = None
     raw_bundle_size: Optional[str] = None
     raw_slabs_array: Optional[str] = None

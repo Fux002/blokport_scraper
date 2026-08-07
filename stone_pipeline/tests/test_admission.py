@@ -68,7 +68,7 @@ def test_run_event_round_trip_bounded(tmp_path, monkeypatch):
 # --- record + react ------------------------------------------------------------
 def test_drift_auto_demotes_an_auto_source(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_source(SourceConfig(source="polonine", adapter="polonine", source_code="pol", mode="auto"))
+    store.upsert_source(SourceConfig(source="polonine",  source_code="pol", mode="auto"))
     res = admission.record_and_evaluate(
         "polonine", _summary("polonine_x", health="DEGRADED", drift=[{"kind": "fill_drop", "field": "color"}]),
         rule=RULE)
@@ -82,24 +82,24 @@ def test_empty_scrape_abort_demotes_but_a_skip_does_not(tmp_path, monkeypatch):
     # auto source MUST be demoted. The twin: a genuine load_frame SKIP writes no health ("" -> coerced OK)
     # and must NOT demote. This is why the abort has to write "FAILED" and not leave health empty.
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_source(SourceConfig(source="polonine", adapter="polonine", source_code="pol", mode="auto"))
+    store.upsert_source(SourceConfig(source="polonine",  source_code="pol", mode="auto"))
     failed = admission.record_and_evaluate("polonine", _summary("pol_fail", health="FAILED"), rule=RULE)
     assert failed["demoted"] is True and load_source("polonine").mode == "review"
-    store.upsert_source(SourceConfig(source="varsha", adapter="varsha", source_code="var", mode="auto"))
+    store.upsert_source(SourceConfig(source="varsha",  source_code="var", mode="auto"))
     skip = admission.record_and_evaluate("varsha", {"run_id": "var_skip", "stages": [], "gates": {}}, rule=RULE)
     assert skip["demoted"] is False and load_source("varsha").mode == "auto"
 
 
 def test_clean_run_on_review_source_does_not_demote(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_source(SourceConfig(source="varsha", adapter="varsha", source_code="var", mode="review"))
+    store.upsert_source(SourceConfig(source="varsha",  source_code="var", mode="review"))
     res = admission.record_and_evaluate("varsha", _summary("varsha_1"), rule=RULE)
     assert res["demoted"] is False and load_source("varsha").mode == "review"
 
 
 def test_status_for_becomes_eligible_after_consistent_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_source(SourceConfig(source="polonine", adapter="polonine", source_code="pol", mode="review"))
+    store.upsert_source(SourceConfig(source="polonine",  source_code="pol", mode="review"))
     for i in range(2):
         admission.record_and_evaluate("polonine", _summary(f"polonine_{i}"), rule=RULE)
     st = admission.status_for("polonine", rule=RULE)
@@ -110,7 +110,7 @@ def test_status_for_becomes_eligible_after_consistent_runs(tmp_path, monkeypatch
 def test_diagnostics_payload_includes_admission(tmp_path, monkeypatch):
     from stone_pipeline.config import diagnostics
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_source(SourceConfig(source="polonine", adapter="polonine", source_code="pol", mode="review"))
+    store.upsert_source(SourceConfig(source="polonine",  source_code="pol", mode="review"))
     store.record_source_diagnostic("polonine", "polonine_x", {"source": "polonine", "health": "OK", "stages": []})
     got = diagnostics.read_source("polonine")
     assert got["admission"]["state"] in (REVIEW, ELIGIBLE, AUTO, DEMOTED)

@@ -81,11 +81,18 @@ def clean_contract(ref: ReferenceData) -> ModuleContract:
 
 
 # --- process: the Medusa-importable output contract -----------------------------------------------
-# After derive + constants, a row must carry an origin country code: Medusa requires it for its
-# pricing-rule lookup, so a blank breaks the import. derive_origin now always fills it when the
-# source has an origin_default; a row that still lacks one (no scrape origin, no origin_map entry,
-# no supplier default) is rejected here with a precise reason rather than emitted broken.
+# After derive + constants, a row must carry an origin country code (Medusa needs it for its pricing-rule
+# lookup, so a blank breaks the import). The HARD reject is owned by validate (Stage 9) -- the single
+# authority for every Medusa-importable hard requirement -- so it is confirmed in ONE place. Here origin is
+# a SOFT early diagnostic: right after derive, a systemic origin-resolution failure escalates this seam's
+# report (a large fraction missing -> DEGRADED/FAILED status) for fast repair, without a second hard reject.
+def _has_origin(row: CanonicalRow) -> bool:
+    return bool((row.origin_country_code or "").strip())
+
+
 PROCESS = ModuleContract(
     module="process",
-    required_fields=("origin_country_code",),
+    invariants=(
+        Invariant("process_origin_missing", _has_origin, severity=SOFT, field="origin_country_code"),
+    ),
 )

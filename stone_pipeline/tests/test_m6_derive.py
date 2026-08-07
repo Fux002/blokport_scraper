@@ -105,6 +105,81 @@ def test_block_has_no_bundle(ref, cfg):
     assert row.bundle_size is None
 
 
+# --- inventory ladder: explicit count -> derived-from-area -> undetermined (held) ---------------------
+def test_inventory_from_explicit_slab_count(ref, cfg):
+    row = _slab_row(raw_slab_count="8")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 8
+    assert row.inventory_method == "raw_slab_count"
+    assert row.inventory_confidence == "high"
+
+
+def test_inventory_from_explicit_quantity(ref, cfg):
+    row = _slab_row(raw_inventory_quantity="12")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 12
+    assert row.inventory_method == "raw_inventory_quantity"
+
+
+def test_inventory_explicit_zero_is_trusted_out_of_stock(ref, cfg):
+    # a source that reports 0 is a DETERMINED out-of-stock: ships as sold-out (0), never held.
+    row = _slab_row(raw_slab_count="0")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 0
+    assert row.inventory_method == "raw_slab_count"
+    assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
+def test_inventory_derived_from_stock_area(ref, cfg):
+    # a source publishing available stock SQM, no slab count: pieces = stock area / per-piece face area.
+    row = _slab_row(raw_stock_m2="10")
+    row.length, row.height = 2.0, 1.0            # per piece = 2.0 m2 -> 5 pieces
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 5
+    assert row.inventory_method == "stock_area_division"
+
+
+def test_inventory_area_partial_piece_never_floors_to_zero(ref, cfg):
+    # 5 m2 available, one piece is 6 m2: still in stock -> at least 1, never a false sold-out.
+    row = _slab_row(raw_stock_m2="5")
+    row.length, row.height = 3.0, 2.0            # per piece = 6.0 m2 > 5
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 1
+
+
+def test_inventory_zero_stock_area_is_trusted_out_of_stock(ref, cfg):
+    row = _slab_row(raw_stock_m2="0")
+    row.length, row.height = 2.0, 1.0
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 0
+    assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
+def test_inventory_stock_area_without_dimensions_is_undetermined(ref, cfg):
+    # stock area present but no face dimensions to divide by -> cannot derive -> held, not a fabricated 0.
+    row = _slab_row(raw_stock_m2="10")           # no length/height set
+    derive.derive_inventory(row)
+    assert row.inventory_quantity is None
+    assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
+def test_inventory_undetermined_when_no_signal_holds_for_review(ref, cfg):
+    # no count and no area: stock is UNDETERMINED -> None + flag, so validate holds it (not a fabricated 0).
+    row = _slab_row()
+    derive.derive_inventory(row)
+    assert row.inventory_quantity is None
+    assert row.inventory_method == "undetermined"
+    assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
+def test_inventory_unparseable_count_without_area_is_undetermined(ref, cfg):
+    # a garbage count with no area to fall back on -> undetermined (held), never a silent 0.
+    row = _slab_row(raw_slab_count="lots")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity is None
+    assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
 def test_title_is_listing_style_with_material_and_format(ref, cfg):
     # a sellable, searchable title: variety + finish + material. The format word (Slab/Tile/Block) is
     # NOT in the title -- format is a variant dimension, not product identity.

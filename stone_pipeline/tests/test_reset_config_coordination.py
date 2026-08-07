@@ -57,7 +57,7 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
     from stone_pipeline import lifecycle
 
     yaml_path = tmp_path / "sources.yaml"
-    yaml_path.write_text("polonine:\n  adapter: polonine\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
+    yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
     _seed_config(tmp_path, monkeypatch)
     store.seed_from_yaml(yaml_path=yaml_path)
     # the ledger reset itself is covered in test_ledger_sync; here we test only the config coordination
@@ -84,7 +84,7 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     from stone_pipeline import lifecycle
 
     yaml_path = tmp_path / "sources.yaml"
-    yaml_path.write_text("polonine:\n  adapter: polonine\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
+    yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
     _seed_config(tmp_path, monkeypatch)
     store.seed_from_yaml(yaml_path=yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
@@ -166,8 +166,8 @@ def test_hard_reset_wipes_images_scoped_per_source_soft_keeps_them(tmp_path, mon
     from deploy import cleanup_images
 
     yaml_path = tmp_path / "sources.yaml"
-    yaml_path.write_text("varsha:\n  adapter: varsha\n  source_code: var\n  vendor: V\n"
-                         "zucchi:\n  adapter: zucchi\n  source_code: zuc\n  vendor: Z\n", encoding="utf-8")
+    yaml_path.write_text("varsha:\n  source_code: var\n  vendor: V\n"
+                         "zucchi:\n  source_code: zuc\n  vendor: Z\n", encoding="utf-8")
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)

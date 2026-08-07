@@ -6,7 +6,7 @@ from __future__ import annotations
 import csv
 
 from stone_pipeline.config.sources import load_source
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, FlagCode
 from stone_pipeline.stages import product_state
 
 
@@ -27,17 +27,20 @@ def _inv(**kw):
 
 def test_derive_inventory_is_stock_only_never_bundle_size():
     # Stock is derived ONCE from raw signals, coerced by parse_number ('1,000'->1000, '12 pcs'->12), never
-    # floored to a guessed value. A literal 0 is a TRUSTED out-of-stock -- it must NOT fall through to a
-    # derived bundle_size (the E2 oversell: a 0-stock slab shipped '6'). No signal -> 0, uniform.
+    # floored to a guessed value. A literal 0 is a TRUSTED out-of-stock. A signal that CANNOT be determined
+    # (unparseable, negative, absent) AND cannot be derived from an available area is left UNDETERMINED
+    # (None + stock_undetermined), so validate HOLDS it -- never a fabricated 0. bundle_size is NEVER stock.
     assert _inv(raw_slab_count="1,000").inventory_quantity == 1000
     assert _inv(raw_slab_count="1.0").inventory_quantity == 1
     assert _inv(raw_slab_count="12 pcs").inventory_quantity == 12
     assert _inv(raw_slab_count="7").inventory_quantity == 7
-    assert _inv(raw_slab_count="0").inventory_quantity == 0        # literal 0 trusted
-    assert _inv(raw_slab_count="junk").inventory_quantity == 0     # unparseable -> 0
-    assert _inv(raw_slab_count="-5").inventory_quantity == 0       # negative -> 0
-    assert _inv(raw_slab_count=None).inventory_quantity == 0       # e.g. a block: no signal -> 0
+    assert _inv(raw_slab_count="0").inventory_quantity == 0        # literal 0 trusted out-of-stock
     assert _inv(raw_slab_count="1" + "0" * 20).inventory_quantity == 1_000_000  # E7 range clamp
+    # undetermined: no determinable count and no area to derive from -> None + flag (held), never a silent 0
+    for undet in (_inv(raw_slab_count="junk"), _inv(raw_slab_count="-5"), _inv(raw_slab_count=None)):
+        assert undet.inventory_quantity is None
+        assert undet.inventory_method == "undetermined"
+        assert any(f.code == FlagCode.stock_undetermined for f in undet.review_flags)
     # E2 regression: a 0 slab count with a derived bundle_size present must STILL be 0 (bundle != stock)
     from stone_pipeline.stages.derive import derive_inventory
     r = CanonicalRow(src_site="polonine", surrogate_key="a", raw_slab_count="0")
@@ -46,18 +49,15 @@ def test_derive_inventory_is_stock_only_never_bundle_size():
     assert r.inventory_quantity == 0, "bundle_size must never leak into stock"
     # provenance is set on the derived value (binding invariant)
     assert _inv(raw_slab_count="7").inventory_method == "raw_slab_count"
-    assert _inv(raw_slab_count=None).inventory_method == "no_signal"
 
 
-def test_inventory_str_formats_the_field_and_flag_reads_raw_only():
+def test_inventory_str_formats_the_stock_field():
+    # inventory_str only FORMATS the derived field; determination happens once in derive_inventory.
     assert product_state.inventory_str(_inv(raw_slab_count="7")) == "7"
-    assert product_state.inventory_str(_inv(raw_slab_count="junk")) == "0"     # unparseable ships 0
     assert product_state.inventory_str(CanonicalRow(src_site="p", surrogate_key="a")) == "0"  # None -> 0
-    # _stock_is_unparseable inspects RAW inputs only: a messy slab count is flagged even though a derived
-    # bundle_size would parse (E3 -- the flag was dead for slabs before).
-    r = CanonicalRow(src_site="polonine", surrogate_key="a", raw_slab_count="twelve"); r.bundle_size = 6
-    assert product_state._stock_is_unparseable(r)
-    assert not product_state._stock_is_unparseable(_row("a", slab_count="0"))  # a real 0 is not unparseable
+    # an UNDETERMINED stock (None) formats defensively as 0; validate HOLDS such a row before it can emit,
+    # so the 0 never actually reaches Medusa (determination + hold are owned by derive + validate).
+    assert product_state.inventory_str(_inv(raw_slab_count="junk")) == "0"
 
 
 def test_emit_num_never_scientific_or_truncated():
