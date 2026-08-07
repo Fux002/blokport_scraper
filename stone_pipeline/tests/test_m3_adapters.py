@@ -90,3 +90,18 @@ def test_contract_generated_from_adapter_matches_required():
     contract = POLONINE.generate_contract(frame)
     assert contract.required_columns == POLONINE.required_columns
     assert contract.adapter_version == POLONINE.adapter_version
+
+
+def test_every_committed_contract_version_matches_its_adapter():
+    # the committed source_contracts.yaml adapter_version must track the adapter's own adapter_version, so
+    # the stamped provenance (health baseline / diagnostics) is never stale. The existing polonine test above
+    # only checks a GENERATED contract (trivially matches); this guards the COMMITTED yaml against drift.
+    from stone_pipeline.adapters import REGISTRY
+    from stone_pipeline.config import contracts
+    for name, adapter in REGISTRY.items():
+        committed = contracts.load_contract(name)
+        if committed is None:
+            continue   # no committed contract -> health generates one from the adapter, trivially in sync
+        assert committed.adapter_version == adapter.adapter_version, (
+            f"source_contracts.yaml adapter_version for {name!r} is {committed.adapter_version} but the "
+            f"adapter declares {adapter.adapter_version} -- bump the contract when you bump the adapter")
