@@ -31,8 +31,6 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS source (
     source              TEXT PRIMARY KEY,
     enabled             INTEGER NOT NULL DEFAULT 1,   -- does this scraper run
-    schedule            TEXT,                          -- optional: how often / when (free text)
-    adapter             TEXT NOT NULL DEFAULT '',
     source_code         TEXT NOT NULL DEFAULT '',
     vendor              TEXT NOT NULL DEFAULT '',      -- the company this source belongs to (agnostic name)
     company_id          TEXT NOT NULL DEFAULT '',      -- Medusa company id for this source (ENV-SPECIFIC; empty = resolve by vendor name)
@@ -216,7 +214,7 @@ def open_store(path: str | Path | None = None) -> sqlite3.Connection:
 
 def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
     return SourceConfig(
-        source=r["source"], adapter=r["adapter"], source_code=r["source_code"],
+        source=r["source"], source_code=r["source_code"],
         vendor=r["vendor"], company_id=r["company_id"], origin_default=r["origin_default"],
         ports_default=json.loads(r["ports"] or "[]"), mode=r["mode"],
         watermarked=bool(r["watermarked"]), enhance=bool(r["enhance"]), emit_on_review=bool(r["emit_on_review"]),
@@ -224,10 +222,10 @@ def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
     )
 
 
-def _params(cfg: SourceConfig, enabled: bool, schedule: str | None) -> dict:
+def _params(cfg: SourceConfig, enabled: bool) -> dict:
     return {
-        "source": cfg.source, "enabled": 1 if enabled else 0, "schedule": schedule,
-        "adapter": cfg.adapter, "source_code": cfg.source_code, "vendor": cfg.vendor,
+        "source": cfg.source, "enabled": 1 if enabled else 0,
+        "source_code": cfg.source_code, "vendor": cfg.vendor,
         "company_id": cfg.company_id,
         "origin_default": cfg.origin_default, "ports": json.dumps(cfg.ports_default or []),
         "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0, "enhance": 1 if cfg.enhance else 0,
@@ -246,10 +244,10 @@ def read_sources(path: str | Path | None = None) -> dict[str, SourceConfig]:
 
 
 def _row_dict(r: sqlite3.Row) -> dict:
-    """JSON-friendly row for the admin API (includes enabled + schedule)."""
+    """JSON-friendly row for the admin API (includes enabled)."""
     return {
-        "source": r["source"], "enabled": bool(r["enabled"]), "schedule": r["schedule"],
-        "adapter": r["adapter"], "source_code": r["source_code"], "vendor": r["vendor"],
+        "source": r["source"], "enabled": bool(r["enabled"]),
+        "source_code": r["source_code"], "vendor": r["vendor"],
         "company_id": r["company_id"],
         "origin_default": r["origin_default"], "ports": json.loads(r["ports"] or "[]"),
         "mode": r["mode"], "watermarked": bool(r["watermarked"]), "enhance": bool(r["enhance"]),
@@ -277,7 +275,7 @@ def get_row(source: str, path: str | Path | None = None) -> dict | None:
 def upsert_row(data: dict, path: str | Path | None = None) -> None:
     """Upsert from an admin-UI payload dict (the inverse of _row_dict)."""
     cfg = SourceConfig(
-        source=data["source"], adapter=data.get("adapter", ""),
+        source=data["source"],
         source_code=data.get("source_code", ""), vendor=data.get("vendor", ""),
         company_id=data.get("company_id", ""),
         origin_default=data.get("origin_default", ""), ports_default=data.get("ports") or [],
@@ -289,8 +287,7 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
     )
     # re-adding a source clears any prior removal tombstone (in ONE transaction with the upsert, so a crash
     # between the two can't leave the source added yet still tombstoned).
-    upsert_source(cfg, enabled=bool(data.get("enabled", True)),
-                  schedule=data.get("schedule"), clear_removed=True, path=path)
+    upsert_source(cfg, enabled=bool(data.get("enabled", True)), clear_removed=True, path=path)
 
 
 def enabled_names(path: str | Path | None = None) -> set[str] | None:
@@ -305,9 +302,9 @@ def enabled_names(path: str | Path | None = None) -> set[str] | None:
 
 # -- writes (used by the seed + the admin API) ---------------------------------
 
-def upsert_source(cfg: SourceConfig, *, enabled: bool = True, schedule: str | None = None,
+def upsert_source(cfg: SourceConfig, *, enabled: bool = True,
                   clear_removed: bool = False, path: str | Path | None = None) -> None:
-    p = _params(cfg, enabled, schedule)
+    p = _params(cfg, enabled)
     cols = ", ".join(p)
     placeholders = ", ".join(f":{c}" for c in p)
     updates = ", ".join(f"{c} = :{c}" for c in p if c != "source")
@@ -539,7 +536,7 @@ def seed_from_yaml(yaml_path: str | Path | None = None, path: str | Path | None 
         for cfg in load_yaml_sources(yaml_path).values():
             if cfg.source in removed:
                 continue                              # explicitly removed -> do NOT re-seed it
-            p = _params(cfg, enabled=True, schedule=None)
+            p = _params(cfg, enabled=True)
             cols = ", ".join(p)
             placeholders = ", ".join(f":{c}" for c in p)
             cur = conn.execute(

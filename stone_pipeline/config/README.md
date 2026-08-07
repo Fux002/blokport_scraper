@@ -121,8 +121,6 @@ For `:4200`: one button, `POST /config/v1/run` (server-side, with the token), th
 {
   "source": "polonine",            // the scraper name (the URL <name>)
   "enabled": true,                 // does it run
-  "schedule": null,                // optional: how often / when (free text)
-  "adapter": "polonine",           // which adapter parses it
   "source_code": "pol",            // SKU prefix and delist scope; keep unique
   "vendor": "Polonine Stone Co",   // the COMPANY this scraper's products belong to (agnostic name)
   "company_id": "",                // Medusa company id for this source. ENV-SPECIFIC (dev != prod),

@@ -87,6 +87,7 @@ marenostone:
   - dimensions_length
   - dimensions_width
   - dimensions_height
+  - ready_stock_sqm
   - formatted_dimensions
   - short_description
   - description

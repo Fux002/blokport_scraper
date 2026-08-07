@@ -63,6 +63,12 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     if not row.company_id or not row.sales_channel_id:
         row.add_reject(RejectReason(rule="owner_missing",
                                     detail="company_id" if not row.company_id else "sales_channel_id"))
+    # Origin country is REQUIRED for Medusa's pricing-rule lookup (a blank breaks the import). derive_origin
+    # fills it from the scrape / origin_map / supplier default; a row that still lacks one (origin_unresolved)
+    # is HELD here. validate is the single authority for every Medusa-importable hard requirement -- the
+    # process gate also surfaces a missing origin early, but only as a soft batch diagnostic, not a reject.
+    if not (row.origin_country_code or "").strip():
+        row.add_reject(RejectReason(rule="origin_missing", detail="origin_country_code"))
     # No usable image + images required -> reject as a transient no_image (retry next scrape). EXCEPTION:
     # a row Stage 7 marked no_publishable_image is a terminal known-good empty -- it publishes WITHOUT an
     # image instead of being rejected, so a real stone whose only photos were spec sheets/logos is not lost.
@@ -91,6 +97,13 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
         if (getattr(row, dim, None) or 0) <= 0:
             row.add_reject(RejectReason(rule="dimension_invalid", detail=dim))
             break
+    # Stock must be DETERMINED before a product can be sold: derive left inventory_quantity None (flagged
+    # stock_undetermined) when it could neither read a count nor derive one from a stock area. Emitting it
+    # would ship a fabricated 0 (a false out-of-stock); HOLD it for review instead -- exactly like a
+    # defaulted dimension. A determined value INCLUDING a real 0 is fine and ships as sold-out. The operator
+    # supplies the stock (or the adapter/scrape is fixed) before the product lists.
+    if row.inventory_quantity is None:
+        row.add_reject(RejectReason(rule="stock_undetermined", detail="inventory"))
 
 
 def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = False) -> ValidationResult:

@@ -18,11 +18,11 @@ from stone_pipeline.config.settings import SETTINGS
 @dataclass
 class SourceConfig:
     source: str
-    adapter: str = ""
     source_code: str = ""
     # Optional per-scrape owner override; blank -> the general Blokport company (settings/env var).
-    # The sales channel is env-level (one per env) and is NOT settable per scrape.
-    # (company_id is a Medusa id, used only by the legacy CSV path.)
+    # The sales channel is env-level (one per env) and is NOT settable per scrape. It is a live,
+    # env-specific Medusa company id: it flows into the ledger record + the sync payload hash
+    # (populate), the Medusa upsert metadata (medusa_client), the validate owner gate, and the CSV emit.
     company_id: str = ""
     # The COMPANY / vendor this source's products belong to (the marketplace seller). This is
     # the AGNOSTIC reference sent as `vendor` in the sync payload; Medusa resolves it to its own

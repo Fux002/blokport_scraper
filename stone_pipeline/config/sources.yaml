@@ -2,8 +2,8 @@
 # vendor = the COMPANY this source's products belong to (the marketplace seller). This is WHERE
 #   YOU SET which scraper belongs to which company: it is sent as the `vendor` reference in the
 #   Medusa sync, and Medusa resolves it to its company id (no Medusa ids live here). Several sources
-#   may share one vendor. Blank -> the source name. (company_id below is the legacy Medusa-id owner,
-#   used only by the CSV path, not the sync.)
+#   may share one vendor. Blank -> the source name. (company_id below is the env-specific Medusa-id
+#   owner; it is live in the ledger + sync payload, the Medusa upsert, the validate gate, and the CSV.)
 # company_id and sales_channel_id own the products from a site. ports_default = the
 # SUPPLIER's shipping ports BY NAME or UN/LOCODE (resolved against catalog_source/ports.csv,
 # the master list of 601 ports); always applied, the product ships from the supplier.
@@ -13,7 +13,6 @@
 # min_expected_rows = catastrophic-scrape floor: a run below it aborts and never delists (guards a
 # broken/empty/truncated fetch). Set well under the normal count (~recent ÷ 4), not a tight bound.
 polonine:
-  adapter: polonine
   source_code: pol
   vendor: Polonine  # VERIFY: the company these products belong to
   ports_default:
@@ -24,7 +23,6 @@ polonine:
   default_bundle_size: 6
   min_expected_rows: 75   # recent ~300
 marenostone:
-  adapter: marenostone
   source_code: mar
   vendor: Marenostone  # VERIFY: the company these products belong to
   ports_default:
@@ -34,7 +32,6 @@ marenostone:
   default_bundle_size: 6
   min_expected_rows: 60   # recent ~260
 zucchi:
-  adapter: zucchi
   source_code: zuc
   vendor: Zucchi  # VERIFY: the company these products belong to
   ports_default:
@@ -44,7 +41,6 @@ zucchi:
   default_bundle_size: 6
   min_expected_rows: 500  # recent ~2000
 varsha:
-  adapter: varsha
   source_code: var
   vendor: Varsha Stones  # VERIFY: the company these products belong to
   ports_default:

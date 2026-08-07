@@ -55,6 +55,9 @@ class MarenostoneAdapter(AdapterBase):
         "raw_dimensions": lambda r: AdapterBase.build_dims(
             r.get("dimensions_length"), r.get("dimensions_height"), unit="", blank_na=True),
         "raw_weight": lambda r: AdapterBase.na(r.get("weight")),
+        # available stock in m2 (scraper emits only when the page's Unit row says SQM); derive turns it into
+        # a piece count via the face area. Kept out of raw_total_m2 so it never feeds bundle_size.
+        "raw_stock_m2": lambda r: AdapterBase.clean(r.get("ready_stock_sqm")),
         "raw_description": lambda r: AdapterBase.clean(r.get("description")) or AdapterBase.clean(r.get("short_description")),
         # full-size images: current scraper emits `image_urls`, the legacy format (kept in the
         # adapter fixture) emits `image_urls_full`. Never thumbnails. Blank in both -> no image.

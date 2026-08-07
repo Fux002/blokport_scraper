@@ -327,15 +327,34 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
 _INVENTORY_MAX = 1_000_000
 
 
+def _inventory_from_area(row: CanonicalRow) -> int | None:
+    """Stock as a PIECE count derived from an available stock AREA: pieces = raw_stock_m2 / one piece's face
+    area (length x height, both metres, set by derive_dimensions which runs first). For a source that
+    publishes square-metres in stock instead of a slab count (e.g. marenostone "Ready Stock"). Reads
+    raw_stock_m2 -- NOT raw_total_m2, which is a bundle's own area and feeds bundle_size. Returns None when
+    the stock area or the face dimensions are missing/non-positive (no derivation -> caller marks stock
+    undetermined). A real 0 m2 is a trusted out-of-stock (0 pieces). A positive area floors to at LEAST 1
+    piece: a partial piece is still sellable, so a genuinely-stocked product never floors to a false 0."""
+    total = _to_float(row.raw_stock_m2)
+    if total is None:
+        return None
+    if total <= 0:
+        return 0
+    length, height = row.length, row.height
+    if not length or not height or length <= 0 or height <= 0:
+        return None
+    return max(1, int(total / (length * height)))
+
+
 def derive_inventory(row: CanonicalRow) -> None:
-    """Stock level (units available), derived ONCE -- SEPARATE from bundle_size (the slabs-per-bundle
-    multiplier). Conflating them oversold 0-stock slabs (a literal '0' fell through to the bundle default)
-    and pinned others at the config default forever. The live stock signal is raw_slab_count (or
-    raw_inventory_quantity if a source ever ships it); bundle_size is NEVER a stock source. A literal '0' is
-    a TRUSTED out-of-stock, not a fall-through. No parseable signal -> 0, uniform across categories: stock
-    never gates publishing (a 0-stock product still ships and sells when a later scrape restocks it -- the
-    inventory step owns real availability). An unparseable stock field is surfaced by classify (via
-    _stock_is_unparseable), not silently defaulted."""
+    """Stock level (units available), derived ONCE from real signals -- SEPARATE from bundle_size (the
+    slabs-per-bundle multiplier); bundle_size is NEVER a stock source. Trust ladder: an explicit count
+    (raw_slab_count, then raw_inventory_quantity), then a count DERIVED from an available stock AREA
+    (raw_total_m2 / per-piece face area) for sources that publish square-metres, not a count. A parsed value
+    INCLUDING 0 is a TRUSTED out-of-stock and ships as sold-out. Only when NO count is present AND none can be
+    derived is stock UNDETERMINED: left None + flagged stock_undetermined so validate HOLDS the row for review
+    -- a missing measurement must never ship as a fabricated 0. Mirrors derive_dimensions' fill-but-flag
+    contract exactly (determined value incl. 0 ships; missing-and-underivable holds)."""
     for candidate, method in ((row.raw_slab_count, "raw_slab_count"),
                               (row.raw_inventory_quantity, "raw_inventory_quantity")):
         text = str(candidate).strip() if candidate is not None else ""
@@ -343,14 +362,26 @@ def derive_inventory(row: CanonicalRow) -> None:
             continue
         n = parse_number(text)
         if n is None or int(n) < 0:
-            continue                                   # unparseable/negative -> no signal (flagged in classify)
+            continue                                   # unparseable/negative here -> try the next signal, then area
         row.inventory_quantity = min(int(n), _INVENTORY_MAX)
         row.inventory_method = method
         row.inventory_confidence = _conf_name(Confidence.high)
         return
-    row.inventory_quantity = 0
-    row.inventory_method = "no_signal"
-    row.inventory_confidence = _conf_name(Confidence.high)   # a definite out-of-stock, not a guess
+    pieces = _inventory_from_area(row)
+    if pieces is not None:
+        row.inventory_quantity = min(pieces, _INVENTORY_MAX)
+        row.inventory_method = "stock_area_division"
+        row.inventory_confidence = _conf_name(Confidence.medium)
+        return
+    raw_present = any(str(c).strip() for c in (row.raw_slab_count, row.raw_inventory_quantity, row.raw_total_m2)
+                      if c is not None)
+    reason = "a stock signal was present but unusable" if raw_present else "no stock signal in the scrape"
+    row.inventory_quantity = None
+    row.inventory_method = "undetermined"
+    row.inventory_confidence = _conf_name(Confidence.none)
+    row.add_flag(ReviewFlag(field="inventory", code=FlagCode.stock_undetermined,
+                            detail=f"stock could not be determined or derived ({reason})",
+                            confidence=Confidence.none, method="undetermined", src_url=row.src_url))
 
 
 @functools.lru_cache(maxsize=1)

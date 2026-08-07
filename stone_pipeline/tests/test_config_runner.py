@@ -165,7 +165,7 @@ def test_start_run_stamps_the_source_as_running(tmp_path, monkeypatch):
 
 def _min_yaml(tmp_path):
     p = tmp_path / "sources.yaml"
-    p.write_text("polonine:\n  adapter: polonine\n  source_code: pol\n  vendor: Polonine Stone Co\n",
+    p.write_text("polonine:\n  source_code: pol\n  vendor: Polonine Stone Co\n",
                  encoding="utf-8")
     return p
 
@@ -214,7 +214,7 @@ def test_lifecycle_ops_address_a_config_only_source(tmp_path, monkeypatch):
     from stone_pipeline.config import store
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
-    store.upsert_row({"source": "zzprobe", "adapter": "zzprobe", "source_code": "zzp", "vendor": "Junk"})
+    store.upsert_row({"source": "zzprobe",  "source_code": "zzp", "vendor": "Junk"})
     for verb in (lambda: lifecycle.reset(sources=["zzprobe"]),
                  lambda: lifecycle.delist(["zzprobe"]),
                  lambda: lifecycle.purge(["zzprobe"])):
@@ -297,7 +297,7 @@ def test_clean_deletes_a_sources_scraped_data(tmp_path, monkeypatch):
     # ISS-5: lifecycle ops resolve identity via the config store, so the source must exist there (as it
     # does in prod, seeded on boot) -- seed it rather than rely on the adapter registry.
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_row({"source": "zucchi", "adapter": "zucchi", "source_code": "zuc", "vendor": "Z"})
+    store.upsert_row({"source": "zucchi",  "source_code": "zuc", "vendor": "Z"})
     monkeypatch.setattr(clean_mod, "SETTINGS",
                         types.SimpleNamespace(paths=types.SimpleNamespace(data_dir=tmp_path)))
     (tmp_path / "zucchi" / "20260625_222931").mkdir(parents=True)
@@ -443,7 +443,7 @@ def test_remove_config_only_source_is_deletable(tmp_path, monkeypatch):
     from stone_pipeline.config import store
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
-    store.upsert_row({"source": "zztest", "adapter": "zztest", "source_code": "zzt", "vendor": "Junk"})
+    store.upsert_row({"source": "zztest",  "source_code": "zzt", "vendor": "Junk"})
     assert store.get_row("zztest") is not None
     body, code = lifecycle.remove_source("zztest")
     assert code == 200 and body["config_removed"] is True            # not 400 'unknown source'

@@ -50,6 +50,6 @@ def test_variation_keys_degrades_to_none_on_transient(monkeypatch):
 
 
 def test_review_flag_keeps_its_detail():
-    f = ReviewFlag(field="inventory", code=FlagCode.stock_unparseable, confidence=Confidence.low,
-                   detail="stock field present but unparseable; shipped out-of-stock (0)")
-    assert f.detail == "stock field present but unparseable; shipped out-of-stock (0)"   # no longer dropped
+    f = ReviewFlag(field="inventory", code=FlagCode.stock_undetermined, confidence=Confidence.low,
+                   detail="stock could not be determined or derived (no stock signal in the scrape)")
+    assert f.detail == "stock could not be determined or derived (no stock signal in the scrape)"   # not dropped

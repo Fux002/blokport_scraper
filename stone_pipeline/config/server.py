@@ -385,6 +385,14 @@ def _validate_source_put(name: str, body: dict) -> tuple[int, dict] | None:
             if row["source"] != name and (row["source_code"] or "").strip().casefold() == code.casefold():
                 return 400, {"error": f"source_code {code!r} already used by source {row['source']!r}; "
                              "codes must be unique (they scope SKUs for removal)"}
+    # Ports are a HARD requirement, set by the admin here (never derived from the seed): Medusa builds a
+    # product's shipping ports from the supplier's ports, so a source that ships without them makes Medusa
+    # fall back to deriving a whole-country port list. A source must therefore carry at least one port.
+    ports = body.get("ports")
+    if not (isinstance(ports, list) and any(str(p).strip() for p in ports)):
+        return 400, {"error": f"source {name!r} requires at least one shipping port: set 'ports' to a "
+                     "non-empty list of the supplier's port names / LOCODEs (Medusa derives a product's "
+                     "ports from these)."}
     return None
 
 

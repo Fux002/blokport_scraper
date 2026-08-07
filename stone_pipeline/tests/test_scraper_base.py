@@ -403,3 +403,30 @@ def test_varsha_holds_the_row_when_the_detail_fetch_fails(monkeypatch):
     ok = s.parse_product({"id": "43", "nomeEspessura": "2cm", "fotoPrincipal": "x.jpg"})
     assert not (ok.get("fetch_failed") or "")                     # genuine absence -> no hold, no audit
     assert s._failures == []
+
+
+def test_marenostone_dims_from_html_reads_ready_stock_only_when_unit_is_sqm():
+    # the Ready Stock figure lives in the SAME WooCommerce attributes table as the dimensions, so the
+    # existing row parser already captures it. It is taken as square-metres ONLY when the sibling 'Unit'
+    # row says SQM -- never assume a unit for a stock magnitude.
+    from scrapers.marenostone import _dims_from_html
+
+    def _row(label, value):
+        return (f'<tr class="woocommerce-product-attributes-item">'
+                f'<th class="woocommerce-product-attributes-item__label">{label}</th>'
+                f'<td class="woocommerce-product-attributes-item__value"><p>{value}</p></td></tr>')
+
+    html = _row("Length (cm)", "255") + _row("Width (cm)", "190") + _row("Thickness (cm)", "2") \
+        + _row("Ready Stock", "114") + _row("Unit", "SQM")
+    out = _dims_from_html(html)
+    # _dims_from_html returns the source's own labels (length/width/thickness); parse_product remaps
+    # 'width' (short face) -> canonical height afterwards. Here we assert the raw parse.
+    assert out["length"] == "255cm" and out["width"] == "190cm" and out["thickness"] == "2cm"
+    assert out["ready_stock_sqm"] == "114"
+
+    # unit not SQM -> stock is NOT captured as m2 (avoids a wrong-magnitude stock)
+    html2 = _row("Ready Stock", "10") + _row("Unit", "pcs")
+    assert "ready_stock_sqm" not in _dims_from_html(html2)
+
+    # no Ready Stock row -> absent (derive then holds it as undetermined)
+    assert "ready_stock_sqm" not in _dims_from_html(_row("Length (cm)", "300"))

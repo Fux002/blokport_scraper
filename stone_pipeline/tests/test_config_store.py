@@ -13,14 +13,12 @@ def _seed_yaml(tmp_path):
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text(
         "polonine:\n"
-        "  adapter: polonine\n"
         "  source_code: pol\n"
         "  vendor: Polonine Stone Co\n"
         "  origin_default: IT\n"
         "  ports_default:\n    - Brindisi\n"
         "  mode: review\n"
         "varsha:\n"
-        "  adapter: varsha\n"
         "  source_code: var\n"
         "  vendor: Varsha Stones\n"
         "  watermarked: true\n",
@@ -176,7 +174,7 @@ def test_removed_source_is_not_resurrected_by_reconcile_seed(tmp_path, monkeypat
     assert store.delete_source("varsha") is True
     store.seed_from_yaml(yaml_path=yaml_path)
     assert {r["source"] for r in store.list_rows()} == {"polonine"}   # stays removed
-    store.upsert_row({"source": "varsha", "adapter": "varsha", "source_code": "var", "vendor": "V"})
+    store.upsert_row({"source": "varsha",  "source_code": "var", "vendor": "V"})
     store.seed_from_yaml(yaml_path=yaml_path)
     assert "varsha" in {r["source"] for r in store.list_rows()}       # re-add cleared the tombstone
 
@@ -188,12 +186,12 @@ def test_duplicate_source_code_is_rejected_by_the_db(tmp_path, monkeypatch):
 
     import pytest
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_row({"source": "alpha", "adapter": "alpha", "source_code": "ZUC", "vendor": "A"})
+    store.upsert_row({"source": "alpha",  "source_code": "ZUC", "vendor": "A"})
     with pytest.raises(sqlite3.IntegrityError):
-        store.upsert_row({"source": "beta", "adapter": "beta", "source_code": "ZUC", "vendor": "B"})
+        store.upsert_row({"source": "beta",  "source_code": "ZUC", "vendor": "B"})
     # empty codes are the default and must stay non-unique (many sources can be code-less)
-    store.upsert_row({"source": "gamma", "adapter": "gamma", "source_code": "", "vendor": "C"})
-    store.upsert_row({"source": "delta", "adapter": "delta", "source_code": "", "vendor": "D"})
+    store.upsert_row({"source": "gamma",  "source_code": "", "vendor": "C"})
+    store.upsert_row({"source": "delta",  "source_code": "", "vendor": "D"})
     assert {r["source"] for r in store.list_rows()} >= {"alpha", "gamma", "delta"}
 
 
@@ -201,9 +199,9 @@ def test_readd_clears_tombstone_atomically(tmp_path, monkeypatch):
     # F8: the source upsert and its removal-tombstone clear happen in ONE transaction, so a re-added source
     # is never left both present AND tombstoned. (Functional check of the single-transaction upsert_row.)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_row({"source": "zucchi", "adapter": "zucchi", "source_code": "zuc", "vendor": "Z"})
+    store.upsert_row({"source": "zucchi",  "source_code": "zuc", "vendor": "Z"})
     assert store.delete_source("zucchi") is True
-    store.upsert_row({"source": "zucchi", "adapter": "zucchi", "source_code": "zuc", "vendor": "Z"})
+    store.upsert_row({"source": "zucchi",  "source_code": "zuc", "vendor": "Z"})
     from contextlib import closing
     with closing(store.open_store()) as conn:
         tomb = conn.execute("SELECT COUNT(*) AS n FROM removed_source WHERE source = 'zucchi'").fetchone()["n"]
@@ -231,10 +229,10 @@ def test_config_api_dispatch(tmp_path, monkeypatch):
     code, body = server.dispatch("GET", ["sources", "polonine"], None)
     assert code == 200 and body["vendor"] == "Polonine Stone Co"
 
-    # the UI disables a scraper + edits a setting (PUT replaces the row)
+    # the UI disables a scraper + edits a setting (PUT replaces the row). ports are a hard requirement.
     code, body = server.dispatch("PUT", ["sources", "varsha"],
-                                 {"enabled": False, "adapter": "varsha", "source_code": "var",
-                                  "vendor": "Varsha Stones"})
+                                 {"enabled": False,  "source_code": "var",
+                                  "vendor": "Varsha Stones", "ports": ["Brindisi"]})
     assert code == 200 and body["enabled"] is False
     assert store.enabled_names() == {"polonine"}   # varsha no longer runs
 
@@ -277,7 +275,7 @@ def test_put_rejects_a_source_with_no_coded_adapter(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))
     code, body = server.dispatch("PUT", ["sources", "ghost_vendor"],
-                                 {"adapter": "ghost", "source_code": "gho", "vendor": "Ghost"})
+                                 {"source_code": "gho", "vendor": "Ghost"})
     assert code == 400 and "coded adapter" in body["error"]
     assert store.get_row("ghost_vendor") is None                     # never created
 
@@ -289,14 +287,32 @@ def test_put_rejects_a_duplicate_source_code(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))              # polonine=pol, varsha=var
     code, body = server.dispatch("PUT", ["sources", "varsha"],
-                                 {"adapter": "varsha", "source_code": "pol", "vendor": "V"})
+                                 {"source_code": "pol", "vendor": "V"})
     assert code == 400 and "source_code" in body["error"]
     assert store.get_row("varsha")["source_code"] == "var"           # unchanged
 
     # editing a real coded source with its OWN (unique) code still works
     code, body = server.dispatch("PUT", ["sources", "varsha"],
-                                 {"adapter": "varsha", "source_code": "var", "vendor": "Renamed"})
+                                 {"source_code": "var", "vendor": "Renamed",
+                                  "ports": ["Brindisi"]})
     assert code == 200 and body["vendor"] == "Renamed"
+
+
+def test_put_rejects_a_source_with_no_ports(tmp_path, monkeypatch):
+    # ports are a hard requirement set by the admin (Medusa derives a product's ports from the supplier's
+    # ports; without them it falls back to a whole-country port list). A save with no ports is refused.
+    from stone_pipeline.config import server
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.seed_from_yaml(yaml_path=_seed_yaml(tmp_path))
+    for bad in ({"source_code": "var", "vendor": "V"},          # ports absent
+                {"source_code": "var", "vendor": "V", "ports": []},        # empty
+                {"source_code": "var", "vendor": "V", "ports": ["  "]}):   # blank
+        code, body = server.dispatch("PUT", ["sources", "varsha"], bad)
+        assert code == 400 and "port" in body["error"].lower()
+    # with a port it saves
+    code, body = server.dispatch("PUT", ["sources", "varsha"],
+                                 {"source_code": "var", "vendor": "V", "ports": ["Brindisi"]})
+    assert code == 200
 
 
 # --- per-source pipeline diagnostics (Phase 1b) -------------------------------
@@ -369,7 +385,7 @@ def test_evaluate_from_outputs_records_once_and_skips_replays(tmp_path, monkeypa
     from stone_pipeline.config.sources import SourceConfig
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(admission, "_certified", lambda *a, **k: True)      # skip live certify in the unit
-    store.upsert_source(SourceConfig(source="polonine", adapter="polonine", source_code="pol", mode="review"))
+    store.upsert_source(SourceConfig(source="polonine",  source_code="pol", mode="review"))
     outputs = tmp_path / "outputs"
     _fake_run(outputs, "polonine")
     assert admission.evaluate_from_outputs(outputs_dir=outputs) == 1        # one source newly processed
@@ -383,9 +399,9 @@ def test_enhance_flag_defaults_on_and_round_trips(tmp_path):
     # `watermarked`. No env var -- purely config-store driven.
     from stone_pipeline.config.sources import SourceConfig
     p = tmp_path / "config.db"
-    store.upsert_source(SourceConfig(source="a", adapter="a"), path=p)
+    store.upsert_source(SourceConfig(source="a"), path=p)
     assert store.read_sources(p)["a"].enhance is True                   # default ON
-    store.upsert_source(SourceConfig(source="b", adapter="a", enhance=False), path=p)
+    store.upsert_source(SourceConfig(source="b",  enhance=False), path=p)
     assert store.read_sources(p)["b"].enhance is False                  # per-source OFF
     row = store.get_row("b", p)
     assert row["enhance"] is False                                      # exposed to the admin UI
