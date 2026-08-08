@@ -131,16 +131,6 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             result, code = lifecycle.rebuild_curation()
             return code, result
         return 405, {"error": "POST /config/v1/curation/rebuild to reseed the base + re-derive the catalog"}
-    if segments and segments[0] == "reserve-stranded-images":
-        # TEMPORARY one-off backfill -- REMOVE after use. Re-serve the "stranded image" class: imaged +
-        # synced variants whose Key shows an empty Image in the current Medusa export (they acked the
-        # image-inclusive hash but Medusa dropped the image on ingest, so they never self-heal). Bumps them
-        # dirty so the next pull re-serves them through the fixed ingest. Runs on the live in-cluster ledger.
-        if method == "POST":
-            from stone_pipeline.ledger.reserve import reserve_stranded_images
-            from stone_pipeline.ledger.writethrough import open_ledger
-            return 200, reserve_stranded_images(open_ledger())
-        return 405, {"error": "POST /config/v1/reserve-stranded-images to re-serve stranded imaged variants"}
     if segments and segments[0] == "purge":
         # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
         # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
