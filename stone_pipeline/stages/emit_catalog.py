@@ -18,7 +18,7 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category, category_for_key
+from stone_pipeline.config.settings import SETTINGS, active_categories, category_for_key
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
     clean_alias_list,
