@@ -153,7 +153,7 @@ SSRF guard (`io/ssrf.py`), setuptools≥78.1.1, all GitHub Actions SHA-pinned, L
 ```bash
 python -m stone_pipeline.build                 # scrape→catalog→tree→gate
 SRC=<src> WATERMARKED=<bool> python -m deploy.reprocess_source   # re-clean a source's images in place
-python -m deploy.cleanup_images [--apply]      # prune images not in the catalog (S3 hygiene; dry-run default)
+# image reclamation is via the reset/wipe flows only (deploy.cleanup_images.wipe_*), never a catalog diff
 aws ecs run-task ... --no-cli-pager            # run-task can HANG without --no-cli-pager
 ```
 - `dewatermarked=True` ≠ removed — verify by eye. · Settings changes don't retroactively reprocess (do it explicitly).

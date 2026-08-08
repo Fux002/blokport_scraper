@@ -5,9 +5,9 @@ The image pipeline (Stage 7 / GPU reprocess) may classify every scraped image of
 that the full pipeline reacts to WITHOUT ever inspecting pixels. Ownership is split cleanly:
 
 - Image pipeline owns: the pixel classification, the durable discard set (content-hash + source-URL, in the
-  image manifest, so a re-scrape skips re-classification), the provenance (classifier id, score, reason),
-  and cleaning a now-stale `{Key}.png` via `deploy/cleanup_images.py` (products-only, guarded -- never
-  ad-hoc `aws s3 rm`).
+  image manifest, so a re-scrape skips re-classification), and the provenance (classifier id, score, reason).
+  Stale product images are reclaimed only by the explicit reset/wipe flows (`deploy/cleanup_images.py`
+  `wipe_*`, products-only, guarded, scrape-paired) -- never a catalog diff, never ad-hoc `aws s3 rm`.
 - Full pipeline owns: reacting to the state. Implemented here.
 
 ## What the full pipeline now does (implemented + tested)
