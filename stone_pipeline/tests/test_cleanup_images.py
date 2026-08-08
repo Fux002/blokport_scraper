@@ -7,8 +7,14 @@ from deploy import cleanup_images
 from stone_pipeline.config.settings import ENV_SEGMENT
 
 
+class _NoSuchKey(Exception):
+    """boto3-shaped absence (response Error Code), so the fake exercises the real absence-vs-error branch."""
+    response = {"Error": {"Code": "NoSuchKey"}}
+
+
 class _FakeS3:
-    """Minimal in-memory S3: paginated list-by-prefix + delete_objects. Records deletes for assertions."""
+    """Minimal in-memory S3: paginated list-by-prefix + delete_objects. Records deletes for assertions.
+    get_object raises a NoSuchKey-shaped error on an absent key, exactly as real S3 does."""
 
     def __init__(self, keys, bodies=None):
         self.keys = set(keys)
@@ -34,7 +40,7 @@ class _FakeS3:
     def get_object(self, Bucket, Key):
         import io
         if Key not in self.bodies:
-            raise Exception("NoSuchKey")
+            raise _NoSuchKey()
         return {"Body": io.BytesIO(self.bodies[Key])}
 
     def put_object(self, Bucket, Key, Body, ContentType=None):
@@ -163,3 +169,44 @@ def test_wipe_all_also_deletes_raw_root_objects():
     assert not any(k.startswith(f"{seg}/products/") for k in fake.keys)   # every product image gone
     assert f"{seg}/variations/x.png" in fake.keys                        # texture kept
     assert counts["raw_root"] == 1
+
+
+# -- fail-loud on the DESTRUCTIVE main() delete path (never delete against a stale/erroring reference) -----
+
+class _Denied(Exception):
+    response = {"Error": {"Code": "AccessDenied"}}
+
+
+def test_catalog_text_fails_loud_on_s3_error_instead_of_a_local_fallback():
+    # The published S3 catalog is the authoritative reference set; a real fetch error must raise, never
+    # silently read a possibly-stale local file (which would under-count refs and over-delete live images).
+    class _DenyingS3:
+        def get_object(self, **_kw):
+            raise _Denied()
+
+    with pytest.raises(_Denied):
+        cleanup_images._catalog_text(_DenyingS3(), override=None)
+
+
+def test_main_aborts_without_deleting_when_the_manifest_read_errors(monkeypatch):
+    seg = ENV_SEGMENT
+    aaa, bbb = "a" * 64, "b" * 64
+    catalog_key = f"{seg}/scraper/to_upload/3_products_all.csv"
+    manifest_key = f"{seg}/products/_manifest.json"
+    # catalog references improved/varsha/aaa -> bbb is unreferenced (would normally be deleted)
+    catalog = f"Key,Image\nx,https://b/{seg}/products/improved/varsha/{aaa}.jpg\n"
+
+    class _DenyManifest(_FakeS3):
+        def get_object(self, Bucket, Key):
+            if Key == manifest_key:            # a real (non-absence) error on the manifest read
+                raise _Denied()
+            return super().get_object(Bucket, Key)
+
+    fake = _DenyManifest(
+        keys=[f"{seg}/products/improved/varsha/{aaa}.jpg", f"{seg}/products/improved/varsha/{bbb}.jpg"],
+        bodies={catalog_key: catalog.encode()})
+    monkeypatch.setattr(cleanup_images.boto3, "client", lambda *a, **k: fake)
+    monkeypatch.setattr(cleanup_images.sys, "argv", ["cleanup_images", "--apply"])
+    with pytest.raises(_Denied):
+        cleanup_images.main()
+    assert fake.deleted == []       # aborted on the manifest read, BEFORE any object delete

@@ -24,6 +24,7 @@ import sys
 import boto3
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+from stone_pipeline.io.storage import s3_error_is_missing
 
 _REF = re.compile(r"/improved/([a-z]+)/([0-9a-f]{64})\.jpg")
 _MANIFEST_KEY = f"{ENV_SEGMENT}/products/_manifest.json"
@@ -153,8 +154,10 @@ def _prune_manifest_for_source(client, source: str, products_root: str, dry_run:
         key = f"{products_root}{name}"
         try:
             man = json.loads(client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
-        except Exception:
-            continue                                      # this manifest absent -> nothing to prune
+        except Exception as exc:
+            if s3_error_is_missing(exc):
+                continue                                  # this manifest absent -> nothing to prune
+            raise                                         # a real S3 error must surface, not silently skip
         kept = {u: v for u, v in man.items() if not any(m in (v or "") for m in markers)}
         n = len(man) - len(kept)
         pruned += n
@@ -165,17 +168,15 @@ def _prune_manifest_for_source(client, source: str, products_root: str, dry_run:
 
 
 def _catalog_text(client, override: str | None) -> str:
+    # The published S3 catalog is the AUTHORITATIVE reference set for a DESTRUCTIVE delete. A transient
+    # fetch error (throttle/timeout/IAM) must NOT silently fall back to a local file: a stale-but-non-empty
+    # local catalog under-counts references and passes the 0-refs guard, so live images would be deleted.
+    # Fail loud instead; pass --csv to supply a reference source explicitly.
     if override:
         return open(override, encoding="utf-8").read()
-    # prefer the published catalog on S3; fall back to the local export
-    try:
-        return client.get_object(
-            Bucket=S3_BUCKET, Key=f"{ENV_SEGMENT}/scraper/to_upload/3_products_all.csv"
-        )["Body"].read().decode("utf-8")
-    except Exception:
-        env = ENV_SEGMENT  # dev/prod -> development/production folder
-        local = f"to_upload/{'development' if env == 'dev' else 'production'}/3_products_all.csv"
-        return open(local, encoding="utf-8").read()
+    return client.get_object(
+        Bucket=S3_BUCKET, Key=f"{ENV_SEGMENT}/scraper/to_upload/3_products_all.csv"
+    )["Body"].read().decode("utf-8")
 
 
 def _referenced(text: str) -> set[tuple[str, str]]:
@@ -216,10 +217,16 @@ def main() -> int:
     for k in to_delete[:8]:
         print("   would delete:", k)
 
-    # manifest entries whose improved target is no longer referenced
+    # manifest entries whose improved target is no longer referenced. Loaded BEFORE the deletes below so a
+    # real read error aborts here rather than deleting objects and then silently skipping the prune (which
+    # would leave the manifest pointing at deleted keys -> a re-scrape reuses a dead url). Genuine absence
+    # (no manifest yet) -> empty, nothing to prune.
     try:
-        man = json.loads(client.get_object(Bucket=S3_BUCKET, Key=_MANIFEST_KEY)["Body"].read())
-    except Exception:
+        raw = client.get_object(Bucket=S3_BUCKET, Key=_MANIFEST_KEY)["Body"].read()
+        man = json.loads(raw)
+    except Exception as exc:
+        if not s3_error_is_missing(exc):
+            raise
         man = {}
     stale = {u for u, v in man.items() for m in [_REF.search(v or "")] if m and (m.group(1), m.group(2)) not in refs}
     print(f"manifest entries={len(man)}  stale_to_prune={len(stale)}")
