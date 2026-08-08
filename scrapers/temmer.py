@@ -167,13 +167,21 @@ class TemmerScraper(ScraperBase):
 
             self.log.info("  index page %d: %s", page_num, url)
             try:
-                html = self.get(url).text
-            except Exception:
-                # treat as past-the-last-page (the monolith stopped on 404)
-                self.log.info("  no more pages after page %d", page_num - 1)
+                resp = self.get(url, allow_missing=True)
+            except Exception as exc:
+                # A real transient/persistent fetch failure is NOT end-of-pagination -- reading it as one
+                # would silently drop the rest of the category and look like a clean run (products then read
+                # as discontinuations). Mark the run INCOMPLETE so it is not ingested as authoritative, and
+                # stop this category. Only a 404 (resp is None below) is a legitimate past-the-last-page stop.
+                self.record_failure("http_index", category=cat_slug, page=page_num, url=url, error=str(exc))
+                self.mark_incomplete(f"index fetch failed for {cat_slug} page {page_num}: {exc}")
+                break
+            if resp is None:
+                # 404 -> WooCommerce returns this for a page past the last one: a genuine end-of-pagination.
+                self.log.info("  no more pages after page %d (404)", page_num - 1)
                 break
 
-            page_hits = list(set(PRODUCT_LINK_RE.findall(html)))
+            page_hits = list(set(PRODUCT_LINK_RE.findall(resp.text)))
             new_count = 0
             for link in page_hits:
                 link = link.rstrip("/") + "/"

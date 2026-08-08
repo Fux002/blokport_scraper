@@ -88,18 +88,19 @@ def _load_manifest(backend) -> dict[str, str]:
     """Persisted source_url -> public_url map (cross-run idempotency on the URL).
     A URL processed in a prior scrape is reused as-is -- never re-downloaded or
     re-processed -- so repeated scrapes of the same products never duplicate an
-    already-processed image, even if the supplier re-encodes the bytes."""
-    try:
-        raw = backend.get(_MANIFEST_KEY)
-    except Exception:
-        raw = None
+    already-processed image, even if the supplier re-encodes the bytes.
+
+    This map is rewritten with overwrite=True at the end of the run, so a silent
+    empty read here would WIPE the whole cross-run idempotency map. `backend.get`
+    returns None only for a genuine absence (fresh env) and RAISES on any real S3
+    error, and a corrupt manifest raises here -- both fail loud rather than wipe."""
+    raw = backend.get(_MANIFEST_KEY)
     if not raw:
-        return {}
-    try:
-        data = json.loads(raw.decode("utf-8"))
-        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+        return {}                                    # genuinely absent -> fresh env, start empty
+    data = json.loads(raw.decode("utf-8"))           # corrupt manifest fails loud, never silently wiped
+    if not isinstance(data, dict):
+        raise ValueError(f"image manifest {_MANIFEST_KEY} is not a JSON object")
+    return {str(k): str(v) for k, v in data.items()}
 
 
 def _save_manifest(backend, manifest: dict[str, str]) -> None:

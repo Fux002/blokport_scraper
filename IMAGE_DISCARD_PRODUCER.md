@@ -48,11 +48,13 @@ sha set. Both the passthrough and s3/local paths skip a url whose embedded sha i
 TERMINAL (`no_publishable_image`) only when EVERY scraped image is discarded -- none survived and none
 merely held/failed (those stay transient `no_image`, retried). Exactly one flag per imageless row.
 
-### 5. Cleanup is automatic
-A discarded product image becomes unreferenced (Stage 7 stops linking it), so `deploy/cleanup_images.py`
-prunes it on its normal catalog sweep. That tool sweeps `improved/` + `scraped/` ONLY, never the
-`discarded/` markers, so the memory survives. NB: this is the scraped-photo pool, distinct from the FAL
-`variations/{Key}.png` variant textures (a separate pool, untouched by discard). No ad-hoc `aws s3 rm`.
+### 5. Cleanup is reset-driven, never a catalog diff
+A discarded product image simply stops being linked (Stage 7). Its bytes are reclaimed only when the
+source's images are wiped by an explicit reset (`deploy/cleanup_images.py` `wipe_*`), after which a
+re-produce re-hosts exactly what the current scrape wants -- so an in-flight image (scraped and awaiting
+enhancement, or enhanced and awaiting minting) is never deleted. The `discarded/` markers are never wiped
+by a per-source/global product wipe on their own path, so the memory survives. NB: the scraped-photo pool
+is distinct from the FAL `variations/{Key}.png` variant textures (untouched by discard). No ad-hoc `aws s3 rm`.
 
 ### 6. Config + deploy + tests
 - `config/settings.py` `ImageProcessingConfig`: `classify`, `classify_model`, `classify_margin`,

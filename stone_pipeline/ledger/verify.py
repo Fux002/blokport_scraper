@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import csv
 import filecmp
-import sys
 import tempfile
 from pathlib import Path
 

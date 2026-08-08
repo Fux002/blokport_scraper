@@ -7,8 +7,14 @@ from deploy import cleanup_images
 from stone_pipeline.config.settings import ENV_SEGMENT
 
 
+class _NoSuchKey(Exception):
+    """boto3-shaped absence (response Error Code), so the fake exercises the real absence-vs-error branch."""
+    response = {"Error": {"Code": "NoSuchKey"}}
+
+
 class _FakeS3:
-    """Minimal in-memory S3: paginated list-by-prefix + delete_objects. Records deletes for assertions."""
+    """Minimal in-memory S3: paginated list-by-prefix + delete_objects. Records deletes for assertions.
+    get_object raises a NoSuchKey-shaped error on an absent key, exactly as real S3 does."""
 
     def __init__(self, keys, bodies=None):
         self.keys = set(keys)
@@ -34,7 +40,7 @@ class _FakeS3:
     def get_object(self, Bucket, Key):
         import io
         if Key not in self.bodies:
-            raise Exception("NoSuchKey")
+            raise _NoSuchKey()
         return {"Body": io.BytesIO(self.bodies[Key])}
 
     def put_object(self, Bucket, Key, Body, ContentType=None):
@@ -163,3 +169,20 @@ def test_wipe_all_also_deletes_raw_root_objects():
     assert not any(k.startswith(f"{seg}/products/") for k in fake.keys)   # every product image gone
     assert f"{seg}/variations/x.png" in fake.keys                        # texture kept
     assert counts["raw_root"] == 1
+
+
+def test_prune_manifest_fails_loud_on_a_real_s3_error(monkeypatch):
+    # wipe_source prunes the shared manifest; a genuine absence (backup manifest) is skipped, but a REAL
+    # S3 error on the manifest read must surface, never be silently swallowed into "nothing to prune".
+    class _Denied(Exception):
+        response = {"Error": {"Code": "AccessDenied"}}
+
+    seg = ENV_SEGMENT
+    keys, _bodies = _seed_multi(seg)
+
+    class _DenyManifest(_FakeS3):
+        def get_object(self, Bucket, Key):
+            raise _Denied()
+
+    with pytest.raises(_Denied):
+        cleanup_images.wipe_source_product_images("varsha", client=_DenyManifest(keys), dry_run=True)

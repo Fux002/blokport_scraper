@@ -18,18 +18,23 @@ set -euo pipefail
 #                       writing into improved/ in place (no scrape). Slice with
 #                       SLICE_OFFSET / SLICE_COUNT to parallelise across tasks.
 RUN_MODE="${RUN_MODE:-pipeline}"
-if [ "$RUN_MODE" = "validate-dewatermark" ]; then
-  echo "==> de-watermark validation sample (no scrape)"
-  exec python -m deploy.validate_dewatermark
-fi
-if [ "$RUN_MODE" = "reprocess" ]; then
-  echo "==> reprocess a source's scraped/ originals -> improved/ (no scrape)"
-  exec python -m deploy.reprocess_source
-fi
-if [ "$RUN_MODE" = "generate-textures" ]; then
-  echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> dev/variations/), no scrape"
-  exec python -m stone_pipeline.prepare_variant_images
-fi
+# Explicit dispatch: an UNKNOWN mode must fail loud, never silently fall through to the full pipeline
+# (a typo like 'reprocesss' would otherwise trigger a full scrape + catalog rebuild + S3 upload).
+case "$RUN_MODE" in
+  pipeline) ;;   # the default full run, handled below
+  validate-dewatermark)
+    echo "==> de-watermark validation sample (no scrape)"
+    exec python -m deploy.validate_dewatermark ;;
+  reprocess)
+    echo "==> reprocess a source's scraped/ originals -> improved/ (no scrape)"
+    exec python -m deploy.reprocess_source ;;
+  generate-textures)
+    echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> dev/variations/), no scrape"
+    exec python -m stone_pipeline.prepare_variant_images ;;
+  *)
+    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: pipeline | validate-dewatermark | reprocess | generate-textures)" >&2
+    exit 2 ;;
+esac
 
 ENV_NAME="${BLOKPORT_ENV:-development}"
 echo "==> blokport scraper run | env=${ENV_NAME} image_mode=${BLOKPORT_IMAGE_MODE:-passthrough} processing=${BLOKPORT_IMAGE_PROCESSING:-false}"
