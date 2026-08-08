@@ -1,5 +1,5 @@
 polonine:
-  adapter_version: 1.0.0
+  adapter_version: 1.1.0
   required_columns:
   - product_id
   - material
@@ -53,7 +53,7 @@ polonine:
     product_id: ^\d+$
   row_baseline: 303
 marenostone:
-  adapter_version: 1.0.0
+  adapter_version: 1.2.0
   required_columns:
   - product_id
   - name
@@ -109,7 +109,7 @@ marenostone:
   value_patterns: {}
   row_baseline: 264
 zucchi:
-  adapter_version: 1.0.0
+  adapter_version: 1.1.0
   required_columns:
   - bundle_id
   - product_name_en
@@ -164,7 +164,7 @@ zucchi:
   value_patterns: {}
   row_baseline: 2431
 varsha:
-  adapter_version: 1.0.0
+  adapter_version: 1.4.0
   required_columns:
   - bundle_id
   - material_name
