@@ -158,3 +158,40 @@ def test_combinations_baseline_restores_from_the_published_key(monkeypatch):
     assert snapshot.restore_combinations_baseline() is True
     assert seen["key"] == "dev/scraper/to_upload/2_valid_combinations.csv"        # published prefix (dev)
     assert seen["path"].endswith("to_upload/development/2_valid_combinations.csv")  # local dir (development)
+
+
+def test_wipe_artifacts_drops_both_trees_local_and_s3(tmp_path, monkeypatch):
+    # A pristine reset must clear the cached scrape (data/ + outputs/) LOCALLY and its S3 snapshots, so a
+    # later republish/catalog cannot re-mint from it and a cold boot cannot restore it.
+    deleted: list[str] = []
+    fake = _FakeS3()
+    fake.delete_object = lambda Bucket, Key: deleted.append(Key)   # idempotent no-op that records the key
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+
+    out_dir = tmp_path / "outputs"; data_dir = tmp_path / "data"
+    (out_dir / "marenostone").mkdir(parents=True)
+    (out_dir / "marenostone" / "canonical.parquet").write_text("x")
+    (data_dir / "marenostone" / "t").mkdir(parents=True)
+    (data_dir / "marenostone" / "t" / "products.csv").write_text("y")
+
+    res = snapshot.wipe_artifacts(env="development", outputs_dir=out_dir, data_dir=data_dir)
+
+    assert not out_dir.exists() and not data_dir.exists()          # both local trees gone
+    assert set(deleted) == {snapshot.artifacts_key("outputs", "development"),
+                            snapshot.artifacts_key("data", "development")}   # both S3 snapshots deleted
+    assert res["local"] and len(res["s3"]) == 2
+
+    # idempotent: re-running with the trees already gone must not raise
+    snapshot.wipe_artifacts(env="development", outputs_dir=out_dir, data_dir=data_dir)
+
+
+def test_wipe_artifacts_tolerates_a_missing_s3_snapshot(tmp_path, monkeypatch):
+    # delete_object never errors on an absent key in real S3; a genuine error is logged, not raised.
+    class _Boom(_FakeS3):
+        def delete_object(self, Bucket, Key):
+            raise RuntimeError("s3 down")
+    monkeypatch.setattr(snapshot, "_s3", lambda: _Boom())
+    # no local trees, S3 raises -> still returns (best-effort), never raises
+    res = snapshot.wipe_artifacts(env="development",
+                                  outputs_dir=tmp_path / "nope_out", data_dir=tmp_path / "nope_data")
+    assert res["s3"] == []   # nothing recorded as deleted, but no exception escaped
