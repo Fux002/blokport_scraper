@@ -354,6 +354,16 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()
                 out["base_reseed"] = _reseed_base_from_pristine()   # S0: the base file itself starts pristine
+                # Also drop the cached scrape (raw scrapes + canonical parquets, local AND S3 snapshots): a
+                # factory reset returns to the seed, so a later republish/catalog must not re-mint from the
+                # pre-reset scrape, and a cold boot must not restore it. Best-effort + LOUD (never fails the
+                # reset -- the ledger/base are already reset).
+                try:
+                    from stone_pipeline.ledger import snapshot
+                    out["artifacts_wiped"] = snapshot.wipe_artifacts()
+                except Exception as exc:
+                    log.exception("reset: scrape-artifact wipe FAILED; a stale scrape may remain")
+                    out["artifacts_wiped"] = {"error": f"wipe failed, scrape cache kept: {exc}"}
             out["config"] = config
         if hard:
             # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces

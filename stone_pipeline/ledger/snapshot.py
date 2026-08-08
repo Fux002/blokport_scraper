@@ -214,6 +214,36 @@ def restore_artifacts(env: str = ENV_NAME) -> None:
     restore_tree(SETTINGS.paths.data_dir, artifacts_key("data", env))
 
 
+def wipe_artifacts(env: str = ENV_NAME, outputs_dir=None, data_dir=None) -> dict:
+    """Drop the scrape-artifact trees (raw scrapes `data/` + canonical parquets `outputs/`) BOTH locally
+    AND their S3 snapshots, so a PRISTINE (factory) reset leaves no cached scrape behind. Without this a
+    later `republish` (re-runs the pipeline from `data/`) or `catalog` (re-consolidates `outputs/`)
+    re-mints varieties from the pre-reset scrape, and a cold boot's restore_artifacts brings the snapshot
+    back -- so a factory reset would not actually return to the seed. Both trees + both locations are the
+    exact set save/restore_artifacts cover. Best-effort + LOUD (mirrors save_tree): a failure is logged,
+    never raised, so it cannot fail the reset. Returns what was removed. `outputs_dir`/`data_dir` default
+    to SETTINGS.paths (overridable for tests so it never touches the real trees)."""
+    import shutil
+
+    from stone_pipeline.config.settings import SETTINGS
+    removed: dict = {"local": [], "s3": []}
+    for tree, path in (("outputs", outputs_dir or SETTINGS.paths.outputs_dir),
+                       ("data", data_dir or SETTINGS.paths.data_dir)):
+        p = Path(path)
+        if p.exists():
+            shutil.rmtree(p, ignore_errors=True)          # regenerable + gitignored -> safe to drop wholesale
+            removed["local"].append(str(p))
+        key = artifacts_key(tree, env)
+        try:
+            _s3().delete_object(Bucket=S3_BUCKET, Key=key)  # idempotent: no error when the object is absent
+            removed["s3"].append(key)
+        except Exception:
+            log.exception("artifact snapshot delete failed (non-fatal)",
+                          extra={"extra_fields": {"key": key}})
+    log.info("scrape-artifact cache wiped (pristine reset)", extra={"extra_fields": removed})
+    return removed
+
+
 # -- combinations delta baseline ----------------------------------------------
 # tree_build emits the incremental 2_valid_combinations_update.csv by diffing the new set against the
 # PREVIOUS build's to_upload/2_valid_combinations.csv. On a cold task that file is gone, so the "delta"

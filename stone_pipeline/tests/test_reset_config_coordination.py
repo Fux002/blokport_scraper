@@ -82,12 +82,19 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     the next produce derives the catalog purely from the committed seed (no mint/alias/approve/retire
     re-applies). Registered sources are left alone."""
     from stone_pipeline import lifecycle
+    from stone_pipeline.ledger import snapshot
+    from deploy import cleanup_images
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
     _seed_config(tmp_path, monkeypatch)
     store.seed_from_yaml(yaml_path=yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
+    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})   # global hard wipes images
+    # guard the real scrape-cache wipe (rmtree + S3) behind a recorder, so the test never touches real dirs
+    wiped: list[bool] = []
+    monkeypatch.setattr(snapshot, "wipe_artifacts",
+                        lambda **k: (wiped.append(True), {"local": ["outputs", "data"], "s3": ["k1", "k2"]})[1])
 
     out, code = lifecycle.reset(sources=None, pristine=True)
     assert code == 200 and out["mode"] == "pristine"
@@ -101,6 +108,26 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     assert store.load_retired() == set()
     # the registered source survives -- scraping still works
     assert "polonine" in store.read_sources()
+    # a pristine reset ALSO wipes the cached scrape (else a later republish/catalog re-mints from it)
+    assert wiped == [True] and out["artifacts_wiped"]["s3"] == ["k1", "k2"]
+
+
+def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch):
+    """Only a PRISTINE (factory) reset clears the cached scrape. A hard/soft reset keeps it, so a targeted
+    republish still works -- wiping it there would break the "release without re-scrape" flow."""
+    from stone_pipeline import lifecycle
+    from stone_pipeline.ledger import snapshot
+    from deploy import cleanup_images
+
+    _seed_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
+    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})   # global hard wipes images
+    wiped: list[bool] = []
+    monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: (wiped.append(True), {})[1])
+
+    lifecycle.reset(sources=None, hard=True)          # global HARD (not pristine)
+    lifecycle.reset(sources=None, hard=False)         # global SOFT
+    assert wiped == []                                # neither touched the scrape cache
 
 
 def test_publish_base_to_import_targets_the_to_upload_namespace(monkeypatch):
