@@ -116,3 +116,18 @@ def test_gate_stays_fatal_on_error_outside_the_new_variety_class(monkeypatch):
 def test_gate_keeps_failure_if_no_errors_surface(monkeypatch):
     # build failed for some non-gate reason (verify_consistency clean) -> keep the original failure
     assert _reconcile(monkeypatch, [], held=225, untyped=0) == 1
+
+
+# empty-export cold start: verify_consistency returns ONLY the "cannot verify" error (nothing to check
+# against yet). tree_build already treats this as a soft cold start; the gate must too -- rescued when the
+# ledger confirms new varieties, fatal otherwise (a warm run whose export genuinely broke with nothing new).
+EMPTY_EXPORT_ERROR = ["variants_export.csv is missing or has no Ids -- cannot verify"]
+
+
+def test_gate_held_on_empty_export_cold_start_with_new_varieties(monkeypatch):
+    assert _reconcile(monkeypatch, EMPTY_EXPORT_ERROR, held=12181, untyped=0) == 0
+
+
+def test_gate_stays_fatal_on_empty_export_when_nothing_new_explains_it(monkeypatch):
+    # export empty but the ledger has no held new varieties -> a genuinely broken warm export -> fatal
+    assert _reconcile(monkeypatch, EMPTY_EXPORT_ERROR, held=0, untyped=0) == 1

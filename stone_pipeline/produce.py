@@ -80,10 +80,14 @@ def _live_scrape(sources: list[str] | None) -> int:
     return scrapers_run.main(scraper_sources)
 
 
-# The catalog consistency gate keys off variants_export.csv, so it FALSE-ALARMS on varieties minted
-# THIS produce (no Medusa id yet). These two error classes are that expected two-pass checkpoint; any
-# error OUTSIDE them keeps the gate fatal.
-_NEW_VARIETY_MARKERS = ("NOT in the current export", "NO valid-combination row")
+# The catalog consistency gate keys off variants_export.csv, so it FALSE-ALARMS on the two-pass pull
+# checkpoint: (1) varieties minted THIS produce have no Medusa id yet ("NOT in the current export" /
+# "NO valid-combination row"), and (2) a PRISTINE cold start has an EMPTY export, so the gate cannot
+# verify anything against it ("cannot verify") -- the same condition tree_build already treats as a soft
+# cold start (it writes empty combinations so the variants flow to Medusa). All three are rescued ONLY
+# when the ledger confirms new variations explain them (held > 0); any error OUTSIDE this class, or
+# held == 0 (e.g. a warm run whose export genuinely broke, with nothing new), keeps the gate fatal.
+_COLD_START_MARKERS = ("NOT in the current export", "NO valid-combination row", "cannot verify")
 
 
 def _ledger_gate_state() -> tuple[int, int]:
@@ -127,8 +131,8 @@ def _reconcile_gate(rc: int) -> int:
     errors, _ = catalog_mod.verify_consistency()
     if not errors:
         return rc                                   # gate isn't why build failed -- keep the failure
-    if any(not any(m in e for m in _NEW_VARIETY_MARKERS) for e in errors):
-        return rc                                   # an error outside the new-variety class -> fatal
+    if any(not any(m in e for m in _COLD_START_MARKERS) for e in errors):
+        return rc                                   # an error outside the cold-start/new-variety class -> fatal
     held, untyped = _ledger_gate_state()
     if not held:
         return rc                                   # nothing new explains the failure -> stay fatal
