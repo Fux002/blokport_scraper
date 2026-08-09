@@ -127,16 +127,27 @@ class MarenoStoneScraper(ScraperBase):
 
     def list_products(self) -> Iterable[Any]:
         page = 1
+        total_pages = None
         while True:
             r = self.get(API_URL, params={"page": page, "per_page": PER_PAGE})
+            if total_pages is None:
+                # The WooCommerce Store API advertises the page count in a header. Use it so a
+                # mid-pagination empty/short response is caught as a TRUNCATED fetch, not mistaken for a
+                # clean end-of-list (which would be marked complete and silently delist the missing tail).
+                total_pages = int(r.headers.get("X-WP-TotalPages") or 0)
             batch = r.json()
             if not batch:
+                if total_pages and page <= total_pages:   # empty BEFORE the advertised end == truncation
+                    self.mark_incomplete(f"empty page {page} before advertised {total_pages}")
                 break
             self.log.info("fetched page %d: %d products", page, len(batch))
             yield from batch
-            if len(batch) < PER_PAGE:
-                break
             page += 1
+            if total_pages:
+                if page > total_pages:                    # fetched every advertised page -> clean end
+                    break
+            elif len(batch) < PER_PAGE:                   # no header advertised -> short-page end signal
+                break
 
     def _page_dims(self, url: str) -> tuple[dict, bool]:
         """Fetch the product page and read its real Length/Width/Thickness from the attributes table (the

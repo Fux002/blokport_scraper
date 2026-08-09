@@ -2,7 +2,7 @@
 
     python -m scrapers.run marenostone            # one
     python -m scrapers.run all                     # all (registry order)
-    python -m scrapers.run zucchi develi ferraz    # explicit order
+    python -m scrapers.run zucchi varsha           # explicit order
 
 Each scraper writes to data/<source>/<timestamp>/products.csv and declares its
 format (slab/block/tile) so blocks, slabs, and tiles are tagged correctly per
@@ -26,12 +26,15 @@ except ImportError:
     from base import ScraperBase
     _PKG = ""
 
-# ONE source of truth: add a scraper here (a single line) once its module defines a ScraperBase subclass.
-# The class is DISCOVERED from the module (mirrors adapter auto-discovery), so there is no import list or
-# class name to keep in sync. Order is the `all` run order. slabware (helper module) + stonevip (empty)
-# are not scrapers, so they are not listed.
-_SOURCES = ("marenostone", "polonine", "zucchi", "develi", "ferraz", "fulei",
-            "temmer", "tureks", "brumagran", "varsha")
+# ONE source of truth: the sources the runner scrapes. A source is listed ONLY once it is fully onboarded --
+# a ScraperBase module AND an adapter + config entry (NEW_SOURCE_CHECKLIST). The class is DISCOVERED from the
+# module (mirrors adapter auto-discovery), so there is no import list to keep in sync. Order is the `all` run
+# order. slabware (helper) + stonevip (empty) are not scrapers.
+# develi / ferraz / fulei / temmer / tureks / brumagran have ScraperBase modules but NO adapter/config yet, so
+# they are deliberately NOT listed: an adapter-less source can never reach the pipeline (stone_pipeline.run
+# builds its work list from the ADAPTER registry), and listing one here would only let a `scrape all` on an
+# unseeded box abort the whole produce on that dormant scraper's failure (rc=1). Add on full onboarding.
+_SOURCES = ("marenostone", "polonine", "zucchi", "varsha")
 
 
 def _discover(source: str) -> Type[ScraperBase]:
