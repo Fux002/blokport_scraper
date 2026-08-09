@@ -115,7 +115,14 @@ class PolonineScraper(ScraperBase):
         while True:
             batch = self._fetch_page(inicio)
             if not batch:
-                break
+                # SlabWare exposes no total, so a valid-but-empty 200 mid-pagination looks like the real end
+                # and would be marked COMPLETE (truncating the tail -> silent delist). Confirm with ONE
+                # re-fetch of the SAME offset before accepting the end; a transient empty resolves on the
+                # re-probe. (A real network error already raises out of _fetch_page before any complete marker.)
+                confirm = self._fetch_page(inicio)
+                if not confirm:
+                    break
+                batch = confirm
             self.log.info("batch inicio=%d: %d bundles", inicio, len(batch))
             yield from batch
             inicio += PAGE_SIZE

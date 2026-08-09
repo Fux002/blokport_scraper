@@ -144,8 +144,16 @@ class VarshaScraper(ScraperBase):
             self.log.info("batch inicio=%d", inicio)
             batch = self._fetch_page(inicio)
             if not batch:
-                self.log.info("empty batch at inicio=%d; done", inicio)
-                break
+                # The SlabWare list API exposes no total, so a valid-but-empty 200 mid-pagination is
+                # indistinguishable from the real end and would be marked COMPLETE (truncating the tail ->
+                # silent delist). Confirm with ONE re-fetch of the SAME offset before accepting the end;
+                # a transient empty resolves on the re-probe, a real end stays empty. (A genuine network
+                # error already raises out of _fetch_page and crashes before any complete marker is written.)
+                confirm = self._fetch_page(inicio)
+                if not confirm:
+                    self.log.info("empty batch confirmed at inicio=%d; done", inicio)
+                    break
+                batch = confirm
             yield from batch
             inicio += PAGE_SIZE
 
