@@ -127,6 +127,25 @@ variable "dev_require_enhanced" {
   description = "Enable BLOKPORT_REQUIRE_ENHANCED on dev produce + scheduled scrape: publish ONLY GPU-enhanced images. ON in dev: the enhanced/ markers are backfilled for the existing set. Prod uses its own var."
 }
 
+# Prod auto-flags: default OFF so a freshly-provisioned prod stack is quiet until deliberately enabled.
+variable "prod_auto_enhance" {
+  type        = bool
+  default     = false
+  description = "Enable BLOKPORT_AUTO_ENHANCE on the PROD produce (auto-submit the GPU reprocess for newly-staged images). Off until prod is validated."
+}
+
+variable "prod_auto_texture" {
+  type        = bool
+  default     = false
+  description = "Enable BLOKPORT_AUTO_TEXTURE on the PROD produce (auto-submit the GPU texture job for new-variant textures). Off until the prod :gpu image + FAL_KEY are wired and validated."
+}
+
+variable "prod_require_enhanced" {
+  type        = bool
+  default     = false
+  description = "Enable BLOKPORT_REQUIRE_ENHANCED on the PROD produce (publish ONLY GPU-enhanced images). Off until the prod enhanced/ markers are backfilled."
+}
+
 variable "alert_email" {
   type        = string
   default     = ""
