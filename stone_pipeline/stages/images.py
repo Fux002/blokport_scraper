@@ -104,11 +104,23 @@ def _load_manifest(backend) -> dict[str, str]:
 
 
 def _save_manifest(backend, manifest: dict[str, str]) -> None:
+    """Persist the source_url -> hosted-url manifest. Best-effort ONLY for a genuine persist failure
+    (S3/network/local-disk): the manifest is recoverable -- the next run re-derives it and content-addressed
+    images are not re-uploaded (backend.exists short-circuits), so a transient write failure must not fail
+    the produce. A programming error (a non-serializable manifest, a broken import) is NOT recoverable and
+    fails loud rather than being masked."""
+    payload = json.dumps(manifest, sort_keys=True).encode("utf-8")   # a non-serializable manifest -> fail loud
     try:
-        backend.put(_MANIFEST_KEY, json.dumps(manifest, sort_keys=True).encode("utf-8"),
-                    content_type="application/json", overwrite=True)
-    except Exception as exc:
-        log.warning("could not persist image manifest", extra={"extra_fields": {"error": str(exc)}})
+        backend.put(_MANIFEST_KEY, payload, content_type="application/json", overwrite=True)
+    except OSError as exc:                              # local-disk write failure: recoverable, best-effort
+        log.error("could not persist image manifest (best-effort; next run re-derives it)",
+                  extra={"extra_fields": {"error": str(exc)}})
+    except Exception as exc:                            # S3 path: swallow ONLY a boto/S3 error, else fail loud
+        import botocore.exceptions as be
+        if not isinstance(exc, (be.BotoCoreError, be.ClientError)):
+            raise
+        log.error("could not persist image manifest (best-effort; next run re-derives it)",
+                  extra={"extra_fields": {"error": str(exc)}})
 
 
 def _hosted_object_exists(backend, hosted_url: str) -> bool:
