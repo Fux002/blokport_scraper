@@ -27,7 +27,7 @@ log = logfmt.get_logger("io.storage")
 # The ONLY S3 error codes that mean "the object genuinely does not exist" (head_object returns 404,
 # get_object returns NoSuchKey). Every other error -- AccessDenied, throttling, a 5xx, a connection reset
 # -- is a real failure that must fail loud, never masquerade as absence (a silent absence read causes a
-# re-upload/re-process or, for the image manifest, a wipe). Single source of truth, shared with treat.py.
+# re-upload/re-process or, for the image manifest, a wipe). Single source of truth for absence-vs-failure.
 _S3_MISSING_CODES = ("404", "NoSuchKey")
 
 
