@@ -47,16 +47,19 @@ def _rows(q: str | None = None) -> list[dict]:
         sql += " AND name LIKE ? ESCAPE '\\'"
         params = (f"%{_like_escape(q)}%",)
     sql += " ORDER BY name COLLATE NOCASE"
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     out: list[dict] = []
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
         for r in lg.execute(sql, params):
             if r["key"] in retired:                   # retired varieties are not valid alias targets
                 continue
-            nrm = proj.norm(r["name"])
-            if nrm in seen:                           # one alias target per variety, across branches
+            # Dedup on (name, TYPE), not name alone: the slab/block/tile copies of ONE variety share both
+            # and collapse to a single alias target, but a legitimately multi-type name ('Coffee' = Marble
+            # AND Onyx) keeps BOTH as distinct targets -- else one stone is hidden from the alias dropdown.
+            key = (proj.norm(r["name"]), proj.norm(r["type"] or ""))
+            if key in seen:
                 continue
-            seen.add(nrm)
+            seen.add(key)
             out.append({"name": r["name"], "stone_type": r["type"] or ""})
     return out
 
