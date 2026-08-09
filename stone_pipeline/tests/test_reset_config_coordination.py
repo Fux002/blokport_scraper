@@ -77,6 +77,28 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
     assert store.load_retired() == {"slab_granite_x_uuid"}
 
 
+def test_global_reset_snapshots_both_stores_immediately_scoped_does_not(tmp_path, monkeypatch):
+    """GAP 3: a global reset mutates BOTH the ledger and config.db, so it must snapshot both immediately
+    (ledger then config) to shrink the cross-store tear window; a scoped reset leaves config.db alone, so it
+    snapshots neither. (The helpers are no-ops off the config server; here we record the calls directly.)"""
+    from stone_pipeline import lifecycle
+
+    yaml_path = tmp_path / "sources.yaml"
+    yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
+    _seed_config(tmp_path, monkeypatch)
+    store.seed_from_yaml(yaml_path=yaml_path)
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
+    calls: list[str] = []
+    monkeypatch.setattr(lifecycle, "_snapshot_ledger", lambda: calls.append("ledger"))
+    monkeypatch.setattr(lifecycle, "_snapshot_config", lambda: calls.append("config"))
+
+    lifecycle.reset(sources=["polonine"], hard=False)     # SCOPED -> config.db untouched -> no cross-store snapshot
+    assert calls == []
+
+    lifecycle.reset(sources=None, hard=False)             # GLOBAL -> snapshot BOTH, ledger first then config
+    assert calls == ["ledger", "config"]
+
+
 def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch):
     """The factory cold start: a normal reset KEEPS operator curation, but `pristine` also forgets it, so
     the next produce derives the catalog purely from the committed seed (no mint/alias/approve/retire

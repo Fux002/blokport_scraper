@@ -157,6 +157,19 @@ def _snapshot_config() -> None:
         log.debug("config snapshot after a lifecycle op skipped", exc_info=True)
 
 
+def _snapshot_ledger() -> None:
+    """Best-effort: snapshot the ledger to S3 right after a mutation -- the ledger-side mirror of
+    _snapshot_config. Same config-server-only guard, same best-effort. A global reset uses it so the ledger
+    reset is durable immediately, not only at the next periodic snapshot."""
+    if not _snapshot_on_mutation:
+        return
+    try:
+        from stone_pipeline.ledger import snapshot, writethrough
+        snapshot.save(writethrough.ledger_path())
+    except Exception:
+        log.debug("ledger snapshot after a lifecycle op skipped", exc_info=True)
+
+
 @contextmanager
 def _exclusive(name: str):
     """Hold the destructive-op slot for the block. Raises _Busy if another op holds it, or (after
@@ -383,7 +396,19 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
                 out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
         return out
 
-    return _ledger_op("reset", _do_reset)
+    result, code = _ledger_op("reset", _do_reset)
+    # A GLOBAL reset mutates BOTH stores (ledger reset/reseed AND the config.db overlay clear). Durability
+    # otherwise rides two independent per-process periodic snapshots, so a hard crash in that window could
+    # persist one store's reset but not the other (e.g. a fresh ledger + a stale operator overlay -> the next
+    # produce re-mints from the surviving decisions). Snapshot both immediately, back-to-back, mirroring
+    # pause/delist -- this shrinks the cross-store tear window from up to one snapshot interval to a single S3
+    # round-trip. Same `codes is None` gate as the config.db clear above (a scoped reset leaves config.db
+    # alone, so there is no cross-store tear to close). Best-effort + config-server-guarded: a no-op in tests
+    # / laptop / the produce subprocess, and a snapshot failure never fails the (already-committed) reset.
+    if code == 200 and codes is None:
+        _snapshot_ledger()
+        _snapshot_config()
+    return result, code
 
 
 def remove_source(name: str) -> tuple[dict, int]:
