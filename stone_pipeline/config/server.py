@@ -468,7 +468,7 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # BEFORE seeding, so a redeploy does not lose it and re-seed every source back to active. Restore is a
     # no-op when a local config.db already exists; the seed then only fills a genuinely first-ever run.
     config_db = store.config_db_path()
-    snapshot.restore_config(config_db)
+    snapshot.restore_config(config_db, required=True)   # durable: fail loud if a present snapshot won't fetch
     # RECONCILE the source list from yaml on EVERY boot (INSERT OR IGNORE, minus removed sources), not only
     # when config.db is absent. A restored partial/stale snapshot must NOT leave configured sources missing
     # (that returned an inconsistent /config/v1/sources); seed re-adds any missing yaml source while keeping
@@ -483,7 +483,7 @@ def serve(host: str | None = None, port: int = 8724) -> None:
                     extra={"extra_fields": {"sources": interrupted}})
     # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
     # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
-    snapshot.restore(writethrough.ledger_path())
+    snapshot.restore(writethrough.ledger_path(), required=True)   # durable: fail loud if present-but-unfetchable
     # Restore the last scrape's artifact trees (outputs_dir + data/) too: catalog/republish consume them
     # off the ephemeral disk, so without this a redeploy wipes the last scrape and they abort with "no
     # source runs". No-op when a local scrape already exists or none has been snapshotted yet.

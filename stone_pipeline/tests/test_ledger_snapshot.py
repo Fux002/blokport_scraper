@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from stone_pipeline.ledger import snapshot
 from stone_pipeline.ledger.db import Ledger, now_iso
 
@@ -22,6 +24,28 @@ class _FakeS3:
 
     def download_file(self, Bucket, Key, filename):
         Path(filename).write_bytes(self.store[(Bucket, Key)])
+
+
+class _HeadOkDownloadFailsS3(_FakeS3):
+    """head_object succeeds (the snapshot is present) but download_file raises -- the GAP-1 scenario:
+    a proven-present snapshot that will not fetch (transient throttle, or a race-delete after head)."""
+
+    def __init__(self, exc):
+        super().__init__()
+        self._exc = exc
+
+    def head_object(self, Bucket, Key):
+        return                                  # present, always
+
+    def download_file(self, Bucket, Key, filename):
+        raise self._exc
+
+
+def _s3_error(code: str) -> Exception:
+    """A boto-shaped error carrying an Error.Code, the field s3_error_is_missing reads."""
+    exc = Exception(code)
+    exc.response = {"Error": {"Code": code}}    # type: ignore[attr-defined]
+    return exc
 
 
 def _seed(path: Path, key: str) -> None:
@@ -64,6 +88,36 @@ def test_restore_never_clobbers_an_existing_ledger(tmp_path, monkeypatch):
 
 def test_restore_returns_false_when_no_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(snapshot, "_s3", lambda: _FakeS3())   # empty store
+    assert snapshot.restore(tmp_path / "development.db", env="development") is False
+    # ...and a required restore of a genuinely-absent snapshot still starts fresh (never a crash-loop)
+    assert snapshot.restore(tmp_path / "development.db", env="development", required=True) is False
+
+
+def test_required_restore_fails_loud_when_a_present_snapshot_wont_download(tmp_path, monkeypatch):
+    # GAP 1: head_object proved the snapshot exists but the download fails transiently. A required (durable
+    # system-of-record) restore must RAISE, not boot a fresh ledger -- booting fresh would let the guardless
+    # periodic save() clobber the good snapshot. ECS restarts the task and retries.
+    fake = _HeadOkDownloadFailsS3(_s3_error("SlowDown"))
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    dest = tmp_path / "development.db"
+    with pytest.raises(Exception):
+        snapshot.restore(dest, env="development", required=True)
+    assert not dest.exists()                                  # no partial/empty ledger left behind
+
+
+def test_required_restore_starts_fresh_when_snapshot_vanished_after_head(tmp_path, monkeypatch):
+    # If the object genuinely disappeared between head_object and download (404/NoSuchKey), starting fresh
+    # is correct even when required -- there is no snapshot left to lose, so do not crash-loop on it.
+    fake = _HeadOkDownloadFailsS3(_s3_error("NoSuchKey"))
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    assert snapshot.restore(tmp_path / "development.db", env="development", required=True) is False
+
+
+def test_non_required_restore_download_failure_stays_best_effort(tmp_path, monkeypatch):
+    # A non-required caller (the combinations baseline, the ops CLI) must never crash boot on a download
+    # failure -- it is an optimization, not the system of record.
+    fake = _HeadOkDownloadFailsS3(_s3_error("SlowDown"))
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     assert snapshot.restore(tmp_path / "development.db", env="development") is False
 
 

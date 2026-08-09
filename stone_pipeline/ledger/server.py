@@ -178,7 +178,7 @@ def serve(host: str | None = None, port: int = 8723) -> None:
     # C1: the ledger is on LOCAL (ephemeral) disk. On a cold task, restore the last S3 snapshot BEFORE
     # anything can create a fresh empty file (which would lose the acked ids); only then seed if still
     # absent. This server owns the periodic + on-stop snapshot (it shares the local volume with config).
-    snapshot.restore(path)
+    snapshot.restore(path, required=True)   # durable system-of-record: fail loud if a present snapshot won't fetch
     bootstrap_ledger_if_missing(path)
     snapshot.start_periodic(path)
     def _snapshot_on_term(*_):                  # ECS sends SIGTERM before stopping the task
