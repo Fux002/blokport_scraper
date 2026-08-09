@@ -42,6 +42,34 @@ def _would_clobber(incoming_lines: int, current_lines: int) -> bool:
     return current_lines > 0 and incoming_lines < current_lines * _MIN_KEEP_FRACTION
 
 
+def fetch_attributes(client=None, target=None) -> bool:
+    """Fetch ONLY attributes.csv (the attribute vocab) from S3 into from_medusa/<env>/, honoring the same
+    thin-copy floor as the full fetch. The config server calls this on BOOT so the review-decision endpoint
+    validates colours/types against Medusa's CURRENT set from container start. Without it a fresh container
+    (every deploy reverts the on-disk file to the committed baseline, which lags Medusa's newer colours)
+    rejects a just-added colour at mint until the next full produce re-fetches it. Best-effort: returns False
+    and keeps the committed copy on ANY error (a fresh/offline host still validates against a real seed).
+    Returns True iff a fresher copy was written. Downloads to a temp then atomically replaces. `target`
+    overrides the destination for tests (defaults to the live attributes_csv path)."""
+    key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
+    target = Path(target or SETTINGS.paths.attributes_csv)
+    tmp = target.with_suffix(target.suffix + ".incoming")
+    try:
+        client = client or boto3.client("s3", region_name=S3_REGION)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(S3_BUCKET, key, str(tmp))
+        # protected base: never let a thin S3 copy (Medusa mid-reset) replace the fuller committed seed
+        if target.exists() and _would_clobber(_line_count(tmp), _line_count(target)):
+            return False
+        tmp.replace(target)
+        return True
+    except Exception:
+        return False
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
 def main() -> int:
     prefix = f"{ENV_SEGMENT}/scraper/from_medusa/"
     dest = Path(SETTINGS.paths.from_medusa_dir)
