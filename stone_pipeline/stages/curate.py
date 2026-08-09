@@ -510,6 +510,20 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             "nearest_existing": _named_with_types(clean),
             "score": "", "model_prob": "", **_review_evidence(row)})
 
+    def _hold_retired(title: str, stone_type: str, obs_color: str, evidence: dict) -> None:
+        """Keep-retired-and-surface: a confirmed mint whose deterministic Key lands on a RETIRED variety.
+        Retirement is sticky, so do NOT silently skip it (its rows would gap every run with no signal) nor
+        let it slip into the update delta -- surface an explicit un-retire decision instead. It stays retired
+        until the operator un-retires it (POST /config/v1/variations/<key>/un_retire), after which the next
+        produce matches it normally. Mirrors the other _hold_* surfacing; never mints, never writes a delta."""
+        pending_confirm.append({
+            "confirm": "", "variant": title,
+            "reason": f"'{title}' was previously RETIRED. Un-retire it to bring it back; it will not be "
+                      f"re-created otherwise.",
+            "stone_type": title_case(stone_type), "color": title_case(obs_color or ""),
+            "nearest_existing": _named_with_types(title),
+            "score": "", "model_prob": "", **evidence})
+
     def _mint(clean: str, stone_type: str, row, gap) -> None:
         """Create a NEW variety row (clean + stone_type) -- the PHASE 5 last-resort mint. Shared with the
         BUG6 confirm path so an operator's confirmed NEW type on an existing multi-type name mints DIRECTLY,
@@ -825,6 +839,16 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                                     "stone_type": "", "color": title_case(obs_color or ""),
                                     "nearest_existing": _named_with_types(gap.nearest_existing) if gap else "",
                                     "score": "", "model_prob": "", **evidence})
+            continue
+        # keep-retired-and-surface: if this mint's deterministic Key in ANY fan-out branch is RETIRED, the
+        # variety was deliberately retired. Silently skipping it here (Window A: retired Key still in the
+        # export, so the branch-dedup guard below drops it) leaves its rows gapping every run with no signal;
+        # letting it through (Window B: retired Key already dropped from the export) leaks it into the update
+        # delta. Instead surface ONE un-retire decision and skip the whole variety. Retirement is per-variety
+        # (any retired branch holds all its formats), so a retired stone is never resurrected in another
+        # format; it stays retired until an explicit un-retire, after which it matches normally next produce.
+        if any(gen_key(b, stone_type, title) in retired_keys for b in active_branches()):
+            _hold_retired(title, stone_type, obs_color, evidence)
             continue
         _u = obs_union.get((proj.norm(stone_type), proj.norm(title)),
                            {"colors": set(), "qualities": set(), "finishes": set()})
