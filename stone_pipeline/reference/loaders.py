@@ -232,7 +232,20 @@ def load_attributes(path: Path | None = None) -> Attributes:
             if category == "category":
                 attrs.category_pcat[value] = sourceid
             else:
-                attrs.by_category.setdefault(category, {})[_norm(value)] = (value, sourceid)
+                table = attrs.by_category.setdefault(category, {})
+                nk = _norm(value)
+                # Fail loud on a CONFLICTING duplicate: two names in a category that collapse to the same
+                # normalized key but carry DIFFERENT Medusa ids. The value->id map silently last-wins
+                # otherwise, so one id would shadow the other (and _norm folds accents/separators, so two
+                # distinct raw names can collide). Names are unique per category today, so this never fires;
+                # it surfaces a future Medusa dup instead of shipping the wrong id. A same-id repeat is
+                # harmless (idempotent) and allowed.
+                if nk in table and table[nk][1] != sourceid:
+                    raise ValueError(
+                        f"attributes.csv: {category} values {table[nk][0]!r} and {value!r} normalize to the "
+                        f"same key {nk!r} but map to different ids ({table[nk][1]} vs {sourceid}); attribute "
+                        f"names must be unique per category so the value->id mapping is unambiguous")
+                table[nk] = (value, sourceid)
     return attrs
 
 
