@@ -21,6 +21,7 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, S3_REGION
 from stone_pipeline.core import logfmt
+from stone_pipeline.io.storage import s3_error_is_missing
 
 log = logfmt.get_logger("ledger.snapshot")
 
@@ -92,11 +93,20 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -
             tmp_path.unlink(missing_ok=True)
 
 
-def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -> bool:
+def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None,
+            required: bool = False) -> bool:
     """Restore a single file from its latest S3 snapshot into `ledger_path` (the ledger by default; `key`
     targets another -- config.db, or the combinations baseline), IF the local file is absent and a snapshot
     exists. Atomic (download to a temp then rename). Returns True if a restore happened; False (leaving the
-    caller to bootstrap fresh) when the file already exists or there is no snapshot."""
+    caller to bootstrap fresh) when the file already exists or there is no snapshot.
+
+    `required=True` marks a DURABLE system-of-record (the ledger, config.db): head_object below already
+    proved the snapshot is present, so a download failure is NOT absence. If the object genuinely vanished
+    between head and download it is safe to start fresh; anything else (transient / throttle / permission)
+    must FAIL LOUD (raise -> non-zero boot -> ECS restarts the task and retries), because booting a fresh
+    base-only store would let the guardless periodic save() clobber the good snapshot and silently drop the
+    acked ids / pending removals. Non-required callers (an optimization baseline, the ops CLI) stay
+    best-effort and never crash boot."""
     ledger_path = Path(ledger_path)
     if ledger_path.exists():
         return False                       # a local copy already wins -- never clobber it
@@ -105,7 +115,7 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
         _s3().head_object(Bucket=S3_BUCKET, Key=key)   # raises if there is no snapshot yet
     except Exception:
         log.info("no snapshot to restore; starting fresh", extra={"extra_fields": {"key": key}})
-        return False
+        return False                       # genuine absence -> fresh start, never a crash-loop
     tmp = ledger_path.with_suffix(f".restore.{os.getpid()}.tmp")   # pid-unique: both containers may boot together
     try:
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,9 +123,13 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
         os.replace(tmp, ledger_path)       # atomic rename into place (last writer wins, same content)
         log.info("restored from snapshot", extra={"extra_fields": {"key": key}})
         return True
-    except Exception:
-        log.exception("snapshot restore failed (non-fatal); starting fresh")
+    except Exception as exc:
         Path(tmp).unlink(missing_ok=True)
+        if required and not s3_error_is_missing(exc):
+            log.exception("restore FAILED for a present, required snapshot; failing loud (retry on restart)",
+                          extra={"extra_fields": {"key": key}})
+            raise
+        log.exception("snapshot restore failed (non-fatal); starting fresh")
         return False
 
 
@@ -124,10 +138,11 @@ def save_config(config_path: str | Path, env: str = ENV_NAME) -> bool:
     return save(config_path, env, key=config_key(env))
 
 
-def restore_config(config_path: str | Path, env: str = ENV_NAME) -> bool:
+def restore_config(config_path: str | Path, env: str = ENV_NAME, required: bool = False) -> bool:
     """Restore config.db from its S3 snapshot if the local file is absent. Run BEFORE seed_from_yaml so a
-    restored config (with pause/delist state) is not masked by a fresh yaml seed."""
-    return restore(config_path, env, key=config_key(env))
+    restored config (with pause/delist state) is not masked by a fresh yaml seed. config.db is durable
+    system-of-record, so boot passes required=True (see restore())."""
+    return restore(config_path, env, key=config_key(env), required=required)
 
 
 # -- scrape-artifact trees (outputs_dir + data/) -------------------------------
