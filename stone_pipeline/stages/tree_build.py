@@ -51,7 +51,15 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
             sourceid = (r.get("sourceid") or "").strip()
             if not category or not value or not sourceid:
                 continue
-            attr[match_key(category)][match_key(value)] = sourceid
+            k, v = match_key(category), match_key(value)
+            # Fail loud on a CONFLICTING duplicate (same normalized key, different id) -- else the last row
+            # silently wins and a combination could carry the wrong attribute id. Mirrors the same guard in
+            # reference.loaders.load_attributes; a no-op while names are unique per category.
+            if v in attr[k] and attr[k][v] != sourceid:
+                raise ValueError(
+                    f"attributes.csv: two {category} values normalize to {v!r} but map to different ids "
+                    f"({attr[k][v]} vs {sourceid}); attribute names must be unique per category")
+            attr[k][v] = sourceid
     return attr
 
 
