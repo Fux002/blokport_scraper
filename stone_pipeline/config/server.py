@@ -491,6 +491,15 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # ...and the last published big-list combinations file, which tree_build diffs against to emit only the
     # NEW combinations ("build on it"). Without it a cold task re-emits the whole ~2M set as the delta.
     snapshot.restore_combinations_baseline()
+    # E15: refresh the attribute vocab (attributes.csv) from S3 on boot so the review-decision endpoint
+    # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
+    # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
+    # just-added colour is rejected at mint until the next full produce. Best-effort: a fetch failure keeps
+    # the committed vocab (a fresh/offline host still validates against a real seed), and a REPUBLISH does
+    # not fetch inputs, so without this boot fetch a redeploy leaves the vocab stale.
+    from deploy.fetch_inputs import fetch_attributes
+    if fetch_attributes():
+        log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
     # keep config.db durable: a periodic snapshot backstop + a best-effort snapshot on clean shutdown
     # (the lifecycle verbs also snapshot immediately after a pause/delist so a crash never loses one).
     snapshot.start_periodic(config_db, key=snapshot.config_key())
