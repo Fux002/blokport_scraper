@@ -119,7 +119,11 @@ def build_variation_index(variant_table, backbone) -> "CandidateIndex":
         # every branch) could carry a different stone type and set the wrong block_type.
         key_type = _type_from_key(variant.key)
         variety = backbone.lookup(variant.name, stone_type=key_type)
-        block_type = (variety.stone_type if variety else "") or key_type
+        # block_type IS the Key's type_slug (the sole type authority). backbone.lookup only returns a
+        # variety whose stone_type norm-equals key_type, so (variety.stone_type or key_type) already
+        # normalized to key_type -- verified 0 mismatches on the committed seed. Use key_type directly so
+        # blocking never depends on the backbone's display FORM of the type. `variety` stays for block_colors.
+        block_type = key_type
         block_colors = set(variety.colors) if variety and variety.colors else colors_from_name(variant.name)
         surfaces = set(variant.aliases)
         index.add(

@@ -207,3 +207,96 @@ def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(
 
     touched = [a for a in result.alias_additions["slab"] if a["Key"] in (MARBLE_KEY, GRANITE_KEY)]
     assert not touched, f"multi-type name must not resolve to an arbitrary stone, got {touched}"
+
+
+def _minted_any(res) -> bool:
+    return any(res.new_variants[b] for b in ("slab", "block", "tile"))
+
+
+def test_operator_alias_decision_applies_uniformly_not_only_in_two_arms(tmp_path, monkeypatch):
+    # THE alias-dropped bug: an operator ALIAS decision (spelling -> target NAME) was consulted ONLY in the
+    # code-shaped and fuzzy-review arms. A spelling that is neither code-shaped nor fuzzy-near its target
+    # (no resolver, no nearest_existing) reached NEITHER arm, so the decision was silently dropped and the
+    # row fell through to a spurious "new variety (no close existing match)" hold. The uniform 3c consult
+    # honors the decision for every row: 'Monalisa' aliases onto its chosen-type target ('Arabescato' Granite).
+    from stone_pipeline.stages import decisions
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])   # Arabescato = marble + granite
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))              # no resolver -> no fuzzy arm
+    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {"monalisa": "Arabescato"})
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {"monalisa": "Granite"})
+    ref = loaders.load_all()
+
+    res = curate.build_curation([_gap_row("Monalisa")], ref)
+    on_granite = [a for a in res.alias_additions["slab"]
+                  if a["Key"] == GRANITE_KEY and "Monalisa" in (a.get("_added") or "")]
+    on_marble = [a for a in res.alias_additions["slab"] if a["Key"] == MARBLE_KEY]
+    assert on_granite, f"operator alias must land on the Granite Arabescato, got {res.alias_additions['slab']}"
+    assert not on_marble, "must not touch the same-name Marble variety"
+    assert not _minted_any(res), "an aliased spelling must not also mint a new variety"
+    assert not any(p["variant"].lower() == "monalisa" for p in res.pending_confirm), \
+        "must not fall through to a 'new variety' hold"
+
+
+def test_operator_alias_to_multitype_target_without_a_type_pick_holds_loudly(tmp_path, monkeypatch):
+    # Same alias decision, but NO chosen target type: 'Arabescato' exists as several stones with nothing to
+    # pick by. The uniform consult must HOLD LOUDLY (name the types, ask which), never silently no-op onto one
+    # arbitrary stone and never mint. Proves the fix keeps the ambiguity guard, not just the happy path.
+    from stone_pipeline.stages import decisions
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {"monalisa": "Arabescato"})
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {})               # no type pick
+    ref = loaders.load_all()
+
+    res = curate.build_curation([_gap_row("Monalisa")], ref)
+    assert not res.alias_additions["slab"], "ambiguous multi-type target must not silently alias onto one stone"
+    assert not _minted_any(res), "must not mint"
+    held = [p for p in res.pending_confirm if p["variant"].lower() == "monalisa"]
+    assert held, "must hold loudly asking which type to alias into"
+    assert "Marble" in held[0]["reason"] and "Granite" in held[0]["reason"], "the hold must name the candidate types"
+
+
+VERDE_SCURO_KEY = "slab_onyx_verde_scuro_A"
+VERDE_ONYX_SCURO_KEY = "slab_onyx_verde_onyx_scuro_B"
+
+
+def _verde_imports() -> dict[str, ImportFile]:
+    """Two SAME-TYPE (onyx) varieties on slab: one literally NAMED 'Verde Scuro', and 'Verde Onyx Scuro'
+    which lists 'Verde Scuro' as an ALIAS. So the surface 'verde scuro' resolves to BOTH owners."""
+    branches = {}
+    for b in ("slab", "block", "tile"):
+        imp = ImportFile(branch=b, path=None, present=(b == "slab"))
+        if b == "slab":
+            for key, nm, al in ((VERDE_ONYX_SCURO_KEY, "Verde Onyx Scuro", "Verde Scuro"),  # alias-owner FIRST
+                                (VERDE_SCURO_KEY, "Verde Scuro", "")):                       # exact-name owner
+                v = {"Key": key, "Name": nm, "Image": "", "Aliases": al, "Volume": "",
+                     "type": curate.proj.norm(loaders.type_slug_from_key(key))}
+                imp.varieties.append(v)
+                imp.by_name_type[(curate.proj.norm(nm), v["type"])] = v
+                imp.by_name[curate.proj.norm(nm)] = v
+        branches[b] = imp
+    return branches
+
+
+def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatch):
+    # SEV-3: PHASE-4a same-type routing used sorted(owners)[0]. 'verde onyx scuro' sorts BEFORE 'verde
+    # scuro', so a typed-onyx 'Verde Scuro' scrape would alias onto 'Verde Onyx Scuro' (which merely lists
+    # 'Verde Scuro' as a spelling) instead of the variety literally named 'Verde Scuro'. Prefer the exact-
+    # name owner.
+    monkeypatch.setattr(curate, "load_existing", lambda b: _verde_imports()[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    ref = loaders.load_all()
+
+    from stone_pipeline.core.schema import GapKind, TreeGap
+    g = TreeGap(src_site="polonine", surrogate_key="v1", raw_name="Verde Scuro",
+                normalized_name="verde scuro", gap_kind=GapKind.missing_variation)
+    row = CanonicalRow(src_site="polonine", surrogate_key="v1", variety_match_key="Verde Scuro",
+                       raw_type="Onyx", variation_method="exact_name_ambiguous", tree_gaps=[g])
+    res = curate.build_curation([row], ref)
+
+    on_exact = [a for a in res.alias_additions["slab"] if a["Key"] == VERDE_SCURO_KEY]
+    on_alias_owner = [a for a in res.alias_additions["slab"] if a["Key"] == VERDE_ONYX_SCURO_KEY]
+    assert on_exact, f"must alias onto the exact-name 'Verde Scuro', got {res.alias_additions['slab']}"
+    assert not on_alias_owner, "must NOT alias onto 'Verde Onyx Scuro' (it only carries the name as a spelling)"

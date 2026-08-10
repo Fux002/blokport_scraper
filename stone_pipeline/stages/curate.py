@@ -595,7 +595,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             continue
         if proj.norm(clean) in rejected:           # 3b. a human said 'no' on a past run
             continue
-        # 3c. code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
+        # 3c. OPERATOR ALIAS -- authoritative, consulted UNIFORMLY (not only in the code-shaped / fuzzy-
+        # review arms). An explicit "this spelling is variety X" decision is honored here for EVERY row, so
+        # it applies even when the spelling is neither code-shaped nor fuzzy-near its chosen target --
+        # otherwise the decision was silently dropped and the row fell through to a spurious "new variety,
+        # no close match" hold. Disambiguated by the operator's chosen target type (else the row's own
+        # type); a multi-type target with no type to pick by is HELD, never a silent no-op onto one stone.
+        if _apply_operator_alias(clean, name, row, stone_type):
+            continue
+        # 3d. code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
         # varieties -> NEVER mint them. A trailing lone-letter grade whose de-coded base is a KNOWN,
         # single, NON-colour variety is auto-aliased to that variety ('Rosal C' -> 'Rosal'), so a
         # re-scrape resolves instead of re-adding. The colour guard (base not pure colour/type words)
@@ -612,8 +620,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 continue
         if code_why:
             base = re.sub(r"[\s\-]+[A-Za-z]\s*$", "", clean).strip() if code_why == "lone_letter" else ""
-            if _apply_operator_alias(clean, name, row, stone_type):  # operator: this code is a spelling of X
-                continue
+            # (an operator alias for this code was already applied by the uniform 3c consult above)
             dec = confirm_decisions.get(proj.norm(clean))
             if dec == "no":                            # honour 'no' so the code stops re-appearing
                 rejected.add(proj.norm(clean))
@@ -643,7 +650,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             st = proj.norm(stone_type)
             same_type = sorted(o for o in owners if st and o[1] == st)
             if same_type:                              # product's type matches an existing variety -> alias
-                _alias_and_backfill(same_type[0], name, clean, stone_type, row, gap)
+                # prefer the variety whose canonical NAME equals the cleaned name over one that merely
+                # carries it as an ALIAS: 'Verde Scuro' aliases onto the variety named 'Verde Scuro', not
+                # onto 'Verde Onyx Scuro' that lists it as a spelling. same_type is sorted, so the fallback
+                # (no exact-name owner -> a genuine alias) stays deterministic.
+                target = next((o for o in same_type if o[0] == proj.norm(clean)), same_type[0])
+                _alias_and_backfill(target, name, clean, stone_type, row, gap)
                 continue
             if not st:                                 # TYPE-LESS scrape -> ALWAYS review to set the type.
                 # A type the scrape did not make clear is NEVER auto-completed -- not even to a single
@@ -697,8 +709,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     continue
                 if d.verdict == "review":
                     # uncertain -> the human decides (mint / reject / alias) via the review API
-                    if _apply_operator_alias(clean, name, row, stone_type):  # operator: this spelling is variety X
-                        continue
+                    # (an operator alias for this spelling was already applied by the uniform 3c consult)
                     dec = confirm_decisions.get(proj.norm(clean))
                     if dec == "no":
                         rejected.add(proj.norm(clean))
