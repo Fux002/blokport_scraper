@@ -463,5 +463,36 @@
     "src_site": "marenostone",
     "src_url": "https://marenostone.com/product/black-wave-marble-slab-3/",
     "variety_match_key": "Black Wave Marble"
+  },
+  {
+    "adapter_version": "1.2.0",
+    "raw_bundle_size": null,
+    "raw_color": "Grey",
+    "raw_description": "",
+    "raw_dimensions": "",
+    "raw_finish": "Polished",
+    "raw_format": "Tile",
+    "raw_image_urls": [
+      "https://marenostone.com/wp-content/uploads/2026/02/Black-Granite-Tile-P0707-1.jpg",
+      "https://marenostone.com/wp-content/uploads/2026/02/Black-Granite-Tile-P0707-2.jpg",
+      "https://marenostone.com/wp-content/uploads/2026/02/Black-Granite-Tile-P0707-3.jpg"
+    ],
+    "raw_inventory_quantity": null,
+    "raw_name": "Basalt Grey Tile",
+    "raw_origin": null,
+    "raw_per_slab_m2": null,
+    "raw_quality": "A",
+    "raw_slab_count": null,
+    "raw_slabs_array": null,
+    "raw_stock_m2": "Unlimited",
+    "raw_thickness": "",
+    "raw_total_m2": null,
+    "raw_type": "Basalt",
+    "raw_weight": "",
+    "scrape_timestamp": "2026-06-01 15:52:29",
+    "src_natural_key": "P/99/01",
+    "src_site": "marenostone",
+    "src_url": "https://marenostone.com/product/basalt-grey-tile-unlimited/",
+    "variety_match_key": "Basalt Grey"
   }
 ]
