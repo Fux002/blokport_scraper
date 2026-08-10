@@ -253,6 +253,10 @@ class Thresholds:
     variation_auto_accept: float = 92.0
     variation_review_floor: float = 84.0  # band 84..92 routes to review
     attribute_fuzzy_floor: float = 90.0
+    # A supplier that flags availability as a WORD ('Unlimited', 'In Stock', 'Made to Order') instead of a
+    # count carries a real positive signal but no number. Seed this made-to-order fallback so the product
+    # LISTS (flagged low-confidence estimate) rather than holding. High so it never reads as low stock.
+    in_stock_word_fallback_qty: int = 999
     health_fill_drop_warn: float = 0.15
     health_fill_drop_fail: float = 0.40
     health_rowcount_floor: float = 0.50
