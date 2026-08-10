@@ -209,10 +209,27 @@ class VariationEngine:
             if named:
                 ids = named
                 method = f"{method}_name"
-        if len(ids) > 1 and (block_type or block_color):
-            blocked = {cid for cid in ids if self._block_ok(cid, block_type, block_color)}
-            if len(blocked) == 1:
-                ids = blocked
+        # Narrow by TYPE, which alone identifies the variety: identity is (type, name) and no two varieties
+        # share it. Colour is a product ATTRIBUTE, never part of identity -- use it only to break a tie the
+        # type left, NEVER to reject a type-identified variety. A scraped colour the catalog does not yet
+        # list for that variety is a new-combination gap to APPROVE downstream (leaf-gap), not an identity
+        # failure -- so 'Matterhorn Dolomite White' resolves to Matterhorn Dolomite (Grey/Blue) with White
+        # surfaced as a new colour, instead of gapping ambiguous because White belongs to the Marble twin.
+        if len(ids) > 1 and block_type:
+            by_type = {cid for cid in ids if self._block_ok(cid, block_type, "")}
+            if by_type:
+                ids = by_type
+                method = f"{method}_blocked"
+                if len(ids) > 1 and block_color:          # a genuine same-type tie -> colour breaks it
+                    by_color = {cid for cid in ids if self._block_ok(cid, "", block_color)}
+                    if len(by_color) == 1:
+                        ids = by_color
+            # else: the scraped type matches NO same-name variety -> a NEW type; leave it ambiguous for
+            # review (mint the new type), and do not let colour cross it to a wrong-type sibling.
+        elif len(ids) > 1 and block_color:                 # type-less scrape: colour is the only signal
+            by_color = {cid for cid in ids if self._block_ok(cid, "", block_color)}
+            if len(by_color) == 1:
+                ids = by_color
                 method = f"{method}_blocked"
         if len(ids) == 1:
             cid = next(iter(ids))
