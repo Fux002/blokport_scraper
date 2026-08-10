@@ -334,37 +334,43 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
 
     def variety_identity(row: CanonicalRow) -> tuple[str, str, str]:
         """The (name, resolved stone_type, cleaned name) a row's variety is minted under -- computed
-        ONE way so the dedup, variety_branches, obs_union and the mint all agree on the identity (and
-        its (type, name) key). Type: the corrected type_name, else the raw tag, else the first
-        missing_variation gap's suggested type, else the OPERATOR-ASSIGNED type (seed_type) for a
-        type-less variety -- never guessed, and never NON-CANONICAL (see the gate below). Name: the match
-        key, else the raw name MINUS its format word (so 'Brown Onyx Slab' is 'Brown Onyx' everywhere)."""
+        ONE way so the dedup, variety_branches, obs_union and the mint all agree on the identity (and its
+        (type, name) key).
+
+        Type precedence is OPERATOR-AUTHORITATIVE, not scraper-authoritative:
+          1. the operator's MINT decision type (seed_type) WINS -- it is the type the operator chose in
+             review, so it overrides the scraper's guess. A supplier that names a product 'Lumiere Crystal'
+             only SUGGESTS Crystal; an operator minting Lumiere as Agate is the authority (the fix for
+             "I mint it as Agate, why did it become Crystal").
+          2. else the SCRAPED type (corrected type_name, else raw tag, else the gap's suggested type).
+          3. else an ALIAS decision's chosen target type FILLS a type-less row (it routes the alias, it
+             does not redefine a variety).
+        A non-canonical value at any step is never minted -- the variety stays type-less and HOLDS for
+        review, never a garbage-slug Key. Name: the match key, else the raw name MINUS its format word
+        (so 'Brown Onyx Slab' is 'Brown Onyx' everywhere)."""
         mv = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         suggested = (mv[0].suggested_type if mv else "") or next(
             (g.suggested_type for g in row.tree_gaps if g.suggested_type), "")
-        stone_type = row.type_name or row.raw_type or suggested or ""
-        # A stone type MUST be a canonical Medusa type. When none of the sources above resolved to one
-        # (e.g. a raw supplier spelling 'Semiprecious' that no synonym mapped to 'Semi-Precious Stone'),
-        # the value is not a real type -- treat it as type-less so it HOLDS for review (or an operator
-        # seed_type fills it below), NEVER minting a variety under a garbage type slug. This validates the
-        # RESULT, so a legitimate raw_type that happens to be canonical still passes untouched.
-        if stone_type and proj.norm(stone_type) not in valid_type_norms:
-            stone_type = ""
+        # the SCRAPE's provisional type -- a suggestion, not an authority. Canonical-gated: a raw supplier
+        # spelling that maps to no Medusa type ('Semiprecious') is treated as type-less so it HOLDS, never
+        # minting a garbage type slug. This validates the RESULT, so a canonical raw tag passes untouched.
+        scrape_type = row.type_name or row.raw_type or suggested or ""
+        if scrape_type and proj.norm(scrape_type) not in valid_type_norms:
+            scrape_type = ""
         name = (row.variety_match_key or strip_format(row.raw_name or "")).strip()
-        # clean is derived from the BASE (pre-seed) type, so the seed only fills the final stone_type and
-        # never changes the name/clean/Key uuid -- the seed lookup key norm(clean) stays stable run to run.
-        clean = _clean_variety(name, stone_type)
-        if not stone_type:
-            # Operator-assigned type for a type-less variety: a MINT decision's seed_type, else an ALIAS
-            # decision's chosen TARGET type (both keyed by norm(clean)). Reading alias_types here is what
-            # lets a 'pick the type' answer on an ALIASED multi-type variety (e.g. Monalisa -> Mona Lisa,
-            # a 4-type target) actually resolve the row: with the type filled, PHASE-4a's same_type branch
-            # attaches it to the chosen-type owner. Without it the row stays type-less and re-holds forever
-            # -- the mint path already read seed_types; the alias path was the missing half of the symmetry.
-            stone_type = seed_types.get(proj.norm(clean), "") or alias_types.get(proj.norm(clean), "")
-            # the operator type must ALSO be canonical -- the :4200 API validates it, but curate does not
-            # trust that boundary: a non-canonical value is dropped so the variety stays type-less (held)
-            # rather than minting a garbage-slug Key. Same rule as the scraped-type gate above.
+        # clean is derived from the SCRAPE type (never the operator override) so its type token is stripped
+        # correctly and the seed lookup key norm(clean) + the Key uuid stay byte-stable run to run -- the
+        # operator's type below changes only the final IDENTITY type, never the name/clean/Key.
+        clean = _clean_variety(name, scrape_type)
+        # OPERATOR AUTHORITY: a MINT decision's chosen type overrides the scraper's suggestion. Absent a
+        # mint type, the scrape type stands; absent both, an ALIAS decision's target type fills a type-less
+        # row (which lets a 'pick the type' answer on an aliased multi-type target resolve the row instead
+        # of re-holding forever). Non-canonical operator types are dropped, same as the scrape gate above.
+        op_mint_type = seed_types.get(proj.norm(clean), "")
+        if op_mint_type and proj.norm(op_mint_type) in valid_type_norms:
+            stone_type = op_mint_type
+        else:
+            stone_type = scrape_type or alias_types.get(proj.norm(clean), "")
             if stone_type and proj.norm(stone_type) not in valid_type_norms:
                 stone_type = ""
         return name, stone_type, clean

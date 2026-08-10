@@ -300,3 +300,54 @@ def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatc
     on_alias_owner = [a for a in res.alias_additions["slab"] if a["Key"] == VERDE_ONYX_SCURO_KEY]
     assert on_exact, f"must alias onto the exact-name 'Verde Scuro', got {res.alias_additions['slab']}"
     assert not on_alias_owner, "must NOT alias onto 'Verde Onyx Scuro' (it only carries the name as a spelling)"
+
+
+def _empty_imports() -> dict[str, ImportFile]:
+    return {b: ImportFile(branch=b, path=None, present=(b == "slab")) for b in ("slab", "block", "tile")}
+
+
+def _typed_gap_row(name: str, raw_type: str) -> CanonicalRow:
+    """A gapped scrape that carries a stone TYPE (as a supplier does when the type is in the product name,
+    e.g. 'Lumiere Crystal'), so variety_identity sees a non-blank scrape type."""
+    from stone_pipeline.core.schema import GapKind, TreeGap
+    g = TreeGap(src_site="zucchi", surrogate_key="t1", raw_name=name,
+                normalized_name=curate.proj.norm(name), gap_kind=GapKind.missing_variation)
+    return CanonicalRow(src_site="zucchi", surrogate_key="t1", variety_match_key=name,
+                        raw_type=raw_type, variation_method="exact_name_ambiguous", tree_gaps=[g])
+
+
+def test_operator_mint_type_overrides_the_scraped_type(tmp_path, monkeypatch):
+    # THE requirement: the operator picks a type in review and it must WIN over the type the scraper derived
+    # from the product name. 'Lumiere' scraped as Crystal, operator mints it as Agate -> the minted variety
+    # is Agate, never Crystal. (The bug: seed_type only filled a BLANK type, so the scrape's Crystal won.)
+    from stone_pipeline.stages import decisions
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(curate, "load_existing", lambda b: _empty_imports()[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"lumiere": "yes"})    # operator minted it
+    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {"lumiere": "Agate"})  # ...as Agate
+    ref = loaders.load_all()
+
+    res = curate.build_curation([_typed_gap_row("Lumiere", "Crystal")], ref)
+    minted = [k for b in ("slab", "block", "tile") for k in (r["Key"] for r in res.new_variants[b])]
+    assert any("_agate_" in k for k in minted), f"must mint as the operator-picked Agate, got {minted}"
+    assert not any("_crystal_" in k for k in minted), f"must NOT mint as the scraped Crystal type, got {minted}"
+
+
+def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_variety(tmp_path, monkeypatch):
+    # Arabescato exists as Marble + Granite. A scrape typed MARBLE (an existing type) that the operator minted
+    # as Agate must mint a NEW Agate variety -- the operator's choice wins even over an existing same-type
+    # variety; it does NOT silently alias onto the Marble one (which is what happened when the scrape type won).
+    from stone_pipeline.stages import decisions
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"arabescato": "yes"})
+    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {"arabescato": "Agate"})
+    ref = loaders.load_all()
+
+    res = curate.build_curation([_typed_gap_row("Arabescato", "Marble")], ref)
+    minted = [k for b in ("slab", "block", "tile") for k in (r["Key"] for r in res.new_variants[b])]
+    assert any("_agate_" in k for k in minted), f"operator's Agate must mint, got {minted}"
+    on_marble = [a for a in res.alias_additions["slab"] if a["Key"] == MARBLE_KEY]
+    assert not on_marble, "must NOT alias onto the existing Marble variety when the operator picked Agate"
