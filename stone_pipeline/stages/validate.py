@@ -82,12 +82,11 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     if unavailable:
         row.add_reject(RejectReason(rule="dimension_unavailable", detail="|".join(sorted(unavailable))))
     # A genuinely-absent dimension was filled from the pack DEFAULT in derive (flagged dimension_defaulted).
-    # A fabricated size feeds area/volume pricing + freight, so it must NOT ship: HOLD it for review like an
-    # unavailable one (the operator supplies a real size before the product can be sold). No guessed freight
-    # basis reaches a live order.
-    defaulted = {f.field for f in row.review_flags if f.code == FlagCode.dimension_defaulted}
-    if defaulted:
-        row.add_reject(RejectReason(rule="dimension_defaulted", detail="|".join(sorted(defaulted))))
+    # It now LISTS carrying that flag rather than holding: the pack defaults are the standard size for the
+    # format, so the freight basis is a small, known estimate (a slab/tile default is the 2cm thickness; a
+    # block default is a standard block), and an operator chose to maximize listings over exact freight. The
+    # flag stays on the row for later correction, and a genuinely-INVALID (<=0) or fetch-FAILED dimension
+    # still holds (below / above) -- only a usable default lists.
     # Dimensions are REQUIRED: a genuinely-absent one was defaulted in derive (flagged), so a size that is
     # still <= 0 / None here is a data error -- reject it (a wrong real size breaks area/volume pricing and
     # freight). (`None or 0` -> 0 <= 0, so a missing size rejects too.) Skip a fetch-failed dim (held above).

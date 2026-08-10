@@ -66,7 +66,7 @@ dimension_ranges:
 # 2-3cm slab is stocked as the 2cm standard, not the midpoint.
 dimension_defaults:
   slab:  {length: 3.30, height: 2.00, thickness: 0.02}
-  block: {length: 2.80, height: 1.50, thickness: 1.50}
+  block: {length: 2.64, height: 1.76, thickness: 1.76}
   tile:  {length: 0.60, height: 0.60, thickness: 0.02}
 
 # Finish -> surface phrase for the generated product description (was stages/derive.py _FINISH_PHRASE).

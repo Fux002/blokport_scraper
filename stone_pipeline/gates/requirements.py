@@ -48,8 +48,6 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 "raw_image_urls -> the image stage; a terminal non-stone set publishes imageless"),
     Requirement("dimension_unavailable", "no dimension whose source FETCH failed (transient)",
                 "held for retry next scrape; never defaulted (freight-critical)"),
-    Requirement("dimension_defaulted", "no genuinely-absent dimension filled from the pack default",
-                "held for review so a real size is supplied before it sells"),
     Requirement("dimension_invalid", "length, width, height all > 0",
                 "parsed dims or pack defaults; a parsed 0 is a data error and is held"),
     Requirement("stock_undetermined", "inventory_quantity determined (a real value, including 0)",
