@@ -346,6 +346,21 @@ def _inventory_from_area(row: CanonicalRow) -> int | None:
     return max(1, int(total / (length * height)))
 
 
+# Positive availability WORDS a supplier may publish instead of a count. Cross-source: read from the same
+# raw stock fields the numeric ladder uses, so no per-source code. NOT a fabricated number -- the supplier
+# asserts the item IS available, we just have no count, so derive_inventory seeds a made-to-order fallback.
+_IN_STOCK_WORDS = frozenset({"unlimited", "limited", "in stock", "instock", "in-stock",
+                             "available", "made to order", "made-to-order"})
+
+
+def _in_stock_word(row: CanonicalRow) -> bool:
+    """True when the scrape flags availability as one of the recognized positive WORDS (not a count)."""
+    for value in (row.raw_stock_m2, row.raw_inventory_quantity):
+        if " ".join((value or "").strip().lower().split()) in _IN_STOCK_WORDS:
+            return True
+    return False
+
+
 def derive_inventory(row: CanonicalRow) -> None:
     """Stock level (units available), derived ONCE from real signals -- SEPARATE from bundle_size (the
     slabs-per-bundle multiplier); bundle_size is NEVER a stock source. Trust ladder: an explicit count
@@ -372,6 +387,15 @@ def derive_inventory(row: CanonicalRow) -> None:
         row.inventory_quantity = min(pieces, _INVENTORY_MAX)
         row.inventory_method = "stock_area_division"
         row.inventory_confidence = _conf_name(Confidence.medium)
+        return
+    # Qualitative availability: a supplier that flags stock as a WORD ('Unlimited', 'In Stock', 'Made to
+    # Order') with no count. A real positive signal, so seed the made-to-order fallback and LIST (flagged
+    # low-confidence estimate) instead of holding -- distinct from a genuinely-absent stock, which still
+    # HOLDS below rather than shipping a fabricated number.
+    if _in_stock_word(row):
+        row.inventory_quantity = SETTINGS.thresholds.in_stock_word_fallback_qty
+        row.inventory_method = "in_stock_word_fallback"
+        row.inventory_confidence = _conf_name(Confidence.low)
         return
     raw_present = any(str(c).strip() for c in (row.raw_slab_count, row.raw_inventory_quantity, row.raw_total_m2)
                       if c is not None)

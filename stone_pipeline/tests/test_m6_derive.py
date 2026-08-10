@@ -180,6 +180,27 @@ def test_inventory_unparseable_count_without_area_is_undetermined(ref, cfg):
     assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
 
 
+def test_inventory_qualitative_in_stock_word_uses_the_fallback_and_lists(ref, cfg):
+    # a supplier that flags availability as a WORD ('Unlimited'/'In Stock') instead of a count is a real
+    # positive signal: seed the made-to-order fallback so the product LISTS, never held. (marenostone tiles.)
+    from stone_pipeline.config.settings import SETTINGS
+    for word in ("Unlimited", "Limited", "In Stock", "Made to Order"):
+        row = _slab_row(raw_stock_m2=word)           # the qualitative label the scraper captured
+        derive.derive_inventory(row)
+        assert row.inventory_quantity == SETTINGS.thresholds.in_stock_word_fallback_qty, word
+        assert row.inventory_method == "in_stock_word_fallback"
+        assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags), word
+
+
+def test_inventory_empty_stock_still_holds_not_a_fabricated_number(ref, cfg):
+    # the fallback fires ONLY on a recognized positive word -- genuinely-absent stock stays undetermined,
+    # so we never invent a number for a product the supplier said nothing about.
+    row = _slab_row(raw_stock_m2="")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity is None
+    assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
 def test_title_is_listing_style_with_material_and_format(ref, cfg):
     # a sellable, searchable title: variety + finish + material. The format word (Slab/Tile/Block) is
     # NOT in the title -- format is a variant dimension, not product identity.
