@@ -447,5 +447,34 @@
     "src_site": "zucchi",
     "src_url": "https://inventory.zucchistones.com/product?Acquamare-BD00182586",
     "variety_match_key": "Acquamare"
+  },
+  {
+    "adapter_version": "1.1.0",
+    "raw_bundle_size": null,
+    "raw_color": "Black",
+    "raw_description": "Acadian Night is an enchanting black granite with a special blend of deep gold and white veins. It is always contemporary, sophisticated, exotic and also affordable stone which resembles a perfectly painted starlit night sky.",
+    "raw_dimensions": "length=3.15m;height=1.76m",
+    "raw_finish": "Polished and Resined",
+    "raw_format": "",
+    "raw_image_urls": [
+      "https://d1vjwtwi5ituin.cloudfront.net/imagens_sf/ItemEstoque__c/UriFo1__c/BD00183415.jpg"
+    ],
+    "raw_inventory_quantity": null,
+    "raw_name": "Matterhorn",
+    "raw_origin": null,
+    "raw_per_slab_m2": null,
+    "raw_quality": "Premium",
+    "raw_slab_count": "8",
+    "raw_slabs_array": null,
+    "raw_stock_m2": null,
+    "raw_thickness": "2cm",
+    "raw_total_m2": "44.352",
+    "raw_type": "Dolomite",
+    "raw_weight": "326.738",
+    "scrape_timestamp": "2026-05-05 09:07:35",
+    "src_natural_key": "900901",
+    "src_site": "zucchi",
+    "src_url": "https://inventory.zucchistones.com/product?Acadian-Night-BD00183415",
+    "variety_match_key": "Matterhorn"
   }
 ]
