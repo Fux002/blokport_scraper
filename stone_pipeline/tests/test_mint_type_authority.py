@@ -256,3 +256,47 @@ def test_operator_alias_to_multitype_target_without_a_type_pick_holds_loudly(tmp
     held = [p for p in res.pending_confirm if p["variant"].lower() == "monalisa"]
     assert held, "must hold loudly asking which type to alias into"
     assert "Marble" in held[0]["reason"] and "Granite" in held[0]["reason"], "the hold must name the candidate types"
+
+
+VERDE_SCURO_KEY = "slab_onyx_verde_scuro_A"
+VERDE_ONYX_SCURO_KEY = "slab_onyx_verde_onyx_scuro_B"
+
+
+def _verde_imports() -> dict[str, ImportFile]:
+    """Two SAME-TYPE (onyx) varieties on slab: one literally NAMED 'Verde Scuro', and 'Verde Onyx Scuro'
+    which lists 'Verde Scuro' as an ALIAS. So the surface 'verde scuro' resolves to BOTH owners."""
+    branches = {}
+    for b in ("slab", "block", "tile"):
+        imp = ImportFile(branch=b, path=None, present=(b == "slab"))
+        if b == "slab":
+            for key, nm, al in ((VERDE_ONYX_SCURO_KEY, "Verde Onyx Scuro", "Verde Scuro"),  # alias-owner FIRST
+                                (VERDE_SCURO_KEY, "Verde Scuro", "")):                       # exact-name owner
+                v = {"Key": key, "Name": nm, "Image": "", "Aliases": al, "Volume": "",
+                     "type": curate.proj.norm(loaders.type_slug_from_key(key))}
+                imp.varieties.append(v)
+                imp.by_name_type[(curate.proj.norm(nm), v["type"])] = v
+                imp.by_name[curate.proj.norm(nm)] = v
+        branches[b] = imp
+    return branches
+
+
+def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatch):
+    # SEV-3: PHASE-4a same-type routing used sorted(owners)[0]. 'verde onyx scuro' sorts BEFORE 'verde
+    # scuro', so a typed-onyx 'Verde Scuro' scrape would alias onto 'Verde Onyx Scuro' (which merely lists
+    # 'Verde Scuro' as a spelling) instead of the variety literally named 'Verde Scuro'. Prefer the exact-
+    # name owner.
+    monkeypatch.setattr(curate, "load_existing", lambda b: _verde_imports()[b])
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    ref = loaders.load_all()
+
+    from stone_pipeline.core.schema import GapKind, TreeGap
+    g = TreeGap(src_site="polonine", surrogate_key="v1", raw_name="Verde Scuro",
+                normalized_name="verde scuro", gap_kind=GapKind.missing_variation)
+    row = CanonicalRow(src_site="polonine", surrogate_key="v1", variety_match_key="Verde Scuro",
+                       raw_type="Onyx", variation_method="exact_name_ambiguous", tree_gaps=[g])
+    res = curate.build_curation([row], ref)
+
+    on_exact = [a for a in res.alias_additions["slab"] if a["Key"] == VERDE_SCURO_KEY]
+    on_alias_owner = [a for a in res.alias_additions["slab"] if a["Key"] == VERDE_ONYX_SCURO_KEY]
+    assert on_exact, f"must alias onto the exact-name 'Verde Scuro', got {res.alias_additions['slab']}"
+    assert not on_alias_owner, "must NOT alias onto 'Verde Onyx Scuro' (it only carries the name as a spelling)"

@@ -650,7 +650,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             st = proj.norm(stone_type)
             same_type = sorted(o for o in owners if st and o[1] == st)
             if same_type:                              # product's type matches an existing variety -> alias
-                _alias_and_backfill(same_type[0], name, clean, stone_type, row, gap)
+                # prefer the variety whose canonical NAME equals the cleaned name over one that merely
+                # carries it as an ALIAS: 'Verde Scuro' aliases onto the variety named 'Verde Scuro', not
+                # onto 'Verde Onyx Scuro' that lists it as a spelling. same_type is sorted, so the fallback
+                # (no exact-name owner -> a genuine alias) stays deterministic.
+                target = next((o for o in same_type if o[0] == proj.norm(clean)), same_type[0])
+                _alias_and_backfill(target, name, clean, stone_type, row, gap)
                 continue
             if not st:                                 # TYPE-LESS scrape -> ALWAYS review to set the type.
                 # A type the scrape did not make clear is NEVER auto-completed -- not even to a single
