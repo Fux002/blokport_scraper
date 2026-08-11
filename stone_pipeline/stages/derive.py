@@ -364,15 +364,41 @@ def _in_stock_word(row: CanonicalRow) -> bool:
     return False
 
 
+# Definitive NEGATIVE availability a supplier may publish (structured flag or word). Cross-source: read from
+# the same raw fields as the positive check. An explicit out-of-stock is the supplier stating the item is
+# unavailable -- a TRUSTED sold-out, exactly like a literal count of 0.
+_OUT_OF_STOCK_WORDS = frozenset({"out of stock", "outofstock", "out-of-stock",
+                                 "sold out", "soldout", "sold-out", "unavailable", "discontinued"})
+
+
+def _out_of_stock_flag(row: CanonicalRow) -> bool:
+    """True when the scrape EXPLICITLY flags the item as unavailable (structured status or word). An unknown
+    or missing status is NOT out of stock -- it returns False and the row falls through to the magnitude."""
+    for value in (row.raw_stock_status, row.raw_stock_m2, row.raw_inventory_quantity):
+        if " ".join((value or "").strip().lower().split()) in _OUT_OF_STOCK_WORDS:
+            return True
+    return False
+
+
 def derive_inventory(row: CanonicalRow) -> None:
     """Stock level (units available), derived ONCE from real signals -- SEPARATE from bundle_size (the
-    slabs-per-bundle multiplier); bundle_size is NEVER a stock source. Trust ladder: an explicit count
-    (raw_slab_count, then raw_inventory_quantity), then a count DERIVED from an available stock AREA
-    (raw_total_m2 / per-piece face area) for sources that publish square-metres, not a count. A parsed value
-    INCLUDING 0 is a TRUSTED out-of-stock and ships as sold-out. Only when NO count is present AND none can be
-    derived is stock UNDETERMINED: left None + flagged stock_undetermined so validate HOLDS the row for review
-    -- a missing measurement must never ship as a fabricated 0. Mirrors derive_dimensions' fill-but-flag
-    contract exactly (determined value incl. 0 ships; missing-and-underivable holds)."""
+    slabs-per-bundle multiplier); bundle_size is NEVER a stock source. Trust ladder, in order:
+      0. an EXPLICIT out-of-stock flag (structured status / word) -> quantity 0, a trusted sold-out. This
+         wins over a published stock AREA below: if the supplier says the item is unavailable it is
+         unavailable, and a stale Ready-Stock figure must not resurrect it.
+      1. an explicit count (raw_slab_count, then raw_inventory_quantity), a deliberate magnitude incl. 0.
+      2. a count DERIVED from an available stock AREA (raw_stock_m2 / per-piece face area).
+      3. a positive availability WORD/flag with no magnitude -> the made-to-order fallback qty.
+    A parsed value INCLUDING 0 is a TRUSTED out-of-stock and ships as sold-out. Only when NO signal is present
+    AND none can be derived is stock UNDETERMINED: left None + flagged stock_undetermined so validate HOLDS
+    the row -- a missing measurement must never ship as a fabricated 0. Mirrors derive_dimensions' fill-but-
+    flag contract (determined value incl. 0 ships; missing-and-underivable holds)."""
+    # 0. an explicit out-of-stock flag is a trusted sold-out (quantity 0), authoritative over a stale area.
+    if _out_of_stock_flag(row):
+        row.inventory_quantity = 0
+        row.inventory_method = "out_of_stock_flag"
+        row.inventory_confidence = _conf_name(Confidence.high)
+        return
     for candidate, method in ((row.raw_slab_count, "raw_slab_count"),
                               (row.raw_inventory_quantity, "raw_inventory_quantity")):
         text = str(candidate).strip() if candidate is not None else ""
