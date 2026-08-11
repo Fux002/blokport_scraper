@@ -138,6 +138,15 @@ class ScraperBase:
         # one stable UA for the whole run (a real browser does not change UA mid-session)
         self._ua = random.choice(_USER_AGENTS)
         self.log = self._make_logger()
+        # Fail LOUD on a dead proxy declaration: the proxy is wired ONLY into the curl_cffi session
+        # (_cffi -> _resolve_proxy). A scraper that declares proxy_capability but runs on plain httpx
+        # (use_curl_cffi=False) would connect DIRECT with NO warning -- the exact silent miss that left
+        # marenostone blocked. Surface it at init so it can never be dead config again.
+        if self.proxy_capability and not self.use_curl_cffi:
+            self.log.warning("%s declares proxy_capability=%r but use_curl_cffi is False -- the proxy is "
+                             "applied ONLY on the curl_cffi path, so it will NOT be used. Set "
+                             "use_curl_cffi=True to actually route through it.",
+                             self.source, self.proxy_capability)
 
     # --- HTTP ----------------------------------------------------------------
     def _resolve_proxy(self) -> Optional[str]:
