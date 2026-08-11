@@ -205,13 +205,24 @@ def test_inventory_structured_in_stock_status_uses_the_fallback_and_lists(ref, c
     assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
 
 
-def test_inventory_structured_out_of_stock_status_never_fabricates_stock(ref, cfg):
-    # the negative flag ('out-of-stock') is NOT a positive word -> no fallback: a sold-out item with no count
-    # stays undetermined and held, never given a fabricated quantity.
+def test_inventory_structured_out_of_stock_status_is_trusted_sold_out(ref, cfg):
+    # an EXPLICIT out-of-stock flag from the source is the supplier stating the item is unavailable: a trusted
+    # sold-out (quantity 0), never held and never given a fabricated positive quantity.
     row = _slab_row(raw_stock_status="out-of-stock")
     derive.derive_inventory(row)
-    assert row.inventory_quantity is None
-    assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+    assert row.inventory_quantity == 0
+    assert row.inventory_method == "out_of_stock_flag"
+    assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
+def test_inventory_out_of_stock_flag_overrides_a_published_area(ref, cfg):
+    # the marenostone contradiction: the site marks the item out-of-stock yet still publishes a Ready-Stock
+    # area. The explicit unavailable flag WINS -> sold-out 0, so a stale area never lists a sold-out item.
+    row = _slab_row(raw_stock_m2="100", raw_stock_status="out-of-stock")
+    row.length, row.height = 2.0, 1.0                # a real area/face that WOULD divide to 50 pieces
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 0
+    assert row.inventory_method == "out_of_stock_flag"
 
 
 def test_inventory_precise_count_wins_over_structured_status(ref, cfg):
