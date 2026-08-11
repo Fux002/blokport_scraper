@@ -192,6 +192,38 @@ def test_inventory_qualitative_in_stock_word_uses_the_fallback_and_lists(ref, cf
         assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags), word
 
 
+def test_inventory_structured_in_stock_status_uses_the_fallback_and_lists(ref, cfg):
+    # a source's STRUCTURED availability flag (WooCommerce stock_status "in-stock") with no count or area is
+    # as authoritative as the free-text words: seed the same fallback so the product LISTS, never held. This
+    # is the marenostone travertine case that was being dropped -- the scraper read the flag but the adapter
+    # never mapped it, so the signal died before derive. (Guarded end-to-end by the adapter test below.)
+    from stone_pipeline.config.settings import SETTINGS
+    row = _slab_row(raw_stock_status="in-stock")     # no count, no area, no per-piece dims
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == SETTINGS.thresholds.in_stock_word_fallback_qty
+    assert row.inventory_method == "in_stock_word_fallback"
+    assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
+def test_inventory_structured_out_of_stock_status_never_fabricates_stock(ref, cfg):
+    # the negative flag ('out-of-stock') is NOT a positive word -> no fallback: a sold-out item with no count
+    # stays undetermined and held, never given a fabricated quantity.
+    row = _slab_row(raw_stock_status="out-of-stock")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity is None
+    assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+
+
+def test_inventory_precise_count_wins_over_structured_status(ref, cfg):
+    # ordering: a real area/count is ALWAYS preferred over the status fallback, so an in-stock flag never
+    # downgrades a product that actually publishes a magnitude.
+    row = _slab_row(raw_stock_m2="10", raw_stock_status="in-stock")
+    row.length, row.height = 2.0, 1.0                # 10 m2 / 2 m2 = 5 pieces
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 5
+    assert row.inventory_method == "stock_area_division"
+
+
 def test_inventory_empty_stock_still_holds_not_a_fabricated_number(ref, cfg):
     # the fallback fires ONLY on a recognized positive word -- genuinely-absent stock stays undetermined,
     # so we never invent a number for a product the supplier said nothing about.

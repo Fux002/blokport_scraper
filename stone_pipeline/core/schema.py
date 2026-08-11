@@ -164,6 +164,11 @@ class CanonicalRow(BaseModel):
     # marenostone "Ready Stock"). derive_inventory turns it into a piece count via the face area. Kept
     # SEPARATE from raw_total_m2 (a bundle's total area, which feeds bundle_size) so stock never corrupts it.
     raw_stock_m2: Optional[str] = None
+    # a source's STRUCTURED availability flag (e.g. WooCommerce stock_status "in-stock"/"out-of-stock"), as
+    # opposed to a count or an area. When no count/area is derivable, an authoritative "in-stock" here lets
+    # derive_inventory seed the same made-to-order fallback the availability WORDS do (never a fabricated
+    # count); a non-positive flag ("out-of-stock") does NOT match, so a sold-out item is never given stock.
+    raw_stock_status: Optional[str] = None
     raw_slab_count: Optional[str] = None
     raw_bundle_size: Optional[str] = None
     raw_slabs_array: Optional[str] = None

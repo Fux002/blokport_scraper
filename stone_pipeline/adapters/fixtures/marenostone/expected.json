@@ -1,6 +1,6 @@
 [
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Cream",
     "raw_description": "",
@@ -20,6 +20,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "114",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Marble",
@@ -31,7 +32,7 @@
     "variety_match_key": "Cream Marble"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Grey",
     "raw_description": "",
@@ -51,6 +52,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "250.5",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Marble",
@@ -62,7 +64,7 @@
     "variety_match_key": "Pietra Gray Marble"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Black",
     "raw_description": "",
@@ -82,6 +84,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "0",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Granite",
@@ -93,7 +96,7 @@
     "variety_match_key": "Black Granite"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Black",
     "raw_description": "",
@@ -113,6 +116,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Granite",
@@ -124,7 +128,7 @@
     "variety_match_key": "Tiger Black Granite"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Black",
     "raw_description": "",
@@ -144,6 +148,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Granite",
@@ -155,7 +160,7 @@
     "variety_match_key": "Tiger Black Granite"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "White",
     "raw_description": "",
@@ -175,6 +180,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Travertine",
@@ -186,7 +192,7 @@
     "variety_match_key": "White Travertine"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "White",
     "raw_description": "",
@@ -206,6 +212,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Travertine",
@@ -217,7 +224,7 @@
     "variety_match_key": "White Travertine"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Pink",
     "raw_description": "",
@@ -237,6 +244,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Onyx",
@@ -248,7 +256,7 @@
     "variety_match_key": "Pink Onyx"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "White",
     "raw_description": "",
@@ -268,6 +276,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Onyx",
@@ -279,7 +288,7 @@
     "variety_match_key": "White Onyx"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Blue",
     "raw_description": "",
@@ -299,6 +308,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Granite",
@@ -310,7 +320,7 @@
     "variety_match_key": "Labradorite Blue Granite"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Cream",
     "raw_description": "",
@@ -330,6 +340,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Marble",
@@ -341,7 +352,7 @@
     "variety_match_key": "Sunny Beige Marble"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Cream",
     "raw_description": "",
@@ -361,6 +372,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Marble",
@@ -372,7 +384,7 @@
     "variety_match_key": "Sunny Beige Marble"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Green",
     "raw_description": "",
@@ -392,6 +404,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Granite",
@@ -403,7 +416,7 @@
     "variety_match_key": "Turquoise Granite"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Cream",
     "raw_description": "",
@@ -423,6 +436,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Marble",
@@ -434,7 +448,7 @@
     "variety_match_key": "Sunny Beige Marble"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Black",
     "raw_description": "",
@@ -454,6 +468,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Marble",
@@ -465,7 +480,7 @@
     "variety_match_key": "Black Wave Marble"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Grey",
     "raw_description": "",
@@ -485,6 +500,7 @@
     "raw_slab_count": null,
     "raw_slabs_array": null,
     "raw_stock_m2": "Unlimited",
+    "raw_stock_status": "in-stock",
     "raw_thickness": "",
     "raw_total_m2": null,
     "raw_type": "Basalt",

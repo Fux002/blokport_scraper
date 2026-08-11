@@ -70,6 +70,27 @@ def test_adapter_carries_fetch_failed_signal_with_zero_per_adapter_work():
     assert all(r.fetch_failed_fields == [] for r in rows[1:])     # others stay empty
 
 
+def test_marenostone_maps_structured_stock_status_to_canonical():
+    # The scraper always reads the WooCommerce stock_status ("in-stock"/"out-of-stock"), but it only helps
+    # if the ADAPTER carries it into the canonical row -- the exact miss that held ~24 in-stock travertines
+    # (the signal died at the adapter boundary, invisible to every derive-level test). This proves the map
+    # scraper -> canonical, so a dropped mapping fails here instead of silently in production.
+    import polars as pl
+    from stone_pipeline.adapters.marenostone import ADAPTER as MARENO
+    frame = pl.DataFrame({
+        "product_id": ["1", "2"],
+        "name": ["Super White Travertine Slab", "Cloud White Marble Slab"],
+        "attr_category1": ["Travertine", "Marble"], "attr_category2": ["White", "White"],
+        "attr_format": ["slab", "slab"], "attr_finish": ["Polished", "Polished"],
+        "image_urls": ["http://x/a.jpg", "http://x/b.jpg"],
+        # the second value carries trailing THEME classes, as the live site emits for out-of-stock; the
+        # adapter must keep only the availability keyword so the value is clean regardless of theme markup.
+        "stock_status": ["in-stock", "out-of-stock wd-style-with-bg"],
+    })
+    rows = MARENO.adapt(frame)
+    assert [r.raw_stock_status for r in rows] == ["in-stock", "out-of-stock"]
+
+
 def test_build_dims_and_na_contract():
     # the ONE shared dimension-string builder (was copy-pasted per adapter). Locks the contract the 4
     # migrated adapters + every future one rely on.
