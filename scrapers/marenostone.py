@@ -111,10 +111,13 @@ def _dims_from_html(html: str, default_unit: str = "cm") -> dict:
 class MarenoStoneScraper(ScraperBase):
     source = "marenostone"
     category = None  # format is per-product (attr_format), not a constant
-    # Product PAGES (where the real dimensions AND ready-stock live) are behind the site's anti-bot: run
-    # DIRECT, ~5% of the per-product fetches exhaust all retries ('GET failed after 5 tries'), losing that
-    # product's size and stock together (both come from that one fetch) -> held. Route through the same
-    # residential proxy varsha/polonine already use so the fetches stop being blocked. Config only, no logic.
+    # Product PAGES (where the real dimensions AND ready-stock live) are behind the site's anti-bot: ~5% of
+    # the per-product fetches exhaust all retries ('GET failed after 5 tries'), losing that product's size
+    # and stock together (both come from that one fetch) -> held. Use curl_cffi (Chrome-TLS impersonation)
+    # ROUTED THROUGH the residential proxy -- the same treatment varsha/polonine use. NOTE: the proxy is
+    # wired only into the curl_cffi path, so use_curl_cffi MUST be True for proxy_capability to take effect
+    # (base.py warns loudly if it is not).
+    use_curl_cffi = True
     proxy_capability = "cloudflare_residential"
     # DECLARED source convention: marenostone.com renders dimensions in centimetres (verified across the
     # live catalogue). Locked in here so the extractor never silently guesses a unit when a label omits it
