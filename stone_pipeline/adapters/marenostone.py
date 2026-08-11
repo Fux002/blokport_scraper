@@ -17,7 +17,7 @@ from stone_pipeline.adapters.tokens import strip_format
 
 class MarenostoneAdapter(AdapterBase):
     source = "marenostone"
-    adapter_version = "1.2.0"
+    adapter_version = "1.3.0"
     variety_match_key = "name"  # extracted, not a clean column
     format_field = "attr_format"  # marenostone already carries an explicit format tag
     # generic-descriptor source: the variety candidate is the name minus the
@@ -58,6 +58,14 @@ class MarenostoneAdapter(AdapterBase):
         # available stock in m2 (scraper emits only when the page's Unit row says SQM); derive turns it into
         # a piece count via the face area. Kept out of raw_total_m2 so it never feeds bundle_size.
         "raw_stock_m2": lambda r: AdapterBase.clean(r.get("ready_stock_sqm")),
+        # STRUCTURED availability the WooCommerce Store API always sets (stock_availability.class). Most
+        # products resolve via the area above; the ~9% with no published Ready Stock still carry this
+        # authoritative flag, so map it so derive can seed the made-to-order fallback instead of holding an
+        # item the site says IS available. The class can carry trailing THEME classes ("out-of-stock
+        # wd-style-with-bg"), so keep only the FIRST token -- the availability keyword ("in-stock"/
+        # "out-of-stock") -- so the value is clean regardless of theme markup (a sold-out flag won't match
+        # the positive-word set downstream).
+        "raw_stock_status": lambda r: AdapterBase.clean(r.get("stock_status")).split(" ", 1)[0],
         "raw_description": lambda r: AdapterBase.clean(r.get("description")) or AdapterBase.clean(r.get("short_description")),
         # full-size images: current scraper emits `image_urls`, the legacy format (kept in the
         # adapter fixture) emits `image_urls_full`. Never thumbnails. Blank in both -> no image.

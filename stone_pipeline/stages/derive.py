@@ -354,8 +354,11 @@ _IN_STOCK_WORDS = frozenset({"unlimited", "limited", "in stock", "instock", "in-
 
 
 def _in_stock_word(row: CanonicalRow) -> bool:
-    """True when the scrape flags availability as one of the recognized positive WORDS (not a count)."""
-    for value in (row.raw_stock_m2, row.raw_inventory_quantity):
+    """True when the scrape flags availability as one of the recognized positive WORDS (not a count) -- either
+    in a free-text stock field or in a source's STRUCTURED availability flag (raw_stock_status, e.g. a
+    WooCommerce "in-stock"). A negative flag ("out-of-stock") is not in the set, so a sold-out item never
+    matches and is never given fabricated stock."""
+    for value in (row.raw_stock_m2, row.raw_inventory_quantity, row.raw_stock_status):
         if " ".join((value or "").strip().lower().split()) in _IN_STOCK_WORDS:
             return True
     return False
