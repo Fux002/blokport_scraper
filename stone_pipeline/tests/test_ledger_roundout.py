@@ -124,3 +124,34 @@ def test_variants_verify_set_equal_after_bootstrap(tmp_path):
         n = populate_variations_full(ledger, FULL)    # produced set: in_full=1
         assert n > 20000
         assert verify_mod.verify_variants(ledger, FULL.parent) == []
+
+
+def test_reset_re_derives_variety_aliases_from_clean_base(tmp_path):
+    # Factory-reset gap (lifecycle S0b): reconcile_variations_to_seed fixes WHICH varieties exist but not
+    # their CONTENT, so a seed variety a prior produce decorated with an extra alias spelling keeps it. The
+    # reset now re-derives content from the clean base -- this drops the stale spelling, preserves medusa_id
+    # (Medusa updates, never recreates), and flips the row dirty for the update pull.
+    import csv, json
+    from stone_pipeline.ledger.render import VARIANTS_FULL_COLS
+    key_c, name_c, image_c, aliases_c, volume_c = VARIANTS_FULL_COLS
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("variation", {
+            "key": "slab_quartzite_capolavoro_0001", "branch": "slab", "type": "Quartzite",
+            "name": "Capolavoro",
+            "aliases": json.dumps(["Capolavoro Quartzite", "Azul Palomino Quartzite"]),  # STALE mis-bind spelling
+            "image_url": "", "image_sha256": None, "image_model": None, "volume": "", "medusa_id": "V9",
+            "payload_hash": "OLD", "state": "synced", "first_seen": now, "last_synced": now,
+            "created_at": now, "updated_at": now}, pk=("key",))
+        base = tmp_path / "variants_export_base.csv"
+        with base.open("w", newline="") as h:
+            w = csv.DictWriter(h, fieldnames=list(VARIANTS_FULL_COLS))
+            w.writeheader()
+            w.writerow({key_c: "slab_quartzite_capolavoro_0001", name_c: "Capolavoro",
+                        image_c: "", aliases_c: "Capolavoro Quartzite", volume_c: ""})   # clean base: no mis-bind
+        populate_variations_full(ledger, base)
+        row = ledger.execute("SELECT aliases, medusa_id, state FROM variation WHERE key=?",
+                             ("slab_quartzite_capolavoro_0001",)).fetchone()
+        assert json.loads(row["aliases"]) == ["Capolavoro Quartzite"]   # stale spelling dropped
+        assert row["medusa_id"] == "V9"                                  # id preserved (update, not recreate)
+        assert row["state"] == "dirty"                                   # re-serves on the update pull
