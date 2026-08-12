@@ -117,10 +117,10 @@ def test_unknown_review_subpath_is_404():
 
 def test_get_adapters_lists_the_registry():
     # ISS-3 dropdown source: the coded adapters available to run. Lets :4200 validate the "adapter" field
-    # instead of parsing a 400 error. The real registry is the four coded sources.
+    # instead of parsing a 400 error. The real registry is the coded sources (fuleistone added, PR #185).
     code, body = server.dispatch("GET", ["adapters"], None)
     assert code == 200
-    assert set(body["adapters"]) == {"marenostone", "polonine", "varsha", "zucchi"}
+    assert set(body["adapters"]) == {"marenostone", "polonine", "varsha", "zucchi", "fuleistone"}
     assert server.dispatch("POST", ["adapters"], {})[0] == 405
 
 
