@@ -118,7 +118,18 @@ def _review_evidence(row) -> dict:
     return {"src": getattr(row, "src_site", "") or "",
             "src_url": getattr(row, "src_url", "") or "",
             "image": next((u for u in imgs if u), ""),
-            "description": getattr(row, "description", "") or ""}
+            "description": _evidence_description(getattr(row, "description", "") or "")}
+
+
+def _evidence_description(text: str, limit: int = 400) -> str:
+    """The operator-facing description snippet on a review card: markup-STRIPPED and length-CAPPED. A source
+    whose description is page-builder markup (e.g. Divi '[et_pb_...]' shortcodes, ~17 KB each) would otherwise
+    bloat the review-queue payload -- the mint page loads a card per held variety, so ~1000 such cards is a
+    ~18 MB response the page times out on and shows nothing. Strip shortcodes + HTML, collapse whitespace,
+    cap the length; the operator only needs a readable snippet to judge the variety, not the raw page."""
+    t = re.sub(r"\[/?[^\]]*\]", " ", text or "")   # WordPress/Divi shortcodes: [et_pb_...] and [/...]
+    t = re.sub(r"<[^>]+>", " ", t)                  # HTML tags
+    return re.sub(r"\s+", " ", t).strip()[:limit]
 
 
 def _review_card(variant: str, reason: str, evidence: dict, *, stone_type: str = "", color: str = "",

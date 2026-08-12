@@ -51,7 +51,12 @@ _PCS_RE = re.compile(r"(\d+)\s*pcs", re.IGNORECASE)
 
 
 def _clean(s: str) -> str:
-    return re.sub(r"<[^>]+>", "", html.unescape(s or "")).strip()
+    # fuleistone descriptions are raw Divi page-builder markup ('[et_pb_section ...]...'), ~17 KB each. Strip
+    # the WordPress/Divi shortcodes (and HTML) so the description is clean prose (usually empty -> derive then
+    # builds a templated one) instead of bloating the product Description AND the review-queue payload.
+    t = re.sub(r"\[/?[^\]]*\]", " ", html.unescape(s or ""))   # [et_pb_...] and [/...] shortcodes
+    t = re.sub(r"<[^>]+>", " ", t)                             # HTML tags
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _attr(attributes: list, display: str) -> str:
