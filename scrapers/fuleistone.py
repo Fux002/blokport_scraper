@@ -76,8 +76,12 @@ def _dims_from_size(size_raw: str) -> tuple[str, str, str]:
 class FuleistoneScraper(ScraperBase):
     source = "fuleistone"
     category = "slab"            # the whole "Stone Slabs" scope is one format (no per-row inference)
-    # the Store API is open (no Cloudflare TLS gate observed); plain httpx is enough.
-    use_curl_cffi = False
+    # stone.fuleistone.com is Cloudflare-fronted (server: cloudflare / cf-ray), like the other slabware
+    # sources. A plain-httpx request works from a residential IP but Cloudflare can block the datacenter IP
+    # the scheduled task runs on, so route through curl_cffi (Chrome-TLS impersonation) + the residential
+    # proxy -- for BOTH the Store API and the ~thousands of image downloads. Same treatment as marenostone.
+    use_curl_cffi = True
+    proxy_capability = "cloudflare_residential"
     # DECLARED source convention: fuleistone renders sizes in millimetres ('3280mm x 1830mm x 20mm'). Locked
     # here so the extractor never guesses a unit; the adapter maps with unit="mm" and derive converts.
     dimension_unit = "mm"
