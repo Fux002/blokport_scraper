@@ -51,12 +51,7 @@ _PCS_RE = re.compile(r"(\d+)\s*pcs", re.IGNORECASE)
 
 
 def _clean(s: str) -> str:
-    # fuleistone descriptions are raw Divi page-builder markup ('[et_pb_section ...]...'), ~17 KB each. Strip
-    # the WordPress/Divi shortcodes (and HTML) so the description is clean prose (usually empty -> derive then
-    # builds a templated one) instead of bloating the product Description AND the review-queue payload.
-    t = re.sub(r"\[/?[^\]]*\]", " ", html.unescape(s or ""))   # [et_pb_...] and [/...] shortcodes
-    t = re.sub(r"<[^>]+>", " ", t)                             # HTML tags
-    return re.sub(r"\s+", " ", t).strip()
+    return re.sub(r"<[^>]+>", "", html.unescape(s or "")).strip()
 
 
 def _attr(attributes: list, display: str) -> str:
@@ -94,9 +89,11 @@ class FuleistoneScraper(ScraperBase):
         "product_id", "name", "slug", "permalink", "sku",
         "material", "color", "finish", "thickness", "size",
         "dimensions_length", "dimensions_height", "stock_m2", "slab_count",
-        "categories", "is_in_stock", "stock_status",
-        "short_description", "description", "image_urls_thumb",
+        "categories", "is_in_stock", "stock_status", "image_urls_thumb",
     ]
+    # fuleistone's product 'description' is a Divi page-builder FAQ that is BYTE-IDENTICAL on every product
+    # (packing/ordering boilerplate, not a per-product description), so it is not captured as a column and not
+    # mapped -- derive builds the proper templated description instead. The full raw object is still in raw_json.
 
     def list_products(self) -> Iterable[Any]:
         page = 1
@@ -157,8 +154,6 @@ class FuleistoneScraper(ScraperBase):
             "categories": " | ".join((c.get("name") or "") for c in (p.get("categories") or []) if c.get("name")),
             "is_in_stock": p.get("is_in_stock"),
             "stock_status": (stock.get("class", "") or "").strip(),   # 'in-stock' -> derive stock fallback
-            "short_description": _clean(p.get("short_description", "")),
-            "description": _clean(p.get("description", "")),
             "image_urls_thumb": " | ".join(thumbs),
             # base reads these:
             "image_urls": fulls,

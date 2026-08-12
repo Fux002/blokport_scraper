@@ -135,7 +135,8 @@ class FuleistoneAdapter(AdapterBase):
         "raw_stock_m2": lambda r: AdapterBase.clean(r.get("stock_m2")),
         # structured availability ('in-stock') -> derive's stock fallback when no area/count is present
         "raw_stock_status": lambda r: AdapterBase.clean(r.get("stock_status")),
-        "raw_description": lambda r: AdapterBase.clean(r.get("description")) or AdapterBase.clean(r.get("short_description")),
+        # NB: no raw_description -- fuleistone's description is byte-identical Divi boilerplate on every product
+        # (see the scraper), so derive builds the templated description rather than shipping the same FAQ.
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls") or r.get("image_urls_thumb"), "|"),
     }
 
