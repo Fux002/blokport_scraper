@@ -13,8 +13,9 @@ from __future__ import annotations
 from stone_pipeline.adapters import REGISTRY
 from stone_pipeline.adapters.base import read_scrape_csv
 from stone_pipeline.adapters.selftest import fixture_dir
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.stages import derive
+from stone_pipeline.stages.derive import _dimension_category
 
 
 def _adapt(source: str):
@@ -27,5 +28,7 @@ def test_marenostone_unlimited_stock_row_lists_via_the_in_stock_fallback():
     row = next(r for r in _adapt("marenostone") if r.raw_name == "Basalt Grey Tile")
     assert row.raw_stock_m2 == "Unlimited"                       # extraction
     derive.derive_inventory(row)                                 # handling
-    assert row.inventory_quantity == SETTINGS.thresholds.in_stock_word_fallback_qty
+    # lists via the per-category made-to-order fallback (positive), never held as stock_undetermined
+    assert row.inventory_quantity == active_pack().in_stock_fallback_qty[_dimension_category(row)]
+    assert row.inventory_quantity > 0
     assert row.inventory_method == "in_stock_word_fallback"      # lists, not stock_undetermined (held)

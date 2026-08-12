@@ -420,9 +420,10 @@ def derive_inventory(row: CanonicalRow) -> None:
     # Qualitative availability: a supplier that flags stock as a WORD ('Unlimited', 'In Stock', 'Made to
     # Order') with no count. A real positive signal, so seed the made-to-order fallback and LIST (flagged
     # low-confidence estimate) instead of holding -- distinct from a genuinely-absent stock, which still
-    # HOLDS below rather than shipping a fabricated number.
+    # HOLDS below rather than shipping a fabricated number. The fallback COUNT is per category (a block is a
+    # single large piece; a slab/tile is stocked in modest quantity), not one global magnitude.
     if _in_stock_word(row):
-        row.inventory_quantity = SETTINGS.thresholds.in_stock_word_fallback_qty
+        row.inventory_quantity = active_pack().in_stock_fallback_qty[_dimension_category(row)]
         row.inventory_method = "in_stock_word_fallback"
         row.inventory_confidence = _conf_name(Confidence.low)
         return

@@ -182,14 +182,30 @@ def test_inventory_unparseable_count_without_area_is_undetermined(ref, cfg):
 
 def test_inventory_qualitative_in_stock_word_uses_the_fallback_and_lists(ref, cfg):
     # a supplier that flags availability as a WORD ('Unlimited'/'In Stock') instead of a count is a real
-    # positive signal: seed the made-to-order fallback so the product LISTS, never held. (marenostone tiles.)
-    from stone_pipeline.config.settings import SETTINGS
+    # positive signal: seed the per-category made-to-order fallback so the product LISTS, never held.
+    from stone_pipeline.config.domain import active_pack
+    slab_fallback = active_pack().in_stock_fallback_qty["slab"]
     for word in ("Unlimited", "Limited", "In Stock", "Made to Order"):
         row = _slab_row(raw_stock_m2=word)           # the qualitative label the scraper captured
         derive.derive_inventory(row)
-        assert row.inventory_quantity == SETTINGS.thresholds.in_stock_word_fallback_qty, word
+        assert row.inventory_quantity == slab_fallback, word
         assert row.inventory_method == "in_stock_word_fallback"
         assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags), word
+
+
+def test_in_stock_fallback_is_per_category_not_one_global(ref, cfg):
+    # the fallback COUNT is per category (a block is a single large piece; a slab is stocked in quantity),
+    # not one global magnitude. A block with an in-stock word gets the block count, a slab the slab count.
+    from stone_pipeline.config.domain import active_pack
+    fallback = active_pack().in_stock_fallback_qty
+    assert fallback["block"] == 1 and fallback["slab"] == 10   # locks the declared per-category values
+    block = _slab_row(raw_format="Block", raw_stock_m2="In Stock")
+    derive.derive_category(block, ref)                          # resolves format -> block
+    derive.derive_inventory(block)
+    assert block.inventory_quantity == fallback["block"], "a block lists a single piece, not the slab count"
+    slab = _slab_row(raw_stock_m2="In Stock")
+    derive.derive_inventory(slab)
+    assert slab.inventory_quantity == fallback["slab"]
 
 
 def test_inventory_structured_in_stock_status_uses_the_fallback_and_lists(ref, cfg):
@@ -197,10 +213,10 @@ def test_inventory_structured_in_stock_status_uses_the_fallback_and_lists(ref, c
     # as authoritative as the free-text words: seed the same fallback so the product LISTS, never held. This
     # is the marenostone travertine case that was being dropped -- the scraper read the flag but the adapter
     # never mapped it, so the signal died before derive. (Guarded end-to-end by the adapter test below.)
-    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.config.domain import active_pack
     row = _slab_row(raw_stock_status="in-stock")     # no count, no area, no per-piece dims
     derive.derive_inventory(row)
-    assert row.inventory_quantity == SETTINGS.thresholds.in_stock_word_fallback_qty
+    assert row.inventory_quantity == active_pack().in_stock_fallback_qty["slab"]
     assert row.inventory_method == "in_stock_word_fallback"
     assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
 

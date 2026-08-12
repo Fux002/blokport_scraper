@@ -80,6 +80,7 @@ def _valid_pack_dict():
                         "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None}],
         "ambiguous_type_words": ["z"], "default_finishes": ["F"], "fallback_color": "N",
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
+        "in_stock_fallback_qty": {"x": 5},
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
         "dimension_defaults": {"x": {"length": 1.0, "height": 1.0, "thickness": 0.02}},
         "finish_phrases": {"f": "p"}, "finish_phrase_default": "p"})
@@ -125,6 +126,7 @@ fallback_color: Unspecified
 last_resort_finishes: {shirt: Standard, pants: Standard}
 last_resort_quality: Standard
 block_finish: Standard
+in_stock_fallback_qty: {shirt: 10, pants: 10}
 dimension_ranges:
   shirt: {weight: [0.1, 0.3], length: [0.5, 0.8], width: [0.4, 0.6], height: [0.01, 0.02]}
   pants: {weight: [0.2, 0.5], length: [0.9, 1.2], width: [0.3, 0.5], height: [0.01, 0.02]}
