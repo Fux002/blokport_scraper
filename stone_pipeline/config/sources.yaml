@@ -50,3 +50,12 @@ varsha:
   default_bundle_size: 6
   min_expected_rows: 125  # recent ~510
   watermarked: true   # varshastones.slabware.com burns a visible watermark into its photos
+fuleistone:
+  source_code: ful
+  vendor: Fuleistone  # VERIFY: the company these products belong to
+  ports_default:
+    - Xiamen
+  emit_on_review: true
+  origin_default: CN  # VERIFY supplier country
+  default_bundle_size: 6
+  min_expected_rows: 300  # Stone Slabs category ~1274

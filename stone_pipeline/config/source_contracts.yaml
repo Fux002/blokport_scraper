@@ -232,3 +232,38 @@ varsha:
   value_sets: {}
   value_patterns: {}
   row_baseline: 527
+fuleistone:
+  adapter_version: 1.0.0
+  required_columns:
+  - product_id
+  - name
+  - material
+  - image_urls
+  optional_columns:
+  - slug
+  - permalink
+  - sku
+  - color
+  - finish
+  - thickness
+  - size
+  - dimensions_length
+  - dimensions_height
+  - stock_m2
+  - slab_count
+  - categories
+  - is_in_stock
+  - stock_status
+  - short_description
+  - description
+  - image_urls_thumb
+  - format
+  - scrape_timestamp
+  fill_floors:
+    product_id: 0.7
+    name: 0.7
+    material: 0.7
+    image_urls: 0.7
+  value_sets: {}
+  value_patterns: {}
+  row_baseline: 1274
