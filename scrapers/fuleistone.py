@@ -35,6 +35,7 @@ ATTRIBUTE_NAMES = {
     "Finish": "finish",         # -> raw_finish (may list >1; includes non-finish tags e.g. 'Bookmatched')
     "Thickness": "thickness",   # e.g. '20mm' -- the depth, present even when the full Size is not
     "Size": "size",             # e.g. '3280mm x 1830mm x 20mm' OR a qualitative label ('Rough Slab Size')
+    "Quantity": "quantity",     # live-inventory lots only: 'Njj.jjm², Kpcs' -- a REAL piece count (K)
 }
 
 # A real per-slab size renders as 'L mm x W mm x T mm'; a qualitative Size ('Rough Slab Size',
@@ -44,6 +45,9 @@ _SIZE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*mm\s*[x×]\s*(\d+(?:\.\d+)?)\s*mm\s*[x
 # Live-inventory lots publish the available stock as a square-metre figure in the product NAME,
 # e.g. 'Instock Slabs - Statuario Marble - 148.36m2'. Captured as ready stock; derive turns it into a count.
 _STOCK_M2_RE = re.compile(r"([\d.]+)\s*m²", re.IGNORECASE)
+# ... and a REAL piece count in the Quantity attribute, e.g. '380.594m², 83pcs' -> 83. Preferred over the
+# area estimate: it is the actual number of slabs in the lot.
+_PCS_RE = re.compile(r"(\d+)\s*pcs", re.IGNORECASE)
 
 
 def _clean(s: str) -> str:
@@ -80,7 +84,7 @@ class FuleistoneScraper(ScraperBase):
     columns = [
         "product_id", "name", "slug", "permalink", "sku",
         "material", "color", "finish", "thickness", "size",
-        "dimensions_length", "dimensions_height", "stock_m2",
+        "dimensions_length", "dimensions_height", "stock_m2", "slab_count",
         "categories", "is_in_stock", "stock_status",
         "short_description", "description", "image_urls_thumb",
     ]
@@ -124,6 +128,7 @@ class FuleistoneScraper(ScraperBase):
         length, height, size_thickness = _dims_from_size(attrs.get("size"))
         stock = p.get("stock_availability") or {}
         m2 = _STOCK_M2_RE.search(name)
+        pcs = _PCS_RE.search(attrs.get("quantity", ""))   # real piece count on live-inventory lots
         return {
             "product_id": p.get("id"),
             "name": name,
@@ -139,6 +144,7 @@ class FuleistoneScraper(ScraperBase):
             # bare '20' would misparse as 20 m), else the standalone Thickness attribute (already '20mm').
             "thickness": f"{size_thickness}mm" if size_thickness else attrs.get("thickness", ""),
             "stock_m2": m2.group(1) if m2 else "",            # live-inventory total available area (m2)
+            "slab_count": pcs.group(1) if pcs else "",        # real piece count (preferred over the area estimate)
             "categories": " | ".join((c.get("name") or "") for c in (p.get("categories") or []) if c.get("name")),
             "is_in_stock": p.get("is_in_stock"),
             "stock_status": (stock.get("class", "") or "").strip(),   # 'in-stock' -> derive stock fallback

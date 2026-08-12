@@ -250,6 +250,7 @@ fuleistone:
   - dimensions_length
   - dimensions_height
   - stock_m2
+  - slab_count
   - categories
   - is_in_stock
   - stock_status

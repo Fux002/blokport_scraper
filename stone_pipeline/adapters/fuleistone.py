@@ -128,7 +128,10 @@ class FuleistoneAdapter(AdapterBase):
         # default. build_dims is the ONE shared helper; unit declared here since the scraper emits bare numbers.
         "raw_dimensions": lambda r: AdapterBase.build_dims(
             r.get("dimensions_length"), r.get("dimensions_height"), unit="mm", blank_na=True),
-        # live-inventory total available area (m2) from the product name -> derive turns it into a piece count
+        # live-inventory lots carry a REAL piece count (Quantity '…, 83pcs'); derive prefers it over the area
+        # estimate. The general catalogue has neither -> the in-stock flag seeds the per-category fallback.
+        "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
+        # total available area (m2) from the product name -> derive divides it into a count when no count exists
         "raw_stock_m2": lambda r: AdapterBase.clean(r.get("stock_m2")),
         # structured availability ('in-stock') -> derive's stock fallback when no area/count is present
         "raw_stock_status": lambda r: AdapterBase.clean(r.get("stock_status")),
