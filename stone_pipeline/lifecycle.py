@@ -367,6 +367,21 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()
                 out["base_reseed"] = _reseed_base_from_pristine()   # S0: the base file itself starts pristine
+                # S0b: reconcile_variations_to_seed above fixes WHICH varieties exist (drops non-seed, dedups
+                # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
+                # spellings (a mis-bind written into the grown base); reseeding the base FILE alone leaves those
+                # spellings on the ledger's existing varieties, so the factory reset keeps them. Re-derive the
+                # variation content (name/aliases/image/volume) from the freshly-clean base -- upserts
+                # aliases := base, preserves medusa_id, and flips a changed row 'dirty' so the update pull
+                # corrects Medusa. Best-effort + LOUD (the ledger/base are already reset).
+                try:
+                    from stone_pipeline.config.settings import SETTINGS as _S
+                    from stone_pipeline.ledger.populate import populate_variations_full
+                    out["base_reseed_content"] = populate_variations_full(lg, _S.paths.variants_export_base_csv)
+                except Exception as exc:
+                    log.exception("reset: re-deriving variation content from the clean base FAILED; a seed "
+                                  "variety may keep stale aliases")
+                    out["base_reseed_content"] = {"error": f"content re-derive failed: {exc}"}
                 # Also drop the cached scrape (raw scrapes + canonical parquets, local AND S3 snapshots): a
                 # factory reset returns to the seed, so a later republish/catalog must not re-mint from the
                 # pre-reset scrape, and a cold boot must not restore it. Best-effort + LOUD (never fails the
