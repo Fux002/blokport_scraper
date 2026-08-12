@@ -34,7 +34,7 @@ except ImportError:
 # they are deliberately NOT listed: an adapter-less source can never reach the pipeline (stone_pipeline.run
 # builds its work list from the ADAPTER registry), and listing one here would only let a `scrape all` on an
 # unseeded box abort the whole produce on that dormant scraper's failure (rc=1). Add on full onboarding.
-_SOURCES = ("marenostone", "polonine", "zucchi", "varsha")
+_SOURCES = ("marenostone", "polonine", "zucchi", "varsha", "fuleistone")
 
 
 def _discover(source: str) -> Type[ScraperBase]:
