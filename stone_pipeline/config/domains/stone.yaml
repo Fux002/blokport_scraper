@@ -43,6 +43,13 @@ fallback_color: Natural
 last_resort_finishes: {slab: Polished, tile: Honed}
 last_resort_quality: A
 
+# In-stock fallback COUNT, PER CATEGORY. When a source flags a product as available (an in-stock word /
+# structured status) but gives no real count and no stock area to divide, derive seeds this piece count
+# (flagged low-confidence) so the product LISTS instead of holding -- a made-to-order estimate, never a
+# measurement. A block is a single large piece (1); a slab/tile is stocked in modest quantity. Replaces the
+# old single global 999 (settings.thresholds.in_stock_word_fallback_qty), which was one size for every format.
+in_stock_fallback_qty: {slab: 10, block: 1, tile: 10}
+
 # The standard finish for a raw/unfinished block, applied when a block source gives none (was the hardcoded
 # 'Raw' in stages/normalize.py). Must exist in attributes.csv + the block backbone.
 block_finish: Raw

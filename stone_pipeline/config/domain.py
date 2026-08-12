@@ -23,7 +23,7 @@ _DOMAINS_DIR = Path(__file__).parent / "domains"
 _DEFAULT_PACK = "stone"
 _REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories",
              "ambiguous_type_words", "default_finishes", "fallback_color",
-             "last_resort_finishes", "last_resort_quality", "block_finish",
+             "last_resort_finishes", "last_resort_quality", "block_finish", "in_stock_fallback_qty",
              "dimension_ranges", "dimension_defaults", "finish_phrases", "finish_phrase_default")
 
 
@@ -45,6 +45,7 @@ class DomainPack:
     last_resort_finishes: dict[str, str]   # branch -> flagged last-resort finish (unlisted branch uses slab's)
     last_resort_quality: str               # flagged last-resort quality when a source states none
     block_finish: str                      # the standard finish applied to a raw/unfinished block
+    in_stock_fallback_qty: dict[str, int]  # category -> flagged made-to-order piece count when in-stock but countless
     # format -> {weight|length|width|height: (lo, hi)} in metres/tonnes
     dimension_ranges: dict[str, dict[str, tuple[float, float]]]
     # format -> {length, height, thickness} fallback size in metres (derive fills a missing dim from this)
@@ -87,6 +88,11 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         for dim in ("length", "height", "thickness"):
             if not isinstance(dims.get(dim), (int, float)) or dims[dim] <= 0:
                 bad(f"dimension_defaults[{fmt!r}][{dim!r}] must be a positive number, got {dims.get(dim)!r}")
+    if not isinstance(data["in_stock_fallback_qty"], dict):
+        bad("'in_stock_fallback_qty' must be a mapping of category -> positive int")
+    for fmt, qty in data["in_stock_fallback_qty"].items():
+        if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
+            bad(f"in_stock_fallback_qty[{fmt!r}] must be a positive int, got {qty!r}")
 
 
 def load_pack(name: str | None = None) -> DomainPack:
@@ -117,6 +123,7 @@ def load_pack(name: str | None = None) -> DomainPack:
         last_resort_finishes=dict(data["last_resort_finishes"]),
         last_resort_quality=data["last_resort_quality"],
         block_finish=data["block_finish"],
+        in_stock_fallback_qty={fmt: int(qty) for fmt, qty in data["in_stock_fallback_qty"].items()},
         dimension_ranges=ranges,
         dimension_defaults={fmt: {k: float(v) for k, v in dims.items()}
                             for fmt, dims in data["dimension_defaults"].items()},
