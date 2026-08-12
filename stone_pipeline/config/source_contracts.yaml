@@ -254,8 +254,6 @@ fuleistone:
   - categories
   - is_in_stock
   - stock_status
-  - short_description
-  - description
   - image_urls_thumb
   - format
   - scrape_timestamp
