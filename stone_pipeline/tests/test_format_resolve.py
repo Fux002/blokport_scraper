@@ -63,6 +63,32 @@ def test_structural_infers_slab_and_flags(ref):
     assert any(f.code == FlagCode.format_inferred for f in row.review_flags)
 
 
+def test_structural_thick_depth_infers_block_not_slab(ref):
+    # the MAR-682 bug: no tag, no name word, but a 2 m depth in the thickness field. Presence of a thickness
+    # must NOT default to slab -- a block-scale depth resolves to Block (and derive then keeps the real depth
+    # instead of clamping it to the 2 cm slab default).
+    row = _resolve(ref, raw_format="", raw_name="Marjan Silver Travertine No. 682", raw_thickness="200cm")
+    assert row.format_value == "Block"
+    assert row.is_block is True
+    assert row.format_method == "structural"
+    assert any(f.code == FlagCode.format_inferred for f in row.review_flags)
+
+
+def test_structural_thin_depth_infers_slab(ref):
+    # a slab-scale thickness with no other signal still resolves to Slab (the common untagged slab case).
+    row = _resolve(ref, raw_format="", raw_name="Some Marble", raw_thickness="2cm")
+    assert row.format_value == "Slab"
+    assert row.format_method == "structural"
+
+
+def test_structural_ambiguous_depth_declines_to_unresolved(ref):
+    # a depth in neither the slab band nor the block band is not guessed -- it declines to the flagged
+    # unresolved fallback rather than forcing a possibly-wrong format.
+    row = _resolve(ref, raw_format="", raw_name="Mystery", raw_thickness="20cm")
+    assert row.format_method == "unresolved_default"
+    assert any(f.code == FlagCode.format_unresolved for f in row.review_flags)
+
+
 def test_unresolved_is_flagged_not_guessed(ref):
     # no tag, no name word, no structural signal -> flagged, slab branch fallback
     row = _resolve(ref, raw_format="", raw_name="Mystery Product")

@@ -27,6 +27,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, Confidence, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
@@ -74,17 +75,38 @@ def _set(row: CanonicalRow, value: str, method: str, confidence: Confidence) -> 
     row.format_confidence = _conf(confidence)
 
 
-def _structural_guess(row: CanonicalRow) -> str | None:
-    """A clean, isolated structural inference. Slab bundles carry a slab count, a
-    total area, or a thickness; those are unambiguous slab indicators. Block and
-    tile detection from raw fields is not reliable without an explicit tag, so
-    this only confirms slab and otherwise declines (returns None)."""
-    has_slab_count = bool((row.raw_slab_count or "").strip())
-    has_total_area = bool((row.raw_total_m2 or "").strip())
-    has_thickness = bool((row.raw_thickness or "").strip())
-    if has_slab_count or has_total_area or has_thickness:
+def _thickness_branch(row: CanonicalRow, ref: ReferenceData) -> str | None:
+    """Classify block vs slab from the DEPTH (raw_thickness) magnitude when no tag or name word says so. A
+    slab is a few centimetres thick; a block is tens of centimetres or more (a source that puts the piece
+    depth in the thickness field -- e.g. marenostone -- gives a block a large value here). Parsed in metres
+    with the SAME parser derive uses, so the format decision and the dimensions agree, and compared to the
+    pack's per-category thickness bands with the pipeline's standard tolerance (lo*0.3 / hi*3): a clearly
+    thick depth -> block, a clearly thin one -> slab, the ambiguous middle -> decline (returns None). Presence
+    of a thickness value is NOT itself a slab signal -- that mislabelled a 2 m thick block as a slab and then
+    let derive clamp its real depth to the 2 cm slab default."""
+    if not (row.raw_thickness or "").strip():
+        return None
+    from stone_pipeline.stages.derive import _parse_measure   # canonical string->metres; local import avoids a cycle
+    meters = _parse_measure(row.raw_thickness, ref)
+    if meters is None:
+        return None
+    ranges = active_pack().dimension_ranges
+    slab_hi = ranges["slab"]["width"][1]     # slab thickness band top (e.g. 0.03 m)
+    block_lo = ranges["block"]["width"][0]   # block thickness band floor (e.g. 1.5 m)
+    if meters >= block_lo * 0.3:             # clearly block-scale depth
+        return "block"
+    if meters <= slab_hi * 3:                # clearly slab-scale thickness
         return "slab"
-    return None
+    return None                              # ambiguous middle -> decline, leave it to review
+
+
+def _structural_guess(row: CanonicalRow, ref: ReferenceData) -> str | None:
+    """A clean, isolated structural inference when there is no tag or name word. A slab count or a bundle
+    total-area is an unambiguous SLAB indicator (only counted slab bundles carry them). Otherwise fall to the
+    depth magnitude, which separates a thin slab from a thick block; anything unclear declines (returns None)."""
+    if (row.raw_slab_count or "").strip() or (row.raw_total_m2 or "").strip():
+        return "slab"
+    return _thickness_branch(row, ref)
 
 
 def resolve_format(row: CanonicalRow, ref: ReferenceData) -> None:
@@ -109,8 +131,8 @@ def resolve_format(row: CanonicalRow, ref: ReferenceData) -> None:
         _set(row, name_hit.group(1), "name_word", Confidence.high)
         return
 
-    # 4. structural inference (slab indicators)
-    guess = _structural_guess(row)
+    # 4. structural inference (slab-count / area, else the depth magnitude)
+    guess = _structural_guess(row, ref)
     if guess:
         _set(row, guess, "structural", Confidence.medium)
         row.add_flag(ReviewFlag(field="format", code=FlagCode.format_inferred,
