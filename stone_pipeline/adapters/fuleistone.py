@@ -24,11 +24,17 @@ attribute, so quality takes the pack's flagged last-resort (A) downstream -- it 
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 
 from stone_pipeline.adapters.base import AdapterBase
 from stone_pipeline.adapters.tokens import extract_color, known_values, recognize_type, strip_format
 from stone_pipeline.core.text import match_key
+
+# 'Backlit'/'Backlited' is a lighting/display condition in the product name (backlit onyx/agate/crystal panels),
+# never part of the stone's identity -- strip it like the format word so 'Backlit Calcite Blue' resolves as the
+# real variety 'Calcite Blue'. fuleistone-only for now; promote to a shared strip if a second source ships it.
+_BACKLIT_RE = re.compile(r"(?i)\bbacklit(?:ed)?\b")
 
 
 def _terms(value: str) -> list[str]:
@@ -91,14 +97,14 @@ def _pick_thickness(thickness_raw: str) -> str:
 
 def _variety(name: str) -> str:
     """The variety candidate for the tree matcher. A live-inventory lot wraps the variety as
-    'Instock Slabs - <variety> [- Bookmatched] - <area>m2'; unwrap it. Otherwise strip only the format word
-    (colour+type tokens kept), so a real variety resolves and a generic descriptor routes to review."""
-    import re
+    'Instock Slabs - <variety> [- Bookmatched] - <area>m2'; unwrap it. Then drop the 'Backlit' display artifact
+    and strip only the format word (colour+type tokens kept), so a real variety resolves and a generic
+    descriptor routes to review."""
     text = (name or "").strip()
     lot = re.match(r"(?i)^instock\s+slabs\s*[-–]\s*(.+?)\s*[-–]\s*(?:bookmatched\s*[-–]\s*)?[\d.]+\s*m²", text)
     if lot:
-        return strip_format(lot.group(1).strip())
-    return strip_format(text)
+        text = lot.group(1).strip()
+    return strip_format(_BACKLIT_RE.sub(" ", text))
 
 
 class FuleistoneAdapter(AdapterBase):

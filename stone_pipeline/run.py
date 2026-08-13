@@ -152,6 +152,29 @@ def _skipped_manifest(source: str, reason: str) -> "Manifest":
     return m
 
 
+def _funnel(metrics) -> dict:
+    """The per-source cleaning funnel, hoisted from the stage metrics already recorded (no new counting):
+    how many rows the source LISTED and where they went. By construction
+
+        listed == unmapped + deduped + rejected + held + clean
+
+    (ingest is the only entry and the only adapt-time drop; keys_dedupe is the only dedup drop; validate
+    splits the rest into reject/review/emit; the stages between them never drop a row) so the buckets always
+    reconcile -- a self-checking stat, unlike an opaque total. This is a ROW-level figure (what the source
+    offered vs what survived cleaning); it is deliberately NOT the downstream product or valid-combination
+    count, which are built later at catalog on a different unit."""
+    by = {m.stage: m for m in metrics}
+    ingest, dd, val = by.get("ingest"), by.get("keys_dedupe"), by.get("validate")
+    return {
+        "listed": ingest.rows_in if ingest else 0,               # rows the source listed (scraped)
+        "unmapped": (ingest.rows_in - ingest.rows_out) if ingest else 0,  # adapter could not map (missing field)
+        "deduped": (dd.rows_in - dd.rows_out) if dd else 0,       # dropped as duplicate keys
+        "rejected": val.rejected if val else 0,                  # dropped: unusable/bad data
+        "held": val.reviewed if val else 0,                      # held for operator review
+        "clean": val.rows_out if val else 0,                     # survived cleaning -> importable
+    }
+
+
 def _write_diagnostics(manifest, layout) -> None:
     """Write the run manifest AND the one-glance per-layer stages.json (each stage's status plus the
     validate-in gate/health/magnitude statuses), so a bug surfaces at the layer it was born in. Called
@@ -164,6 +187,7 @@ def _write_diagnostics(manifest, layout) -> None:
         "health": manifest.health_status,
         "magnitude": manifest.magnitude_status,
         "gates": manifest.gate_status,
+        "funnel": _funnel(manifest.stage_metrics),
         "stages": [
             {"stage": m.stage, "status": m.status, "rows_in": m.rows_in, "rows_out": m.rows_out,
              "rejected": m.rejected, "reviewed": m.reviewed, "gapped": m.gapped, "extra": m.extra}
