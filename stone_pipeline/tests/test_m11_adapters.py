@@ -50,6 +50,15 @@ def test_generic_descriptor_yields_empty_variety():
     assert strip_variety("Pietra Gray Marble Slab") == "Pietra"
 
 
+def test_fuleistone_strips_backlit_display_artifact():
+    # 'Backlit'/'Backlited' is a lighting condition in the name, not part of the stone identity; it must be
+    # dropped before matching so the real variety resolves (and it never touches a genuine token).
+    from stone_pipeline.adapters.fuleistone import _variety
+    assert _variety("Backlit Calcite Blue") == "Calcite Blue"
+    assert _variety("Backlited Yellow Agate Slab") == "Yellow Agate"
+    assert _variety("Calcite Blue Onyx Slab") == "Calcite Blue Onyx"   # no artifact -> unchanged (bar format)
+
+
 def test_match_colour_is_position_aware_and_boundary_safe():
     # _match_colour is PURE: inject the vocabulary and assert the logic alone (no reference I/O). It is
     # position-aware (first colour by TEXT order) and boundary-safe (whole words, via the match key).

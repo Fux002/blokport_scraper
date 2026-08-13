@@ -31,6 +31,26 @@ def test_stage_metric_summary_and_status_default():
     assert StageMetric(stage="y", status="DEGRADED").summary().startswith("y: DEGRADED")
 
 
+# --- per-source cleaning funnel (listed vs survived, self-reconciling) ---------------------------
+def test_funnel_reconciles_listed_to_clean():
+    from stone_pipeline.run import _funnel
+    metrics = [
+        StageMetric(stage="ingest", rows_in=1274, rows_out=1270),        # 4 rows the adapter could not map
+        StageMetric(stage="keys_dedupe", rows_in=1270, rows_out=1260),   # 10 dropped as duplicate keys
+        StageMetric(stage="format", rows_in=1260, rows_out=1260),        # a non-dropping stage in between
+        StageMetric(stage="validate", rows_in=1260, rows_out=296, rejected=40, reviewed=924),
+    ]
+    f = _funnel(metrics)
+    assert f == {"listed": 1274, "unmapped": 4, "deduped": 10, "rejected": 40, "held": 924, "clean": 296}
+    # the buckets MUST account for every listed row -- the funnel is only meaningful if it reconciles
+    assert f["listed"] == f["unmapped"] + f["deduped"] + f["rejected"] + f["held"] + f["clean"]
+
+
+def test_funnel_is_all_zeros_on_an_empty_or_aborted_run():
+    from stone_pipeline.run import _funnel
+    assert _funnel([]) == {"listed": 0, "unmapped": 0, "deduped": 0, "rejected": 0, "held": 0, "clean": 0}
+
+
 # --- images / validate strip status (the two cells that were hardcoded/absent) -------------------
 def test_ratio_status_thresholds_and_zero_guard():
     from stone_pipeline.run import _ratio_status
