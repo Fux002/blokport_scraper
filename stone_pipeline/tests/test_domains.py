@@ -78,7 +78,8 @@ def _valid_pack_dict():
         "categories": [{"name": "x", "plural": "xs", "label": "Xs", "backbone_filename": "b.json",
                         "base_image": "", "shares_variety_vocab": True, "fan_out": True,
                         "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None}],
-        "ambiguous_type_words": ["z"], "default_finishes": ["F"], "fallback_color": "N",
+        "ambiguous_type_words": ["z"], "generic_descriptors": ["g"], "generic_material_word": "m",
+        "default_finishes": ["F"], "fallback_color": "N",
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
         "in_stock_fallback_qty": {"x": 5},
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
@@ -121,6 +122,8 @@ categories:
   - {name: pants, plural: pants, label: Pants, backbone_filename: backbone_pants.json,
      base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null}
 ambiguous_type_words: [blend]
+generic_descriptors: [garment, the]
+generic_material_word: garment
 default_finishes: [Standard]
 fallback_color: Unspecified
 last_resort_finishes: {shirt: Standard, pants: Standard}

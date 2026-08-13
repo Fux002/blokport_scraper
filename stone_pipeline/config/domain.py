@@ -22,7 +22,8 @@ import yaml
 _DOMAINS_DIR = Path(__file__).parent / "domains"
 _DEFAULT_PACK = "stone"
 _REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories",
-             "ambiguous_type_words", "default_finishes", "fallback_color",
+             "ambiguous_type_words", "generic_descriptors", "generic_material_word",
+             "default_finishes", "fallback_color",
              "last_resort_finishes", "last_resort_quality", "block_finish", "in_stock_fallback_qty",
              "dimension_ranges", "dimension_defaults", "finish_phrases", "finish_phrase_default")
 
@@ -40,6 +41,12 @@ class DomainPack:
     # settings.py maps these to Category objects (the pack stays agnostic to that dataclass); pcat is env.
     categories: tuple[dict, ...]
     ambiguous_type_words: frozenset[str]
+    # words that, as the ONLY difference between two variety names, signal an alias not a distinct variety
+    # (base + descriptor: 'Bardiglio Nuvolato' ~ '... Marble'). Per-domain: each pack supplies its own.
+    generic_descriptors: frozenset[str]
+    # the generic material noun of this domain ('stone'; 'wood' for a wood pack): used as the title's
+    # material fallback and stripped when deciding whether a type name is purely generic.
+    generic_material_word: str
     default_finishes: tuple[str, ...]
     fallback_color: str
     last_resort_finishes: dict[str, str]   # branch -> flagged last-resort finish (unlisted branch uses slab's)
@@ -118,6 +125,8 @@ def load_pack(name: str | None = None) -> DomainPack:
         leaf_attributes=tuple(data["leaf_attributes"]),
         categories=tuple(data["categories"]),
         ambiguous_type_words=frozenset(data["ambiguous_type_words"]),
+        generic_descriptors=frozenset(data["generic_descriptors"]),
+        generic_material_word=data["generic_material_word"],
         default_finishes=tuple(data["default_finishes"]),
         fallback_color=data["fallback_color"],
         last_resort_finishes=dict(data["last_resort_finishes"]),

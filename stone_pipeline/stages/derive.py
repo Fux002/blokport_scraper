@@ -627,9 +627,6 @@ def _primary_variety_name(name: str) -> str:
     return re.sub(r"\s*\(.*?\)\s*", " ", name or "").strip()
 
 
-_GENERIC_TYPE_TOKENS = frozenset({"stone"})  # too generic to signal the type is already named
-
-
 def _material_suffix(variety_name: str, type_name: str | None) -> str:
     """The stone type to append to a title, or '' when the variety name already implies it.
     Skips if ANY non-generic token of the type is already a whole word in the variety name, so
@@ -638,7 +635,8 @@ def _material_suffix(variety_name: str, type_name: str | None) -> str:
     to skip: a missing material only costs a little findability, a doubled one reads broken."""
     if not type_name:
         return ""
-    type_tokens = [t for t in re.findall(r"[a-z]+", type_name.casefold()) if t not in _GENERIC_TYPE_TOKENS]
+    generic_tokens = {active_pack().generic_material_word}   # the domain's generic material noun ('stone')
+    type_tokens = [t for t in re.findall(r"[a-z]+", type_name.casefold()) if t not in generic_tokens]
     if not type_tokens:
         return ""                                  # a purely generic type ('Stone') adds nothing
     variety_tokens = set(re.findall(r"[a-z]+", (variety_name or "").casefold()))
@@ -674,7 +672,7 @@ def derive_description(row: CanonicalRow) -> None:
         row.description_method = "passthrough"
         return
     variety = title_case(_primary_variety_name(row.variation_name or row.raw_name or "This stone"))
-    stone_type = (row.type_name or "stone").lower()     # 'stone' is a safe generic noun
+    stone_type = (row.type_name or active_pack().generic_material_word).lower()  # generic material noun
     color = (row.color_name or "").lower()               # OMIT when unresolved -- never invent 'natural'
     material = f"{color} {stone_type}".strip()           # 'black marble', or just 'marble'
     # origin is a real provenance claim -- only stated when both city and country resolved, else omitted
