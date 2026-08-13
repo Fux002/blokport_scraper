@@ -29,14 +29,9 @@ from stone_pipeline.core.text import match_key
 
 log = logfmt.get_logger("alias_resolver")
 
-# Words that, as the ONLY difference between two names, signal an alias rather than a distinct variety
-# (base + descriptor): 'Bardiglio Nuvolato' -> 'Bardiglio Nuvolato Marble'. Colour/varietal words are NOT
-# here -- a differing colour/varietal word ('Divine' vs 'Bianco') means a distinct stone, not an alias.
-_GENERIC = frozenset({
-    "marble", "granite", "slab", "slabs", "stone", "tile", "tiles", "block", "blocks",
-    "natural", "polished", "honed", "brazilian", "brazil", "italian", "turkish", "indian",
-    "premium", "classic", "extra", "standard", "the", "and",
-})
+# The generic-descriptor words (that, as the ONLY difference between two names, signal an alias not a
+# distinct variety) now live in the active domain pack -- `active_pack().generic_descriptors` -- so a
+# non-stone pack supplies its own. Read lazily in `decide_against` (see AliasResolver._generic_set).
 
 # De-spaced char similarity above which two names are the SAME variety (a typo/spelling variant); and above
 # which an uncertain near-match is REVIEWED rather than minted. A distinct sibling ('Cristallo Divine' vs
@@ -61,6 +56,15 @@ class AliasResolver:
     """Stateless deterministic decider. Kept as a class (built by `from_backbones`) so the curate call site
     is unchanged; it holds no trained parameters."""
 
+    # the pack's generic-descriptor words; empty means "read the active pack lazily" (see _generic_set)
+    generic: frozenset = frozenset()
+
+    def _generic_set(self) -> frozenset:
+        if self.generic:
+            return self.generic
+        from stone_pipeline.config.domain import active_pack   # lazy: avoid an import cycle at module load
+        return active_pack().generic_descriptors
+
     def decide(self, a: str, ta: str, ca, b: str, tb: str, cb) -> Decision:
         return self.decide_against(a, ta, ca, [b], tb, cb)
 
@@ -69,6 +73,7 @@ class AliasResolver:
         known aliases) and take the strongest NAME evidence. `ca`/`cb` (colours) are accepted for interface
         compatibility but deliberately NOT used -- colour is not identity. `ta`/`tb` gate a cross-type alias
         down to review, nothing more."""
+        generic = self._generic_set()
         da = _norm(a).replace(" ", "")
         atoks = set(_norm(a).split())
         best_char = 0.0
@@ -86,7 +91,7 @@ class AliasResolver:
                 # a shared varietal core with the ONLY differing tokens being generic descriptors is the same
                 # variety ('Bardiglio Nuvolato' ~ '... Marble'); a shared core with a MEANINGFUL differing
                 # word is a DISTINCT sibling ('Cristallo Divine' vs 'Cristallo Bianco'), never an alias.
-                if extra <= _GENERIC:
+                if extra <= generic:
                     only_generic = True
                 else:
                     meaningful_diff = True

@@ -29,6 +29,18 @@ categories:
 # Type words too generic to disambiguate a variety on their own (was adapters/tokens.py _AMBIGUOUS_TYPE_WORDS).
 ambiguous_type_words: [crystal, quartz, agate, amethyst, coral]
 
+# Words that, as the ONLY difference between two variety names, signal an alias rather than a distinct
+# variety ('Bardiglio Nuvolato' ~ 'Bardiglio Nuvolato Marble'). Colour/varietal words are NOT here.
+# (Was the hardcoded _GENERIC frozenset in matching/alias_resolver.py; moved here verbatim so a non-stone
+# pack supplies its own descriptors.)
+generic_descriptors: [marble, granite, slab, slabs, stone, tile, tiles, block, blocks,
+                      natural, polished, honed, brazilian, brazil, italian, turkish, indian,
+                      premium, classic, extra, standard, the, and]
+
+# The generic material noun (title material fallback + stripped when a type name is purely generic).
+# (Was the hardcoded 'stone' literal / _GENERIC_TYPE_TOKENS in stages/derive.py.)
+generic_material_word: stone
+
 # A sensible default allowed-finish set for a new variant; the human refines it (was stages/curate.py
 # _DEFAULT_FINISHES). Order preserved.
 default_finishes: [Polished, Honed, Leathered, Brushed, Flamed, Sandblasted, Sawn Cut, Raw]
