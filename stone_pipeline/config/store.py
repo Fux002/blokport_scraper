@@ -378,6 +378,25 @@ def clear_retired(path: str | Path | None = None) -> int:
     return n
 
 
+def clear_source_diagnostics(sources: list[str] | None = None, path: str | Path | None = None) -> int:
+    """Drop the persisted per-source diagnostics (the funnel/listed/stages the admin's Diagnostics and
+    /scrapers pages read). A GLOBAL/pristine reset calls this so the 'listed' column starts BLANK after a
+    factory reset -- otherwise the last-produce values linger (the reset clears the ledger/base but not this
+    display table). Each source refills its diagnostic on its next produce. sources=None clears every source;
+    a list scopes it. Returns the number of rows dropped."""
+    p = Path(path or config_db_path())
+    if not p.exists():
+        return 0
+    with closing(open_store(p)) as conn:
+        if sources is None:
+            n = conn.execute("DELETE FROM source_diagnostic").rowcount
+        else:
+            n = sum(conn.execute("DELETE FROM source_diagnostic WHERE source = ?", (s,)).rowcount
+                    for s in sources)
+        conn.commit()
+    return n
+
+
 def delete_source(source: str, path: str | Path | None = None) -> bool:
     """Remove a scraper from the config store entirely (the ':4200' Remove-permanently button, after its
     ledger products have been purged). Returns True if a row was deleted, False if the source was already

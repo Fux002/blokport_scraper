@@ -70,7 +70,8 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
 
     # GLOBAL reset -> queues + attribute ids cleared, reported in the response
     out, code = lifecycle.reset(sources=None, hard=False)
-    assert code == 200 and out["config"] == {"review_pending": 2, "attribute_ids": 1}
+    assert code == 200 and out["config"] == {"review_pending": 2, "attribute_ids": 1,
+                                             "source_diagnostics": 0}
     assert decisions_store.list_pending("variety") == [] and decisions_store.attribute_ids() == {}
     # durable intent still survives a global reset
     assert decisions_store.confirm_map() == {"black absolute": "yes"}
@@ -121,7 +122,7 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     out, code = lifecycle.reset(sources=None, pristine=True)
     assert code == 200 and out["mode"] == "pristine"
     # every clearable store reported in the response.config
-    assert out["config"] == {"review_pending": 2, "attribute_ids": 1,
+    assert out["config"] == {"review_pending": 2, "attribute_ids": 1, "source_diagnostics": 0,
                              "variety_decisions": 1, "leaf_decisions": 1, "retired_keys": 1}
     # the durable overlay is GONE (unlike a normal reset), so the catalog is seed-only next produce
     assert decisions_store.confirm_map() == {}
