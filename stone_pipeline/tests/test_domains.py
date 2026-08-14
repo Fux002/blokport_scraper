@@ -194,6 +194,29 @@ def test_name_heuristics_are_pack_driven(monkeypatch):
     assert text.looks_code_shaped("Trani Bianco H") == ""        # not flagged as a grade
 
 
+def test_texture_colour_classification_is_pack_gated(monkeypatch):
+    # GAP B: stone classifies a variety's colour from its product image; a domain can opt out
+    # (classify_texture_color=false), and then the classify() palette need not exist in Medusa.
+    import dataclasses
+    from types import SimpleNamespace
+    from stone_pipeline.reference import loaders
+    from stone_pipeline.stages.variety_color import CLASSIFIABLE_COLORS
+    pack = domain.active_pack()
+    assert pack.classify_texture_color is True
+    # a fake Medusa vocab that has the pack defaults but is MISSING the classify palette colours
+    def resolve_id(vocab, val):
+        if vocab == "color" and val in CLASSIFIABLE_COLORS:
+            return None                          # palette colour absent from Medusa
+        return (vocab, "id")                     # every pack-default value resolves
+    ref = SimpleNamespace(attributes=SimpleNamespace(resolve_id=resolve_id))
+    monkeypatch.setattr(loaders, "load_synonyms", lambda vocab: {})
+    with pytest.raises(ValueError, match="absent from attributes.csv"):
+        loaders._assert_pack_defaults_resolve(ref)          # classify ON -> palette required -> fails loud
+    off = dataclasses.replace(pack, classify_texture_color=False)
+    monkeypatch.setattr(domain, "active_pack", lambda: off)
+    loaders._assert_pack_defaults_resolve(ref)              # classify OFF -> palette not required -> passes
+
+
 _TOY_APPAREL_PACK = """
 name: apparel
 attributes: [material, color, size]

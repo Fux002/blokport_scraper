@@ -65,6 +65,10 @@ class DomainPack:
     # review (stone: 'Rosal C' -> 'Rosal'). A pack that omits both never mangles a name on these rules.
     name_code_pattern: str | None = None
     trailing_grade_letters: bool = False
+    # Classify a variety's colour from its product image with the stone-tuned CV palette (variety_color).
+    # A domain whose tones that palette cannot read sets this false: colour then comes from the pack
+    # fallback_color / the Medusa-supplied value, and its CLASSIFIABLE_COLORS need not exist in Medusa.
+    classify_texture_color: bool = True
 
 
 def _pack_path(name: str) -> Path:
@@ -171,6 +175,7 @@ def load_pack(name: str | None = None) -> DomainPack:
         finish_phrase_default=data["finish_phrase_default"],
         name_code_pattern=data.get("name_code_pattern"),
         trailing_grade_letters=bool(data.get("trailing_grade_letters", False)),
+        classify_texture_color=bool(data.get("classify_texture_color", True)),
     )
 
 

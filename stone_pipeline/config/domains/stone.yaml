@@ -114,3 +114,8 @@ finish_phrase_default: "a refined natural surface"
 # Validated on the stone backbone (no variety ends in a lone non-'I' letter). A non-stone pack sets its own.
 name_code_pattern: '[Gg]\d+[A-Za-z]?'
 trailing_grade_letters: true
+
+# Classify a variety's colour from its de-watermarked product image with the stone-tuned CV palette
+# (variety_color.classify). A material whose tones that palette cannot read sets this false and takes the
+# fallback/Medusa colour instead; stone relies on it (varsha/zucchi have no colour column).
+classify_texture_color: true
