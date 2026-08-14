@@ -176,6 +176,24 @@ def test_stone_declares_the_category_roles():
     assert settings.category("tile").mirror_of == "slab"
 
 
+def test_name_heuristics_are_pack_driven(monkeypatch):
+    # GAP F: the granite-code keep-exception and the trailing lone-letter grade strip/flag are STONE corpus
+    # rules, now pack-declared. Under stone they fire (byte-identical); a domain that declares neither leaves
+    # names intact instead of mangling them (the wood footgun).
+    import dataclasses
+    from stone_pipeline.core import text
+    # stone pack: grade letter collapses to the base variety; granite 'G682' survives as a real name
+    assert text.clean_variety_name("Rosal C") == "Rosal"
+    assert text.clean_variety_name("G682 Kashmir") == "G682 Kashmir"
+    assert text.looks_code_shaped("Trani Bianco H") == "lone_letter"
+    # a domain that grades by neither: the trailing letter is kept, granite 'G682' is treated as a code
+    plain = dataclasses.replace(domain.active_pack(), trailing_grade_letters=False, name_code_pattern=None)
+    monkeypatch.setattr(domain, "active_pack", lambda: plain)
+    assert text.clean_variety_name("Rosal C") == "Rosal C"       # trailing letter NOT a grade -> kept
+    assert text.clean_variety_name("G682 Kashmir") == "Kashmir"  # no real-code pattern -> stripped as a code
+    assert text.looks_code_shaped("Trani Bianco H") == ""        # not flagged as a grade
+
+
 _TOY_APPAREL_PACK = """
 name: apparel
 attributes: [material, color, size]

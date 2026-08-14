@@ -106,3 +106,11 @@ finish_phrases:
   tumbled: "a softened, antique-worn character"
 # Phrase when the finish has no specific entry (was the default in derive.derive_description).
 finish_phrase_default: "a refined natural surface"
+
+# Name-cleaning corpus rules (core/text.py), previously hardcoded stone conventions. name_code_pattern: the
+# ONE codey-looking token shape that is a real stone name (granite 'G682'/'G032') and is never stripped or
+# flagged. trailing_grade_letters: stone grades a variety with a trailing lone letter ('Rosal C', 'Red
+# Wendeng-z'), collapsed to the base variety in cleaning and flagged in review; a Roman 'I' is kept distinct.
+# Validated on the stone backbone (no variety ends in a lone non-'I' letter). A non-stone pack sets its own.
+name_code_pattern: '[Gg]\d+[A-Za-z]?'
+trailing_grade_letters: true

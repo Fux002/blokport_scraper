@@ -59,6 +59,12 @@ class DomainPack:
     dimension_defaults: dict[str, dict[str, float]]
     finish_phrases: dict[str, str]
     finish_phrase_default: str
+    # Name-cleaning corpus rules (core/text.py), optional. name_code_pattern: a regex for codey-LOOKING tokens
+    # that are real names in this domain and must never be stripped/flagged (stone: granite 'G682').
+    # trailing_grade_letters: whether a trailing lone letter is a grade code to strip in cleaning and flag in
+    # review (stone: 'Rosal C' -> 'Rosal'). A pack that omits both never mangles a name on these rules.
+    name_code_pattern: str | None = None
+    trailing_grade_letters: bool = False
 
 
 def _pack_path(name: str) -> Path:
@@ -163,6 +169,8 @@ def load_pack(name: str | None = None) -> DomainPack:
                             for fmt, dims in data["dimension_defaults"].items()},
         finish_phrases=dict(data["finish_phrases"]),
         finish_phrase_default=data["finish_phrase_default"],
+        name_code_pattern=data.get("name_code_pattern"),
+        trailing_grade_letters=bool(data.get("trailing_grade_letters", False)),
     )
 
 
