@@ -190,24 +190,27 @@ def fill_colors(backbone_paths: list[Path] | None = None,
 
     from_image = 0
     by_sha: dict[str, str | None] = {}   # a photo shared across mirrors classifies once
-    # 1. colour from the real product image -- (re)derived when blank OR the photo changed since last time
-    for doc in docs.values():
-        for post in posts(doc):
-            key = post.get("key")
-            url = product_images.get(key) if key else None
-            sha = imagestore.sha_from_url(url) if url else None
-            if not (is_blank(post) or (sha and sha != post.get("color_src_sha"))):
-                continue                                 # keep the current colour: still valid + same photo
-            if not (url and sha):
-                continue                                 # no product image -> leave for propagate/floor
-            if sha not in by_sha:
-                data = fetch(url)
-                by_sha[sha] = color_from_image_bytes(data) if data else None
-            col = by_sha[sha]
-            if col:
-                post["color"] = [col]
-                post["color_src_sha"] = sha              # so we only re-derive when the photo changes
-                from_image += 1
+    # 1. colour from the real product image -- (re)derived when blank OR the photo changed since last time.
+    #    Skipped for a domain that opts out of texture-colour CV (pack.classify_texture_color=false): its
+    #    colours then come only from propagation + the fallback, never the stone-tuned palette.
+    if active_pack().classify_texture_color:
+        for doc in docs.values():
+            for post in posts(doc):
+                key = post.get("key")
+                url = product_images.get(key) if key else None
+                sha = imagestore.sha_from_url(url) if url else None
+                if not (is_blank(post) or (sha and sha != post.get("color_src_sha"))):
+                    continue                             # keep the current colour: still valid + same photo
+                if not (url and sha):
+                    continue                             # no product image -> leave for propagate/floor
+                if sha not in by_sha:
+                    data = fetch(url)
+                    by_sha[sha] = color_from_image_bytes(data) if data else None
+                col = by_sha[sha]
+                if col:
+                    post["color"] = [col]
+                    post["color_src_sha"] = sha          # so we only re-derive when the photo changes
+                    from_image += 1
     # 2. propagate a known colour to same-stone mirrors -- learn from BOTH the docs being edited and
     #    the read-only reference backbones (already-merged siblings).
     known: dict[tuple[str, str], list[str]] = {}

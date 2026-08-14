@@ -17,10 +17,14 @@ leaf_attributes: [color, finish, quality]
 # The category model (was the CATEGORIES tuple in settings.py). Each category is one FORM of the product;
 # every category-derived constant in the pipeline recomputes from this list. The Medusa pcat id is NOT here
 # -- it is env-specific and resolved at runtime from the env's attributes.csv. base_image "" = real photo.
+# default_form (slab) = the form a row falls back to when its format is unresolved, and the finish/dimension
+# fallback source. bulk_form (block) = the uncut/solid form -> drives is_block + the block-scale dim/freight
+# branch. tile mirrors slab (mirror_of). A non-stone pack declares its own roles (a material with no bulk
+# form simply sets bulk_form nowhere).
 categories:
-  - {name: slab,  plural: slabs,  label: Slabs,  backbone_filename: backbone_slabs.json,  shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0017",    pcat_env_var: null,
+  - {name: slab,  plural: slabs,  label: Slabs,  backbone_filename: backbone_slabs.json,  shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0017",    pcat_env_var: null, default_form: true,
      base_image: "https://v3b.fal.media/files/b/0a9ef2cf/Mfbt9fWxn_4taQ9Pe-wvs_base_slab_3.jpg"}
-  - {name: block, plural: blocks, label: Blocks, backbone_filename: backbone_blocks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014348", pcat_env_var: null,
+  - {name: block, plural: blocks, label: Blocks, backbone_filename: backbone_blocks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014348", pcat_env_var: null, bulk_form: true,
      base_image: "https://v3b.fal.media/files/b/0a9f301e/Vlbo_xk9vDJtYKhEbkxBZ_base_block.jpeg"}
   # tiles mirror slabs and use the block volume per kg
   - {name: tile,  plural: tiles,  label: Tiles,  backbone_filename: backbone_tiles.json,  shares_variety_vocab: true, fan_out: true, mirror_of: slab, volume_per_kg: "0.0014348", pcat_env_var: BLOKPORT_CAT_TILES_PCAT,
@@ -102,3 +106,16 @@ finish_phrases:
   tumbled: "a softened, antique-worn character"
 # Phrase when the finish has no specific entry (was the default in derive.derive_description).
 finish_phrase_default: "a refined natural surface"
+
+# Name-cleaning corpus rules (core/text.py), previously hardcoded stone conventions. name_code_pattern: the
+# ONE codey-looking token shape that is a real stone name (granite 'G682'/'G032') and is never stripped or
+# flagged. trailing_grade_letters: stone grades a variety with a trailing lone letter ('Rosal C', 'Red
+# Wendeng-z'), collapsed to the base variety in cleaning and flagged in review; a Roman 'I' is kept distinct.
+# Validated on the stone backbone (no variety ends in a lone non-'I' letter). A non-stone pack sets its own.
+name_code_pattern: '[Gg]\d+[A-Za-z]?'
+trailing_grade_letters: true
+
+# Classify a variety's colour from its de-watermarked product image with the stone-tuned CV palette
+# (variety_color.classify). A material whose tones that palette cannot read sets this false and takes the
+# fallback/Medusa colour instead; stone relies on it (varsha/zucchi have no colour column).
+classify_texture_color: true

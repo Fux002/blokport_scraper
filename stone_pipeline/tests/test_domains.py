@@ -77,7 +77,7 @@ def _valid_pack_dict():
         "name": "bad", "attributes": ["a", "b"], "disambiguator": "a", "leaf_attributes": ["b"],
         "categories": [{"name": "x", "plural": "xs", "label": "Xs", "backbone_filename": "b.json",
                         "base_image": "", "shares_variety_vocab": True, "fan_out": True,
-                        "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None}],
+                        "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None, "default_form": True}],
         "ambiguous_type_words": ["z"], "generic_descriptors": ["g"], "generic_material_word": "m",
         "default_finishes": ["F"], "fallback_color": "N",
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
@@ -111,6 +111,112 @@ def test_malformed_range_fails_loud_at_load(tmp_path, monkeypatch):
         domain.load_pack("bad")
 
 
+def test_category_missing_from_a_per_category_map_fails_loud(tmp_path, monkeypatch):
+    # V1 cross-check: a category with no entry in a per-category map (the wood-onboarding footgun -- e.g.
+    # 'board' declared but absent from dimension_ranges) must fail LOUD at load, not KeyError in derive.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    del pack["dimension_ranges"]["x"]                          # category 'x' now has no range entry
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="dimension_ranges is missing an entry for categories"):
+        domain.load_pack("bad")
+
+
+def test_map_key_not_a_declared_category_fails_loud(tmp_path, monkeypatch):
+    # V1 cross-check (reverse): a per-category map key that is not a declared category is also a pack bug.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["in_stock_fallback_qty"]["ghost"] = 3                 # 'ghost' is not a category
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="not in the declared categories"):
+        domain.load_pack("bad")
+
+
+def test_disambiguator_outside_attributes_fails_loud(tmp_path, monkeypatch):
+    # V2 cross-check: the identity attribute must be part of the attribute vocabulary, else the Key is built
+    # from an attribute the pipeline never resolves.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["disambiguator"] = "not_an_attribute"
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="disambiguator .* is not in attributes"):
+        domain.load_pack("bad")
+
+
+def test_no_default_form_fails_loud(tmp_path, monkeypatch):
+    # V3: the pipeline always needs a fallback form; a pack that declares none must fail LOUD at load.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    del pack["categories"][0]["default_form"]                 # now zero default_form categories
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="exactly one category must set default_form"):
+        domain.load_pack("bad")
+
+
+def test_two_bulk_forms_fails_loud(tmp_path, monkeypatch):
+    # V3: the bulk/solid form is singular; two is a pack bug (which one drives is_block?).
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["categories"].append({**pack["categories"][0], "name": "y", "default_form": False, "bulk_form": True})
+    pack["categories"][0]["bulk_form"] = True                 # two bulk_form categories now
+    pack["in_stock_fallback_qty"]["y"] = 1                    # keep V1 (per-category maps) satisfied
+    pack["dimension_ranges"]["y"] = {"weight": [0.1, 0.3]}
+    pack["dimension_defaults"]["y"] = {"length": 1.0, "height": 1.0, "thickness": 0.02}
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="at most one category may set bulk_form"):
+        domain.load_pack("bad")
+
+
+def test_stone_declares_the_category_roles():
+    # the stone pack's roles: slab is the default/fallback form, block is the uncut/bulk form (drives is_block),
+    # tile mirrors slab. This is what makes the historical slab/block/tile behaviour pack-driven, not hardcoded.
+    from stone_pipeline.config import settings
+    assert settings.default_form_name() == "slab"
+    assert settings.bulk_form_name() == "block"
+    assert settings.category("tile").mirror_of == "slab"
+
+
+def test_name_heuristics_are_pack_driven(monkeypatch):
+    # GAP F: the granite-code keep-exception and the trailing lone-letter grade strip/flag are STONE corpus
+    # rules, now pack-declared. Under stone they fire (byte-identical); a domain that declares neither leaves
+    # names intact instead of mangling them (the wood footgun).
+    import dataclasses
+    from stone_pipeline.core import text
+    # stone pack: grade letter collapses to the base variety; granite 'G682' survives as a real name
+    assert text.clean_variety_name("Rosal C") == "Rosal"
+    assert text.clean_variety_name("G682 Kashmir") == "G682 Kashmir"
+    assert text.looks_code_shaped("Trani Bianco H") == "lone_letter"
+    # a domain that grades by neither: the trailing letter is kept, granite 'G682' is treated as a code
+    plain = dataclasses.replace(domain.active_pack(), trailing_grade_letters=False, name_code_pattern=None)
+    monkeypatch.setattr(domain, "active_pack", lambda: plain)
+    assert text.clean_variety_name("Rosal C") == "Rosal C"       # trailing letter NOT a grade -> kept
+    assert text.clean_variety_name("G682 Kashmir") == "Kashmir"  # no real-code pattern -> stripped as a code
+    assert text.looks_code_shaped("Trani Bianco H") == ""        # not flagged as a grade
+
+
+def test_texture_colour_classification_is_pack_gated(monkeypatch):
+    # GAP B: stone classifies a variety's colour from its product image; a domain can opt out
+    # (classify_texture_color=false), and then the classify() palette need not exist in Medusa.
+    import dataclasses
+    from types import SimpleNamespace
+    from stone_pipeline.reference import loaders
+    from stone_pipeline.stages.variety_color import CLASSIFIABLE_COLORS
+    pack = domain.active_pack()
+    assert pack.classify_texture_color is True
+    # a fake Medusa vocab that has the pack defaults but is MISSING the classify palette colours
+    def resolve_id(vocab, val):
+        if vocab == "color" and val in CLASSIFIABLE_COLORS:
+            return None                          # palette colour absent from Medusa
+        return (vocab, "id")                     # every pack-default value resolves
+    ref = SimpleNamespace(attributes=SimpleNamespace(resolve_id=resolve_id))
+    monkeypatch.setattr(loaders, "load_synonyms", lambda vocab: {})
+    with pytest.raises(ValueError, match="absent from attributes.csv"):
+        loaders._assert_pack_defaults_resolve(ref)          # classify ON -> palette required -> fails loud
+    off = dataclasses.replace(pack, classify_texture_color=False)
+    monkeypatch.setattr(domain, "active_pack", lambda: off)
+    loaders._assert_pack_defaults_resolve(ref)              # classify OFF -> palette not required -> passes
+
+
 _TOY_APPAREL_PACK = """
 name: apparel
 attributes: [material, color, size]
@@ -118,7 +224,7 @@ disambiguator: material
 leaf_attributes: [color, size]
 categories:
   - {name: shirt, plural: shirts, label: Shirts, backbone_filename: backbone_shirts.json,
-     base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null}
+     base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null, default_form: true}
   - {name: pants, plural: pants, label: Pants, backbone_filename: backbone_pants.json,
      base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null}
 ambiguous_type_words: [blend]

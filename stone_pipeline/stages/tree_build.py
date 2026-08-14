@@ -110,7 +110,11 @@ def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[st
         prefix = pcat_to_prefix.get(p["category"])
         if prefix:
             out[prefix] |= p["finishes"]
-    out["tile"] |= out["slab"]
+    # a mirror category inherits the finishes of the category it mirrors (stone: tile mirrors slab), per the
+    # pack's declared mirror_of -- so this is not a slab/tile hardcode.
+    for c in CATEGORIES:
+        if c.mirror_of:
+            out[c.name] |= out[c.mirror_of]
     return {k: sorted(v) for k, v in out.items()}
 
 

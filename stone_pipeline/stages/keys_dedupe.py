@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from stone_pipeline.config.settings import Confidence
+from stone_pipeline.config.settings import Confidence, bulk_form_name
 from stone_pipeline.core import ids, logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.matching import projections as proj
@@ -88,12 +88,13 @@ def run(rows: list[CanonicalRow]) -> DedupResult:
     # near-duplicate flag: same normalized name + branch + colour
     near_index: dict[tuple, str] = {}
     near_duplicates = 0
+    bulk = bulk_form_name()   # the pack's uncut/solid form name (stone: 'block'); None for a domain without one
     for row in kept:
         # branch from the RAW format tag, not row.is_block: keys_dedupe runs BEFORE format_resolve
         # and match_variation, the only stages that set is_block, so is_block is still its default
-        # False here -- using it would collapse the block/slab dimension and falsely flag a block and
+        # False here -- using it would collapse the bulk/default dimension and falsely flag a block and
         # a slab of the same name+colour as near-duplicates.
-        is_block = (row.raw_format or "").strip().casefold() == "block"
+        is_block = bool(bulk) and (row.raw_format or "").strip().casefold() == bulk
         key = (proj.norm(row.raw_name or ""), is_block, proj.norm(row.raw_color or ""))
         if key in near_index and key[0]:
             near_duplicates += 1

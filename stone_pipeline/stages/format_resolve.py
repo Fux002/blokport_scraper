@@ -28,7 +28,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, Confidence, category
+from stone_pipeline.config.settings import CATEGORIES, Confidence, bulk_form_name, category, default_form_name
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.reference.loaders import ReferenceData
@@ -38,7 +38,10 @@ log = logfmt.get_logger("format")
 # a name-word regex derived from the registry (format detection in a product name)
 _NAME_WORD = re.compile(r"\b(" + "|".join(c.name for c in CATEGORIES) + r")s?\b",
                         flags=re.IGNORECASE)
-_DEFAULT_BRANCH = "slab"  # unresolved format falls back to slab (flagged separately)
+# The fallback branch + the uncut/solid form come from the active pack's category roles (stone: slab / block),
+# so the same resolver serves any domain. _BULK is None for a material with no solid form (is_block never set).
+_DEFAULT_BRANCH = default_form_name()  # unresolved format falls back to this branch (flagged separately)
+_BULK = bulk_form_name()
 
 
 def branch_of(row) -> str:
@@ -70,7 +73,7 @@ def _set(row: CanonicalRow, value: str, method: str, confidence: Confidence) -> 
     c = category(value)
     canonical = c.name if c else value            # canonical singular; a truly unresolved value passes through
     row.format_value = canonical.title()          # Block / Slab / Tile -- never a plural
-    row.is_block = canonical.casefold() == "block"
+    row.is_block = bool(_BULK) and canonical.casefold() == _BULK
     row.format_method = method
     row.format_confidence = _conf(confidence)
 
@@ -84,6 +87,8 @@ def _thickness_branch(row: CanonicalRow, ref: ReferenceData) -> str | None:
     thick depth -> block, a clearly thin one -> slab, the ambiguous middle -> decline (returns None). Presence
     of a thickness value is NOT itself a slab signal -- that mislabelled a 2 m thick block as a slab and then
     let derive clamp its real depth to the 2 cm slab default."""
+    if _BULK is None:                        # a domain with no solid form cannot have a block-vs-default split
+        return None
     if not (row.raw_thickness or "").strip():
         return None
     from stone_pipeline.stages.derive import _parse_measure   # canonical string->metres; local import avoids a cycle
@@ -91,12 +96,12 @@ def _thickness_branch(row: CanonicalRow, ref: ReferenceData) -> str | None:
     if meters is None:
         return None
     ranges = active_pack().dimension_ranges
-    slab_hi = ranges["slab"]["width"][1]     # slab thickness band top (e.g. 0.03 m)
-    block_lo = ranges["block"]["width"][0]   # block thickness band floor (e.g. 1.5 m)
-    if meters >= block_lo * 0.3:             # clearly block-scale depth
-        return "block"
-    if meters <= slab_hi * 3:                # clearly slab-scale thickness
-        return "slab"
+    default_hi = ranges[_DEFAULT_BRANCH]["width"][1]  # default-form thickness band top (slab: e.g. 0.03 m)
+    bulk_lo = ranges[_BULK]["width"][0]               # bulk-form thickness band floor (block: e.g. 1.5 m)
+    if meters >= bulk_lo * 0.3:              # clearly bulk-scale depth
+        return _BULK
+    if meters <= default_hi * 3:             # clearly default-scale thickness
+        return _DEFAULT_BRANCH
     return None                              # ambiguous middle -> decline, leave it to review
 
 
@@ -105,7 +110,7 @@ def _structural_guess(row: CanonicalRow, ref: ReferenceData) -> str | None:
     total-area is an unambiguous SLAB indicator (only counted slab bundles carry them). Otherwise fall to the
     depth magnitude, which separates a thin slab from a thick block; anything unclear declines (returns None)."""
     if (row.raw_slab_count or "").strip() or (row.raw_total_m2 or "").strip():
-        return "slab"
+        return _DEFAULT_BRANCH
     return _thickness_branch(row, ref)
 
 
@@ -142,9 +147,9 @@ def resolve_format(row: CanonicalRow, ref: ReferenceData) -> None:
 
     # 5. unresolved: do not assume. Flag it and fall back to the slab branch so
     # the pipeline continues; the flag makes the missing scraper tag visible.
-    _set(row, "slab", "unresolved_default", Confidence.none)
+    _set(row, _DEFAULT_BRANCH, "unresolved_default", Confidence.none)
     row.add_flag(ReviewFlag(field="format", code=FlagCode.format_unresolved,
-                            raw_value=row.raw_format, best_guess="Slab",
+                            raw_value=row.raw_format, best_guess=_DEFAULT_BRANCH.title(),
                             confidence=Confidence.none, method="no_signal", src_url=row.src_url))
 
 

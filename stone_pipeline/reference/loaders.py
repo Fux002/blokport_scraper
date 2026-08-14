@@ -784,8 +784,10 @@ def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
         [("finish", f) for f in pack.default_finishes]
         + [("finish", f) for f in pack.last_resort_finishes.values()]
         + [("finish", pack.block_finish), ("quality", pack.last_resort_quality),
-           ("color", pack.fallback_color)]
-        + [("color", c) for c in CLASSIFIABLE_COLORS])
+           ("color", pack.fallback_color)])
+    # the classify() palette only needs to resolve in Medusa if the domain actually classifies texture colour
+    if pack.classify_texture_color:
+        checks += [("color", c) for c in CLASSIFIABLE_COLORS]
     # every SYNONYM's canonical target must also be a real Medusa value: a synonym 'Grigio'->'Gray' while
     # attributes.csv has only 'Grey' otherwise resolves to a null id PER PRODUCT (a quiet per-row reject
     # for every product routing through it) instead of one loud config error here at load. Skip the 'none'

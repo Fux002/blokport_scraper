@@ -551,6 +551,10 @@ class Category:
     volume_per_kg: str = ""     # static "Volume per kg (m³/kg)" written into every variant
     pcat_env_var: str | None = None  # env override for pcat_id (bootstrap); kept so a post-fetch refresh
                                      # re-derives pcat_id the SAME way construction did (see refresh_category_pcats)
+    bulk_form: bool = False     # the uncut/solid form (block for stone): drives row.is_block + the block-scale
+                                # dimension/freight branch. A domain with no such form leaves this unset everywhere.
+    default_form: bool = False  # the form a row falls back to when its format is unresolved; also the finish and
+                                # dimension fallback source. Exactly one category declares it (pack-validated).
 
     @property
     def active(self) -> bool:
@@ -604,7 +608,8 @@ def _build_categories() -> "tuple[Category, ...]":
             _pcat(c["label"], c.get("pcat_env_var")), c["backbone_filename"], c["base_image"],
             shares_variety_vocab=c["shares_variety_vocab"], fan_out=c["fan_out"],
             mirror_of=c.get("mirror_of"), volume_per_kg=c.get("volume_per_kg", ""),
-            pcat_env_var=c.get("pcat_env_var"))
+            pcat_env_var=c.get("pcat_env_var"),
+            bulk_form=c.get("bulk_form", False), default_form=c.get("default_form", False))
         for c in active_pack().categories
     )
 
@@ -631,6 +636,25 @@ def category_by_label(label: str) -> "Category | None":
 def category_for_key(key: str) -> "Category | None":
     """The category a variant Key belongs to, by its prefix (slab_..., tile_...)."""
     return _BY_NAME.get((key or "").split("_", 1)[0].casefold())
+
+
+def default_form_name() -> str:
+    """The category a row falls back to when its format is unresolved (also the finish/dimension fallback
+    source). Declared by the pack's `default_form: true`; fail loud if the pack declares none (a pack that
+    passes _validate_shape always has exactly one, so this raise is only a defence against a bypassed load)."""
+    for c in _BY_NAME.values():
+        if c.default_form:
+            return c.name
+    raise RuntimeError("active domain pack declares no default_form category")
+
+
+def bulk_form_name() -> "str | None":
+    """The uncut/solid form's category name (block for stone), or None when the domain has no such form.
+    Drives row.is_block and the block-scale dimension/freight branch."""
+    for c in _BY_NAME.values():
+        if c.bulk_form:
+            return c.name
+    return None
 
 
 def active_categories() -> tuple[Category, ...]:

@@ -158,18 +158,23 @@ def slugify(text: str) -> str:
 _EDGE_PUNCT = re.compile(r"^[\s\-–—_/.,:;#*|]+|[\s\-–—_/.,:;#*|]+$")
 
 
-_GRANITE_CODE = re.compile(r"[Gg]\d+[A-Za-z]?")  # the ONE number allowed: granite 'G682', 'G032'
+def _kept_code_match(tok: str) -> bool:
+    """True if `tok` matches the active pack's real-code pattern (stone: granite 'G682') -- a codey-LOOKING
+    token that is a genuine name in this domain, so it is never stripped or flagged. False when the pack
+    declares no such pattern (a non-stone domain then treats every digit-bearing token as a code)."""
+    from stone_pipeline.config.domain import active_pack
+    pat = active_pack().name_code_pattern
+    return bool(pat) and re.fullmatch(pat, tok) is not None
 
 
 def _is_number_code(tok: str) -> bool:
-    """A token carrying a number that does NOT belong in a stone variety name -> drop it. The
-    ONLY number a stone name uses is a granite code: 'G' + digits ('G682', 'G032'). EVERYTHING
-    else with a digit ('3D', '2cm', '1.08', '426', '883') or a 'No.' series marker is a code /
-    measurement to strip -- no other stone uses numbers in its name."""
+    """A token carrying a number that does NOT belong in a variety name of this domain -> drop it. The one
+    exception is the pack's real-code pattern (stone: a granite code 'G682'/'G032'). EVERYTHING else with a
+    digit ('3D', '2cm', '1.08', '426', '883') or a 'No.' series marker is a code/measurement to strip."""
     t = tok.strip("().[]{}-–—,")
     if not t:
         return False
-    if _GRANITE_CODE.fullmatch(t):                       # granite 'G682' is a real name -> keep
+    if _kept_code_match(t):                              # a domain-declared real code (granite 'G682') -> keep
         return False
     if t.casefold().rstrip(".") == "no":                 # the 'No.' in 'No. 426'
         return True
@@ -241,13 +246,16 @@ def clean_variety_name(name: str, code_prefixes: tuple[str, ...] = (),
     # ('Rosal C'/'Rosal T' -> 'Rosal'; customer finds it under 'Rosal', tells them apart by colour).
     # Space-separated and hyphen-attached ('Red Wendeng-z' -> 'Red Wendeng'). Only ONE letter (no
     # cascade: 'Bianco C T' -> 'Bianco C', not 'Bianco') and KEEP a Roman-numeral 'I' grade ('Onyx I'
-    # stays distinct from 'Onyx II'). Validated: no backbone variety ends in a lone non-'I' letter.
-    if len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha() and toks[-1].upper() != "I":
-        toks = toks[:-1]
-    if toks:
-        m = re.search(r"-([A-Za-z])$", toks[-1])
-        if m and m.group(1).upper() != "I":
-            toks[-1] = toks[-1][:m.start()] or toks[-1]                   # 'Wendeng-z' -> 'Wendeng'
+    # stays distinct from 'Onyx II'). Only when the domain grades by a trailing letter (pack-declared);
+    # stone's backbone is validated to have no variety ending in a lone non-'I' letter.
+    from stone_pipeline.config.domain import active_pack
+    if active_pack().trailing_grade_letters:
+        if len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha() and toks[-1].upper() != "I":
+            toks = toks[:-1]
+        if toks:
+            m = re.search(r"-([A-Za-z])$", toks[-1])
+            if m and m.group(1).upper() != "I":
+                toks[-1] = toks[-1][:m.start()] or toks[-1]               # 'Wendeng-z' -> 'Wendeng'
     toks = [t for t in toks if t.strip("-–—_/|")]                         # drop dangling separators
     return _EDGE_PUNCT.sub("", " ".join(toks)).strip() or n or (name or "").strip()
 
@@ -280,13 +288,14 @@ def looks_code_shaped(name: str) -> str:
       - trailing lone-letter grade code: 'Rosal C', 'Trani Bianco H', 'Colonial White - M', 'Red Wendeng-z'
       - bare short code: 'Gs', 'Zb'  (granite G+number names like 'G682' are real -> kept)
     Colours are NEVER touched here (Agata Black vs Agata Blue stay distinct)."""
+    from stone_pipeline.config.domain import active_pack
     toks = [t for t in re.split(r"[\s\-]+", (name or "").strip()) if t]
     if not toks:
         return ""
-    if len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha():
+    if active_pack().trailing_grade_letters and len(toks) >= 2 and len(toks[-1]) == 1 and toks[-1].isalpha():
         return "lone_letter"
     # a SINGLE token that is code-SHAPED (no vowel or <=2 chars -> un-pronounceable: 'Gs','Zb','Lg')
-    # but NOT a real short name ('Ice','Oak','Ash' have a vowel) and NOT granite 'G682'.
-    if len(toks) == 1 and not _GRANITE_CODE.fullmatch(toks[0]) and looks_codey(toks[0]):
+    # but NOT a real short name ('Ice','Oak','Ash' have a vowel) and NOT a pack real-code (granite 'G682').
+    if len(toks) == 1 and not _kept_code_match(toks[0]) and looks_codey(toks[0]):
         return "bare_code"
     return ""
