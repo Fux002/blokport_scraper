@@ -71,8 +71,10 @@ _CATEGORY_KEYS = ("name", "plural", "label", "backbone_filename", "base_image", 
 
 def _validate_shape(name: str, path: Path, data: dict) -> None:
     """Fail LOUD at load on a malformed NESTED shape (a category dict missing a key, or a dimension range
-    that is not a 2-number pair), naming the pack + the problem -- instead of a raw KeyError/ValueError
-    surfacing deep in a stage (settings._build_categories / derive.derive_dimensions) much later."""
+    that is not a 2-number pair) OR an internally INCONSISTENT pack (a category with no entry in a
+    per-category map, a disambiguator outside the attribute set), naming the pack + the problem -- instead
+    of a raw KeyError/ValueError surfacing deep in a stage (settings._build_categories /
+    derive.derive_dimensions / the Key builder) much later on a new (e.g. wood) pack."""
     def bad(msg: str):
         raise ValueError(f"domain pack {name!r} at {path} is malformed: {msg}")
 
@@ -100,6 +102,21 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     for fmt, qty in data["in_stock_fallback_qty"].items():
         if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
             bad(f"in_stock_fallback_qty[{fmt!r}] must be a positive int, got {qty!r}")
+
+    # Cross-checks: the per-field shapes above are each individually valid, but the pack can still be
+    # internally INCONSISTENT in a way that only KeyErrors deep in a stage on a new pack. Catch it at load.
+    cat_names = {cat["name"] for cat in data["categories"]}   # every category has 'name' (validated above)
+    # V1: every category needs an entry in each per-category map, and no map may carry a non-category key.
+    # last_resort_finishes is deliberately EXCLUDED -- a branch may be absent by design and fall back to slab's.
+    for map_name in ("dimension_ranges", "dimension_defaults", "in_stock_fallback_qty"):
+        keys = set(data[map_name])
+        if cat_names - keys:
+            bad(f"{map_name} is missing an entry for categories {sorted(cat_names - keys)}")
+        if keys - cat_names:
+            bad(f"{map_name} has key(s) {sorted(keys - cat_names)} not in the declared categories {sorted(cat_names)}")
+    # V2: the disambiguator (the identity attribute that drives the Key) must be one of the attributes.
+    if data["disambiguator"] not in data["attributes"]:
+        bad(f"disambiguator {data['disambiguator']!r} is not in attributes {list(data['attributes'])}")
 
 
 def load_pack(name: str | None = None) -> DomainPack:

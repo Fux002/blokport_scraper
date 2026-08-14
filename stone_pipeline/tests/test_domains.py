@@ -111,6 +111,38 @@ def test_malformed_range_fails_loud_at_load(tmp_path, monkeypatch):
         domain.load_pack("bad")
 
 
+def test_category_missing_from_a_per_category_map_fails_loud(tmp_path, monkeypatch):
+    # V1 cross-check: a category with no entry in a per-category map (the wood-onboarding footgun -- e.g.
+    # 'board' declared but absent from dimension_ranges) must fail LOUD at load, not KeyError in derive.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    del pack["dimension_ranges"]["x"]                          # category 'x' now has no range entry
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="dimension_ranges is missing an entry for categories"):
+        domain.load_pack("bad")
+
+
+def test_map_key_not_a_declared_category_fails_loud(tmp_path, monkeypatch):
+    # V1 cross-check (reverse): a per-category map key that is not a declared category is also a pack bug.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["in_stock_fallback_qty"]["ghost"] = 3                 # 'ghost' is not a category
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="not in the declared categories"):
+        domain.load_pack("bad")
+
+
+def test_disambiguator_outside_attributes_fails_loud(tmp_path, monkeypatch):
+    # V2 cross-check: the identity attribute must be part of the attribute vocabulary, else the Key is built
+    # from an attribute the pipeline never resolves.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["disambiguator"] = "not_an_attribute"
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="disambiguator .* is not in attributes"):
+        domain.load_pack("bad")
+
+
 _TOY_APPAREL_PACK = """
 name: apparel
 attributes: [material, color, size]
