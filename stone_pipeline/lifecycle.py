@@ -292,6 +292,36 @@ def purge(sources=None) -> tuple[dict, int]:
     return _ledger_op("purge", lambda lg, sync: sync.purge_discontinued(lg, source_codes=codes))
 
 
+def _prune_stale_product_exports() -> dict:
+    """Delete the pre-reset per-source product export CSVs (to_upload/3_products_*.csv), local AND on S3, so a
+    pristine reset leaves no stale per-source emit behind. They refill on the next produce, and the admin reads
+    the ledger (not these files), so this is display/tidy-up only. Best-effort + LOUD: never fails the reset."""
+    from stone_pipeline.config.settings import SETTINGS
+    out: dict = {"local": 0, "s3": 0}
+    try:
+        for f in SETTINGS.paths.to_upload_dir.glob("3_products_*.csv"):
+            f.unlink()
+            out["local"] += 1
+    except Exception as exc:
+        log.exception("reset: local product-export prune failed (best-effort)")
+        out["local_error"] = str(exc)
+    try:
+        import boto3
+        from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+        s3 = boto3.client("s3", region_name=S3_REGION)
+        prefix = f"{ENV_SEGMENT}/scraper/to_upload/"
+        resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
+        keys = [{"Key": o["Key"]} for o in resp.get("Contents", [])
+                if o["Key"].rsplit("/", 1)[-1].startswith("3_products_") and o["Key"].endswith(".csv")]
+        if keys:
+            s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": keys, "Quiet": True})
+        out["s3"] = len(keys)
+    except Exception as exc:
+        log.exception("reset: S3 product-export prune failed (best-effort)")
+        out["s3_error"] = str(exc)
+    return out
+
+
 def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
     re-scrape; hard also drops the scraped products AND wipes the hosted product images (scoped -> only the
@@ -361,7 +391,10 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
         if codes is None:                          # global reset only -> pair the config.db clean-start
             from stone_pipeline.config import decisions_store, store
             config = {"review_pending": decisions_store.clear_review_pending(),
-                      "attribute_ids": decisions_store.clear_attribute_ids()}
+                      "attribute_ids": decisions_store.clear_attribute_ids(),
+                      # forget the per-source diagnostics (funnel/listed/stages) so the admin's 'listed'
+                      # column starts blank after a reset; each source refills it on its next produce.
+                      "source_diagnostics": store.clear_source_diagnostics()}
             if pristine:                           # factory reset: also forget the durable operator overlay
                 config["variety_decisions"] = decisions_store.clear_variety_decisions()
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
@@ -392,6 +425,9 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
                 except Exception as exc:
                     log.exception("reset: scrape-artifact wipe FAILED; a stale scrape may remain")
                     out["artifacts_wiped"] = {"error": f"wipe failed, scrape cache kept: {exc}"}
+                # prune the pre-reset per-source product exports so to_upload/ holds only the seed (they refill
+                # on the next produce; the admin reads the ledger, not these files).
+                out["product_exports_pruned"] = _prune_stale_product_exports()
             out["config"] = config
         if hard:
             # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces

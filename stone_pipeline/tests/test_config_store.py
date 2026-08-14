@@ -343,6 +343,26 @@ def test_source_diagnostic_round_trip(tmp_path, monkeypatch):
     assert not (tmp_path / "absent.db").exists()
 
 
+def test_clear_source_diagnostics_global_and_scoped(tmp_path, monkeypatch):
+    # a reset clears the per-source diagnostics so the admin's 'listed' column starts blank after a factory
+    # reset; global clears all, a scoped list clears only those sources.
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.record_source_diagnostic("varsha", "varsha_x", {"funnel": {"listed": 5}})
+    store.record_source_diagnostic("zucchi", "zucchi_x", {"funnel": {"listed": 9}})
+    # scoped: only varsha dropped
+    assert store.clear_source_diagnostics(sources=["varsha"]) == 1
+    assert store.get_source_diagnostic("varsha") is None
+    assert store.get_source_diagnostic("zucchi") is not None
+    # global: the rest dropped
+    store.record_source_diagnostic("varsha", "varsha_y", {"funnel": {"listed": 7}})
+    assert store.clear_source_diagnostics() == 2
+    assert store.read_source_diagnostics() == []
+    # clearing an ABSENT db never creates it (isolation contract)
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "absent.db"))
+    assert store.clear_source_diagnostics() == 0
+    assert not (tmp_path / "absent.db").exists()
+
+
 def test_diagnostics_endpoint_serves_persisted(tmp_path, monkeypatch):
     from stone_pipeline.config import server
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
