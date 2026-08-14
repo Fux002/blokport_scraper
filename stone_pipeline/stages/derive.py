@@ -16,7 +16,7 @@ import json
 import re
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence, bulk_form_name, category, default_form_name
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
@@ -133,11 +133,13 @@ _FACE_DIMS = ("length", "height")
 
 
 def _dimension_category(row: CanonicalRow) -> str:
-    """The row's dimension bucket: 'block' | 'tile' | 'slab' (a tile keeps its own size, not the slab's)."""
+    """The row's dimension bucket (a category name): the bulk form when is_block (stone: block), else the
+    row's own format if it is a known category (a tile keeps its own size), else the default form (slab)."""
     fmt = (row.format_value or "").casefold()
-    if row.is_block or fmt == "block":
-        return "block"
-    return "tile" if fmt == "tile" else "slab"
+    bulk = bulk_form_name()
+    if row.is_block or (bulk and fmt == bulk):
+        return bulk
+    return fmt if category(fmt) else default_form_name()
 
 
 def _parse_face(text: str, ref: ReferenceData) -> float | None:

@@ -77,7 +77,7 @@ def _valid_pack_dict():
         "name": "bad", "attributes": ["a", "b"], "disambiguator": "a", "leaf_attributes": ["b"],
         "categories": [{"name": "x", "plural": "xs", "label": "Xs", "backbone_filename": "b.json",
                         "base_image": "", "shares_variety_vocab": True, "fan_out": True,
-                        "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None}],
+                        "mirror_of": None, "volume_per_kg": "", "pcat_env_var": None, "default_form": True}],
         "ambiguous_type_words": ["z"], "generic_descriptors": ["g"], "generic_material_word": "m",
         "default_finishes": ["F"], "fallback_color": "N",
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
@@ -143,6 +143,39 @@ def test_disambiguator_outside_attributes_fails_loud(tmp_path, monkeypatch):
         domain.load_pack("bad")
 
 
+def test_no_default_form_fails_loud(tmp_path, monkeypatch):
+    # V3: the pipeline always needs a fallback form; a pack that declares none must fail LOUD at load.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    del pack["categories"][0]["default_form"]                 # now zero default_form categories
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="exactly one category must set default_form"):
+        domain.load_pack("bad")
+
+
+def test_two_bulk_forms_fails_loud(tmp_path, monkeypatch):
+    # V3: the bulk/solid form is singular; two is a pack bug (which one drives is_block?).
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["categories"].append({**pack["categories"][0], "name": "y", "default_form": False, "bulk_form": True})
+    pack["categories"][0]["bulk_form"] = True                 # two bulk_form categories now
+    pack["in_stock_fallback_qty"]["y"] = 1                    # keep V1 (per-category maps) satisfied
+    pack["dimension_ranges"]["y"] = {"weight": [0.1, 0.3]}
+    pack["dimension_defaults"]["y"] = {"length": 1.0, "height": 1.0, "thickness": 0.02}
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="at most one category may set bulk_form"):
+        domain.load_pack("bad")
+
+
+def test_stone_declares_the_category_roles():
+    # the stone pack's roles: slab is the default/fallback form, block is the uncut/bulk form (drives is_block),
+    # tile mirrors slab. This is what makes the historical slab/block/tile behaviour pack-driven, not hardcoded.
+    from stone_pipeline.config import settings
+    assert settings.default_form_name() == "slab"
+    assert settings.bulk_form_name() == "block"
+    assert settings.category("tile").mirror_of == "slab"
+
+
 _TOY_APPAREL_PACK = """
 name: apparel
 attributes: [material, color, size]
@@ -150,7 +183,7 @@ disambiguator: material
 leaf_attributes: [color, size]
 categories:
   - {name: shirt, plural: shirts, label: Shirts, backbone_filename: backbone_shirts.json,
-     base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null}
+     base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null, default_form: true}
   - {name: pants, plural: pants, label: Pants, backbone_filename: backbone_pants.json,
      base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null}
 ambiguous_type_words: [blend]

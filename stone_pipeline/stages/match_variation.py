@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
-from stone_pipeline.config.settings import SETTINGS, Confidence, category
+from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
@@ -118,7 +118,7 @@ class VariationStage:
         if not row.format_value and row.raw_format:
             row.format_value = row.raw_format.strip().title()
         branch = branch_of(row)
-        row.is_block = branch == "block"
+        row.is_block = branch == bulk_form_name()
         cat = category(branch)
 
         # A standalone category (own vocabulary, not stone varieties -- e.g.

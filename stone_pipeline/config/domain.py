@@ -117,6 +117,14 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     # V2: the disambiguator (the identity attribute that drives the Key) must be one of the attributes.
     if data["disambiguator"] not in data["attributes"]:
         bad(f"disambiguator {data['disambiguator']!r} is not in attributes {list(data['attributes'])}")
+    # V3: category roles. Exactly one category is the default_form (the unresolved-format + finish/dim
+    # fallback, which the pipeline always needs); at most one is the bulk_form (the uncut/solid form).
+    default_forms = [c.get("name") for c in data["categories"] if c.get("default_form")]
+    bulk_forms = [c.get("name") for c in data["categories"] if c.get("bulk_form")]
+    if len(default_forms) != 1:
+        bad(f"exactly one category must set default_form: true, found {default_forms or 'none'}")
+    if len(bulk_forms) > 1:
+        bad(f"at most one category may set bulk_form: true, found {bulk_forms}")
 
 
 def load_pack(name: str | None = None) -> DomainPack:

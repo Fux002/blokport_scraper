@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import SETTINGS, Confidence
+from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, default_form_name
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
@@ -158,7 +158,7 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
     # format_value isn't set yet -- the source format tag is what's available here.
     fmt = (row.format_value or row.raw_format or "").strip().lower()
     block_finish = active_pack().block_finish
-    if fmt == "block" and not row.finish_id:
+    if fmt == bulk_form_name() and not row.finish_id:
         looked = ref.attributes.resolve_id("finish", block_finish)
         if looked:
             row.finish_name, row.finish_id = block_finish, looked[1]
@@ -171,7 +171,7 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
     last_resort_finishes = active_pack().last_resort_finishes
     if not row.finish_id:   # block finish already defaulted above
         _apply_last_resort(row, "finish",
-                           last_resort_finishes.get(fmt) or last_resort_finishes.get("slab"), ref)
+                           last_resort_finishes.get(fmt) or last_resort_finishes.get(default_form_name()), ref)
     if not row.quality_id:
         _apply_last_resort(row, "quality", active_pack().last_resort_quality, ref)
 
