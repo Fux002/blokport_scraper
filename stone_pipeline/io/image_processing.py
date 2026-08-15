@@ -128,6 +128,9 @@ class _Dewatermarker:
     INK_MEDIAN, INK_DELTA = 31, 9           # text strokes deviate this much from the local stone
     MIN_INK = 25                            # px of ink needed to trust a mark is present
     PINK_STONE_FRACTION = 0.35              # pink over >this share of the ROI is the STONE's colour, not ink
+    MIN_PINK = 40                           # px of pink logo ink needed to ANCHOR the mask on the logo
+    LOGO_PAD = 24                           # grow the pink-logo box to catch adjacent (grey) sub-text (px)
+    MAX_MASK_FRACTION = 0.12                # a logo is small; a mask larger than this is catching STONE -> refuse
     DILATE = 4                              # grow the logo mask so FAL covers anti-aliased edges (px)
     FEATHER = 9                             # composite feather radius (px)
     MAX_RETRIES = 3
@@ -162,22 +165,43 @@ class _Dewatermarker:
 
     def _locate(self, bgr):
         """Return (bbox, logo_mask) or None. bbox=(x0,y0,x1,y1) tight to the ink; logo_mask is a full
-        image uint8 (255 = logo pixel), the SHAPE to inpaint. Presence-gated on MIN_INK ink pixels."""
+        image uint8 (255 = logo pixel), the SHAPE to inpaint. Presence-gated on MIN_INK ink pixels.
+
+        The mark is a PINK/magenta logo, and stone never carries that ink, so we ANCHOR on the pink cluster
+        and confine the luminance `strokes` term to a padded box around it. Without that anchor, `strokes`
+        fires on a busy slab's OWN veining and the mask balloons to the whole search band -- FLUX then
+        repaints the entire slab (a foreign rectangle) instead of the logo. A mask that still exceeds
+        MAX_MASK_FRACTION is catching stone, not a logo -> refuse (hold the image rather than corrupt it)."""
         h, w = bgr.shape[:2]
         sy0, sy1, sx0, sx1 = (int(h * self.SEARCH[0]), int(h * self.SEARCH[1]),
                               int(w * self.SEARCH[2]), int(w * self.SEARCH[3]))
         roi = bgr[sy0:sy1, sx0:sx1]
+        rh, rw = roi.shape[:2]
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         strokes = cv2.absdiff(gray, cv2.medianBlur(gray, self.INK_MEDIAN)) > self.INK_DELTA
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         pink = ((hsv[:, :, 0] >= self.HUE_LO) & (hsv[:, :, 0] <= self.HUE_HI) & (hsv[:, :, 1] >= self.SAT_MIN))
-        # A watermark's pink/magenta ink is a small localized cluster; a naturally pink/magenta STONE (pink
-        # onyx, Rosa) is pink across a large share of the search band. When pink DOMINATES the ROI it is the
-        # stone's own colour, not ink -- drop the pink term (the luminance `strokes` term still catches real
-        # ink) so genuine pink veining/fields are never masked and inpainted away as a phantom watermark.
+        # A naturally pink/magenta STONE (pink onyx, Rosa) is pink across a large share of the band; when pink
+        # DOMINATES it is the stone's colour, not ink -- drop it (the strokes term below still catches ink).
         if pink.mean() > self.PINK_STONE_FRACTION:
             pink = np.zeros_like(pink)
-        ink = cv2.dilate(((strokes | pink) * 255).astype(np.uint8), np.ones((5, 5), np.uint8), iterations=2)
+        # Anchor: the bounding box of the largest pink component (glyphs pre-connected by a small dilation),
+        # padded to catch the adjacent grey sub-text. `strokes` is then confined to that box, so the slab's
+        # veining -- never pink, and lying outside the box -- can never enter the mask. No pink anchor -> fall
+        # back to the whole ROI, but the size cap below still refuses a runaway (veining-driven) mask.
+        region = np.ones((rh, rw), bool)
+        pdil = cv2.dilate((pink * 255).astype(np.uint8), np.ones((5, 5), np.uint8))
+        n, _, stats, _ = cv2.connectedComponentsWithStats(pdil, connectivity=8)
+        if n > 1:
+            i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+            if stats[i, cv2.CC_STAT_AREA] >= self.MIN_PINK:
+                x, y = int(stats[i, cv2.CC_STAT_LEFT]), int(stats[i, cv2.CC_STAT_TOP])
+                cw, ch = int(stats[i, cv2.CC_STAT_WIDTH]), int(stats[i, cv2.CC_STAT_HEIGHT])
+                region = np.zeros((rh, rw), bool)
+                region[max(0, y - self.LOGO_PAD):min(rh, y + ch + self.LOGO_PAD),
+                       max(0, x - self.LOGO_PAD):min(rw, x + cw + self.LOGO_PAD)] = True
+        ink = cv2.dilate((((strokes | pink) & region) * 255).astype(np.uint8),
+                         np.ones((5, 5), np.uint8), iterations=2)
         ys, xs = np.where(ink > 0)
         if len(xs) < self.MIN_INK:
             return None
@@ -186,6 +210,8 @@ class _Dewatermarker:
         if self.DILATE > 0:
             k = np.ones((self.DILATE * 2 + 1, self.DILATE * 2 + 1), np.uint8)
             logo_mask = cv2.dilate(logo_mask, k)
+        if (logo_mask > 0).mean() > self.MAX_MASK_FRACTION:      # slab-sized -> not a logo -> refuse to repaint
+            return None
         bbox = (int(sx0 + xs.min()), int(sy0 + ys.min()), int(sx0 + xs.max()), int(sy0 + ys.max()))
         return bbox, logo_mask
 

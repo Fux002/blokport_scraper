@@ -55,6 +55,30 @@ def test_locate_returns_none_on_clean_slab():
     assert dw._locate(_slab_with_logo(logo=False)) is None    # presence-gated -> no FAL cost
 
 
+def test_locate_confines_mask_to_logo_on_a_veined_slab():
+    # REGRESSION (the "foreign rectangle" bug): heavy stone veining fires the luminance `strokes` term across
+    # the whole search band. The mask must stay ANCHORED to the pink logo, not balloon to the band -- which
+    # made FLUX repaint the slab with a foreign stone and wrecked the colour classifier.
+    yy, xx = np.mgrid[0:600, 0:1024]
+    base = 120 + 60 * np.sin(xx / 4.0) * np.sin(yy / 40.0)     # strong high-frequency veining everywhere
+    bgr = np.clip(np.dstack([base, base, base]), 0, 255).astype(np.uint8)
+    bgr[290:330, 460:560] = (200, 40, 190)                     # the pink logo
+    located = _Dewatermarker(_cfg())._locate(bgr)
+    assert located is not None                                 # the logo IS found (pink anchor)
+    bbox, mask = located
+    assert (mask > 0).mean() < _Dewatermarker.MAX_MASK_FRACTION   # tight, not the ~20% band
+    assert (bbox[2] - bbox[0]) < 300                           # bbox hugs the ~100px logo, not the 572px band
+
+
+def test_locate_refuses_a_bandwide_mask_with_no_pink_anchor():
+    # Safety net: a slab whose veining fires strokes across the band but with NO pink logo to anchor on must
+    # be REFUSED (None) rather than repainted -- the size cap guarantees we never hand FLUX a whole-band box.
+    yy, xx = np.mgrid[0:600, 0:1024]
+    base = 120 + 70 * np.sin(xx / 4.0) * np.sin(yy / 40.0)     # heavy veining, no logo
+    bgr = np.clip(np.dstack([base, base, base]), 0, 255).astype(np.uint8)
+    assert _Dewatermarker(_cfg())._locate(bgr) is None
+
+
 def _pink_stone(h=600, w=1024):
     """A naturally pink/magenta STONE (pink onyx, Rosa): the whole slab is magenta, no watermark."""
     bgr = np.full((h, w, 3), (190, 40, 200), np.uint8)        # BGR magenta across the ENTIRE image
