@@ -170,6 +170,31 @@ def test_process_composites_only_the_logo(monkeypatch):
     assert tuple(int(v) for v in out[10, 10]) == (120 + 10 % 30, 120, 120)  # far corner byte-identical
 
 
+def test_process_holds_a_hallucinated_bright_fill(monkeypatch):
+    # Fill-quality guard: FLUX sometimes fills the hole with a bright label/patch instead of stone. A fill far
+    # brighter than the surrounding stone (a white label on a mid-grey slab) must be HELD, not published.
+    dw = _Dewatermarker(_cfg())
+    def _white_fill(crop_bgr, cmask):
+        dw._billed_mp += dw.billed_megapixels(crop_bgr.shape[1], crop_bgr.shape[0])
+        return np.full((crop_bgr.shape[0], crop_bgr.shape[1], 3), 255, np.uint8)   # a white "label"
+    monkeypatch.setattr(dw, "_fal_fill", _white_fill)
+    pil = Image.fromarray(cv2.cvtColor(_slab_with_logo(logo=True), cv2.COLOR_BGR2RGB))
+    r = dw.process(pil)
+    assert r.applied is False and r.failed is True      # hallucinated fill -> HELD, not published
+
+
+def test_process_publishes_a_fill_that_matches_the_stone(monkeypatch):
+    # the guard must NOT hold a legitimate fill: a fill matching the surrounding mid-grey stone publishes.
+    dw = _Dewatermarker(_cfg())
+    def _grey_fill(crop_bgr, cmask):
+        dw._billed_mp += dw.billed_megapixels(crop_bgr.shape[1], crop_bgr.shape[0])
+        return np.full((crop_bgr.shape[0], crop_bgr.shape[1], 3), 120, np.uint8)   # matches the 120 slab
+    monkeypatch.setattr(dw, "_fal_fill", _grey_fill)
+    pil = Image.fromarray(cv2.cvtColor(_slab_with_logo(logo=True), cv2.COLOR_BGR2RGB))
+    r = dw.process(pil)
+    assert r.applied is True and r.failed is False       # clean, matching fill -> published
+
+
 def test_process_noop_on_clean_slab(monkeypatch):
     dw = _Dewatermarker(_cfg())
     monkeypatch.setattr(dw, "_fal_fill",
