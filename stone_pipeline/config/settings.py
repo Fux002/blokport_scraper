@@ -384,8 +384,9 @@ class ImageProcessingConfig:
     # heavy diffusers stack. Runs in the GPU reprocess (needs network + FAL_KEY, not a local model).
     dewatermark: bool = True
     fal_model: str = os.environ.get("BLOKPORT_FAL_FILL_MODEL", "fal-ai/flux-pro/v1/fill")
-    fal_prompt: str = ("natural polished stone slab, continuous seamless mineral veining, "
-                       "photorealistic, high detail")
+    fal_prompt: str = ("natural polished stone slab, continuous seamless mineral veining, photorealistic, "
+                       "high detail, plain uninterrupted stone surface, no text, no letters, no label, "
+                       "no sticker, no logo, no watermark")
     fal_seed: int = 0                 # fixed for best-effort reproducibility across re-runs
     fal_price_per_mp: float = 0.05    # USD per billed megapixel (rounds up, 1 MP floor)
     fal_max_usd: float = _env_float("BLOKPORT_FAL_MAX_USD", 150.0)  # per-run cost circuit breaker

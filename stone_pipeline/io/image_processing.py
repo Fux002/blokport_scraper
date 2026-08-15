@@ -135,6 +135,13 @@ class _Dewatermarker:
     DILATE = 4                              # grow the logo mask so FAL covers anti-aliased edges (px)
     FEATHER = 9                             # composite feather radius (px)
     MAX_RETRIES = 3
+    # Fill-quality guard: FLUX can hallucinate a bright label/patch in the hole instead of continuing the
+    # stone. A fill that adds this fraction of near-white pixels the local stone lacks, OR whose median
+    # brightness differs from the local stone by this much, is rejected (HELD). Tuned with margin: a clean
+    # fill measured white-excess ~0.5% / delta ~3; a hallucinated white label ~71% / ~58.
+    FILL_WHITE_LEVEL = 230                  # a pixel this bright counts as "near-white"
+    FILL_WHITE_EXCESS = 0.25               # fill near-white fraction MINUS surround's; above this -> reject
+    FILL_MEDIAN_DELTA = 40                 # |fill median - surround median| above this -> reject
     BASE_BACKOFF = 2.0
 
     def __init__(self, cfg: ImageProcessingConfig):
@@ -271,6 +278,21 @@ class _Dewatermarker:
                       extra={"extra_fields": {"error": str(exc), "billed_mp": self._billed_mp}})
             return DewatermarkResult(pil_image, applied=False, failed=True, billed_mp=self._billed_mp)
         filled_bgr = cv2.cvtColor(filled_rgb, cv2.COLOR_RGB2BGR).astype(np.float32)
+        # Fill-quality guard: FLUX occasionally HALLUCINATES a bright label/foreign patch in the hole instead
+        # of continuing the stone (seen on busy granite). Compare the filled logo pixels to the surrounding
+        # stone in the crop; a fill much brighter than the local stone, or adding a big near-white region the
+        # stone does not have, is a hallucination -> HOLD it (never publish), same contract as the mask cap.
+        m = cmask > 0
+        if m.any() and (~m).any():
+            fg = cv2.cvtColor(np.clip(filled_bgr, 0, 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+            cg = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            white_excess = float((fg[m] > self.FILL_WHITE_LEVEL).mean() - (cg[~m] > self.FILL_WHITE_LEVEL).mean())
+            median_delta = abs(float(np.median(fg[m])) - float(np.median(cg[~m])))
+            if white_excess > self.FILL_WHITE_EXCESS or median_delta > self.FILL_MEDIAN_DELTA:
+                log.warning("de-watermark: fill does not match the stone (likely a hallucinated label/patch); "
+                            "holding image", extra={"extra_fields": {
+                                "white_excess": round(white_excess, 3), "median_delta": round(median_delta, 1)}})
+                return DewatermarkResult(pil_image, applied=False, failed=True, billed_mp=self._billed_mp)
         # feathered composite THROUGH the logo mask: outside-logo pixels stay byte-identical, logo blends
         feather = cv2.GaussianBlur(cmask.astype(np.float32) / 255.0, (0, 0), self.FEATHER)[..., None]
         blended = crop.astype(np.float32) * (1 - feather) + filled_bgr * feather
