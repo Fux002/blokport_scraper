@@ -70,13 +70,46 @@ def test_locate_confines_mask_to_logo_on_a_veined_slab():
     assert (bbox[2] - bbox[0]) < 300                           # bbox hugs the ~100px logo, not the 572px band
 
 
-def test_locate_refuses_a_bandwide_mask_with_no_pink_anchor():
-    # Safety net: a slab whose veining fires strokes across the band but with NO pink logo to anchor on must
-    # be REFUSED (None) rather than repainted -- the size cap guarantees we never hand FLUX a whole-band box.
-    yy, xx = np.mgrid[0:600, 0:1024]
-    base = 120 + 70 * np.sin(xx / 4.0) * np.sin(yy / 40.0)     # heavy veining, no logo
-    bgr = np.clip(np.dstack([base, base, base]), 0, 255).astype(np.uint8)
-    assert _Dewatermarker(_cfg())._locate(bgr) is None
+def test_locate_covers_a_full_multi_word_logo():
+    # "Varsha Stones" is two words: the morphological close (LOGO_GAP) must bridge the inter-word gap so BOTH
+    # words are in the mask, or the second word's watermark survives and ships. Words ~30px apart (a realistic
+    # logo gap, within LOGO_GAP), both in the central search band.
+    bgr = np.full((600, 1024, 3), 120, np.uint8)
+    bgr[300:320, 400:470] = (200, 40, 190)                    # word 1 (BGR magenta)
+    bgr[300:320, 500:570] = (200, 40, 190)                    # word 2, ~30px gap
+    located = _Dewatermarker(_cfg())._locate(bgr)
+    assert located is not None
+    bbox, mask = located
+    assert bbox[0] <= 400 and bbox[2] >= 570                  # bbox spans BOTH words
+    assert mask[310, 405] == 255 and mask[310, 555] == 255    # both words are in the mask
+
+
+def _veined_no_logo(h=600, w=1024, amp=70):
+    yy, xx = np.mgrid[0:h, 0:w]
+    base = 120 + amp * np.sin(xx / 4.0) * np.sin(yy / 40.0)   # heavy veining, NO logo -> no pink anchor
+    return np.clip(np.dstack([base, base, base]), 0, 255).astype(np.uint8)
+
+
+def test_process_holds_a_bandwide_mask_never_publishes_watermarked(monkeypatch):
+    # Safety net: heavy veining with no pink anchor produces a slab-sized mask. process() must HOLD it
+    # (failed=True) -- never call FAL, never repaint, never publish it still-watermarked.
+    dw = _Dewatermarker(_cfg())
+    monkeypatch.setattr(dw, "_fal_fill",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("FAL must not run on a refused mask")))
+    pil = Image.fromarray(cv2.cvtColor(_veined_no_logo(), cv2.COLOR_BGR2RGB))
+    r = dw.process(pil)
+    assert r.applied is False and r.failed is True            # HELD, not published, not repainted
+
+
+def test_imageprocessor_holds_a_watermarked_slab_it_cannot_locate(monkeypatch):
+    # end-to-end: a watermarked source image whose logo cannot be safely located (band-wide veining mask)
+    # must be HELD, not published -- the "never publish watermarked" invariant at the ImageProcessor level.
+    proc = ImageProcessor(_cfg())
+    monkeypatch.setattr(proc._dw, "available", lambda: True)   # FAL "available" so it reaches the cap, not the
+    monkeypatch.setattr(proc._dw, "_fal_fill",                 # unavailable-hold; FAL must not actually run
+                        lambda *a: (_ for _ in ()).throw(AssertionError("FAL must not run on a refused mask")))
+    res = proc.process(_jpeg(_veined_no_logo()), watermarked=True)
+    assert res.dewatermark_failed is True and res.enhanced is False
 
 
 def _pink_stone(h=600, w=1024):
