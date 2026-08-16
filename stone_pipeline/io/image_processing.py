@@ -135,6 +135,8 @@ class _Dewatermarker:
     DILATE = 4                              # grow the logo mask so FAL covers anti-aliased edges (px)
     FEATHER = 9                             # composite feather radius (px)
     MAX_RETRIES = 3
+    EDIT_MAX_SHIFT = 45                     # a valid Kontext edit keeps the slab; whole-image median colour
+                                           # must not shift more than this per channel (catches a garbage edit)
     # Fill-quality guard: FLUX can hallucinate a bright label/patch in the hole instead of continuing the
     # stone. A fill that adds this fraction of near-white pixels the local stone lacks, OR whose median
     # brightness differs from the local stone by this much, is rejected (HELD). Tuned with margin: a clean
@@ -247,58 +249,74 @@ class _Dewatermarker:
         return max(1, math.ceil(w * h / 1_000_000))
 
     def process(self, pil_image) -> DewatermarkResult:
-        bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
-        located = self._locate(bgr)
-        if located is None:
-            return DewatermarkResult(pil_image, applied=False)      # no logo -> clean slab -> no FAL cost
-        bbox, logo_mask = located
-        if (logo_mask > 0).mean() > self.MAX_MASK_FRACTION:
-            # A slab-sized mask means the detector is catching STONE (heavy veining, no pink anchor), not a
-            # logo. Refuse: HOLD the image (never repaint the slab, never publish it still-watermarked) so it
-            # surfaces for review instead of shipping corrupted or watermarked. Never reached for a normal
-            # pink-anchored logo (a few % of the image).
-            log.warning("de-watermark: mask too large to be a logo; holding image (not repainting)",
-                        extra={"extra_fields": {"mask_fraction": round(float((logo_mask > 0).mean()), 3)}})
-            return DewatermarkResult(pil_image, applied=False, failed=True)
-        h, w = bgr.shape[:2]
-        x0, y0, x1, y1 = self._crop_box(bbox, w, h)
-        crop = bgr[y0:y1, x0:x1]
-        cmask = logo_mask[y0:y1, x0:x1]
-        if crop.size == 0 or int(cmask.max()) == 0:                 # nothing to fill after cropping
-            return DewatermarkResult(pil_image, applied=False)
-        # Count EVERY billed FAL generation, not just a final success: _fal_fill retries up to MAX_RETRIES
-        # and a blank/refused output triggers another billed generation. Reset here and let _fal_fill
-        # accumulate, so a run that generated 3x then FAILED still reports its true cost to the breaker
-        # (the old code reported billed_mp=0 on failure, so the circuit breaker never tripped).
-        self._billed_mp = 0
+        """Remove the supplier watermark with FAL FLUX Kontext (INSTRUCTION editing -- no mask). Kontext edits
+        the whole image from `self.prompt` ('remove the ... logo ...') and reconstructs the stone underneath,
+        which the old masked FLUX Fill could not do without hallucinating a label/patch on busy slabs. A light
+        sanity check HOLDS a blank or wildly-recoloured edit so a bad result is never published (the caller
+        holds a failed result and a re-run retries). Kontext re-renders at its own size; the output is resized
+        back to the input WIDTH with the aspect preserved (no distortion), so the downstream upscale sees the
+        same scale as before. Outcomes: edited -> applied=True; FAL/blank/sanity failure -> failed=True."""
+        src = pil_image.convert("RGB")
+        self._billed_mp = self.billed_megapixels(src.width, src.height)   # rough cost proxy for the breaker
         try:
-            filled_rgb = self._fal_fill(crop, cmask)                # RGB uint8, same HxW as crop
-        except Exception as exc:                                    # network/validation/refusal -> HOLD
-            log.error("de-watermark FAL failed; holding image (never publishing watermarked)",
+            edited = self._kontext_edit(src)                             # RGB PIL at Kontext's own size
+        except Exception as exc:                                         # network/validation/refusal -> HOLD
+            log.error("de-watermark Kontext failed; holding image (never publishing watermarked)",
                       extra={"extra_fields": {"error": str(exc), "billed_mp": self._billed_mp}})
             return DewatermarkResult(pil_image, applied=False, failed=True, billed_mp=self._billed_mp)
-        filled_bgr = cv2.cvtColor(filled_rgb, cv2.COLOR_RGB2BGR).astype(np.float32)
-        # Fill-quality guard: FLUX occasionally HALLUCINATES a bright label/foreign patch in the hole instead
-        # of continuing the stone (seen on busy granite). Compare the filled logo pixels to the surrounding
-        # stone in the crop; a fill much brighter than the local stone, or adding a big near-white region the
-        # stone does not have, is a hallucination -> HOLD it (never publish), same contract as the mask cap.
-        m = cmask > 0
-        if m.any() and (~m).any():
-            fg = cv2.cvtColor(np.clip(filled_bgr, 0, 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
-            cg = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-            white_excess = float((fg[m] > self.FILL_WHITE_LEVEL).mean() - (cg[~m] > self.FILL_WHITE_LEVEL).mean())
-            median_delta = abs(float(np.median(fg[m])) - float(np.median(cg[~m])))
-            if white_excess > self.FILL_WHITE_EXCESS or median_delta > self.FILL_MEDIAN_DELTA:
-                log.warning("de-watermark: fill does not match the stone (likely a hallucinated label/patch); "
-                            "holding image", extra={"extra_fields": {
-                                "white_excess": round(white_excess, 3), "median_delta": round(median_delta, 1)}})
-                return DewatermarkResult(pil_image, applied=False, failed=True, billed_mp=self._billed_mp)
-        # feathered composite THROUGH the logo mask: outside-logo pixels stay byte-identical, logo blends
-        feather = cv2.GaussianBlur(cmask.astype(np.float32) / 255.0, (0, 0), self.FEATHER)[..., None]
-        blended = crop.astype(np.float32) * (1 - feather) + filled_bgr * feather
-        bgr[y0:y1, x0:x1] = np.clip(blended, 0, 255).astype(np.uint8)
-        out = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-        return DewatermarkResult(out, applied=True, billed_mp=self._billed_mp)   # every generation billed
+        out = edited.resize((src.width, max(1, round(src.width * edited.height / edited.width))))  # aspect kept
+        if not self._edit_is_sane(src, out):
+            log.warning("de-watermark: Kontext edit failed sanity (blank or wild colour shift); holding image")
+            return DewatermarkResult(pil_image, applied=False, failed=True, billed_mp=self._billed_mp)
+        return DewatermarkResult(out, applied=True, billed_mp=self._billed_mp)
+
+    def _kontext_edit(self, pil_rgb):
+        """Send the whole image + instruction to FAL FLUX Kontext; return the edited RGB PIL (Kontext's size).
+        Retries transient errors with backoff, fails fast on a deterministic (422) rejection, rejects a blank
+        output. Raises on unrecoverable failure so process() holds the image."""
+        import fal_client
+        import requests
+
+        ti = tempfile.mktemp(suffix=".png")
+        pil_rgb.save(ti)
+        last = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                result = fal_client.subscribe(self.model, arguments={
+                    "image_url": fal_client.upload_file(ti),
+                    "prompt": self.prompt,
+                    "seed": self.seed,
+                    "output_format": "png",
+                })
+                imgs = result.get("images") or []
+                if not imgs:
+                    raise ValueError(f"no images in Kontext response: {list(result.keys())}")
+                url = imgs[0]["url"] if isinstance(imgs[0], dict) else imgs[0]
+                resp = requests.get(url, timeout=120)
+                resp.raise_for_status()
+                out = Image.open(BytesIO(resp.content)).convert("RGB")
+                if float(np.asarray(out).std()) < 1.0:                   # blank/uniform -> a failed edit
+                    raise ValueError("Kontext returned a blank image")
+                return out
+            except Exception as exc:
+                last = exc
+                msg = str(exc).lower()
+                if "422" in msg or "unprocessable" in msg:               # deterministic rejection -> no retry
+                    break
+                if attempt < self.MAX_RETRIES:
+                    time.sleep(2 ** attempt)
+        raise last if last else RuntimeError("Kontext edit failed")
+
+    def _edit_is_sane(self, src, out):
+        """True iff the edit looks like the same slab, not a catastrophe: not blank, and the whole-image
+        median colour did not shift more than EDIT_MAX_SHIFT per channel (a re-render keeps the stone's
+        colour; a garbage/wrong image does not)."""
+        a = np.asarray(src.resize((64, 64)).convert("RGB")).astype(np.float32).reshape(-1, 3)
+        b = np.asarray(out.resize((64, 64)).convert("RGB")).astype(np.float32).reshape(-1, 3)
+        if float(b.std()) < 2.0:                                         # near-uniform -> blank/failed
+            return False
+        shift = float(np.abs(np.median(a, 0) - np.median(b, 0)).max())
+        return shift < self.EDIT_MAX_SHIFT
 
     def _fal_fill(self, crop_bgr, cmask):
         """Send the crop + logo mask to FAL FLUX Fill; return the filled crop as RGB uint8 (same size).
