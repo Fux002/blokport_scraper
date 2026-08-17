@@ -49,6 +49,25 @@ def pending_shas(client, source: str) -> set[str]:
     return _shas_under(client, imagestore.scraped_prefix(source)) - done_shas(client, source)
 
 
+def image_progress(client, source: str) -> dict | None:
+    """LIVE image-generation progress for one source, counted from the S3 markers at CALL time (never a
+    produce-time snapshot: de-watermark + upscale run async for tens of minutes AFTER the produce, so a
+    frozen count would never move). Fields the admin UI reads:
+        total       scraped originals for the source
+        ready       enhanced markers -- the configured job completed for that image (the publish gate)
+        held        discarded markers -- classifier set-aside (deliberate; not an error, not generating)
+        generating  some scraped image still carries neither marker  <=>  (ready + held) < total
+    Markers are intersected with the scraped set so a stale marker (whose original is gone) can never push
+    ready + held past total. None when the source has no scraped images -- the UI then renders "-"."""
+    scraped = _shas_under(client, imagestore.scraped_prefix(source))
+    total = len(scraped)
+    if not total:
+        return None
+    ready = len(_shas_under(client, imagestore.enhanced_prefix(source)) & scraped)
+    held = len(_shas_under(client, imagestore.discarded_prefix(source)) & scraped)
+    return {"total": total, "ready": ready, "held": held, "generating": (ready + held) < total}
+
+
 def _enhance_sources() -> set[str]:
     """Sources with the GPU-upscale switch ON (per-source `enhance`, default on). A source with it OFF is
     still size-reduced + re-hosted by the reprocess, just not upscaled -- no GPU-model pass."""
