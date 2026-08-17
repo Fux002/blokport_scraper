@@ -63,6 +63,36 @@ def test_nothing_pending_when_all_done():
     assert et.pending_shas(s3, "varsha") == set()
 
 
+D = "d" * 64
+
+
+def test_image_progress_mid_generation():
+    # scraped {A,B,C,D}; A,B enhanced, C discarded -> D still generating
+    s3 = FakeS3(_keys(scraped=(A, B, C, D), enhanced=(A, B), discarded=(C,)))
+    assert et.image_progress(s3, "varsha") == {
+        "total": 4, "ready": 2, "held": 1, "generating": True}
+
+
+def test_image_progress_complete_flips_generating_false():
+    # every scraped image has a marker (ready + held == total) -> done
+    s3 = FakeS3(_keys(scraped=(A, B, C), enhanced=(A, B), discarded=(C,)))
+    assert et.image_progress(s3, "varsha") == {
+        "total": 3, "ready": 2, "held": 0 + 1, "generating": False}
+
+
+def test_image_progress_none_when_no_scraped():
+    # no scraped originals for this source -> omit the block (UI shows "-")
+    s3 = FakeS3(_keys(enhanced=(A,)))
+    assert et.image_progress(s3, "varsha") is None
+
+
+def test_image_progress_ignores_stale_markers():
+    # an enhanced marker whose original is gone from scraped/ must NOT inflate ready past total
+    s3 = FakeS3(_keys(scraped=(A,), enhanced=(A, B)))
+    assert et.image_progress(s3, "varsha") == {
+        "total": 1, "ready": 1, "held": 0, "generating": False}
+
+
 def _wire(monkeypatch, s3, batch, cfg, watermarked=("varsha",)):
     monkeypatch.setattr(et, "SETTINGS", types.SimpleNamespace(auto_enhance=cfg))
     monkeypatch.setattr(et, "_watermarked_sources", lambda: set(watermarked))

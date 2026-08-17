@@ -68,6 +68,39 @@ def _country_iso(raw: str) -> str | None:
     return None
 
 
+def _attach_image_progress(rows: list[dict]) -> None:
+    """Enrich each source diagnostic with a LIVE `images` block, computed at serve time from the S3 markers
+    (deliberately NOT the produce-time stages.json snapshot: de-watermark + upscale run async for tens of
+    minutes after the produce, so the UI's 30s poll must see numbers that actually move). Only meaningful
+    when images are hosted on S3; a source with no scraped images gets no block (the UI renders "-").
+
+    Best-effort and isolated: a single S3 client is reused across sources, and any listing failure omits the
+    images block rather than failing the whole diagnostics response -- the endpoint's primary job is pipeline
+    health, and the UI already treats a missing block as "-"."""
+    from stone_pipeline.config.settings import S3_REGION, SETTINGS
+    if SETTINGS.images.mode != "s3":
+        return
+    try:
+        import boto3
+        client = boto3.client("s3", region_name=S3_REGION)
+    except Exception:
+        log.warning("live image-progress: S3 client unavailable; omitting images blocks", exc_info=True)
+        return
+    from deploy.enhance_trigger import image_progress
+    for row in rows:                          # isolate per source: one source's S3 hiccup never drops the rest
+        source = row.get("source")
+        if not source:
+            continue
+        try:
+            block = image_progress(client, source)
+        except Exception:
+            log.warning("live image-progress failed for %s; omitting its images block",
+                        source, exc_info=True)
+            continue
+        if block is not None:
+            row["images"] = block
+
+
 def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[int, object]:
     """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
     or ['sources', 'polonine']); `query` is the raw URL query string (e.g. 'q=carr&limit=20').
@@ -93,15 +126,19 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
     if segments and segments[0] == "diagnostics":
         # per-source pipeline diagnostics for the admin UI (read-only): which layer degraded + what
         # drifted in the source, so a silent format change is visible.
-        #   GET /config/v1/diagnostics            -> [{source, run_id, health, gates, stages, drift, ...}, ...]
+        #   GET /config/v1/diagnostics            -> [{source, run_id, health, gates, stages, images, ...}, ...]
         #   GET /config/v1/diagnostics/<source>   -> that source's latest summary (404 if it never produced)
         from stone_pipeline.config import diagnostics
         if method != "GET":
             return 405, {"error": "GET /config/v1/diagnostics[/<source>]"}
         if len(segments) == 1:
-            return 200, {"diagnostics": diagnostics.read_all()}
+            rows = diagnostics.read_all()
+            _attach_image_progress(rows)
+            return 200, {"diagnostics": rows}
         if len(segments) == 2:
             summary = diagnostics.read_source(segments[1])
+            if summary:
+                _attach_image_progress([summary])
             return (200, summary) if summary else (404, {"error": f"no diagnostics for {segments[1]!r}"})
         return 404, {"error": "expected /config/v1/diagnostics or /config/v1/diagnostics/<source>"}
     if segments and segments[0] == "reset":
