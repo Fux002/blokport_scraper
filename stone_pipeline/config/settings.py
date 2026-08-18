@@ -386,6 +386,10 @@ class ImageProcessingConfig:
     # De-watermark is an INSTRUCTION edit (FAL FLUX Kontext), not a masked inpaint: Kontext edits the whole
     # image from the prompt and reconstructs the stone under the logo without the mask-fill's hallucinations.
     fal_model: str = os.environ.get("BLOKPORT_FAL_MODEL", "fal-ai/flux-pro/kontext")
+    # FALLBACK de-watermark instruction, used only when a watermarked source has no per-source prompt
+    # (SourceConfig.fal_prompt). The instruction NAMES the supplier's mark, so it is inherently
+    # source-specific: each watermarked source SHOULD set its own; this default is tuned for varsha (the
+    # first watermarked source) and a different source running on it logs a warning (see reprocess_source).
     fal_prompt: str = ("Remove the pink 'Varsha Stones' watermark logo and any overlaid brand text from the "
                        "surface of the stone slab, seamlessly reconstructing the natural stone pattern "
                        "underneath. Keep the stone colour, veining, the size/label card and everything else "

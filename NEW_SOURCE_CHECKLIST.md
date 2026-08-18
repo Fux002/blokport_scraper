@@ -36,10 +36,22 @@ a shared stage. Lock these in on the scraper/adapter class + config:
     page maps `src_url` to `""` explicitly -- a conscious decision, never a missing link.
     `test_every_adapter_maps_a_product_url` enforces the mapping exists. Likewise map the source's full-size
     image URL(s) to `raw_image_urls` from the field that actually holds them (never a thumbnail).
-- **Config** (`config/sources.yaml`): `source_code` (unique -- SKU provenance), `vendor`, `origin_default`,
-  `ports`, `min_expected_rows`, `mode: review` (always start in review).
+- **Config** (`config/sources.yaml`, mirrored into `config.db` for the admin UI -- the `SourceConfig` fields).
+  Set EVERY applicable knob at onboarding; a forgotten one silently takes a default that may be wrong:
+  - **Identity / commerce** (always): `source_code` (unique -- SKU provenance + delist scope), `vendor` (the
+    company the products belong to), `company_id` (Medusa company id; blank = resolve by vendor),
+    `origin_default` (supplier ISO-2 country), `ports_default` (supplier shipping ports), `default_bundle_size`.
+  - **Trust / safety** (always): `mode: review` (always start in review), `min_expected_rows` (catastrophic-
+    scrape floor), `emit_on_review`.
+  - **Images** (IF APPLICABLE -- this is the easy-to-forget group):
+    - `watermarked: true` if the supplier burns a logo into its photos; **and when true you MUST set
+      `fal_prompt`** -- the source-specific de-watermark instruction naming THAT supplier's mark (colour +
+      text). It is never shared: a watermarked source with no `fal_prompt` falls back to another supplier's
+      prompt (logs a warning, removal degrades). Empty is only valid for a non-watermarked source.
+    - `enhance` (default on) -- Real-ESRGAN upscale; turn off for a source whose photos should not be upscaled.
 - Rule: NO order-dependent heuristics and NO silent unit/format guesses. Declare the source's rule; if the
-  source genuinely varies, declare that too. (This is the D/E lesson.)
+  source genuinely varies, declare that too. (This is the D/E lesson.) A watermarked source that omits
+  `fal_prompt` is the image-equivalent of that mistake -- declare the mark, don't inherit another's.
 
 ## 1. Golden fixture (offline lock)
 
