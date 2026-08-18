@@ -108,53 +108,26 @@ class DewatermarkResult:
 
 
 class _Dewatermarker:
-    """Removes the supplier watermark with FAL FLUX Fill (hosted inpainting).
+    """Removes the supplier watermark with FAL FLUX Kontext (hosted INSTRUCTION editing).
 
-    The pink/magenta logo is LOCATED by _locate (stone never carries that ink), and ONLY the padded
-    logo crop of the image is sent to FAL. The fill is composited back through a feathered logo mask,
-    so every pixel outside the logo is byte-identical to the original -- no whole-region "box" like the
-    old SDXL footprint reconstruction left on veined stone. FAL bills per megapixel, so cropping to the
-    logo keeps each slab at the $0.05 floor; callers send the RAW (pre-upscale) image to keep the crop
-    smallest.
+    Kontext edits the WHOLE image from `self.prompt` ('remove the ... logo ...') and reconstructs the stone
+    underneath -- no mask, no crop. The output is resized back to the input WIDTH (aspect preserved), and a
+    light sanity check HOLDS a blank or wildly-recoloured edit so a bad result is never published.
 
     No local model: it needs `fal_client` + a network + `FAL_KEY`. Outcomes:
-      - logo absent            -> applied=False, failed=False (clean slab, no FAL cost).
-      - FAL / config failure   -> applied=False, failed=True  (HOLD the image; a re-run retries).
-      - filled                 -> applied=True.
+      - edited                        -> applied=True.
+      - FAL / config / sanity failure -> applied=False, failed=True (HOLD the image; a re-run retries).
     Never returns a watermarked image marked as done."""
 
-    SEARCH = (0.32, 0.68, 0.22, 0.78)       # y0,y1,x0,x1 fractions of the central search band
-    HUE_LO, HUE_HI, SAT_MIN = 148, 180, 35  # the mark's pink/magenta ink in OpenCV HSV
-    INK_MEDIAN, INK_DELTA = 31, 9           # text strokes deviate this much from the local stone
-    MIN_INK = 25                            # px of ink needed to trust a mark is present
-    PINK_STONE_FRACTION = 0.35              # pink over >this share of the ROI is the STONE's colour, not ink
-    MIN_PINK = 40                           # px of pink logo ink needed to ANCHOR the mask on the logo
-    LOGO_GAP = 40                           # close pink gaps up to this so a multi-word logo is ONE component
-    LOGO_PAD = 24                           # grow the pink-logo box to catch adjacent (grey) sub-text (px)
-    MAX_MASK_FRACTION = 0.12                # a logo is small; a mask larger than this is catching STONE -> refuse
-    DILATE = 4                              # grow the logo mask so FAL covers anti-aliased edges (px)
-    FEATHER = 9                             # composite feather radius (px)
     MAX_RETRIES = 3
     EDIT_MAX_SHIFT = 45                     # a valid Kontext edit keeps the slab; whole-image median colour
                                            # must not shift more than this per channel (catches a garbage edit)
-    # Fill-quality guard: FLUX can hallucinate a bright label/patch in the hole instead of continuing the
-    # stone. A fill that adds this fraction of near-white pixels the local stone lacks, OR whose median
-    # brightness differs from the local stone by this much, is rejected (HELD). Tuned with margin: a clean
-    # fill measured white-excess ~0.5% / delta ~3; a hallucinated white label ~71% / ~58.
-    FILL_WHITE_LEVEL = 230                  # a pixel this bright counts as "near-white"
-    FILL_WHITE_EXCESS = 0.25               # fill near-white fraction MINUS surround's; above this -> reject
-    FILL_MEDIAN_DELTA = 40                 # |fill median - surround median| above this -> reject
-    BASE_BACKOFF = 2.0
 
     def __init__(self, cfg: ImageProcessingConfig):
         self._billed_mp = 0                     # billed megapixels accrued for the image being processed
         self.model = cfg.fal_model
         self.prompt = cfg.fal_prompt
         self.seed = cfg.fal_seed
-        self.pad = cfg.crop_pad
-        self.min_side = cfg.crop_min_side
-        self.snap = max(1, cfg.crop_snap)
-        self.price_per_mp = cfg.fal_price_per_mp
         self._ok: Optional[bool] = None
 
     def available(self) -> bool:
@@ -172,78 +145,6 @@ class _Dewatermarker:
                       extra={"extra_fields": {"error": str(exc)}})
             self._ok = False
         return self._ok
-
-    def _locate(self, bgr):
-        """Return (bbox, logo_mask) or None (no logo -> a clean slab). bbox=(x0,y0,x1,y1) tight to the ink;
-        logo_mask is a full-image uint8 (255 = logo pixel), the SHAPE to inpaint. Presence-gated on MIN_INK.
-
-        The mark is a PINK/magenta logo, and stone never carries that ink, so ANCHOR on the pink cluster and
-        confine the luminance `strokes` term to a padded box spanning EVERY pink component (all glyphs/words),
-        so a busy slab's own veining -- never pink, and outside the box -- can't enter the mask. Without a pink
-        anchor the search falls back to the whole ROI; process() then applies MAX_MASK_FRACTION and HOLDS a
-        slab-sized (veining-driven) mask rather than repainting. This method does NOT decide publish/hold."""
-        h, w = bgr.shape[:2]
-        sy0, sy1, sx0, sx1 = (int(h * self.SEARCH[0]), int(h * self.SEARCH[1]),
-                              int(w * self.SEARCH[2]), int(w * self.SEARCH[3]))
-        roi = bgr[sy0:sy1, sx0:sx1]
-        rh, rw = roi.shape[:2]
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        strokes = cv2.absdiff(gray, cv2.medianBlur(gray, self.INK_MEDIAN)) > self.INK_DELTA
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        pink = ((hsv[:, :, 0] >= self.HUE_LO) & (hsv[:, :, 0] <= self.HUE_HI) & (hsv[:, :, 1] >= self.SAT_MIN))
-        # A naturally pink/magenta STONE (pink onyx, Rosa) is pink across a large share of the band; when pink
-        # DOMINATES it is the stone's colour, not ink -- drop it (the strokes term still catches a real logo).
-        if pink.mean() > self.PINK_STONE_FRACTION:
-            pink = np.zeros_like(pink)
-        # Anchor: morphologically CLOSE the pink mask (kernel LOGO_GAP) so a multi-word logo ('Varsha Stones')
-        # bridges into ONE component while far stray pink (a speck/reflection) stays separate; then take the
-        # LARGEST such component -- the whole logo, not stray pink and not the slab. `strokes` is confined to
-        # its padded box, so the slab's veining (never pink, outside the box) can't enter the mask.
-        region = np.ones((rh, rw), bool)
-        closed = cv2.morphologyEx((pink * 255).astype(np.uint8), cv2.MORPH_CLOSE,
-                                  np.ones((self.LOGO_GAP, self.LOGO_GAP), np.uint8))
-        n, _, stats, _ = cv2.connectedComponentsWithStats(closed, connectivity=8)
-        if n > 1:
-            i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-            if stats[i, cv2.CC_STAT_AREA] >= self.MIN_PINK:
-                x, y = int(stats[i, cv2.CC_STAT_LEFT]), int(stats[i, cv2.CC_STAT_TOP])
-                cw, ch = int(stats[i, cv2.CC_STAT_WIDTH]), int(stats[i, cv2.CC_STAT_HEIGHT])
-                region = np.zeros((rh, rw), bool)
-                region[max(0, y - self.LOGO_PAD):min(rh, y + ch + self.LOGO_PAD),
-                       max(0, x - self.LOGO_PAD):min(rw, x + cw + self.LOGO_PAD)] = True
-        ink = cv2.dilate((((strokes | pink) & region) * 255).astype(np.uint8),
-                         np.ones((5, 5), np.uint8), iterations=2)
-        ys, xs = np.where(ink > 0)
-        if len(xs) < self.MIN_INK:
-            return None
-        logo_mask = np.zeros((h, w), np.uint8)
-        logo_mask[sy0:sy1, sx0:sx1][ink > 0] = 255
-        if self.DILATE > 0:
-            k = np.ones((self.DILATE * 2 + 1, self.DILATE * 2 + 1), np.uint8)
-            logo_mask = cv2.dilate(logo_mask, k)
-        bbox = (int(sx0 + xs.min()), int(sy0 + ys.min()), int(sx0 + xs.max()), int(sy0 + ys.max()))
-        return bbox, logo_mask
-
-    def _pad_axis(self, a0, a1, lim):
-        """Pad [a0,a1] by self.pad, grow to at least self.min_side, then round the span UP to a multiple
-        of self.snap -- all clamped to [0,lim], staying valid (0 <= a0 < a1 <= lim)."""
-        a0 = max(0, a0 - self.pad)
-        a1 = min(lim, a1 + self.pad)
-        target = min(lim, max(self.min_side, a1 - a0))
-        target = min(lim, ((target + self.snap - 1) // self.snap) * self.snap)  # snap up, capped at lim
-        need = target - (a1 - a0)
-        if need > 0:                                    # grow symmetrically, then spill to whichever side has room
-            left = min(a0, (need + 1) // 2)
-            a0 -= left
-            a1 = min(lim, a1 + (need - left))
-            if (a1 - a0) < target:
-                a0 = max(0, a1 - target)
-        return a0, a1
-
-    def _crop_box(self, bbox, w, h):
-        x0, x1 = self._pad_axis(bbox[0], bbox[2], w)
-        y0, y1 = self._pad_axis(bbox[1], bbox[3], h)
-        return x0, y0, x1, y1
 
     def billed_megapixels(self, w: int, h: int) -> int:
         return max(1, math.ceil(w * h / 1_000_000))
@@ -317,59 +218,6 @@ class _Dewatermarker:
             return False
         shift = float(np.abs(np.median(a, 0) - np.median(b, 0)).max())
         return shift < self.EDIT_MAX_SHIFT
-
-    def _fal_fill(self, crop_bgr, cmask):
-        """Send the crop + logo mask to FAL FLUX Fill; return the filled crop as RGB uint8 (same size).
-        Retries transient errors with backoff; fails fast on deterministic (422) rejections; validates the
-        output. Raises on unrecoverable failure so process() holds the image."""
-        import fal_client
-        import requests
-
-        crop_rgb = Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB))
-        mask_l = Image.fromarray(cmask).convert("L")
-        ti = tempfile.mktemp(suffix=".png")
-        tm = tempfile.mktemp(suffix=".png")
-        try:
-            crop_rgb.save(ti)
-            mask_l.save(tm)
-            crop_h, crop_w = crop_bgr.shape[:2]
-            tile_mp = self.billed_megapixels(crop_w, crop_h)        # FAL bills per generation of this tile
-            last = None
-            for attempt in range(1, self.MAX_RETRIES + 1):
-                self._billed_mp += tile_mp                          # every submitted generation is billed,
-                try:                                                # whether it succeeds, blanks, or errors
-                    result = fal_client.subscribe(self.model, arguments={
-                        "image_url": fal_client.upload_file(ti),
-                        "mask_url": fal_client.upload_file(tm),
-                        "prompt": self.prompt,
-                        "seed": self.seed,
-                        "output_format": "png",
-                    })
-                    imgs = result.get("images") or []
-                    if not imgs:
-                        raise ValueError(f"no images in FAL response: {list(result.keys())}")
-                    url = imgs[0]["url"] if isinstance(imgs[0], dict) else imgs[0]
-                    resp = requests.get(url, timeout=120)
-                    resp.raise_for_status()
-                    out = Image.open(BytesIO(resp.content)).convert("RGB")
-                    if out.size != crop_rgb.size:                  # FLUX may round dims -> snap back
-                        out = out.resize(crop_rgb.size)
-                    arr = np.array(out)
-                    if arr.std() < 1.0:                            # blank/black frame or a safety refusal
-                        raise ValueError("FAL returned a blank image")
-                    return arr
-                except Exception as exc:
-                    last = exc
-                    msg = str(exc).lower()
-                    if "422" in msg or "unprocessable" in msg:     # deterministic rejection -> no retry
-                        raise
-                    if attempt < self.MAX_RETRIES:
-                        time.sleep(self.BASE_BACKOFF * (2 ** (attempt - 1)))
-            raise last if last else RuntimeError("FAL fill failed")
-        finally:
-            for t in (ti, tm):
-                if os.path.exists(t):
-                    os.remove(t)
 
 
 # --------------------------------------------------------------------------- #
