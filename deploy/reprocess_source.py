@@ -92,17 +92,16 @@ def main() -> int:
 
     print(f"==> reprocess {src}: slice[{offset}:{offset + len(sliced)}] of {total} full={full} "
           f"watermarked={watermarked} enhance={enhance} classify={classify} -> s3://{S3_BUCKET}/{dst_prefix}")
-    # Per-source de-watermark instruction (the logo is source-specific). Empty falls back to the global
-    # default; a watermarked source on the fallback is flagged loud (it names another supplier's logo).
+    # Per-source de-watermark instruction (the logo is source-specific). Empty falls back to the generic,
+    # source-agnostic global default -- safe for any source; a note surfaces that a tuned prompt is unset.
     from stone_pipeline.config.sources import load_source
     source_prompt = (load_source(src).fal_prompt or "").strip()
     img_kwargs = dict(enabled=True, dewatermark=watermarked, classify=classify, write_preview=False)
     if source_prompt:
         img_kwargs["fal_prompt"] = source_prompt
     elif watermarked:
-        print(f"WARNING: watermarked source {src!r} has no per-source de-watermark prompt "
-              f"(SourceConfig.fal_prompt); using the global fallback, which is tuned for another supplier's "
-              f"logo -- removal may be degraded. Set {src}'s fal_prompt (admin UI / sources.yaml).")
+        print(f"note: {src!r} has no source-specific de-watermark prompt (SourceConfig.fal_prompt); "
+              f"using the generic fallback. Set {src}'s fal_prompt for best removal.")
     proc = ImageProcessor(ImageProcessingConfig(**img_kwargs))
     price, max_usd = proc.cfg.fal_price_per_mp, proc.cfg.fal_max_usd
 
