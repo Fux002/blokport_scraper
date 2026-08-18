@@ -44,10 +44,10 @@ a shared stage. Lock these in on the scraper/adapter class + config:
   - **Trust / safety** (always): `mode: review` (always start in review), `min_expected_rows` (catastrophic-
     scrape floor), `emit_on_review`.
   - **Images** (IF APPLICABLE -- this is the easy-to-forget group):
-    - `watermarked: true` if the supplier burns a logo into its photos; **and when true you MUST set
+    - `watermarked: true` if the supplier burns a logo into its photos; **and when true you SHOULD set
       `fal_prompt`** -- the source-specific de-watermark instruction naming THAT supplier's mark (colour +
-      text). It is never shared: a watermarked source with no `fal_prompt` falls back to another supplier's
-      prompt (logs a warning, removal degrades). Empty is only valid for a non-watermarked source.
+      text) for the best removal. Empty falls back to a GENERIC, source-agnostic instruction (safe for any
+      source, just less tuned; a note is logged) -- never another supplier's prompt.
     - `enhance` (default on) -- Real-ESRGAN upscale; turn off for a source whose photos should not be upscaled.
 - Rule: NO order-dependent heuristics and NO silent unit/format guesses. Declare the source's rule; if the
   source genuinely varies, declare that too. (This is the D/E lesson.) A watermarked source that omits

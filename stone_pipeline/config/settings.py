@@ -386,14 +386,14 @@ class ImageProcessingConfig:
     # De-watermark is an INSTRUCTION edit (FAL FLUX Kontext), not a masked inpaint: Kontext edits the whole
     # image from the prompt and reconstructs the stone under the logo without the mask-fill's hallucinations.
     fal_model: str = os.environ.get("BLOKPORT_FAL_MODEL", "fal-ai/flux-pro/kontext")
-    # FALLBACK de-watermark instruction, used only when a watermarked source has no per-source prompt
-    # (SourceConfig.fal_prompt). The instruction NAMES the supplier's mark, so it is inherently
-    # source-specific: each watermarked source SHOULD set its own; this default is tuned for varsha (the
-    # first watermarked source) and a different source running on it logs a warning (see reprocess_source).
-    fal_prompt: str = ("Remove the pink 'Varsha Stones' watermark logo and any overlaid brand text from the "
-                       "surface of the stone slab, seamlessly reconstructing the natural stone pattern "
-                       "underneath. Keep the stone colour, veining, the size/label card and everything else "
-                       "in the photo identical to the original.")
+    # GENERIC fallback de-watermark instruction, used when a watermarked source has no per-source prompt
+    # (SourceConfig.fal_prompt). It is source-AGNOSTIC on purpose -- it names no supplier -- so it is always
+    # safe for any source (it removes whatever logo is present, never another supplier's specifically). Each
+    # watermarked source SHOULD still set its own tuned prompt for best removal; this is the safe default.
+    fal_prompt: str = ("Remove any supplier watermark logo and any overlaid brand text from the surface of "
+                       "the stone slab, seamlessly reconstructing the natural stone pattern underneath. Keep "
+                       "the stone colour, veining, the size/label card and everything else in the photo "
+                       "identical to the original.")
     fal_seed: int = 0                 # fixed for best-effort reproducibility across re-runs
     fal_price_per_mp: float = 0.05    # USD per billed megapixel (rounds up, 1 MP floor)
     fal_max_usd: float = _env_float("BLOKPORT_FAL_MAX_USD", 150.0)  # per-run cost circuit breaker
