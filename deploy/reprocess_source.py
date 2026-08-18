@@ -24,6 +24,37 @@ from stone_pipeline.io import imagestore
 from stone_pipeline.io.image_processing import ImageProcessor
 
 
+def enhance_one(client, proc, src, name, sha, dst_prefix, data, *,
+                watermarked, enhance, price, max_attempts):
+    """Process ONE scraped image to a TERMINAL state; return (outcome, dewatermarked, fal_cost).
+
+    outcome is 'enhanced' (improved image + enhanced marker written -> READY) or 'held' (a terminal marker in
+    the discarded pool -> HELD). A non-completing image is retried up to `max_attempts`; if it still cannot
+    complete (a de-watermark the sanity check keeps rejecting, or an upscale that fails on an extreme aspect
+    ratio) it is written to the discarded pool as a terminal HELD state. This guarantees EVERY scraped image
+    ends ready-or-held, so the pull gate and the `generating` indicator always converge (ready + held ==
+    total): an unprocessable image can never sit markerless and re-serve / spin forever. A reset clears the
+    marker, so the image is retried fresh on the next cold start."""
+    fal_cost = 0.0
+    res = None
+    for _ in range(max(1, max_attempts)):
+        res = proc.process(data, watermarked=watermarked, enhance=enhance)
+        fal_cost += res.billed_mp * price
+        if res.is_complete(enhance_requested=enhance):
+            break
+    if res.is_complete(enhance_requested=enhance):
+        client.put_object(Bucket=S3_BUCKET, Key=f"{dst_prefix}{name}",
+                          Body=res.data, ContentType="image/jpeg")
+        client.put_object(Bucket=S3_BUCKET, Key=imagestore.enhanced_key(src, sha),
+                          Body=b"", ContentType="text/plain")
+        return "enhanced", bool(res.dewatermarked), fal_cost
+    marker = json.dumps({"reason": "dewatermark_unrecoverable", "attempts": max(1, max_attempts),
+                         "classifier": "reprocess"}, sort_keys=True).encode("utf-8")
+    client.put_object(Bucket=S3_BUCKET, Key=imagestore.discarded_key(src, sha),
+                      Body=marker, ContentType="application/json")
+    return "held", False, fal_cost
+
+
 def main() -> int:
     src = os.environ.get("SRC", "varsha")
     watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
@@ -86,22 +117,22 @@ def main() -> int:
                                   Body=marker, ContentType="application/json")
                 discarded += 1
                 continue
-            # 2) FAL de-watermark (watermarked sources) + ESRGAN enhance.
-            res = proc.process(data, watermarked=watermarked, enhance=enhance)
-            fal_cost += res.billed_mp * price
-            # HOLD (no improved/, NO marker) unless the pipeline completed AS A WHOLE (ProcessResult.
-            # is_complete): de-watermark ok, treated, AND -- when enhance is on -- actually UPSCALED, not
-            # merely size-reduced. The enhanced/ marker must mean "clean + fully enhanced", so the publish
-            # gate never links a watermarked OR a de-watermarked-but-not-upscaled image. A re-run retries it.
-            if not res.is_complete(enhance_requested=enhance):
-                held += 1
-            else:
-                client.put_object(Bucket=S3_BUCKET, Key=f"{dst_prefix}{name}",
-                                  Body=res.data, ContentType="image/jpeg")
-                client.put_object(Bucket=S3_BUCKET, Key=imagestore.enhanced_key(src, sha),
-                                  Body=b"", ContentType="text/plain")
+            # 2) FAL de-watermark (watermarked sources) + ESRGAN enhance, to a TERMINAL state. A completing
+            #    image is published (improved + enhanced marker = READY); one that cannot complete after
+            #    bounded retries is terminally HELD in the discarded pool, so every scraped image ends
+            #    ready-or-held and the pipeline always converges (never a markerless image that re-serves /
+            #    spins the generating indicator forever). The enhanced/ marker still only ever means "clean +
+            #    fully enhanced", so the publish gate never links a watermarked or un-upscaled image.
+            outcome, was_dw, cost = enhance_one(
+                client, proc, src, name, sha, dst_prefix, data,
+                watermarked=watermarked, enhance=enhance, price=price,
+                max_attempts=proc.cfg.enhance_max_attempts)
+            fal_cost += cost
+            if outcome == "enhanced":
                 enhanced += 1
-                dw += 1 if res.dewatermarked else 0
+                dw += 1 if was_dw else 0
+            else:
+                held += 1
         except Exception as exc:  # never let one bad image kill the slice
             failed += 1
             print(f"   [{offset + i}] FAILED {name}: {exc}")
