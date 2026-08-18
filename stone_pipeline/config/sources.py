@@ -40,6 +40,13 @@ class SourceConfig:
     # The source burns a visible watermark into its product photos (e.g. varsha).
     # When true the image stage de-watermarks before re-hosting (local/s3 modes).
     watermarked: bool = False
+    # The de-watermark INSTRUCTION for this source's logo (FAL Kontext), e.g. "Remove the pink 'Varsha
+    # Stones' watermark logo...". It names the supplier's own mark (colour + text), so it is source-specific
+    # and MUST be set per watermarked source -- never shared. Empty falls back to the global default
+    # (settings ImageProcessingConfig.fal_prompt); a watermarked source de-watermarking on that fallback
+    # logs a warning (the prompt names another supplier's logo, so removal degrades). Ignored when
+    # watermarked is False. Set from the admin UI, like watermarked/enhance.
+    fal_prompt: str = ""
     # Upscale (Real-ESRGAN, GPU) this source's photos before re-host. A per-source switch like
     # watermarked, set from the admin UI -- default on. When off the GPU upscale is skipped; images are
     # still size-reduced (CPU, no GPU) and re-hosted. Independent of watermarked.

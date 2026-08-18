@@ -48,8 +48,12 @@ def main() -> int:
         print(f"no originals at s3://{S3_BUCKET}/{src} — run the pipeline with keep_scraped first")
         return 1
 
-    proc = ImageProcessor(ImageProcessingConfig(
-        enabled=True, dewatermark=True, write_preview=False))
+    from stone_pipeline.config.sources import load_source   # varsha's own de-watermark prompt (else global fallback)
+    source_prompt = (load_source("varsha").fal_prompt or "").strip()
+    img_kwargs = dict(enabled=True, dewatermark=True, write_preview=False)
+    if source_prompt:
+        img_kwargs["fal_prompt"] = source_prompt
+    proc = ImageProcessor(ImageProcessingConfig(**img_kwargs))
     print(f"==> de-watermarking {len(keys)} varsha originals -> s3://{S3_BUCKET}/{out}/")
     hits = 0
     for i, key in enumerate(keys):

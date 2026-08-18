@@ -126,6 +126,23 @@ def test_lifecycle_defaults_to_active_and_round_trips(tmp_path, monkeypatch):
     assert store.get_row("varsha")["lifecycle"] == "paused"
 
 
+def test_fal_prompt_is_per_source_and_round_trips(tmp_path, monkeypatch):
+    # The de-watermark instruction is source-specific: it must persist per source through the store + the
+    # admin API, and default to '' (the global fallback) for a source that never sets one.
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.upsert_row({"source": "acme", "source_code": "acm", "vendor": "Acme",
+                      "watermarked": True, "fal_prompt": "Remove the blue AcmeStone mark"})
+    store.upsert_row({"source": "plain", "source_code": "pla", "vendor": "Plain"})   # sets no prompt
+    # pipeline read (SourceConfig)
+    srcs = store.read_sources()
+    assert srcs["acme"].fal_prompt == "Remove the blue AcmeStone mark"
+    assert srcs["plain"].fal_prompt == ""            # falls back to the global default at de-watermark time
+    # admin API dict carries it (so the UI can edit per source)
+    assert store.get_row("acme")["fal_prompt"] == "Remove the blue AcmeStone mark"
+    # one source's prompt never leaks onto another
+    assert srcs["acme"].fal_prompt != srcs["plain"].fal_prompt
+
+
 def test_retired_keys_are_durable_in_config_db(tmp_path, monkeypatch):
     # the retired-variety exclusion lives in config.db (snapshotted), not a CSV under ephemeral /app, so a
     # retired variety never re-mints after a restart. Round-trip + idempotent add + un-retire remove.

@@ -50,6 +50,9 @@ varsha:
   default_bundle_size: 6
   min_expected_rows: 125  # recent ~510
   watermarked: true   # varshastones.slabware.com burns a visible watermark into its photos
+  # Source-specific de-watermark instruction (FAL Kontext). Names varsha's OWN mark (pink 'Varsha Stones'
+  # leaf + grey subtext); every watermarked source declares its own -- never shared.
+  fal_prompt: "Remove the pink 'Varsha Stones' watermark logo and any overlaid brand text from the surface of the stone slab, seamlessly reconstructing the natural stone pattern underneath. Keep the stone colour, veining, the size/label card and everything else in the photo identical to the original."
 fuleistone:
   source_code: ful
   vendor: Fuleistone  # VERIFY: the company these products belong to

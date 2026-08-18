@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS source (
     ports               TEXT,                          -- JSON array of port names / LOCODEs
     mode                TEXT NOT NULL DEFAULT 'review',
     watermarked         INTEGER NOT NULL DEFAULT 0,     -- de-watermark this source's photos (FAL)
+    fal_prompt          TEXT NOT NULL DEFAULT '',       -- per-source de-watermark instruction (empty = global fallback)
     enhance             INTEGER NOT NULL DEFAULT 1,     -- upscale this source's photos (Real-ESRGAN, GPU)
     emit_on_review      INTEGER NOT NULL DEFAULT 1,
     default_bundle_size INTEGER NOT NULL DEFAULT 6,
@@ -95,6 +96,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.commit()
     if "enhance" not in cols:   # per-source GPU upscale switch; DBs created before it default ON
         conn.execute("ALTER TABLE source ADD COLUMN enhance INTEGER NOT NULL DEFAULT 1")
+        conn.commit()
+    if "fal_prompt" not in cols:   # per-source de-watermark instruction; older rows default to the global fallback
+        conn.execute("ALTER TABLE source ADD COLUMN fal_prompt TEXT NOT NULL DEFAULT ''")
         conn.commit()
     # F8: source_code must be UNIQUE among real codes (the empty default stays non-unique), so two vendors
     # can't collide their SKU namespace -- the app-level read-then-write check races under the threading
@@ -218,6 +222,7 @@ def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
         vendor=r["vendor"], company_id=r["company_id"], origin_default=r["origin_default"],
         ports_default=json.loads(r["ports"] or "[]"), mode=r["mode"],
         watermarked=bool(r["watermarked"]), enhance=bool(r["enhance"]), emit_on_review=bool(r["emit_on_review"]),
+        fal_prompt=r["fal_prompt"],
         default_bundle_size=r["default_bundle_size"], min_expected_rows=r["min_expected_rows"],
     )
 
@@ -229,6 +234,7 @@ def _params(cfg: SourceConfig, enabled: bool) -> dict:
         "company_id": cfg.company_id,
         "origin_default": cfg.origin_default, "ports": json.dumps(cfg.ports_default or []),
         "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0, "enhance": 1 if cfg.enhance else 0,
+        "fal_prompt": cfg.fal_prompt,
         "emit_on_review": 1 if cfg.emit_on_review else 0,
         "default_bundle_size": cfg.default_bundle_size, "min_expected_rows": cfg.min_expected_rows,
         "updated_at": _now(),
@@ -251,6 +257,7 @@ def _row_dict(r: sqlite3.Row) -> dict:
         "company_id": r["company_id"],
         "origin_default": r["origin_default"], "ports": json.loads(r["ports"] or "[]"),
         "mode": r["mode"], "watermarked": bool(r["watermarked"]), "enhance": bool(r["enhance"]),
+        "fal_prompt": r["fal_prompt"],
         "emit_on_review": bool(r["emit_on_review"]),
         "default_bundle_size": r["default_bundle_size"], "min_expected_rows": r["min_expected_rows"],
         # last run (for the admin list's "last run" label); null until this source has ever been produced.
@@ -281,6 +288,7 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
         origin_default=data.get("origin_default", ""), ports_default=data.get("ports") or [],
         mode=data.get("mode", "review"), watermarked=bool(data.get("watermarked", False)),
         enhance=bool(data.get("enhance", True)),
+        fal_prompt=data.get("fal_prompt", ""),
         emit_on_review=bool(data.get("emit_on_review", True)),
         default_bundle_size=int(data.get("default_bundle_size", 6)),
         min_expected_rows=int(data.get("min_expected_rows", 0)),
