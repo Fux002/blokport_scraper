@@ -149,18 +149,19 @@ class _Dewatermarker:
     def billed_megapixels(self, w: int, h: int) -> int:
         return max(1, math.ceil(w * h / 1_000_000))
 
-    def process(self, pil_image) -> DewatermarkResult:
+    def process(self, pil_image, prompt: Optional[str] = None) -> DewatermarkResult:
         """Remove the supplier watermark with FAL FLUX Kontext (INSTRUCTION editing -- no mask). Kontext edits
-        the whole image from `self.prompt` ('remove the ... logo ...') and reconstructs the stone underneath,
-        which the old masked FLUX Fill could not do without hallucinating a label/patch on busy slabs. A light
-        sanity check HOLDS a blank or wildly-recoloured edit so a bad result is never published (the caller
-        holds a failed result and a re-run retries). Kontext re-renders at its own size; the output is resized
-        back to the input WIDTH with the aspect preserved (no distortion), so the downstream upscale sees the
-        same scale as before. Outcomes: edited -> applied=True; FAL/blank/sanity failure -> failed=True."""
+        the whole image from the instruction ('remove the ... logo ...') and reconstructs the stone underneath,
+        which the old masked FLUX Fill could not do without hallucinating a label/patch on busy slabs. `prompt`
+        overrides the instruction for THIS call (the per-source prompt when one processor serves many sources);
+        None uses self.prompt. A light sanity check HOLDS a blank or wildly-recoloured edit so a bad result is
+        never published (the caller holds a failed result and a re-run retries). Kontext re-renders at its own
+        size; the output is resized back to the input WIDTH with the aspect preserved (no distortion), so the
+        downstream upscale sees the same scale. Outcomes: edited -> applied=True; failure -> failed=True."""
         src = pil_image.convert("RGB")
-        self._billed_mp = self.billed_megapixels(src.width, src.height)   # rough cost proxy for the breaker
+        self._billed_mp = 0                          # accrue per FAL generation _kontext_edit submits (breaker)
         try:
-            edited = self._kontext_edit(src)                             # RGB PIL at Kontext's own size
+            edited = self._kontext_edit(src, prompt)                     # RGB PIL at Kontext's own size
         except Exception as exc:                                         # network/validation/refusal -> HOLD
             log.error("de-watermark Kontext failed; holding image (never publishing watermarked)",
                       extra={"extra_fields": {"error": str(exc), "billed_mp": self._billed_mp}})
@@ -171,21 +172,26 @@ class _Dewatermarker:
             return DewatermarkResult(pil_image, applied=False, failed=True, billed_mp=self._billed_mp)
         return DewatermarkResult(out, applied=True, billed_mp=self._billed_mp)
 
-    def _kontext_edit(self, pil_rgb):
+    def _kontext_edit(self, pil_rgb, prompt: Optional[str] = None):
         """Send the whole image + instruction to FAL FLUX Kontext; return the edited RGB PIL (Kontext's size).
-        Retries transient errors with backoff, fails fast on a deterministic (422) rejection, rejects a blank
-        output. Raises on unrecoverable failure so process() holds the image."""
+        `prompt` overrides self.prompt for this call. Retries transient errors with backoff, fails fast on a
+        deterministic (422) rejection, rejects a blank output. Raises on unrecoverable failure so process()
+        holds the image. Every SUBMITTED generation bills FAL (success/blank/error alike), so it is added to
+        _billed_mp per attempt -- the cost proxy the run's circuit breaker reads."""
         import fal_client
         import requests
 
+        instruction = prompt or self.prompt
+        gen_mp = self.billed_megapixels(pil_rgb.width, pil_rgb.height)   # FAL bills ~this per generation
         ti = tempfile.mktemp(suffix=".png")
         pil_rgb.save(ti)
         last = None
         for attempt in range(1, self.MAX_RETRIES + 1):
+            self._billed_mp += gen_mp                                    # every submitted generation is billed
             try:
                 result = fal_client.subscribe(self.model, arguments={
                     "image_url": fal_client.upload_file(ti),
-                    "prompt": self.prompt,
+                    "prompt": instruction,
                     "seed": self.seed,
                     "output_format": "png",
                 })
@@ -425,18 +431,20 @@ class ImageProcessor:
             log.warning("classify failed; keeping image", extra={"extra_fields": {"error": str(exc)}})
             return ClassifyResult(keep=True, ran=False)
 
-    def process(self, data: bytes, *, watermarked: bool = False, enhance: bool = True) -> ProcessResult:
+    def process(self, data: bytes, *, watermarked: bool = False, enhance: bool = True,
+                prompt: Optional[str] = None) -> ProcessResult:
         if not self.cfg.enabled:
             return ProcessResult(data)
         try:
-            return self._process(data, watermarked, enhance)
+            return self._process(data, watermarked, enhance, prompt)
         except Exception as exc:  # faithful fallback: original bytes, never crash
             log.warning("image processing failed; keeping original",
                         extra={"extra_fields": {"error": str(exc)}})
             # a failure on a WATERMARKED image must hold it (never publish the original, watermarked).
             return ProcessResult(data, dewatermark_failed=watermarked)
 
-    def _process(self, data: bytes, watermarked: bool, enhance: bool = True) -> ProcessResult:
+    def _process(self, data: bytes, watermarked: bool, enhance: bool = True,
+                 prompt: Optional[str] = None) -> ProcessResult:
         res = ProcessResult(data)
 
         # 1) de-watermark (flagged sources only) via FAL. If the source is watermarked but de-watermarking
@@ -448,7 +456,7 @@ class ImageProcessor:
                 res.dewatermark_failed = True
                 return res
             pil = Image.open(BytesIO(data)).convert("RGB")
-            dw = self._dw.process(pil)
+            dw = self._dw.process(pil, prompt)               # per-source prompt override (None -> self.prompt)
             if dw.failed:                                     # FAL error -> hold, retry next run
                 res.dewatermark_failed = True
                 return res

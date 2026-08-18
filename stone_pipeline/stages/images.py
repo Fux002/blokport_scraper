@@ -330,12 +330,19 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     processor = None
     watermarked_sources: set[str] = set()
     enhance_sources: set[str] = set()
+    source_prompts: dict[str, str] = {}
     if getattr(cfg, "processing", None) and cfg.processing.enabled:
         from stone_pipeline.io.image_processing import ImageProcessor
 
         processor = ImageProcessor(cfg.processing)
         watermarked_sources = _watermarked_sources()
         enhance_sources = _enhance_sources()
+        # one processor serves every source, so pass each watermarked source's OWN de-watermark prompt
+        # per image (empty -> the processor's generic fallback). Same prompt the GPU reprocess uses.
+        from stone_pipeline.config.sources import load_sources
+        _all = load_sources()
+        source_prompts = {s: p for s in watermarked_sources
+                          if (c := _all.get(s)) and (p := (c.fal_prompt or "").strip())}
     preview: list[dict] = []
 
     # cross-run idempotency on the SOURCE URL: a URL processed in a prior scrape is
@@ -437,7 +444,8 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                                                                          "ceiling": fal_ceiling}})
                 fal_budget_logged = True
             pr = processor.process(data, watermarked=finish_on_core and watermarked_src,
-                                   enhance=src_site in enhance_sources)
+                                   enhance=src_site in enhance_sources,
+                                   prompt=source_prompts.get(src_site))   # this source's own de-watermark prompt
             stats.processed += 1
             fal_cost += pr.billed_mp * cfg.processing.fal_price_per_mp   # every billed generation (F5)
             # Persist the raw original UNCONDITIONALLY (keep_scraped): it is the GPU reprocess's INPUT.

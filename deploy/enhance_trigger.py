@@ -58,13 +58,16 @@ def image_progress(client, source: str) -> dict | None:
         held        discarded markers -- classifier set-aside (deliberate; not an error, not generating)
         generating  some scraped image still carries neither marker  <=>  (ready + held) < total
     Markers are intersected with the scraped set so a stale marker (whose original is gone) can never push
-    ready + held past total. None when the source has no scraped images -- the UI then renders "-"."""
+    ready + held past total; and an image that carries BOTH an enhanced and a discarded marker (a terminal
+    hold that later succeeded on a FULL re-run) counts as READY only -- the enhanced/published marker wins --
+    so ready + held <= total always holds. None when the source has no scraped images (UI renders "-")."""
     scraped = _shas_under(client, imagestore.scraped_prefix(source))
     total = len(scraped)
     if not total:
         return None
-    ready = len(_shas_under(client, imagestore.enhanced_prefix(source)) & scraped)
-    held = len(_shas_under(client, imagestore.discarded_prefix(source)) & scraped)
+    ready_shas = _shas_under(client, imagestore.enhanced_prefix(source)) & scraped
+    held_shas = (_shas_under(client, imagestore.discarded_prefix(source)) & scraped) - ready_shas
+    ready, held = len(ready_shas), len(held_shas)
     return {"total": total, "ready": ready, "held": held, "generating": (ready + held) < total}
 
 

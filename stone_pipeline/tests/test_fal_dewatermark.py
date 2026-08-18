@@ -45,7 +45,7 @@ def test_process_edits_and_publishes(monkeypatch):
     # input WIDTH with the aspect preserved (not the input height), so there is no distortion.
     dw = _Dewatermarker(_cfg())
     edited = _slab(h=800, w=1328)   # a textured grey slab at Kontext's own size/aspect (not blank)
-    monkeypatch.setattr(dw, "_kontext_edit", lambda pil: edited)
+    monkeypatch.setattr(dw, "_kontext_edit", lambda pil, prompt=None: edited)
     src = _slab()
     r = dw.process(src)
     assert r.applied is True and r.failed is False
@@ -56,7 +56,7 @@ def test_process_edits_and_publishes(monkeypatch):
 def test_process_holds_when_kontext_fails(monkeypatch):
     dw = _Dewatermarker(_cfg())
     monkeypatch.setattr(dw, "_kontext_edit",
-                        lambda pil: (_ for _ in ()).throw(RuntimeError("FAL 500")))
+                        lambda pil, prompt=None: (_ for _ in ()).throw(RuntimeError("FAL 500")))
     r = dw.process(_slab())
     assert r.applied is False and r.failed is True          # HOLD -> caller writes no marker
 
@@ -64,7 +64,7 @@ def test_process_holds_when_kontext_fails(monkeypatch):
 def test_process_holds_a_garbage_edit(monkeypatch):
     # sanity guard: an edit that is not the same slab (blank / wildly recoloured) must be HELD, never published.
     dw = _Dewatermarker(_cfg())
-    monkeypatch.setattr(dw, "_kontext_edit", lambda pil: Image.new("RGB", (1328, 800), (255, 0, 0)))  # bright red
+    monkeypatch.setattr(dw, "_kontext_edit", lambda pil, prompt=None: Image.new("RGB", (1328, 800), (255, 0, 0)))  # bright red
     r = dw.process(_slab())
     assert r.applied is False and r.failed is True
 
@@ -93,7 +93,7 @@ def test_watermarked_held_when_dewatermark_fails(monkeypatch):
     proc = ImageProcessor(_cfg())
     monkeypatch.setattr(proc._dw, "available", lambda: True)
     monkeypatch.setattr(proc._dw, "process",
-                        lambda pil: ip.DewatermarkResult(pil, applied=False, failed=True))
+                        lambda pil, prompt=None: ip.DewatermarkResult(pil, applied=False, failed=True))
     res = proc.process(_jpeg(_slab()), watermarked=True)
     assert res.dewatermark_failed is True
 
@@ -133,3 +133,36 @@ def test_kontext_edit_rejects_blank_output(monkeypatch):
     monkeypatch.setattr(ip.time, "sleep", lambda *_: None)     # skip real backoff
     with pytest.raises(Exception):
         dw._kontext_edit(_slab())
+
+
+def test_kontext_edit_bills_every_generation(monkeypatch):
+    # every SUBMITTED FAL generation is billed (success/blank/error), so retries accrue billed_mp -- the
+    # cost circuit breaker must not undercount them (the old masked-Fill path counted per generation too).
+    dw = _Dewatermarker(_cfg())
+    fake_fal = type("F", (), {"upload_file": staticmethod(lambda p: "url"),
+                              "subscribe": staticmethod(lambda m, arguments: {"images": [{"url": "u"}]})})
+    fake_png = cv2.imencode(".png", np.zeros((32, 32, 3), np.uint8))[1].tobytes()   # blank -> retried
+    fake_req = type("R", (), {"get": staticmethod(
+        lambda u, timeout=0: type("Resp", (), {"content": fake_png, "raise_for_status": lambda s: None})())})
+    monkeypatch.setitem(sys.modules, "fal_client", fake_fal)
+    monkeypatch.setitem(sys.modules, "requests", fake_req)
+    monkeypatch.setattr(ip.time, "sleep", lambda *_: None)
+    dw._billed_mp = 0
+    src = _slab()
+    with pytest.raises(Exception):
+        dw._kontext_edit(src)
+    assert dw._billed_mp == dw.MAX_RETRIES * dw.billed_megapixels(src.width, src.height)
+
+
+def test_process_passes_the_prompt_override(monkeypatch):
+    # one processor serves many sources; process(prompt=...) must forward the per-source instruction.
+    dw = _Dewatermarker(_cfg())
+    seen = {}
+
+    def _capture(pil, prompt=None):
+        seen["prompt"] = prompt
+        return _slab(h=800, w=1328)
+
+    monkeypatch.setattr(dw, "_kontext_edit", _capture)
+    dw.process(_slab(), prompt="Remove the blue AcmeStone mark")
+    assert seen["prompt"] == "Remove the blue AcmeStone mark"
