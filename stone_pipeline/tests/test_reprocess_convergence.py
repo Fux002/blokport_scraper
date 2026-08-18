@@ -76,6 +76,13 @@ def test_terminal_held_after_retries():
     assert cost == 2 * 1 * 0.05                                  # billed per attempt
 
 
+def test_main_requires_src(monkeypatch):
+    # SRC identifies the source to reprocess; the auto-enhance job always sets it. A bare run with SRC
+    # unset must fail loud (return 2) rather than silently defaulting to a brand -- brand-agnostic.
+    monkeypatch.delenv("SRC", raising=False)
+    assert rs.main() == 2
+
+
 def test_retry_recovers():
     proc, client = FakeProc([_incomplete(), _complete()]), FakeClient()
     outcome, _, _ = _run(proc, client, max_attempts=2)

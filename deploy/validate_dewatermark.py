@@ -1,14 +1,13 @@
-"""De-watermark a SAMPLE of real varsha originals (no re-scrape) for a human to judge.
+"""De-watermark a SAMPLE of a source's real originals (no re-scrape) for a human to judge.
 
-Reads N watermarked originals already on S3 at <env>/products/scraped/varsha/, runs
-the de-watermark + enhance chain, and writes before/after pairs to
-<env>/scraper/dewatermark-validation/. Lets you eyeball the result — especially the
-centered "Varsha Stone" mark, the hardest case for faithful inpainting — before
-committing to the full (slow) set. Run on the imageproc or gpu image:
+Reads N watermarked originals already on S3 at <env>/products/scraped/<SRC>/, runs the
+de-watermark + enhance chain with THAT source's own prompt, and writes before/after pairs
+to <env>/scraper/dewatermark-validation/. Lets you eyeball the result before committing to
+the full (slow) set. Run on the imageproc or gpu image:
 
-    RUN_MODE=validate-dewatermark   (the entrypoint dispatches here)
+    SRC=<source> RUN_MODE=validate-dewatermark   (the entrypoint dispatches here)
 
-Needs FAL_KEY (the hosted FAL FLUX Fill de-watermarker) plus torch for the ESRGAN enhance.
+Needs FAL_KEY (the hosted FAL de-watermarker) plus torch for the ESRGAN enhance.
 Tune the count with VALIDATE_N.
 """
 
@@ -20,12 +19,17 @@ import sys
 import boto3
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, ImageProcessingConfig
+from stone_pipeline.io import imagestore
 from stone_pipeline.io.image_processing import ImageProcessor
 
 
 def main() -> int:
     n = int(os.environ.get("VALIDATE_N", "12"))
-    src = f"{ENV_SEGMENT}/products/scraped/varsha/"
+    src_name = os.environ.get("SRC", "").strip()
+    if not src_name:
+        print("ERROR: SRC is required (the source to validate); aborting")
+        return 2
+    src = imagestore.scraped_prefix(src_name)          # single source of truth for the S3 layout
     out = f"{ENV_SEGMENT}/scraper/dewatermark-validation"
     client = boto3.client("s3", region_name=S3_REGION)
 
@@ -48,13 +52,13 @@ def main() -> int:
         print(f"no originals at s3://{S3_BUCKET}/{src} — run the pipeline with keep_scraped first")
         return 1
 
-    from stone_pipeline.config.sources import load_source   # varsha's own de-watermark prompt (else global fallback)
-    source_prompt = (load_source("varsha").fal_prompt or "").strip()
+    from stone_pipeline.config.sources import load_source   # the source's own de-watermark prompt (else fallback)
+    source_prompt = (load_source(src_name).fal_prompt or "").strip()
     img_kwargs = dict(enabled=True, dewatermark=True, write_preview=False)
     if source_prompt:
         img_kwargs["fal_prompt"] = source_prompt
     proc = ImageProcessor(ImageProcessingConfig(**img_kwargs))
-    print(f"==> de-watermarking {len(keys)} varsha originals -> s3://{S3_BUCKET}/{out}/")
+    print(f"==> de-watermarking {len(keys)} {src_name} originals -> s3://{S3_BUCKET}/{out}/")
     hits = 0
     for i, key in enumerate(keys):
         data = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
