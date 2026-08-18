@@ -56,7 +56,10 @@ def enhance_one(client, proc, src, name, sha, dst_prefix, data, *,
 
 
 def main() -> int:
-    src = os.environ.get("SRC", "varsha")
+    src = os.environ.get("SRC", "").strip()
+    if not src:
+        print("ERROR: SRC is required (the source to reprocess); aborting")
+        return 2
     watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
     enhance = os.environ.get("ENHANCE", "true").lower() in ("1", "true", "yes")
     classify = os.environ.get("CLASSIFY", "true").lower() in ("1", "true", "yes")

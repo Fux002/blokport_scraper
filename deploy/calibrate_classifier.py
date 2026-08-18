@@ -23,7 +23,10 @@ from stone_pipeline.io.image_processing import ImageProcessor
 
 
 def main() -> int:
-    src = os.environ.get("SRC", "varsha")
+    src = os.environ.get("SRC", "").strip()
+    if not src:
+        print("ERROR: SRC is required (the source to calibrate); aborting")
+        return 2
     sample = int(os.environ.get("SAMPLE", "80"))
     stride_env = os.environ.get("STRIDE")  # optional: take every Nth (spread across the source) instead of first N
     src_prefix = imagestore.scraped_prefix(src)
