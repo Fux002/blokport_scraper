@@ -179,7 +179,7 @@ def _spy_dewatermarker(monkeypatch):
     monkeypatch.setattr(ip._ESRGANEnhancer, "available", lambda self: False)
     monkeypatch.setattr(ip._Dewatermarker, "available", lambda self: True)
 
-    def _fake_dw(self, pil):
+    def _fake_dw(self, pil, prompt=None):
         calls.append("dw")
         return ip.DewatermarkResult(pil, applied=True, failed=False)
 

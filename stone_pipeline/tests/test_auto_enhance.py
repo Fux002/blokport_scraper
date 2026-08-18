@@ -93,6 +93,14 @@ def test_image_progress_ignores_stale_markers():
         "total": 1, "ready": 1, "held": 0, "generating": False}
 
 
+def test_image_progress_both_markers_count_ready_not_held():
+    # A carries BOTH markers (a terminal hold that later succeeded on a FULL re-run): it counts as READY
+    # only -- the enhanced/published marker wins -- so ready + held never exceeds total.
+    s3 = FakeS3(_keys(scraped=(A, B), enhanced=(A, B), discarded=(A,)))
+    assert et.image_progress(s3, "varsha") == {
+        "total": 2, "ready": 2, "held": 0, "generating": False}
+
+
 def _wire(monkeypatch, s3, batch, cfg, watermarked=("varsha",)):
     monkeypatch.setattr(et, "SETTINGS", types.SimpleNamespace(auto_enhance=cfg))
     monkeypatch.setattr(et, "_watermarked_sources", lambda: set(watermarked))
