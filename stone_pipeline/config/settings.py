@@ -393,6 +393,11 @@ class ImageProcessingConfig:
     fal_seed: int = 0                 # fixed for best-effort reproducibility across re-runs
     fal_price_per_mp: float = 0.05    # USD per billed megapixel (rounds up, 1 MP floor)
     fal_max_usd: float = _env_float("BLOKPORT_FAL_MAX_USD", 150.0)  # per-run cost circuit breaker
+    # Bounded attempts in the GPU reprocess before an image is TERMINALLY held. A completing image is
+    # published (enhanced marker); one that still cannot complete after this many tries is written to the
+    # discarded pool as a terminal HELD state, so every scraped image ends ready-or-held and the pipeline
+    # always converges (ready + held == total) -- an unprocessable image never spins the indicator forever.
+    enhance_max_attempts: int = 2
     crop_pad: int = 64                # context stone around the logo sent to FAL (px)
     crop_min_side: int = 512          # pad the crop up to this short side for fill quality (still < 1 MP)
     crop_snap: int = 16               # FLUX prefers dims divisible by 16
