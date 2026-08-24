@@ -116,14 +116,20 @@ if not _S3_BUCKET_ENV and (IS_PRODUCTION or BRAND != "blokport"):
 S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
 S3_REGION = env.getenv("BLOKPORT_S3_REGION", "eu-west-1")
 
-# Brand<->bucket cross-check (prod): the bucket must belong to THIS brand, so a bucket mis-set to ANOTHER
-# brand's populated prod store fails loud instead of crossing brands. Convention: '<brand>-prod-staging[...]'.
-# (Substring today; PR-3 hardening tightens this to a prefix/equality check.)
-if IS_PRODUCTION and BRAND not in S3_BUCKET.lower():
+# Brand<->bucket cross-check: the bucket must BELONG to this brand, so a bucket mis-set to ANOTHER brand's
+# store fails loud instead of crossing brands (and, since it runs before any snapshot restore, it also stops
+# a wrong-brand ledger/config.db from ever being pulled). Prefix, not substring: 'blokport' must not match
+# 'notblokport-x' or a bucket that merely contains the slug. Fires for any prod run OR any non-blokport brand
+# even in dev -- the same scope as the require-guard above. Convention: '<brand>-<env>-staging[...]'.
+def _bucket_matches_brand(brand: str, bucket: str) -> bool:
+    return bool(brand) and bucket.lower().startswith(f"{brand}-")
+
+
+if (IS_PRODUCTION or BRAND != "blokport") and not _bucket_matches_brand(BRAND, S3_BUCKET):
     raise RuntimeError(
-        f"SCRAPER_BRAND={BRAND!r} but the prod bucket {S3_BUCKET!r} does not contain the brand slug -- "
-        "refusing to run. A bucket set to ANOTHER brand's store would cross brands. Set SCRAPER_S3_BUCKET "
-        f"to {BRAND}'s own prod bucket.")
+        f"SCRAPER_BRAND={BRAND!r} but the bucket {S3_BUCKET!r} is not this brand's (expected prefix "
+        f"'{BRAND}-') -- refusing to run. A bucket set to ANOTHER brand's store would cross brands. Set "
+        f"SCRAPER_S3_BUCKET to {BRAND}'s own bucket.")
 
 
 # Owner Medusa ids -- operational config, NOT catalog attributes (those come from the env's attributes.csv).
