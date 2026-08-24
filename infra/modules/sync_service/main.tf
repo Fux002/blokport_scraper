@@ -146,6 +146,11 @@ locals {
     { name = "BLOKPORT_ENV", value = var.target_env },
     { name = "BLOKPORT_S3_BUCKET", value = var.staging_bucket },
     { name = "BLOKPORT_S3_REGION", value = var.region },
+    # Brand + product-type selection (both containers import settings, so both must carry BLOKPORT_BRAND for
+    # the prod brand<->bucket guard). Domain pack = the product-type choice; defaults keep this blokport-stone.
+    { name = "BLOKPORT_BRAND", value = var.brand },
+    { name = "BLOKPORT_DOMAIN_PACK", value = var.domain_pack },
+    { name = "BLOKPORT_SALES_CHANNEL_ID", value = var.sales_channel_id },
     { name = "BLOKPORT_LEDGER_PATH", value = "/ledger/${var.target_env}.db" },
     { name = "BLOKPORT_LEDGER_WRITETHROUGH", value = "1" },
     { name = "BLOKPORT_RUN_MODE", value = "local" },

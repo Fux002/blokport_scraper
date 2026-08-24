@@ -106,6 +106,24 @@ if IS_PRODUCTION and not _S3_BUCKET_ENV:
 S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
 S3_REGION = os.environ.get("BLOKPORT_S3_REGION", "eu-west-1")
 
+# Brand identity (multi-brand prod). Each brand (blokport/wudport/calcport/...) is its OWN production
+# deployment: own bucket, own Medusa, own domain pack. Dev is single-brand (defaults to blokport). The
+# existing dev-only unset-bucket guard above catches a dev FALLBACK, but NOT a prod bucket mis-set to
+# ANOTHER brand's populated prod bucket -- that would write one brand's images into another's store, keyed
+# to a wrong Medusa. So in PRODUCTION require BLOKPORT_BRAND and cross-check it against the bucket name:
+# the brand slug MUST appear in the bucket, or we refuse to run. Convention: '<brand>-prod-staging[...]'.
+BRAND = os.environ.get("BLOKPORT_BRAND", "").strip().lower() or ("blokport" if not IS_PRODUCTION else "")
+if IS_PRODUCTION:
+    if not BRAND:
+        raise RuntimeError(
+            "BLOKPORT_BRAND must be set in production (the brand this deployment serves, e.g. 'blokport', "
+            "'wudport', 'calcport') so the brand<->bucket guard can refuse a cross-brand mis-configuration.")
+    if BRAND not in S3_BUCKET.lower():
+        raise RuntimeError(
+            f"BLOKPORT_BRAND={BRAND!r} but the prod bucket {S3_BUCKET!r} does not contain the brand slug -- "
+            "refusing to run. A bucket set to ANOTHER brand's store would cross brands. Set BLOKPORT_S3_BUCKET "
+            f"to {BRAND}'s own prod bucket.")
+
 
 # Owner Medusa ids -- operational config, NOT catalog attributes, so they are environment
 # variables (the catalog attribute ids -- color/finish/type/quality/category -- come from the
@@ -203,6 +221,19 @@ class Paths:
     @property
     def backbone_tiles_json(self) -> Path:
         return category("tile").backbone_path
+
+    @property
+    def type_density_csv(self) -> Path:
+        # per-material density, PACK-NAMESPACED (reference/type_density.<pack>.csv) so each material's
+        # densities are separate. A pack with no such file uses its own default_density (domain pack), never
+        # the stone file -- so wood never inherits stone's 2700. Seeded from that env's Medusa type table.
+        return REPO_ROOT / "reference" / f"type_density.{active_pack().name}.csv"
+
+    @property
+    def standard_slab_area_csv(self) -> Path:
+        # PACK-NAMESPACED like type_density; absent for a pack with no standard-area concept (the bundle-area
+        # ladder then simply falls through), so it never reads stone's slab-area table under another pack.
+        return REPO_ROOT / "reference" / f"standard_slab_area.{active_pack().name}.csv"
     # ports.csv is supplied by the user into catalog_source; loader falls back to reference/.
     ports_csv: Path = WORKSPACE_ROOT / "catalog_source" / "ports.csv"
     ports_csv_fallback: Path = REPO_ROOT / "reference" / "ports.csv"
@@ -217,10 +248,8 @@ class Paths:
     origin_overrides_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_supplier_overrides.csv"
     country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
-    standard_slab_area_csv: Path = REPO_ROOT / "reference" / "standard_slab_area.csv"
-    # per-stone-type material density (kg/m3): derive weight from real dimensions when a source has no
-    # weight. Seeded from Medusa's type table; default row (Marble) is the rare fallback for a new type.
-    type_density_csv: Path = REPO_ROOT / "reference" / "type_density.csv"
+    # type_density_csv + standard_slab_area_csv are PACK-NAMESPACED properties (below), not shared files, so a
+    # non-stone pack never inherits stone's per-type densities / slab-area table.
 
     # The import template defines the emit schema (operating principle 8). Lives in
     # the package (header is the schema authority).
