@@ -10,8 +10,8 @@
 # registration in the platform namespace). It never mutates platform-owned resources.
 
 locals {
-  name = "blokport-scraper-svc-${var.target_env}"
-  tags = { Project = "blokport-scraper", Environment = var.target_env, Component = "sync-service" }
+  name = "${var.brand}-scraper-svc-${var.target_env}"
+  tags = { Project = "${var.brand}-scraper", Environment = var.target_env, Component = "sync-service" }
 }
 
 data "aws_region" "current" {}

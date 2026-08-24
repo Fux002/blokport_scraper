@@ -21,8 +21,8 @@ terraform {
 # =============================================================================
 
 locals {
-  name          = "blokport-scraper-${var.target_env}" # env-suffixed: dev + prod never collide
-  platform_name = "blokport-${var.home_env}"           # the VPC/cluster that HOSTS this task
+  name          = "${var.brand}-scraper-${var.target_env}" # env-suffixed: dev + prod never collide
+  platform_name = "${var.brand}-${var.home_env}"           # the VPC/cluster that HOSTS this task
 
   bucket_arn = "arn:aws:s3:::${var.staging_bucket}"
   object_arn = "arn:aws:s3:::${var.staging_bucket}/*"
@@ -55,7 +55,7 @@ data "terraform_remote_state" "platform" {
   backend = "s3"
   config = {
     bucket = var.state_bucket
-    key    = "blokport/${var.home_env}/terraform.tfstate"
+    key    = "${var.brand}/${var.home_env}/terraform.tfstate"
     region = var.region
   }
 }

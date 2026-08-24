@@ -7,8 +7,8 @@
 # =============================================================================
 
 locals {
-  name          = "blokport-gpu-enhance-${var.target_env}"
-  platform_name = "blokport-${var.home_env}"
+  name          = "${var.brand}-gpu-enhance-${var.target_env}"
+  platform_name = "${var.brand}-${var.home_env}"
   bucket_arn    = "arn:aws:s3:::${var.staging_bucket}"
   object_arn    = "arn:aws:s3:::${var.staging_bucket}/*"
 }

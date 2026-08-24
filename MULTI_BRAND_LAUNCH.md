@@ -30,23 +30,31 @@ The Terraform `scraper` + `sync_service` modules take `brand` / `domain_pack` / 
 3. **Smoke run (the gate)** — a ~10-row `SCRAPER_DOMAIN_PACK=<pack>` scrape→derive→emit in a **separate dev
    data plane** (own bucket/config.db/ledger), eyeballed for right categories, un-mangled names, right
    density/dimensions. Code review does not prove a material works; a clean smoke run does.
-4. **Root Terraform stack per brand** — see below; not yet parameterized.
+4. **Stand up the brand's root stack** — the root is now brand-parameterized (below).
 
-## The remaining infra work (root stack per brand)
+## Standing up a brand's root stack (now parameterized)
 
-The `scraper`/`sync_service`/`gpu_enhance` **modules** are brand-parameterized. The **root** `infra/main.tf`
-is still hardwired to the Blokport platform (names `blokport-*`, VPC `blokport-<env>-vpc`, state key
-`blokport/<env>/terraform.tfstate`, SSM `/blokport-<env>/…`). A new brand needs **its own root stack**:
+The whole root (`infra/`) is parameterized by a `brand` variable (default `blokport`, so the existing stack
+renders byte-identical). Every resource name, tag, SSM namespace, and platform-state key derives from
+`var.brand`; the modules already take `brand`/`domain_pack`/`sales_channel_id`. A second brand is the **same
+code**, a separate state:
 
-- its own platform stack (VPC / cluster / state key `<brand>/<env>/…` / SSM namespace `/<brand>-<env>/…`),
-- its own `<brand>-<env>-staging` bucket + `gpu_enhance` instance,
-- the shared ECR image (`blokport-scraper`) is domain-agnostic — the pack is chosen at runtime, so all brands
-  promote the SAME image tag.
+1. **Init with the brand's own backend key** — a backend block can't take a variable, so:
+   `terraform init -backend-config="key=<brand>/scraper/terraform.tfstate"` (reuse the platform state bucket
+   or set your own). This is the one thing that keeps two brands' state apart.
+2. **Set the brand tfvars:** `brand = "<brand>"`, `domain_pack = "<pack>"`, `platform_state_bucket` +
+   `prod_home_env` for that brand's platform, `dev_staging_bucket`/`prod_staging_bucket`, `prod_sales_channel_id`,
+   the brand's `*_ssm_name`s, `alert_email`.
+3. **Shared ECR:** the image is brand-agnostic (pack chosen at runtime). blokport's stack **creates** the
+   `blokport-scraper` repo; a second brand should **reference** it (change `aws_ecr_repository.this` to the
+   existing `data "aws_ecr_repository" "scraper"` and drop the create), so all brands promote the SAME tag.
+4. **Platform:** the brand's own VPC (`<brand>-<env>-vpc`), cluster, and `<brand>/<env>/terraform.tfstate`
+   platform state must exist — the modules resolve them from `var.brand` + `platform_state_bucket`.
 
-This is the one piece that needs a real `terraform plan` against live state before apply. (Do NOT apply from
-here — this branch changes no live infrastructure. Every module change is additive: a `plan` on the existing
-Blokport stack should show only task-def revisions adding `SCRAPER_BRAND`/`SCRAPER_DOMAIN_PACK`/`SALES_CHANNEL_ID`
-with their current effective values, and no destroy/recreate.)
+Still `terraform plan`-gated before apply (nothing here touches live infra). A `plan` on the **existing
+blokport stack** must show **no destroy/recreate** — only the additive task-def env vars
+(`SCRAPER_BRAND`/`SCRAPER_DOMAIN_PACK`/`SCRAPER_SALES_CHANNEL_ID`) with their current effective values, because
+`brand` defaults to `blokport` and every rendered string is unchanged.
 
 ## Per-brand launch checklist (Wudport / Calcport)
 
