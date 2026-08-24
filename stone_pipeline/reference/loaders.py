@@ -445,6 +445,12 @@ def _split_aliases(raw_aliases: list) -> list[str]:
 
 def load_backbone(path: Path | None = None) -> Backbone:
     path = Path(path or SETTINGS.paths.backbone_json)
+    if not path.exists():
+        from stone_pipeline.config.domain import active_pack
+        raise FileNotFoundError(
+            f"backbone file {path} is missing for domain pack {active_pack().name!r}. Each pack ships its own "
+            "catalog_source/<pack>/ backbone JSON; a non-stone pack never falls back to stone's data. Add the "
+            "pack's backbone file before running it.")
     backbone = Backbone()
     data = json.loads(path.read_text(encoding="utf-8"))
     posts = data.get("posts", data if isinstance(data, list) else [])

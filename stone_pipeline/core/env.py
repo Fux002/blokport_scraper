@@ -24,18 +24,19 @@ def _suffix(name: str) -> str:
 
 
 def getenv(name: str, default: str | None = None) -> str | None:
-    """Value of the env var under the neutral prefix, else the legacy prefix, else `default`. Mirrors
-    os.environ.get semantics (returns `default` -- None by default -- when neither is set)."""
+    """Value of the env var under the neutral prefix, else the legacy prefix, else `default`. An EMPTY
+    string counts as unset for the neutral read, so `SCRAPER_X=""` (e.g. an unset-defaulting TF var) does NOT
+    shadow a real legacy `BLOKPORT_X` -- it falls through. Returns `default` (None by default) when neither
+    prefix carries a non-empty value."""
     suffix = _suffix(name)
-    val = os.environ.get(PREFIX + suffix)
-    if val is None:
-        val = os.environ.get(LEGACY_PREFIX + suffix)
-    return val if val is not None else default
+    val = os.environ.get(PREFIX + suffix) or os.environ.get(LEGACY_PREFIX + suffix)
+    return val if val else default
 
 
 def require(name: str) -> str:
-    """Like getenv but raises KeyError when neither prefix is set (for the os.environ[...] call sites)."""
+    """Like getenv but raises KeyError when neither prefix carries a non-empty value (for the os.environ[...]
+    call sites, so a set-but-EMPTY var fails loud instead of returning '')."""
     val = getenv(name)
-    if val is None:
+    if not val:
         raise KeyError(PREFIX + _suffix(name))
     return val

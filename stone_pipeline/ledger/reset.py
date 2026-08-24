@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
+        with Ledger.open(path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
             before = sync.status(ledger)
             if "--yes" not in argv:
                 print(f"DRY RUN (no changes). Ledger: {path}")

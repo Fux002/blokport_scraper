@@ -218,7 +218,7 @@ def _ledger_op(name: str, work):
     from stone_pipeline.ledger.db import Ledger
     try:
         with _exclusive(name):
-            with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as ledger:
+            with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
                 return work(ledger, sync), 200
     except _NotFound as exc:
         return {"error": str(exc)}, 404

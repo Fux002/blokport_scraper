@@ -144,6 +144,20 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         bad(f"exactly one category must set default_form: true, found {default_forms or 'none'}")
     if len(bulk_forms) > 1:
         bad(f"at most one category may set bulk_form: true, found {bulk_forms}")
+    # V4: leaf_attributes must be a subset of attributes, and MUST exclude the disambiguator (the docstring
+    # invariant leaf_attributes == attributes - {disambiguator}). Otherwise a stage that fills/reconciles a
+    # leaf attribute or the Key builder KeyErrors deep on a new pack instead of failing loud here.
+    leaf = set(data["leaf_attributes"])
+    attrs = set(data["attributes"])
+    if leaf - attrs:
+        bad(f"leaf_attributes {sorted(leaf - attrs)} are not in attributes {sorted(attrs)}")
+    if data["disambiguator"] in leaf:
+        bad(f"disambiguator {data['disambiguator']!r} must NOT be in leaf_attributes {sorted(leaf)}")
+    # V5: a category's mirror_of must name an existing category (a typo'd mirror silently mirrors nothing).
+    for cat in data["categories"]:
+        mo = cat.get("mirror_of")
+        if mo is not None and mo not in cat_names:
+            bad(f"category {cat['name']!r} mirror_of {mo!r} is not a declared category {sorted(cat_names)}")
 
 
 def load_pack(name: str | None = None) -> DomainPack:

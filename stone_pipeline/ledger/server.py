@@ -135,7 +135,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 return self._respond(400, {"error": "invalid JSON body"})
         try:
-            with Ledger.open(self.server.ledger_path, env=writethrough.ENV_NAME) as ledger:  # type: ignore[attr-defined]
+            with Ledger.open(self.server.ledger_path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:  # type: ignore[attr-defined]
                 code, payload = dispatch(ledger, method, resource, parse_qs(parts.query), body)
         except Exception:
             log.exception("sync request failed", extra={"extra_fields": {"path": self.path}})
@@ -167,7 +167,7 @@ def bootstrap_ledger_if_missing(path) -> None:
             pass
     except Exception:
         log.exception("ledger seed skipped; starting empty (a produce will populate it)")
-        Ledger.open(path, env=writethrough.ENV_NAME).close()   # ensure the file exists to serve
+        Ledger.open(path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()).close()   # ensure the file exists to serve
 
 
 def serve(host: str | None = None, port: int = 8723) -> None:
