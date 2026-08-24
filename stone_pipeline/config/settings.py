@@ -135,20 +135,25 @@ _DEV_SALES_CHANNEL_ID = "sc_01KTM2B2DJNSW6WPS1Q8FN8B2R"
 _DEV_COMPANY_ID = "01KTV98X8RG743YR3QHCECZKKA"
 
 
-def _owner_id(env_var: str, dev_default: str, label: str) -> str:
+def _owner_id(env_var: str, dev_default: str, label: str, *, required_in_prod: bool) -> str:
     val = (env.getenv(env_var, "") or "").strip()
     if val:
         return val
-    if IS_PRODUCTION:
+    if IS_PRODUCTION and required_in_prod:
         raise RuntimeError(
             f"{env.PREFIX + env._suffix(env_var)} (the {label}) must be set in production -- refusing to run "
             "with an empty owner id that would mis-own or blank every product/variation in Medusa. Set it "
             "for this brand.")
-    return dev_default if BRAND == "blokport" else ""   # dev: blokport defaults only for blokport
+    # dev: the hardcoded defaults are BLOKPORT's -- apply them only for the blokport brand, never another's.
+    return dev_default if (not IS_PRODUCTION and BRAND == "blokport") else ""
 
 
-SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID, "sales channel id")
-COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID, "company id")
+# sales channel is ONE id per deployment with NO fallback, so it is REQUIRED in prod (an empty channel is a
+# broken storefront). company is the general owner DEFAULT and is overridable per-source (Medusa resolves an
+# empty one by vendor name), so it may be empty -- NOT required in prod.
+SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID, "sales channel id",
+                             required_in_prod=True)
+COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID, "company id", required_in_prod=False)
 
 
 # Hand-maintained catalog_source/ files (backbones, origin_map, supplier-overrides) are MATERIAL-specific.

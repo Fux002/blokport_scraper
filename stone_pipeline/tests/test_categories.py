@@ -186,14 +186,19 @@ def test_owner_ids_are_env_vars_with_prod_guard(monkeypatch):
     # or wrong owner id -- audit A4).
     import pytest
     from stone_pipeline.config import settings
+
+    def owner(required):
+        return settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default", "id", required_in_prod=required)
+
     monkeypatch.setenv("BLOKPORT_COMPANY_ID", "comp_X")
-    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default", "company id") == "comp_X"
+    assert owner(True) == "comp_X"                                  # explicit env var wins
     monkeypatch.delenv("BLOKPORT_COMPANY_ID", raising=False)
     monkeypatch.setattr(settings, "IS_PRODUCTION", False)
     monkeypatch.setattr(settings, "BRAND", "blokport")
-    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default", "company id") == "dev_default"
-    monkeypatch.setattr(settings, "BRAND", "wudport")   # non-blokport dev never inherits blokport's id
-    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default", "company id") == ""
+    assert owner(True) == "dev_default"                            # blokport dev falls back to the local default
+    monkeypatch.setattr(settings, "BRAND", "wudport")              # a non-blokport dev never inherits blokport's id
+    assert owner(True) == ""
     monkeypatch.setattr(settings, "IS_PRODUCTION", True)
-    with pytest.raises(RuntimeError):
-        settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default", "company id")
+    with pytest.raises(RuntimeError):                              # sales-channel-style: required -> fail loud
+        owner(True)
+    assert owner(False) == ""                                      # company-style: optional -> "" in prod, no raise
