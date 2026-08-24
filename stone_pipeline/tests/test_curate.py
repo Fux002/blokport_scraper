@@ -122,7 +122,7 @@ def test_borderline_gap_becomes_alias_candidate_not_new_variant(ref, monkeypatch
     # proposed as an ALIAS of that variety, not a new variant. (The tier-7 model path is covered
     # by test_alias_resolver; the confirm-ledger read-back by test_decisions.)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    nearest = next(iter(ref.variants_slabs.by_id.values())).name
+    nearest = next(iter(ref.variants["slab"].by_id.values())).name
     row = CanonicalRow(src_site="polonine", surrogate_key="ac1",
                        variety_match_key="Suppliers Rebrand Xyz", raw_type="Marble")
     row.add_gap(TreeGap(src_site="polonine", surrogate_key="ac1", raw_name="Suppliers Rebrand Xyz",

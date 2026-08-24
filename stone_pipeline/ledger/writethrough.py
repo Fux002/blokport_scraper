@@ -14,7 +14,7 @@ exists (no known products to diff against). No em dashes (design principle 2).
 
 from __future__ import annotations
 
-import os
+from stone_pipeline.core import env
 from pathlib import Path
 from typing import Sequence
 
@@ -31,13 +31,13 @@ _TRUE = {"1", "true", "yes", "on"}
 
 
 def enabled() -> bool:
-    return os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in _TRUE
+    return env.getenv("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in _TRUE
 
 
 def ledger_path() -> Path:
     """Per-env ledger location. BLOKPORT_LEDGER_PATH overrides it (tests, ops). The
     default sits on local disk (never EFS, design section 12 / M4)."""
-    override = os.environ.get("BLOKPORT_LEDGER_PATH", "").strip()
+    override = env.getenv("BLOKPORT_LEDGER_PATH", "").strip()
     if override:
         return Path(override)
     return SETTINGS.paths.workspace_root / "ledger" / f"{ENV_NAME}.db"

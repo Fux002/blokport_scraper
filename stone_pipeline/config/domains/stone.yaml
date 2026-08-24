@@ -70,6 +70,10 @@ in_stock_fallback_qty: {slab: 10, block: 1, tile: 10}
 # 'Raw' in stages/normalize.py). Must exist in attributes.csv + the block backbone.
 block_finish: Raw
 
+# material density (kg/m3): the fallback for deriving weight when a source omits it and reference/
+# type_density.csv is absent or lacks the row's type. 2700 = marble (stone's historical default).
+default_density: 2700
+
 # Synthetic dimension/weight ranges per format, in metres/tonnes, used only as a fallback when a real value
 # is absent (was stages/derive.py _SLAB_RANGES / _BLOCK_RANGES / _TILE_RANGES). [lo, hi].
 dimension_ranges:

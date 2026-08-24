@@ -16,14 +16,16 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.ledger.db import Ledger, now_iso, payload_hash
 
 
 def _branch_of(key: str) -> str:
+    # the Key prefix is the category name; validate it against the ACTIVE PACK's registry (pack-driven), not
+    # a hardcoded stone category set, so a non-stone pack's categories are recognized instead of dropped to "".
     head = key.split("_", 1)[0]
-    return head if head in ("slab", "block", "tile") else ""
+    return head if category(head) else ""
 
 
 def seed_attributes(ledger: Ledger, path: str | Path | None = None) -> int:

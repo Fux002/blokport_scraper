@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import glob
 
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.io import staging
 from stone_pipeline.run import run_source
 
@@ -43,7 +43,7 @@ def test_polonine_spine_runs_and_is_deterministic(tmp_path):
         if row.variation_id:
             assert row.variation_method
             assert row.type_id is not None
-            assert row.category_pcat_id == SETTINGS.backend.cat_slabs_pcat
+            assert row.category_pcat_id == category("slab").pcat_id
 
 
 def test_no_value_below_floor_reaches_ids(tmp_path):

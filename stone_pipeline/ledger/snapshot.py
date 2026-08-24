@@ -13,6 +13,7 @@ plus a best-effort snapshot on shutdown is enough -- no need to snapshot on ever
 from __future__ import annotations
 
 import os
+from stone_pipeline.core import env
 import sqlite3
 import tarfile
 import tempfile
@@ -26,7 +27,7 @@ from stone_pipeline.io.storage import s3_error_is_missing
 log = logfmt.get_logger("ledger.snapshot")
 
 # Snapshot cadence (seconds). A crash loses at most this window of acks, which re-sync harmlessly.
-_SNAPSHOT_INTERVAL = int(os.environ.get("BLOKPORT_LEDGER_SNAPSHOT_SECONDS", "300"))
+_SNAPSHOT_INTERVAL = int(env.getenv("BLOKPORT_LEDGER_SNAPSHOT_SECONDS", "300"))
 
 
 def _s3():

@@ -116,3 +116,25 @@ variable "require_enhanced_enabled" {
   default     = false
   description = "BLOKPORT_REQUIRE_ENHANCED: hard publish gate -- only GPU-enhanced images (enhanced/ marker) are linked. Ships false; enable only after markers are backfilled, else all images hold."
 }
+
+# --- Brand + product-type selection (multi-brand / multi-material) ------------
+# These make the deployment brand- and product-agnostic: the product type is a SETUP CHOICE (the domain
+# pack), and the brand names its store. The blokport-stone stack keeps the defaults, so nothing changes;
+# a wudport (wood) / calcport (lime) stack sets brand + domain_pack + its own sales channel.
+variable "brand" {
+  type        = string
+  default     = "blokport"
+  description = "BLOKPORT_BRAND: the brand this deployment serves. Cross-checked against the bucket name in prod so a bucket mis-set to another brand's store fails loud. (blokport | wudport | calcport | ...)"
+}
+
+variable "domain_pack" {
+  type        = string
+  default     = "stone"
+  description = "BLOKPORT_DOMAIN_PACK: the product-domain pack (config/domains/<pack>.yaml) this deployment runs. stone (default) | wood | lime | ... -- selects the whole vocabulary/category/density model, no code change."
+}
+
+variable "sales_channel_id" {
+  type        = string
+  default     = ""
+  description = "BLOKPORT_SALES_CHANNEL_ID: this brand's Medusa sales channel (storefront). One per deployment; empty falls back to the code dev default in dev, and is required (fail-loud) in prod."
+}

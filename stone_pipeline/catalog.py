@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import os
+from stone_pipeline.core import env
 import shutil
 import sys
 from pathlib import Path
@@ -130,7 +131,7 @@ def run(outputs_root: Path | None = None) -> Path:
     # even though those variations are valid and simply awaiting their first pull. The ledger must carry
     # them regardless; the sync engine gates their products on the variation being synced, and produce
     # reconciles the gate against the ledger (held vs fatal). Inert unless BLOKPORT_LEDGER_WRITETHROUGH.
-    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
+    if env.getenv("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
         from stone_pipeline.ledger import writethrough
         if not writethrough.record_catalog():
             log.error("ledger catalog write-through FAILED; the produced variations are NOT in the ledger "

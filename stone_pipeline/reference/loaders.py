@@ -759,17 +759,8 @@ class ReferenceData:
         to GB via the name/alias path instead of passing through as a bogus code)."""
         return frozenset(self.country_codes.values())
 
-    @property
-    def variants_slabs(self) -> VariantTable:
-        return self.variants["slab"]
-
-    @property
-    def variants_blocks(self) -> VariantTable:
-        return self.variants["block"]
-
-    @property
-    def variants_tiles(self) -> VariantTable:
-        return self.variants["tile"]
+    # A specific category's variant table is `self.variants[<category name>]` (keyed by the active pack's
+    # category names) -- no per-product-type accessor, so nothing here assumes a 'slab'/'block'/'tile' pack.
 
 
 def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
@@ -855,7 +846,11 @@ def load_all() -> ReferenceData:
         extra={
             "extra_fields": {
                 "attributes_colors": len(ref.attributes.by_category.get("color", {})),
-                "variants_slabs": len(ref.variants_slabs.by_id),
+                # the default-form variant count (pack primary category); NOT literally slab, so a non-stone
+                # pack whose default form is not named 'slab' does not KeyError building this log line.
+                "variants_default_form": (
+                    len(ref.variants[settings.default_form_name()].by_id)
+                    if settings.default_form_name() in ref.variants else 0),
                 "backbone_varieties": len(ref.backbone),
             }
         },

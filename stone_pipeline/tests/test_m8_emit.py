@@ -48,7 +48,7 @@ def test_emitted_rows_exist(emitted):
 
 def test_every_id_resolves_via_reference(emitted, ref):
     attr_ids = set(ref.attributes.all_ids())
-    slab_ids = set(ref.variants_slabs.all_ids())
+    slab_ids = set(ref.variants["slab"].all_ids())
     for row in emitted:
         for col, vocab in (("STN Color Id", "color"), ("STN Finish Id", "finish"),
                            ("STN Quality Id", "quality"), ("STN Type Id", "type")):
@@ -65,8 +65,8 @@ def test_category_is_slabs_pcat(emitted):
 
 
 def ref_pcat():
-    from stone_pipeline.config.settings import SETTINGS
-    return SETTINGS.backend.cat_slabs_pcat
+    from stone_pipeline.config.settings import category
+    return category("slab").pcat_id
 
 
 def test_required_columns_non_empty(emitted):

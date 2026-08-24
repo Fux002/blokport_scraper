@@ -84,7 +84,7 @@ def _valid_pack_dict():
         "in_stock_fallback_qty": {"x": 5},
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
         "dimension_defaults": {"x": {"length": 1.0, "height": 1.0, "thickness": 0.02}},
-        "finish_phrases": {"f": "p"}, "finish_phrase_default": "p"})
+        "finish_phrases": {"f": "p"}, "finish_phrase_default": "p", "default_density": 700})
 
 
 def _write_pack(dirpath, pack_dict):
@@ -235,6 +235,7 @@ fallback_color: Unspecified
 last_resort_finishes: {shirt: Standard, pants: Standard}
 last_resort_quality: Standard
 block_finish: Standard
+default_density: 300
 in_stock_fallback_qty: {shirt: 10, pants: 10}
 dimension_ranges:
   shirt: {weight: [0.1, 0.3], length: [0.5, 0.8], width: [0.4, 0.6], height: [0.01, 0.02]}
@@ -259,3 +260,4 @@ def test_a_completely_different_product_pack_loads(tmp_path, monkeypatch):
     assert p.leaf_attributes == ("color", "size")
     assert [c["name"] for c in p.categories] == ["shirt", "pants"]   # a different category model
     assert "crystal" not in p.ambiguous_type_words             # no stone vocabulary leaked in
+    assert p.default_density == 300.0                          # material density is a pack field, not hardcoded 2700

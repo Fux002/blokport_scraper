@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+from stone_pipeline.config.settings import category
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import match_key
@@ -63,8 +64,10 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
             image_sha256 = shas.get(key) or None
             aliases = [a for a in (r.get(_aliases) or "").split("|") if a]
             volume = r.get(_volume) or ""
+            # the Key prefix is the category name; validate against the ACTIVE PACK's registry (pack-driven),
+            # not a hardcoded stone set, so a non-stone pack's categories are kept, not silently dropped to "".
             head = key.split("_", 1)[0]
-            branch = head if head in ("slab", "block", "tile") else ""
+            branch = head if category(head) else ""
             # image_sha256 in the hash re-serves a variant whose texture bytes changed at the stable URL.
             # Adding it to the formula also flips every imaged variant dirty ONCE (a one-time full variation
             # re-sync, like the product payload contract bump), which heals variants Medusa ingested blank.

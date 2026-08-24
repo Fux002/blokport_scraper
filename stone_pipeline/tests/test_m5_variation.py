@@ -23,7 +23,7 @@ def ref():
 
 @pytest.fixture(scope="module")
 def slab_engine(ref):
-    index = build_variation_index(ref.variants_slabs, ref.backbone)
+    index = build_variation_index(ref.variants["slab"], ref.backbone)
     return VariationEngine(index, auto_accept=92, review_floor=84)
 
 

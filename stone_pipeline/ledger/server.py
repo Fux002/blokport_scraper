@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import hmac
 import json
-import os
+from stone_pipeline.core import env
 import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -96,7 +96,7 @@ def dispatch(ledger: Ledger, method: str, resource: str,
 
 
 def _expected_token() -> str:
-    token = os.environ.get("BLOKPORT_SYNC_TOKEN", "").strip()
+    token = env.getenv("BLOKPORT_SYNC_TOKEN", "").strip()
     if not token:
         raise SystemExit("BLOKPORT_SYNC_TOKEN is not set; refusing to start the sync server")
     return token
@@ -173,7 +173,7 @@ def bootstrap_ledger_if_missing(path) -> None:
 def serve(host: str | None = None, port: int = 8723) -> None:
     # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so Medusa (over the
     # VPC) can reach it. The bearer token still gates every request.
-    host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
+    host = host or env.getenv("BLOKPORT_BIND_HOST", "127.0.0.1")
     path = writethrough.ledger_path()
     # C1: the ledger is on LOCAL (ephemeral) disk. On a cold task, restore the last S3 snapshot BEFORE
     # anything can create a fresh empty file (which would lose the acked ids); only then seed if still

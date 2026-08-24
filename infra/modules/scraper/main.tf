@@ -190,21 +190,27 @@ resource "aws_ecs_task_definition" "this" {
     # No runtime toggle: BLOKPORT_ENV is fixed to this instance's target env and the
     # bucket is its own. (The prod instance therefore can never default to dev.)
     environment = [
-      { name = "BLOKPORT_ENV", value = var.target_env },
-      { name = "BLOKPORT_S3_BUCKET", value = var.staging_bucket },
-      { name = "BLOKPORT_S3_REGION", value = var.region },
-      { name = "BLOKPORT_S3_DRY_RUN", value = "false" },
-      { name = "BLOKPORT_IMAGE_MODE", value = "s3" },
-      { name = "BLOKPORT_IMAGE_PROCESSING", value = "true" },
-      { name = "BLOKPORT_KEEP_SCRAPED", value = var.keep_scraped },
+      { name = "SCRAPER_ENV", value = var.target_env },
+      { name = "SCRAPER_S3_BUCKET", value = var.staging_bucket },
+      { name = "SCRAPER_S3_REGION", value = var.region },
+      # Brand + product-type selection. Names are BRAND-NEUTRAL on purpose (the product type is not a brand's
+      # property): DOMAIN_PACK is the product-type choice (stone/wood/lime), BRAND names the store (cross-checked
+      # against the bucket in prod). Defaults keep this the blokport-stone stack.
+      { name = "SCRAPER_BRAND", value = var.brand },
+      { name = "SCRAPER_DOMAIN_PACK", value = var.domain_pack },
+      { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
+      { name = "SCRAPER_S3_DRY_RUN", value = "false" },
+      { name = "SCRAPER_IMAGE_MODE", value = "s3" },
+      { name = "SCRAPER_IMAGE_PROCESSING", value = "true" },
+      { name = "SCRAPER_KEEP_SCRAPED", value = var.keep_scraped },
       # Auto-enhance: submit the GPU reprocess for the delta after the scheduled scrape stages new images.
       # Ships OFF (flag false); queue/def names let the trigger reach Batch once enabled. CLASSIFY stays false.
-      { name = "BLOKPORT_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
-      { name = "BLOKPORT_GPU_QUEUE", value = var.gpu_job_queue_name },
-      { name = "BLOKPORT_GPU_JOBDEF", value = var.gpu_job_definition_name },
+      { name = "SCRAPER_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
+      { name = "SCRAPER_GPU_QUEUE", value = var.gpu_job_queue_name },
+      { name = "SCRAPER_GPU_JOBDEF", value = var.gpu_job_definition_name },
       # HARD publish gate: only images the GPU actually enhanced (enhanced/ marker) may be linked. Ships OFF
       # -- flip on ONLY after the markers are backfilled for the already-enhanced set, else every image holds.
-      { name = "BLOKPORT_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
+      { name = "SCRAPER_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
     ]
     secrets = [for k, v in var.ssm_secret_arns : { name = k, valueFrom = v }]
     logConfiguration = {
