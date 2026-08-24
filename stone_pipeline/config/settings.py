@@ -187,8 +187,10 @@ class Paths:
 
     # per-category backbone files derive from the CATEGORIES registry.
     @property
-    def backbone_json(self) -> Path:        # legacy alias (== slab backbone)
-        return self.backbone_slabs_json
+    def backbone_json(self) -> Path:        # the DEFAULT-FORM backbone (the pack's primary category), NOT
+        # literally slab -- a non-stone pack whose default form is not named 'slab' would otherwise crash here
+        # (category('slab') -> None -> AttributeError) on the arg-less load_backbone hot path.
+        return category(default_form_name()).backbone_path
 
     @property
     def backbone_slabs_json(self) -> Path:

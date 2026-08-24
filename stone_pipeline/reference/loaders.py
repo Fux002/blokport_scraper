@@ -855,7 +855,11 @@ def load_all() -> ReferenceData:
         extra={
             "extra_fields": {
                 "attributes_colors": len(ref.attributes.by_category.get("color", {})),
-                "variants_slabs": len(ref.variants_slabs.by_id),
+                # the default-form variant count (pack primary category); NOT literally slab, so a non-stone
+                # pack whose default form is not named 'slab' does not KeyError building this log line.
+                "variants_default_form": (
+                    len(ref.variants[settings.default_form_name()].by_id)
+                    if settings.default_form_name() in ref.variants else 0),
                 "backbone_varieties": len(ref.backbone),
             }
         },

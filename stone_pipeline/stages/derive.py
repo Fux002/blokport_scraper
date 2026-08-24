@@ -463,10 +463,11 @@ def _standard_area(type_name: str | None) -> float | None:
 
 @functools.lru_cache(maxsize=1)
 def _type_densities() -> tuple[float, dict[str, float]]:
-    """Parse type_density.csv once: (default density, {type_casefold: density kg/m3}). The default row
-    (Marble, 2700) covers a type not listed. Falls back to Marble if the file is somehow absent."""
+    """Parse type_density.csv once: (default density, {type_casefold: density kg/m3}). The CSV's own
+    'default' row covers a type not listed. When the file is absent, the fallback is the ACTIVE PACK's
+    default_density (stone: 2700; a wood/lime pack supplies its own), never a hardcoded stone value."""
     path = SETTINGS.paths.type_density_csv
-    default, by_type = 2700.0, {}
+    default, by_type = active_pack().default_density, {}
     if not path.exists():
         return default, by_type
     with path.open(newline="", encoding="utf-8-sig") as handle:

@@ -25,7 +25,8 @@ _REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categori
              "ambiguous_type_words", "generic_descriptors", "generic_material_word",
              "default_finishes", "fallback_color",
              "last_resort_finishes", "last_resort_quality", "block_finish", "in_stock_fallback_qty",
-             "dimension_ranges", "dimension_defaults", "finish_phrases", "finish_phrase_default")
+             "dimension_ranges", "dimension_defaults", "finish_phrases", "finish_phrase_default",
+             "default_density")
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,11 @@ class DomainPack:
     dimension_defaults: dict[str, dict[str, float]]
     finish_phrases: dict[str, str]
     finish_phrase_default: str
+    # material density in kg/m3, used to derive weight when a source omits it. This is the fallback when
+    # reference/type_density.csv is absent or lacks the row's type (that CSV's 'default' row overrides it when
+    # present). Required per pack so a non-stone material never silently inherits stone's ~2700 (stone: 2700
+    # marble; wood ~700; lime ~2500). Wrong density = wrong derived weight + freight, silently.
+    default_density: float
     # Name-cleaning corpus rules (core/text.py), optional. name_code_pattern: a regex for codey-LOOKING tokens
     # that are real names in this domain and must never be stripped/flagged (stone: granite 'G682').
     # trailing_grade_letters: whether a trailing lone letter is a grade code to strip in cleaning and flag in
@@ -112,6 +118,9 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     for fmt, qty in data["in_stock_fallback_qty"].items():
         if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
             bad(f"in_stock_fallback_qty[{fmt!r}] must be a positive int, got {qty!r}")
+    if not isinstance(data["default_density"], (int, float)) or isinstance(data["default_density"], bool) \
+            or data["default_density"] <= 0:
+        bad(f"default_density must be a positive number (kg/m3), got {data['default_density']!r}")
 
     # Cross-checks: the per-field shapes above are each individually valid, but the pack can still be
     # internally INCONSISTENT in a way that only KeyErrors deep in a stage on a new pack. Catch it at load.
@@ -173,6 +182,7 @@ def load_pack(name: str | None = None) -> DomainPack:
                             for fmt, dims in data["dimension_defaults"].items()},
         finish_phrases=dict(data["finish_phrases"]),
         finish_phrase_default=data["finish_phrase_default"],
+        default_density=float(data["default_density"]),
         name_code_pattern=data.get("name_code_pattern"),
         trailing_grade_letters=bool(data.get("trailing_grade_letters", False)),
         classify_texture_color=bool(data.get("classify_texture_color", True)),
