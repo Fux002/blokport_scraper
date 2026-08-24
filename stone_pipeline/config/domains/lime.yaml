@@ -1,6 +1,6 @@
 # Product-domain pack: LIME (Calcport).  <<< SKELETON -- REPLACE EVERY PLACEHOLDER WITH REAL CALCPORT DATA >>>
 #
-# Structurally-valid template so `DOMAIN_PACK=lime` LOADS and the pipeline runs the lime vocabulary instead of
+# Structurally-valid template so `SCRAPER_DOMAIN_PACK=lime` LOADS and the pipeline runs the lime vocabulary instead of
 # stone -- the product type is a SETUP CHOICE (this file + the env var), not code. Same Medusa data model as
 # stone (category / type / color / finish / quality); only the VALUES differ.
 #
@@ -10,7 +10,7 @@
 #   - the lime `type` vocabulary lives in attributes.csv (from Calcport's Medusa), not here
 #   - density, finishes, dimensions must be REAL lime values
 # Then author backbone_<category>.json per category in catalog_source/ and run the smoke run
-# (~10 rows scrape->derive->emit with DOMAIN_PACK=lime) BEFORE any Calcport prod deploy.
+# (~10 rows scrape->derive->emit with SCRAPER_DOMAIN_PACK=lime) BEFORE any Calcport prod deploy.
 name: lime
 
 # Same attribute model as stone/brand setup: type is the disambiguator (drives the Key); color/finish/quality

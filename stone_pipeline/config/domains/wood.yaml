@@ -1,6 +1,6 @@
 # Product-domain pack: WOOD (Wudport).  <<< SKELETON -- REPLACE THE PLACEHOLDER VALUES WITH REAL WUDPORT DATA >>>
 #
-# This is a structurally-valid template so `DOMAIN_PACK=wood` LOADS and the pipeline runs the wood
+# This is a structurally-valid template so `SCRAPER_DOMAIN_PACK=wood` LOADS and the pipeline runs the wood
 # vocabulary instead of stone -- the product type is now a SETUP CHOICE (this file + the env var), not code.
 # Same Medusa data model as stone (category / type / color / finish / quality); only the VALUES differ.
 #
@@ -9,7 +9,7 @@
 #   - the wood species vocabulary lives in attributes.csv (type), pulled from Wudport's Medusa -- not here
 #   - finishes, density, and the fallback dimensions must be REAL wood values (wood is ~700 kg/m3, not 2700)
 # Then author the matching backbone_*.json (per category) in catalog_source/ and run the smoke run
-# (a ~10-row scrape->derive->emit with DOMAIN_PACK=wood) BEFORE any Wudport prod deploy.
+# (a ~10-row scrape->derive->emit with SCRAPER_DOMAIN_PACK=wood) BEFORE any Wudport prod deploy.
 name: wood
 
 # Same attribute model as stone (per the brand setup): type = wood SPECIES (the disambiguator, drives the

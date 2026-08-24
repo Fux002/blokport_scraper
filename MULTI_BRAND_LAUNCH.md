@@ -8,12 +8,12 @@ pack — not code. Today: Blokport (stone). Next: Wudport (wood), Calcport (lime
 
 The software no longer assumes stone or Blokport. Chosen at deploy time by env var, no code edit:
 
-- **`DOMAIN_PACK`** selects the product model — vocabulary (attributes/type set), categories,
+- **`SCRAPER_DOMAIN_PACK`** selects the product model — vocabulary (attributes/type set), categories,
   dimensions, finishes, density, name-cleaning, colour classification — from `config/domains/<pack>.yaml`.
   `stone` (default) reproduces the historical output exactly; `wood` ships as a fill-in skeleton.
-- **`BRAND`** names the store and is cross-checked against the bucket in prod (a bucket mis-set to
+- **`SCRAPER_BRAND`** names the store and is cross-checked against the bucket in prod (a bucket mis-set to
   another brand's store fails loud). Required in prod.
-- **`BLOKPORT_SALES_CHANNEL_ID`** is the brand's storefront (one per deployment).
+- **`SCRAPER_SALES_CHANNEL_ID`** is the brand's storefront (one per deployment).
 - Per-material **density** is pack-namespaced (`reference/type_density.<pack>.csv`); a pack with no file uses
   its `default_density`, so wood never inherits stone's 2700.
 
@@ -27,7 +27,7 @@ The Terraform `scraper` + `sync_service` modules take `brand` / `domain_pack` / 
 2. **Reference data** — the brand's `attributes.csv` (from its Medusa: type=species, color, finish, quality),
    `backbone_<category>.json` per category in `catalog_source/`, and `reference/type_density.<pack>.csv` for
    per-type densities. Novel varieties absent from the backbone legitimately gap to review.
-3. **Smoke run (the gate)** — a ~10-row `DOMAIN_PACK=<pack>` scrape→derive→emit in a **separate dev
+3. **Smoke run (the gate)** — a ~10-row `SCRAPER_DOMAIN_PACK=<pack>` scrape→derive→emit in a **separate dev
    data plane** (own bucket/config.db/ledger), eyeballed for right categories, un-mangled names, right
    density/dimensions. Code review does not prove a material works; a clean smoke run does.
 4. **Root Terraform stack per brand** — see below; not yet parameterized.
@@ -45,7 +45,7 @@ is still hardwired to the Blokport platform (names `blokport-*`, VPC `blokport-<
 
 This is the one piece that needs a real `terraform plan` against live state before apply. (Do NOT apply from
 here — this branch changes no live infrastructure. Every module change is additive: a `plan` on the existing
-Blokport stack should show only task-def revisions adding `BRAND`/`DOMAIN_PACK`/`SALES_CHANNEL_ID`
+Blokport stack should show only task-def revisions adding `SCRAPER_BRAND`/`SCRAPER_DOMAIN_PACK`/`SALES_CHANNEL_ID`
 with their current effective values, and no destroy/recreate.)
 
 ## Per-brand launch checklist (Wudport / Calcport)
@@ -58,7 +58,7 @@ For each brand X (wood→Wudport, lime→Calcport):
 3. `config/sources.yaml` — the brand's source(s) (fetcher/adapter per source, auto-discovered).
 
 **B. Prove**
-4. Smoke run with `DOMAIN_PACK=<pack>` in a scratch dev data plane → eyeball. Fix until clean.
+4. Smoke run with `SCRAPER_DOMAIN_PACK=<pack>` in a scratch dev data plane → eyeball. Fix until clean.
 
 **C. Medusa (that brand's backend)**
 5. Create the brand's company, sales channel, publishable key, and attribute values.
@@ -75,8 +75,8 @@ For each brand X (wood→Wudport, lime→Calcport):
 11. `terraform plan` (confirm 0 destroy) → `apply`.
 
 **E. Cutover**
-12. Task-def env is set by TF: `BLOKPORT_ENV=production`, `BLOKPORT_S3_BUCKET=<brand>-prod-staging`,
-    `BRAND=<brand>`, `DOMAIN_PACK=<pack>`, `BLOKPORT_SALES_CHANNEL_ID=<channel>`, `FAL_KEY`.
+12. Task-def env is set by TF: `SCRAPER_ENV=production`, `SCRAPER_S3_BUCKET=<brand>-prod-staging`,
+    `SCRAPER_BRAND=<brand>`, `SCRAPER_DOMAIN_PACK=<pack>`, `SCRAPER_SALES_CHANNEL_ID=<channel>`, `FAL_KEY`.
 13. `python -m stone_pipeline.config.store seed`; bootstrap the ledger from `from_medusa/production/*`;
     `python -m stone_pipeline.reference.seed verify` → `fixed_point: True`.
 14. Dry-run produce (`BLOKPORT_S3_DRY_RUN=true`) → inspect → real produce → verify company/channel/categories/
@@ -85,5 +85,5 @@ For each brand X (wood→Wudport, lime→Calcport):
 ## Blokport (stone) prod
 
 Code-ready; its only blocker is external (the Blokport prod platform stack + `/blokport-prod` SSM tokens per
-`TODO_PROD.md`). Once those exist, flip `prod_staging_bucket` in tfvars, set `BRAND=blokport`, and
+`TODO_PROD.md`). Once those exist, flip `prod_staging_bucket` in tfvars, set `SCRAPER_BRAND=blokport`, and
 follow steps C–E with `domain_pack=stone`.

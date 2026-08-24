@@ -13,7 +13,7 @@ vocabulary. The active pack is cached (cleared in tests that switch packs).
 from __future__ import annotations
 
 import functools
-import os
+from stone_pipeline.core import env
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,7 +150,7 @@ def load_pack(name: str | None = None) -> DomainPack:
     """Load a pack by name (env DOMAIN_PACK, default 'stone'). Raises on a missing pack or a missing required
     key -- never silently substitutes a default vocabulary. The env var is brand-neutral (DOMAIN_PACK): the
     product type is not a brand's property. The legacy BLOKPORT_DOMAIN_PACK is still read for back-compat."""
-    name = name or os.environ.get("DOMAIN_PACK") or os.environ.get("BLOKPORT_DOMAIN_PACK") or _DEFAULT_PACK
+    name = name or env.getenv("DOMAIN_PACK") or _DEFAULT_PACK
     path = _pack_path(name)
     if not path.exists():
         raise FileNotFoundError(

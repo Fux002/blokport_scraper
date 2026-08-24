@@ -11,7 +11,7 @@ is opened, so a misconfigured dialect fails LOUD at that boundary instead of as 
 
 from __future__ import annotations
 
-import os
+from stone_pipeline.core import env
 
 SQLITE = "sqlite"
 POSTGRES = "postgres"
@@ -19,7 +19,7 @@ POSTGRES = "postgres"
 
 def dialect() -> str:
     """The configured DB dialect (BLOKPORT_DB_DIALECT), default 'sqlite'."""
-    return os.environ.get("BLOKPORT_DB_DIALECT", SQLITE).strip().lower()
+    return env.getenv("BLOKPORT_DB_DIALECT", SQLITE).strip().lower()
 
 
 def require_sqlite(component: str) -> None:

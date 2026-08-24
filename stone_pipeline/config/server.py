@@ -18,7 +18,7 @@ from __future__ import annotations
 import atexit
 import hmac
 import json
-import os
+from stone_pipeline.core import env
 import signal
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -424,9 +424,9 @@ def _validate_source_put(name: str, body: dict) -> tuple[int, dict] | None:
 
 
 def _expected_token() -> str:
-    token = os.environ.get("BLOKPORT_CONFIG_TOKEN", "").strip()
+    token = env.getenv("BLOKPORT_CONFIG_TOKEN", "").strip()
     if not token:
-        raise SystemExit("BLOKPORT_CONFIG_TOKEN is not set; refusing to start the config server")
+        raise SystemExit("SCRAPER_CONFIG_TOKEN is not set; refusing to start the config server")
     return token
 
 
@@ -499,7 +499,7 @@ class ConfigHandler(BaseHTTPRequestHandler):
 def serve(host: str | None = None, port: int = 8724) -> None:
     # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so peer tasks
     # (Medusa, over the VPC) can reach it. The bearer token still gates every request.
-    host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
+    host = host or env.getenv("BLOKPORT_BIND_HOST", "127.0.0.1")
     from stone_pipeline.ledger import snapshot, writethrough
     # E14: restore config.db (the durable source lifecycle: pause/delist/enabled) from its S3 snapshot
     # BEFORE seeding, so a redeploy does not lose it and re-seed every source back to active. Restore is a

@@ -20,6 +20,7 @@ Contract (matches the :4200 admin's expectations):
 from __future__ import annotations
 
 import os
+from stone_pipeline.core import env
 import subprocess
 import sys
 import threading
@@ -114,7 +115,7 @@ def _stamp_last_run(rec: dict, status: str) -> None:
 
 
 def _mode() -> str:
-    return "ecs" if os.environ.get("BLOKPORT_RUN_MODE", "").strip().lower() == "ecs" else "local"
+    return "ecs" if env.getenv("BLOKPORT_RUN_MODE", "").strip().lower() == "ecs" else "local"
 
 
 def _resolve_sources(requested) -> list[str]:
@@ -131,7 +132,7 @@ def _resolve_sources(requested) -> list[str]:
 
 # -- launchers (injectable for tests) -----------------------------------------
 
-_RUN_TIMEOUT = int(os.environ.get("BLOKPORT_RUN_TIMEOUT_SECONDS", "7200"))   # 2h: kill a wedged produce so
+_RUN_TIMEOUT = int(env.getenv("BLOKPORT_RUN_TIMEOUT_SECONDS", "7200"))   # 2h: kill a wedged produce so
                                                                             # a hung scraper never wedges the
                                                                             # control plane (409s all runs/ops)
 
@@ -221,7 +222,7 @@ def _build_command(rec: dict) -> list[str]:
 def _launch_local(rec: dict) -> None:
     proc = subprocess.Popen(
         _build_command(rec),
-        env={**os.environ, "BLOKPORT_LEDGER_WRITETHROUGH": "1"},
+        env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1"},
         # stdout is the image-progress print() noise (drop it); stderr carries the structured logfmt logs
         # + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's cause.
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
@@ -230,23 +231,23 @@ def _launch_local(rec: dict) -> None:
 
 def _launch_ecs(rec: dict) -> None:
     import boto3
-    ecs = boto3.client("ecs", region_name=os.environ.get("BLOKPORT_S3_REGION", "eu-west-1"))
-    env = os.environ.get("BLOKPORT_ENV", "development")
+    ecs = boto3.client("ecs", region_name=env.getenv("BLOKPORT_S3_REGION", "eu-west-1"))
+    env_name = env.getenv("BLOKPORT_ENV", "development")   # not `env`: that name is the env-var module here
     # scope the task the same way the local launcher does: override the container's command with the
-    # run's stage + sources. The container name must match the task definition's (BLOKPORT_ECS_CONTAINER,
+    # run's stage + sources. The container name must match the task definition's (SCRAPER_ECS_CONTAINER,
     # default blokport-scraper-<env>). Without stage/scope the taskdef's default command (full build) runs.
-    container = os.environ.get("BLOKPORT_ECS_CONTAINER", f"blokport-scraper-{env}")
+    container = env.getenv("BLOKPORT_ECS_CONTAINER", f"blokport-scraper-{env_name}")
     command = ["python", "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
     if rec.get("scope"):
         command += ["--sources", ",".join(rec["scope"])]
     resp = ecs.run_task(
-        cluster=os.environ["BLOKPORT_ECS_CLUSTER"],
-        taskDefinition=os.environ.get("BLOKPORT_ECS_TASKDEF", f"blokport-scraper-{env}"),
+        cluster=env.require("BLOKPORT_ECS_CLUSTER"),
+        taskDefinition=env.getenv("BLOKPORT_ECS_TASKDEF", f"blokport-scraper-{env_name}"),
         launchType="FARGATE", count=1,
         overrides={"containerOverrides": [{"name": container, "command": command}]},
         networkConfiguration={"awsvpcConfiguration": {
-            "subnets": os.environ["BLOKPORT_ECS_SUBNETS"].split(","),
-            "securityGroups": os.environ["BLOKPORT_ECS_SG"].split(","),
+            "subnets": env.require("BLOKPORT_ECS_SUBNETS").split(","),
+            "securityGroups": env.require("BLOKPORT_ECS_SG").split(","),
             "assignPublicIp": "DISABLED"}})
     with _lock:
         rec["task_arn"] = (resp.get("tasks") or [{}])[0].get("taskArn")

@@ -12,7 +12,7 @@ later milestones.
 from __future__ import annotations
 
 import json
-import os
+from stone_pipeline.core import env
 import sys
 from collections import Counter
 from pathlib import Path
@@ -487,7 +487,7 @@ def run_source(
     # inventory into the ledger, AFTER the CSVs are written. Fully inert unless
     # BLOKPORT_LEDGER_WRITETHROUGH is set, and it never fails the run (the ledger is
     # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
-    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
+    if env.getenv("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
         from stone_pipeline.ledger import writethrough
         if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
@@ -629,7 +629,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # constants.py) and an empty one resolves by vendor name on Medusa's side, so a global company id is
     # not needed for a valid prod run.
     if IS_PRODUCTION and not SALES_CHANNEL_ID:
-        log.error("production run requires BLOKPORT_SALES_CHANNEL_ID "
+        log.error("production run requires SCRAPER_SALES_CHANNEL_ID "
                   "(refusing to emit channel-less, invisible products)")
         return 1
     try:

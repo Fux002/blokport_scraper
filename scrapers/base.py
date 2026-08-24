@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import csv
 import logging
-import os
+from stone_pipeline.core import env
 import random
 import time
 from datetime import datetime, timezone
@@ -164,7 +164,7 @@ class ScraperBase:
                              "DIRECT (likely to be blocked)", self.source, self.proxy_capability)
             return None
         if self.needs_proxy:
-            url = os.environ.get("BLOKPORT_SCRAPER_PROXY", "").strip()
+            url = env.getenv("BLOKPORT_SCRAPER_PROXY", "").strip()
             if url:
                 self.log.info("routing %s through the residential proxy (legacy needs_proxy)", self.source)
                 return url
