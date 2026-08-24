@@ -266,6 +266,11 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             # them directly instead of deriving ports from the quarry country (which fanned out to every
             # port in that country). Empty means "no port", never "re-derive".
             "port_ids": json.loads(p["ports"] or "[]"),
+            # supplier COLLECTION location: where the product is physically collected before shipping (the
+            # supplier's warehouse). Independent of origin_country_code (provenance) and of ports (departure);
+            # null when the source configured none. Never overload origin with it.
+            "collection_country_code": p["collection_country_code"],
+            "collection_city": p["collection_city"],
             "bundle_size": p["bundle_size"],   # under coordination: pallet model is retiring the multiplier
             # Images -- the SAME set the working CSV import carried, so Medusa builds the same media:
             #   thumbnail      = the CSV 'Product Thumbnail' (the product's MAIN display image)

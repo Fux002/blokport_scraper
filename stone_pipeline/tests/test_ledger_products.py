@@ -117,3 +117,26 @@ def test_repopulate_preserves_synced_products(tmp_path):
         populate_products(ledger, changed, cfg)
         row = ledger.get("product", "sku", sku)
         assert row["state"] == "dirty" and row["medusa_id"] == "prod_1", "a change must dirty, keep id"
+
+
+def test_collection_location_stored_and_dirties_on_change(tmp_path):
+    # the supplier collection location is stored on the product AND folded into the payload_hash, so a
+    # config change flips the product dirty and re-serves. A value NOT in the hash would never re-serve
+    # (the variant-image-freshness bug); this guards against that regression.
+    cfg = load_source("polonine")
+    coll = [r.model_copy(update={"collection_country_code": "IT", "collection_city": "Verona"})
+            for r in _fixture_rows()]
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _seed_ids(ledger)
+        populate_products(ledger, coll, cfg)
+        sku = emit._sku(coll[0], cfg)
+        p = ledger.get("product", "sku", sku)
+        assert p["collection_country_code"] == "IT" and p["collection_city"] == "Verona"
+
+        ledger.execute("UPDATE product SET state='synced', medusa_id='prod_1', last_synced=? WHERE sku=?",
+                       (now_iso(), sku))
+        changed = [coll[0].model_copy(update={"collection_city": "Milan"})] + coll[1:]
+        populate_products(ledger, changed, cfg)
+        row = ledger.get("product", "sku", sku)
+        assert row["state"] == "dirty" and row["medusa_id"] == "prod_1", "a collection change must dirty"
+        assert row["collection_city"] == "Milan"

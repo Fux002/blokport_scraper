@@ -166,6 +166,7 @@ Only products whose variation is synced and whose texture is live.
     "handle": "walnut-travertine-honed-slab-polonine-7f3a2b19",
     "length": 2.5, "width": 0.2, "height": 2.0, "weight": 0.3,
     "origin_port": "ITMDC", "origin_country_code": "IT",
+    "collection_country_code": "IT", "collection_city": "Verona",
     "bundle_size": 7,
     "image_urls": ["https://.../products/improved/polonine/<sha>.jpg"]
   }
@@ -185,6 +186,21 @@ variation id from step 1 and **inherit its category and type** (and write the se
 Medusa id in the payload, set per source in :4200), else resolve by `vendor` name;
 resolve `origin_port` (UN/LOCODE) to the port id (falling back to `origin_country_code`);
 copy `image_urls` into your own storage. Ack with the product id.
+
+**Collection location** (`collection_country_code`, `collection_city`) is where the product is
+physically **collected** before shipping (the supplier's warehouse). It is a distinct axis from
+both `origin_country_code` (provenance -- where the stone was produced/quarried, which still drives
+customs) and the port (departure). Rules:
+
+- `collection_country_code` is ISO-3166 alpha-2. It **may differ** from `origin_country_code` and
+  from the port's country; there is **no consistency requirement** between them.
+- `collection_city` is a free-text city and is **only meaningful together with**
+  `collection_country_code`; the scraper never emits a city without a resolved country.
+- Both are **optional**: `null`/absent when the source has no collection location configured. A
+  product with null collection still lists (the port conveys departure). Do **not** treat a null as
+  an error, and do **not** overload `origin_country_code` with the collection location.
+- Set at the **scraper** level, per source (the supplier's warehouse is a per-supplier constant), in
+  the :4200 admin config -- not derived Medusa-side.
 
 > **`company_id`** is the single deliberate Medusa id in the payload: a small, hand-managed,
 > per-source seller id (the 4 companies), unlike the high-cardinality variation/attribute

@@ -33,6 +33,41 @@ def _slab_row(**kw):
     return CanonicalRow(**base)
 
 
+def test_collection_location_stamped_from_config(ref, cfg):
+    # a configured supplier collection location (country + city) is stamped onto every row, independent of
+    # origin and ports. Country resolves to an ISO-2 via the reference; city passes through.
+    c = dataclasses.replace(cfg, collection_country_default="IT", collection_city_default="Verona")
+    row = _slab_row()
+    derive.derive_collection(row, ref, c)
+    assert row.collection_country_code == "IT"
+    assert row.collection_city == "Verona"
+
+
+def test_collection_null_when_unconfigured(ref, cfg):
+    # no collection config -> both null (optional, never required). The product still lists.
+    c = dataclasses.replace(cfg, collection_country_default="", collection_city_default="")
+    row = _slab_row()
+    derive.derive_collection(row, ref, c)
+    assert row.collection_country_code is None and row.collection_city is None
+
+
+def test_collection_bad_country_emits_null_not_a_guess(ref, cfg):
+    # an unresolvable country is emitted as null (never a wrong country); the city falls with it, since a
+    # city is only meaningful WITH a country.
+    c = dataclasses.replace(cfg, collection_country_default="XX", collection_city_default="Nowhere")
+    row = _slab_row()
+    derive.derive_collection(row, ref, c)
+    assert row.collection_country_code is None and row.collection_city is None
+
+
+def test_collection_city_without_country_is_null(ref, cfg):
+    # a city configured without a country is meaningless (the emit contract) -> both null.
+    c = dataclasses.replace(cfg, collection_country_default="", collection_city_default="Verona")
+    row = _slab_row()
+    derive.derive_collection(row, ref, c)
+    assert row.collection_country_code is None and row.collection_city is None
+
+
 def test_bundle_from_slab_count_high(ref, cfg):
     row = _slab_row(raw_slab_count="10")
     derive.derive_category(row, ref)

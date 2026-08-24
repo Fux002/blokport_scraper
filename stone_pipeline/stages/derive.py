@@ -619,6 +619,28 @@ def derive_ports(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig
                                 src_url=row.src_url))
 
 
+# --- collection location (section 3.3b) ---------------------------------------
+def derive_collection(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
+    # Where this source's products are physically COLLECTED before shipping (the supplier's warehouse): a
+    # per-source constant, independent of origin (provenance/quarry) and of ports (departure). Optional and
+    # NEVER required -- a blank config leaves both null and the product still lists. Country is validated
+    # against the same ISO reference as origin (a typo emits null + a loud log, never a wrong country); city
+    # is free text. City is only meaningful WITH a resolved country (the emit contract), so the two stand or
+    # fall together. A per-PRODUCT scrape override can layer here later (precedence scrape > default).
+    country = (source_cfg.collection_country_default or "").strip()
+    city = (source_cfg.collection_city_default or "").strip()
+    iso = _to_iso(country, ref) if country else None
+    if country and not iso:
+        log.warning("collection_country_default did not resolve to a country; emitting null collection",
+                    extra={"extra_fields": {"source": source_cfg.source, "value": country}})
+    elif city and not country:
+        log.warning("collection_city set without a collection_country_default; emitting null collection "
+                    "(a city is only meaningful with a country)",
+                    extra={"extra_fields": {"source": source_cfg.source, "city": city}})
+    row.collection_country_code = iso
+    row.collection_city = (city or None) if iso else None
+
+
 # --- title / description / handle (section 10.3, 10.4) ------------------------
 _FORMAT_WORD = {c.name: c.name.title() for c in CATEGORIES}  # slab -> Slab
 
@@ -764,6 +786,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
         derive_inventory(row)                          # stock, once, from raw signals only (never bundle_size)
         derive_origin(row, ref, source_cfg)
         derive_ports(row, ref, source_cfg)
+        derive_collection(row, ref, source_cfg)
         derive_title(row)
         derive_description(row)
         _apply_overrides(row, ref)  # overrides win over the derived values

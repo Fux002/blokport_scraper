@@ -143,6 +143,22 @@ def test_fal_prompt_is_per_source_and_round_trips(tmp_path, monkeypatch):
     assert srcs["acme"].fal_prompt != srcs["plain"].fal_prompt
 
 
+def test_collection_location_is_per_source_and_round_trips(tmp_path, monkeypatch):
+    # The supplier collection location (country + city) is per-source config, like origin_default: it must
+    # persist through the store + the admin API, and default to '' for a source that sets none.
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    store.upsert_row({"source": "acme", "source_code": "acm", "vendor": "Acme",
+                      "collection_country": "IT", "collection_city": "Verona"})
+    store.upsert_row({"source": "plain", "source_code": "pla", "vendor": "Plain"})   # sets no collection
+    srcs = store.read_sources()
+    assert srcs["acme"].collection_country_default == "IT"
+    assert srcs["acme"].collection_city_default == "Verona"
+    assert srcs["plain"].collection_country_default == "" and srcs["plain"].collection_city_default == ""
+    # admin API dict carries both (so the UI can edit per source)
+    assert store.get_row("acme")["collection_country"] == "IT"
+    assert store.get_row("acme")["collection_city"] == "Verona"
+
+
 def test_retired_keys_are_durable_in_config_db(tmp_path, monkeypatch):
     # the retired-variety exclusion lives in config.db (snapshotted), not a CSV under ephemeral /app, so a
     # retired variety never re-mints after a restart. Round-trip + idempotent add + un-retire remove.

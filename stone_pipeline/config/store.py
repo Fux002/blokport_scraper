@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS source (
     source_code         TEXT NOT NULL DEFAULT '',
     vendor              TEXT NOT NULL DEFAULT '',      -- the company this source belongs to (agnostic name)
     company_id          TEXT NOT NULL DEFAULT '',      -- Medusa company id for this source (ENV-SPECIFIC; empty = resolve by vendor name)
-    origin_default      TEXT NOT NULL DEFAULT '',      -- supplier ISO-2 country
+    origin_default      TEXT NOT NULL DEFAULT '',      -- supplier ISO-2 country (provenance fallback)
+    collection_country  TEXT NOT NULL DEFAULT '',      -- supplier collection ISO-2 country (independent of origin)
+    collection_city     TEXT NOT NULL DEFAULT '',      -- supplier collection city
     ports               TEXT,                          -- JSON array of port names / LOCODEs
     mode                TEXT NOT NULL DEFAULT 'review',
     watermarked         INTEGER NOT NULL DEFAULT 0,     -- de-watermark this source's photos (FAL)
@@ -99,6 +101,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.commit()
     if "fal_prompt" not in cols:   # per-source de-watermark instruction; older rows default to the global fallback
         conn.execute("ALTER TABLE source ADD COLUMN fal_prompt TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    if "collection_country" not in cols:   # supplier collection location (independent of origin); older rows blank
+        conn.execute("ALTER TABLE source ADD COLUMN collection_country TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    if "collection_city" not in cols:
+        conn.execute("ALTER TABLE source ADD COLUMN collection_city TEXT NOT NULL DEFAULT ''")
         conn.commit()
     # F8: source_code must be UNIQUE among real codes (the empty default stays non-unique), so two vendors
     # can't collide their SKU namespace -- the app-level read-then-write check races under the threading
@@ -220,6 +228,7 @@ def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
     return SourceConfig(
         source=r["source"], source_code=r["source_code"],
         vendor=r["vendor"], company_id=r["company_id"], origin_default=r["origin_default"],
+        collection_country_default=r["collection_country"], collection_city_default=r["collection_city"],
         ports_default=json.loads(r["ports"] or "[]"), mode=r["mode"],
         watermarked=bool(r["watermarked"]), enhance=bool(r["enhance"]), emit_on_review=bool(r["emit_on_review"]),
         fal_prompt=r["fal_prompt"],
@@ -233,6 +242,7 @@ def _params(cfg: SourceConfig, enabled: bool) -> dict:
         "source_code": cfg.source_code, "vendor": cfg.vendor,
         "company_id": cfg.company_id,
         "origin_default": cfg.origin_default, "ports": json.dumps(cfg.ports_default or []),
+        "collection_country": cfg.collection_country_default, "collection_city": cfg.collection_city_default,
         "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0, "enhance": 1 if cfg.enhance else 0,
         "fal_prompt": cfg.fal_prompt,
         "emit_on_review": 1 if cfg.emit_on_review else 0,
@@ -256,6 +266,7 @@ def _row_dict(r: sqlite3.Row) -> dict:
         "source_code": r["source_code"], "vendor": r["vendor"],
         "company_id": r["company_id"],
         "origin_default": r["origin_default"], "ports": json.loads(r["ports"] or "[]"),
+        "collection_country": r["collection_country"], "collection_city": r["collection_city"],
         "mode": r["mode"], "watermarked": bool(r["watermarked"]), "enhance": bool(r["enhance"]),
         "fal_prompt": r["fal_prompt"],
         "emit_on_review": bool(r["emit_on_review"]),
@@ -286,6 +297,8 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
         source_code=data.get("source_code", ""), vendor=data.get("vendor", ""),
         company_id=data.get("company_id", ""),
         origin_default=data.get("origin_default", ""), ports_default=data.get("ports") or [],
+        collection_country_default=data.get("collection_country", ""),
+        collection_city_default=data.get("collection_city", ""),
         mode=data.get("mode", "review"), watermarked=bool(data.get("watermarked", False)),
         enhance=bool(data.get("enhance", True)),
         fal_prompt=data.get("fal_prompt", ""),

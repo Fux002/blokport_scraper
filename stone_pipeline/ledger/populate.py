@@ -27,7 +27,7 @@ from stone_pipeline.stages.product_state import inventory_str
 # once, re-syncing the whole catalog with the new payload. v2: adds port_ids to the sync payload so Medusa
 # links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
 # origin_country_code (which fanned every product out to all ports in its quarry country).
-_PRODUCT_PAYLOAD_CONTRACT = "v2-port_ids"
+_PRODUCT_PAYLOAD_CONTRACT = "v3-collection"
 
 
 def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
@@ -192,6 +192,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "origin_country_code": r.origin_country_code,
             "origin_city": r.origin_city,
             "origin_county": r.origin_county,
+            "collection_country_code": r.collection_country_code,
+            "collection_city": r.collection_city,
             "thumbnail_key": r.thumbnail_key,
             "oriented_image_keys": json.dumps(r.oriented_image_keys or []),
             "product_image_keys": json.dumps(r.product_image_keys or []),
@@ -213,6 +215,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 json.dumps(r.oriented_image_keys or []),
                 r.company_id, r.sales_channel_id, category,
                 r.bundle_size, json.dumps(r.port_ids or []),
+                # supplier collection location: a config change must flip the product dirty so it re-serves.
+                r.collection_country_code, r.collection_city,
             ])),
             "created_at": now,
             "updated_at": now,
