@@ -37,6 +37,22 @@ locals {
     var.scraper_proxy_ssm_name == "" ? {} : { BLOKPORT_SCRAPER_PROXY = data.aws_ssm_parameter.scraper_proxy[0].arn },
   )
   prod_enabled = var.prod_staging_bucket != ""
+  dev_enabled  = var.dev_enabled
+}
+
+# blokport's dev modules pre-date the dev_enabled gate: migrate their state to the count index so adding
+# the gate does NOT destroy/recreate the live dev stack (a prod-only brand starts fresh with none of these).
+moved {
+  from = module.scraper_dev
+  to   = module.scraper_dev[0]
+}
+moved {
+  from = module.gpu_enhance_dev
+  to   = module.gpu_enhance_dev[0]
+}
+moved {
+  from = module.sync_service_dev
+  to   = module.sync_service_dev[0]
 }
 
 # --- SHARED ECR repository (one image, promoted dev -> prod) ------------------
@@ -147,6 +163,7 @@ module "scraper_dev" {
 
   brand       = var.brand
   domain_pack = var.domain_pack
+  count       = local.dev_enabled ? 1 : 0
 
   target_env     = "development"
   home_env       = "dev"
@@ -164,9 +181,9 @@ module "scraper_dev" {
 
   # Auto-enhance: the scheduled scrape submits the dev GPU reprocess for newly-staged images. ON in dev
   # (dev_auto_enhance defaults true). Prod stays unwired until its own GPU module is active.
-  gpu_job_queue_name       = module.gpu_enhance_dev.job_queue
-  gpu_job_definition_name  = module.gpu_enhance_dev.job_definition
-  gpu_job_queue_arn        = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_queue_name       = module.gpu_enhance_dev[0].job_queue
+  gpu_job_definition_name  = module.gpu_enhance_dev[0].job_definition
+  gpu_job_queue_arn        = module.gpu_enhance_dev[0].job_queue_arn
   gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
   auto_enhance_enabled     = var.dev_auto_enhance
   require_enhanced_enabled = var.dev_require_enhanced
@@ -208,6 +225,7 @@ module "gpu_enhance_dev" {
 
   brand       = var.brand
   domain_pack = var.domain_pack
+  count       = local.dev_enabled ? 1 : 0
 
   target_env     = "development"
   home_env       = "dev"
@@ -231,7 +249,7 @@ locals {
   # (module output) means any job-def change (e.g. adding a secret) silently breaks the submit with an IAM
   # denial until every dependent module is re-applied. Match all revisions by NAME instead: strip the
   # trailing :<revision> and allow :*. Queue ARNs have no revision, so they are used as-is.
-  dev_gpu_jobdef_iam_arn = replace(module.gpu_enhance_dev.job_definition_arn, "/:[0-9]+$/", ":*")
+  dev_gpu_jobdef_iam_arn = local.dev_enabled ? replace(module.gpu_enhance_dev[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
 }
 
 module "gpu_enhance_prod" {
@@ -282,6 +300,7 @@ module "sync_service_dev" {
 
   brand       = var.brand
   domain_pack = var.domain_pack
+  count       = local.dev_enabled ? 1 : 0
 
   target_env     = "development"
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
@@ -310,9 +329,9 @@ module "sync_service_dev" {
 
   # Auto-enhance: the produce trigger submits the dev GPU reprocess for newly-staged images (scoped IAM +
   # queue/def names). ON in dev (dev_auto_enhance defaults true). Auto-texture reuses the same queue/jobdef.
-  gpu_job_queue_name       = module.gpu_enhance_dev.job_queue
-  gpu_job_definition_name  = module.gpu_enhance_dev.job_definition
-  gpu_job_queue_arn        = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_queue_name       = module.gpu_enhance_dev[0].job_queue
+  gpu_job_definition_name  = module.gpu_enhance_dev[0].job_definition
+  gpu_job_queue_arn        = module.gpu_enhance_dev[0].job_queue_arn
   gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
   auto_enhance_enabled     = var.dev_auto_enhance
   auto_texture_enabled     = var.dev_auto_texture
