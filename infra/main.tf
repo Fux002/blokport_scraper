@@ -7,12 +7,12 @@
 # =============================================================================
 
 # --- Runtime secrets (FAL key + residential proxy) --------------------------
-# DEV: resolved by their KNOWN /blokport-dev/ names, so they are ALWAYS present -- a plain
+# DEV: resolved by their KNOWN /${var.brand}-dev/ names, so they are ALWAYS present -- a plain
 # `terraform apply` can NEVER strip them from the dev task. This is the durable fix for the recurring
 # "FAL_KEY / proxy vanished on apply" drift: dev secrets are wired by convention, exactly like the
 # sync/config tokens below, NOT via an optional input var that silently defaults to empty.
-data "aws_ssm_parameter" "fal_key_dev" { name = "/blokport-dev/FAL_KEY" }
-data "aws_ssm_parameter" "scraper_proxy_dev" { name = "/blokport-dev/BLOKPORT_SCRAPER_PROXY" }
+data "aws_ssm_parameter" "fal_key_dev" { name = "/${var.brand}-dev/FAL_KEY" }
+data "aws_ssm_parameter" "scraper_proxy_dev" { name = "/${var.brand}-dev/BLOKPORT_SCRAPER_PROXY" }
 
 # PROD: still by explicit SSM-name var (empty until the prod params exist), so a dev deploy never forces
 # prod secret wiring. Consumed ONLY by module.scraper_prod (count-gated on prod_staging_bucket).
@@ -40,6 +40,8 @@ locals {
 }
 
 # --- SHARED ECR repository (one image, promoted dev -> prod) ------------------
+# SHARED across brands: the image is brand-agnostic (brand/pack chosen at runtime). blokport OWNS this repo;
+# a 2nd brand's root references it as a data source (see below) rather than re-creating it.
 resource "aws_ecr_repository" "this" {
   name                 = "blokport-scraper"
   image_tag_mutability = "MUTABLE"
@@ -99,7 +101,7 @@ data "aws_iam_policy_document" "deploy_assume" {
 }
 
 resource "aws_iam_role" "deploy" {
-  name               = "blokport-scraper-gha-deploy"
+  name               = "${var.brand}-scraper-gha-deploy"
   assume_role_policy = data.aws_iam_policy_document.deploy_assume.json
 }
 
@@ -124,7 +126,7 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "EcsRollDevServiceUpdate"
     actions   = ["ecs:UpdateService"]
-    resources = ["${replace(data.terraform_remote_state.platform_dev.outputs.ecs_cluster_arn, ":cluster/", ":service/")}/blokport-scraper-svc-development"]
+    resources = ["${replace(data.terraform_remote_state.platform_dev.outputs.ecs_cluster_arn, ":cluster/", ":service/")}/${var.brand}-scraper-svc-development"]
   }
   statement {
     sid       = "EcsDescribeForRollWait"
@@ -134,7 +136,7 @@ data "aws_iam_policy_document" "deploy" {
 }
 
 resource "aws_iam_role_policy" "deploy" {
-  name   = "blokport-scraper-gha-deploy"
+  name   = "${var.brand}-scraper-gha-deploy"
   role   = aws_iam_role.deploy.id
   policy = data.aws_iam_policy_document.deploy.json
 }
@@ -142,6 +144,9 @@ resource "aws_iam_role_policy" "deploy" {
 # --- DEV deployment (runs in blokport-dev, writes the dev bucket only) --------
 module "scraper_dev" {
   source = "./modules/scraper"
+
+  brand       = var.brand
+  domain_pack = var.domain_pack
 
   target_env     = "development"
   home_env       = "dev"
@@ -172,7 +177,11 @@ module "scraper_dev" {
 # prod bucket, so it can never touch dev (and dev's role can never touch prod).
 module "scraper_prod" {
   source = "./modules/scraper"
-  count  = local.prod_enabled ? 1 : 0
+
+  brand            = var.brand
+  domain_pack      = var.domain_pack
+  sales_channel_id = var.prod_sales_channel_id
+  count            = local.prod_enabled ? 1 : 0
 
   target_env     = "production"
   home_env       = var.prod_home_env
@@ -196,6 +205,9 @@ module "scraper_prod" {
 # =============================================================================
 module "gpu_enhance_dev" {
   source = "./modules/gpu_enhance"
+
+  brand       = var.brand
+  domain_pack = var.domain_pack
 
   target_env     = "development"
   home_env       = "dev"
@@ -224,7 +236,11 @@ locals {
 
 module "gpu_enhance_prod" {
   source = "./modules/gpu_enhance"
-  count  = local.prod_enabled ? 1 : 0
+
+  brand            = var.brand
+  domain_pack      = var.domain_pack
+  sales_channel_id = var.prod_sales_channel_id
+  count            = local.prod_enabled ? 1 : 0
 
   target_env     = "production"
   home_env       = var.prod_home_env
@@ -247,14 +263,14 @@ module "gpu_enhance_prod" {
 data "terraform_remote_state" "platform_dev" {
   backend = "s3"
   config = {
-    bucket = "blokport-tfstate"
-    key    = "blokport/dev/terraform.tfstate"
+    bucket = var.platform_state_bucket
+    key    = "${var.brand}/dev/terraform.tfstate"
     region = var.region
   }
 }
 
-data "aws_ssm_parameter" "sync_token_dev" { name = "/blokport-dev/BLOKPORT_SYNC_TOKEN" }
-data "aws_ssm_parameter" "config_token_dev" { name = "/blokport-dev/BLOKPORT_CONFIG_TOKEN" }
+data "aws_ssm_parameter" "sync_token_dev" { name = "/${var.brand}-dev/BLOKPORT_SYNC_TOKEN" }
+data "aws_ssm_parameter" "config_token_dev" { name = "/${var.brand}-dev/BLOKPORT_CONFIG_TOKEN" }
 
 # Reference the EXISTING shared ECR by name (data source, not the root resource) so this module can
 # apply with -target without depending on the root ECR -- which is currently drifted from state
@@ -263,6 +279,9 @@ data "aws_ecr_repository" "scraper" { name = "blokport-scraper" }
 
 module "sync_service_dev" {
   source = "./modules/sync_service"
+
+  brand       = var.brand
+  domain_pack = var.domain_pack
 
   target_env     = "development"
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
@@ -303,7 +322,7 @@ module "sync_service_dev" {
 # =============================================================================
 # In-VPC sync/config SERVICE (PROD) -- the mirror of the dev service, count-gated on prod_staging_bucket
 # so it is INERT until prod is provisioned: with prod disabled the prod platform remote state and the
-# /blokport-prod/ tokens are never read, so a dev apply is unaffected. It runs in Blokport's PROD platform
+# /${var.brand}-prod/ tokens are never read, so a dev apply is unaffected. It runs in Blokport's PROD platform
 # VPC over Cloud Map, so before enabling it the prod platform stack must exist (blokport/prod/terraform.tfstate)
 # and the prod SSM tokens + FAL_KEY must be created (see TODO_PROD.md, section 1).
 # =============================================================================
@@ -311,20 +330,20 @@ data "terraform_remote_state" "platform_prod" {
   count   = local.prod_enabled ? 1 : 0
   backend = "s3"
   config = {
-    bucket = "blokport-tfstate"
-    key    = "blokport/prod/terraform.tfstate"
+    bucket = var.platform_state_bucket
+    key    = "${var.brand}/prod/terraform.tfstate"
     region = var.region
   }
 }
 
 data "aws_ssm_parameter" "sync_token_prod" {
   count = local.prod_enabled ? 1 : 0
-  name  = "/blokport-prod/BLOKPORT_SYNC_TOKEN"
+  name  = "/${var.brand}-prod/BLOKPORT_SYNC_TOKEN"
 }
 
 data "aws_ssm_parameter" "config_token_prod" {
   count = local.prod_enabled ? 1 : 0
-  name  = "/blokport-prod/BLOKPORT_CONFIG_TOKEN"
+  name  = "/${var.brand}-prod/BLOKPORT_CONFIG_TOKEN"
 }
 
 locals {
@@ -335,7 +354,11 @@ locals {
 
 module "sync_service_prod" {
   source = "./modules/sync_service"
-  count  = local.prod_enabled ? 1 : 0
+
+  brand            = var.brand
+  domain_pack      = var.domain_pack
+  sales_channel_id = var.prod_sales_channel_id
+  count            = local.prod_enabled ? 1 : 0
 
   target_env     = "production"
   image_repo_url = data.aws_ecr_repository.scraper.repository_url
