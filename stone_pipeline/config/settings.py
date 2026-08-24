@@ -94,58 +94,74 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-# The dev bucket is known. The PROD bucket is supplied at deploy time via BLOKPORT_S3_BUCKET.
-# In PRODUCTION we must NOT silently fall back to the dev bucket (that would store prod images in
-# dev and stamp prod Medusa rows with dev URLs) -- fail fast instead. Dev keeps the known default.
-_DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
-_S3_BUCKET_ENV = env.getenv("BLOKPORT_S3_BUCKET", "").strip()
-if IS_PRODUCTION and not _S3_BUCKET_ENV:
+# Brand identity (multi-brand). Each brand (blokport/wudport/calcport/...) is its OWN deployment: own
+# bucket, own Medusa, own domain pack. Dev defaults to blokport (single-brand by design). BRAND is
+# brand-neutral (env BRAND; legacy BLOKPORT_BRAND read as fallback). Defined BEFORE the bucket so the
+# non-blokport guard below can reference it.
+BRAND = (env.getenv("BRAND") or "").strip().lower() or ("blokport" if not IS_PRODUCTION else "")
+if IS_PRODUCTION and not BRAND:
     raise RuntimeError(
-        "SCRAPER_S3_BUCKET must be set in production — refusing to default to the dev bucket "
-        f"({_DEV_S3_BUCKET}). Set SCRAPER_S3_BUCKET to the prod bucket before running prod.")
+        "BRAND must be set in production (the brand this deployment serves, e.g. 'blokport', 'wudport', "
+        "'calcport') so the brand<->bucket guard can refuse a cross-brand mis-configuration.")
+
+# The S3 bucket. The blokport DEV bucket is the only known default; a PROD run OR any non-blokport brand
+# (even in dev) MUST set SCRAPER_S3_BUCKET explicitly -- never silently write into blokport's bucket.
+_DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
+_S3_BUCKET_ENV = (env.getenv("BLOKPORT_S3_BUCKET", "") or "").strip()
+if not _S3_BUCKET_ENV and (IS_PRODUCTION or BRAND != "blokport"):
+    raise RuntimeError(
+        "SCRAPER_S3_BUCKET must be set for this deployment (any production run, or any non-blokport brand "
+        f"even in dev) -- refusing to default to the blokport dev bucket ({_DEV_S3_BUCKET}). Set "
+        "SCRAPER_S3_BUCKET to this brand's own bucket.")
 S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
 S3_REGION = env.getenv("BLOKPORT_S3_REGION", "eu-west-1")
 
-# Brand identity (multi-brand prod). Each brand (blokport/wudport/calcport/...) is its OWN production
-# deployment: own bucket, own Medusa, own domain pack. Dev is single-brand (defaults to blokport). The
-# existing dev-only unset-bucket guard above catches a dev FALLBACK, but NOT a prod bucket mis-set to
-# ANOTHER brand's populated prod bucket -- that would write one brand's images into another's store, keyed
-# to a wrong Medusa. So in PRODUCTION require BLOKPORT_BRAND and cross-check it against the bucket name:
-# the brand slug MUST appear in the bucket, or we refuse to run. Convention: '<brand>-prod-staging[...]'.
-# BRAND is brand-neutral by design (env `BRAND`); legacy `BLOKPORT_BRAND` still read for back-compat.
-BRAND = (env.getenv("BRAND") or "").strip().lower() \
-    or ("blokport" if not IS_PRODUCTION else "")
-if IS_PRODUCTION:
-    if not BRAND:
-        raise RuntimeError(
-            "BRAND must be set in production (the brand this deployment serves, e.g. 'blokport', 'wudport', "
-            "'calcport') so the brand<->bucket guard can refuse a cross-brand mis-configuration.")
-    if BRAND not in S3_BUCKET.lower():
-        raise RuntimeError(
-            f"SCRAPER_BRAND={BRAND!r} but the prod bucket {S3_BUCKET!r} does not contain the brand slug -- "
-            "refusing to run. A bucket set to ANOTHER brand's store would cross brands. Set SCRAPER_S3_BUCKET "
-            f"to {BRAND}'s own prod bucket.")
+# Brand<->bucket cross-check (prod): the bucket must belong to THIS brand, so a bucket mis-set to ANOTHER
+# brand's populated prod store fails loud instead of crossing brands. Convention: '<brand>-prod-staging[...]'.
+# (Substring today; PR-3 hardening tightens this to a prefix/equality check.)
+if IS_PRODUCTION and BRAND not in S3_BUCKET.lower():
+    raise RuntimeError(
+        f"SCRAPER_BRAND={BRAND!r} but the prod bucket {S3_BUCKET!r} does not contain the brand slug -- "
+        "refusing to run. A bucket set to ANOTHER brand's store would cross brands. Set SCRAPER_S3_BUCKET "
+        f"to {BRAND}'s own prod bucket.")
 
 
-# Owner Medusa ids -- operational config, NOT catalog attributes, so they are environment
-# variables (the catalog attribute ids -- color/finish/type/quality/category -- come from the
-# env's attributes.csv instead). The sales channel is ONE id per environment; the company is
-# the general Blokport owner by default and can be overridden per scrape in sources.yaml. Each
-# has a dev default for local runs; a PRODUCTION run must set the env var -- it never falls back
-# to a dev id (returns "" so the miss is loud, never a silent dev/prod cross).
+# Owner Medusa ids -- operational config, NOT catalog attributes (those come from the env's attributes.csv).
+# One sales channel + one company per deployment. In PRODUCTION they MUST be set: an empty owner id would
+# stamp every product with a blank/wrong Medusa owner, so we FAIL LOUD rather than returning "". The dev
+# defaults below are BLOKPORT's -- applied only for the blokport brand in dev; a non-blokport dev must set
+# its own (else empty, never blokport's).
 _DEV_SALES_CHANNEL_ID = "sc_01KTM2B2DJNSW6WPS1Q8FN8B2R"
 _DEV_COMPANY_ID = "01KTV98X8RG743YR3QHCECZKKA"
 
 
-def _owner_id(env_var: str, dev_default: str) -> str:
+def _owner_id(env_var: str, dev_default: str, label: str) -> str:
     val = (env.getenv(env_var, "") or "").strip()
     if val:
         return val
-    return "" if IS_PRODUCTION else dev_default
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            f"{env.PREFIX + env._suffix(env_var)} (the {label}) must be set in production -- refusing to run "
+            "with an empty owner id that would mis-own or blank every product/variation in Medusa. Set it "
+            "for this brand.")
+    return dev_default if BRAND == "blokport" else ""   # dev: blokport defaults only for blokport
 
 
-SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID)
-COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID)
+SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID, "sales channel id")
+COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID, "company id")
+
+
+# Hand-maintained catalog_source/ files (backbones, origin_map, supplier-overrides) are MATERIAL-specific.
+# The stone pack (historical) keeps them flat at catalog_source/<file>; any OTHER pack MUST ship its own
+# catalog_source/<pack>/<file> and NEVER falls back to stone's -- so a wood/lime run reads its own data or
+# gaps/fails loudly, never silently loads stone varieties/origins (audit A2 / #213 M1).
+_STONE_PACK = "stone"
+
+
+def _catalog_source_file(filename: str) -> Path:
+    base = WORKSPACE_ROOT / "catalog_source"
+    pack = active_pack().name
+    return base / filename if pack == _STONE_PACK else base / pack / filename
 
 # Last-resort attribute defaults are DOMAIN VALUES, so they live in the active pack, not here:
 # config/domains/<pack>.yaml -> last_resort_finishes / last_resort_quality / block_finish (read via
@@ -226,18 +242,25 @@ class Paths:
         # PACK-NAMESPACED like type_density; absent for a pack with no standard-area concept (the bundle-area
         # ladder then simply falls through), so it never reads stone's slab-area table under another pack.
         return REPO_ROOT / "reference" / f"standard_slab_area.{active_pack().name}.csv"
+
+    @property
+    def origin_map_csv(self) -> Path:
+        # per-variety origin, PACK-NAMESPACED via catalog_source/<pack>/ (stone stays flat). A non-stone pack
+        # reads its OWN origin_map or none -- never stone's, so wood/lime origins can't silently resolve to a
+        # stone variety's country.
+        return _catalog_source_file("origin_map.csv")
+
+    @property
+    def origin_overrides_csv(self) -> Path:
+        # per-supplier origin overrides, same pack-namespacing. Optional (absent file = no overrides).
+        return _catalog_source_file("origin_supplier_overrides.csv")
     # ports.csv is supplied by the user into catalog_source; loader falls back to reference/.
     ports_csv: Path = WORKSPACE_ROOT / "catalog_source" / "ports.csv"
     ports_csv_fallback: Path = REPO_ROOT / "reference" / "ports.csv"
     units_csv: Path = REPO_ROOT / "reference" / "units.csv"
-    # origin_map is HAND-MAINTAINED in catalog_source/ (variety -> country + geographic patterns),
-    # like ports.csv -- it is NOT generated from any export. Fallback to reference/ for back-compat.
-    origin_map_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_map.csv"
+    # origin_map + origin_overrides are HAND-MAINTAINED material-specific catalog_source files -> now
+    # PACK-NAMESPACED properties (below), so a non-stone pack reads its own or gaps loudly, never stone's.
     origin_map_csv_fallback: Path = REPO_ROOT / "reference" / "origin_map.csv"
-    # Per-SUPPLIER origin overrides: (source, variety, stone_type) -> ISO2, for a supplier that sells a
-    # stone it does NOT quarry in its home country (a reseller). Scoped to one source, so it never leaks
-    # to other suppliers. Optional -- absent file = no overrides.
-    origin_overrides_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_supplier_overrides.csv"
     country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
     # type_density_csv + standard_slab_area_csv are PACK-NAMESPACED properties (below), not shared files, so a
@@ -357,6 +380,13 @@ class S3Config:
     dry_run: bool = _env_bool("BLOKPORT_S3_DRY_RUN", not IS_PRODUCTION)
 
 
+# The active domain's generic material noun ('stone'/'wood'/'lime'), used to keep the de-watermark and
+# image-classify prompts MATERIAL-neutral -- a wood pack must not instruct FAL to reconstruct a STONE
+# pattern, nor score wood photos against a "natural stone slab" prompt. Resolved once at import from the
+# deployment's DOMAIN_PACK.
+_MATERIAL = active_pack().generic_material_word
+
+
 @dataclass(frozen=True)
 class ImageProcessingConfig:
     """Enhancement + de-watermark applied to scraped product photos during
@@ -403,10 +433,10 @@ class ImageProcessingConfig:
     # (SourceConfig.fal_prompt). It is source-AGNOSTIC on purpose -- it names no supplier -- so it is always
     # safe for any source (it removes whatever logo is present, never another supplier's specifically). Each
     # watermarked source SHOULD still set its own tuned prompt for best removal; this is the safe default.
-    fal_prompt: str = ("Remove any supplier watermark logo and any overlaid brand text from the surface of "
-                       "the stone slab, seamlessly reconstructing the natural stone pattern underneath. Keep "
-                       "the stone colour, veining, the size/label card and everything else in the photo "
-                       "identical to the original.")
+    fal_prompt: str = (f"Remove any supplier watermark logo and any overlaid brand text from the surface of "
+                       f"the {_MATERIAL} product, seamlessly reconstructing the natural {_MATERIAL} texture "
+                       f"underneath. Keep the {_MATERIAL} colour, pattern, the size/label card and everything "
+                       f"else in the photo identical to the original.")
     fal_seed: int = 0                 # fixed for best-effort reproducibility across re-runs
     fal_price_per_mp: float = 0.05    # USD per billed megapixel (rounds up, 1 MP floor)
     fal_max_usd: float = _env_float("BLOKPORT_FAL_MAX_USD", 150.0)  # per-run cost circuit breaker
@@ -445,10 +475,10 @@ class ImageProcessingConfig:
     classify_model: str = env.getenv("BLOKPORT_CLIP_MODEL", "openai/clip-vit-base-patch32")
     classify_margin: float = 0.85  # discard iff P(non-stone) >= this; conservative, keep when unsure
     classify_stone_prompts: tuple = (
-        "a photograph of a natural stone slab",
-        "a close-up photo of a polished stone surface",
-        "a photo of marble or granite or quartzite texture",
-        "a slab of stone in a warehouse",
+        f"a photograph of natural {_MATERIAL}",
+        f"a close-up photo of a {_MATERIAL} surface",
+        f"a photo of {_MATERIAL} texture",
+        f"a {_MATERIAL} product in a warehouse",
     )
     classify_nonstone_prompts: tuple = (
         "a document or technical spec sheet",
@@ -579,7 +609,7 @@ class Category:
 
     @property
     def backbone_path(self) -> Path:
-        return WORKSPACE_ROOT / "catalog_source" / self.backbone_filename
+        return _catalog_source_file(self.backbone_filename)   # pack-namespaced (stone flat); never stone-fallback
 
 
 # DEV/PROD SEGREGATION: a category's Medusa pcat id is INSTANCE-SPECIFIC (the dev and prod

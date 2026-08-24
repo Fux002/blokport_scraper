@@ -914,7 +914,7 @@ def main(argv: list[str] | None = None) -> int:
     if not path.exists():
         print(f"no ledger at {path} (run with BLOKPORT_LEDGER_WRITETHROUGH=1 first)")
         return 1
-    with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
+    with Ledger.open(path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
         print(_json.dumps(status(ledger), indent=2, sort_keys=True))
     return 0
 

@@ -194,14 +194,23 @@ class Ledger:
                 f"ledger schema_version {row['schema_version']} != code {SCHEMA_VERSION}; "
                 "a migration is needed"
             )
-        if fingerprint is not None and fingerprint != row["backend_id_fingerprint"]:
-            # A fingerprint change is the re-seed signal (design section 9); record it.
-            # Marking ids stale is the populate layer's job, not the store's.
-            self.conn.execute(
-                "UPDATE ledger_meta SET backend_id_fingerprint = ?, updated_at = ? WHERE id = 1",
-                (fingerprint, now_iso()),
-            )
-            self.conn.commit()
+        if fingerprint is not None:
+            stored = row["backend_id_fingerprint"]
+            if stored is None:
+                # first-time bind (a ledger created before a fingerprint was passed): record it, don't reject.
+                self.conn.execute(
+                    "UPDATE ledger_meta SET backend_id_fingerprint = ?, updated_at = ? WHERE id = 1",
+                    (fingerprint, now_iso()),
+                )
+                self.conn.commit()
+            elif stored != fingerprint:
+                # This ledger belongs to a DIFFERENT brand/backend -- a wrong-brand snapshot restored onto
+                # this task, or a re-seed. FAIL LOUD instead of silently accepting + clobbering it (a genuine
+                # re-seed is an explicit operator action). This is the ledger's brand-identity guard.
+                raise LedgerEnvMismatch(
+                    f"ledger backend fingerprint {stored!r} != this deployment's {fingerprint!r} -- refusing "
+                    "to open. It belongs to a different brand/backend (a wrong-brand snapshot restore or a "
+                    "re-seed). Restore the correct ledger, or re-seed explicitly.")
 
     def close(self) -> None:
         self.conn.commit()

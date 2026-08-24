@@ -33,16 +33,9 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from base import ScraperBase
 
+# The public FullInventory viewer needs no ?S= token (verified live: list + detail both 200).
 BASE = "https://polonine.slabware.com"
-S_TOKEN = (
-    "9t5AptkpH/x2GD3oStI0wQzByO78puNBq5ZOBU2x8a1DsWdZJ9W+UFgwpAvr7qTXgoGcUrLnmVFKc1f53xV19kVT8"
-    "6meSR82TYzwo9Agi4tIXRQahJ4warnLVR8jPRR5Nlzhv/4jv1JmwSC9pdc1APdC6JsDPn80c4HIItTOWsDTMGQ/m4K"
-    "WvF/vuGG1xQjPN2naAtXme+bu5+uO0hBOcWWESF+wB2pQt8LvkO+h5JyX1H2r3rTAczO9+1aOnEINoQybgacnN/c/T"
-    "1fFwsW+EWUS8XgpOiJkM6UPR5tsTEeNWPUQ1RNMPKHbkoFCDNu0cyNLSh2evfTLqOzz2DeOB1jvLXtdEm5CGTjLQbS"
-    "azi5YDZ3J/iI+wjOvyyKDLqsjQpxThT9Aqnouk+4m5j0bMQ0xdINjDRTu5eY3xwn8REhAbLryAPUB0NGE9hlAATDyN"
-    "v72E4Y62lg+nOBU9naNm8Ga5dwl2DeNXGmFgFhCQjXfbWq8IbhX8Yw0H6IVORAP"
-)
-PAGE_URL = f"{BASE}/FullInventory.aspx?S={S_TOKEN}"
+PAGE_URL = f"{BASE}/FullInventory.aspx"
 LIST_API = f"{BASE}/FullInventory.aspx/ObterListaBundles"
 DETAIL_API = f"{BASE}/FullInventory.aspx/DetalheBundle"
 PAGE_SIZE = 40

@@ -132,6 +132,36 @@ def test_map_key_not_a_declared_category_fails_loud(tmp_path, monkeypatch):
         domain.load_pack("bad")
 
 
+def test_leaf_attribute_not_in_attributes_fails_loud(tmp_path, monkeypatch):
+    pack = _valid_pack_dict()
+    pack["leaf_attributes"] = ["b", "ghost"]                   # 'ghost' not in attributes [a,b]
+    _write_pack(tmp_path, pack)
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    domain.active_pack.cache_clear()
+    with pytest.raises(ValueError, match="leaf_attributes"):
+        domain.load_pack("bad")
+
+
+def test_disambiguator_inside_leaf_attributes_fails_loud(tmp_path, monkeypatch):
+    pack = _valid_pack_dict()
+    pack["leaf_attributes"] = ["a", "b"]                       # 'a' is the disambiguator -> must not be a leaf
+    _write_pack(tmp_path, pack)
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    domain.active_pack.cache_clear()
+    with pytest.raises(ValueError, match="disambiguator"):
+        domain.load_pack("bad")
+
+
+def test_mirror_of_unknown_category_fails_loud(tmp_path, monkeypatch):
+    pack = _valid_pack_dict()
+    pack["categories"][0]["mirror_of"] = "ghost"              # names no declared category
+    _write_pack(tmp_path, pack)
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    domain.active_pack.cache_clear()
+    with pytest.raises(ValueError, match="mirror_of"):
+        domain.load_pack("bad")
+
+
 def test_disambiguator_outside_attributes_fails_loud(tmp_path, monkeypatch):
     # V2 cross-check: the identity attribute must be part of the attribute vocabulary, else the Key is built
     # from an attribute the pipeline never resolves.
