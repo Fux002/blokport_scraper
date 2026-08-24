@@ -202,3 +202,15 @@ def test_owner_ids_are_env_vars_with_prod_guard(monkeypatch):
     with pytest.raises(RuntimeError):                              # sales-channel-style: required -> fail loud
         owner(True)
     assert owner(False) == ""                                      # company-style: optional -> "" in prod, no raise
+
+
+def test_bucket_matches_brand_is_prefix_not_substring():
+    # audit B2: the brand<->bucket guard is a PREFIX check ('<brand>-...'), never a substring -- so a bucket
+    # that merely contains the slug, or another brand's bucket, does NOT pass as this brand's own.
+    from stone_pipeline.config.settings import _bucket_matches_brand
+    assert _bucket_matches_brand("blokport", "blokport-prod-staging-abc")   # own bucket
+    assert _bucket_matches_brand("wudport", "wudport-dev-staging-xyz")
+    assert not _bucket_matches_brand("blokport", "wudport-prod-staging")    # another brand's bucket
+    assert not _bucket_matches_brand("blokport", "notblokport-prod")        # slug as a substring, not the prefix
+    assert not _bucket_matches_brand("blokport", "blokportprod")            # missing the '-' boundary
+    assert not _bucket_matches_brand("", "anything")                        # unset brand never matches
