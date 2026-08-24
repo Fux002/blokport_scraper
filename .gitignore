@@ -52,3 +52,7 @@ crash.log
 infra/**/terraform.tfvars
 infra/**/*.auto.tfvars
 variants_export_base.seed.csv
+
+# Local runtime secrets (copied from .env.template); never commit
+.env
+!.env.template

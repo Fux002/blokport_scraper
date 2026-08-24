@@ -1,8 +1,17 @@
 # Multi-brand / multi-product launch runbook
 
-One codebase + one dev. Each **brand** is its own **production deployment** (own Medusa backend + storefront,
-own S3 bucket, own domain pack). The **product type** (stone / wood / lime) is a **setup choice** — the domain
-pack — not code. Today: Blokport (stone). Next: Wudport (wood), Calcport (lime).
+One codebase + **one shared dev** (blokport). Each **brand** is its own **production deployment** (own Medusa
+backend + storefront, own S3 bucket, own domain pack). The other brands are **prod-only** (no dev of their
+own). The **product type** (stone / wood / lime) is a **setup choice** — the domain pack — not code. Today:
+Blokport (stone). Next: Wudport (wood), Calcport (lime).
+
+> **The declarative layer.** A brand is a **tfvars file**, not a code change:
+> - `infra/brands/<brand>.tfvars` — one file per brand (blokport = dev + prod; wudport/calcport = prod-only,
+>   standby with zero AWS until filled). See `infra/brands/README.md` for the launch matrix + `init`/`apply`.
+> - `.env.template` (repo root) — every runtime env var, `SCRAPER_*` names, for local runs + as the checklist.
+>
+> Intended AWS footprint: **dev + one prod (blokport)**; wudport/calcport are declared and ready but consume
+> **zero** AWS until their tfvars are filled.
 
 ## What is now product- and brand-agnostic (this branch)
 
