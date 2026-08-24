@@ -35,8 +35,35 @@ WORKSPACE_ROOT = REPO_ROOT.parent
 # on the ECS task / Lambda / Batch job) and never a code edit. The defaults below
 # reproduce the current dev-staging behaviour exactly, so nothing changes until
 # the env vars are set. See DEV_PROD_PIPELINE.md for the promotion checklist.
-BLOKPORT_ENV = os.environ.get("BLOKPORT_ENV", "development").strip().lower()
-IS_PRODUCTION = BLOKPORT_ENV in ("production", "prod")
+#
+# BLOKPORT_ENV IS THE DEPLOYMENT TIER, AND NOTHING ELSE. It is not a tenant, brand or material
+# slot. Every production guard in this file keys off IS_PRODUCTION, so an unrecognised value that
+# merely FAILED to look like production would silently downgrade a prod deployment to dev
+# semantics: dev S3 prefix, BLOKPORT_S3_DRY_RUN defaulting true, and the bucket + sales-channel
+# guards below disabled -- a run that looks healthy while writing nothing real. A brand-prefixed
+# value such as "wudport-production" is the obvious way to trip this.
+#
+# So the value is VALIDATED against a closed set and anything else raises HERE, at import, before
+# a single guard can be silently skipped. Separation between two brands or materials comes from
+# giving each its own deployment -- own bucket, own task, own config.db + ledger -- never from
+# inventing a new BLOKPORT_ENV string. See DOMAIN_PACK.md.
+_ENV_ALIASES = {
+    "development": "development", "dev": "development",
+    "production": "production", "prod": "production",
+}
+_RAW_ENV = os.environ.get("BLOKPORT_ENV", "development").strip().lower()
+if _RAW_ENV not in _ENV_ALIASES:
+    raise RuntimeError(
+        f"BLOKPORT_ENV={os.environ.get('BLOKPORT_ENV')!r} is not a valid deployment tier. "
+        f"Allowed: {', '.join(sorted(_ENV_ALIASES))}. BLOKPORT_ENV selects the TIER only -- it is "
+        "not a brand/tenant/material slot, and an unrecognised value would silently run with "
+        "DEVELOPMENT semantics (dev S3 prefix, dry-run on, bucket + sales-channel guards off). "
+        "To run a second brand or material, give it its OWN deployment (own S3 bucket, own task, "
+        "own config.db + ledger) with BLOKPORT_ENV set to the real tier, and select its vocabulary "
+        "with BLOKPORT_DOMAIN_PACK. See DOMAIN_PACK.md.")
+# Canonical, so downstream sees "development"/"production" even when the alias "dev"/"prod" was set.
+BLOKPORT_ENV = _ENV_ALIASES[_RAW_ENV]
+IS_PRODUCTION = BLOKPORT_ENV == "production"
 # Two DELIBERATELY separate S3 top-level prefixes per environment, split by lifecycle (not by accident --
 # each is owned by a different subsystem, and the boundary is REGENERABLE-vs-DURABLE):
 #   ENV_SEGMENT (dev|prod)          -- the REGENERABLE data + integration plane. products/, variations/,

@@ -15,16 +15,37 @@ a dev apply never reads the prod platform state or the `/blokport-prod/` params.
 now config + the cross-team prerequisite below, not new module code.
 
 CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's prod platform VPC.
+
+> **Status 2026-08-24 (audited against `blokport_backend`).** The Blokport side of every item below is
+> now WRITTEN AND VALIDATED, but the prod platform stack has **not been applied yet** — there is no
+> `blokport/prod/terraform.tfstate` in the bucket, and no prod AWS resources exist. So the ordering is
+> unchanged and strict: **Blokport applies its prod platform stack FIRST, then this stack.** Nothing
+> here needs new module code.
+
 - [ ] **Blokport prod platform up + remote state available** at `blokport/prod/terraform.tfstate`
       (bucket `blokport-tfstate`), exposing the same outputs as dev (`vpc_id`, `private_subnet_ids`,
       `ecs_cluster_arn`, `service_sg_id`, `internal_namespace_id`). `sync_service_prod` reads these via
       `data.terraform_remote_state.platform_prod` once prod is enabled.
+      *Blokport side READY:* all five outputs are in `terraform/envs/prod/outputs.tf`, plus
+      `ecs_cluster_name` for `modules/scraper`. The shared network module tags the VPC
+      `blokport-prod-vpc` and its private subnets `Tier=private`, which is how the `aws_vpc` /
+      `aws_subnets` lookups here find the network. Waiting only on the apply.
 - [ ] **Create prod SSM params:** `/blokport-prod/BLOKPORT_SYNC_TOKEN`, `/blokport-prod/BLOKPORT_CONFIG_TOKEN`
       (read by name when prod is enabled), and set `fal_key_ssm_name` (+ `scraper_proxy_ssm_name` if used) to
       the prod FAL_KEY / proxy SSM params so `local.prod_ssm_secrets` wires them into the prod scraper, GPU,
       and produce.
+      *Blokport side READY for the two TOKENS:* they are now in the prod stack's `app_secrets`, so its
+      apply creates both params (confirmed in a dry-run plan). The backend also carries
+      `SCRAPER_SYNC_URL`/`SCRAPER_CONFIG_URL` (`scraper.blokport-prod.internal:8723`/`:8724`),
+      `SCRAPER_SYNC_ENABLED=true` and both tokens on its FIRST prod task def.
+      *STILL MANUAL:* `/blokport-prod/FAL_KEY` and `/blokport-prod/BLOKPORT_SCRAPER_PROXY`. These are
+      scraper-only, so the platform deliberately does not create them (they would otherwise be injected
+      into the Medusa backend task). Create them with `aws ssm put-parameter` before this apply.
 - [ ] Set `prod_staging_bucket` in `infra/terraform.tfvars` -- this flips `local.prod_enabled` and creates
       ALL prod resources at once (`scraper_prod`, `gpu_enhance_prod`, `sync_service_prod` + prod data sources).
+      *The value is now KNOWN IN ADVANCE:* `blokport-prod-staging`. The platform's prod stack sets
+      `deterministic_bucket_names = true`, so there is no random hex suffix to look up after the fact.
+      Keep the variable's DEFAULT at `""` — a non-empty default would make a routine dev apply build prod.
 - [ ] Set the prod flags as desired: `prod_image_tag`, `prod_gpu_image_tag`, `prod_schedule_enabled`,
       `prod_auto_enhance` / `prod_auto_texture` / `prod_require_enhanced` (all default OFF for a quiet start).
 - [ ] `alert_email` in `terraform.tfvars` (also makes the DEV alert persistent -- a full apply otherwise
