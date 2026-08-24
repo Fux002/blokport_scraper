@@ -193,11 +193,11 @@ resource "aws_ecs_task_definition" "this" {
       { name = "BLOKPORT_ENV", value = var.target_env },
       { name = "BLOKPORT_S3_BUCKET", value = var.staging_bucket },
       { name = "BLOKPORT_S3_REGION", value = var.region },
-      # Brand + product-type selection: the domain pack IS the product-type choice (stone/wood/lime); BRAND
-      # names the store and is cross-checked against the bucket in prod. Defaults keep this the blokport-stone
-      # stack, so a re-apply is a no-op; a wudport/calcport stack overrides them.
-      { name = "BLOKPORT_BRAND", value = var.brand },
-      { name = "BLOKPORT_DOMAIN_PACK", value = var.domain_pack },
+      # Brand + product-type selection. Names are BRAND-NEUTRAL on purpose (the product type is not a brand's
+      # property): DOMAIN_PACK is the product-type choice (stone/wood/lime), BRAND names the store (cross-checked
+      # against the bucket in prod). Defaults keep this the blokport-stone stack.
+      { name = "BRAND", value = var.brand },
+      { name = "DOMAIN_PACK", value = var.domain_pack },
       { name = "BLOKPORT_SALES_CHANNEL_ID", value = var.sales_channel_id },
       { name = "BLOKPORT_S3_DRY_RUN", value = "false" },
       { name = "BLOKPORT_IMAGE_MODE", value = "s3" },

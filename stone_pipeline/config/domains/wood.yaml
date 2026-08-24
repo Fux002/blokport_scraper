@@ -1,6 +1,6 @@
 # Product-domain pack: WOOD (Wudport).  <<< SKELETON -- REPLACE THE PLACEHOLDER VALUES WITH REAL WUDPORT DATA >>>
 #
-# This is a structurally-valid template so `BLOKPORT_DOMAIN_PACK=wood` LOADS and the pipeline runs the wood
+# This is a structurally-valid template so `DOMAIN_PACK=wood` LOADS and the pipeline runs the wood
 # vocabulary instead of stone -- the product type is now a SETUP CHOICE (this file + the env var), not code.
 # Same Medusa data model as stone (category / type / color / finish / quality); only the VALUES differ.
 #
@@ -9,7 +9,7 @@
 #   - the wood species vocabulary lives in attributes.csv (type), pulled from Wudport's Medusa -- not here
 #   - finishes, density, and the fallback dimensions must be REAL wood values (wood is ~700 kg/m3, not 2700)
 # Then author the matching backbone_*.json (per category) in catalog_source/ and run the smoke run
-# (a ~10-row scrape->derive->emit with BLOKPORT_DOMAIN_PACK=wood) BEFORE any Wudport prod deploy.
+# (a ~10-row scrape->derive->emit with DOMAIN_PACK=wood) BEFORE any Wudport prod deploy.
 name: wood
 
 # Same attribute model as stone (per the brand setup): type = wood SPECIES (the disambiguator, drives the
@@ -25,7 +25,7 @@ leaf_attributes: [color, finish, quality]
 categories:
   - {name: plank, plural: planks, label: Planks, backbone_filename: backbone_planks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014", pcat_env_var: null, default_form: true,  base_image: ""}
   - {name: beam,  plural: beams,  label: Beams,  backbone_filename: backbone_beams.json,  shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014", pcat_env_var: null, bulk_form: true,    base_image: ""}
-  - {name: panel, plural: panels, label: Panels, backbone_filename: backbone_panels.json, shares_variety_vocab: true, fan_out: true, mirror_of: plank, volume_per_kg: "0.0014", pcat_env_var: BLOKPORT_CAT_PANELS_PCAT,  base_image: ""}
+  - {name: panel, plural: panels, label: Panels, backbone_filename: backbone_panels.json, shares_variety_vocab: true, fan_out: true, mirror_of: plank, volume_per_kg: "0.0014", pcat_env_var: null,  base_image: ""}
 
 # PLACEHOLDER: species words too generic to disambiguate a variety on their own (wood's analogue of stone's
 # 'crystal/quartz'). Set Wudport's real ambiguous species/descriptors, or leave a minimal set.

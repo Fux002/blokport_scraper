@@ -28,14 +28,14 @@ def _deactivate_tiles(monkeypatch):
 def _clear_tile_reference(ref):
     """The live export now contains tile variants; clear them to exercise the
     'no tile reference supplied yet' path (the function-scoped ref isolates this)."""
-    ref.variants_tiles.by_id.clear()
-    ref.variants_tiles.surface_to_id.clear()
+    ref.variants["tile"].by_id.clear()
+    ref.variants["tile"].surface_to_id.clear()
 
 
 def test_tile_with_no_reference_is_held_not_given_slab_id(ref, monkeypatch):
     _deactivate_tiles(monkeypatch)  # category not wired up: tile held, not given a slab id
     _clear_tile_reference(ref)
-    assert len(ref.variants_tiles.by_id) == 0  # not supplied yet
+    assert len(ref.variants["tile"].by_id) == 0  # not supplied yet
     stage = match_variation.VariationStage.build(ref)
     row = CanonicalRow(src_site="marenostone", surrogate_key="t1",
                        format_value="Tile", variety_match_key="White Travertine",
@@ -65,7 +65,7 @@ def test_tile_resolves_when_tile_variants_supplied(ref):
     # simulate the tile export arriving with exactly one known tile variant
     _clear_tile_reference(ref)
     tid = "01TILEWHITETRAVERTINE00000"
-    ref.variants_tiles.by_id[tid] = Variant(
+    ref.variants["tile"].by_id[tid] = Variant(
         variation_id=tid, key="tile_travertine_white_travertine",
         name="White Travertine", image="", aliases=[])
     stage = match_variation.VariationStage.build(ref)

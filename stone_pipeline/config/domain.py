@@ -147,9 +147,10 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
 
 
 def load_pack(name: str | None = None) -> DomainPack:
-    """Load a pack by name (BLOKPORT_DOMAIN_PACK, default 'stone'). Raises on a missing pack or a missing
-    required key -- never silently substitutes a default vocabulary."""
-    name = name or os.environ.get("BLOKPORT_DOMAIN_PACK", _DEFAULT_PACK)
+    """Load a pack by name (env DOMAIN_PACK, default 'stone'). Raises on a missing pack or a missing required
+    key -- never silently substitutes a default vocabulary. The env var is brand-neutral (DOMAIN_PACK): the
+    product type is not a brand's property. The legacy BLOKPORT_DOMAIN_PACK is still read for back-compat."""
+    name = name or os.environ.get("DOMAIN_PACK") or os.environ.get("BLOKPORT_DOMAIN_PACK") or _DEFAULT_PACK
     path = _pack_path(name)
     if not path.exists():
         raise FileNotFoundError(

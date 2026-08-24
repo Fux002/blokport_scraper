@@ -11,7 +11,7 @@ import csv
 
 import pytest
 
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.reference import loaders
 from stone_pipeline.reference.fingerprint import (
     FingerprintMismatch,
@@ -28,9 +28,9 @@ def ref() -> loaders.ReferenceData:
 def test_all_reference_files_load(ref):
     assert len(ref.attributes.by_category["color"]) == 26  # +Orchid +Natural (generic last-resort colour)
     assert len(ref.attributes.by_category["type"]) == 31   # +Dolomite Marble
-    assert ref.attributes.category_pcat["Slabs"] == SETTINGS.backend.cat_slabs_pcat
-    assert ref.attributes.category_pcat["Blocks"] == SETTINGS.backend.cat_blocks_pcat
-    assert len(ref.variants_slabs.by_id) > 300
+    assert ref.attributes.category_pcat["Slabs"] == category("slab").pcat_id
+    assert ref.attributes.category_pcat["Blocks"] == category("block").pcat_id
+    assert len(ref.variants["slab"].by_id) > 300
     assert len(ref.backbone) > 10000
     assert ref.units.convert(2000, "mm") == pytest.approx(2.0)
     assert ref.units.convert(1.0, "ft") == pytest.approx(0.3048)
@@ -56,7 +56,7 @@ def test_6a_trace_reproduces_against_real_upload(ref):
     via attributes.csv, Type Name equals the Type Id name, and the variation id
     resolves via the slabs variants file (allowing for reference lag)."""
     attr_ids = set(ref.attributes.all_ids())
-    slab_ids = set(ref.variants_slabs.all_ids())
+    slab_ids = set(ref.variants["slab"].all_ids())
     rows = 0
     type_name_matches = 0
     variation_resolved = 0

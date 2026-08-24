@@ -1,0 +1,82 @@
+# Product-domain pack: LIME (Calcport).  <<< SKELETON -- REPLACE EVERY PLACEHOLDER WITH REAL CALCPORT DATA >>>
+#
+# Structurally-valid template so `DOMAIN_PACK=lime` LOADS and the pipeline runs the lime vocabulary instead of
+# stone -- the product type is a SETUP CHOICE (this file + the env var), not code. Same Medusa data model as
+# stone (category / type / color / finish / quality); only the VALUES differ.
+#
+# EVERYTHING below is a placeholder. Before a lime smoke run / Calcport prod deploy, set the REAL model:
+#   - categories: Calcport's actual lime product forms + which is the default/bulk form (these guesses are NOT
+#     real lime forms -- replace them)
+#   - the lime `type` vocabulary lives in attributes.csv (from Calcport's Medusa), not here
+#   - density, finishes, dimensions must be REAL lime values
+# Then author backbone_<category>.json per category in catalog_source/ and run the smoke run
+# (~10 rows scrape->derive->emit with DOMAIN_PACK=lime) BEFORE any Calcport prod deploy.
+name: lime
+
+# Same attribute model as stone/brand setup: type is the disambiguator (drives the Key); color/finish/quality
+# grow the leaf. The VALUES come from Calcport's attributes.csv.
+attributes: [type, color, finish, quality]
+disambiguator: type
+leaf_attributes: [color, finish, quality]
+
+# PLACEHOLDER category model -- replace with Calcport's REAL lime forms. Exactly one default_form; optionally
+# one bulk_form. base_image "" = real photo; pcat is env-specific (attributes.csv), so pcat_env_var null.
+categories:
+  - {name: block, plural: blocks, label: Blocks, backbone_filename: backbone_blocks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0006", pcat_env_var: null, default_form: true, base_image: ""}
+  - {name: bag,   plural: bags,   label: Bags,   backbone_filename: backbone_bags.json,   shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0006", pcat_env_var: null, bulk_form: true,   base_image: ""}
+
+# PLACEHOLDER: type words too generic to disambiguate on their own.
+ambiguous_type_words: [lime, calcium]
+
+# PLACEHOLDER: words that, as the ONLY difference between two names, mark an alias not a distinct variety.
+generic_descriptors: [lime, calcium, block, blocks, bag, bags, natural, hydraulic, hydrated, premium,
+                      classic, standard, the, and]
+
+# The generic material noun (title fallback + purely-generic-type check).
+generic_material_word: lime
+
+# PLACEHOLDER default allowed-finish set for a new variety; must exist in attributes.csv (finish).
+default_finishes: [Natural, Smooth, Textured, Raw]
+
+# Generic fallback colour; must exist in attributes.csv (color).
+fallback_color: Natural
+
+# PLACEHOLDER last-resort finish per branch (unlisted branch uses the default form's) + one quality.
+last_resort_finishes: {block: Natural}
+last_resort_quality: A
+
+# In-stock fallback COUNT per category (made-to-order estimate). One entry per category above.
+in_stock_fallback_qty: {block: 10, bag: 1}
+
+# Standard finish for a raw/unfinished bulk form, applied when a source gives none.
+block_finish: Raw
+
+# Material density kg/m3 -- REAL lime value (placeholder). Lime products vary widely (hydrated lime bulk
+# ~500, limestone block ~2500); set Calcport's actual figure and supply reference/type_density.lime.csv.
+default_density: 1600
+
+# PLACEHOLDER fallback dimension/weight ranges per category, metres/tonnes [lo, hi]. width == thickness.
+dimension_ranges:
+  block: {weight: [0.01, 0.05], length: [0.2, 0.6], width: [0.1, 0.3], height: [0.1, 0.3]}
+  bag:   {weight: [0.02, 0.05], length: [0.3, 0.6], width: [0.1, 0.3], height: [0.4, 0.8]}
+
+# PLACEHOLDER fallback dimensions in METRES (applied only when a real value is missing; always flagged).
+dimension_defaults:
+  block: {length: 0.40, height: 0.20, thickness: 0.20}
+  bag:   {length: 0.50, height: 0.60, thickness: 0.20}
+
+# PLACEHOLDER finish -> surface phrase for the generated description.
+finish_phrases:
+  natural: "a natural, breathable lime finish"
+  smooth: "a smooth, even lime surface"
+  textured: "a textured lime surface with tactile depth"
+finish_phrase_default: "a natural lime surface"
+
+# Name-cleaning: lime has no granite-style code convention, so no code pattern and no trailing-grade strip
+# unless Calcport's naming needs them.
+name_code_pattern: null
+trailing_grade_letters: false
+
+# The stone-tuned CV colour palette cannot read lime tones -> texture-colour classification OFF; colour comes
+# from the source/Medusa value + fallback_color.
+classify_texture_color: false

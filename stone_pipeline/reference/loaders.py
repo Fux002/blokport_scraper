@@ -759,17 +759,8 @@ class ReferenceData:
         to GB via the name/alias path instead of passing through as a bogus code)."""
         return frozenset(self.country_codes.values())
 
-    @property
-    def variants_slabs(self) -> VariantTable:
-        return self.variants["slab"]
-
-    @property
-    def variants_blocks(self) -> VariantTable:
-        return self.variants["block"]
-
-    @property
-    def variants_tiles(self) -> VariantTable:
-        return self.variants["tile"]
+    # A specific category's variant table is `self.variants[<category name>]` (keyed by the active pack's
+    # category names) -- no per-product-type accessor, so nothing here assumes a 'slab'/'block'/'tile' pack.
 
 
 def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:

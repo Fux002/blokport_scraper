@@ -112,12 +112,14 @@ S3_REGION = os.environ.get("BLOKPORT_S3_REGION", "eu-west-1")
 # ANOTHER brand's populated prod bucket -- that would write one brand's images into another's store, keyed
 # to a wrong Medusa. So in PRODUCTION require BLOKPORT_BRAND and cross-check it against the bucket name:
 # the brand slug MUST appear in the bucket, or we refuse to run. Convention: '<brand>-prod-staging[...]'.
-BRAND = os.environ.get("BLOKPORT_BRAND", "").strip().lower() or ("blokport" if not IS_PRODUCTION else "")
+# BRAND is brand-neutral by design (env `BRAND`); legacy `BLOKPORT_BRAND` still read for back-compat.
+BRAND = (os.environ.get("BRAND") or os.environ.get("BLOKPORT_BRAND") or "").strip().lower() \
+    or ("blokport" if not IS_PRODUCTION else "")
 if IS_PRODUCTION:
     if not BRAND:
         raise RuntimeError(
-            "BLOKPORT_BRAND must be set in production (the brand this deployment serves, e.g. 'blokport', "
-            "'wudport', 'calcport') so the brand<->bucket guard can refuse a cross-brand mis-configuration.")
+            "BRAND must be set in production (the brand this deployment serves, e.g. 'blokport', 'wudport', "
+            "'calcport') so the brand<->bucket guard can refuse a cross-brand mis-configuration.")
     if BRAND not in S3_BUCKET.lower():
         raise RuntimeError(
             f"BLOKPORT_BRAND={BRAND!r} but the prod bucket {S3_BUCKET!r} does not contain the brand slug -- "
@@ -210,17 +212,7 @@ class Paths:
         # (category('slab') -> None -> AttributeError) on the arg-less load_backbone hot path.
         return category(default_form_name()).backbone_path
 
-    @property
-    def backbone_slabs_json(self) -> Path:
-        return category("slab").backbone_path
-
-    @property
-    def backbone_blocks_json(self) -> Path:
-        return category("block").backbone_path
-
-    @property
-    def backbone_tiles_json(self) -> Path:
-        return category("tile").backbone_path
+    # A specific category's backbone is category(<name>).backbone_path -- no per-product-type accessor.
 
     @property
     def type_density_csv(self) -> Path:
@@ -324,17 +316,7 @@ class BackendConstants:
     (dev-staging environment). Per-source overrides live in sources.yaml."""
 
     # Category pcat ids derive from the CATEGORIES registry (single source of truth).
-    @property
-    def cat_slabs_pcat(self) -> str:
-        return category("slab").pcat_id
-
-    @property
-    def cat_blocks_pcat(self) -> str:
-        return category("block").pcat_id
-
-    @property
-    def cat_tiles_pcat(self) -> str:
-        return category("tile").pcat_id
+    # A specific category's pcat is category(<name>).pcat_id -- no per-product-type accessor.
 
     # Owner ids, from env vars (settings top). sales_channel_id: one per env. company_id: the
     # general Blokport owner default; a per-scrape sources.yaml value overrides it (constants).
@@ -545,17 +527,7 @@ class CurationConfig:
         f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{ENV_SEGMENT}/variations/")
     # Base images per category derive from the CATEGORIES registry (image_prompts
     # selects by Key prefix; these accessors remain for any direct callers).
-    @property
-    def variant_base_image_slab(self) -> str:
-        return category("slab").base_image
-
-    @property
-    def variant_base_image_block(self) -> str:
-        return category("block").base_image
-
-    @property
-    def variant_base_image_tile(self) -> str:
-        return category("tile").base_image
+    # A specific category's base image is category(<name>).base_image -- no per-product-type accessor.
 
     # (Volume per kg (m³/kg) is per-category now; see CATEGORIES[*].volume_per_kg.)
     # a gap whose nearest existing variety scores at or above this is proposed as
