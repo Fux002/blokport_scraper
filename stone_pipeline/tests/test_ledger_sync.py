@@ -85,6 +85,22 @@ def test_sync_loop_serve_ack_converges(tmp_path):
         assert [r["external_id"] for r in ready(ledger, "products")] == ["S-1"]
 
 
+def test_product_payload_carries_collection_location(tmp_path):
+    # the supplier collection location rides the product payload (independent of origin + ports); a product
+    # with none configured emits null for both (never an error, never overloaded onto origin).
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_c_1", state="synced", medusa_id="VID-1")
+        now = now_iso()
+        for sku, cc, city in [("S-9", "IT", "Verona"), ("S-10", None, None)]:
+            ledger.upsert("product", {"sku": sku, "source": "s", "variation_key": "slab_c_1",
+                                      "state": "pending", "collection_country_code": cc,
+                                      "collection_city": city, "created_at": now, "updated_at": now},
+                          pk=("sku",))
+        by = {r["external_id"]: r["payload"] for r in ready(ledger, "products")}
+        assert by["S-9"]["collection_country_code"] == "IT" and by["S-9"]["collection_city"] == "Verona"
+        assert by["S-10"]["collection_country_code"] is None and by["S-10"]["collection_city"] is None
+
+
 def test_reset_sync_state_clean_start(tmp_path):
     # Medusa was wiped -> the ledger must follow: every entity back to 'pending', all Medusa ids +
     # sync bookkeeping dropped, but the scraped CONTENT (name/type/image) untouched.

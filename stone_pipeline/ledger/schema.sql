@@ -181,6 +181,8 @@ CREATE TABLE IF NOT EXISTS product (
     origin_country_code  TEXT,
     origin_city          TEXT,
     origin_county        TEXT,
+    collection_country_code TEXT,                       -- supplier collection country (ISO-2; independent of origin)
+    collection_city      TEXT,                          -- supplier collection city
     thumbnail_key        TEXT,
     oriented_image_keys  TEXT,                          -- JSON array, ordered (blocks: Front/Right/Back/Left)
     product_image_keys   TEXT,                          -- JSON array, ordered (slabs: Product Image 1..N)

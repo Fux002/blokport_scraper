@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from stone_pipeline.ledger.db import Ledger, now_iso
+from stone_pipeline.ledger.db import Ledger, SCHEMA_VERSION, now_iso
 from stone_pipeline.ledger.sync import (abandon_dead_letter, cancel_variation_tombstone, failures,
                                         ready, reconcile_variations_to_seed, record_tombstones,
                                         requeue_dead_lettered)
@@ -33,7 +33,7 @@ def test_v4_to_v5_migration_adds_abandoned_at_and_preserves_data(tmp_path):
     if sqlite3.sqlite_version_info < (3, 35, 0):
         pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v4 shape")
     p = tmp_path / "mig.ledger"
-    with Ledger.open(p, env="development") as lg:               # create current (v5) schema
+    with Ledger.open(p, env="development") as lg:               # create current schema
         _variation(lg, "slab_marble_keep_1", "gap_held", medusa_id="V9")
     raw = sqlite3.connect(p)                                    # simulate a v4 ledger: strip the v5 column
     for t in ("variation", "product", "removed"):
@@ -41,8 +41,8 @@ def test_v4_to_v5_migration_adds_abandoned_at_and_preserves_data(tmp_path):
     raw.execute("PRAGMA user_version = 4")
     raw.commit(); raw.close()
 
-    with Ledger.open(p, env="development") as lg:               # reopen with v5 code -> _migrate runs
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    with Ledger.open(p, env="development") as lg:               # reopen with current code -> _migrate runs
+        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         for t in ("variation", "product", "removed"):
             cols = [r[1] for r in lg.conn.execute(f"PRAGMA table_info({t})")]
             assert "abandoned_at" in cols                       # column re-added by the ALTER migration

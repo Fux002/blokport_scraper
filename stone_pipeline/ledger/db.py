@@ -27,7 +27,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 5   # v5: `abandoned_at` on variation/product/removed -- a dead-letter the operator dropped
+SCHEMA_VERSION = 6   # v6: product.collection_country_code/collection_city -- supplier collection location
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -155,6 +155,11 @@ class Ledger:
         inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
+        prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}
+        if "collection_country_code" not in prod_cols:   # v6: supplier collection location (independent of origin)
+            self.conn.execute("ALTER TABLE product ADD COLUMN collection_country_code TEXT")
+        if "collection_city" not in prod_cols:
+            self.conn.execute("ALTER TABLE product ADD COLUMN collection_city TEXT")
         removed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(removed)")}
         if "kind" not in removed_cols:   # v4: existing tombstones are all products (that was the only lane)
             self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")

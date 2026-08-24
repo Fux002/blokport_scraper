@@ -232,6 +232,12 @@ class CanonicalRow(BaseModel):
     origin_county: Optional[str] = None
     origin_confidence: str = "none"
     origin_source: str = ""
+    # supplier COLLECTION location: where this source's products are physically collected before shipping
+    # (the supplier's warehouse). Independent of origin (provenance/quarry) and of ports (departure). A
+    # per-source constant (SourceConfig.collection_*), stamped in derive_collection. Optional -- None when the
+    # source has no collection location configured; NEVER required (unlike origin).
+    collection_country_code: Optional[str] = None
+    collection_city: Optional[str] = None
     port_ids: list[str] = Field(default_factory=list)
 
     # generated (Stage 6)

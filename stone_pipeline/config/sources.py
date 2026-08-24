@@ -35,6 +35,14 @@ class SourceConfig:
     # country and origin_map doesn't cover the variety -- Medusa requires an origin for its
     # pricing-rule lookup. origin_map (per-variety) overrides it for known specific origins.
     origin_default: str = ""
+    # supplier COLLECTION location: ISO-2 country + city where this source's products are physically
+    # collected before shipping (the supplier's warehouse). Independent of origin_default (provenance) and
+    # of ports_default (departure). Stamped onto every row (derive_collection) and emitted in the sync
+    # payload as collection_country_code / collection_city. Optional: blank -> the product emits null
+    # collection_* (it still lists; the port conveys departure). Set per source in the :4200 admin UI, like
+    # origin_default. A per-PRODUCT scrape override can be layered on later (precedence scrape > default).
+    collection_country_default: str = ""
+    collection_city_default: str = ""
     emit_on_review: bool = True
     default_bundle_size: int = 6
     # The source burns a visible watermark into its product photos (e.g. varsha).
