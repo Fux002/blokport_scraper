@@ -37,12 +37,44 @@ locals {
     var.scraper_proxy_ssm_name == "" ? {} : { BLOKPORT_SCRAPER_PROXY = data.aws_ssm_parameter.scraper_proxy[0].arn },
   )
   prod_enabled = var.prod_staging_bucket != ""
+  dev_enabled  = var.dev_enabled
+  # Shared image repo, resolved from whichever side owns it: the creating brand's resource, or the data
+  # source that references it. Every consumer uses these, so create_ecr flips ownership with no other edit.
+  ecr_repo_url = var.create_ecr ? aws_ecr_repository.this[0].repository_url : data.aws_ecr_repository.scraper[0].repository_url
+  ecr_repo_arn = var.create_ecr ? aws_ecr_repository.this[0].arn : data.aws_ecr_repository.scraper[0].arn
+}
+
+# blokport's dev modules pre-date the dev_enabled gate: migrate their state to the count index so adding
+# the gate does NOT destroy/recreate the live dev stack (a prod-only brand starts fresh with none of these).
+moved {
+  from = module.scraper_dev
+  to   = module.scraper_dev[0]
+}
+moved {
+  from = module.gpu_enhance_dev
+  to   = module.gpu_enhance_dev[0]
+}
+moved {
+  from = module.sync_service_dev
+  to   = module.sync_service_dev[0]
 }
 
 # --- SHARED ECR repository (one image, promoted dev -> prod) ------------------
-# SHARED across brands: the image is brand-agnostic (brand/pack chosen at runtime). blokport OWNS this repo;
-# a 2nd brand's root references it as a data source (see below) rather than re-creating it.
+# SHARED across brands: the image is brand-agnostic (brand/pack chosen at runtime), so ONE repo serves every
+# brand. `create_ecr` decides ownership WITHOUT a code edit: the owning brand (blokport, default true) CREATES
+# the repo; every other brand sets create_ecr=false and REFERENCES it via the data source below. All consumers
+# read local.ecr_repo_* so they don't care which side supplied it. (Repo name stays "blokport-scraper" -- an
+# internal, brand-agnostic image registry name, not a brand-facing string; renaming would orphan every image.)
+moved {
+  from = aws_ecr_repository.this
+  to   = aws_ecr_repository.this[0]
+}
+moved {
+  from = aws_ecr_lifecycle_policy.this
+  to   = aws_ecr_lifecycle_policy.this[0]
+}
 resource "aws_ecr_repository" "this" {
+  count                = var.create_ecr ? 1 : 0
   name                 = "blokport-scraper"
   image_tag_mutability = "MUTABLE"
   image_scanning_configuration {
@@ -51,7 +83,8 @@ resource "aws_ecr_repository" "this" {
 }
 
 resource "aws_ecr_lifecycle_policy" "this" {
-  repository = aws_ecr_repository.this.name
+  count      = var.create_ecr ? 1 : 0
+  repository = aws_ecr_repository.this[0].name
   # ECR evaluates rules by priority and an image matched by a higher rule is NOT re-evaluated by a
   # lower one -- so the prefix rules below PROTECT the semantic tags (core / gpu / imageproc, which can
   # never collide with a hex git-sha) from the broad churn rule. Without this, a single "keep last N,
@@ -117,7 +150,7 @@ data "aws_iam_policy_document" "deploy" {
       "ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer",
       "ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload",
     ]
-    resources = [aws_ecr_repository.this.arn]
+    resources = [local.ecr_repo_arn]
   }
   # Let the Deploy workflow roll the dev service after a :core push, so a merge actually goes live instead
   # of shipping a new image that ECS never rolls (the mutable-tag gotcha). UpdateService is scoped to ONLY
@@ -147,11 +180,12 @@ module "scraper_dev" {
 
   brand       = var.brand
   domain_pack = var.domain_pack
+  count       = local.dev_enabled ? 1 : 0
 
   target_env     = "development"
   home_env       = "dev"
   staging_bucket = var.dev_staging_bucket
-  image_repo_url = aws_ecr_repository.this.repository_url
+  image_repo_url = local.ecr_repo_url
 
   region              = var.region
   image_tag           = var.image_tag
@@ -164,9 +198,9 @@ module "scraper_dev" {
 
   # Auto-enhance: the scheduled scrape submits the dev GPU reprocess for newly-staged images. ON in dev
   # (dev_auto_enhance defaults true). Prod stays unwired until its own GPU module is active.
-  gpu_job_queue_name       = module.gpu_enhance_dev.job_queue
-  gpu_job_definition_name  = module.gpu_enhance_dev.job_definition
-  gpu_job_queue_arn        = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_queue_name       = module.gpu_enhance_dev[0].job_queue
+  gpu_job_definition_name  = module.gpu_enhance_dev[0].job_definition
+  gpu_job_queue_arn        = module.gpu_enhance_dev[0].job_queue_arn
   gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
   auto_enhance_enabled     = var.dev_auto_enhance
   require_enhanced_enabled = var.dev_require_enhanced
@@ -186,7 +220,7 @@ module "scraper_prod" {
   target_env     = "production"
   home_env       = var.prod_home_env
   staging_bucket = var.prod_staging_bucket
-  image_repo_url = aws_ecr_repository.this.repository_url
+  image_repo_url = local.ecr_repo_url
 
   region              = var.region
   image_tag           = var.prod_image_tag
@@ -208,11 +242,12 @@ module "gpu_enhance_dev" {
 
   brand       = var.brand
   domain_pack = var.domain_pack
+  count       = local.dev_enabled ? 1 : 0
 
   target_env     = "development"
   home_env       = "dev"
   staging_bucket = var.dev_staging_bucket
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url # shared repo (data source; decoupled from ECR refactor)
+  image_repo_url = local.ecr_repo_url
   image_tag      = var.gpu_image_tag
   region         = var.region
   # 128 vCPU = up to 32 g4dn.xlarge in parallel. Full-catalog reprocess is ~53 GPU-hours at ~30s/image;
@@ -231,7 +266,7 @@ locals {
   # (module output) means any job-def change (e.g. adding a secret) silently breaks the submit with an IAM
   # denial until every dependent module is re-applied. Match all revisions by NAME instead: strip the
   # trailing :<revision> and allow :*. Queue ARNs have no revision, so they are used as-is.
-  dev_gpu_jobdef_iam_arn = replace(module.gpu_enhance_dev.job_definition_arn, "/:[0-9]+$/", ":*")
+  dev_gpu_jobdef_iam_arn = local.dev_enabled ? replace(module.gpu_enhance_dev[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
 }
 
 module "gpu_enhance_prod" {
@@ -245,7 +280,7 @@ module "gpu_enhance_prod" {
   target_env     = "production"
   home_env       = var.prod_home_env
   staging_bucket = var.prod_staging_bucket
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_repo_url = local.ecr_repo_url
   image_tag      = var.prod_gpu_image_tag
   region         = var.region
   alert_email    = var.alert_email
@@ -275,16 +310,21 @@ data "aws_ssm_parameter" "config_token_dev" { name = "/${var.brand}-dev/BLOKPORT
 # Reference the EXISTING shared ECR by name (data source, not the root resource) so this module can
 # apply with -target without depending on the root ECR -- which is currently drifted from state
 # (state has module.scraper.aws_ecr_repository; the repo config was refactored but never applied).
-data "aws_ecr_repository" "scraper" { name = "blokport-scraper" }
+# Referenced ONLY by a non-owning brand (create_ecr=false); the owning brand creates the repo above instead.
+data "aws_ecr_repository" "scraper" {
+  count = var.create_ecr ? 0 : 1
+  name  = "blokport-scraper"
+}
 
 module "sync_service_dev" {
   source = "./modules/sync_service"
 
   brand       = var.brand
   domain_pack = var.domain_pack
+  count       = local.dev_enabled ? 1 : 0
 
   target_env     = "development"
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_repo_url = local.ecr_repo_url
   # DEV tracks :core (= what's on main); the branch is merged. :core = bbf35a2 (WAL + local-disk ledger).
   image_tag      = var.image_tag
   region         = var.region
@@ -310,9 +350,9 @@ module "sync_service_dev" {
 
   # Auto-enhance: the produce trigger submits the dev GPU reprocess for newly-staged images (scoped IAM +
   # queue/def names). ON in dev (dev_auto_enhance defaults true). Auto-texture reuses the same queue/jobdef.
-  gpu_job_queue_name       = module.gpu_enhance_dev.job_queue
-  gpu_job_definition_name  = module.gpu_enhance_dev.job_definition
-  gpu_job_queue_arn        = module.gpu_enhance_dev.job_queue_arn
+  gpu_job_queue_name       = module.gpu_enhance_dev[0].job_queue
+  gpu_job_definition_name  = module.gpu_enhance_dev[0].job_definition
+  gpu_job_queue_arn        = module.gpu_enhance_dev[0].job_queue_arn
   gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
   auto_enhance_enabled     = var.dev_auto_enhance
   auto_texture_enabled     = var.dev_auto_texture
@@ -361,7 +401,7 @@ module "sync_service_prod" {
   count            = local.prod_enabled ? 1 : 0
 
   target_env     = "production"
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_repo_url = local.ecr_repo_url
   image_tag      = var.prod_image_tag
   region         = var.region
   staging_bucket = var.prod_staging_bucket

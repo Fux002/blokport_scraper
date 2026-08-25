@@ -9,6 +9,12 @@ variable "dev_staging_bucket" {
   default = "blokport-dev-staging-3e58a6"
 }
 
+variable "dev_enabled" {
+  type        = bool
+  default     = true
+  description = "Whether this brand has a dev deployment. True for blokport (the one shared dev). A prod-only brand (wudport, calcport) sets this false so ONLY its prod stack stands up -- no per-brand dev."
+}
+
 variable "prod_staging_bucket" {
   type        = string
   default     = ""
@@ -167,6 +173,12 @@ variable "domain_pack" {
   type        = string
   default     = "stone"
   description = "SCRAPER_DOMAIN_PACK -- the product-domain pack this brand runs (stone | wood | lime | ...). Selects the whole product model at runtime; no code edit."
+}
+
+variable "create_ecr" {
+  type        = bool
+  default     = true
+  description = "Whether THIS brand's stack creates the shared ECR image repo. True for the owning brand (blokport); every other brand sets false and references the existing repo (the image is brand-agnostic, so all brands share one). Flips repo ownership with no code edit."
 }
 
 variable "prod_sales_channel_id" {
