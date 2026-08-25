@@ -322,6 +322,36 @@ def _prune_stale_product_exports() -> dict:
     return out
 
 
+def _prune_stale_medusa_export() -> dict:
+    """Delete the pre-reset Medusa PRODUCT export (from_medusa/<env>/products_export.csv), local AND on S3. A
+    factory reset means Medusa is wiped, so its product export is by definition stale -- and `seed_products`
+    seeds a 'synced' ledger row for EVERY sku in that file, so a stale export re-hydrates GHOST products
+    (synced, no medusa_id, absent from live Medusa) on the next produce's bootstrap. `seed_products` is dormant
+    when the file is absent (returns 0), so removing it makes the cold start seed ZERO products until Medusa
+    re-publishes a fresh export. Only this one file: attributes.csv (the vocab) and variants_export_base.csv
+    (the Id-free seed) are KEPT. Best-effort + LOUD: never fails the reset."""
+    from stone_pipeline.config.settings import SETTINGS
+    out: dict = {"local": 0, "s3": 0}
+    try:
+        f = SETTINGS.paths.products_known_csv
+        if f.exists():
+            f.unlink()
+            out["local"] = 1
+    except Exception as exc:
+        log.exception("reset: local medusa-export prune failed (best-effort)")
+        out["local_error"] = str(exc)
+    try:
+        import boto3
+        from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
+        s3 = boto3.client("s3", region_name=S3_REGION)
+        s3.delete_object(Bucket=S3_BUCKET, Key=f"{ENV_SEGMENT}/scraper/from_medusa/products_export.csv")
+        out["s3"] = 1
+    except Exception as exc:
+        log.exception("reset: S3 medusa-export prune failed (best-effort)")
+        out["s3_error"] = str(exc)
+    return out
+
+
 def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
     re-scrape; hard also drops the scraped products AND wipes the hosted product images (scoped -> only the
@@ -428,6 +458,9 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
                 # prune the pre-reset per-source product exports so to_upload/ holds only the seed (they refill
                 # on the next produce; the admin reads the ledger, not these files).
                 out["product_exports_pruned"] = _prune_stale_product_exports()
+                # prune the stale Medusa product export so the cold start does not seed GHOST 'synced' products
+                # from a pre-reset products_export.csv (Medusa is wiped on a factory reset -> that file is stale).
+                out["medusa_export_pruned"] = _prune_stale_medusa_export()
             out["config"] = config
         if hard:
             # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces
