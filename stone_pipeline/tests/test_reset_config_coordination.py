@@ -254,33 +254,35 @@ def test_reset_rejects_an_explicit_empty_sources_list(tmp_path, monkeypatch):
     assert decisions_store.list_pending("variety") and decisions_store.attribute_ids()   # nothing cleared
 
 
-def test_pristine_reset_prunes_the_stale_medusa_export(tmp_path, monkeypatch):
-    """Regression (the 12-ghost-products incident): a factory reset must delete the stale
-    from_medusa/products_export.csv (local AND S3). Medusa is wiped on a pristine reset, so that export is
-    stale -- and seed_products seeds a 'synced' ledger row for EVERY sku in it, re-hydrating ghost products
-    (synced, no medusa_id, absent from live Medusa) on the next cold-start bootstrap. Removing the file makes
-    seed_products dormant (0) until Medusa re-publishes a fresh export."""
+def test_pristine_reset_prunes_both_stale_medusa_exports(tmp_path, monkeypatch):
+    """Regression (the ghost incidents): a factory reset must delete BOTH id-bearing Medusa exports (local AND
+    S3): products_export.csv (seed_products -> ghost PRODUCTS, the 12-ghost incident) and variants_export.csv
+    (seed_variations seeds each variation 'synced' WITH the file's Id column -> up to ~36k ghost VARIATIONS
+    bound to dead/foreign ids; also the dev-ids-into-prod vector). Medusa is wiped on a pristine reset, so both
+    are stale; removing them makes the seeders dormant until Medusa re-publishes fresh exports."""
     import dataclasses
     import boto3
     from stone_pipeline import lifecycle
     from stone_pipeline.config import settings
 
-    stale = tmp_path / "products_export.csv"
-    stale.write_text("Variant Sku,Product Handle,Inventory Quantity\nVAR-1,ghost-1,0\nVAR-2,ghost-2,0\n",
-                     encoding="utf-8")
-    patched = dataclasses.replace(
-        settings.SETTINGS, paths=dataclasses.replace(settings.SETTINGS.paths, products_known_csv=stale))
+    prods = tmp_path / "products_export.csv"
+    prods.write_text("Variant Sku,Product Handle,Inventory Quantity\nVAR-1,ghost-1,0\n", encoding="utf-8")
+    variants = tmp_path / "variants_export.csv"
+    variants.write_text("Id,Key,Name\nmed_1,slab_x_uuid,Ghost\n", encoding="utf-8")
+    patched = dataclasses.replace(settings.SETTINGS, paths=dataclasses.replace(
+        settings.SETTINGS.paths, products_known_csv=prods, variants_export_csv=variants))
     monkeypatch.setattr(settings, "SETTINGS", patched)
 
     deleted = []
 
     class _S3:
-        def delete_object(self, Bucket, Key):
-            deleted.append(Key)
+        def delete_objects(self, Bucket, Delete):
+            deleted.extend(o["Key"] for o in Delete["Objects"])
 
     monkeypatch.setattr(boto3, "client", lambda *a, **k: _S3())
 
     out = lifecycle._prune_stale_medusa_export()
-    assert not stale.exists()                                  # the local ghost source is gone
-    assert out["local"] == 1 and out["s3"] == 1
-    assert deleted and deleted[0].endswith("from_medusa/products_export.csv")
+    assert not prods.exists() and not variants.exists()        # both local ghost sources gone
+    assert out["local"] == 2 and out["s3"] == 2
+    assert any(k.endswith("from_medusa/products_export.csv") for k in deleted)
+    assert any(k.endswith("from_medusa/variants_export.csv") for k in deleted)

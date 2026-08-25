@@ -323,29 +323,39 @@ def _prune_stale_product_exports() -> dict:
 
 
 def _prune_stale_medusa_export() -> dict:
-    """Delete the pre-reset Medusa PRODUCT export (from_medusa/<env>/products_export.csv), local AND on S3. A
-    factory reset means Medusa is wiped, so its product export is by definition stale -- and `seed_products`
-    seeds a 'synced' ledger row for EVERY sku in that file, so a stale export re-hydrates GHOST products
-    (synced, no medusa_id, absent from live Medusa) on the next produce's bootstrap. `seed_products` is dormant
-    when the file is absent (returns 0), so removing it makes the cold start seed ZERO products until Medusa
-    re-publishes a fresh export. Only this one file: attributes.csv (the vocab) and variants_export_base.csv
-    (the Id-free seed) are KEPT. Best-effort + LOUD: never fails the reset."""
+    """Delete the pre-reset Medusa exports that carry live ids -- products_export.csv AND variants_export.csv --
+    local AND on S3. A factory reset means Medusa is wiped, so both are stale by definition, and each seeds a
+    'synced' ledger row on the next cold-boot bootstrap:
+      - seed_products reads products_export.csv (sku -> synced, no medusa_id): a stale file re-hydrates GHOST
+        PRODUCTS (the 12-ghost incident).
+      - seed_variations reads variants_export.csv and seeds each variation 'synced' WITH the file's Id column:
+        a stale or wrong-env file re-hydrates up to ~36k GHOST VARIATIONS bound to dead/foreign ids (and it is
+        the dev-ids-into-prod vector). The thin-guard also PROTECTS variants_export.csv, so a fresh empty copy
+        cannot replace a stale fuller one -- removing it is the only clean break.
+    Both seeders are dormant when their file is absent, so the cold start seeds ZERO from them until Medusa
+    re-publishes fresh exports (with the new backend's ids). attributes.csv (the vocab) and
+    variants_export_base.csv (the Id-free seed) are KEPT. Best-effort + LOUD: never fails the reset."""
     from stone_pipeline.config.settings import SETTINGS
+    files = {  # local path : S3 object name under from_medusa/
+        SETTINGS.paths.products_known_csv: "products_export.csv",
+        SETTINGS.paths.variants_export_csv: "variants_export.csv",
+    }
     out: dict = {"local": 0, "s3": 0}
-    try:
-        f = SETTINGS.paths.products_known_csv
-        if f.exists():
-            f.unlink()
-            out["local"] = 1
-    except Exception as exc:
-        log.exception("reset: local medusa-export prune failed (best-effort)")
-        out["local_error"] = str(exc)
+    for f in files:
+        try:
+            if f.exists():
+                f.unlink()
+                out["local"] += 1
+        except Exception as exc:
+            log.exception("reset: local medusa-export prune failed (best-effort)", extra={"extra_fields": {"file": str(f)}})
+            out["local_error"] = str(exc)
     try:
         import boto3
         from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
         s3 = boto3.client("s3", region_name=S3_REGION)
-        s3.delete_object(Bucket=S3_BUCKET, Key=f"{ENV_SEGMENT}/scraper/from_medusa/products_export.csv")
-        out["s3"] = 1
+        keys = [{"Key": f"{ENV_SEGMENT}/scraper/from_medusa/{name}"} for name in files.values()]
+        s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": keys, "Quiet": True})
+        out["s3"] = len(keys)
     except Exception as exc:
         log.exception("reset: S3 medusa-export prune failed (best-effort)")
         out["s3_error"] = str(exc)
