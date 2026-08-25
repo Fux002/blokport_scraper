@@ -131,3 +131,9 @@ never a Medusa id. So they transplant 1:1 and prod skips the entire GPU pipeline
 - Split-type authority: a confidently-wrong resolved type can bind a homonym to the wrong-type variety (input-dependent). Watch `tree_uncovered_variations.csv` / review holds.
 - Concurrency edges: an ECS reset can race a running produce; the local-run watcher can wedge the run slot on a non-timeout exception. Low frequency.
 - On an S3 outage mid-produce, the image link/gate fail open (narrow window).
+- **Pull loop termination (Blokport):** the pull should keep going while **`status.syncing > 0`**, not stop at
+  `pending == 0`. Serving LEASES rows to `syncing` (in-flight guard); an un-acked lease is reaped to `dirty`
+  and re-served **only on the next pull** (`reap_stale_syncing`, 15-min timeout, no background job). A recurring
+  prod pull self-heals this on its next cycle, but a loop that terminates on `pending == 0` alone can leave
+  leased-but-unacked rows sitting `syncing` (and their products held) until the next scheduled pull. `status()`
+  exposes the `syncing` count for exactly this. Convergence edge, not a correctness bug.
