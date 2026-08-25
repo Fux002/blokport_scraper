@@ -5,10 +5,27 @@ One ordered sequence both chats (scraper + Blokport platform/Medusa) work from. 
 fallback, so a missed step errors rather than shipping silently. See `TODO_PROD.md` for the checklist form
 and `DEV_PROD_PIPELINE.md` for the data-flow story.
 
-**Status (2026-08-24):** prod is NOT provisioned. Nothing exists in prod AWS yet (no state, VPC, cluster,
+**Status (2026-08-25):** prod is NOT provisioned. Nothing exists in prod AWS yet (no state, VPC, cluster,
 bucket). The scraper prod stack is fully defined and count-gated on `prod_staging_bucket`; a dev apply never
 reads prod state or `/blokport-prod/` params. Launch is gated on the Blokport platform apply (blocked on an
-Elastic IP quota increase + real secret values) and then a short scraper apply + verify.
+Elastic IP quota increase + real secret values) and then a short scraper apply + texture transplant + verify.
+Config now lives in **`infra/brands/blokport.tfvars`** + **`infra/brands/blokport.backend.hcl`** (PR #219); the
+old ECR-drift gotcha is RESOLVED — `create_ecr` (default true) owns the shared repo cleanly, no pre-apply cleanup.
+
+## Who does what (the split)
+
+**YOU / Blokport (only you can):** stand up the prod platform (VPC/cluster/state + `blokport-prod-staging` +
+`/blokport-prod/` tokens); set up prod Medusa (same attribute vocabulary as dev, sales channel, company,
+publishable key, category pcats); send the ids; say "apply"; run the produce + pull loop from the UI.
+
+**ME / command line (all of it):** fill the tfvars/backend from your values; `init` + `plan` (show 0 destroy);
+the **one-off texture + base-data transplant** (dev S3 → prod S3, all keys preserved — see Phase 4b); seed +
+bootstrap + `seed.verify`; dry-run then real produce; diagnose from S3 throughout. The `apply` and the UI pull
+stay YOUR triggers.
+
+**Never copied dev→prod:** `config.db` / `ledger.db` (they carry dev's minted ids + synced state). Prod starts
+fresh and mints its own. The base is Id-free; owner ids + attributes come from prod Medusa; only the *textures*
+(Key/sha-named, env-agnostic) are transplanted.
 
 ---
 
@@ -42,7 +59,7 @@ Elastic IP quota increase + real secret values) and then a short scraper apply +
 **Scraper (us):**
 - [x] `/blokport-prod/FAL_KEY` + `/blokport-prod/BLOKPORT_SCRAPER_PROXY` created (same as dev, 2026-08-24).
 - [ ] **Merge `fix/env-tier-validation` → `main`** if you want the `BLOKPORT_ENV` allowlist guard (closed-set, raises at import, 13 tests) in the prod image. It is defense-in-depth: our terraform sets `BLOKPORT_ENV=production` deterministically on the prod task def, so the typo risk is already near-zero — but the guard is cheap. If merged, its sha becomes a candidate to pin (after a dev soak). If not merged, ship a soaked pre-guard sha and add the guard in a later routine promotion.
-- [ ] **Reconcile the pre-existing ECR state drift** — root `aws_ecr_repository "this"` (infra/main.tf:43) was "refactored but never applied" (see the data-source workaround comment at infra/main.tf:261). The gpu/sync modules dodge it via `data.aws_ecr_repository.scraper`, but the root resource + lifecycle policy + deploy role still reference it, so a full apply will try to reconcile it. Clean this **before** the prod apply so the apply is a pure add.
+- [x] **ECR drift — RESOLVED (PR #219).** `create_ecr` (default true) count-gates the repo + lifecycle behind a `moved{}` block, and every consumer reads `local.ecr_repo_url/arn`. blokport keeps the existing repo (create_ecr=true); a second brand sets false and references it. No pre-apply cleanup needed; the apply is a pure add.
 - [ ] Pre-stage the tfvars values (do NOT set `prod_staging_bucket` yet — that flips `prod_enabled` and the count-gated `platform_prod`/`/blokport-prod/` data sources fail until the platform exists): `fal_key_ssm_name = "/blokport-prod/FAL_KEY"`, `scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY"`, and note the bucket name `blokport-prod-staging`.
 
 ### Phase 1 — Blokport platform apply (BLOCKING)
@@ -58,7 +75,9 @@ Elastic IP quota increase + real secret values) and then a short scraper apply +
 - [ ] **Blokport sends us:** `sales_channel_id`, the Slabs/Blocks/Tiles **pcat ids**, and the per-source **company_id**s.
 
 ### Phase 4 — Scraper prod apply (us)
-- [ ] Set in `infra/terraform.tfvars`:
+Config lives in `infra/brands/blokport.tfvars` (+ `infra/brands/blokport.backend.hcl` for state). Init with
+`terraform init -reconfigure -backend-config=brands/blokport.backend.hcl`, then plan/apply `-var-file=brands/blokport.tfvars`.
+- [ ] Set in `infra/brands/blokport.tfvars`:
   - `prod_staging_bucket = "blokport-prod-staging"` (this flips `prod_enabled` and creates ALL prod resources at once — only valid now that Phase 1 is done).
   - `fal_key_ssm_name` / `scraper_proxy_ssm_name` (from Phase 0).
   - `prod_image_tag = "<the :core-<sha> currently deployed AND soaked in dev at this moment>"` — record the exact sha + digest here; pin it, never `core`.
@@ -67,6 +86,25 @@ Elastic IP quota increase + real secret values) and then a short scraper apply +
   - `alert_email = "<ops email>"` — **required before a full apply**, else the apply removes the dev SNS alert the earlier targeted apply created.
 - [ ] `terraform plan` — with the platform state present it should CREATE the prod services (`scraper_prod`, `gpu_enhance_prod`, `sync_service_prod`, prod data sources, Batch queue/jobdef). Confirm **0 destroy** and no unexpected ECR churn (see the drift reconcile in Phase 0).
 - [ ] `terraform apply` → confirm the prod ECS services (incl. `sync_service_prod`) + the Batch queue/jobdef come up. Confirm the revision-agnostic `batch:SubmitJob` IAM (`:*`) is on the prod roles (mirrors the dev fix).
+
+### Phase 4b — One-off texture + base-data transplant (us, command line)
+The variant textures + de-watermark set are **expensive** (GPU + FAL) and **env-agnostic** — every image is named
+by its variety **Key** (`{Key}.png`, a deterministic uuid5 from the Id-free variety data) or a content **sha**,
+never a Medusa id. So they transplant 1:1 and prod skips the entire GPU pipeline. This needs only the prod bucket
+(Phase 1) + our write access to it.
+- [ ] **Copy the two texture trees** dev → prod, rewriting the `dev/` → `prod/` segment (keys copied verbatim):
+  ```
+  aws s3 sync s3://blokport-dev-staging-3e58a6/dev/variations/ s3://blokport-prod-staging/prod/variations/
+  aws s3 sync s3://blokport-dev-staging-3e58a6/dev/products/    s3://blokport-prod-staging/prod/products/
+  ```
+  `dev/variations/` = the ~13.5k variant/type icon textures; `dev/products/` = the de-watermark set + the
+  `enhanced/`/`discarded/` **markers**. Copying the markers is what makes prod's produce treat every image as
+  **already processed** → auto-enhance submits ZERO GPU jobs (no FAL cost, no GPU hours).
+- [ ] Sanity: `aws s3 ls --summarize --recursive` object counts on the prod prefixes ≈ the dev source counts.
+- [ ] **Base data (varieties/attributes) is NOT a copy** — it loads from the committed `catalog_source/` (Id-free)
+  + prod Medusa's own `from_medusa/production/attributes.csv` at produce time (Phase 5/6). Nothing to move; just
+  confirm `production/attributes.csv` has arrived and its `category,value` vocabulary matches dev (only `sourceid`
+  differs). A value present in dev but missing in prod Medusa gaps to review, never guesses.
 
 ### Phase 5 — Prod runtime config
 - [ ] Prod task-def env is set by our terraform: verify `BLOKPORT_ENV=production` (⚠️ must be exactly `production`/`prod`), `BLOKPORT_S3_BUCKET=blokport-prod-staging`, `BLOKPORT_SALES_CHANNEL_ID=<from Phase 3>`, `FAL_KEY` (SSM), `S3_DRY_RUN` (defaults false in prod).
@@ -83,7 +121,7 @@ Elastic IP quota increase + real secret values) and then a short scraper apply +
 
 ## Gotchas (do not trip on these)
 - **Ordering:** setting `prod_staging_bucket` creates the count-gated `platform_prod` remote-state + `/blokport-prod/` data sources; they FAIL if the platform (Phase 1) isn't applied. Platform first, always.
-- **ECR drift** must be reconciled before the full apply (Phase 0), or the apply touches ECR unexpectedly.
+- **ECR drift** — RESOLVED (PR #219, `create_ecr` + `moved{}`); the apply is a pure add, no ECR churn.
 - **`alert_email`** must be in tfvars before the full apply, or it removes the dev SNS alert.
 - **`BLOKPORT_ENV`** must be exactly `production`/`prod` — a typo runs prod-intended config in the dev namespace *unless* the env-tier guard is merged (Phase 0). Verify the resolved task-def env.
 - **Pin a soaked sha**, never the mutable `core`/`gpu` tag — record the exact sha + digest in Phase 4.
