@@ -12,6 +12,7 @@
 
 brand       = "blokport"
 domain_pack = "stone"
+create_ecr  = true # blokport OWNS the shared ECR image repo; every other brand references it
 
 # --- DEV (the one shared dev; lives in blokport-dev) ------------------------
 dev_enabled        = true

@@ -175,6 +175,12 @@ variable "domain_pack" {
   description = "SCRAPER_DOMAIN_PACK -- the product-domain pack this brand runs (stone | wood | lime | ...). Selects the whole product model at runtime; no code edit."
 }
 
+variable "create_ecr" {
+  type        = bool
+  default     = true
+  description = "Whether THIS brand's stack creates the shared ECR image repo. True for the owning brand (blokport); every other brand sets false and references the existing repo (the image is brand-agnostic, so all brands share one). Flips repo ownership with no code edit."
+}
+
 variable "prod_sales_channel_id" {
   type        = string
   default     = ""

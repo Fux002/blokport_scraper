@@ -1,7 +1,7 @@
 # --- Shared ---------------------------------------------------------------
 output "ecr_repository_url" {
-  value       = aws_ecr_repository.this.repository_url
-  description = "CI pushes the one image here; both envs pull it (promote the same tag)."
+  value       = local.ecr_repo_url
+  description = "CI pushes the one image here; both envs pull it (promote the same tag). Resolved from whichever brand owns the shared repo (create_ecr)."
 }
 
 output "deploy_role_arn" {

@@ -3,7 +3,24 @@
 One codebase, one shared image, one Terraform root. A brand is a **tfvars file**, not
 a code change. `brand` selects identity + bucket + SSM namespace + state key; `domain_pack`
 selects the product type (stone/wood/lime); `dev_enabled` / `prod_staging_bucket` decide
-which stacks actually stand up.
+which stacks actually stand up; `create_ecr` decides repo ownership.
+
+## Adding a brand = two files + init, ZERO code edits
+
+Every knob a new brand needs is a variable, so onboarding never touches a `.tf` resource:
+
+1. **`brands/<brand>.tfvars`** — `brand`, `domain_pack`, `create_ecr = false` (references the shared
+   image repo instead of creating it), `dev_enabled = false` (prod-only) or `true`, the prod owner ids +
+   bucket + SSM names. Copy an existing file and fill it.
+2. **`brands/<brand>.backend.hcl`** — the brand's own state bucket/key/lock (a backend block can't take a
+   variable, so state is separated at `init` time, not in code).
+3. **`terraform init -reconfigure -backend-config=brands/<brand>.backend.hcl`** then
+   **`terraform plan/apply -var-file=brands/<brand>.tfvars`**.
+
+That's the whole infra story. What is NOT declarative (because it is genuine product work, not config):
+the brand's **domain pack** (`config/domains/<pack>.yaml`), its **source scrapers + adapters**, and a
+**smoke run** to prove the material — see `MULTI_BRAND_LAUNCH.md`. The platform (VPC/cluster/state bucket)
+must also exist first. But the scraper stack itself is pure tfvars.
 
 ## AWS footprint (intended steady state)
 

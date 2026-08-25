@@ -38,6 +38,10 @@ locals {
   )
   prod_enabled = var.prod_staging_bucket != ""
   dev_enabled  = var.dev_enabled
+  # Shared image repo, resolved from whichever side owns it: the creating brand's resource, or the data
+  # source that references it. Every consumer uses these, so create_ecr flips ownership with no other edit.
+  ecr_repo_url = var.create_ecr ? aws_ecr_repository.this[0].repository_url : data.aws_ecr_repository.scraper[0].repository_url
+  ecr_repo_arn = var.create_ecr ? aws_ecr_repository.this[0].arn : data.aws_ecr_repository.scraper[0].arn
 }
 
 # blokport's dev modules pre-date the dev_enabled gate: migrate their state to the count index so adding
@@ -56,9 +60,21 @@ moved {
 }
 
 # --- SHARED ECR repository (one image, promoted dev -> prod) ------------------
-# SHARED across brands: the image is brand-agnostic (brand/pack chosen at runtime). blokport OWNS this repo;
-# a 2nd brand's root references it as a data source (see below) rather than re-creating it.
+# SHARED across brands: the image is brand-agnostic (brand/pack chosen at runtime), so ONE repo serves every
+# brand. `create_ecr` decides ownership WITHOUT a code edit: the owning brand (blokport, default true) CREATES
+# the repo; every other brand sets create_ecr=false and REFERENCES it via the data source below. All consumers
+# read local.ecr_repo_* so they don't care which side supplied it. (Repo name stays "blokport-scraper" -- an
+# internal, brand-agnostic image registry name, not a brand-facing string; renaming would orphan every image.)
+moved {
+  from = aws_ecr_repository.this
+  to   = aws_ecr_repository.this[0]
+}
+moved {
+  from = aws_ecr_lifecycle_policy.this
+  to   = aws_ecr_lifecycle_policy.this[0]
+}
 resource "aws_ecr_repository" "this" {
+  count                = var.create_ecr ? 1 : 0
   name                 = "blokport-scraper"
   image_tag_mutability = "MUTABLE"
   image_scanning_configuration {
@@ -67,7 +83,8 @@ resource "aws_ecr_repository" "this" {
 }
 
 resource "aws_ecr_lifecycle_policy" "this" {
-  repository = aws_ecr_repository.this.name
+  count      = var.create_ecr ? 1 : 0
+  repository = aws_ecr_repository.this[0].name
   # ECR evaluates rules by priority and an image matched by a higher rule is NOT re-evaluated by a
   # lower one -- so the prefix rules below PROTECT the semantic tags (core / gpu / imageproc, which can
   # never collide with a hex git-sha) from the broad churn rule. Without this, a single "keep last N,
@@ -133,7 +150,7 @@ data "aws_iam_policy_document" "deploy" {
       "ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer",
       "ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload",
     ]
-    resources = [aws_ecr_repository.this.arn]
+    resources = [local.ecr_repo_arn]
   }
   # Let the Deploy workflow roll the dev service after a :core push, so a merge actually goes live instead
   # of shipping a new image that ECS never rolls (the mutable-tag gotcha). UpdateService is scoped to ONLY
@@ -168,7 +185,7 @@ module "scraper_dev" {
   target_env     = "development"
   home_env       = "dev"
   staging_bucket = var.dev_staging_bucket
-  image_repo_url = aws_ecr_repository.this.repository_url
+  image_repo_url = local.ecr_repo_url
 
   region              = var.region
   image_tag           = var.image_tag
@@ -203,7 +220,7 @@ module "scraper_prod" {
   target_env     = "production"
   home_env       = var.prod_home_env
   staging_bucket = var.prod_staging_bucket
-  image_repo_url = aws_ecr_repository.this.repository_url
+  image_repo_url = local.ecr_repo_url
 
   region              = var.region
   image_tag           = var.prod_image_tag
@@ -230,7 +247,7 @@ module "gpu_enhance_dev" {
   target_env     = "development"
   home_env       = "dev"
   staging_bucket = var.dev_staging_bucket
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url # shared repo (data source; decoupled from ECR refactor)
+  image_repo_url = local.ecr_repo_url
   image_tag      = var.gpu_image_tag
   region         = var.region
   # 128 vCPU = up to 32 g4dn.xlarge in parallel. Full-catalog reprocess is ~53 GPU-hours at ~30s/image;
@@ -263,7 +280,7 @@ module "gpu_enhance_prod" {
   target_env     = "production"
   home_env       = var.prod_home_env
   staging_bucket = var.prod_staging_bucket
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_repo_url = local.ecr_repo_url
   image_tag      = var.prod_gpu_image_tag
   region         = var.region
   alert_email    = var.alert_email
@@ -293,7 +310,11 @@ data "aws_ssm_parameter" "config_token_dev" { name = "/${var.brand}-dev/BLOKPORT
 # Reference the EXISTING shared ECR by name (data source, not the root resource) so this module can
 # apply with -target without depending on the root ECR -- which is currently drifted from state
 # (state has module.scraper.aws_ecr_repository; the repo config was refactored but never applied).
-data "aws_ecr_repository" "scraper" { name = "blokport-scraper" }
+# Referenced ONLY by a non-owning brand (create_ecr=false); the owning brand creates the repo above instead.
+data "aws_ecr_repository" "scraper" {
+  count = var.create_ecr ? 0 : 1
+  name  = "blokport-scraper"
+}
 
 module "sync_service_dev" {
   source = "./modules/sync_service"
@@ -303,7 +324,7 @@ module "sync_service_dev" {
   count       = local.dev_enabled ? 1 : 0
 
   target_env     = "development"
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_repo_url = local.ecr_repo_url
   # DEV tracks :core (= what's on main); the branch is merged. :core = bbf35a2 (WAL + local-disk ledger).
   image_tag      = var.image_tag
   region         = var.region
@@ -380,7 +401,7 @@ module "sync_service_prod" {
   count            = local.prod_enabled ? 1 : 0
 
   target_env     = "production"
-  image_repo_url = data.aws_ecr_repository.scraper.repository_url
+  image_repo_url = local.ecr_repo_url
   image_tag      = var.prod_image_tag
   region         = var.region
   staging_bucket = var.prod_staging_bucket

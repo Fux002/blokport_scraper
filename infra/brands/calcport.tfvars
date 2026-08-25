@@ -16,6 +16,7 @@
 
 brand       = "calcport"
 domain_pack = "lime"
+create_ecr  = false # references the shared ECR (owned by blokport); does NOT re-create it
 
 # --- NO DEV for this brand (prod-only model) --------------------------------
 dev_enabled = false
