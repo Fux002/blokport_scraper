@@ -119,6 +119,25 @@ def build(additions_dir: Path | None = None, out_path: Path | None = None) -> Pa
             if item:
                 seen.add(key)
                 items.append(item)
+    # ALSO queue EXISTING product-backed variants that are still imageless. A fan-out block/tile (or a
+    # variety) that GAINED a product AFTER its form was first created is never in backbone_additions, so the
+    # additions loop above misses it -- and the sync holds that product forever (a listing with no texture).
+    # Image a category exactly when it has a product to list, whether the variety is new or pre-existing.
+    # product_backed_keys()/_variants() read the emitted export + products (present during a produce; empty on
+    # the image-only GPU task, which uses the published queue instead), so this is a no-op without those inputs.
+    backed = product_backed_keys()
+    if backed:
+        variants, ktype = _variants(), _backbone_types()
+        for key in sorted(backed):
+            if key in seen:
+                continue
+            r = variants.get(key)
+            if not r or (r.get("Image") or "").strip():   # skip unknown + already-imaged (that is a refresh, not a mint)
+                continue
+            item = _prompt_item(key, ktype.get(key, ""), (r.get("Name") or "").strip())
+            if item:
+                seen.add(key)
+                items.append(item)
     return _write(items, out_path, "new")
 
 
