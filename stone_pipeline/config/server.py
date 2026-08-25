@@ -431,7 +431,7 @@ def _expected_token() -> str:
 
 
 class ConfigHandler(BaseHTTPRequestHandler):
-    server_version = "blokport-config/1.0"
+    server_version = "scraper-config/1.0"   # brand-neutral banner (one image serves every brand)
 
     def _respond(self, code: int, payload: object) -> None:
         data = json.dumps(payload).encode("utf-8")
