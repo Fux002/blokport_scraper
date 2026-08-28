@@ -97,3 +97,22 @@ def read_all(path: str | Path | None = None) -> list[dict]:
     disk fallback for a source not yet persisted)."""
     from stone_pipeline.config import store
     return store.read_source_diagnostics(path=path)
+
+
+def held_for_image(summary: dict) -> int:
+    """Products the last produce could NOT emit because their texture was not ready yet -- the images stage's
+    `no_image` count. A republish emits them as/once their textures exist (de-watermark + generation run
+    async AFTER the produce). Read this WITH the live `images` block (ready/total/generating): the admin shows
+    "N held for image, M of T textures ready -> republish", which is honest without a gate the scraper cannot
+    cheaply or correctly compute at serve time (a `generating==false` gate deadlocks a cap-deferred source;
+    an exact per-product count would re-run the emit gate). 0 when the summary carries no images stage (a
+    source that never produced, or a run with no image gate)."""
+    if not isinstance(summary, dict):
+        return 0
+    for st in summary.get("stages") or []:
+        if isinstance(st, dict) and st.get("stage") == "images":
+            try:
+                return int((st.get("extra") or {}).get("no_image") or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
