@@ -35,9 +35,9 @@ def test_emit_build_from_seed_is_idempotent():
 def test_committed_base_is_already_a_fixed_point():
     # The committed base's SEED IDENTITY (Key/Name/Aliases/Volume) must equal what a rebuild projects back.
     # This is the ops guard `seed.verify` -- asserting it here keeps a future edit from committing a base
-    # that would silently drift on the next cold start. The Image column is EXCLUDED (it is stamped from
-    # live S3 at emit, so it is not seed data and is not byte-stable); this is why the check no longer
-    # false-fails on an S3-authenticated shell -- image drift is the informational `image_stale` count.
+    # that would silently drift on the next cold start. verify() rebuilds HERMETICALLY (seed_only: no live
+    # export / delta / config.db / S3), so it gives the same answer on CI and on an S3-authenticated dev
+    # shell -- the old "seed FAILED" that only meant the ambient environment differed is gone.
     from stone_pipeline.reference import seed
     stats = seed.verify()
     assert stats["fixed_point"], f"committed base drifts on rebuild (first diff at row {stats['first_diff_row']})"

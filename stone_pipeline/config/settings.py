@@ -104,11 +104,20 @@ if IS_PRODUCTION and not BRAND:
         "BRAND must be set in production (the brand this deployment serves, e.g. 'blokport', 'wudport', "
         "'calcport') so the brand<->bucket guard can refuse a cross-brand mis-configuration.")
 
+
+# ONE predicate for "the hardcoded blokport dev defaults may apply": blokport is the owning brand, so its
+# dev bucket / owner ids are the only baked-in defaults, and ONLY for blokport-in-dev. Every other case
+# (production, or any non-blokport brand even in dev) must supply its own -- never inherit blokport's. This
+# is the single source of truth for that rule so the brand-isolation guarantee can't drift across the guards
+# below (previously the `BRAND == "blokport"` literal was repeated at each site).
+def _is_blokport_dev() -> bool:
+    return not IS_PRODUCTION and BRAND == "blokport"
+
 # The S3 bucket. The blokport DEV bucket is the only known default; a PROD run OR any non-blokport brand
 # (even in dev) MUST set SCRAPER_S3_BUCKET explicitly -- never silently write into blokport's bucket.
 _DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
 _S3_BUCKET_ENV = (env.getenv("BLOKPORT_S3_BUCKET", "") or "").strip()
-if not _S3_BUCKET_ENV and (IS_PRODUCTION or BRAND != "blokport"):
+if not _S3_BUCKET_ENV and not _is_blokport_dev():
     raise RuntimeError(
         "SCRAPER_S3_BUCKET must be set for this deployment (any production run, or any non-blokport brand "
         f"even in dev) -- refusing to default to the blokport dev bucket ({_DEV_S3_BUCKET}). Set "
@@ -125,7 +134,7 @@ def _bucket_matches_brand(brand: str, bucket: str) -> bool:
     return bool(brand) and bucket.lower().startswith(f"{brand}-")
 
 
-if (IS_PRODUCTION or BRAND != "blokport") and not _bucket_matches_brand(BRAND, S3_BUCKET):
+if not _is_blokport_dev() and not _bucket_matches_brand(BRAND, S3_BUCKET):
     raise RuntimeError(
         f"SCRAPER_BRAND={BRAND!r} but the bucket {S3_BUCKET!r} is not this brand's (expected prefix "
         f"'{BRAND}-') -- refusing to run. A bucket set to ANOTHER brand's store would cross brands. Set "
@@ -151,7 +160,7 @@ def _owner_id(env_var: str, dev_default: str, label: str, *, required_in_prod: b
             "with an empty owner id that would mis-own or blank every product/variation in Medusa. Set it "
             "for this brand.")
     # dev: the hardcoded defaults are BLOKPORT's -- apply them only for the blokport brand, never another's.
-    return dev_default if (not IS_PRODUCTION and BRAND == "blokport") else ""
+    return dev_default if _is_blokport_dev() else ""
 
 
 # sales channel is ONE id per deployment with NO fallback, so it is REQUIRED in prod (an empty channel is a
