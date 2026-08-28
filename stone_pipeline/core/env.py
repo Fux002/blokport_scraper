@@ -40,3 +40,13 @@ def require(name: str) -> str:
     if not val:
         raise KeyError(PREFIX + _suffix(name))
     return val
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    """True/False from a boolean env var (1/true/yes/on), read via getenv (so the neutral SCRAPER_ prefix
+    wins over the legacy BLOKPORT_ fallback). Returns `default` when neither prefix carries a value. The ONE
+    boolean-env parser: every call site delegates here so the truthy vocabulary never drifts."""
+    raw = getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
