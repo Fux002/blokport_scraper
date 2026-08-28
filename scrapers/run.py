@@ -30,10 +30,12 @@ except ImportError:
 # a ScraperBase module AND an adapter + config entry (NEW_SOURCE_CHECKLIST). The class is DISCOVERED from the
 # module (mirrors adapter auto-discovery), so there is no import list to keep in sync. Order is the `all` run
 # order. slabware (helper) + stonevip (empty) are not scrapers.
-# develi / ferraz / fulei / temmer / tureks / brumagran have ScraperBase modules but NO adapter/config yet, so
+# develi / ferraz / temmer / tureks / brumagran have ScraperBase modules but NO adapter/config yet, so
 # they are deliberately NOT listed: an adapter-less source can never reach the pipeline (stone_pipeline.run
 # builds its work list from the ADAPTER registry), and listing one here would only let a `scrape all` on an
 # unseeded box abort the whole produce on that dormant scraper's failure (rc=1). Add on full onboarding.
+# (fulei was the same supplier as fuleistone -- category 246 "Live Inventory" vs fuleistone's 148 "Stone Slabs"
+# superset -- so it was removed as a superseded duplicate, not a distinct pending source.)
 _SOURCES = ("marenostone", "polonine", "zucchi", "varsha", "fuleistone")
 
 
