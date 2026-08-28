@@ -87,6 +87,7 @@ def _attach_image_progress(rows: list[dict]) -> None:
         log.warning("live image-progress: S3 client unavailable; omitting images blocks", exc_info=True)
         return
     from deploy.enhance_trigger import image_progress
+    from stone_pipeline.config import diagnostics
     for row in rows:                          # isolate per source: one source's S3 hiccup never drops the rest
         source = row.get("source")
         if not source:
@@ -98,6 +99,12 @@ def _attach_image_progress(rows: list[dict]) -> None:
                         source, exc_info=True)
             continue
         if block is not None:
+            # held_for_image: products the LAST produce held for no_image (their texture was not ready at emit).
+            # Paired with this LIVE block (ready/total/generating) so the admin can render the reconciliation
+            # the frozen per-run 'Produced' count cannot give on its own: "N held for image, M of T textures
+            # ready -> Republish". Per-run (drops to 0 on the next republish as they emit); read from the same
+            # row's images-stage diagnostic, so no extra I/O.
+            block["held_for_image"] = diagnostics.held_for_image(row)
             row["images"] = block
 
 
