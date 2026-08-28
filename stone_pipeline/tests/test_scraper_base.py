@@ -500,3 +500,47 @@ def test_paginate_offset_empty_first_page_yields_nothing_and_run_marks_incomplet
     s.list_products = lambda: s.paginate_offset(_seq([[], []]), page_size=1)  # empty, re-probe empty
     s.run()
     assert s._incomplete is True
+
+
+# --- format fallback: a per-row scraper's explicit "unknown" must reach the pipeline, not be defaulted -----
+
+def test_per_row_scraper_surfaces_an_unknown_format_instead_of_defaulting(tmp_path):
+    # A scraper that determines format PER ROW (category=None) and could not tell (format="") must return ""
+    # so the pipeline's signal-based resolver settles it -- NOT silently assert a kind. A real per-row value
+    # is honoured as-is. (This is why VarshaScraper.category is None: an empty thickness is genuinely unknown.)
+    class _PerRow(ScraperBase):
+        source = "perrow"
+        category = None
+        columns = ["product_id"]
+
+        def list_products(self):
+            return []
+
+        def parse_product(self, raw):
+            return {}
+
+    s = _PerRow(data_dir=tmp_path)
+    assert s._resolve_format({"format": ""}) == ""          # explicit-unknown surfaced, not defaulted to a kind
+    assert s._resolve_format({"format": "block"}) == "block"  # a real per-row format is honoured
+
+
+def test_single_format_scraper_falls_back_to_its_category_constant(tmp_path):
+    # A single-format scraper sets no per-row format; the category constant is the correct default.
+    class _Single(ScraperBase):
+        source = "single"
+        category = "slab"
+        columns = ["product_id"]
+
+        def list_products(self):
+            return []
+
+        def parse_product(self, raw):
+            return {}
+
+    s = _Single(data_dir=tmp_path)
+    assert s._resolve_format({}) == "slab"                  # no per-row format -> the source's constant
+
+
+def test_varsha_has_no_category_fallback(tmp_path):
+    from scrapers.varsha import VarshaScraper
+    assert VarshaScraper.category is None                   # unknown thickness must not silently become slab
