@@ -462,3 +462,41 @@ def test_marenostone_dims_from_html_reads_ready_stock_only_when_unit_is_sqm():
 
     # no Ready Stock row -> absent (derive then holds it as undetermined)
     assert "ready_stock_sqm" not in _dims_from_html(_row("Length (cm)", "300"))
+
+
+# --- paginate_offset: the shared no-total paginator (empty batch confirmed with a re-probe) ---------------
+
+class _Pager(ScraperBase):
+    source = "pagersite"
+    category = "slab"
+    columns = ["product_id"]
+
+    def parse_product(self, raw):
+        return {"product_id": raw["id"], "image_urls": []}
+
+
+def _seq(batches):
+    it = iter(batches)
+    return lambda offset: next(it)
+
+
+def test_paginate_offset_confirms_a_transient_empty_before_ending(tmp_path):
+    s = _Pager(data_dir=tmp_path)
+    # [a]; [] (transient) -> re-probe [b]; [] -> re-probe [] (real end)
+    got = list(s.paginate_offset(_seq([[{"id": "a"}], [], [{"id": "b"}], [], []]), page_size=1))
+    assert [r["id"] for r in got] == ["a", "b"]     # the transient empty did NOT truncate the tail
+
+
+def test_paginate_offset_stops_on_a_confirmed_empty(tmp_path):
+    s = _Pager(data_dir=tmp_path)
+    got = list(s.paginate_offset(_seq([[{"id": "a"}], [], []]), page_size=1))
+    assert [r["id"] for r in got] == ["a"]
+
+
+def test_paginate_offset_empty_first_page_yields_nothing_and_run_marks_incomplete(tmp_path):
+    # a blocked/empty first page confirms empty -> zero rows -> the run's zero-row rule marks INCOMPLETE,
+    # so a down first page is never ingested as a clean 'empty catalog' that would delist the whole source.
+    s = _Pager(data_dir=tmp_path)
+    s.list_products = lambda: s.paginate_offset(_seq([[], []]), page_size=1)  # empty, re-probe empty
+    s.run()
+    assert s._incomplete is True

@@ -323,6 +323,20 @@ class Thresholds:
     derive_incomplete_degraded: float = 0.25      # rows missing a required derived dimension/weight
     validate_reject_degraded: float = 0.50        # rows rejected at validate (majority -> systemic, not stray)
     images_no_image_degraded: float = 0.25        # rows with no publishable image (held from shipping)
+    # rows a stage dead-lettered on an unexpected exception (stages/_rowguard.py). A lone bad-data row stays
+    # isolated (surfaced per-row, never escalated); a systemic share tripping this points at a code bug and
+    # goes DEGRADED so it is loud. Low, because ANY appreciable isolated fraction is abnormal.
+    row_isolated_degraded: float = 0.02
+    # ABORT floor for the same signal: when this large a share of rows was dead-lettered, it is a systemic
+    # code bug (e.g. one input class every row hits), not sparse bad data -- fail the source LOUD (like the
+    # >50% adapt-drop / ingest / magnitude gates) rather than report it a clean success that shipped almost
+    # nothing. Below this, per-row isolation does its job (ship the good rows, flag the few dead ones).
+    row_isolated_abort: float = 0.25
+    # A1: when a scrape reports that more than this fraction of its per-product DETAIL fetches failed
+    # (rate-limited), its product absences are untrustworthy -- refuse to delist against it. Below the 30%
+    # delist cap so a moderately rate-limited run (10-25% detail failures) that would otherwise silently
+    # discontinue held products is caught. Scrapers with no detail fetch never report a ratio (no-op).
+    delist_detail_failure_floor: float = 0.10
 
 
 @dataclass(frozen=True)

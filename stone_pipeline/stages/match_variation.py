@@ -26,6 +26,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.gates.report import DEGRADED, OK
+from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.matching.engine import VariationEngine, VariationMatch
 from stone_pipeline.matching.index import build_variation_index
 from stone_pipeline.matching import projections as proj
@@ -216,7 +217,9 @@ class VariationStage:
             # order -- same cid, but an order-dependent method/confidence that skews review routing.
             # Same-run repeats now resolve identically; the persisted alias takes effect next run.
             if match.method not in ("exact", "override"):
-                self.writeback.add_alias(match.cid, query)
+                # record the learning method as provenance -> a persisted fuzzy/phonetic guess is auditable
+                # and reversible (state.writeback.forget_alias), never an invisible permanent exact alias.
+                self.writeback.add_alias(match.cid, query, method=match.method)
             return
 
         if match.method in ("review", "semantic_review"):
@@ -304,8 +307,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, writeback: WriteBack | Non
         writeback_path=None, generic_descriptor: bool = False) -> StageMetric:
     stage = VariationStage.build(ref, writeback=writeback, writeback_path=writeback_path,
                                  generic_descriptor=generic_descriptor)
-    for row in rows:
-        stage.resolve_row(row)
+    isolated = isolate_rows(rows, "match_variation", stage.resolve_row, log)
     # The Resolve layer is the essential-complexity core: surface its own health. A high UNMATCHED share
     # on an established source signals a tree/index/vocab drift (not just new varieties), caught here.
     # review rows are held (not gapped); gapped rows carry a tree gap for the operator worklist.
@@ -314,10 +316,14 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, writeback: WriteBack | Non
     gapped = sum(1 for r in rows if not r.variation_id and r.tree_gaps)
     unmatched = len(rows) - resolved
     methods = dict(Counter(r.variation_method for r in rows if r.variation_method))
-    status = DEGRADED if rows and unmatched / len(rows) >= SETTINGS.thresholds.match_unmatched_degraded else OK
+    thr = SETTINGS.thresholds
+    status = DEGRADED if rows and (unmatched / len(rows) >= thr.match_unmatched_degraded
+                                   or isolated / len(rows) >= thr.row_isolated_degraded) else OK
     log.info(
         "variation done",
-        extra={"extra_fields": {"rows": len(rows), "resolved": resolved, "gapped": gapped}},
+        extra={"extra_fields": {"rows": len(rows), "resolved": resolved, "gapped": gapped,
+                                "isolated": isolated}},
     )
     return StageMetric(stage="match_variation", status=status, rows_in=len(rows), rows_out=len(rows),
-                       reviewed=review, gapped=gapped, extra={"resolved": resolved, "methods": methods})
+                       reviewed=review, gapped=gapped,
+                       extra={"resolved": resolved, "methods": methods, "isolated": isolated})

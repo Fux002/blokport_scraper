@@ -537,9 +537,15 @@ class UnitEntry:
 class Units:
     by_token: dict[str, UnitEntry] = field(default_factory=dict)
 
-    def convert(self, value: float, token: str) -> Optional[float]:
+    def convert(self, value: float, token: str, expect: str | None = None) -> Optional[float]:
+        """Scale `value` by the token's factor. When `expect` is given (e.g. "weight"), a token of a
+        DIFFERENT dimension returns None instead of a silently-wrong scaling -- so a length/area token
+        that leaked into a weight field is rejected rather than shipped as a plausible-magnitude kg.
+        The `dimension` column carries this; without `expect` the behaviour is unchanged (dimension ignored)."""
         entry = self.by_token.get((token or "").strip().casefold())
         if entry is None:
+            return None
+        if expect is not None and entry.dimension != expect:
             return None
         return value * entry.factor
 

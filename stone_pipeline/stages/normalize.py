@@ -20,6 +20,7 @@ from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name,
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
+from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.matching.engine import VocabResolver
 from stone_pipeline.reference.loaders import ReferenceData
@@ -178,15 +179,18 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
 
 def run(rows: list[CanonicalRow], ref: ReferenceData) -> StageMetric:
     resolvers = AttributeResolvers.build(ref)
-    for row in rows:
-        normalize_row(row, resolvers, ref)
+    isolated = isolate_rows(rows, "normalize", lambda r: normalize_row(r, resolvers, ref), log)
     # Per-layer signal: an unusually high share of rows whose required attribute never resolved points
     # at a vocab/synonym drift (the attribute-vocab-drift bug class), caught here rather than as a
     # downstream reject. last_resort/multi are informational counts, not anomalies.
     unresolved = sum(1 for r in rows if any(f.code == FlagCode.attr_unresolved for f in r.review_flags))
     last_resort = sum(1 for r in rows if any(f.code == FlagCode.attr_last_resort for f in r.review_flags))
     multi = sum(1 for r in rows if any(f.code == FlagCode.multi_value for f in r.review_flags))
-    status = DEGRADED if rows and unresolved / len(rows) >= SETTINGS.thresholds.normalize_unresolved_degraded else OK
-    log.info("normalize done", extra={"extra_fields": {"rows": len(rows), "unresolved": unresolved}})
+    thr = SETTINGS.thresholds
+    status = DEGRADED if rows and (unresolved / len(rows) >= thr.normalize_unresolved_degraded
+                                   or isolated / len(rows) >= thr.row_isolated_degraded) else OK
+    log.info("normalize done", extra={"extra_fields": {"rows": len(rows), "unresolved": unresolved,
+                                                        "isolated": isolated}})
     return StageMetric(stage="normalize", status=status, rows_in=len(rows), rows_out=len(rows),
-                       extra={"unresolved_rows": unresolved, "last_resort": last_resort, "multi_value": multi})
+                       extra={"unresolved_rows": unresolved, "last_resort": last_resort,
+                              "multi_value": multi, "isolated": isolated})
