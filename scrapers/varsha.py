@@ -68,7 +68,12 @@ def build_image_urls(bundle_id, filename):
 
 class VarshaScraper(ScraperBase):
     source = "varsha"
-    category = "slab"        # fallback format only; parse_product sets a per-row format (slab vs block)
+    # NO category fallback: varsha sets a PER-ROW format from the thickness field (MULTI => block, a gauge
+    # => slab, ABSENT => ""). An empty format is a genuine "unknown", and classify_format leaves it for the
+    # pipeline's signal-based format resolver (slab_count/area/depth) to settle, flagged. A `category="slab"`
+    # fallback would silently assert slab for an unknown-thickness row (wrong Key/freight for a block), so it
+    # is deliberately absent -- an unknown format surfaces, never a silent guess.
+    category = None
     id_field = "bundle_id"   # images named varsha_<bundle_id>_<idx>
     use_curl_cffi = True     # Cloudflare-fronted SlabWare tenant
     # Route through the residential proxy, like polonine (same SlabWare/Cloudflare stack). The datacenter

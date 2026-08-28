@@ -87,3 +87,24 @@ def test_ratio_crosses_the_configured_floor(tmp_path):
     high = _DetailScraper([True, False, False], data_dir=tmp_path)     # 66% >= floor
     high.run()
     assert run_mod._scrape_detail_failure_ratio(high.products_csv) >= floor
+
+
+def test_polonine_detail_failure_holds_the_row_imageless_never_ships_it(tmp_path, monkeypatch):
+    # F4: on a polonine detail-fetch FAILURE the detail-only fields are lost (images come only from
+    # detail.fotos), so the row goes out with NO images -> the pipeline's no_image gate HOLDS it. It is NOT
+    # silently shipped with defaulted data. The failure is recorded and counted for the delist-failure ratio.
+    # (varsha differs by design: it falls back to a listing image and lists-with-held-dims; polonine holds --
+    # the conservative side. This test pins polonine's held-not-shipped behaviour.)
+    from scrapers.polonine import PolonineScraper
+    s = PolonineScraper(data_dir=tmp_path)
+    monkeypatch.setattr(s, "_warm_up", lambda: None)
+
+    def _boom(*a, **k):
+        raise RuntimeError("detail unreachable")
+
+    monkeypatch.setattr(s, "post", _boom)
+    row = s.parse_product({"id": "b1", "nomeMaterial": "Granite"})
+    assert row["image_urls"] == []                              # imageless -> pipeline holds (no_image), not shipped
+    assert not (row["dimension_height"] or row["dimension_length"])
+    assert any(f["kind"] == "detail" for f in s._failures)      # failure surfaced
+    assert s._detail_failed == 1                                 # counted for the delist-failure ratio
