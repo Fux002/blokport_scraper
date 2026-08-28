@@ -1,6 +1,6 @@
 """Phase 2 write-through: a real run also populates the ledger (flag-gated, shadow).
 
-OFF by default. Enable with BLOKPORT_LEDGER_WRITETHROUGH=1. When on, run_source
+OFF by default. Enable with SCRAPER_LEDGER_WRITETHROUGH=1 (legacy BLOKPORT_ still read). When on, run_source
 records its emitted products and the inventory delta into the per-env ledger AFTER
 the CSVs are written, so the ledger is a shadow mirror and the live CSV flow is
 unchanged. A ledger error is caught and logged, never failing the run.
@@ -27,11 +27,10 @@ from stone_pipeline.ledger.db import Ledger
 
 log = logfmt.get_logger("ledger.writethrough")
 
-_TRUE = {"1", "true", "yes", "on"}
-
 
 def enabled() -> bool:
-    return env.getenv("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in _TRUE
+    """The single predicate for 'is ledger write-through on?' -- every gate calls this, never re-reads env."""
+    return env.env_bool("LEDGER_WRITETHROUGH")
 
 
 def ledger_path() -> Path:

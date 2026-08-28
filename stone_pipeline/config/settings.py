@@ -62,11 +62,9 @@ _OUTPUTS = REPO_ROOT / "outputs" / ENV_NAME                # the env's per-sourc
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    """Read a boolean env var (1/true/yes/on); fall back to default when unset."""
-    raw = env.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    """Read a boolean env var (1/true/yes/on); fall back to default when unset. Delegates to the one
+    boolean-env parser in core.env so the truthy vocabulary lives in a single place."""
+    return env.env_bool(name, default)
 
 
 def _env_int(name: str, default: int) -> int:

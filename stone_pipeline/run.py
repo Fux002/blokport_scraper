@@ -12,7 +12,6 @@ later milestones.
 from __future__ import annotations
 
 import json
-from stone_pipeline.core import env
 import sys
 from collections import Counter
 from pathlib import Path
@@ -541,10 +540,10 @@ def run_source(
 
     # Phase 2 (flag-gated, shadow): also record this source's emitted products +
     # inventory into the ledger, AFTER the CSVs are written. Fully inert unless
-    # BLOKPORT_LEDGER_WRITETHROUGH is set, and it never fails the run (the ledger is
+    # write-through is enabled, and it never fails the run (the ledger is
     # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
-    if env.getenv("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
-        from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger import writethrough
+    if writethrough.enabled():
         if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it LOUDLY on the run (do not report a clean success).
