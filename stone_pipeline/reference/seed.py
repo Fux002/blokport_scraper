@@ -22,6 +22,15 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.reference.sync_variants_base import COLS
 
+# The fixed-point property is about SEED IDENTITY (Key/Name/Aliases/Volume) -- the columns that must
+# reproduce byte-identically on every cold start. The Image cell is deliberately EXCLUDED: emit stamps it
+# from LIVE S3 (a variant advertises its {Key}.png iff the texture exists), so it legitimately changes as
+# textures are generated and can never be byte-stable while the image pipeline runs. Comparing it made the
+# check false-fail on any S3-authenticated shell (base = a stale texture snapshot vs a fresh live read) --
+# a recurring source of "seed FAILED" confusion that was never a seed-data problem. Image drift is surfaced
+# informationally instead (image_stale), never as a fixed-point failure.
+_IDENTITY_COLS = [c for c in COLS if c != "Image"]
+
 log = logfmt.get_logger("seed")
 
 # The self-mutating committed seed: rebuilt (base := full) at the end of every catalog.run.
@@ -99,18 +108,30 @@ def _mistyped_variants(rows: list[dict]) -> list[str]:
 
 
 def verify(base_path: Path = BASE) -> dict:
-    """Rebuild 1_variants_full from the committed base and assert (1) it projects back to the SAME base --
-    the fixed-point property that makes repeated cold starts reproducible -- and (2) no (branch,type,Name)
-    variety is present under more than one Key. Non-destructive: only the generated 1_variants_full is
-    (re)written; the committed base is read, never modified.
+    """Rebuild 1_variants_full from the committed base and assert (1) its SEED IDENTITY projects back to the
+    SAME base -- the fixed-point property that makes repeated cold starts reproducible -- and (2) no
+    (branch,type,Name) variety is present under more than one Key. Non-destructive: only the generated
+    1_variants_full is (re)written; the committed base is read, never modified.
+
+    The Image column is EXCLUDED from the fixed-point comparison (see _IDENTITY_COLS): it is stamped from
+    LIVE S3 at emit, so it is not seed data and cannot be byte-stable while textures are being generated.
+    That coupling is what used to make this "seed FAILED" on any S3-authenticated shell despite a clean
+    seed. Image drift now surfaces as the informational `image_stale` count, never a fixed-point failure.
 
     Run from a clean tree with no pending 1_variants_update delta (the cold-start seed state); a stale
     delta legitimately makes base != full, which this correctly reports as not-a-fixed-point."""
     from stone_pipeline.stages import emit_catalog
     emit_catalog.build()                       # -> to_upload/1_variants_full.csv (a generated artifact)
     base, full = _rows(base_path), _rows(FULL)
-    first = next((i for i, (b, f) in enumerate(zip(base, full)) if b != f), None)
-    fixed = base == full
+    # Compare SEED IDENTITY only (Image excluded -- see _IDENTITY_COLS): the fixed point is the stable seed,
+    # not the live-S3-derived image links.
+    base_id = [tuple(r[c] for c in _IDENTITY_COLS) for r in base]
+    full_id = [tuple(r[c] for c in _IDENTITY_COLS) for r in full]
+    first = next((i for i, (b, f) in enumerate(zip(base_id, full_id)) if b != f), None)
+    fixed = base_id == full_id
+    # Informational only: variants whose Image link differs because live S3 now has textures the committed
+    # base snapshot predates. NOT a fixed-point failure -- Image is recomputed from S3 every emit.
+    image_stale = sum(1 for b, f in zip(base, full) if (b.get("Image") or "") != (f.get("Image") or ""))
     dups = _duplicate_varieties(base)          # a duplicate variety is invisible to the fixed-point check
     malformed = _malformed_type_keys(base)     # type-less / mis-keyed varieties, also fixed-point-invisible
     nonuniform = _non_uniform_categories(base)  # every category must carry the full variety union
@@ -118,7 +139,7 @@ def verify(base_path: Path = BASE) -> dict:
     stats = {"fixed_point": fixed, "base_rows": len(base), "full_rows": len(full),
              "first_diff_row": first, "duplicate_varieties": len(dups),
              "malformed_type_keys": len(malformed), "non_uniform_categories": nonuniform,
-             "mistyped_variants": len(mistyped),
+             "mistyped_variants": len(mistyped), "image_stale": image_stale,
              "clean": fixed and not dups and not malformed and not nonuniform and not mistyped}
     (log.info if stats["clean"] else log.error)(
         "seed is a fixed point: no duplicate/type-less/mistyped varieties, categories uniform" if stats["clean"]
