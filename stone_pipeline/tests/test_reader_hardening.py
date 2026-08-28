@@ -16,6 +16,30 @@ def test_read_template_columns_fails_loud_on_empty_template(tmp_path):
         read_template_columns(empty)
 
 
+def test_read_template_columns_fails_loud_when_a_mapped_column_is_missing(tmp_path):
+    # a template that renamed/dropped a column the emit fills must FAIL LOUD, not silently blank that value
+    # for every product (row_to_cells emits "" for an unmapped column). Uses a real COLUMN_MAP key so it
+    # tracks the actual emit schema.
+    from stone_pipeline.stages import emit
+    keys = list(emit.COLUMN_MAP)
+    dropped = keys[0]
+    tpl = tmp_path / "template.csv"
+    tpl.write_text(",".join(keys[1:]) + "\n", encoding="utf-8")     # every mapped column EXCEPT the first
+    with pytest.raises(ValueError, match="missing"):
+        emit.read_template_columns(tpl)
+
+
+def test_read_template_columns_allows_extra_medusa_managed_columns(tmp_path):
+    # the template may carry EXTRA columns the emit does not fill (Medusa-managed); those emit "" and must
+    # NOT trip the guard. Only a MISSING mapped column is an error.
+    from stone_pipeline.stages import emit
+    keys = list(emit.COLUMN_MAP)
+    tpl = tmp_path / "template.csv"
+    tpl.write_text(",".join(keys + ["Some Medusa Managed Column"]) + "\n", encoding="utf-8")
+    cols = emit.read_template_columns(tpl)
+    assert "Some Medusa Managed Column" in cols and len(cols) == len(keys) + 1
+
+
 def test_load_units_skips_a_non_numeric_factor_keeps_the_rest(tmp_path):
     from stone_pipeline.reference.loaders import load_units
     csv_path = tmp_path / "units.csv"
