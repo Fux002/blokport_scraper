@@ -66,6 +66,11 @@ class FlagCode(str, Enum):
     ports_default = "ports_default"
     surrogate_minted = "surrogate_minted"
     degraded_batch = "degraded_batch"
+    # a per-row stage body raised an UNEXPECTED exception (not a handled data condition): the row is
+    # dead-lettered -- a stage_error RejectReason makes it non-emittable, this flag surfaces it for review,
+    # and the stage continues. Upholds fail-loud-and-ISOLATED: one bad row flags itself, never crashes the
+    # source batch. Emitted only by the shared per-row guard (stages/_rowguard.py).
+    row_stage_error = "row_stage_error"
 
 
 class GapKind(str, Enum):

@@ -22,6 +22,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
+from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.core.text import match_key, slugify, title_case
 from stone_pipeline.reference.loaders import ReferenceData
@@ -63,8 +64,12 @@ def _conf_name(c: Confidence) -> str:
     return Confidence(c).name
 
 
-def _parse_measure(text: str, ref: ReferenceData) -> float | None:
-    """Parse a single '2cm' / '2.80m' measure to metres via units.csv."""
+def _parse_measure(text: str, ref: ReferenceData, expect_dimension: str | None = None) -> float | None:
+    """Parse a single '2cm' / '2.80m' measure to metres via units.csv. When `expect_dimension` is given
+    (the weight path passes "weight"), a PRESENT token of a different dimension is rejected (returns None)
+    instead of scaling as if it were the expected unit -- so a length/area token that leaked into the
+    weight field falls through to the volume x density fallback rather than shipping a wrong kg. A bare
+    (unit-less) number is unaffected: it stays the caller's default unit, as before."""
     if not text:
         return None
     # a range ('2-3 cm') resolves to the midpoint with the trailing unit, NOT the low endpoint as
@@ -74,7 +79,7 @@ def _parse_measure(text: str, ref: ReferenceData) -> float | None:
         lo, hi = parse_number(rng.group(1)), parse_number(rng.group(2))
         if lo is not None and hi is not None:
             raw_token = (rng.group(3) or "").strip()
-            converted = ref.units.convert((lo + hi) / 2.0, normalize_unit(rng.group(3)))
+            converted = ref.units.convert((lo + hi) / 2.0, normalize_unit(rng.group(3)), expect=expect_dimension)
             if converted is not None:
                 return converted
             return (lo + hi) / 2.0 if not raw_token else None
@@ -86,7 +91,7 @@ def _parse_measure(text: str, ref: ReferenceData) -> float | None:
         return None
     raw_token = (match.group(2) or "").strip()
     token = normalize_unit(match.group(2))   # quote marks -> in/ft; empty -> m
-    converted = ref.units.convert(value, token)
+    converted = ref.units.convert(value, token, expect=expect_dimension)
     if converted is not None:
         return converted
     # convert failed: trust the bare number ONLY when no unit was given (already metres). An UNKNOWN
@@ -116,7 +121,10 @@ def _derive_weight(row: CanonicalRow, ref: ReferenceData,
     """Weight in TONNES: the scraped value (kg/1000) when present, else volume x per-type density from
     the real dims (type_density.csv). None when a dimension is missing (validate then rejects on the
     dims). A derived weight is flagged. Returns (weight, method)."""
-    kg = _parse_measure(row.raw_weight, ref) if row.raw_weight else None
+    # expect_dimension="weight": a PRESENT non-mass token in the weight field (a leaked length/area, e.g.
+    # "2.5 m") is rejected -> falls through to volume x density below, instead of scaling as kg. A bare
+    # number stays kg (suppliers ship bare kg; the zucchi adapter emits one by construction).
+    kg = _parse_measure(row.raw_weight, ref, expect_dimension="weight") if row.raw_weight else None
     if kg is not None and kg > 0:
         return kg / 1000.0, "weight:parsed"
     if not all(v is not None and v > 0 for v in (length, width, height)):
@@ -779,19 +787,22 @@ def _provenance_gap(row: CanonicalRow) -> bool:
     return any(value and not method for value, method in pairs)
 
 
+def _derive_row(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
+    derive_category(row, ref)
+    derive_dimensions(row, ref)
+    derive_bundle_size(row, ref, source_cfg)
+    derive_inventory(row)                          # stock, once, from raw signals only (never bundle_size)
+    derive_origin(row, ref, source_cfg)
+    derive_ports(row, ref, source_cfg)
+    derive_collection(row, ref, source_cfg)
+    derive_title(row)
+    derive_description(row)
+    _apply_overrides(row, ref)  # overrides win over the derived values
+    derive_handle(row, source_cfg)  # handle follows the (possibly overridden) title
+
+
 def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) -> StageMetric:
-    for row in rows:
-        derive_category(row, ref)
-        derive_dimensions(row, ref)
-        derive_bundle_size(row, ref, source_cfg)
-        derive_inventory(row)                          # stock, once, from raw signals only (never bundle_size)
-        derive_origin(row, ref, source_cfg)
-        derive_ports(row, ref, source_cfg)
-        derive_collection(row, ref, source_cfg)
-        derive_title(row)
-        derive_description(row)
-        _apply_overrides(row, ref)  # overrides win over the derived values
-        derive_handle(row, source_cfg)  # handle follows the (possibly overridden) title
+    isolated = isolate_rows(rows, "derive", lambda r: _derive_row(r, ref, source_cfg), log)
     # A dimension filled from the pack default (always flagged, never silent) means the source did not ship
     # a real size for that row; a high share signals a source that stopped shipping sizes. A provenance gap
     # is an invariant breach. Either way -> DEGRADED (the per-row default still emits, but the batch is flagged).
@@ -803,10 +814,13 @@ def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) 
     unavailable = sum(1 for r in rows
                       if any(f.code == FlagCode.dimension_unavailable for f in r.review_flags))
     provenance_gaps = sum(1 for r in rows if _provenance_gap(r))
-    degraded = (rows and (incomplete + unavailable) / len(rows) >= SETTINGS.thresholds.derive_incomplete_degraded) \
+    thr = SETTINGS.thresholds
+    degraded = (rows and ((incomplete + unavailable) / len(rows) >= thr.derive_incomplete_degraded
+                          or isolated / len(rows) >= thr.row_isolated_degraded)) \
         or provenance_gaps
     log.info("derive done", extra={"extra_fields": {
-        "rows": len(rows), "incomplete_dims": incomplete, "unavailable_dims": unavailable}})
+        "rows": len(rows), "incomplete_dims": incomplete, "unavailable_dims": unavailable,
+        "isolated": isolated}})
     return StageMetric(stage="derive", status=DEGRADED if degraded else OK, rows_in=len(rows), rows_out=len(rows),
                        extra={"incomplete_dims": incomplete, "unavailable_dims": unavailable,
-                              "provenance_gaps": provenance_gaps})
+                              "provenance_gaps": provenance_gaps, "isolated": isolated})

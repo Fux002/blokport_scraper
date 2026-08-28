@@ -128,34 +128,18 @@ class VarshaScraper(ScraperBase):
         try:
             r = self.post(DETAIL_API_URL, headers=API_HEADERS, content=json.dumps(payload))
         except Exception:
+            self.note_detail(ok=False)   # A1: feed the delist gate's detail-failure ratio
             return None
+        self.note_detail(ok=True)
         d = (r.json().get('d') or {})
         return d.get('Bundle') or {}
 
     def list_products(self) -> Iterable[Any]:
+        # SlabWare exposes no total, so the base paginator confirms an empty batch with one re-probe before
+        # accepting the end (a transient empty must not truncate the tail -> silent delist). An empty first
+        # page confirms empty -> zero rows -> the base marks the run INCOMPLETE.
         self._warm_up()
-        first = self._fetch_page(0)
-        if not first:
-            self.log.error("first batch empty; aborting")
-            return
-        yield from first
-        inicio = PAGE_SIZE
-        while True:
-            self.log.info("batch inicio=%d", inicio)
-            batch = self._fetch_page(inicio)
-            if not batch:
-                # The SlabWare list API exposes no total, so a valid-but-empty 200 mid-pagination is
-                # indistinguishable from the real end and would be marked COMPLETE (truncating the tail ->
-                # silent delist). Confirm with ONE re-fetch of the SAME offset before accepting the end;
-                # a transient empty resolves on the re-probe, a real end stays empty. (A genuine network
-                # error already raises out of _fetch_page and crashes before any complete marker is written.)
-                confirm = self._fetch_page(inicio)
-                if not confirm:
-                    self.log.info("empty batch confirmed at inicio=%d; done", inicio)
-                    break
-                batch = confirm
-            yield from batch
-            inicio += PAGE_SIZE
+        yield from self.paginate_offset(self._fetch_page, PAGE_SIZE)
 
     # --- parsing ------------------------------------------------------------
     def parse_product(self, item: dict) -> Optional[dict]:

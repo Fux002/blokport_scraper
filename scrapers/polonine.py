@@ -99,26 +99,16 @@ class PolonineScraper(ScraperBase):
                           content=json.dumps({"IdBundle": bundle_id, "IdCampanha": 0}))
         except Exception as exc:
             self.record_failure("detail", bundle_id=bundle_id, error=str(exc))
+            self.note_detail(ok=False)   # A1: feed the delist gate's detail-failure ratio
             return {}
+        self.note_detail(ok=True)
         return (r.json().get("d") or {}).get("Bundle") or {}
 
     def list_products(self) -> Iterable[Any]:
+        # SlabWare exposes no total, so the base paginator confirms an empty batch with one re-probe before
+        # accepting the end (a transient empty must not truncate the tail -> silent delist).
         self._warm_up()
-        inicio = 0
-        while True:
-            batch = self._fetch_page(inicio)
-            if not batch:
-                # SlabWare exposes no total, so a valid-but-empty 200 mid-pagination looks like the real end
-                # and would be marked COMPLETE (truncating the tail -> silent delist). Confirm with ONE
-                # re-fetch of the SAME offset before accepting the end; a transient empty resolves on the
-                # re-probe. (A real network error already raises out of _fetch_page before any complete marker.)
-                confirm = self._fetch_page(inicio)
-                if not confirm:
-                    break
-                batch = confirm
-            self.log.info("batch inicio=%d: %d bundles", inicio, len(batch))
-            yield from batch
-            inicio += PAGE_SIZE
+        yield from self.paginate_offset(self._fetch_page, PAGE_SIZE)
 
     def parse_product(self, item: dict) -> Optional[dict]:
         detail = self._fetch_detail(item.get("id")) or {}

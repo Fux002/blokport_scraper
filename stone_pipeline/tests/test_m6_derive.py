@@ -98,6 +98,36 @@ def test_parsed_weight_is_tonnes_not_kilograms(ref, cfg):
     assert abs(row2.weight - 0.3) < 1e-6  # 0.3 t == 300 kg -> same tonnes value
 
 
+def test_bare_number_weight_is_kilograms(ref, cfg):
+    # a unit-less weight stays kg (suppliers ship a bare kg; the zucchi adapter emits one by construction).
+    # This must NOT regress when the weight parse became dimension-aware.
+    row = _slab_row(raw_weight="300")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert abs(row.weight - 0.3) < 1e-6
+    assert "weight:parsed" in row.dimension_method
+
+
+def test_leaked_length_in_weight_field_is_rejected_not_scaled_as_kg(ref, cfg):
+    # a length/area token that leaked into the weight field ('2.5 m') must NOT ship as 0.0025 t. The parse
+    # rejects the wrong-dimension token and falls through to volume x density, so the weight is real, flagged.
+    row = _slab_row(raw_weight="2.5 m")   # no dims on the row -> pack defaults drive volume x density
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert "weight:derived" in row.dimension_method
+    assert row.weight and row.weight > 0.01          # a real slab weight, not the bogus 0.0025 t
+    assert any(f.code == FlagCode.weight_derived for f in row.review_flags)
+
+
+def test_valid_weight_unit_still_parses(ref, cfg):
+    # the dimension filter must PASS a genuine mass unit unchanged.
+    row = _slab_row(raw_weight="45 kg")
+    derive.derive_category(row, ref)
+    derive.derive_dimensions(row, ref)
+    assert abs(row.weight - 0.045) < 1e-6
+    assert "weight:parsed" in row.dimension_method
+
+
 def test_bundle_zero_count_falls_through_to_default(ref, cfg):
     # A sold-out slab reports slab_count '0'; '0'.isdigit() is True but a bundle of
     # zero is contradictory -- it must fall through, never emit sold_in_bundle + size 0.
