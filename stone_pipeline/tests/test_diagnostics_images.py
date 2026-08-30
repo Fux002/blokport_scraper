@@ -105,3 +105,19 @@ def test_held_for_image_helper_is_defensive():
     assert diagnostics.held_for_image(
         {"stages": [{"stage": "images", "extra": {"no_image": "x"}}]}) == 0        # malformed value
     assert diagnostics.held_for_image(None) == 0                                   # not a dict
+
+
+def test_held_for_image_excludes_permanent_no_source_rejects():
+    # held_for_image is the REPUBLISHABLE subset only: no_image MINUS no_image_source (rows with no usable
+    # source url at all -- a permanent reject a republish can never fix, so it must not drive a republish).
+    def held(no_image, no_source):
+        return diagnostics.held_for_image(
+            {"stages": [{"stage": "images", "extra": {"no_image": no_image, "no_image_source": no_source}}]})
+
+    assert held(63, 63) == 0     # the live case: every hold is a permanent no-source reject -> clears to 0
+    assert held(10, 4) == 6      # 4 permanent no-source excluded; 6 genuinely republishable remain
+    assert held(5, 0) == 5       # all transient (image not linked yet) -> all republishable
+    assert held(3, 5) == 0       # never negative (guard); no_image_source is a subset of no_image
+    # back-compat: a pre-change summary carrying no no_image_source subtracts 0 (old behaviour preserved)
+    assert diagnostics.held_for_image(
+        {"stages": [{"stage": "images", "extra": {"no_image": 8}}]}) == 8
