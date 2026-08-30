@@ -421,7 +421,8 @@ def run_source(
                                       SETTINGS.thresholds.images_no_image_degraded))
     _record(manifest, run_log, StageMetric(
         stage="images", status=_img_status, rows_out=len(rows),
-        extra={"staged": img_stats.staged, "no_image": img_stats.no_image}))
+        extra={"staged": img_stats.staged, "no_image": img_stats.no_image,
+               "no_image_source": img_stats.no_image_source}))
     # Stage 8: constants
     _record(manifest, run_log, constants.run(rows, source_cfg))
 
