@@ -30,6 +30,9 @@ fal_key_ssm_name       = "" # FILL: /calcport-prod/FAL_KEY
 scraper_proxy_ssm_name = "" # FILL: /calcport-prod/BLOKPORT_SCRAPER_PROXY
 
 # --- shared / ops -----------------------------------------------------------
-platform_state_bucket = "calcport-tfstate" # calcport's own platform state
+platform_state_bucket = "calcport-tfstate" # VERIFY BEFORE USE: must match wherever calcport's
+# PLATFORM writes its state. The convention for the existing brands is a single shared bucket
+# (blokport-tfstate) separated by key "<brand>/<env>/terraform.tfstate", NOT a bucket per brand —
+# see wudport.tfvars. calcport has no platform stack yet, so this value is unverified.
 region                = "eu-west-1"
 alert_email           = ""
