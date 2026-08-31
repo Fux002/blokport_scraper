@@ -192,7 +192,8 @@ def _apply_type(row: CanonicalRow, new_type: str, ref: ReferenceData, stats: Rec
             )
         )
     row.type_name = new_type
-    row.type_id = _map_id(ref, "type", new_type)
+    # id mapping is owned by _finalize_ids (always runs after this on every reconcile_row path); it maps
+    # row.type_name, which we just set, so setting type_id here too would be a redundant second mapping.
     if from_key:
         row.type_method = "variety_authoritative"
         row.type_confidence = Confidence.high.name
