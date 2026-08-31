@@ -35,6 +35,14 @@ ready but consume **zero** AWS until their `*.tfvars` are filled and applied.
 
 ## Standing a brand up
 
+> **Two different state locations — do not conflate them.**
+> - **This stack's own state** is per brand (`brands/<brand>.backend.hcl`), passed at init.
+> - **The PLATFORM's state**, which this stack only *reads* (`platform_state_bucket`), is NOT per brand:
+>   every brand's platform state lives in the single `blokport-tfstate` bucket, separated by key
+>   `<brand>/<env>/terraform.tfstate`. wudport-dev is already at
+>   `blokport-tfstate/wudport/dev/terraform.tfstate`. Pointing `platform_state_bucket` at a
+>   `<brand>-tfstate` bucket that does not exist fails the remote-state read at plan time.
+
 Each brand has its **own** Terraform state (a backend block can't take a variable, so the
 key is passed at init):
 

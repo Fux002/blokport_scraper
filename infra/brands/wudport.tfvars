@@ -30,6 +30,11 @@ fal_key_ssm_name       = "" # FILL: /wudport-prod/FAL_KEY
 scraper_proxy_ssm_name = "" # FILL: /wudport-prod/BLOKPORT_SCRAPER_PROXY
 
 # --- shared / ops -----------------------------------------------------------
-platform_state_bucket = "wudport-tfstate" # wudport's own platform state
+platform_state_bucket = "blokport-tfstate" # NOT a per-brand bucket: the PLATFORM keeps every
+# brand's state in the one blokport-tfstate bucket, separated by KEY ("<brand>/<env>/terraform.tfstate")
+# — wudport-dev already lives at blokport-tfstate/wudport/dev/terraform.tfstate, and wudport-prod at
+# .../wudport/prod/. A "wudport-tfstate" bucket does not exist, so the platform_prod remote-state read
+# would fail at plan time. This is only about where the PLATFORM's state is read from; this stack's
+# OWN state still goes wherever brands/wudport.backend.hcl says.
 region                = "eu-west-1"
 alert_email           = ""
