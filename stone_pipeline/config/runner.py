@@ -232,7 +232,11 @@ def _launch_local(rec: dict) -> None:
 def _launch_ecs(rec: dict) -> None:
     import boto3
     ecs = boto3.client("ecs", region_name=env.getenv("BLOKPORT_S3_REGION", "eu-west-1"))
-    env_name = env.getenv("BLOKPORT_ENV", "development")   # not `env`: that name is the env-var module here
+    # Take the CANONICAL tier from settings rather than re-reading the raw var: settings validates it
+    # against the closed tier set and normalises the dev/prod aliases, so the task-def / container
+    # names derived below can never be built from an unvalidated string. Still named `env_name`, not
+    # `env`: that name is the env-var module here.
+    from stone_pipeline.config.settings import BLOKPORT_ENV as env_name
     # scope the task the same way the local launcher does: override the container's command with the
     # run's stage + sources. The container name must match the task definition's (SCRAPER_ECS_CONTAINER,
     # default blokport-scraper-<env>). Without stage/scope the taskdef's default command (full build) runs.

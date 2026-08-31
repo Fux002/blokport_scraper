@@ -1,14 +1,74 @@
 # Copy to terraform.tfvars (gitignored) to override defaults.
 #
-# The dev staging bucket is known and preset. The PROD bucket is TBD — fill it in
-# when the prod S3 details are shared, which grants the task write access to it:
-# prod_staging_bucket = "blokport-prod-staging-REPLACE_ME"
+# ONE state, ONE apply, TWO deployments: a dev instance (always on) and a prod instance that is
+# count-gated on `prod_staging_bucket`. Everything prod is INERT until that one value is set —
+# with it empty, a dev apply never reads the prod platform state or the /blokport-prod/ params.
 #
-# default_target_env  = "development"   # what a bare run/schedule targets
-# image_tag           = "core"          # or "imageproc" for de-watermark
-# schedule_enabled    = false           # flip true once a manual run is verified
-# schedule_expression = "cron(0 3 * * ? *)"
+# See TODO_PROD.md for the full prod checklist and DEV_PROD_PIPELINE.md for the data flow.
+
+# ---------------------------------------------------------------------------------------------
+# DEV — already provisioned and proven. Normally nothing here needs changing.
+# ---------------------------------------------------------------------------------------------
+# dev_staging_bucket   = "blokport-dev-staging-3e58a6"   # the default; the dev bucket's real name
+# image_tag            = "core"                          # or "imageproc" for the de-watermark image
+# gpu_image_tag        = "gpu"
+# dev_schedule_enabled = false                           # scheduled pulls stay OFF; cadence is manual
+# dev_auto_enhance     = true
+# dev_auto_texture     = true
+# dev_require_enhanced = true
+
+# ---------------------------------------------------------------------------------------------
+# PROD — the whole prod stack turns on when `prod_staging_bucket` is non-empty.
+# ---------------------------------------------------------------------------------------------
+# DO NOT uncomment prod_staging_bucket until EVERY prerequisite below is true. Setting it creates
+# scraper_prod + gpu_enhance_prod + sync_service_prod at once, and the apply reads the prod platform
+# remote state and the /blokport-prod/ SSM params — it FAILS HARD if any is absent. This is also why
+# the variable's DEFAULT is "" and must stay that way: a non-empty default would make a routine dev
+# apply try to build prod.
+#
+# PREREQUISITES (all on the Blokport platform side, blokport_backend repo):
+#   1. The prod platform stack is applied, so `blokport/prod/terraform.tfstate` exists and exposes
+#      ecs_cluster_name, vpc_id, private_subnet_ids, ecs_cluster_arn, service_sg_id and
+#      internal_namespace_id. It also tags the VPC `blokport-prod-vpc` and its private subnets
+#      `Tier=private`, which is how the modules here find the network.  [READY in that repo]
+#   2. /blokport-prod/BLOKPORT_SYNC_TOKEN and /blokport-prod/BLOKPORT_CONFIG_TOKEN exist. These are
+#      read BY NAME, so their absence fails the apply. They are created by the prod platform's
+#      terraform `app_secrets`.                                          [READY in that repo]
+#   3. /blokport-prod/FAL_KEY (and the proxy param, if used) exist. These are scraper-only, so the
+#      platform deliberately does NOT create them — make them out of band:
+#        aws ssm put-parameter --name /blokport-prod/FAL_KEY --type SecureString --value '<key>'
+#        aws ssm put-parameter --name /blokport-prod/BLOKPORT_SCRAPER_PROXY --type SecureString --value '<url>'
+#
+# The prod staging bucket name is DETERMINISTIC (the platform's prod stack sets
+# deterministic_bucket_names = true), so it is known before the apply — no random hex suffix:
+# prod_staging_bucket = "blokport-prod-staging"
+#
+# prod_home_env = "prod"    # default; which platform stack hosts prod (blokport-<prod_home_env>)
+#
+# Promote the SAME image dev -> prod. Pin an immutable git-sha tag rather than leaving both on the
+# mutable "core"/"gpu" tags, or pushing a new dev image silently moves prod too.
+# prod_image_tag     = "<the dev-proven sha>"
+# prod_gpu_image_tag = "gpu-<the dev-proven sha>"
+#
+# Prod runtime flags — ALL DEFAULT OFF so a freshly provisioned prod is quiet. Turn them on one at
+# a time, after the corresponding prod prerequisite is validated.
+# prod_schedule_enabled = false   # scheduled scrapes; leave off, cadence is manual/admin-driven
+# prod_auto_enhance     = false   # needs the prod :gpu image working
+# prod_auto_texture     = false   # needs the prod :gpu image + /blokport-prod/FAL_KEY
+# prod_require_enhanced = false   # needs the prod enhanced/ markers backfilled first
+#
+# Wire the prod-only secrets into the prod scraper/GPU/produce tasks (see prerequisite 3):
+# fal_key_ssm_name       = "/blokport-prod/FAL_KEY"
+# scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY"
+
+# ---------------------------------------------------------------------------------------------
+# Shared
+# ---------------------------------------------------------------------------------------------
+# schedule_expression = "cron(0 3 * * ? *)"   # applies to whichever schedules are enabled
+# memory              = 4096                  # raise to 8192 for the imageproc (de-watermark) image
 #
 # Proactive alert when an auto-texture GPU job fails (otherwise a failed batch shows only as
-# products missing from Pull). Set this, apply, then CONFIRM the SNS email AWS sends you:
-# alert_email         = "ops@example.com"
+# products missing from Pull). Set this, apply, then CONFIRM the SNS email AWS sends you.
+# NOTE: leaving this empty on a FULL apply removes the dev SNS alert created by an earlier
+# targeted apply — set it once and keep it set.
+# alert_email = "ops@example.com"
