@@ -117,9 +117,9 @@ def verify(ledger_path: Path | None = None, to_upload: Path | None = None,
     to_upload = Path(to_upload or SETTINGS.paths.to_upload_dir)
     path = Path(ledger_path or writethrough.ledger_path())
     if not path.exists():
-        return [f"no ledger at {path} (run with BLOKPORT_LEDGER_WRITETHROUGH=1 first)"]
+        return [f"no ledger at {path} (run with SCRAPER_LEDGER_WRITETHROUGH=1 first)"]
     problems: list[str] = []
-    with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
+    with Ledger.open(path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
         problems += verify_variants(ledger, to_upload)
         problems += verify_products(ledger, to_upload)
         if combinations:

@@ -97,3 +97,26 @@ def read_all(path: str | Path | None = None) -> list[dict]:
     disk fallback for a source not yet persisted)."""
     from stone_pipeline.config import store
     return store.read_source_diagnostics(path=path)
+
+
+def held_for_image(summary: dict) -> int:
+    """Products the last produce could NOT emit but a republish CAN still emit once their image lands -- the
+    REPUBLISHABLE subset of the images stage `no_image` count: rows that have a usable source image which is
+    not linked/enhanced yet. It EXCLUDES `no_image_source` (rows with no usable source url at all): those are
+    permanent rejects a republish can never fix, so they must not drive a "republish" prompt (they already
+    show as rejected in the funnel). So this clears to 0 when nothing is genuinely republishable. Read WITH
+    the live `images` block (ready/total/generating): the admin shows "N held for image, M of T textures
+    ready -> republish", honest without a gate the scraper cannot cheaply compute at serve time. 0 when the
+    summary carries no images stage. Back-compat: a summary predating no_image_source subtracts 0 (old
+    behaviour)."""
+    if not isinstance(summary, dict):
+        return 0
+    for st in summary.get("stages") or []:
+        if isinstance(st, dict) and st.get("stage") == "images":
+            extra = st.get("extra") or {}
+            try:
+                republishable = int(extra.get("no_image") or 0) - int(extra.get("no_image_source") or 0)
+            except (TypeError, ValueError):
+                return 0
+            return max(0, republishable)     # never negative; no_image_source is a subset of no_image
+    return 0

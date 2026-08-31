@@ -25,6 +25,7 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
@@ -224,9 +225,10 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     DISTINCT namespaces (the export Id churns, the Key is stable) -- so a retired Key must be tested
     against the Key column, never folded into the Id set (where it would never match and be inert)."""
     attr = _load_attributes(attributes_csv)
-    # universal finish fallback: finishes are consistent per product category, so a variation in a
-    # category that declares NO finish is still priceable in 'Raw' rather than dropping uncovered.
-    _raw_finish = attr["finish"].get("raw")
+    # universal finish fallback: a variation in a category that declares NO finish is still priceable in the
+    # pack's raw/unfinished finish (stone: 'Raw') rather than dropping uncovered. Sourced from the active
+    # pack, not the literal "raw", so a non-stone pack whose unfinished finish is named differently works.
+    _raw_finish = attr["finish"].get(match_key(active_pack().block_finish))
     assigned_types = assigned_types or {}
     exclude_ids = exclude_ids or set()
     retired_keys = retired_keys or set()

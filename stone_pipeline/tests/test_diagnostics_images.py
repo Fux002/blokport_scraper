@@ -53,7 +53,7 @@ def test_diagnostics_attaches_live_images_block(monkeypatch):
     code, body = server.dispatch("GET", ["diagnostics"], None)
     assert code == 200
     assert body["diagnostics"][0]["images"] == {
-        "total": 3, "ready": 1, "held": 1, "generating": True}
+        "total": 3, "ready": 1, "held": 1, "generating": True, "held_for_image": 0}  # no stages -> 0
 
 
 def test_no_images_block_when_not_s3_mode(monkeypatch):
@@ -82,3 +82,42 @@ def test_s3_failure_omits_block_never_500s(monkeypatch):
     code, body = server.dispatch("GET", ["diagnostics"], None)
     assert code == 200
     assert "images" not in body["diagnostics"][0]
+
+
+def test_images_block_carries_held_for_image_from_the_run(monkeypatch):
+    # held_for_image surfaces the last produce's no_image count (products held because their texture was not
+    # ready) into the LIVE images block, so the admin renders "N held -> Republish" alongside the live texture
+    # progress -- the reconciliation the frozen per-run 'Produced' count cannot give on its own.
+    rows = [{"source": "varsha", "health": "OK",
+             "stages": [{"stage": "images", "extra": {"no_image": 5, "staged": 0}}]}]
+    _wire(monkeypatch, "s3", rows, _keys(scraped=(A, B, C), enhanced=(A,)))
+    _, body = server.dispatch("GET", ["diagnostics"], None)
+    assert body["diagnostics"][0]["images"]["held_for_image"] == 5
+
+
+def test_held_for_image_helper_is_defensive():
+    assert diagnostics.held_for_image(
+        {"stages": [{"stage": "images", "extra": {"no_image": 7}}]}) == 7
+    assert diagnostics.held_for_image({"stages": [{"stage": "match_variation", "extra": {}}]}) == 0  # no images stage
+    assert diagnostics.held_for_image({"stages": []}) == 0
+    assert diagnostics.held_for_image({}) == 0                                     # no stages key
+    assert diagnostics.held_for_image({"stages": [{"stage": "images"}]}) == 0      # no extra
+    assert diagnostics.held_for_image(
+        {"stages": [{"stage": "images", "extra": {"no_image": "x"}}]}) == 0        # malformed value
+    assert diagnostics.held_for_image(None) == 0                                   # not a dict
+
+
+def test_held_for_image_excludes_permanent_no_source_rejects():
+    # held_for_image is the REPUBLISHABLE subset only: no_image MINUS no_image_source (rows with no usable
+    # source url at all -- a permanent reject a republish can never fix, so it must not drive a republish).
+    def held(no_image, no_source):
+        return diagnostics.held_for_image(
+            {"stages": [{"stage": "images", "extra": {"no_image": no_image, "no_image_source": no_source}}]})
+
+    assert held(63, 63) == 0     # the live case: every hold is a permanent no-source reject -> clears to 0
+    assert held(10, 4) == 6      # 4 permanent no-source excluded; 6 genuinely republishable remain
+    assert held(5, 0) == 5       # all transient (image not linked yet) -> all republishable
+    assert held(3, 5) == 0       # never negative (guard); no_image_source is a subset of no_image
+    # back-compat: a pre-change summary carrying no no_image_source subtracts 0 (old behaviour preserved)
+    assert diagnostics.held_for_image(
+        {"stages": [{"stage": "images", "extra": {"no_image": 8}}]}) == 8

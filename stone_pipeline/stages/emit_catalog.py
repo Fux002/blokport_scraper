@@ -237,14 +237,22 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
     return list(out.values())
 
 
-def build(existing_path: Path | None = None, image_keys: set[str] | None = None) -> Path:
+def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
+          *, seed_only: bool = False, out_path: Path | None = None) -> Path:
     """Assemble to_upload/1_variants_full.csv from the committed base (the complete
     source-of-truth variant set) + this run's delta (to_upload/1_variants_update.csv).
 
     image_keys: the set of variant Keys that actually have a {Key}.png on S3. When provided (or
     resolvable from S3), a variant advertises its image link IFF its image exists -- so the file
     can never point Medusa at a missing image. Pass an explicit set in tests; None resolves it from
-    S3, and a None result there (S3 unreachable) falls back to the prior heuristic."""
+    S3, and a None result there (S3 genuinely absent) falls back to the prior heuristic.
+
+    seed_only: rebuild HERMETICALLY from the committed base alone -- no live Medusa export, no update
+    delta, no retired-decision filter, no product-backed lookup, no live S3. This is the cold-start seed
+    projection (the fixed point `seed.verify` checks): the deterministic transforms only, so the result
+    depends solely on the committed seed, never on the operator's shell/S3/config.db. Production builds
+    leave it False. out_path: write here instead of the standard artifact (so a seed_only verify never
+    clobbers a real 1_variants_full.csv)."""
     # Seed from the BASE (committed, complete, Id-free source of truth), never the live export: a cold
     # start has a thin/empty live export (Medusa emptied), but the catalog must still rebuild the whole
     # set and grow from there. The live export is unioned only as a safety net, so a variety Medusa minted
@@ -253,13 +261,14 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     by_key = {r["Key"]: r for r in _rows(existing_path)}      # base = complete catalog (read-only)
     order = list(by_key)
     live = SETTINGS.paths.export_file
-    if existing_path != live:
+    if not seed_only and existing_path != live:              # seed_only: no live-export union (hermetic)
         for r in _rows(live):
             if r["Key"] not in by_key:
                 by_key[r["Key"]] = r
                 order.append(r["Key"])
     n_existing = len(order)
-    for r in _rows(SETTINGS.paths.to_upload_dir / "1_variants_update.csv"):   # new + alias delta
+    delta = [] if seed_only else _rows(SETTINGS.paths.to_upload_dir / "1_variants_update.csv")  # new+alias
+    for r in delta:
         if r["Key"] in by_key:
             by_key[r["Key"]].update(r)                        # alias update onto existing row
         else:
@@ -283,7 +292,7 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     # E10: a retired variety (the operator's explicit removal / un-retire memory) never re-enters the
     # upload -- so a produce does not re-serve it, and the ledger row stays 'retiring' until Medusa acks.
     from stone_pipeline.stages import decisions
-    retired = decisions.load_retired()
+    retired = set() if seed_only else decisions.load_retired()   # seed_only: no config.db retired filter
     if retired:
         rows = [r for r in rows if r["Key"] not in retired]
     _snap("retired")
@@ -301,9 +310,11 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
     _snap("consolidate")
 
     from stone_pipeline.stages.image_prompts import product_backed_keys
-    backed = product_backed_keys()                            # variants a product references
+    backed = set() if seed_only else product_backed_keys()    # variants a product references (ambient)
     base = SETTINGS.curation.variant_image_base               # dev/prod switch via env
-    s3_keys = image_keys if image_keys is not None else _s3_variation_keys()
+    # seed_only: never touch live S3 (None -> the deterministic has_export_image heuristic reproduces the
+    # base's own image cells). Otherwise use the passed key set, or resolve it from S3.
+    s3_keys = None if seed_only else (image_keys if image_keys is not None else _s3_variation_keys())
     for r in rows:
         cat = category_for_key(r["Key"])
         # advertise the image link only when the image really exists (see _image_link): a
@@ -355,7 +366,7 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None)
         log.warning("catalog left non-uniform varieties", extra={"extra_fields": {
             "fanout": sorted(_fanout), "non_uniform_count": len(_nonuniform), "detail": _detail}})
 
-    path = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
+    path = Path(out_path) if out_path else (SETTINGS.paths.to_upload_dir / "1_variants_full.csv")
     # atomic, NOT sanitized: 1_variants_full is the Medusa import; a leading "'" prepended to a
     # Name/Alias would corrupt the catalog data. (Operator review of scraped names is the sanitized
     # review files' job, not this machine-consumed deliverable.)

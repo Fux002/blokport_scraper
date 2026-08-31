@@ -18,7 +18,7 @@ from __future__ import annotations
 import atexit
 import hmac
 import json
-import os
+from stone_pipeline.core import env
 import signal
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -87,6 +87,7 @@ def _attach_image_progress(rows: list[dict]) -> None:
         log.warning("live image-progress: S3 client unavailable; omitting images blocks", exc_info=True)
         return
     from deploy.enhance_trigger import image_progress
+    from stone_pipeline.config import diagnostics
     for row in rows:                          # isolate per source: one source's S3 hiccup never drops the rest
         source = row.get("source")
         if not source:
@@ -98,6 +99,12 @@ def _attach_image_progress(rows: list[dict]) -> None:
                         source, exc_info=True)
             continue
         if block is not None:
+            # held_for_image: products the LAST produce held for no_image (their texture was not ready at emit).
+            # Paired with this LIVE block (ready/total/generating) so the admin can render the reconciliation
+            # the frozen per-run 'Produced' count cannot give on its own: "N held for image, M of T textures
+            # ready -> Republish". Per-run (drops to 0 on the next republish as they emit); read from the same
+            # row's images-stage diagnostic, so no extra I/O.
+            block["held_for_image"] = diagnostics.held_for_image(row)
             row["images"] = block
 
 
@@ -424,14 +431,14 @@ def _validate_source_put(name: str, body: dict) -> tuple[int, dict] | None:
 
 
 def _expected_token() -> str:
-    token = os.environ.get("BLOKPORT_CONFIG_TOKEN", "").strip()
+    token = env.getenv("BLOKPORT_CONFIG_TOKEN", "").strip()
     if not token:
-        raise SystemExit("BLOKPORT_CONFIG_TOKEN is not set; refusing to start the config server")
+        raise SystemExit("SCRAPER_CONFIG_TOKEN is not set; refusing to start the config server")
     return token
 
 
 class ConfigHandler(BaseHTTPRequestHandler):
-    server_version = "blokport-config/1.0"
+    server_version = "scraper-config/1.0"   # brand-neutral banner (one image serves every brand)
 
     def _respond(self, code: int, payload: object) -> None:
         data = json.dumps(payload).encode("utf-8")
@@ -499,7 +506,7 @@ class ConfigHandler(BaseHTTPRequestHandler):
 def serve(host: str | None = None, port: int = 8724) -> None:
     # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so peer tasks
     # (Medusa, over the VPC) can reach it. The bearer token still gates every request.
-    host = host or os.environ.get("BLOKPORT_BIND_HOST", "127.0.0.1")
+    host = host or env.getenv("BLOKPORT_BIND_HOST", "127.0.0.1")
     from stone_pipeline.ledger import snapshot, writethrough
     # E14: restore config.db (the durable source lifecycle: pause/delist/enabled) from its S3 snapshot
     # BEFORE seeding, so a redeploy does not lose it and re-seed every source back to active. Restore is a

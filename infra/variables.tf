@@ -9,6 +9,12 @@ variable "dev_staging_bucket" {
   default = "blokport-dev-staging-3e58a6"
 }
 
+variable "dev_enabled" {
+  type        = bool
+  default     = true
+  description = "Whether this brand has a dev deployment. True for blokport (the one shared dev). A prod-only brand (wudport, calcport) sets this false so ONLY its prod stack stands up -- no per-brand dev."
+}
+
 variable "prod_staging_bucket" {
   type        = string
   default     = ""
@@ -150,4 +156,40 @@ variable "alert_email" {
   type        = string
   default     = ""
   description = "Ops email for a proactive alert when an auto-texture GPU job FAILS (both envs). Empty = no alerting is created. On first apply with a value set, AWS sends an SNS confirmation email that must be clicked before alerts deliver."
+}
+
+# --- Brand + product-type (multi-brand root) ---------------------------------
+# The BRAND this root stack serves and the PRODUCT pack it runs. Default blokport/stone, so the existing
+# stack renders byte-identical. A second brand is a SEPARATE root stack: set brand + domain_pack + its prod
+# owner ids, and init with -backend-config="key=<brand>/scraper/terraform.tfstate" (backend keys can't take
+# a variable). Every blokport-named resource / tag / SSM path / platform-state key below derives from brand.
+variable "brand" {
+  type        = string
+  default     = "blokport"
+  description = "The brand this deployment serves (blokport | wudport | calcport | ...). Drives resource names, tags, SSM namespace, and the platform-state key so two brands never collide in one account."
+}
+
+variable "domain_pack" {
+  type        = string
+  default     = "stone"
+  description = "SCRAPER_DOMAIN_PACK -- the product-domain pack this brand runs (stone | wood | lime | ...). Selects the whole product model at runtime; no code edit."
+}
+
+variable "create_ecr" {
+  type        = bool
+  default     = true
+  description = "Whether THIS brand's stack creates the shared ECR image repo. True for the owning brand (blokport); every other brand sets false and references the existing repo (the image is brand-agnostic, so all brands share one). Flips repo ownership with no code edit."
+}
+
+variable "prod_sales_channel_id" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_SALES_CHANNEL_ID injected into the PROD task (this brand's Medusa storefront). Required by the prod owner-id guard once prod is enabled."
+}
+
+
+variable "platform_state_bucket" {
+  type        = string
+  default     = "blokport-tfstate"
+  description = "S3 bucket holding the PLATFORM terraform state this brand's tasks read (VPC/cluster/SG outputs). Per-brand platform -> set to that brand's state bucket. The scraper's OWN backend bucket is in backend.tf (a backend block can't take a variable; a 2nd brand overrides it with -backend-config)."
 }

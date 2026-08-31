@@ -118,3 +118,22 @@ variable "require_enhanced_enabled" {
   default     = false
   description = "BLOKPORT_REQUIRE_ENHANCED: hard publish gate -- only GPU-enhanced images (enhanced/ marker) are linked. Ships false; enable only after markers are backfilled, else all images hold."
 }
+
+# --- Brand + product-type selection (multi-brand / multi-material) ------------
+variable "brand" {
+  type        = string
+  default     = "blokport"
+  description = "BLOKPORT_BRAND: the brand this deployment serves; cross-checked against the bucket in prod. (blokport | wudport | calcport | ...)"
+}
+
+variable "domain_pack" {
+  type        = string
+  default     = "stone"
+  description = "BLOKPORT_DOMAIN_PACK: the product-domain pack (config/domains/<pack>.yaml) this deployment runs. stone | wood | lime | ... -- the whole product-type model, no code change."
+}
+
+variable "sales_channel_id" {
+  type        = string
+  default     = ""
+  description = "BLOKPORT_SALES_CHANNEL_ID: this brand's Medusa sales channel (storefront). One per deployment; empty falls back to the code dev default in dev, required in prod."
+}

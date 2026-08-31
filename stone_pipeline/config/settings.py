@@ -15,12 +15,12 @@ run must confirm them against the live backend fingerprint.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack  # dependency-free (yaml only); no import cycle
+from stone_pipeline.core import env  # neutral SCRAPER_ env prefix (BLOKPORT_ fallback); no import cycle
 
 # Repository root: this file is stone_pipeline/config/settings.py, so two parents up.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -36,31 +36,28 @@ WORKSPACE_ROOT = REPO_ROOT.parent
 # reproduce the current dev-staging behaviour exactly, so nothing changes until
 # the env vars are set. See DEV_PROD_PIPELINE.md for the promotion checklist.
 #
-# BLOKPORT_ENV IS THE DEPLOYMENT TIER, AND NOTHING ELSE. It is not a tenant, brand or material
-# slot. Every production guard in this file keys off IS_PRODUCTION, so an unrecognised value that
-# merely FAILED to look like production would silently downgrade a prod deployment to dev
-# semantics: dev S3 prefix, BLOKPORT_S3_DRY_RUN defaulting true, and the bucket + sales-channel
-# guards below disabled -- a run that looks healthy while writing nothing real. A brand-prefixed
-# value such as "wudport-production" is the obvious way to trip this.
+# BLOKPORT_ENV IS THE DEPLOYMENT TIER, AND NOTHING ELSE. It is not a tenant, brand or material slot --
+# BRAND (below) and BLOKPORT_DOMAIN_PACK own those. Every production guard in this file keys off
+# IS_PRODUCTION, so an unrecognised value that merely FAILED to look like production would silently
+# downgrade a prod deployment to dev semantics: dev S3 prefix, S3_DRY_RUN defaulting true, and the
+# bucket / brand / sales-channel guards below disabled -- a run that looks healthy while writing
+# nothing real. A brand-prefixed value such as "wudport-production" is the obvious way to trip it.
 #
-# So the value is VALIDATED against a closed set and anything else raises HERE, at import, before
-# a single guard can be silently skipped. Separation between two brands or materials comes from
-# giving each its own deployment -- own bucket, own task, own config.db + ledger -- never from
-# inventing a new BLOKPORT_ENV string. See DOMAIN_PACK.md.
+# So the value is VALIDATED against a closed set and anything else raises HERE, at import, before a
+# single guard can be silently skipped.
 _ENV_ALIASES = {
     "development": "development", "dev": "development",
     "production": "production", "prod": "production",
 }
-_RAW_ENV = os.environ.get("BLOKPORT_ENV", "development").strip().lower()
+_RAW_ENV = (env.getenv("BLOKPORT_ENV", "development") or "").strip().lower()
 if _RAW_ENV not in _ENV_ALIASES:
     raise RuntimeError(
-        f"BLOKPORT_ENV={os.environ.get('BLOKPORT_ENV')!r} is not a valid deployment tier. "
-        f"Allowed: {', '.join(sorted(_ENV_ALIASES))}. BLOKPORT_ENV selects the TIER only -- it is "
-        "not a brand/tenant/material slot, and an unrecognised value would silently run with "
-        "DEVELOPMENT semantics (dev S3 prefix, dry-run on, bucket + sales-channel guards off). "
-        "To run a second brand or material, give it its OWN deployment (own S3 bucket, own task, "
-        "own config.db + ledger) with BLOKPORT_ENV set to the real tier, and select its vocabulary "
-        "with BLOKPORT_DOMAIN_PACK. See DOMAIN_PACK.md.")
+        f"SCRAPER_ENV/BLOKPORT_ENV={_RAW_ENV!r} is not a valid deployment tier. "
+        f"Allowed: {', '.join(sorted(_ENV_ALIASES))}. It selects the TIER only -- it is not a "
+        "brand/tenant/material slot, and an unrecognised value would silently run with DEVELOPMENT "
+        "semantics (dev S3 prefix, dry-run on, bucket + brand + sales-channel guards off). Set the "
+        "brand with BRAND and the material with BLOKPORT_DOMAIN_PACK; give each its OWN deployment "
+        "(own S3 bucket, own task, own config.db + ledger). See DOMAIN_PACK.md.")
 # Canonical, so downstream sees "development"/"production" even when the alias "dev"/"prod" was set.
 BLOKPORT_ENV = _ENV_ALIASES[_RAW_ENV]
 IS_PRODUCTION = BLOKPORT_ENV == "production"
@@ -89,11 +86,9 @@ _OUTPUTS = REPO_ROOT / "outputs" / ENV_NAME                # the env's per-sourc
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    """Read a boolean env var (1/true/yes/on); fall back to default when unset."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    """Read a boolean env var (1/true/yes/on); fall back to default when unset. Delegates to the one
+    boolean-env parser in core.env so the truthy vocabulary lives in a single place."""
+    return env.env_bool(name, default)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -101,7 +96,7 @@ def _env_int(name: str, default: int) -> int:
     never crash config import on a bad override). Parse with int() itself, not an isdigit() pre-check:
     isdigit() is True for a double sign ('--3', once dashes are stripped) and for Unicode digits ('3', '²'),
     both of which int() then REJECTS -- so the heuristic let malformed values through to a crash at import."""
-    raw = os.environ.get(name)
+    raw = env.getenv(name)
     if raw is None:
         return default
     try:
@@ -112,7 +107,7 @@ def _env_int(name: str, default: int) -> int:
 
 def _env_float(name: str, default: float) -> float:
     """Read a float env var; fall back to default when unset or non-numeric (fail soft, never crash)."""
-    raw = os.environ.get(name)
+    raw = env.getenv(name)
     if raw is None:
         return default
     try:
@@ -121,38 +116,94 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-# The dev bucket is known. The PROD bucket is supplied at deploy time via BLOKPORT_S3_BUCKET.
-# In PRODUCTION we must NOT silently fall back to the dev bucket (that would store prod images in
-# dev and stamp prod Medusa rows with dev URLs) -- fail fast instead. Dev keeps the known default.
-_DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
-_S3_BUCKET_ENV = os.environ.get("BLOKPORT_S3_BUCKET", "").strip()
-if IS_PRODUCTION and not _S3_BUCKET_ENV:
+# Brand identity (multi-brand). Each brand (blokport/wudport/calcport/...) is its OWN deployment: own
+# bucket, own Medusa, own domain pack. Dev defaults to blokport (single-brand by design). BRAND is
+# brand-neutral (env BRAND; legacy BLOKPORT_BRAND read as fallback). Defined BEFORE the bucket so the
+# non-blokport guard below can reference it.
+BRAND = (env.getenv("BRAND") or "").strip().lower() or ("blokport" if not IS_PRODUCTION else "")
+if IS_PRODUCTION and not BRAND:
     raise RuntimeError(
-        "BLOKPORT_S3_BUCKET must be set in production — refusing to default to the dev bucket "
-        f"({_DEV_S3_BUCKET}). Set BLOKPORT_S3_BUCKET to the prod bucket before running prod.")
+        "BRAND must be set in production (the brand this deployment serves, e.g. 'blokport', 'wudport', "
+        "'calcport') so the brand<->bucket guard can refuse a cross-brand mis-configuration.")
+
+
+# ONE predicate for "the hardcoded blokport dev defaults may apply": blokport is the owning brand, so its
+# dev bucket / owner ids are the only baked-in defaults, and ONLY for blokport-in-dev. Every other case
+# (production, or any non-blokport brand even in dev) must supply its own -- never inherit blokport's. This
+# is the single source of truth for that rule so the brand-isolation guarantee can't drift across the guards
+# below (previously the `BRAND == "blokport"` literal was repeated at each site).
+def _is_blokport_dev() -> bool:
+    return not IS_PRODUCTION and BRAND == "blokport"
+
+# The S3 bucket. The blokport DEV bucket is the only known default; a PROD run OR any non-blokport brand
+# (even in dev) MUST set SCRAPER_S3_BUCKET explicitly -- never silently write into blokport's bucket.
+_DEV_S3_BUCKET = "blokport-dev-staging-3e58a6"
+_S3_BUCKET_ENV = (env.getenv("BLOKPORT_S3_BUCKET", "") or "").strip()
+if not _S3_BUCKET_ENV and not _is_blokport_dev():
+    raise RuntimeError(
+        "SCRAPER_S3_BUCKET must be set for this deployment (any production run, or any non-blokport brand "
+        f"even in dev) -- refusing to default to the blokport dev bucket ({_DEV_S3_BUCKET}). Set "
+        "SCRAPER_S3_BUCKET to this brand's own bucket.")
 S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
-S3_REGION = os.environ.get("BLOKPORT_S3_REGION", "eu-west-1")
+S3_REGION = env.getenv("BLOKPORT_S3_REGION", "eu-west-1")
+
+# Brand<->bucket cross-check: the bucket must BELONG to this brand, so a bucket mis-set to ANOTHER brand's
+# store fails loud instead of crossing brands (and, since it runs before any snapshot restore, it also stops
+# a wrong-brand ledger/config.db from ever being pulled). Prefix, not substring: 'blokport' must not match
+# 'notblokport-x' or a bucket that merely contains the slug. Fires for any prod run OR any non-blokport brand
+# even in dev -- the same scope as the require-guard above. Convention: '<brand>-<env>-staging[...]'.
+def _bucket_matches_brand(brand: str, bucket: str) -> bool:
+    return bool(brand) and bucket.lower().startswith(f"{brand}-")
 
 
-# Owner Medusa ids -- operational config, NOT catalog attributes, so they are environment
-# variables (the catalog attribute ids -- color/finish/type/quality/category -- come from the
-# env's attributes.csv instead). The sales channel is ONE id per environment; the company is
-# the general Blokport owner by default and can be overridden per scrape in sources.yaml. Each
-# has a dev default for local runs; a PRODUCTION run must set the env var -- it never falls back
-# to a dev id (returns "" so the miss is loud, never a silent dev/prod cross).
+if not _is_blokport_dev() and not _bucket_matches_brand(BRAND, S3_BUCKET):
+    raise RuntimeError(
+        f"SCRAPER_BRAND={BRAND!r} but the bucket {S3_BUCKET!r} is not this brand's (expected prefix "
+        f"'{BRAND}-') -- refusing to run. A bucket set to ANOTHER brand's store would cross brands. Set "
+        f"SCRAPER_S3_BUCKET to {BRAND}'s own bucket.")
+
+
+# Owner Medusa ids -- operational config, NOT catalog attributes (those come from the env's attributes.csv).
+# One sales channel + one company per deployment. In PRODUCTION they MUST be set: an empty owner id would
+# stamp every product with a blank/wrong Medusa owner, so we FAIL LOUD rather than returning "". The dev
+# defaults below are BLOKPORT's -- applied only for the blokport brand in dev; a non-blokport dev must set
+# its own (else empty, never blokport's).
 _DEV_SALES_CHANNEL_ID = "sc_01KTM2B2DJNSW6WPS1Q8FN8B2R"
 _DEV_COMPANY_ID = "01KTV98X8RG743YR3QHCECZKKA"
 
 
-def _owner_id(env_var: str, dev_default: str) -> str:
-    val = os.environ.get(env_var, "").strip()
+def _owner_id(env_var: str, dev_default: str, label: str, *, required_in_prod: bool) -> str:
+    val = (env.getenv(env_var, "") or "").strip()
     if val:
         return val
-    return "" if IS_PRODUCTION else dev_default
+    if IS_PRODUCTION and required_in_prod:
+        raise RuntimeError(
+            f"{env.PREFIX + env._suffix(env_var)} (the {label}) must be set in production -- refusing to run "
+            "with an empty owner id that would mis-own or blank every product/variation in Medusa. Set it "
+            "for this brand.")
+    # dev: the hardcoded defaults are BLOKPORT's -- apply them only for the blokport brand, never another's.
+    return dev_default if _is_blokport_dev() else ""
 
 
-SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID)
-COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID)
+# sales channel is ONE id per deployment with NO fallback, so it is REQUIRED in prod (an empty channel is a
+# broken storefront). company is the general owner DEFAULT and is overridable per-source (Medusa resolves an
+# empty one by vendor name), so it may be empty -- NOT required in prod.
+SALES_CHANNEL_ID = _owner_id("BLOKPORT_SALES_CHANNEL_ID", _DEV_SALES_CHANNEL_ID, "sales channel id",
+                             required_in_prod=True)
+COMPANY_ID = _owner_id("BLOKPORT_COMPANY_ID", _DEV_COMPANY_ID, "company id", required_in_prod=False)
+
+
+# Hand-maintained catalog_source/ files (backbones, origin_map, supplier-overrides) are MATERIAL-specific.
+# The stone pack (historical) keeps them flat at catalog_source/<file>; any OTHER pack MUST ship its own
+# catalog_source/<pack>/<file> and NEVER falls back to stone's -- so a wood/lime run reads its own data or
+# gaps/fails loudly, never silently loads stone varieties/origins (audit A2 / #213 M1).
+_STONE_PACK = "stone"
+
+
+def _catalog_source_file(filename: str) -> Path:
+    base = WORKSPACE_ROOT / "catalog_source"
+    pack = active_pack().name
+    return base / filename if pack == _STONE_PACK else base / pack / filename
 
 # Last-resort attribute defaults are DOMAIN VALUES, so they live in the active pack, not here:
 # config/domains/<pack>.yaml -> last_resort_finishes / last_resort_quality / block_finish (read via
@@ -214,38 +265,48 @@ class Paths:
 
     # per-category backbone files derive from the CATEGORIES registry.
     @property
-    def backbone_json(self) -> Path:        # legacy alias (== slab backbone)
-        return self.backbone_slabs_json
+    def backbone_json(self) -> Path:        # the DEFAULT-FORM backbone (the pack's primary category), NOT
+        # literally slab -- a non-stone pack whose default form is not named 'slab' would otherwise crash here
+        # (category('slab') -> None -> AttributeError) on the arg-less load_backbone hot path.
+        return category(default_form_name()).backbone_path
+
+    # A specific category's backbone is category(<name>).backbone_path -- no per-product-type accessor.
 
     @property
-    def backbone_slabs_json(self) -> Path:
-        return category("slab").backbone_path
+    def type_density_csv(self) -> Path:
+        # per-material density, PACK-NAMESPACED (reference/type_density.<pack>.csv) so each material's
+        # densities are separate. A pack with no such file uses its own default_density (domain pack), never
+        # the stone file -- so wood never inherits stone's 2700. Seeded from that env's Medusa type table.
+        return REPO_ROOT / "reference" / f"type_density.{active_pack().name}.csv"
 
     @property
-    def backbone_blocks_json(self) -> Path:
-        return category("block").backbone_path
+    def standard_slab_area_csv(self) -> Path:
+        # PACK-NAMESPACED like type_density; absent for a pack with no standard-area concept (the bundle-area
+        # ladder then simply falls through), so it never reads stone's slab-area table under another pack.
+        return REPO_ROOT / "reference" / f"standard_slab_area.{active_pack().name}.csv"
 
     @property
-    def backbone_tiles_json(self) -> Path:
-        return category("tile").backbone_path
+    def origin_map_csv(self) -> Path:
+        # per-variety origin, PACK-NAMESPACED via catalog_source/<pack>/ (stone stays flat). A non-stone pack
+        # reads its OWN origin_map or none -- never stone's, so wood/lime origins can't silently resolve to a
+        # stone variety's country.
+        return _catalog_source_file("origin_map.csv")
+
+    @property
+    def origin_overrides_csv(self) -> Path:
+        # per-supplier origin overrides, same pack-namespacing. Optional (absent file = no overrides).
+        return _catalog_source_file("origin_supplier_overrides.csv")
     # ports.csv is supplied by the user into catalog_source; loader falls back to reference/.
     ports_csv: Path = WORKSPACE_ROOT / "catalog_source" / "ports.csv"
     ports_csv_fallback: Path = REPO_ROOT / "reference" / "ports.csv"
     units_csv: Path = REPO_ROOT / "reference" / "units.csv"
-    # origin_map is HAND-MAINTAINED in catalog_source/ (variety -> country + geographic patterns),
-    # like ports.csv -- it is NOT generated from any export. Fallback to reference/ for back-compat.
-    origin_map_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_map.csv"
+    # origin_map + origin_overrides are HAND-MAINTAINED material-specific catalog_source files -> now
+    # PACK-NAMESPACED properties (below), so a non-stone pack reads its own or gaps loudly, never stone's.
     origin_map_csv_fallback: Path = REPO_ROOT / "reference" / "origin_map.csv"
-    # Per-SUPPLIER origin overrides: (source, variety, stone_type) -> ISO2, for a supplier that sells a
-    # stone it does NOT quarry in its home country (a reseller). Scoped to one source, so it never leaks
-    # to other suppliers. Optional -- absent file = no overrides.
-    origin_overrides_csv: Path = WORKSPACE_ROOT / "catalog_source" / "origin_supplier_overrides.csv"
     country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
-    standard_slab_area_csv: Path = REPO_ROOT / "reference" / "standard_slab_area.csv"
-    # per-stone-type material density (kg/m3): derive weight from real dimensions when a source has no
-    # weight. Seeded from Medusa's type table; default row (Marble) is the rare fallback for a new type.
-    type_density_csv: Path = REPO_ROOT / "reference" / "type_density.csv"
+    # type_density_csv + standard_slab_area_csv are PACK-NAMESPACED properties (below), not shared files, so a
+    # non-stone pack never inherits stone's per-type densities / slab-area table.
 
     # The import template defines the emit schema (operating principle 8). Lives in
     # the package (header is the schema authority).
@@ -293,6 +354,20 @@ class Thresholds:
     derive_incomplete_degraded: float = 0.25      # rows missing a required derived dimension/weight
     validate_reject_degraded: float = 0.50        # rows rejected at validate (majority -> systemic, not stray)
     images_no_image_degraded: float = 0.25        # rows with no publishable image (held from shipping)
+    # rows a stage dead-lettered on an unexpected exception (stages/_rowguard.py). A lone bad-data row stays
+    # isolated (surfaced per-row, never escalated); a systemic share tripping this points at a code bug and
+    # goes DEGRADED so it is loud. Low, because ANY appreciable isolated fraction is abnormal.
+    row_isolated_degraded: float = 0.02
+    # ABORT floor for the same signal: when this large a share of rows was dead-lettered, it is a systemic
+    # code bug (e.g. one input class every row hits), not sparse bad data -- fail the source LOUD (like the
+    # >50% adapt-drop / ingest / magnitude gates) rather than report it a clean success that shipped almost
+    # nothing. Below this, per-row isolation does its job (ship the good rows, flag the few dead ones).
+    row_isolated_abort: float = 0.25
+    # A1: when a scrape reports that more than this fraction of its per-product DETAIL fetches failed
+    # (rate-limited), its product absences are untrustworthy -- refuse to delist against it. Below the 30%
+    # delist cap so a moderately rate-limited run (10-25% detail failures) that would otherwise silently
+    # discontinue held products is caught. Scrapers with no detail fetch never report a ratio (no-op).
+    delist_detail_failure_floor: float = 0.10
 
 
 @dataclass(frozen=True)
@@ -320,17 +395,7 @@ class BackendConstants:
     (dev-staging environment). Per-source overrides live in sources.yaml."""
 
     # Category pcat ids derive from the CATEGORIES registry (single source of truth).
-    @property
-    def cat_slabs_pcat(self) -> str:
-        return category("slab").pcat_id
-
-    @property
-    def cat_blocks_pcat(self) -> str:
-        return category("block").pcat_id
-
-    @property
-    def cat_tiles_pcat(self) -> str:
-        return category("tile").pcat_id
+    # A specific category's pcat is category(<name>).pcat_id -- no per-product-type accessor.
 
     # Owner ids, from env vars (settings top). sales_channel_id: one per env. company_id: the
     # general Blokport owner default; a per-scrape sources.yaml value overrides it (constants).
@@ -362,13 +427,20 @@ class S3Config:
     # Empty by default -> boto3 default credential chain (the ECS task IAM role on
     # AWS; ambient creds locally). Set BLOKPORT_AWS_PROFILE only to force a named
     # local profile -- never on Fargate, where no profile exists (ProfileNotFound).
-    credentials_profile: str = os.environ.get("BLOKPORT_AWS_PROFILE", "")
+    credentials_profile: str = env.getenv("BLOKPORT_AWS_PROFILE", "")
     # When true the image stage does not hit S3; it derives keys deterministically
     # and records them, but performs no network IO. Used when creds are absent.
     # Env-aware default: dev defaults dry (no accidental writes); PROD defaults to actually uploading, so a
     # prod deploy that forgets BLOKPORT_S3_DRY_RUN can't silently no-op every S3 write while emitting URLs
     # to objects that were never uploaded. Explicit BLOKPORT_S3_DRY_RUN still overrides in either env.
     dry_run: bool = _env_bool("BLOKPORT_S3_DRY_RUN", not IS_PRODUCTION)
+
+
+# The active domain's generic material noun ('stone'/'wood'/'lime'), used to keep the de-watermark and
+# image-classify prompts MATERIAL-neutral -- a wood pack must not instruct FAL to reconstruct a STONE
+# pattern, nor score wood photos against a "natural stone slab" prompt. Resolved once at import from the
+# deployment's DOMAIN_PACK.
+_MATERIAL = active_pack().generic_material_word
 
 
 @dataclass(frozen=True)
@@ -394,8 +466,8 @@ class ImageProcessingConfig:
 
     enabled: bool = _env_bool("BLOKPORT_IMAGE_PROCESSING", False)
     # --- enhancement (Real-ESRGAN learned clean+sharpen+4x, then faithful beautify) ---
-    esrgan_model: str = os.environ.get("BLOKPORT_ESRGAN_MODEL", "RealESRGAN_x4plus")
-    esrgan_weights: str = os.environ.get("BLOKPORT_ESRGAN_WEIGHTS", "")  # path override; else models/<model>.pth
+    esrgan_model: str = env.getenv("BLOKPORT_ESRGAN_MODEL", "RealESRGAN_x4plus")
+    esrgan_weights: str = env.getenv("BLOKPORT_ESRGAN_WEIGHTS", "")  # path override; else models/<model>.pth
     esrgan_tile: int = 512            # per-tile input for large images (0 = whole image)
     target_long_edge: int = 2048      # cap the 4x output at this long edge (INTER_AREA downscale)
     levels_lo_pct: float = 0.5        # exposure lift: black-point percentile
@@ -412,15 +484,15 @@ class ImageProcessingConfig:
     dewatermark: bool = True
     # De-watermark is an INSTRUCTION edit (FAL FLUX Kontext), not a masked inpaint: Kontext edits the whole
     # image from the prompt and reconstructs the stone under the logo without the mask-fill's hallucinations.
-    fal_model: str = os.environ.get("BLOKPORT_FAL_MODEL", "fal-ai/flux-pro/kontext")
+    fal_model: str = env.getenv("BLOKPORT_FAL_MODEL", "fal-ai/flux-pro/kontext")
     # GENERIC fallback de-watermark instruction, used when a watermarked source has no per-source prompt
     # (SourceConfig.fal_prompt). It is source-AGNOSTIC on purpose -- it names no supplier -- so it is always
     # safe for any source (it removes whatever logo is present, never another supplier's specifically). Each
     # watermarked source SHOULD still set its own tuned prompt for best removal; this is the safe default.
-    fal_prompt: str = ("Remove any supplier watermark logo and any overlaid brand text from the surface of "
-                       "the stone slab, seamlessly reconstructing the natural stone pattern underneath. Keep "
-                       "the stone colour, veining, the size/label card and everything else in the photo "
-                       "identical to the original.")
+    fal_prompt: str = (f"Remove any supplier watermark logo and any overlaid brand text from the surface of "
+                       f"the {_MATERIAL} product, seamlessly reconstructing the natural {_MATERIAL} texture "
+                       f"underneath. Keep the {_MATERIAL} colour, pattern, the size/label card and everything "
+                       f"else in the photo identical to the original.")
     fal_seed: int = 0                 # fixed for best-effort reproducibility across re-runs
     fal_price_per_mp: float = 0.05    # USD per billed megapixel (rounds up, 1 MP floor)
     fal_max_usd: float = _env_float("BLOKPORT_FAL_MAX_USD", 150.0)  # per-run cost circuit breaker
@@ -456,13 +528,13 @@ class ImageProcessingConfig:
     # (deploy.reprocess_source); Stage 7 only reads the resulting pool, so :core stays torch-free.
     # Off by default (a discard is destructive): enable only once the margin is validated on a real sample.
     classify: bool = _env_bool("BLOKPORT_IMAGE_CLASSIFY", False)
-    classify_model: str = os.environ.get("BLOKPORT_CLIP_MODEL", "openai/clip-vit-base-patch32")
+    classify_model: str = env.getenv("BLOKPORT_CLIP_MODEL", "openai/clip-vit-base-patch32")
     classify_margin: float = 0.85  # discard iff P(non-stone) >= this; conservative, keep when unsure
     classify_stone_prompts: tuple = (
-        "a photograph of a natural stone slab",
-        "a close-up photo of a polished stone surface",
-        "a photo of marble or granite or quartzite texture",
-        "a slab of stone in a warehouse",
+        f"a photograph of natural {_MATERIAL}",
+        f"a close-up photo of a {_MATERIAL} surface",
+        f"a photo of {_MATERIAL} texture",
+        f"a {_MATERIAL} product in a warehouse",
     )
     classify_nonstone_prompts: tuple = (
         "a document or technical spec sheet",
@@ -486,9 +558,9 @@ class ImagesConfig:
     same for local and s3, so the emitted URLs match once the local staging dir is
     synced to the bucket. Switching from local to s3 is a one-line mode change."""
 
-    mode: str = os.environ.get("BLOKPORT_IMAGE_MODE", "passthrough")
+    mode: str = env.getenv("BLOKPORT_IMAGE_MODE", "passthrough")
     local_staging_dir: Path = REPO_ROOT / "state" / "image_staging"
-    public_base: str = os.environ.get(
+    public_base: str = env.getenv(
         "BLOKPORT_IMAGE_PUBLIC_BASE",
         f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{ENV_SEGMENT}/products/")
     concurrency: int = 8
@@ -536,22 +608,12 @@ class CurationConfig:
     # re-running the catalog (stages/emit_catalog.py stamps it).
     # derive from the env's bucket + segment (dev/ vs prod/) so a prod build NEVER stamps the
     # dev path; the BLOKPORT_VARIANT_IMAGE_BASE override is for an out-of-band bucket only.
-    variant_image_base: str = os.environ.get(
+    variant_image_base: str = env.getenv(
         "BLOKPORT_VARIANT_IMAGE_BASE",
         f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{ENV_SEGMENT}/variations/")
     # Base images per category derive from the CATEGORIES registry (image_prompts
     # selects by Key prefix; these accessors remain for any direct callers).
-    @property
-    def variant_base_image_slab(self) -> str:
-        return category("slab").base_image
-
-    @property
-    def variant_base_image_block(self) -> str:
-        return category("block").base_image
-
-    @property
-    def variant_base_image_tile(self) -> str:
-        return category("tile").base_image
+    # A specific category's base image is category(<name>).base_image -- no per-product-type accessor.
 
     # (Volume per kg (m³/kg) is per-category now; see CATEGORIES[*].volume_per_kg.)
     # a gap whose nearest existing variety scores at or above this is proposed as
@@ -603,7 +665,7 @@ class Category:
 
     @property
     def backbone_path(self) -> Path:
-        return WORKSPACE_ROOT / "catalog_source" / self.backbone_filename
+        return _catalog_source_file(self.backbone_filename)   # pack-namespaced (stone flat); never stone-fallback
 
 
 # DEV/PROD SEGREGATION: a category's Medusa pcat id is INSTANCE-SPECIFIC (the dev and prod
@@ -631,8 +693,8 @@ def _pcat(label: str, env_var: str | None = None) -> str:
     (from_medusa/<env>/attributes.csv) -- never hardcoded. An explicit env-var override is allowed.
     A category absent from the export stays "" (inactive, emits nothing), so dev and prod ids can
     never cross and no stale literal can leak."""
-    if env_var and os.environ.get(env_var):
-        return os.environ[env_var]
+    if env_var and env.getenv(env_var):
+        return env.getenv(env_var)
     return _ENV_PCATS.get(label, "")
 
 # The category list is declared by the active product-domain pack (config/domains/<pack>.yaml). Adding a
@@ -735,8 +797,8 @@ class AutoEnhanceConfig:
     CLASSIFY=false -- auto-enhance never auto-discards (that needs a calibrated margin, enabled separately)."""
 
     enabled: bool = _env_bool("BLOKPORT_AUTO_ENHANCE", False)
-    queue: str = os.environ.get("BLOKPORT_GPU_QUEUE", "")
-    job_definition: str = os.environ.get("BLOKPORT_GPU_JOBDEF", "")
+    queue: str = env.getenv("BLOKPORT_GPU_QUEUE", "")
+    job_definition: str = env.getenv("BLOKPORT_GPU_JOBDEF", "")
     slice_size: int = _env_int("BLOKPORT_ENHANCE_SLICE", 200)
     # Global fan-out cap: at most this many Batch jobs per trigger. Each job carries its OWN per-process
     # fal_max_usd ceiling, so without a cap a large backlog fans out one job per window (unbounded jobs) and
@@ -756,8 +818,8 @@ class AutoTextureConfig:
     images (the same one-cycle hold as auto_enhance). Off by default (BLOKPORT_AUTO_TEXTURE)."""
 
     enabled: bool = _env_bool("BLOKPORT_AUTO_TEXTURE", False)
-    queue: str = os.environ.get("BLOKPORT_GPU_QUEUE", "")
-    job_definition: str = os.environ.get("BLOKPORT_GPU_JOBDEF", "")
+    queue: str = env.getenv("BLOKPORT_GPU_QUEUE", "")
+    job_definition: str = env.getenv("BLOKPORT_GPU_JOBDEF", "")
 
 
 @dataclass(frozen=True)

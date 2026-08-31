@@ -37,18 +37,9 @@ except ImportError:
     import slabware                                            # noqa: F401 (used by the wrappers below)
     from slabware import slab_get as _get, clean_price, join_slabs, parse_display_status
 
-# The S= token from the URL. SlabWare accepts an empty json filter regardless of
-# the token, but a fresh one is used to be safe.
-S_TOKEN = ("9t5AptkpH/x2GD3oStI0wQzByO78puNBq5ZOBU2x8a1DsWdZJ9W+UFgwpAvr7qTXgoGcUrL"
-           "nmVFKc1f53xV19kVT86meSR82TYzwo9Agi4tIXRQahJ4warnLVR8jPRR5Nlzhv/4jv1JmwSC9p"
-           "dc1APdC6JsDPn80c4HIItTOWsDTMGQ/m4KWvF/vuGG1xQjPN2naAtXme+bu5+uO0hBOcWWESF+"
-           "wB2pQt8LvkO+h5JyX1H2r3rTAczO9+1aOnEINoQybgacnN/c/T1fFwsW+EWUS8XgpOiJkM6UPR"
-           "5tsTEeNWPUQ1RNMPKHbkoFCDNu0cyNLSh2evfTLqOzz2DeOB1jvLXtdEm5CGTjLQbSazi5YDZ3"
-           "J/iI+wjOvyyKDLqsjQpxThT9Aqnouk+4m5j0bMQ0xdINjDRTu5eY3xwn8REhAbLryAPUB0NGE9"
-           "hlAATDyNv72E4Y62lg+nOBU9naNm8Ga5dwl2DeNXGmFgFhCQjXfbWq8IbhX8Yw0H6IVORAP")
-
+# The public FullInventory viewer needs no ?S= token (verified live: list + detail both 200).
 BASE = "https://www.ferrazbrasilinventory.com"
-PAGE_URL = f"{BASE}/FullInventory.aspx?S={S_TOKEN}"
+PAGE_URL = f"{BASE}/FullInventory.aspx"
 API_URL = f"{BASE}/FullInventory.aspx/ObterListaBundles"
 DETAIL_API_URL = f"{BASE}/FullInventory.aspx/DetalheBundle"
 

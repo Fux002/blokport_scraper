@@ -18,6 +18,7 @@ from rapidfuzz import fuzz
 from stone_pipeline.core import logfmt
 from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
+from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.adapters.tokens import recognize_type
 from stone_pipeline.reference.loaders import ReferenceData, type_slug_from_key
@@ -32,6 +33,7 @@ class ReconcileStats:
     missing_leaf: int = 0
     missing_variation: int = 0
     filled_from_variety: int = 0
+    isolated: int = 0   # rows dead-lettered on an unexpected exception (stages/_rowguard.py)
 
 
 # Colour/quality MAY be filled from the matched variety when the scrape omits them
@@ -190,7 +192,8 @@ def _apply_type(row: CanonicalRow, new_type: str, ref: ReferenceData, stats: Rec
             )
         )
     row.type_name = new_type
-    row.type_id = _map_id(ref, "type", new_type)
+    # id mapping is owned by _finalize_ids (always runs after this on every reconcile_row path); it maps
+    # row.type_name, which we just set, so setting type_id here too would be a redundant second mapping.
     if from_key:
         row.type_method = "variety_authoritative"
         row.type_confidence = Confidence.high.name
@@ -277,8 +280,7 @@ def _finalize_ids(row: CanonicalRow, ref: ReferenceData) -> None:
 
 def run(rows: list[CanonicalRow], ref: ReferenceData) -> ReconcileStats:
     stats = ReconcileStats()
-    for row in rows:
-        reconcile_row(row, ref, stats)
+    stats.isolated = isolate_rows(rows, "reconcile", lambda r: reconcile_row(r, ref, stats), log)
     log.info(
         "reconcile done",
         extra={
@@ -289,6 +291,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData) -> ReconcileStats:
                 "missing_leaf": stats.missing_leaf,
                 "missing_variation": stats.missing_variation,
                 "filled_from_variety": stats.filled_from_variety,
+                "isolated": stats.isolated,
             }
         },
     )

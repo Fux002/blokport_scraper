@@ -11,10 +11,18 @@ from __future__ import annotations
 
 import glob
 
+import pytest
+
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.ledger.db import Ledger
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.run import run_source
+
+# marenostone scrape data is present locally (gitignored, absent in CI). Unlike the full-equivalence test
+# above, the gate tests below spy record_source, so they need only the scrape -- NOT the from_medusa export.
+_MAREN_DATA = SETTINGS.paths.data_dir.exists() and any(
+    SETTINGS.paths.data_dir.glob("marenostone/*/products.csv"))
 
 
 def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch):
@@ -38,3 +46,33 @@ def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch):
     assert rendered.read_bytes() == open(emitted_csv, "rb").read(), (
         "ledger write-through products differ from the emitted medusa_import.csv"
     )
+
+
+@pytest.mark.skipif(not _MAREN_DATA, reason="needs local marenostone scrape data (gitignored, absent in CI)")
+def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch):
+    """The run gate consults writethrough.enabled() and, when the NEUTRAL SCRAPER_ flag is set, invokes
+    record_source. Verifies the env-prefix consolidation end-to-end through the real run_source gate;
+    record_source is spied so the from_medusa export is not required."""
+    from stone_pipeline.ledger import writethrough
+
+    monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
+    monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    calls: list[int] = []
+    monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: (calls.append(1), True)[1])
+
+    run_source("marenostone", outputs_dir=tmp_path / "on", state_dir=tmp_path / "on")
+    assert calls == [1], "write-through enabled: the gate must call record_source exactly once"
+
+
+@pytest.mark.skipif(not _MAREN_DATA, reason="needs local marenostone scrape data (gitignored, absent in CI)")
+def test_writethrough_gate_silent_when_disabled(tmp_path, monkeypatch):
+    """With neither prefix set, enabled() is False and the gate must not touch the ledger."""
+    from stone_pipeline.ledger import writethrough
+
+    monkeypatch.delenv("SCRAPER_LEDGER_WRITETHROUGH", raising=False)
+    monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
+    calls: list[int] = []
+    monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: (calls.append(1), True)[1])
+
+    run_source("marenostone", outputs_dir=tmp_path / "off", state_dir=tmp_path / "off")
+    assert calls == [], "write-through disabled: the gate must not call record_source"

@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
 
     path = writethrough.ledger_path()
     if not path.exists():
-        print(f"no ledger at {path} (run a build with BLOKPORT_LEDGER_WRITETHROUGH=1 first)")
+        print(f"no ledger at {path} (run a build with SCRAPER_LEDGER_WRITETHROUGH=1 first)")
         return 1
     with Ledger.open(path, env=writethrough.ENV_NAME) as ledger:
         before = sync.status(ledger)

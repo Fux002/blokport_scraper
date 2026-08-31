@@ -205,3 +205,16 @@ def test_max_jobs_zero_disables_the_cap(monkeypatch):
           AutoEnhanceConfig(enabled=True, queue="Q", job_definition="JD", slice_size=2, max_jobs=0),
           watermarked=())
     assert len(et.submit_pending(["varsha"])) == 5          # <=0 -> no cap, all windows submitted
+
+
+def test_single_source_produce_triggers_auto_enhance(monkeypatch):
+    # Regression: run_all() fired the GPU reprocess for the "all" produce, but a SINGLE-source produce
+    # (build --sources X / the per-source loop) reaches run.main() on its own branch and must also trigger
+    # it -- else a single-source cold start stages raw images that never get de-watermarked.
+    from stone_pipeline import run as run_mod
+    called = []
+    monkeypatch.setattr(run_mod, "run_source", lambda target: types.SimpleNamespace(source=target))
+    monkeypatch.setattr(run_mod, "print_summary", lambda manifest: None)
+    monkeypatch.setattr(et, "submit_pending", lambda sources: called.append(list(sources)) or [])
+    assert run_mod.main(["varsha"]) == 0
+    assert called == [["varsha"]]                            # the single source was handed to the trigger

@@ -12,7 +12,7 @@ provider "aws" {
   region = var.region
   default_tags {
     tags = {
-      Project   = "blokport"
+      Project   = var.brand # per-brand cost/ownership attribution (default 'blokport' -> unchanged)
       Component = "scraper"
       ManagedBy = "terraform"
     }

@@ -69,3 +69,24 @@ variable "alert_email" {
   type        = string
   default     = ""
 }
+
+# Brand + product-type selection. The GPU jobs run pipeline code (de-watermark / generate-textures) that
+# reads active_pack() from DOMAIN_PACK -- without these, a wudport/wood GPU job would default to the STONE
+# pack and generate stone textures/densities. Defaults keep this the blokport-stone stack.
+variable "brand" {
+  type        = string
+  default     = "blokport"
+  description = "SCRAPER_BRAND for the GPU job (brand<->bucket guard)."
+}
+
+variable "domain_pack" {
+  type        = string
+  default     = "stone"
+  description = "SCRAPER_DOMAIN_PACK -- the product-domain pack the GPU job runs (stone|wood|lime|...)."
+}
+
+variable "sales_channel_id" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_SALES_CHANNEL_ID for the GPU job's brand."
+}

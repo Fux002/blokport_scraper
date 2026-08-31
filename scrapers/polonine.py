@@ -33,16 +33,9 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from base import ScraperBase
 
+# The public FullInventory viewer needs no ?S= token (verified live: list + detail both 200).
 BASE = "https://polonine.slabware.com"
-S_TOKEN = (
-    "9t5AptkpH/x2GD3oStI0wQzByO78puNBq5ZOBU2x8a1DsWdZJ9W+UFgwpAvr7qTXgoGcUrLnmVFKc1f53xV19kVT8"
-    "6meSR82TYzwo9Agi4tIXRQahJ4warnLVR8jPRR5Nlzhv/4jv1JmwSC9pdc1APdC6JsDPn80c4HIItTOWsDTMGQ/m4K"
-    "WvF/vuGG1xQjPN2naAtXme+bu5+uO0hBOcWWESF+wB2pQt8LvkO+h5JyX1H2r3rTAczO9+1aOnEINoQybgacnN/c/T"
-    "1fFwsW+EWUS8XgpOiJkM6UPR5tsTEeNWPUQ1RNMPKHbkoFCDNu0cyNLSh2evfTLqOzz2DeOB1jvLXtdEm5CGTjLQbS"
-    "azi5YDZ3J/iI+wjOvyyKDLqsjQpxThT9Aqnouk+4m5j0bMQ0xdINjDRTu5eY3xwn8REhAbLryAPUB0NGE9hlAATDyN"
-    "v72E4Y62lg+nOBU9naNm8Ga5dwl2DeNXGmFgFhCQjXfbWq8IbhX8Yw0H6IVORAP"
-)
-PAGE_URL = f"{BASE}/FullInventory.aspx?S={S_TOKEN}"
+PAGE_URL = f"{BASE}/FullInventory.aspx"
 LIST_API = f"{BASE}/FullInventory.aspx/ObterListaBundles"
 DETAIL_API = f"{BASE}/FullInventory.aspx/DetalheBundle"
 PAGE_SIZE = 40
@@ -106,26 +99,16 @@ class PolonineScraper(ScraperBase):
                           content=json.dumps({"IdBundle": bundle_id, "IdCampanha": 0}))
         except Exception as exc:
             self.record_failure("detail", bundle_id=bundle_id, error=str(exc))
+            self.note_detail(ok=False)   # A1: feed the delist gate's detail-failure ratio
             return {}
+        self.note_detail(ok=True)
         return (r.json().get("d") or {}).get("Bundle") or {}
 
     def list_products(self) -> Iterable[Any]:
+        # SlabWare exposes no total, so the base paginator confirms an empty batch with one re-probe before
+        # accepting the end (a transient empty must not truncate the tail -> silent delist).
         self._warm_up()
-        inicio = 0
-        while True:
-            batch = self._fetch_page(inicio)
-            if not batch:
-                # SlabWare exposes no total, so a valid-but-empty 200 mid-pagination looks like the real end
-                # and would be marked COMPLETE (truncating the tail -> silent delist). Confirm with ONE
-                # re-fetch of the SAME offset before accepting the end; a transient empty resolves on the
-                # re-probe. (A real network error already raises out of _fetch_page before any complete marker.)
-                confirm = self._fetch_page(inicio)
-                if not confirm:
-                    break
-                batch = confirm
-            self.log.info("batch inicio=%d: %d bundles", inicio, len(batch))
-            yield from batch
-            inicio += PAGE_SIZE
+        yield from self.paginate_offset(self._fetch_page, PAGE_SIZE)
 
     def parse_product(self, item: dict) -> Optional[dict]:
         detail = self._fetch_detail(item.get("id")) or {}

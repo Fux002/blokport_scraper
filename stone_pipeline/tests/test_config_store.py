@@ -460,3 +460,45 @@ def test_enhance_flag_defaults_on_and_round_trips(tmp_path):
     assert row["enhance"] is False                                      # exposed to the admin UI
     store.upsert_row({**row, "enhance": True}, p)                       # UI flips it
     assert store.get_row("b", p)["enhance"] is True
+
+
+def test_schema_and_migrate_stay_in_parity(tmp_path):
+    # DRIFT GUARD. _SCHEMA (CREATE, run only on a brand-new DB) and _migrate (ALTER ADD, run on every
+    # connect) are two hand-maintained column lists. The dangerous, silent direction: a column added to
+    # _SCHEMA but forgotten in _migrate is present on fresh DBs and MISSING FOREVER on the long-lived prod
+    # config.db (which skips _SCHEMA), 500-ing the first query that touches it. This asserts a simulated
+    # legacy DB (only the original v1 columns) converges, via _migrate, to the SAME columns as a fresh DB.
+    import sqlite3
+
+    def _cols(path):
+        conn = store._connect(path)
+        try:
+            return {r["name"] for r in conn.execute("PRAGMA table_info(source)")}
+        finally:
+            conn.close()
+
+    fresh = _cols(tmp_path / "fresh.db")   # _SCHEMA + _migrate
+
+    # A pre-existing DB from before any later column was added: the source table with ONLY the original v1
+    # columns, user_version=1 so _connect SKIPS _SCHEMA and runs _migrate alone (exactly the prod path).
+    legacy_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(legacy_path))
+    conn.executescript(
+        "CREATE TABLE source ("
+        "  source TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, source_code TEXT NOT NULL DEFAULT '',"
+        "  vendor TEXT NOT NULL DEFAULT '', origin_default TEXT NOT NULL DEFAULT '', ports TEXT,"
+        "  mode TEXT NOT NULL DEFAULT 'review', watermarked INTEGER NOT NULL DEFAULT 0,"
+        "  emit_on_review INTEGER NOT NULL DEFAULT 1, default_bundle_size INTEGER NOT NULL DEFAULT 6,"
+        "  min_expected_rows INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT ''"
+        ");"
+        "PRAGMA user_version = 1;")
+    conn.commit()
+    conn.close()
+
+    migrated = _cols(legacy_path)   # original v1 + _migrate
+
+    missing_on_legacy = fresh - migrated
+    assert not missing_on_legacy, (
+        "these columns exist on a fresh _SCHEMA DB but _migrate never adds them, so they are MISSING on "
+        f"every long-lived config.db: {sorted(missing_on_legacy)}. Add matching ALTER TABLE ... ADD COLUMN "
+        "statements to store._migrate.")

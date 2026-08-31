@@ -33,9 +33,11 @@ def test_emit_build_from_seed_is_idempotent():
 
 @pytest.mark.skipif(not _BASE.exists(), reason="no committed variants_export_base.csv seed")
 def test_committed_base_is_already_a_fixed_point():
-    # The committed base must equal what a rebuild projects back (base == full projection). This is the
-    # ops guard `seed.verify` -- asserting it here keeps a future edit from committing a base that would
-    # silently drift on the next cold start.
+    # The committed base's SEED IDENTITY (Key/Name/Aliases/Volume) must equal what a rebuild projects back.
+    # This is the ops guard `seed.verify` -- asserting it here keeps a future edit from committing a base
+    # that would silently drift on the next cold start. verify() rebuilds HERMETICALLY (seed_only: no live
+    # export / delta / config.db / S3), so it gives the same answer on CI and on an S3-authenticated dev
+    # shell -- the old "seed FAILED" that only meant the ambient environment differed is gone.
     from stone_pipeline.reference import seed
     stats = seed.verify()
     assert stats["fixed_point"], f"committed base drifts on rebuild (first diff at row {stats['first_diff_row']})"
@@ -51,6 +53,23 @@ def test_committed_base_is_already_a_fixed_point():
     # survives in one category and vanishes from another (uneven Medusa cleaning), breaking uniformity.
     assert stats["mistyped_variants"] == 0, f"committed base has {stats['mistyped_variants']} mistyped varieties"
     assert stats["clean"], "committed seed is not clean (fixed_point / duplicate / type-less / mistyped check failed)"
+
+
+@pytest.mark.skipif(not _BASE.exists(), reason="no committed variants_export_base.csv seed")
+def test_no_committed_variety_is_mangled_by_clean_variety_name():
+    # clean_variety_name strips grade/code artifacts from a SCRAPED name so it matches the backbone (e.g.
+    # 'Rosal C' -> 'Rosal', a leading 'Z' code dropped). Its SAFETY invariant: a real variety name must be a
+    # FIXED POINT of the cleaning -- else a scraped copy of that variety would clean to something ELSE and
+    # fail to match its own entry, or (for a trailing grade letter) silently collapse onto a DIFFERENT
+    # variety. Enforce it on the committed base so a future base edit cannot add a variety clean_variety_name
+    # would mangle. This is the guard the trailing-grade collapse relies on (it assumes no real variety ends
+    # in a lone non-'I' letter); asserting the full fixed-point covers grade letters, number codes, and leads.
+    from stone_pipeline.core.text import clean_variety_name
+    from stone_pipeline.reference import seed
+    names = sorted({r["Name"] for r in seed._rows(_BASE) if r.get("Name")})
+    mangled = [(n, clean_variety_name(n)) for n in names if clean_variety_name(n) != n]
+    assert not mangled, \
+        f"{len(mangled)} committed varieties are NOT fixed points of clean_variety_name: {mangled[:10]}"
 
 
 def test_malformed_type_keys_flags_type_less_keys():

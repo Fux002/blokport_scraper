@@ -12,7 +12,6 @@ later milestones.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -50,6 +49,7 @@ from stone_pipeline.stages import (
     reconcile_tree,
     validate,
 )
+from stone_pipeline.stages._rowguard import STAGE_ERROR_RULE
 
 log = logfmt.get_logger("run")
 
@@ -112,6 +112,28 @@ def find_scrape_file(source: str) -> Optional[Path]:
                 pass
         return products
     return None
+
+
+def _isolated_fraction(rows) -> float:
+    """Share of rows the per-row guard dead-lettered (a stage_error reject). 0.0 for an empty batch."""
+    if not rows:
+        return 0.0
+    return sum(1 for r in rows if any(rr.rule == STAGE_ERROR_RULE for rr in r.reject_reasons)) / len(rows)
+
+
+def _scrape_detail_failure_ratio(scrape_path: Optional[Path]) -> float:
+    """A1: the fraction of per-product DETAIL fetches that failed on the scrape behind `scrape_path`, read
+    from its completion marker (the scraper records it via ScraperBase.note_detail). 0.0 when there is no
+    scrape file, no marker, or the scraper does not fetch details -- so the delist gate is a strict no-op
+    for those. Never raises: a malformed/absent marker reads as 0.0 (the delist gate then behaves as before)."""
+    if scrape_path is None:
+        return 0.0
+    import json
+    marker = scrape_path.parent / "scrape_complete.json"
+    try:
+        return float(json.loads(marker.read_text(encoding="utf-8")).get("detail_failure_ratio", 0.0) or 0.0)
+    except (ValueError, OSError, TypeError):
+        return 0.0
 
 
 def _apply_gate(rows, contract, manifest, run_log):
@@ -341,9 +363,11 @@ def run_source(
                                                    generic_descriptor=adapter.generic_descriptor))
     # Stage 5: reconcile tree
     stats = reconcile_tree.run(rows, ref)
-    manifest.add_stage(StageMetric(stage="reconcile", rows_in=len(rows), rows_out=len(rows),
+    _reconcile_status = _ratio_status(stats.isolated, len(rows), SETTINGS.thresholds.row_isolated_degraded)
+    manifest.add_stage(StageMetric(stage="reconcile", status=_reconcile_status, rows_in=len(rows), rows_out=len(rows),
                                    gapped=stats.missing_variation + stats.missing_leaf,
-                                   extra={"validated": stats.validated, "snapped": stats.snapped}))
+                                   extra={"validated": stats.validated, "snapped": stats.snapped,
+                                          "isolated": stats.isolated}))
 
     # Clean gate: resolved attribute names must be the canonical spelling for their id (the safety
     # net for the casing-leak bug class), and surface how many rows still carry an unresolved tree
@@ -353,6 +377,24 @@ def run_source(
     # Stage 6: derivation
     source_cfg = load_source(source)
     _record(manifest, run_log, derive.run(rows, ref, source_cfg))
+
+    # Per-row isolation ABORT gate: the four row-loop stages above dead-letter a row that raises an
+    # unexpected exception (fail-loud-and-ISOLATED). Isolating a FEW bad-data rows and shipping the rest is
+    # correct; but if a systemic share was dead-lettered it is a code bug hitting a whole input class, and
+    # letting the run finish would report the source a clean success that emitted almost nothing (a silent
+    # mask). Fail LOUD here, like the adapt-drop / ingest / magnitude gates, so the source is excluded from
+    # results with a non-zero rc rather than quietly shipping a gutted batch.
+    _iso_frac = _isolated_fraction(rows)
+    if _iso_frac >= SETTINGS.thresholds.row_isolated_abort:
+        run_log.error("per-row isolation breached the abort floor; aborting -- a systemic error dead-lettered "
+                      "too many rows to ship this as a success",
+                      extra={"extra_fields": {"rows": len(rows), "fraction": round(_iso_frac, 3),
+                                              "floor": SETTINGS.thresholds.row_isolated_abort}})
+        manifest.health_status = "FAILED"
+        _write_diagnostics(manifest, layout)
+        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
+                       gates=manifest.gate_status)
+        raise SystemExit(2)
 
     # Canonical magnitude-drift gate: after derive populates the physical fields (weight/dims), catch a
     # unit/normalization rescale before it reaches the catalog. Source-agnostic (canonical fields only),
@@ -379,7 +421,8 @@ def run_source(
                                       SETTINGS.thresholds.images_no_image_degraded))
     _record(manifest, run_log, StageMetric(
         stage="images", status=_img_status, rows_out=len(rows),
-        extra={"staged": img_stats.staged, "no_image": img_stats.no_image}))
+        extra={"staged": img_stats.staged, "no_image": img_stats.no_image,
+               "no_image_source": img_stats.no_image_source}))
     # Stage 8: constants
     _record(manifest, run_log, constants.run(rows, source_cfg))
 
@@ -444,6 +487,19 @@ def run_source(
     changed = [r for r in existing_rows if r.product_changed] if known else []
     # delete loop: products in Medusa (this source) that the latest scrape dropped -> stock-0 delist + report
     discontinued = product_state.discontinued(rows, source_cfg, known)
+    # SAFETY (A1): an identity-from-detail scraper DROPS a product whose detail fetch failed, which is
+    # indistinguishable from a real absence -> a rate-limited run would silently delist held products. If the
+    # scrape reported that too large a fraction of its detail fetches failed, its absences are untrustworthy:
+    # suppress the delist entirely. Keyed on the FETCH-FAILURE ratio, not the delisted count, so a genuine
+    # catalog shrink (clean absences, no detail failures) still delists. 0.0 for scrapers with no detail fetch.
+    _detail_fail_ratio = _scrape_detail_failure_ratio(scrape_path)
+    if discontinued and _detail_fail_ratio >= SETTINGS.thresholds.delist_detail_failure_floor:
+        run_log.warning("delist refused: the scrape's detail fetches were too degraded to trust product "
+                        "absences (likely rate-limited) -- keeping products listed",
+                        extra={"extra_fields": {"would_delist": len(discontinued),
+                                                "detail_failure_ratio": round(_detail_fail_ratio, 3),
+                                                "floor": SETTINGS.thresholds.delist_detail_failure_floor}})
+        discontinued = []
     # SAFETY: a partial scrape (truncated Cloudflare page, transient block) passes the DEGRADED
     # health gate yet would delist every product it failed to fetch. Refuse to mass-delist: if a
     # single run would discontinue >30% of this source's known products, drop the delist and flag
@@ -485,10 +541,10 @@ def run_source(
 
     # Phase 2 (flag-gated, shadow): also record this source's emitted products +
     # inventory into the ledger, AFTER the CSVs are written. Fully inert unless
-    # BLOKPORT_LEDGER_WRITETHROUGH is set, and it never fails the run (the ledger is
+    # write-through is enabled, and it never fails the run (the ledger is
     # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
-    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
-        from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger import writethrough
+    if writethrough.enabled():
         if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it LOUDLY on the run (do not report a clean success).
@@ -629,7 +685,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # constants.py) and an empty one resolves by vendor name on Medusa's side, so a global company id is
     # not needed for a valid prod run.
     if IS_PRODUCTION and not SALES_CHANNEL_ID:
-        log.error("production run requires BLOKPORT_SALES_CHANNEL_ID "
+        log.error("production run requires SCRAPER_SALES_CHANNEL_ID "
                   "(refusing to emit channel-less, invisible products)")
         return 1
     try:
@@ -665,6 +721,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 1 if (missing or blocked) else 0
         manifest = run_source(target)
         print_summary(manifest)
+        # Auto-enhance for the single-source path too. run_all() fires the GPU reprocess for the "all"
+        # produce; a per-source produce (build --sources X, or build's per-source loop) reaches main() HERE
+        # and must fire it as well -- otherwise a single-source (cold-start) produce stages raw images that
+        # never get de-watermarked, so improved/ stays empty and every re-produce rejects them as no_image.
+        # No-op unless BLOKPORT_AUTO_ENHANCE is set; best-effort (never fails the run).
+        try:
+            from deploy.enhance_trigger import submit_pending
+            submit_pending([target])
+        except Exception:
+            log.exception("auto-enhance trigger failed (non-fatal; images stay raw until next run)")
     except SystemExit as exc:
         return int(exc.code or 0)
     except Exception:

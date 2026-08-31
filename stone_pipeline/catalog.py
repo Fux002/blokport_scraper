@@ -129,9 +129,9 @@ def run(outputs_root: Path | None = None) -> Path:
     # pulls, and a produce that mints new varieties trips the CSV gate ("not in the current export")
     # even though those variations are valid and simply awaiting their first pull. The ledger must carry
     # them regardless; the sync engine gates their products on the variation being synced, and produce
-    # reconciles the gate against the ledger (held vs fatal). Inert unless BLOKPORT_LEDGER_WRITETHROUGH.
-    if os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in ("1", "true", "yes", "on"):
-        from stone_pipeline.ledger import writethrough
+    # reconciles the gate against the ledger (held vs fatal). Inert unless write-through is enabled.
+    from stone_pipeline.ledger import writethrough
+    if writethrough.enabled():
         if not writethrough.record_catalog():
             log.error("ledger catalog write-through FAILED; the produced variations are NOT in the ledger "
                       "and will not sync to Medusa until a successful re-run")

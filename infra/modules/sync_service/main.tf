@@ -10,8 +10,8 @@
 # registration in the platform namespace). It never mutates platform-owned resources.
 
 locals {
-  name = "blokport-scraper-svc-${var.target_env}"
-  tags = { Project = "blokport-scraper", Environment = var.target_env, Component = "sync-service" }
+  name = "${var.brand}-scraper-svc-${var.target_env}"
+  tags = { Project = "${var.brand}-scraper", Environment = var.target_env, Component = "sync-service" }
 }
 
 data "aws_region" "current" {}
@@ -143,12 +143,17 @@ resource "aws_iam_role_policy" "task" {
 # --- Task definition: ONE task, TWO containers (sync + config), shared local-disk ledger ---
 locals {
   common_env = [
-    { name = "BLOKPORT_ENV", value = var.target_env },
-    { name = "BLOKPORT_S3_BUCKET", value = var.staging_bucket },
-    { name = "BLOKPORT_S3_REGION", value = var.region },
-    { name = "BLOKPORT_LEDGER_PATH", value = "/ledger/${var.target_env}.db" },
-    { name = "BLOKPORT_LEDGER_WRITETHROUGH", value = "1" },
-    { name = "BLOKPORT_RUN_MODE", value = "local" },
+    { name = "SCRAPER_ENV", value = var.target_env },
+    { name = "SCRAPER_S3_BUCKET", value = var.staging_bucket },
+    { name = "SCRAPER_S3_REGION", value = var.region },
+    # Brand + product-type selection (brand-neutral names). Both containers import settings, so both carry
+    # BRAND for the prod brand<->bucket guard. DOMAIN_PACK = the product-type choice; defaults keep blokport-stone.
+    { name = "SCRAPER_BRAND", value = var.brand },
+    { name = "SCRAPER_DOMAIN_PACK", value = var.domain_pack },
+    { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
+    { name = "SCRAPER_LEDGER_PATH", value = "/ledger/${var.target_env}.db" },
+    { name = "SCRAPER_LEDGER_WRITETHROUGH", value = "1" },
+    { name = "SCRAPER_RUN_MODE", value = "local" },
   ]
   ledger_mount = [{ sourceVolume = "ledger", containerPath = "/ledger", readOnly = false }]
   log_options = {
@@ -183,8 +188,8 @@ resource "aws_ecs_task_definition" "this" {
       # fresh one (snapshot.restore + bootstrap_ledger_if_missing), so no wrapper is needed.
       entryPoint       = ["python", "-m", "stone_pipeline.ledger.server"]
       portMappings     = [{ containerPort = 8723, protocol = "tcp" }]
-      environment      = concat(local.common_env, [{ name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" }])
-      secrets          = [{ name = "BLOKPORT_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
+      environment      = concat(local.common_env, [{ name = "SCRAPER_BIND_HOST", value = "0.0.0.0" }])
+      secrets          = [{ name = "SCRAPER_SYNC_TOKEN", valueFrom = var.sync_token_ssm_arn }]
       mountPoints      = local.ledger_mount
       logConfiguration = { logDriver = "awslogs", options = local.log_options }
     },
@@ -200,32 +205,32 @@ resource "aws_ecs_task_definition" "this" {
       # manifest and holds every product no_image. On :core (no torch) the enhancement passes the
       # image through un-enhanced; the GPU Batch reprocess (:gpu) de-watermarks/upscales after.
       environment = concat(local.common_env, [
-        { name = "BLOKPORT_BIND_HOST", value = "0.0.0.0" },
-        { name = "BLOKPORT_IMAGE_MODE", value = "s3" },
-        { name = "BLOKPORT_IMAGE_PROCESSING", value = "true" },
-        { name = "BLOKPORT_KEEP_SCRAPED", value = "true" },
+        { name = "SCRAPER_BIND_HOST", value = "0.0.0.0" },
+        { name = "SCRAPER_IMAGE_MODE", value = "s3" },
+        { name = "SCRAPER_IMAGE_PROCESSING", value = "true" },
+        { name = "SCRAPER_KEEP_SCRAPED", value = "true" },
         # s3 dry-run defaults TRUE in dev (a safety so a dev box never writes the bucket): the image
         # stage then derives keys/urls and logs bytes but never put_object's, so processed images never
         # land and every product holds no_image. The produce runs here and MUST write, so turn it off.
-        { name = "BLOKPORT_S3_DRY_RUN", value = "false" },
+        { name = "SCRAPER_S3_DRY_RUN", value = "false" },
         # Auto-enhance: after produce stages new raw images, submit the GPU reprocess for the delta so the
         # GPU spins up on demand and back to zero. Ships OFF (flag false); the queue/job-def names let the
         # trigger reach Batch once enabled. CLASSIFY stays false in the auto path (no uncalibrated discards).
-        { name = "BLOKPORT_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
+        { name = "SCRAPER_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
         # Auto-texture: after produce QUEUES new-variant textures, submit ONE GPU job (RUN_MODE=generate-
         # textures) to generate + upload them -- reusing the SAME queue/jobdef below. Ships OFF; flip on only
         # after the :gpu image carries ben2 (else the job fails at background-removal).
-        { name = "BLOKPORT_AUTO_TEXTURE", value = tostring(var.auto_texture_enabled) },
-        { name = "BLOKPORT_GPU_QUEUE", value = var.gpu_job_queue_name },
-        { name = "BLOKPORT_GPU_JOBDEF", value = var.gpu_job_definition_name },
+        { name = "SCRAPER_AUTO_TEXTURE", value = tostring(var.auto_texture_enabled) },
+        { name = "SCRAPER_GPU_QUEUE", value = var.gpu_job_queue_name },
+        { name = "SCRAPER_GPU_JOBDEF", value = var.gpu_job_definition_name },
         # HARD publish gate: only GPU-enhanced images (enhanced/ marker) may be linked. Ships OFF -- flip on
         # ONLY after the markers are backfilled for the already-enhanced set, else every image holds.
-        { name = "BLOKPORT_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
+        { name = "SCRAPER_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
       ])
       # the config container runs the produce subprocess (fetch -> live scrape -> build), so it also
       # carries the scraper's runtime secrets (proxy, fal key) when configured.
       secrets = concat(
-        [{ name = "BLOKPORT_CONFIG_TOKEN", valueFrom = var.config_token_ssm_arn }],
+        [{ name = "SCRAPER_CONFIG_TOKEN", valueFrom = var.config_token_ssm_arn }],
       [for k, v in var.produce_secret_arns : { name = k, valueFrom = v }])
       mountPoints      = local.ledger_mount
       logConfiguration = { logDriver = "awslogs", options = local.log_options }

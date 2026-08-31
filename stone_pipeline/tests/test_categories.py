@@ -181,13 +181,36 @@ def test_load_all_refreshes_the_category_registry(monkeypatch):
 
 
 def test_owner_ids_are_env_vars_with_prod_guard(monkeypatch):
-    # company + sales-channel are operational env vars, never hardcoded: an explicit env var wins;
-    # dev falls back to a local default; prod with no env var stays "" (never a dev id).
+    # company + sales-channel are operational env vars, never hardcoded: an explicit env var wins; dev falls
+    # back to the local default (blokport brand only); prod with no env var FAILS LOUD (never ships a blank
+    # or wrong owner id -- audit A4).
+    import pytest
     from stone_pipeline.config import settings
+
+    def owner(required):
+        return settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default", "id", required_in_prod=required)
+
     monkeypatch.setenv("BLOKPORT_COMPANY_ID", "comp_X")
-    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default") == "comp_X"
+    assert owner(True) == "comp_X"                                  # explicit env var wins
     monkeypatch.delenv("BLOKPORT_COMPANY_ID", raising=False)
     monkeypatch.setattr(settings, "IS_PRODUCTION", False)
-    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default") == "dev_default"
+    monkeypatch.setattr(settings, "BRAND", "blokport")
+    assert owner(True) == "dev_default"                            # blokport dev falls back to the local default
+    monkeypatch.setattr(settings, "BRAND", "wudport")              # a non-blokport dev never inherits blokport's id
+    assert owner(True) == ""
     monkeypatch.setattr(settings, "IS_PRODUCTION", True)
-    assert settings._owner_id("BLOKPORT_COMPANY_ID", "dev_default") == ""
+    with pytest.raises(RuntimeError):                              # sales-channel-style: required -> fail loud
+        owner(True)
+    assert owner(False) == ""                                      # company-style: optional -> "" in prod, no raise
+
+
+def test_bucket_matches_brand_is_prefix_not_substring():
+    # audit B2: the brand<->bucket guard is a PREFIX check ('<brand>-...'), never a substring -- so a bucket
+    # that merely contains the slug, or another brand's bucket, does NOT pass as this brand's own.
+    from stone_pipeline.config.settings import _bucket_matches_brand
+    assert _bucket_matches_brand("blokport", "blokport-prod-staging-abc")   # own bucket
+    assert _bucket_matches_brand("wudport", "wudport-dev-staging-xyz")
+    assert not _bucket_matches_brand("blokport", "wudport-prod-staging")    # another brand's bucket
+    assert not _bucket_matches_brand("blokport", "notblokport-prod")        # slug as a substring, not the prefix
+    assert not _bucket_matches_brand("blokport", "blokportprod")            # missing the '-' boundary
+    assert not _bucket_matches_brand("", "anything")                        # unset brand never matches

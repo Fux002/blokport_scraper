@@ -24,7 +24,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-import os
+from stone_pipeline.core import env
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -75,6 +75,9 @@ def _build_backend(cfg) -> Optional[storage.StorageBackend]:
 class ImageStats:
     staged: int = 0
     no_image: int = 0
+    # subset of no_image with NO usable source url at all: a permanent reject (nothing to enhance/link,
+    # ever), NOT republishable. no_image - no_image_source = the transient set a republish can still emit.
+    no_image_source: int = 0
     placeholders: int = 0
     download_failed: int = 0
     bytes_uploaded: int = 0
@@ -318,9 +321,12 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                 stats.staged += 1
             else:
                 stats.no_image += 1
+                if not srcs:                      # no usable source url -> permanent, not republishable
+                    stats.no_image_source += 1
         log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
-            "staged": stats.staged, "no_image": stats.no_image, "manifest_entries": len(manifest),
-            "held_untreated": held_untreated, "discard_set": len(discarded)}})
+            "staged": stats.staged, "no_image": stats.no_image, "no_image_source": stats.no_image_source,
+            "manifest_entries": len(manifest), "held_untreated": held_untreated,
+            "discard_set": len(discarded)}})
         return stats
 
     backend = _build_backend(cfg)
@@ -380,7 +386,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             new_urls.append(u)
     # validation cap: process only N new images per run, so de-watermark/enhance
     # output can be eyeballed on a sample before a full run. 0 = no cap.
-    sample_limit = int(os.environ.get("BLOKPORT_IMAGE_SAMPLE_LIMIT", "0") or 0)
+    sample_limit = int(env.getenv("BLOKPORT_IMAGE_SAMPLE_LIMIT", "0") or 0)
     if sample_limit > 0:
         new_urls = new_urls[:sample_limit]
     fetched = dl.fetch_many(new_urls, fetch, concurrency=cfg.concurrency)
@@ -529,6 +535,8 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             stats.staged += 1
         else:
             stats.no_image += 1
+            if srcs == 0:                         # no usable source url -> permanent, not republishable
+                stats.no_image_source += 1
 
     if manifest_dirty:
         _save_manifest(backend, manifest)
@@ -537,6 +545,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
 
     log.info("images done", extra={"extra_fields": {
         "mode": cfg.mode, "staged": stats.staged, "no_image": stats.no_image,
+        "no_image_source": stats.no_image_source,
         "download_failed": stats.download_failed, "placeholders": stats.placeholders,
         "bytes_uploaded": stats.bytes_uploaded, "processed": stats.processed,
         "stale_manifest_pruned": stale_pruned}})

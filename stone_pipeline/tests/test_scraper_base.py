@@ -462,3 +462,85 @@ def test_marenostone_dims_from_html_reads_ready_stock_only_when_unit_is_sqm():
 
     # no Ready Stock row -> absent (derive then holds it as undetermined)
     assert "ready_stock_sqm" not in _dims_from_html(_row("Length (cm)", "300"))
+
+
+# --- paginate_offset: the shared no-total paginator (empty batch confirmed with a re-probe) ---------------
+
+class _Pager(ScraperBase):
+    source = "pagersite"
+    category = "slab"
+    columns = ["product_id"]
+
+    def parse_product(self, raw):
+        return {"product_id": raw["id"], "image_urls": []}
+
+
+def _seq(batches):
+    it = iter(batches)
+    return lambda offset: next(it)
+
+
+def test_paginate_offset_confirms_a_transient_empty_before_ending(tmp_path):
+    s = _Pager(data_dir=tmp_path)
+    # [a]; [] (transient) -> re-probe [b]; [] -> re-probe [] (real end)
+    got = list(s.paginate_offset(_seq([[{"id": "a"}], [], [{"id": "b"}], [], []]), page_size=1))
+    assert [r["id"] for r in got] == ["a", "b"]     # the transient empty did NOT truncate the tail
+
+
+def test_paginate_offset_stops_on_a_confirmed_empty(tmp_path):
+    s = _Pager(data_dir=tmp_path)
+    got = list(s.paginate_offset(_seq([[{"id": "a"}], [], []]), page_size=1))
+    assert [r["id"] for r in got] == ["a"]
+
+
+def test_paginate_offset_empty_first_page_yields_nothing_and_run_marks_incomplete(tmp_path):
+    # a blocked/empty first page confirms empty -> zero rows -> the run's zero-row rule marks INCOMPLETE,
+    # so a down first page is never ingested as a clean 'empty catalog' that would delist the whole source.
+    s = _Pager(data_dir=tmp_path)
+    s.list_products = lambda: s.paginate_offset(_seq([[], []]), page_size=1)  # empty, re-probe empty
+    s.run()
+    assert s._incomplete is True
+
+
+# --- format fallback: a per-row scraper's explicit "unknown" must reach the pipeline, not be defaulted -----
+
+def test_per_row_scraper_surfaces_an_unknown_format_instead_of_defaulting(tmp_path):
+    # A scraper that determines format PER ROW (category=None) and could not tell (format="") must return ""
+    # so the pipeline's signal-based resolver settles it -- NOT silently assert a kind. A real per-row value
+    # is honoured as-is. (This is why VarshaScraper.category is None: an empty thickness is genuinely unknown.)
+    class _PerRow(ScraperBase):
+        source = "perrow"
+        category = None
+        columns = ["product_id"]
+
+        def list_products(self):
+            return []
+
+        def parse_product(self, raw):
+            return {}
+
+    s = _PerRow(data_dir=tmp_path)
+    assert s._resolve_format({"format": ""}) == ""          # explicit-unknown surfaced, not defaulted to a kind
+    assert s._resolve_format({"format": "block"}) == "block"  # a real per-row format is honoured
+
+
+def test_single_format_scraper_falls_back_to_its_category_constant(tmp_path):
+    # A single-format scraper sets no per-row format; the category constant is the correct default.
+    class _Single(ScraperBase):
+        source = "single"
+        category = "slab"
+        columns = ["product_id"]
+
+        def list_products(self):
+            return []
+
+        def parse_product(self, raw):
+            return {}
+
+    s = _Single(data_dir=tmp_path)
+    assert s._resolve_format({}) == "slab"                  # no per-row format -> the source's constant
+
+
+def test_varsha_has_no_category_fallback(tmp_path):
+    from scrapers.varsha import VarshaScraper
+    assert VarshaScraper.category is None                   # unknown thickness must not silently become slab

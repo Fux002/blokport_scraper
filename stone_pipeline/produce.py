@@ -96,7 +96,7 @@ def _ledger_gate_state() -> tuple[int, int]:
     (sync.gate_state); produce owns only the held-vs-fatal DECISION made from them."""
     from stone_pipeline.ledger import sync, writethrough
     from stone_pipeline.ledger.db import Ledger
-    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         return sync.gate_state(lg)
 
 
@@ -107,7 +107,7 @@ def _cold_start_stall() -> str | None:
     expected pass-1 hold. produced == 0 (a no-op re-run) is not a stall."""
     from stone_pipeline.ledger import sync, writethrough
     from stone_pipeline.ledger.db import Ledger
-    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         vocab, produced, typed = sync.typing_health(lg)
     if produced == 0:
         return None

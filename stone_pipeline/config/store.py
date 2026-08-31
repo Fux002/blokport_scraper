@@ -15,7 +15,7 @@ serves both environments. No em dashes (design principle 2).
 from __future__ import annotations
 
 import json
-import os
+from stone_pipeline.core import env
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS source (
 
 def config_db_path() -> Path:
     """Durable config DB location. BLOKPORT_CONFIG_DB overrides it (tests, ops)."""
-    override = os.environ.get("BLOKPORT_CONFIG_DB", "").strip()
+    override = env.getenv("BLOKPORT_CONFIG_DB", "").strip()
     return Path(override) if override else SETTINGS.paths.workspace_root / "config.db"
 
 

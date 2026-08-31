@@ -252,3 +252,37 @@ def test_reset_rejects_an_explicit_empty_sources_list(tmp_path, monkeypatch):
     out, code = lifecycle.reset(sources=[], hard=True)
     assert code == 400 and "empty list" in out["error"]
     assert decisions_store.list_pending("variety") and decisions_store.attribute_ids()   # nothing cleared
+
+
+def test_pristine_reset_prunes_both_stale_medusa_exports(tmp_path, monkeypatch):
+    """Regression (the ghost incidents): a factory reset must delete BOTH id-bearing Medusa exports (local AND
+    S3): products_export.csv (seed_products -> ghost PRODUCTS, the 12-ghost incident) and variants_export.csv
+    (seed_variations seeds each variation 'synced' WITH the file's Id column -> up to ~36k ghost VARIATIONS
+    bound to dead/foreign ids; also the dev-ids-into-prod vector). Medusa is wiped on a pristine reset, so both
+    are stale; removing them makes the seeders dormant until Medusa re-publishes fresh exports."""
+    import dataclasses
+    import boto3
+    from stone_pipeline import lifecycle
+    from stone_pipeline.config import settings
+
+    prods = tmp_path / "products_export.csv"
+    prods.write_text("Variant Sku,Product Handle,Inventory Quantity\nVAR-1,ghost-1,0\n", encoding="utf-8")
+    variants = tmp_path / "variants_export.csv"
+    variants.write_text("Id,Key,Name\nmed_1,slab_x_uuid,Ghost\n", encoding="utf-8")
+    patched = dataclasses.replace(settings.SETTINGS, paths=dataclasses.replace(
+        settings.SETTINGS.paths, products_known_csv=prods, variants_export_csv=variants))
+    monkeypatch.setattr(settings, "SETTINGS", patched)
+
+    deleted = []
+
+    class _S3:
+        def delete_objects(self, Bucket, Delete):
+            deleted.extend(o["Key"] for o in Delete["Objects"])
+
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _S3())
+
+    out = lifecycle._prune_stale_medusa_export()
+    assert not prods.exists() and not variants.exists()        # both local ghost sources gone
+    assert out["local"] == 2 and out["s3"] == 2
+    assert any(k.endswith("from_medusa/products_export.csv") for k in deleted)
+    assert any(k.endswith("from_medusa/variants_export.csv") for k in deleted)

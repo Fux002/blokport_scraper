@@ -42,18 +42,9 @@ except ImportError:
     from base import ScraperBase
 
 # --- Site config ------------------------------------------------------------
-# The S= token from the URL. SlabWare accepts an empty json filter regardless of
-# the token value, but a fresh one is used to be safe.
-S_TOKEN = ("9t5AptkpH/x2GD3oStI0wQzByO78puNBq5ZOBU2x8a1DsWdZJ9W+UFgwpAvr7qTXgoGcUrL"
-           "nmVFKc1f53xV19kVT86meSR82TYzwo9Agi4tIXRQahJ4warnLVR8jPRR5Nlzhv/4jv1JmwSC9p"
-           "dc1AFx8qKbR3xl0HEU9txLHv39MVXNx4b/vifBF0gOe/RM6YI9AB5JLYmXnoGXC6f7T/+S+1d"
-           "ulKBuvbEhB+S2IbXo1zOwjkgqK/QVUY3kSlWyk7lwRNLLT83oKvJydG9Zg0bGWjMZfKYA0Qiiu"
-           "ey5iIwgYWsUV5CZIcZ77MNZQVm8P8nOTfEHHhIwrCyGNF6ja14E5TfJC7DosXLzzo0/BoVhEqM"
-           "1N1IjZnsejo8GLApg0wrNco62bHNqjnUyCm4V1mwVqYp5Yo6gu32pxZdm8yP3p2xPlkCUn1mbu"
-           "Fz0MzF2tlEgSNd0mSl7f78CyNIjt4sNkEdc4/JIpu0pHxqVEznBaZo70Jh3pFF7s9jnoa+9V")
-
+# The public FullInventory viewer needs no ?S= token (verified live: list + detail both 200).
 BASE = "https://www.brumagraninventory.com"
-PAGE_URL = f"{BASE}/FullInventory.aspx?S={S_TOKEN}"
+PAGE_URL = f"{BASE}/FullInventory.aspx"
 API_URL = f"{BASE}/FullInventory.aspx/ObterListaBundles"
 DETAIL_API_URL = f"{BASE}/FullInventory.aspx/DetalheBundle"
 

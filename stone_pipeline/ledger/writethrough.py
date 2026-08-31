@@ -1,6 +1,6 @@
 """Phase 2 write-through: a real run also populates the ledger (flag-gated, shadow).
 
-OFF by default. Enable with BLOKPORT_LEDGER_WRITETHROUGH=1. When on, run_source
+OFF by default. Enable with SCRAPER_LEDGER_WRITETHROUGH=1 (legacy BLOKPORT_ still read). When on, run_source
 records its emitted products and the inventory delta into the per-env ledger AFTER
 the CSVs are written, so the ledger is a shadow mirror and the live CSV flow is
 unchanged. A ledger error is caught and logged, never failing the run.
@@ -14,7 +14,7 @@ exists (no known products to diff against). No em dashes (design principle 2).
 
 from __future__ import annotations
 
-import os
+from stone_pipeline.core import env
 from pathlib import Path
 from typing import Sequence
 
@@ -27,20 +27,29 @@ from stone_pipeline.ledger.db import Ledger
 
 log = logfmt.get_logger("ledger.writethrough")
 
-_TRUE = {"1", "true", "yes", "on"}
-
 
 def enabled() -> bool:
-    return os.environ.get("BLOKPORT_LEDGER_WRITETHROUGH", "").strip().lower() in _TRUE
+    """The single predicate for 'is ledger write-through on?' -- every gate calls this, never re-reads env."""
+    return env.env_bool("LEDGER_WRITETHROUGH")
 
 
 def ledger_path() -> Path:
     """Per-env ledger location. BLOKPORT_LEDGER_PATH overrides it (tests, ops). The
     default sits on local disk (never EFS, design section 12 / M4)."""
-    override = os.environ.get("BLOKPORT_LEDGER_PATH", "").strip()
+    override = env.getenv("BLOKPORT_LEDGER_PATH", "").strip()
     if override:
         return Path(override)
     return SETTINGS.paths.workspace_root / "ledger" / f"{ENV_NAME}.db"
+
+
+def backend_fingerprint() -> str:
+    """A stable per-DEPLOYMENT identity (brand + env) stamped into the ledger's ledger_meta, so a wrong-brand
+    snapshot restored onto this task fails loud on open instead of being silently accepted. Deterministic
+    within a deployment (brand + env are fixed at startup), so re-opens always match; a different brand's
+    ledger has a different fingerprint and is rejected (ledger.db _bind_env)."""
+    import hashlib
+    from stone_pipeline.config.settings import BRAND
+    return hashlib.sha256(f"{BRAND}|{ENV_NAME}".encode()).hexdigest()[:16]
 
 
 def open_ledger(path: str | Path | None = None) -> Ledger:
@@ -49,7 +58,7 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
     the seed runs only when the variation table is empty."""
     p = Path(path or ledger_path())
     p.parent.mkdir(parents=True, exist_ok=True)
-    ledger = Ledger.open(p, env=ENV_NAME)
+    ledger = Ledger.open(p, env=ENV_NAME, backend_id_fingerprint=backend_fingerprint())
     if ledger.execute("SELECT COUNT(*) AS n FROM variation").fetchone()["n"] == 0:
         bootstrap.seed_attributes(ledger)
         bootstrap.seed_variations(ledger)

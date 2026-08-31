@@ -62,7 +62,9 @@ def main() -> int:
         return 2
     watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
     enhance = os.environ.get("ENHANCE", "true").lower() in ("1", "true", "yes")
-    classify = os.environ.get("CLASSIFY", "true").lower() in ("1", "true", "yes")
+    # Default OFF: a discard is destructive, and the CLIP prompts are material-tuned -- a manual/scheduled
+    # reprocess over a non-stone pack must not run the classifier unless explicitly asked (CLASSIFY=true).
+    classify = os.environ.get("CLASSIFY", "false").lower() in ("1", "true", "yes")
     full = os.environ.get("FULL", "false").lower() in ("1", "true", "yes")  # redo ALL (else only the delta)
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
     count = int(os.environ.get("SLICE_COUNT", "0"))  # 0 = to the end

@@ -24,7 +24,7 @@ def ref():
 
 def test_override_variation_wins(ref):
     # pick a real slab variation id to force
-    forced_id = next(iter(ref.variants_slabs.by_id))
+    forced_id = next(iter(ref.variants["slab"].by_id))
     ref.overrides = Overrides(by_key={("polonine", "620"): {"variation_id": forced_id}})
     row = CanonicalRow(src_site="polonine", surrogate_key="620", variety_match_key="UNKNOWN STONE",
                        raw_format="Slab")
@@ -95,7 +95,7 @@ def test_idempotent_reingest_after_adding_variant(tmp_path, monkeypatch):
 
     # add the new variety to the slabs reference (simulating the human fix)
     new_id = "01TESTNEWVARIETY00000000XY"
-    base.variants_slabs.by_id[new_id] = loaders.Variant(
+    base.variants["slab"].by_id[new_id] = loaders.Variant(
         variation_id=new_id, key="slab_granite_totally_new", name="Totally New Variety Xyz",
         image="", aliases=[])
     base.backbone.by_norm_name["totally new variety xyz"] = [loaders.BackboneVariety(

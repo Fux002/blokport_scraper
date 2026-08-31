@@ -624,6 +624,21 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # type); a multi-type target with no type to pick by is HELD, never a silent no-op onto one stone.
         if _apply_operator_alias(clean, name, row, stone_type):
             continue
+        # 3c-bis. OPERATOR MINT / REJECT -- authoritative, consulted UNIFORMLY (the same fix 3c made for the
+        # ALIAS decision, now for mint/reject). A confirmed mint (dec="yes") MINTS as its operator-chosen
+        # type HERE, before ANY reuse / nearest / similarity arm can alias or re-review it away -- so
+        # "I mint 'Alpine Luxe' as Agate" is applied even when it looks similar to an existing 'Alpine'.
+        # This is the ONE place the mint/reject decision is honored; the arms below never re-check it, so a
+        # decision can no longer be silently dropped by whichever similarity path a row happens to take.
+        # Every mint edge (type-less, already-exists, retired) is handled at the single enforcement point in
+        # the new_variant_rows loop, so _mint is safe to call directly.
+        dec = confirm_decisions.get(proj.norm(clean))
+        if dec == "yes":
+            _mint(clean, stone_type, row, gap)
+            continue
+        if dec == "no":                                # honour a reject so the name stops re-appearing
+            rejected.add(proj.norm(clean))
+            continue
         # 3d. code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
         # varieties -> NEVER mint them. A trailing lone-letter grade whose de-coded base is a KNOWN,
         # single, NON-colour variety is auto-aliased to that variety ('Rosal C' -> 'Rosal'), so a
@@ -642,17 +657,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 alias_new.setdefault(next(iter(owners)), set()).add(name)   # auto-alias to the real variety
                 continue
         if code_why:
-            # (an operator alias for this code was already applied by the uniform 3c consult above)
-            dec = confirm_decisions.get(proj.norm(clean))
-            if dec == "no":                            # honour 'no' so the code stops re-appearing
-                rejected.add(proj.norm(clean))
-                continue
-            if dec != "yes":                           # blank -> hold out of the upload and ask
-                pending_confirm.append(_review_card(
-                    clean, _code_reason(code_why, base), _review_evidence(row),
-                    stone_type=stone_type, nearest_existing=_named_with_types(base)))
-                continue
-            # dec == "yes" -> the human confirmed it IS a real variety -> fall through to mint
+            # an UNDECIDED code-shaped name -> hold for review (an operator mint/reject/alias was already
+            # honoured at 3c/3c-bis above, so this arm only ever sees undecided rows).
+            pending_confirm.append(_review_card(
+                clean, _code_reason(code_why, base), _review_evidence(row),
+                stone_type=stone_type, nearest_existing=_named_with_types(base)))
+            continue
         # PHASE 4 -- RESOLVE to an EXISTING variety (prefer an alias over a new variant). A generic
         # colour+type trade name is its OWN variety, so it skips all alias routing (surface match +
         # model) -- it can never be promoted into a premium named stone (misselling).
@@ -696,20 +706,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     f"Matches several existing varieties ({fam}). Alias it to the right one, or mint as new.",
                     _review_evidence(row), nearest_existing=fam))
                 continue
-            # st is set but NOT among the existing types -> the scrape claims a NEW stone type on an
-            # EXISTING multi-type name. BUG6 / HOLD-never-guess: do not silently mint (a mis-tagged
-            # 'Ocean Blue Quartzite' would become a phantom variety). Mint ONLY if the operator explicitly
-            # confirmed this name; otherwise hold for them to confirm mint-new-type vs mis-tag.
-            if confirm_decisions.get(proj.norm(clean)) != "yes":
-                _hold_new_type(clean, stone_type, row, gap, sorted({o[1] for o in owners}))
-                continue
-            # operator confirmed a genuinely-new type -> MINT it DIRECTLY as that type, and continue. Do NOT
-            # fall through to the fuzzy aliaser (4b): the nearest existing variety shares this exact NAME
-            # under a DIFFERENT type, so 4b would alias the operator's new-type variety onto that sibling
-            # ('Jasper Green Dolomite' -> 'Jasper Green Marble') and silently discard the decision -- the bug
-            # behind "I can only mint it as a preset type". The operator is the type authority here; the
-            # type-aware existing_cores guard below still prevents a duplicate.
-            _mint(clean, stone_type, row, gap)
+            # st is set but NOT among the existing types -> the scrape claims a NEW stone type on an EXISTING
+            # multi-type name. BUG6 / HOLD-never-guess: never silently mint a possible mis-tag ('Ocean Blue
+            # Quartzite'). An operator-confirmed mint was already applied at 3c-bis (which mints DIRECTLY as
+            # the chosen type, so the fuzzy aliaser can't absorb it onto a same-name sibling -- the old
+            # "I can only mint it as a preset type" bug); so an UNDECIDED row here is simply held.
+            _hold_new_type(clean, stone_type, row, gap, sorted({o[1] for o in owners}))
             continue
         # 4b. fuzzy nearest: alias-vs-new decision against the nearest existing variety. The tier-7
         # model uses name + type + colour to tell a real alias ('Marjan' -> 'Marjan Silver') from a
@@ -728,44 +730,34 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     alias_new.setdefault((proj.norm(nearest), proj.norm(nt)), set()).add(name)
                     continue
                 if d.verdict == "review":
-                    # uncertain -> the human decides (mint / reject / alias) via the review API
-                    # (an operator alias for this spelling was already applied by the uniform 3c consult)
-                    dec = confirm_decisions.get(proj.norm(clean))
-                    if dec == "no":
-                        rejected.add(proj.norm(clean))
-                        continue
-                    if dec != "yes":               # pending: hold out of the upload, ask for a decision
-                        near_types = sorted({o[1] for o in existing_surface.get(proj.norm(nearest), set())})
-                        type_note = (f" ({_human_join([title_case(t) for t in near_types])})"
-                                     if near_types else "")
-                        pick_type = " and pick the matching type" if len(near_types) > 1 else ""
-                        pending_confirm.append(_review_card(
-                            clean,
-                            f"Very similar to existing '{title_case(nearest)}'{type_note}. If it is "
-                            f"the same stone, alias it to '{title_case(nearest)}'{pick_type}. Mint "
-                            f"as a new variety only if it is genuinely different.",
-                            _review_evidence(row), stone_type=stone_type, color=gap.suggested_color or "",
-                            nearest_existing=_named_with_types(nearest), score=gap.nearest_score or "",
-                            model_prob=round(d.prob, 2)))
-                        continue
-                    # dec == "yes" -> the human confirmed it IS a new variety -> fall through to mint
-                # "mint" -> fall through to create a new variant
+                    # uncertain, and UNDECIDED (an operator mint/reject/alias was already honoured at
+                    # 3c/3c-bis above) -> hold for the human to decide (mint / reject / alias).
+                    near_types = sorted({o[1] for o in existing_surface.get(proj.norm(nearest), set())})
+                    type_note = (f" ({_human_join([title_case(t) for t in near_types])})"
+                                 if near_types else "")
+                    pick_type = " and pick the matching type" if len(near_types) > 1 else ""
+                    pending_confirm.append(_review_card(
+                        clean,
+                        f"Very similar to existing '{title_case(nearest)}'{type_note}. If it is "
+                        f"the same stone, alias it to '{title_case(nearest)}'{pick_type}. Mint "
+                        f"as a new variety only if it is genuinely different.",
+                        _review_evidence(row), stone_type=stone_type, color=gap.suggested_color or "",
+                        nearest_existing=_named_with_types(nearest), score=gap.nearest_score or "",
+                        model_prob=round(d.prob, 2)))
+                    continue
+                # d.verdict == "mint" -> fall through to create a new variant
             elif (gap.nearest_score or 0) >= alias_floor or _is_token_subset(clean, nearest):
                 review_candidates.setdefault(proj.norm(nearest), set()).add(name)
                 continue
-        # PHASE 5 -- a genuinely NEW variety: nothing rejected it, nothing existing claims it. Per the
-        # 'every new variety is reviewed' policy, do NOT auto-create it -- HOLD for the operator to confirm
-        # (it mints on the next produce), reusing the SAME confirm gate as the code-shaped path so a prior
-        # 'yes' mints directly and a 'no' rejects. This is the one list: a new variety is a review decision,
-        # never a silent auto-mint. (Cross-branch backfill of an ALREADY-resolved variety still mints via
-        # _alias_and_backfill -- that is not a new variety, so it is not gated here.)
-        # A TYPE-LESS new variety is NOT gated here: it falls through to _mint -> the type-less hold below
-        # ("No stone type detected"), a more specific review ask than this one. Gate only typed new varieties.
-        dec = confirm_decisions.get(proj.norm(clean))
-        if stone_type and dec == "no":
-            rejected.add(proj.norm(clean))
-            continue
-        if stone_type and dec != "yes":
+        # PHASE 5 -- a genuinely NEW, UNDECIDED variety: nothing rejected it, nothing existing claims it, and
+        # no operator decision applied above. Per the 'every new variety is reviewed' policy, do NOT
+        # auto-create it -- HOLD for the operator to confirm (an operator 'yes' already minted it at 3c-bis,
+        # a 'no' already rejected it there). A new variety is a review decision, never a silent auto-mint.
+        # (Cross-branch backfill of an ALREADY-resolved variety still mints via _alias_and_backfill -- not a
+        # new variety, so not gated here.)
+        # A TYPE-LESS new variety is NOT gated here: it falls through to _mint -> the type-less hold at the
+        # single enforcement point ("No stone type detected"). Gate only typed new varieties.
+        if stone_type:
             pending_confirm.append(_review_card(
                 clean,
                 "New variety (no close existing match). Confirm to add it as a new variety, or reject.",

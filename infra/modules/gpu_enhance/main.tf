@@ -7,8 +7,8 @@
 # =============================================================================
 
 locals {
-  name          = "blokport-gpu-enhance-${var.target_env}"
-  platform_name = "blokport-${var.home_env}"
+  name          = "${var.brand}-gpu-enhance-${var.target_env}"
+  platform_name = "${var.brand}-${var.home_env}"
   bucket_arn    = "arn:aws:s3:::${var.staging_bucket}"
   object_arn    = "arn:aws:s3:::${var.staging_bucket}/*"
 }
@@ -236,11 +236,15 @@ resource "aws_batch_job_definition" "this" {
       { type = "MEMORY", value = "15000" },
     ]
     environment = [
-      { name = "BLOKPORT_ENV", value = var.target_env },
-      { name = "BLOKPORT_S3_BUCKET", value = var.staging_bucket },
-      { name = "BLOKPORT_S3_REGION", value = var.region },
+      { name = "SCRAPER_ENV", value = var.target_env },
+      { name = "SCRAPER_S3_BUCKET", value = var.staging_bucket },
+      { name = "SCRAPER_S3_REGION", value = var.region },
+      # pack/brand so GPU pipeline code (de-watermark, generate-textures) runs THIS material, not stone
+      { name = "SCRAPER_BRAND", value = var.brand },
+      { name = "SCRAPER_DOMAIN_PACK", value = var.domain_pack },
+      { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
       { name = "RUN_MODE", value = "reprocess" },
-      { name = "SRC", value = "varsha" }, # per-submission override
+      { name = "SRC", value = "" }, # always overridden per submission (never a hardcoded source)
       { name = "WATERMARKED", value = "false" },
     ]
     secrets = [for k, v in var.ssm_secret_arns : { name = k, valueFrom = v }]

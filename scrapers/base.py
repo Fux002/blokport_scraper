@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import csv
 import logging
-import os
+from stone_pipeline.core import env
 import random
 import time
 from datetime import datetime, timezone
@@ -128,6 +128,14 @@ class ScraperBase:
         self.failures_csv = self.run_dir / "failures.csv"
         self.complete_marker = self.run_dir / "scrape_complete.json"
         self._failures: list[dict] = []
+        # Detail-fetch accounting (A1). A scraper that fetches a per-product DETAIL page reports each outcome
+        # via note_detail(ok=...); the base persists the failure RATIO into the completion marker. The delist
+        # gate reads it and refuses to discontinue against a scrape whose detail fetches were badly degraded
+        # (rate-limited): for an identity-from-detail scraper a failed detail DROPS the product, which looks
+        # exactly like a real absence and would silently delist it. Keyed on the fetch-failure ratio, never
+        # the delisted count, so a genuine catalog shrink (clean absences, zero fetch failures) still delists.
+        self._detail_ok = 0
+        self._detail_failed = 0
         # Set True by a scraper that knows it terminated early (e.g. pagination stopped before the
         # advertised total). The completion marker then records the scrape as INCOMPLETE so the
         # pipeline refuses to treat this truncated folder as the authoritative latest scrape.
@@ -164,7 +172,7 @@ class ScraperBase:
                              "DIRECT (likely to be blocked)", self.source, self.proxy_capability)
             return None
         if self.needs_proxy:
-            url = os.environ.get("BLOKPORT_SCRAPER_PROXY", "").strip()
+            url = env.getenv("BLOKPORT_SCRAPER_PROXY", "").strip()
             if url:
                 self.log.info("routing %s through the residential proxy (legacy needs_proxy)", self.source)
                 return url
@@ -344,10 +352,11 @@ class ScraperBase:
             self.mark_incomplete("zero rows scraped -- treating as a failed run, not an empty catalog")
         # Written ONLY after a clean finish: a crash mid-scrape leaves no marker, so the pipeline
         # falls back to the prior good folder instead of ingesting a half-written products.csv.
-        self.complete_marker.write_text(
-            json.dumps({"rows": len(rows), "complete": not self._incomplete,
-                        "timestamp": self.timestamp}),
-            encoding="utf-8")
+        marker = {"rows": len(rows), "complete": not self._incomplete, "timestamp": self.timestamp}
+        detail_ratio = self._detail_failure_ratio()
+        if detail_ratio is not None:   # only for scrapers that report detail fetches (A1 delist gate reads it)
+            marker["detail_failure_ratio"] = round(detail_ratio, 4)
+        self.complete_marker.write_text(json.dumps(marker), encoding="utf-8")
         return self.products_csv
 
     def mark_incomplete(self, reason: str = "") -> None:
@@ -355,6 +364,29 @@ class ScraperBase:
         advertised total) so the run is recorded as truncated and not ingested as authoritative."""
         self._incomplete = True
         self.log.warning("scrape marked INCOMPLETE: %s", reason or "(no reason given)")
+
+    def paginate_offset(self, fetch_page, page_size: int, start: int = 0) -> Iterable[Any]:
+        """Offset paginator for a list API with NO advertised total. `fetch_page(offset)` returns the batch
+        at that offset (a list; falsy/empty when there is nothing there). Because no total is exposed, a
+        valid-but-empty 200 mid-pagination is indistinguishable from the real end and, taken at face value,
+        would truncate the tail and mark the scrape COMPLETE -> a silent delist. So an empty batch is
+        CONFIRMED with one re-fetch of the SAME offset before the end is accepted: a transient empty resolves
+        on the re-probe, a real end stays empty. This is the source-agnostic core the SlabWare scrapers each
+        hand-rolled; a source with a real total should page against THAT instead (a stronger signal). A
+        genuine network error raises out of `fetch_page` (crashing before any complete marker is written), so
+        it is never mistaken for an end. An empty first page confirms empty -> zero rows -> the run's zero-row
+        rule marks it INCOMPLETE, so a blocked/empty first page is never a clean 'empty catalog'."""
+        offset = start
+        while True:
+            batch = fetch_page(offset)
+            if not batch:
+                confirm = fetch_page(offset)
+                if not confirm:
+                    self.log.info("empty batch confirmed at offset=%d; end of list", offset)
+                    break
+                batch = confirm
+            yield from batch
+            offset += page_size
 
     # --- the site-specific bits (subclass implements these) ------------------
     def list_products(self) -> Iterable[Any]:
@@ -384,6 +416,21 @@ class ScraperBase:
         ref = next((str(details[k]) for k in self._REF_KEYS if details.get(k)), "")
         self._failures.append({**details, "kind": kind, "ref": ref,
                                "url": str(details.get("url", "")), "error": str(details.get("error", ""))})
+
+    def note_detail(self, ok: bool) -> None:
+        """Record the outcome of ONE per-product detail-page fetch (ok=True succeeded, ok=False failed).
+        A scraper that enriches products from a detail page calls this at every detail fetch, so the base
+        can persist the failure ratio into the completion marker and the delist gate can refuse to trust a
+        badly rate-limited scrape's absences. Scrapers with no detail fetch simply never call it (ratio
+        absent -> the gate treats it as 0.0, a no-op)."""
+        if ok:
+            self._detail_ok += 1
+        else:
+            self._detail_failed += 1
+
+    def _detail_failure_ratio(self) -> Optional[float]:
+        total = self._detail_ok + self._detail_failed
+        return (self._detail_failed / total) if total else None
 
     def mark_fetch_failed(self, row: dict, group: str, **details) -> None:
         """A sub-fetch for THIS product failed recoverably (e.g. a rate-limited detail page): mark the row

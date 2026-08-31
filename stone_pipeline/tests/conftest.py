@@ -66,6 +66,24 @@ _DATA_DEPENDENT_TESTS = {
     "test_stage_reports::test_run_writes_per_stage_diagnostics",
 }
 
+# HERMETIC tests that happen to live in a whole-module-skipped module above, but need NO export and NO
+# scrape (synthetic index / tmp_path / config-only). The module skip is too coarse for them -- it hid real,
+# runnable unit coverage from CI (e.g. the variety-identity collapse rules behind the "0 duplicate varieties"
+# claim). Listing them here EXEMPTS them from the skip so they run everywhere. Each was verified to pass with
+# no pipeline data before being added; only add a test here once it is confirmed to have no data dependency.
+_HERMETIC_EXEMPTIONS = {
+    "test_m1_reference::test_variety_identity_collapse_rules",
+    "test_m5_variation::test_projection_tiers_work_in_isolation",
+    "test_m5_variation::test_token_set_false_positive_is_rejected",
+    "test_m5_variation::test_color_blocking_prevents_cross_color_match",
+    "test_m8_emit::test_product_image_columns_match_slot_setting",
+    "test_m8_emit::test_product_images_fill_up_to_cap_then_blank",
+    "test_m8_emit::test_images_slab_slot_cap_tracks_setting",
+    "test_m9_overrides_writeback::test_alias_writeback_persists_and_reapplies",
+    "test_m12_production::test_medusa_sink_builds_payloads_dry_run",
+    "test_m12_production::test_csv_and_api_sinks_share_interface",
+}
+
 
 def _pipeline_data_present() -> bool:
     """True when the operator's local pipeline data is present: the from_medusa variants export AND at
@@ -82,5 +100,8 @@ def pytest_collection_modifyitems(config, items):
     skip = pytest.mark.skip(reason="needs local from_medusa export + a scrape (gitignored, absent in CI)")
     for item in items:
         mod = item.module.__name__.rsplit(".", 1)[-1]
-        if mod in _DATA_DEPENDENT_MODULES or f"{mod}::{item.originalname}" in _DATA_DEPENDENT_TESTS:
+        node = f"{mod}::{item.originalname}"
+        if node in _HERMETIC_EXEMPTIONS:
+            continue   # verified data-free: runs in CI despite living in a data-dependent module
+        if mod in _DATA_DEPENDENT_MODULES or node in _DATA_DEPENDENT_TESTS:
             item.add_marker(skip)

@@ -445,6 +445,12 @@ def _split_aliases(raw_aliases: list) -> list[str]:
 
 def load_backbone(path: Path | None = None) -> Backbone:
     path = Path(path or SETTINGS.paths.backbone_json)
+    if not path.exists():
+        from stone_pipeline.config.domain import active_pack
+        raise FileNotFoundError(
+            f"backbone file {path} is missing for domain pack {active_pack().name!r}. Each pack ships its own "
+            "catalog_source/<pack>/ backbone JSON; a non-stone pack never falls back to stone's data. Add the "
+            "pack's backbone file before running it.")
     backbone = Backbone()
     data = json.loads(path.read_text(encoding="utf-8"))
     posts = data.get("posts", data if isinstance(data, list) else [])
@@ -531,9 +537,15 @@ class UnitEntry:
 class Units:
     by_token: dict[str, UnitEntry] = field(default_factory=dict)
 
-    def convert(self, value: float, token: str) -> Optional[float]:
+    def convert(self, value: float, token: str, expect: str | None = None) -> Optional[float]:
+        """Scale `value` by the token's factor. When `expect` is given (e.g. "weight"), a token of a
+        DIFFERENT dimension returns None instead of a silently-wrong scaling -- so a length/area token
+        that leaked into a weight field is rejected rather than shipped as a plausible-magnitude kg.
+        The `dimension` column carries this; without `expect` the behaviour is unchanged (dimension ignored)."""
         entry = self.by_token.get((token or "").strip().casefold())
         if entry is None:
+            return None
+        if expect is not None and entry.dimension != expect:
             return None
         return value * entry.factor
 
@@ -759,17 +771,8 @@ class ReferenceData:
         to GB via the name/alias path instead of passing through as a bogus code)."""
         return frozenset(self.country_codes.values())
 
-    @property
-    def variants_slabs(self) -> VariantTable:
-        return self.variants["slab"]
-
-    @property
-    def variants_blocks(self) -> VariantTable:
-        return self.variants["block"]
-
-    @property
-    def variants_tiles(self) -> VariantTable:
-        return self.variants["tile"]
+    # A specific category's variant table is `self.variants[<category name>]` (keyed by the active pack's
+    # category names) -- no per-product-type accessor, so nothing here assumes a 'slab'/'block'/'tile' pack.
 
 
 def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
@@ -855,7 +858,11 @@ def load_all() -> ReferenceData:
         extra={
             "extra_fields": {
                 "attributes_colors": len(ref.attributes.by_category.get("color", {})),
-                "variants_slabs": len(ref.variants_slabs.by_id),
+                # the default-form variant count (pack primary category); NOT literally slab, so a non-stone
+                # pack whose default form is not named 'slab' does not KeyError building this log line.
+                "variants_default_form": (
+                    len(ref.variants[settings.default_form_name()].by_id)
+                    if settings.default_form_name() in ref.variants else 0),
                 "backbone_varieties": len(ref.backbone),
             }
         },

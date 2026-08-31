@@ -84,7 +84,7 @@ def _valid_pack_dict():
         "in_stock_fallback_qty": {"x": 5},
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
         "dimension_defaults": {"x": {"length": 1.0, "height": 1.0, "thickness": 0.02}},
-        "finish_phrases": {"f": "p"}, "finish_phrase_default": "p"})
+        "finish_phrases": {"f": "p"}, "finish_phrase_default": "p", "default_density": 700})
 
 
 def _write_pack(dirpath, pack_dict):
@@ -129,6 +129,36 @@ def test_map_key_not_a_declared_category_fails_loud(tmp_path, monkeypatch):
     pack["in_stock_fallback_qty"]["ghost"] = 3                 # 'ghost' is not a category
     _write_pack(tmp_path, pack)
     with pytest.raises(ValueError, match="not in the declared categories"):
+        domain.load_pack("bad")
+
+
+def test_leaf_attribute_not_in_attributes_fails_loud(tmp_path, monkeypatch):
+    pack = _valid_pack_dict()
+    pack["leaf_attributes"] = ["b", "ghost"]                   # 'ghost' not in attributes [a,b]
+    _write_pack(tmp_path, pack)
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    domain.active_pack.cache_clear()
+    with pytest.raises(ValueError, match="leaf_attributes"):
+        domain.load_pack("bad")
+
+
+def test_disambiguator_inside_leaf_attributes_fails_loud(tmp_path, monkeypatch):
+    pack = _valid_pack_dict()
+    pack["leaf_attributes"] = ["a", "b"]                       # 'a' is the disambiguator -> must not be a leaf
+    _write_pack(tmp_path, pack)
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    domain.active_pack.cache_clear()
+    with pytest.raises(ValueError, match="disambiguator"):
+        domain.load_pack("bad")
+
+
+def test_mirror_of_unknown_category_fails_loud(tmp_path, monkeypatch):
+    pack = _valid_pack_dict()
+    pack["categories"][0]["mirror_of"] = "ghost"              # names no declared category
+    _write_pack(tmp_path, pack)
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    domain.active_pack.cache_clear()
+    with pytest.raises(ValueError, match="mirror_of"):
         domain.load_pack("bad")
 
 
@@ -235,6 +265,7 @@ fallback_color: Unspecified
 last_resort_finishes: {shirt: Standard, pants: Standard}
 last_resort_quality: Standard
 block_finish: Standard
+default_density: 300
 in_stock_fallback_qty: {shirt: 10, pants: 10}
 dimension_ranges:
   shirt: {weight: [0.1, 0.3], length: [0.5, 0.8], width: [0.4, 0.6], height: [0.01, 0.02]}
@@ -259,3 +290,4 @@ def test_a_completely_different_product_pack_loads(tmp_path, monkeypatch):
     assert p.leaf_attributes == ("color", "size")
     assert [c["name"] for c in p.categories] == ["shirt", "pants"]   # a different category model
     assert "crystal" not in p.ambiguous_type_words             # no stone vocabulary leaked in
+    assert p.default_density == 300.0                          # material density is a pack field, not hardcoded 2700

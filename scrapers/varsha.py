@@ -68,7 +68,12 @@ def build_image_urls(bundle_id, filename):
 
 class VarshaScraper(ScraperBase):
     source = "varsha"
-    category = "slab"        # fallback format only; parse_product sets a per-row format (slab vs block)
+    # NO category fallback: varsha sets a PER-ROW format from the thickness field (MULTI => block, a gauge
+    # => slab, ABSENT => ""). An empty format is a genuine "unknown", and classify_format leaves it for the
+    # pipeline's signal-based format resolver (slab_count/area/depth) to settle, flagged. A `category="slab"`
+    # fallback would silently assert slab for an unknown-thickness row (wrong Key/freight for a block), so it
+    # is deliberately absent -- an unknown format surfaces, never a silent guess.
+    category = None
     id_field = "bundle_id"   # images named varsha_<bundle_id>_<idx>
     use_curl_cffi = True     # Cloudflare-fronted SlabWare tenant
     # Route through the residential proxy, like polonine (same SlabWare/Cloudflare stack). The datacenter
@@ -128,34 +133,18 @@ class VarshaScraper(ScraperBase):
         try:
             r = self.post(DETAIL_API_URL, headers=API_HEADERS, content=json.dumps(payload))
         except Exception:
+            self.note_detail(ok=False)   # A1: feed the delist gate's detail-failure ratio
             return None
+        self.note_detail(ok=True)
         d = (r.json().get('d') or {})
         return d.get('Bundle') or {}
 
     def list_products(self) -> Iterable[Any]:
+        # SlabWare exposes no total, so the base paginator confirms an empty batch with one re-probe before
+        # accepting the end (a transient empty must not truncate the tail -> silent delist). An empty first
+        # page confirms empty -> zero rows -> the base marks the run INCOMPLETE.
         self._warm_up()
-        first = self._fetch_page(0)
-        if not first:
-            self.log.error("first batch empty; aborting")
-            return
-        yield from first
-        inicio = PAGE_SIZE
-        while True:
-            self.log.info("batch inicio=%d", inicio)
-            batch = self._fetch_page(inicio)
-            if not batch:
-                # The SlabWare list API exposes no total, so a valid-but-empty 200 mid-pagination is
-                # indistinguishable from the real end and would be marked COMPLETE (truncating the tail ->
-                # silent delist). Confirm with ONE re-fetch of the SAME offset before accepting the end;
-                # a transient empty resolves on the re-probe, a real end stays empty. (A genuine network
-                # error already raises out of _fetch_page and crashes before any complete marker is written.)
-                confirm = self._fetch_page(inicio)
-                if not confirm:
-                    self.log.info("empty batch confirmed at inicio=%d; done", inicio)
-                    break
-                batch = confirm
-            yield from batch
-            inicio += PAGE_SIZE
+        yield from self.paginate_offset(self._fetch_page, PAGE_SIZE)
 
     # --- parsing ------------------------------------------------------------
     def parse_product(self, item: dict) -> Optional[dict]:

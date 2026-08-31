@@ -99,16 +99,22 @@ def _mistyped_variants(rows: list[dict]) -> list[str]:
 
 
 def verify(base_path: Path = BASE) -> dict:
-    """Rebuild 1_variants_full from the committed base and assert (1) it projects back to the SAME base --
-    the fixed-point property that makes repeated cold starts reproducible -- and (2) no (branch,type,Name)
-    variety is present under more than one Key. Non-destructive: only the generated 1_variants_full is
-    (re)written; the committed base is read, never modified.
+    """Assert the committed seed is a FIXED POINT: rebuilding HERMETICALLY from the base projects its SEED
+    IDENTITY back to the SAME base, and no (branch,type,Name) variety is present under more than one Key.
+    Non-destructive: reads the base, writes only a throwaway temp file.
 
-    Run from a clean tree with no pending 1_variants_update delta (the cold-start seed state); a stale
-    delta legitimately makes base != full, which this correctly reports as not-a-fixed-point."""
+    HERMETIC by construction -- the rebuild uses `emit_catalog.build(seed_only=True)`, which reads ONLY the
+    committed base (no live Medusa export, no update delta, no config.db retired decisions, no product-backed
+    lookup, no live S3). So the result depends solely on the committed seed, never on the operator's shell,
+    S3 credentials, or local state, and every column -- Image included -- is reproduced deterministically.
+    This is what makes the check give the SAME answer everywhere (CI, a clean tree, or an S3-authenticated
+    dev shell), instead of the old "seed FAILED" that only meant the ambient environment differed."""
     from stone_pipeline.stages import emit_catalog
-    emit_catalog.build()                       # -> to_upload/1_variants_full.csv (a generated artifact)
-    base, full = _rows(base_path), _rows(FULL)
+    import tempfile
+    with tempfile.TemporaryDirectory() as _td:
+        full_path = Path(_td) / "1_variants_full.verify.csv"
+        emit_catalog.build(seed_only=True, out_path=full_path)   # hermetic seed projection; never clobbers
+        base, full = _rows(base_path), _rows(full_path)
     first = next((i for i, (b, f) in enumerate(zip(base, full)) if b != f), None)
     fixed = base == full
     dups = _duplicate_varieties(base)          # a duplicate variety is invisible to the fixed-point check

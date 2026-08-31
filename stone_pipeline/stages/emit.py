@@ -119,7 +119,17 @@ def read_template_columns(path: Path | None = None) -> list[str]:
         header = next(csv.reader(handle), None)   # fail loud: the template is the emit schema authority, so
         if not header:                            # an empty/header-less file is a deploy error, not a bare
             raise ValueError(f"Medusa import template has no header row: {path}")   # StopIteration crash.
-        return header
+    # Every column the emit knows how to fill MUST exist in the template. A renamed/removed template column
+    # would otherwise silently blank that value for EVERY product (row_to_cells emits "" for an unmapped
+    # column), so fail loud and name the drifted columns instead. EXTRA template columns the emit does not
+    # fill are fine -- Medusa manages them and they correctly emit "".
+    missing = [c for c in COLUMN_MAP if c not in header]
+    if missing:
+        raise ValueError(
+            f"Medusa import template is missing {len(missing)} column(s) the emit fills (renamed or removed "
+            f"in the template?): {missing}. Refusing to emit and silently drop those values -- reconcile "
+            f"COLUMN_MAP with the template.")
+    return header
 
 
 def row_to_cells(row: CanonicalRow, columns: list[str], cfg: SourceConfig) -> dict[str, str]:

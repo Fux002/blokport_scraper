@@ -1,0 +1,97 @@
+# Product-domain pack: WOOD (Wudport).  <<< SKELETON -- REPLACE THE PLACEHOLDER VALUES WITH REAL WUDPORT DATA >>>
+#
+# This is a structurally-valid template so `SCRAPER_DOMAIN_PACK=wood` LOADS and the pipeline runs the wood
+# vocabulary instead of stone -- the product type is now a SETUP CHOICE (this file + the env var), not code.
+# Same Medusa data model as stone (category / type / color / finish / quality); only the VALUES differ.
+#
+# Before a wood smoke run / prod launch, replace every value marked PLACEHOLDER with Wudport's real catalog:
+#   - categories: Wudport's actual product forms (and which is the default/bulk form)
+#   - the wood species vocabulary lives in attributes.csv (type), pulled from Wudport's Medusa -- not here
+#   - finishes, density, and the fallback dimensions must be REAL wood values (wood is ~700 kg/m3, not 2700)
+# Then author the matching backbone_*.json (per category) in catalog_source/ and run the smoke run
+# (a ~10-row scrape->derive->emit with SCRAPER_DOMAIN_PACK=wood) BEFORE any Wudport prod deploy.
+name: wood
+
+# Same attribute model as stone (per the brand setup): type = wood SPECIES (the disambiguator, drives the
+# Key), color/finish/quality grow the leaf. The VALUES (oak/walnut/...) come from Wudport's attributes.csv.
+attributes: [type, color, finish, quality]
+disambiguator: type
+leaf_attributes: [color, finish, quality]
+
+# PLACEHOLDER category model -- set Wudport's REAL forms. Exactly one `default_form` (the unresolved-format
+# fallback + finish/dimension source); optionally one `bulk_form` (the solid/uncut form -> is_block branch).
+# A category with `mirror_of` is generated from another (like stone's tile mirrors slab). base_image "" = real
+# photo. pcat is env-specific (from attributes.csv), so pcat_env_var stays null unless you override it.
+categories:
+  - {name: plank, plural: planks, label: Planks, backbone_filename: backbone_planks.json, shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014", pcat_env_var: null, default_form: true,  base_image: ""}
+  - {name: beam,  plural: beams,  label: Beams,  backbone_filename: backbone_beams.json,  shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "0.0014", pcat_env_var: null, bulk_form: true,    base_image: ""}
+  - {name: panel, plural: panels, label: Panels, backbone_filename: backbone_panels.json, shares_variety_vocab: true, fan_out: true, mirror_of: plank, volume_per_kg: "0.0014", pcat_env_var: null,  base_image: ""}
+
+# PLACEHOLDER: species words too generic to disambiguate a variety on their own (wood's analogue of stone's
+# 'crystal/quartz'). Set Wudport's real ambiguous species/descriptors, or leave a minimal set.
+ambiguous_type_words: [wood, timber, hardwood, softwood]
+
+# PLACEHOLDER: words that, as the ONLY difference between two names, mark an alias not a distinct variety.
+generic_descriptors: [wood, timber, plank, planks, beam, beams, panel, panels, natural, solid, engineered,
+                      european, american, premium, classic, standard, the, and]
+
+# The generic material noun (title fallback + purely-generic-type check). For wood: 'wood'.
+generic_material_word: wood
+
+# PLACEHOLDER: a sensible default allowed-finish set for a new wood variety; the human refines it. These must
+# exist in Wudport's attributes.csv (finish vocabulary).
+default_finishes: [Oiled, Lacquered, Waxed, Brushed, Sanded, Raw]
+
+# Generic fallback colour when a source supplies none. Must exist in attributes.csv (color).
+fallback_color: Natural
+
+# PLACEHOLDER last-resort finish per branch (unlisted branch uses the default form's) + one quality. Must
+# exist in attributes.csv + the corresponding backbone.
+last_resort_finishes: {plank: Oiled, panel: Lacquered}
+last_resort_quality: A
+
+# In-stock fallback COUNT per category (made-to-order estimate when in-stock but countless). One entry per
+# category above. A bulk beam is a single piece (1); planks/panels stock in modest quantity.
+in_stock_fallback_qty: {plank: 10, beam: 1, panel: 10}
+
+# The standard finish for a raw/unfinished bulk form (beam), applied when a source gives none. Must exist in
+# attributes.csv + the beam backbone.
+block_finish: Raw
+
+# Material density kg/m3 -- REAL wood value (NOT stone's 2700). Hardwood ~700; set Wudport's actual figure,
+# and supply reference/type_density.csv with per-species rows for accuracy. Used to derive weight when a
+# source omits it.
+default_density: 700
+
+# PLACEHOLDER fallback dimension/weight ranges per category, metres/tonnes [lo, hi]. width == thickness
+# (depth); length/height are the two faces. Replace with real Wudport measurements.
+dimension_ranges:
+  plank: {weight: [0.005, 0.05], length: [1.0, 4.0], width: [0.015, 0.05], height: [0.10, 0.40]}
+  beam:  {weight: [0.02, 0.30],  length: [1.0, 4.0], width: [0.08, 0.30],  height: [0.08, 0.30]}
+  panel: {weight: [0.003, 0.03], length: [0.6, 2.4], width: [0.01, 0.03],  height: [0.30, 1.20]}
+
+# PLACEHOLDER fallback dimensions in METRES, applied ONLY when a real scraped value is missing/ambiguous
+# (always provenance-flagged, never silent; a real parsed value always wins). length/height/thickness all > 0.
+dimension_defaults:
+  plank: {length: 2.40, height: 0.20, thickness: 0.03}
+  beam:  {length: 2.40, height: 0.20, thickness: 0.20}
+  panel: {length: 1.20, height: 0.60, thickness: 0.02}
+
+# PLACEHOLDER finish -> surface phrase for the generated product description. Finish-true, benefit-led.
+finish_phrases:
+  oiled: "a warm, natural oiled surface that shows the grain and feels soft to the touch"
+  lacquered: "a smooth, hard-wearing lacquered finish with a subtle sheen"
+  waxed: "a soft, low-sheen waxed surface with a tactile, natural feel"
+  brushed: "a lightly textured, grain-raised matte finish"
+  sanded: "a clean, smooth sanded surface ready to finish"
+finish_phrase_default: "a natural wood surface"
+
+# Name-cleaning corpus rules. Wood has no granite-style code convention, so name_code_pattern is null (every
+# digit-bearing token is treated as a supplier code) and trailing_grade_letters is off unless Wudport grades
+# with a trailing lone letter. Set these to match Wudport's real naming before the smoke run.
+name_code_pattern: null
+trailing_grade_letters: false
+
+# The stone-tuned CV colour palette cannot read wood tones, so texture-colour classification is OFF: colour
+# comes from the source/Medusa value and the fallback_color. (Flip to true only with a wood-tuned palette.)
+classify_texture_color: false
