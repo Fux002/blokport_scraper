@@ -351,3 +351,38 @@ def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_v
     assert any("_agate_" in k for k in minted), f"operator's Agate must mint, got {minted}"
     on_marble = [a for a in res.alias_additions["slab"] if a["Key"] == MARBLE_KEY]
     assert not on_marble, "must NOT alias onto the existing Marble variety when the operator picked Agate"
+
+
+def test_operator_confirmed_mint_mints_even_when_similar_to_an_existing_name(tmp_path, monkeypatch):
+    # The products-side of #174: an operator-CONFIRMED mint ("yes" + a chosen type) must MINT the new
+    # variety, EVEN when its name is similar to an existing one -- the similarity/nearest arms must not
+    # alias or re-review it away (the "Alpine Luxe near Alpine got silently dropped" bug). The confirmed
+    # mint is honoured ONCE at the top (3c-bis), before any heuristic can override it.
+    from stone_pipeline.stages import decisions
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])   # existing 'Arabescato'
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {})
+    ref = loaders.load_all()
+
+    def minted(res):
+        return {(p.get("Name") or "").lower() for posts in res.new_variants.values() for p in posts}
+
+    # (a) UNDECIDED 'Arabescato Royal' (near existing 'Arabescato') -> HELD for review, never auto-minted
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
+    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {})
+    undecided = curate.build_curation([_gap_row("Arabescato Royal")], ref)
+    assert "arabescato royal" not in minted(undecided), "an UNDECIDED new variety must not auto-mint"
+
+    # (b) operator confirmed the mint as Granite -> it MINTS, despite the name similarity, and is NOT held
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"arabescato royal": "yes"})
+    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {"arabescato royal": "Granite"})
+    confirmed = curate.build_curation([_gap_row("Arabescato Royal")], ref)
+    assert "arabescato royal" in minted(confirmed), "a CONFIRMED mint must mint even when similar to an existing name"
+    assert not any(p.get("variant", "").lower() == "arabescato royal" for p in confirmed.pending_confirm), \
+        "a confirmed mint must not also be re-held for review"
+
+    # (c) operator rejected -> not minted, not held
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"arabescato royal": "no"})
+    rejected = curate.build_curation([_gap_row("Arabescato Royal")], ref)
+    assert "arabescato royal" not in minted(rejected), "a rejected variety must not mint"
