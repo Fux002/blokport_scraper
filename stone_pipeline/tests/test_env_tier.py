@@ -22,15 +22,23 @@ def _reload_settings(monkeypatch, value):
         monkeypatch.delenv("BLOKPORT_ENV", raising=False)
     else:
         monkeypatch.setenv("BLOKPORT_ENV", value)
-    # Production additionally requires an explicit bucket, so satisfy that guard: it is a
-    # DIFFERENT check and must not be what makes these cases pass or fail.
-    monkeypatch.setenv("BLOKPORT_S3_BUCKET", "test-bucket")
+    # Production has THREE other guards, each a separate concern from the tier. Satisfy all of them so
+    # these cases exercise the tier validation and nothing else:
+    #   - a brand (note the name: core.env.getenv("BRAND") resolves SCRAPER_BRAND / BLOKPORT_BRAND,
+    #     never a bare BRAND);
+    #   - a bucket carrying that brand's prefix (the brand<->bucket binding, so one brand's deployment
+    #     can never point at another's store);
+    #   - an explicit sales-channel id (never inherited, so prod cannot mis-own products).
+    monkeypatch.setenv("BLOKPORT_BRAND", "blokport")
+    monkeypatch.setenv("BLOKPORT_S3_BUCKET", "blokport-test-bucket")
+    monkeypatch.setenv("BLOKPORT_SALES_CHANNEL_ID", "sc_test")
     import stone_pipeline.config.settings as settings
     return importlib.reload(settings)
 
 
 @pytest.mark.parametrize("value,expected_env,expected_prod", [
     (None, "development", False),          # unset default
+    ("", "development", False),            # empty == unset, by core.env.getenv's contract
     ("development", "development", False),
     ("dev", "development", False),         # alias normalises
     ("production", "production", True),
@@ -51,7 +59,8 @@ def test_valid_tiers_resolve_canonically(monkeypatch, value, expected_env, expec
     "blokport-production",
     "staging",
     "PRODUCTIONN",
-    "",
+    # NOTE: "" is deliberately NOT here -- core.env.getenv treats an empty value as unset (so an
+    # unset-defaulting TF var cannot shadow a real legacy one), which resolves to "development".
 ])
 def test_unknown_tier_fails_loud_instead_of_silently_becoming_dev(monkeypatch, value):
     with pytest.raises(RuntimeError) as e:
@@ -75,5 +84,7 @@ def _restore_settings(monkeypatch):
     yield
     monkeypatch.delenv("BLOKPORT_ENV", raising=False)
     monkeypatch.delenv("BLOKPORT_S3_BUCKET", raising=False)
+    monkeypatch.delenv("BLOKPORT_BRAND", raising=False)
+    monkeypatch.delenv("BLOKPORT_SALES_CHANNEL_ID", raising=False)
     import stone_pipeline.config.settings as settings
     importlib.reload(settings)
