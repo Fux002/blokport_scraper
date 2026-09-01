@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
+from stone_pipeline.adapters.tokens import clean_variety
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.stages._rowguard import isolate_rows
@@ -203,7 +204,29 @@ class VariationStage:
         # block by the CORRECTED canonical type (type_name), not the raw scrape tag -- candidate
         # block_type is the canonical variety.stone_type, so the raw tag mis-blocks (a mis-tagged
         # 'Azul White Quartzite' under an Onyx tag, or a name-corrected type).
-        match = engine.match(query, block_type=row.type_name or row.raw_type or "", block_color=block_color)
+        scraped_type = row.type_name or row.raw_type or ""
+        match = engine.match(query, block_type=scraped_type, block_color=block_color)
+        # OPERATOR-TYPE FALLBACK: when the scrape's type finds NO home (a genuine no-candidate gap, never a
+        # same-type ambiguity), the operator's MINT decision for this variety is the authority -- re-match
+        # under the operator's type so the product binds to the operator-minted (name, type) instead of
+        # gapping forever (its scraped type matches neither the minted variety nor any other). This is the
+        # one place a mint decision reaches a PRODUCT, mirroring how curate mints the variety; from here the
+        # bound row flows through the SAME reconcile/derive/texture path a suggested variant uses. A scraped
+        # type that DID match a variety is never overridden. Keyed by the shared clean-variety identity, so
+        # the lookup key matches the one curate/decisions_store store the decision under.
+        if match.cid is None and not (scraped_type and match.method.endswith("ambiguous")):
+            clean = clean_variety(query, scraped_type)
+            op_type = self.ref.variety_seed_types.get(proj.norm(clean))
+            if op_type and proj.norm(op_type) != proj.norm(scraped_type):
+                # Retry under the operator's authoritative type AND the cleaned identity name: the scrape's
+                # match key often still carries the type token ('Absolute Black Marble'), which only fuzzy-
+                # matches the clean variety and the fuzzy length-guard then rejects (a freshly minted variety
+                # has no 'X Marble' alias yet). The cleaned name 'Absolute Black' + the operator type binds at
+                # the exact tier -- exactly the (name, type) the operator minted.
+                retry = engine.match(clean, block_type=op_type, block_color=block_color)
+                if retry.cid is not None:
+                    match = VariationMatch(retry.cid, retry.canonical, retry.confidence,
+                                           f"operator_type_{retry.method}", retry.score, retry.candidates)
 
         if match.cid is not None and match.confidence >= Confidence.medium:
             row.variation_id = match.cid
