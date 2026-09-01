@@ -51,6 +51,14 @@ def _type_vocab() -> dict[str, str]:
     return {proj.norm(t): t for t in load_attributes().canonical_names("type")}
 
 
+def _quality_vocab() -> dict[str, str]:
+    """norm(quality) -> canonical quality name, from the Medusa attribute vocab. Backs the mint quality
+    picker (GET /config/v1/qualities) and validates an operator's seed quality (never seed one Medusa lacks)."""
+    from stone_pipeline.matching import projections as proj
+    from stone_pipeline.reference.loaders import load_attributes
+    return {proj.norm(q): q for q in load_attributes().canonical_names("quality")}
+
+
 def _country_iso(raw: str) -> str | None:
     """Resolve a country NAME or ISO2 to a canonical ISO-3166 alpha-2, or None if it is not a real country.
     Name-first (so 'UK' -> GB) then a bare valid ISO2 -- mirrors derive._to_iso. Validates the operator's
@@ -238,7 +246,7 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so
         # an edit takes effect on the following run -- same "applies next run" contract as the run guard).
         #   GET /config/v1/review/variants               pending varieties (+ current_action)
-        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?,"type"?}
+        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?,"type"?,"color"?,"country"?,"quality"?}
         #     for alias, "type" is the TARGET's stone type (which of a multi-type name to alias into)
         #   GET /config/v1/review/attributes             pending attribute values (need a Medusa id)
         #   PUT /config/v1/review/attributes/<value>     {"kind":..., "medusa_id":...}
@@ -289,13 +297,23 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             if (raw_country := (body.get("country") or "").strip()):
                 if not (seed_country := _country_iso(raw_country)):
                     return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
+            # an optional mint quality must be a real Medusa attribute (same loud guard as colour), else the
+            # variety would carry a value that null-ids every product's quality_id.
+            seed_quality = None
+            if (raw_quality := (body.get("quality") or "").strip()):
+                vocab = _quality_vocab()
+                if proj.norm(raw_quality) not in vocab:
+                    return 400, {"error": f"quality {raw_quality!r} is not a known Medusa quality attribute"}
+                seed_quality = vocab[proj.norm(raw_quality)]   # store the canonical casing
             try:
                 decisions_store.set_variety_decision(variant, action, alias_of, seed_color=seed_color,
-                                                     seed_type=seed_type, seed_country=seed_country)
+                                                     seed_type=seed_type, seed_country=seed_country,
+                                                     seed_quality=seed_quality)
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
             return 200, {"variant": variant, "action": action, "alias_of": alias_of,
-                         "seed_color": seed_color, "seed_type": seed_type, "seed_country": seed_country}
+                         "seed_color": seed_color, "seed_type": seed_type, "seed_country": seed_country,
+                         "seed_quality": seed_quality}
         if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
             return 200, {"attributes": decisions_store.list_pending("attribute")}
         if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
@@ -365,10 +383,16 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if method == "GET":
             return 200, {"types": sorted(_type_vocab().values())}
         return 405, {"error": "GET /config/v1/types"}
+    if segments and segments[0] == "qualities":
+        # the quality vocabulary for the new-variety mint quality picker: seed a quality-less variety with a
+        # real Medusa quality instead of the pack default. Agnostic: just the canonical names.
+        if method == "GET":
+            return 200, {"qualities": sorted(_quality_vocab().values())}
+        return 405, {"error": "GET /config/v1/qualities"}
     if not segments or segments[0] != "sources":
         return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, "
                      "/delist, /pause, /resume, /clean, /review/<kind>, /varieties, /adapters, /colors, "
-                     "/types or /variations/<key>/{retire,un_retire}"}
+                     "/types, /qualities or /variations/<key>/{retire,un_retire}"}
     if len(segments) == 1:
         if method == "GET":
             # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)

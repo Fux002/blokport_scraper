@@ -81,6 +81,18 @@ def test_alias_carries_the_target_type_to_disambiguate_a_multitype_name():
     assert ds.variety_actions()["junk code"]["seed_type"] is None           # reject carries none
 
 
+def test_mint_carries_seed_quality_like_seed_color():
+    # seed_quality mirrors seed_color: a MINT keeps it, an ALIAS/REJECT drops it, and the produce reads it
+    # via the same facade so curate can seed a quality-less variety with the operator's quality.
+    ds.set_variety_decision("Karur Special", "mint", seed_color="Amber", seed_quality="First")
+    ds.set_variety_decision("Spelling X", "alias", alias_of="Karur Special", seed_quality="First")
+    ds.set_variety_decision("Junk Y", "reject", seed_quality="First")
+    assert decisions.load_variety_seed_qualities() == {"karur special": "First"}   # only the mint keeps it
+    assert ds.variety_actions()["karur special"]["seed_quality"] == "First"
+    assert ds.variety_actions()["spelling x"]["seed_quality"] is None              # alias drops it
+    assert ds.variety_actions()["junk y"]["seed_quality"] is None                 # reject drops it
+
+
 def test_re_deciding_a_variety_overwrites():
     ds.set_variety_decision("Flip Stone", "mint")
     assert decisions.load_confirm_decisions() == {"flip stone": "yes"}
