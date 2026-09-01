@@ -312,7 +312,6 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     rejected = decisions.load_rejected()
     seed_colors = decisions.load_variety_seed_colors()   # norm(variant) -> operator mint colour (over 'Natural')
     seed_types = decisions.load_variety_seed_types()     # norm(variant) -> operator-assigned stone type (fills a void)
-    seed_qualities = decisions.load_variety_seed_qualities()  # norm(variant) -> operator mint quality (over the pack default)
     pending_confirm: list[dict] = []
     result = CurationResult(
         alias_additions={b: [] for b in BRANCHES},
@@ -861,10 +860,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         _pack = active_pack()
         colors = ([seeded] if seeded
                   else sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_pack.fallback_color])
-        # an operator-chosen mint quality WINS over the observed/last-resort chain, mirroring seed colour, so a
-        # source with no quality column is seeded with the operator's quality instead of the pack default.
-        seeded_q = seed_qualities.get(proj.norm(title))
-        qualities = [seeded_q] if seeded_q else sorted(_u["qualities"]) or [obs_quality]
+        qualities = sorted(_u["qualities"]) or [obs_quality]
         finishes = list(dict.fromkeys([*sorted(_u["finishes"]),
                                        *([obs_finish] if obs_finish else []), *_pack.default_finishes]))
         # A cross-branch sibling's variety already exists in another branch carrying the scraped
