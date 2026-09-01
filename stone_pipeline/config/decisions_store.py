@@ -60,13 +60,13 @@ class InvalidDecision(ValueError):
 
 def variety_actions() -> dict[str, dict]:
     """norm(variant) -> {'action': mint|reject|alias, 'alias_of', 'seed_color', 'seed_type',
-    'seed_country'} for every decided variety. Empty for a fresh store."""
+    'seed_country', 'seed_quality'} for every decided variety. Empty for a fresh store."""
     with closing(store.open_store()) as conn:
         return {r["variant_norm"]: {"action": r["action"], "alias_of": r["alias_of"],
                                     "seed_color": r["seed_color"], "seed_type": r["seed_type"],
-                                    "seed_country": r["seed_country"]}
+                                    "seed_country": r["seed_country"], "seed_quality": r["seed_quality"]}
                 for r in conn.execute(
-                    "SELECT variant_norm, action, alias_of, seed_color, seed_type, seed_country "
+                    "SELECT variant_norm, action, alias_of, seed_color, seed_type, seed_country, seed_quality "
                     "FROM variety_decision")}
 
 
@@ -75,6 +75,14 @@ def variety_seed_colors() -> dict[str, str]:
     produce seeds the minted variety with this instead of the generic 'Natural' fallback."""
     return {n: d["seed_color"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_color"]}
+
+
+def variety_seed_qualities() -> dict[str, str]:
+    """norm(variant) -> the operator-chosen mint quality, for every MINT decision that set one. The next
+    produce seeds the minted variety with this instead of the pack last-resort quality. Read only in curate
+    (after config.db exists), like variety_seed_colors -- not in load_all, so no fresh-store guard needed."""
+    return {n: d["seed_quality"] for n, d in variety_actions().items()
+            if d["action"] == "mint" and d["seed_quality"]}
 
 
 def variety_seed_types() -> dict[str, str]:
@@ -151,12 +159,13 @@ def alias_type_map() -> dict[str, str]:
 
 def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
                          seed_color: str | None = None, seed_type: str | None = None,
-                         seed_country: str | None = None) -> None:
+                         seed_country: str | None = None, seed_quality: str | None = None) -> None:
     """Upsert ONE operator decision. Raises InvalidDecision on a bad action or an alias with no target.
-    Idempotent: re-deciding a variety overwrites the prior decision. For a MINT, `seed_color`, `seed_type`
-    and `seed_country` are the colour / stone type / ISO origin to mint the variety with. For an ALIAS,
-    `seed_type` is the TARGET variety's stone type (which of a multi-type name to alias into); seed_color /
-    seed_country are ignored. reject ignores all three. The caller validates seed_country is a real ISO code."""
+    Idempotent: re-deciding a variety overwrites the prior decision. For a MINT, `seed_color`, `seed_type`,
+    `seed_country` and `seed_quality` are the colour / stone type / ISO origin / quality to mint the variety
+    with. For an ALIAS, `seed_type` is the TARGET variety's stone type (which of a multi-type name to alias
+    into); the other seeds are ignored. reject ignores them all. The caller validates seed_country is a real
+    ISO code and seed_quality is a real Medusa quality."""
     action = (action or "").strip().lower()
     if action not in _ACTIONS:
         raise InvalidDecision(f"action must be one of {_ACTIONS}, got {action!r}")
@@ -168,27 +177,28 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
     seed_color = (seed_color or "").strip() or None
     seed_type = (seed_type or "").strip() or None
     seed_country = (seed_country or "").strip().upper() or None
-    # mint carries colour + type + country to create the variety with. alias ALSO carries seed_type, but
-    # meaning the TARGET's stone type: a target NAME can exist under several types (Black Sea = andesite +
+    seed_quality = (seed_quality or "").strip() or None
+    # mint carries colour + type + country + quality to create the variety with. alias ALSO carries seed_type,
+    # but meaning the TARGET's stone type: a target NAME can exist under several types (Black Sea = andesite +
     # soapstone), so the operator picks WHICH one to alias into, else the alias cannot resolve. reject
     # carries nothing.
     if action == "alias":
-        seed_color = seed_country = None
+        seed_color = seed_country = seed_quality = None
     elif action != "mint":
-        seed_color = seed_type = seed_country = None
+        seed_color = seed_type = seed_country = seed_quality = None
     norm = _norm(variant)
     if not norm:
         raise InvalidDecision("variant name is empty")
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO variety_decision (variant_norm, variant_display, action, alias_of, seed_color, "
-            "seed_type, seed_country, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "seed_type, seed_country, seed_quality, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(variant_norm) DO UPDATE SET "
             "variant_display = excluded.variant_display, action = excluded.action, "
             "alias_of = excluded.alias_of, seed_color = excluded.seed_color, "
             "seed_type = excluded.seed_type, seed_country = excluded.seed_country, "
-            "decided_at = excluded.decided_at",
-            (norm, variant.strip(), action, alias_of, seed_color, seed_type, seed_country, _now()))
+            "seed_quality = excluded.seed_quality, decided_at = excluded.decided_at",
+            (norm, variant.strip(), action, alias_of, seed_color, seed_type, seed_country, seed_quality, _now()))
         conn.commit()
 
 
@@ -501,6 +511,7 @@ def list_pending(kind: str) -> list[dict]:
             item["current_seed_color"] = actions.get(r["ref"], {}).get("seed_color")
             item["current_seed_type"] = actions.get(r["ref"], {}).get("seed_type")
             item["current_seed_country"] = actions.get(r["ref"], {}).get("seed_country")
+            item["current_seed_quality"] = actions.get(r["ref"], {}).get("seed_quality")
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
         out.append(item)

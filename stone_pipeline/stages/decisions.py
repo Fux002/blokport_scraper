@@ -83,6 +83,12 @@ def load_variety_seed_types() -> dict[str, str]:
     return decisions_store.variety_seed_types()
 
 
+def load_variety_seed_qualities() -> dict[str, str]:
+    """norm(variant) -> the operator-chosen mint quality. curate seeds a minted variety with this instead
+    of the pack last-resort quality, so a source with no quality column does not leave it on the default."""
+    return decisions_store.variety_seed_qualities()
+
+
 def save_rejected(rejected: set[str]) -> None:
     """Persist runtime-learned rejects. Never overwrites an explicit mint/alias decision."""
     decisions_store.learn_rejects(rejected)
