@@ -216,25 +216,20 @@ class VariationEngine:
         # failure -- so 'Matterhorn Dolomite White' resolves to Matterhorn Dolomite (Grey/Blue) with White
         # surfaced as a new colour, instead of gapping ambiguous because White belongs to the Marble twin.
         if block_type:
+            # (type, name) is the identity, so keep ONLY candidates of the scraped type -- for one candidate
+            # or many, the same rule. by_type is EMPTY when the scraped type matches no same-name variety: a
+            # NEW type, which must not bind to a wrong-type variety on name alone (else an operator's mint of
+            # the name as a different type is silently swallowed onto it). Empty -> no resolve here -> the row
+            # surfaces as missing_variation and curate mints the chosen type. Genuine same-type duplicates
+            # still keep 2+ ids and route to the ambiguous-duplicate review below.
             by_type = {cid for cid in ids if self._block_ok(cid, block_type, "")}
-            if by_type:
-                if by_type != ids:
-                    method = f"{method}_blocked"
-                ids = by_type
-                if len(ids) > 1 and block_color:          # a genuine same-type tie -> colour breaks it
-                    by_color = {cid for cid in ids if self._block_ok(cid, "", block_color)}
-                    if len(by_color) == 1:
-                        ids = by_color
-            elif len(ids) == 1:
-                # A SINGLE same-name candidate whose type the scrape CONTRADICTS is a NEW-type variety, not
-                # this one -- (type, name) is the identity. Do NOT bind on name alone: the phonetic/fuzzy
-                # tiers already drop a type-mismatched candidate, and the exact/projection tiers must too, or
-                # an operator's decision to mint the name as a DIFFERENT type is silently swallowed onto the
-                # lone existing variety (the row never reaches the mint path). Drop it so the row surfaces as
-                # missing_variation and curate mints the operator's chosen type. (2+ same-name candidates of
-                # a foreign type fall through to the ambiguous-duplicate review path below, unchanged.)
-                ids = set()
-            # else (2+ candidates, none of this type): keep them -> the ambiguous-duplicate path routes to review.
+            if by_type != ids:
+                method = f"{method}_blocked"
+            ids = by_type
+            if len(ids) > 1 and block_color:               # a genuine same-type tie -> colour breaks it
+                by_color = {cid for cid in ids if self._block_ok(cid, "", block_color)}
+                if len(by_color) == 1:
+                    ids = by_color
         elif len(ids) > 1 and block_color:                 # type-less scrape: colour is the only signal
             by_color = {cid for cid in ids if self._block_ok(cid, "", block_color)}
             if len(by_color) == 1:
