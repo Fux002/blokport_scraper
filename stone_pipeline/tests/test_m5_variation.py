@@ -98,6 +98,30 @@ def test_token_set_false_positive_is_rejected():
     assert match.cid != "c1" or match.canonical != "Crystal"
 
 
+def test_single_same_name_candidate_of_a_foreign_type_does_not_bind():
+    """(type, name) is the identity. 'Absolute Black' scraped as Marble must NOT bind to the ONE existing
+    'Absolute Black' (Granite) on name alone -- else an operator minting it as a NEW type is silently
+    swallowed onto the Granite variety and never reaches the mint path (the real Absolute Black/Amazon Marble
+    bug). The type gate the multi-candidate + fuzzy tiers already apply must apply here too. A matching or an
+    absent scraped type still binds (the variety is the same / there is no type to contradict)."""
+    index = CandidateIndex()
+    index.add("g1", "Absolute Black", surfaces=[], block_type="granite")
+    engine = VariationEngine(index, auto_accept=92, review_floor=84)
+    assert engine.match("Absolute Black", block_type="marble").cid is None   # contradicts -> no bind (mintable)
+    assert engine.match("Absolute Black", block_type="granite").cid == "g1"  # matches -> binds
+    assert engine.match("Absolute Black").cid == "g1"                        # type-less -> binds
+
+
+def test_two_same_name_candidates_of_a_foreign_type_still_do_not_bind():
+    """The multi-candidate case is unchanged: 2+ same-name varieties of types that the scrape matches none of
+    stay unbound (route to review / mint the new type), never collapsed onto an arbitrary wrong-type sibling."""
+    index = CandidateIndex()
+    index.add("g1", "Absolute Black", surfaces=[], block_type="granite")
+    index.add("o1", "Absolute Black", surfaces=[], block_type="onyx")
+    engine = VariationEngine(index, auto_accept=92, review_floor=84)
+    assert engine.match("Absolute Black", block_type="marble").cid is None
+
+
 def test_color_blocking_prevents_cross_color_match():
     index = CandidateIndex()
     index.add("b1", "Pearl", surfaces=[], block_type="granite", block_colors={"Black"})
