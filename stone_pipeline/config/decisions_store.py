@@ -78,8 +78,14 @@ def variety_seed_colors() -> dict[str, str]:
 
 
 def variety_seed_types() -> dict[str, str]:
-    """norm(variant) -> the operator-assigned stone type, for every MINT decision that set one. The next
-    produce mints a type-less variety with this instead of holding it for review."""
+    """norm(variant) -> the operator-assigned stone type, for every MINT decision that set one. curate mints
+    a type-less variety with this instead of holding it, and load_all folds it into ref.variety_seed_types so
+    the matcher can bind a product to the operator-minted (name, type). No side effect (does NOT create the
+    DB) on a fresh store: load_all reads this every build, so it must NOT materialise config.db -- mirroring
+    variety_seed_countries. Without the guard, ref-build creates an empty config.db that then shadows the
+    sources.yaml seed for load_source."""
+    if not store.config_db_path().exists():
+        return {}
     return {n: d["seed_type"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_type"]}
 

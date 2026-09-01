@@ -28,6 +28,7 @@ def _stage(override_id):
     ref = SimpleNamespace(
         overrides=Overrides(by_key={("polonine", "620"): {"variation_id": override_id}}),
         variants={"slab": SimpleNamespace(by_id={"v_real": SimpleNamespace(key="slab_marble_carrara_1")})},
+        variety_seed_types={},   # a real ReferenceData always carries this; the stub must too
     )
     return match_variation.VariationStage(ref=ref, engines={"slab": eng}, writeback=WriteBack())
 

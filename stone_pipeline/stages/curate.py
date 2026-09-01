@@ -37,18 +37,18 @@ REUSE before MINT; when uncertain, HOLD for human review rather than guess.
 from __future__ import annotations
 
 import csv
-import html
 import json
 import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.adapters.tokens import clean_variety
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind
-from stone_pipeline.core.text import (ascii_fold, looks_code_shaped, looks_codey,
+from stone_pipeline.core.text import (ascii_fold, looks_code_shaped,
                                       looks_like_artifact as _looks_like_artifact, title_case)
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData, type_slug_from_key
@@ -230,33 +230,8 @@ def _code_reason(code_why: str, base: str) -> str:
     return f"{lead} Alias it to the real variety if it is a spelling of one, otherwise reject."
 
 
-# format words to strip from a variety name (singular + plural of every category)
-_FORMAT_WORDS = {w for c in CATEGORIES for w in (c.name, c.plural)}
-
-
-def _clean_variety(name: str, stone_type: str) -> str:
-    """Suppliers name products '{Variety} {Type} {Format}' (e.g. 'Crystal White
-    Granite Slab'). Always strip the format word (slab/block/tile). Strip the
-    stone-type token(s) too, but ONLY when a distinctive multi-word name remains
-    -- otherwise keep the type so we don't reduce a name to a bare generic colour
-    ('Crystal White Granite Slab' -> 'Crystal White', but 'White Onyx Slab' ->
-    'White Onyx', not 'White'). Never returns empty."""
-    toks = html.unescape(name or "").split()   # decode &#8211; etc. before cleaning
-    type_toks = {t.casefold() for t in (stone_type or "").split()}
-    no_fmt = [t for t in toks if t.casefold() not in _FORMAT_WORDS]
-    no_type = [t for t in no_fmt if t.casefold() not in type_toks]
-    # Strip the type when a distinctive multi-word name remains, OR when the single remaining token is
-    # a supplier CODE -- so 'MGT Onyx' -> 'MGT' is caught downstream as a bare code and routed to
-    # review, NOT minted as a type-baked variety 'Mgt Onyx'. Keep the type only when the remainder is
-    # a real word ('White Onyx' -> 'White Onyx', not 'White').
-    chosen = no_type if (len(no_type) >= 2 or (len(no_type) == 1 and looks_codey(no_type[0]))) else no_fmt
-    # A trailing bare <=2-char token is almost always a supplier lot/region code, not part of the
-    # variety name ('White Super ES', ES = Espirito Santo). Drop it so the variety folds to its base
-    # name and the full scraped name is kept as an alias -- never minting a separate '... Es' variant.
-    # Only when >=2 real tokens remain, so a name is never reduced to a bare colour/type.
-    if len(chosen) >= 3 and len(chosen[-1]) <= 2 and chosen[-1].isalnum():
-        chosen = chosen[:-1]
-    return " ".join(chosen) or " ".join(no_fmt) or (name or "").strip()
+# _clean_variety moved to adapters.tokens.clean_variety (the ONE identity derivation, shared with the
+# matcher so an operator mint decision keyed by the cleaned name is found for a product too).
 
 
 def _is_token_subset(short: str, full: str) -> bool:
@@ -382,7 +357,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # clean is derived from the SCRAPE type (never the operator override) so its type token is stripped
         # correctly and the seed lookup key norm(clean) + the Key uuid stay byte-stable run to run -- the
         # operator's type below changes only the final IDENTITY type, never the name/clean/Key.
-        clean = _clean_variety(name, scrape_type)
+        clean = clean_variety(name, scrape_type)
         # OPERATOR AUTHORITY: a MINT decision's chosen type overrides the scraper's suggestion. Absent a
         # mint type, the scrape type stands; absent both, an ALIAS decision's target type fills a type-less
         # row (which lets a 'pick the type' answer on an aliased multi-type target resolve the row instead
@@ -464,7 +439,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
 
     # --- 2. classify each gapped variety, in STRICT PRIORITY ORDER (the cleaning/verification flow).
     # The rule for the ordering: do the cheapest, most DECISIVE thing first, and REUSE before MINT.
-    #   PHASE 1  CANONICALISE  the name (_clean_variety, using the RESOLVED type)
+    #   PHASE 1  CANONICALISE  the name (clean_variety, using the RESOLVED type)
     #   PHASE 2  DEDUP         one decision per cleaned identity
     #   PHASE 3  REJECT/HOLD   junk -- artifact, human-rejected, code-shaped -- NEVER mint these
     #   PHASE 4  RESOLVE       to an EXISTING variety (an alias beats a new variant): exact surface

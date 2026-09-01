@@ -763,6 +763,11 @@ class ReferenceData:
     versions: dict[str, str]
     origin_overrides: OriginOverrides = field(default_factory=OriginOverrides)  # per-supplier origin picks
     overrides: object = None  # state.overrides.Overrides; lazy import to avoid cycle
+    # norm(cleaned variety name) -> operator-chosen canonical stone type, for MINT decisions (config.db).
+    # The matcher consults this so a product whose scraped type matches no existing variety of its name binds
+    # to the operator-minted (name, type) instead of gapping -- the operator's authority reaching the PRODUCT,
+    # not just the variety. Folded in at load (below), mirroring the seed_country origin overlay.
+    variety_seed_types: dict[str, str] = field(default_factory=dict)
 
     @cached_property
     def valid_iso_codes(self) -> frozenset:
@@ -852,6 +857,13 @@ def load_all() -> ReferenceData:
     # seed_type + seed_country), overlaid in memory here -- the one place ref is built, mirroring the leaf
     # overlay. Type-scoped, so a mint under one type never clobbers a homonym's origin under another.
     ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_country_rules())
+    # Operator MINT types folded in (canonical-gated, the SAME gate curate mints under), keyed by norm(clean
+    # variety name) exactly as decisions_store + curate key them. Lets the matcher bind a product to an
+    # operator-minted (name, type) whose type the scrape did not carry -- the mint decision reaching the
+    # product, not only the variety. A non-canonical seed_type is dropped (no such variety can exist).
+    _valid_types = {_norm(t) for t in ref.attributes.canonical_names("type")}
+    ref.variety_seed_types = {n: t for n, t in decisions_store.variety_seed_types().items()
+                              if _norm(t) in _valid_types}
     _assert_pack_defaults_resolve(ref)   # a pack default value not in Medusa's vocabulary fails loud here
     log.info(
         "reference loaded",

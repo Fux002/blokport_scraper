@@ -13,12 +13,13 @@ drift from Medusa.
 
 from __future__ import annotations
 
+import html
 import re
 from functools import lru_cache
 
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import looks_codey, match_key
 
 
 @lru_cache(maxsize=None)
@@ -156,3 +157,30 @@ def strip_format(name: str) -> str:
     for token in FORMAT_TOKENS:
         text = _word_re(token).sub(" ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Format words as a casefold-comparable set (category name + plural), for clean_variety below.
+_VARIETY_FORMAT_WORDS = {w for c in CATEGORIES for w in (c.name, c.plural)}
+
+
+def clean_variety(name: str, stone_type: str) -> str:
+    """The variety IDENTITY name for `name` given its resolved `stone_type` -- the ONE derivation shared by
+    the matcher (to look up an operator mint decision for a product) and curate (to mint under). Suppliers
+    name products '{Variety} {Type} {Format}' (e.g. 'Crystal White Granite Slab'). Always strip the format
+    word (slab/block/tile). Strip the stone-type token(s) too, but ONLY when a distinctive multi-word name
+    remains -- otherwise keep the type so we don't reduce a name to a bare generic colour ('Crystal White
+    Granite Slab' -> 'Crystal White', but 'White Onyx Slab' -> 'White Onyx', not 'White'). Never empty."""
+    toks = html.unescape(name or "").split()   # decode &#8211; etc. before cleaning
+    type_toks = {t.casefold() for t in (stone_type or "").split()}
+    no_fmt = [t for t in toks if t.casefold() not in _VARIETY_FORMAT_WORDS]
+    no_type = [t for t in no_fmt if t.casefold() not in type_toks]
+    # Strip the type when a distinctive multi-word name remains, OR when the single remaining token is a
+    # supplier CODE -- so 'MGT Onyx' -> 'MGT' is caught downstream as a bare code and routed to review, NOT
+    # minted as a type-baked variety 'Mgt Onyx'. Keep the type only when the remainder is a real word.
+    chosen = no_type if (len(no_type) >= 2 or (len(no_type) == 1 and looks_codey(no_type[0]))) else no_fmt
+    # A trailing bare <=2-char token is almost always a supplier lot/region code, not part of the variety
+    # name ('White Super ES', ES = Espirito Santo). Drop it so the variety folds to its base name and the
+    # full scraped name is kept as an alias. Only when >=2 real tokens remain, so never a bare colour/type.
+    if len(chosen) >= 3 and len(chosen[-1]) <= 2 and chosen[-1].isalnum():
+        chosen = chosen[:-1]
+    return " ".join(chosen) or " ".join(no_fmt) or (name or "").strip()
