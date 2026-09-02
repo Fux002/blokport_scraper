@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "f21df2978ea1c73357e42fecd61ea44dc7d82649" # :core w/ reset fetch-inputs fix (#251, incl #249)
+prod_image_tag     = "4764f6d6e5ade3912448ca11aa9e3ebb0f173375" # :core w/ committed prod base seed (#253) + original reset (#254)
 prod_gpu_image_tag = "gpu-f9d828e0f1429cd18ed689c7c8a17ae64793371d"
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
