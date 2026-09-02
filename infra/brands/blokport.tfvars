@@ -32,6 +32,14 @@ prod_home_env         = "prod"
 prod_image_tag     = "126b76b8920947c0c5c997c3fbe7772ea694e625" # dev-proven :core (rev 126b76b)
 prod_gpu_image_tag = "gpu-f9d828e0f1429cd18ed689c7c8a17ae64793371d"
 
+# Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
+# :4200 admin UI (source.enhance / source.watermarked), NOT these infra flags -- these just make prod's
+# task config identical to dev so the UI behaves the same. gpu image (gpu-f9d828e0) == dev's :gpu digest
+# sha256:801ee2f4 -> carries ben2, so auto_texture is safe.
+prod_auto_enhance     = true
+prod_auto_texture     = true
+prod_require_enhanced = true
+
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
 fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                 # de-watermark
 scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY"  # residential proxy

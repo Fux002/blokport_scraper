@@ -114,10 +114,18 @@ def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
     seed = Path(seed_path or SETTINGS.paths.variants_export_base_seed_csv)
     base = Path(base_path or SETTINGS.paths.variants_export_base_csv)
     if not seed.exists():
-        log.warning("reset: no pristine base seed baked; leaving the base file as-is (local dev)")
-        return {"reseeded": False, "reason": "no pristine seed"}
+        # A runtime-loaded env (prod, or a new brand) has NO baked *.seed.csv: only an env whose
+        # from_medusa/<env>/variants_export_base.csv is COMMITTED gets one baked at image build (Dockerfile).
+        # Fall back to the live base, which IS the pristine source there -- the same fallback
+        # _load_pristine_seed_keys already uses. Without it the reset never publishes the base to to_upload/
+        # and Medusa's restore/dry-run has nothing to read (the prod failure this fixes).
+        seed = base
+    if not seed.exists():
+        log.warning("reset: no base seed baked AND no live base on disk; leaving the base file as-is")
+        return {"reseeded": False, "reason": "no base source"}
     try:
-        shutil.copyfile(seed, base)                     # local base := pristine seed
+        if seed.resolve() != base.resolve():
+            shutil.copyfile(seed, base)                 # local base := pristine seed (no-op when already the same file)
         from stone_pipeline.reference.sync_variants_base import publish_base_to_import, publish_base_to_s3
         published = publish_base_to_s3(base)            # S3 base := pristine seed, so the cold start reads it
         # ALSO publish the seed to the import namespace (to_upload/) so Medusa's bulk-restore reads the SEED.
@@ -608,9 +616,10 @@ def rebuild_curation() -> tuple[dict, int]:
         return guard, code
     reseed = _reseed_base_from_pristine()
     if not reseed.get("reseeded"):
-        # no pristine seed baked (local dev): nothing to rebuild from -- report, do not silently re-derive
+        # no base source at all -- neither a baked seed nor a live base on disk (bare host): nothing to
+        # rebuild from -- report, do not silently re-derive
         return {"rebuilt": False, "base_reseed": reseed,
-                "note": "no committed pristine seed to rebuild from"}, 409
+                "note": "no base source (pristine seed or live base) to rebuild from"}, 409
     from stone_pipeline.config import runner
     rec, run_code = runner.start_run(None, "catalog")   # re-derive all sources from the clean base (async)
     return {"rebuilt": True, "base_reseed": reseed, "rederive": rec, "rederive_status": run_code,
