@@ -91,6 +91,17 @@ data "aws_iam_policy_document" "execution_secrets" {
     actions   = ["ssm:GetParameters"]
     resources = concat([var.sync_token_ssm_arn, var.config_token_ssm_arn], values(var.produce_secret_arns))
   }
+  # A CUSTOMER-managed KMS key (prod's alias/<brand>-prod-secrets) needs an explicit decrypt grant, or the
+  # task fails to start (ResourceInitializationError on kms:Decrypt). Empty (dev, the AWS-managed aws/ssm
+  # key) omits it -- that key decrypts implicitly via the SSM GetParameters call.
+  dynamic "statement" {
+    for_each = var.secrets_kms_key_arn == "" ? [] : [1]
+    content {
+      sid       = "DecryptSecrets"
+      actions   = ["kms:Decrypt"]
+      resources = [var.secrets_kms_key_arn]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "execution_secrets" {

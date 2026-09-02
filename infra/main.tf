@@ -228,6 +228,7 @@ module "scraper_prod" {
   schedule_expression = var.schedule_expression
   keep_scraped        = var.keep_scraped
   ssm_secret_arns     = local.prod_ssm_secrets
+  secrets_kms_key_arn = local.prod_secrets_kms_key_arn
   cpu                 = var.cpu
   memory              = var.memory
 }
@@ -286,7 +287,8 @@ module "gpu_enhance_prod" {
   alert_email    = var.alert_email
   # FAL_KEY (+ proxy) for FLUX texture gen + FAL de-watermark, by convention like dev. Empty until the
   # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
-  ssm_secret_arns = local.prod_ssm_secrets
+  ssm_secret_arns     = local.prod_ssm_secrets
+  secrets_kms_key_arn = local.prod_secrets_kms_key_arn
 }
 
 # =============================================================================
@@ -386,7 +388,17 @@ data "aws_ssm_parameter" "config_token_prod" {
   name  = "/${var.brand}-prod/BLOKPORT_CONFIG_TOKEN"
 }
 
+# The prod SSM SecureStrings are encrypted with the brand's CUSTOMER-managed CMK (alias/<brand>-prod-secrets);
+# the task execution roles need kms:Decrypt on it or ECS fails to pull the secrets. Dev uses the AWS-managed
+# aws/ssm key (implicit decrypt), so this is prod-only. The key policy delegates to account IAM, so granting
+# decrypt on the execution role (via secrets_kms_key_arn below) is sufficient -- no key-policy change needed.
+data "aws_kms_key" "prod_secrets" {
+  count  = local.prod_enabled ? 1 : 0
+  key_id = "alias/${var.brand}-prod-secrets"
+}
+
 locals {
+  prod_secrets_kms_key_arn = local.prod_enabled ? data.aws_kms_key.prod_secrets[0].arn : ""
   # Revision-agnostic prod job-def ARN for the auto-enhance/texture SubmitJob IAM (see dev_gpu_jobdef_iam_arn).
   # Guarded by prod_enabled so the count-gated module index [0] is only reached when prod exists.
   prod_gpu_jobdef_iam_arn = local.prod_enabled ? replace(module.gpu_enhance_prod[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
@@ -416,6 +428,7 @@ module "sync_service_prod" {
   sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_prod[0].arn
   config_token_ssm_arn = data.aws_ssm_parameter.config_token_prod[0].arn
   produce_secret_arns  = local.prod_ssm_secrets
+  secrets_kms_key_arn  = local.prod_secrets_kms_key_arn
 
   gpu_job_queue_name       = module.gpu_enhance_prod[0].job_queue
   gpu_job_definition_name  = module.gpu_enhance_prod[0].job_definition

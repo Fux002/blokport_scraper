@@ -119,6 +119,12 @@ variable "require_enhanced_enabled" {
   description = "BLOKPORT_REQUIRE_ENHANCED: hard publish gate -- only GPU-enhanced images (enhanced/ marker) are linked. Ships false; enable only after markers are backfilled, else all images hold."
 }
 
+variable "secrets_kms_key_arn" {
+  type        = string
+  default     = ""
+  description = "KMS key ARN for the SSM SecureStrings (grants kms:Decrypt on the execution role). Empty = AWS-managed aws/ssm key (implicit decrypt); set to the customer CMK in prod."
+}
+
 # --- Brand + product-type selection (multi-brand / multi-material) ------------
 variable "brand" {
   type        = string
