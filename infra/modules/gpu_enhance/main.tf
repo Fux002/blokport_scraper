@@ -151,13 +151,13 @@ resource "aws_iam_role_policy" "job" {
 }
 
 # The GPU image is ~4 GB (CUDA base + baked Real-ESRGAN; de-watermark is the hosted FAL API, no baked
-# weights). The launch template enlarges the ECS_AL2_NVIDIA AMI's default 30 GB root volume anyway, as
+# weights). The launch template enlarges the ECS_AL2023_NVIDIA AMI's default 30 GB root volume anyway, as
 # safe headroom: docker needs ~2.5x the image size to pull + decompress, and a future baked model would
 # otherwise reintroduce the "no space left on device" pull failure that stalls GPU jobs.
 resource "aws_launch_template" "this" {
   name = "${local.name}-lt"
   block_device_mappings {
-    device_name = "/dev/xvda" # AL2 ECS AMI root device
+    device_name = "/dev/xvda" # AL2023 ECS AMI root device
     ebs {
       volume_size           = var.root_volume_gb
       volume_type           = "gp3"
@@ -195,9 +195,10 @@ resource "aws_batch_compute_environment" "this" {
     subnets             = data.aws_subnets.private.ids
 
     # The GPU-optimised ECS AMI (NVIDIA drivers + nvidia-container-runtime). REQUIRED
-    # for GPU jobs — without it the container can't see the GPU.
+    # for GPU jobs — without it the container can't see the GPU. AL2023, not AL2:
+    # AWS Batch rejects the end-of-life Amazon Linux 2 NVIDIA AMI at CreateComputeEnvironment.
     ec2_configuration {
-      image_type = "ECS_AL2_NVIDIA"
+      image_type = "ECS_AL2023_NVIDIA"
     }
     # Enlarged root volume (above) so the big GPU image can be pulled.
     launch_template {
