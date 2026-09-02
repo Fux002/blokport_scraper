@@ -21,15 +21,22 @@ dev_staging_bucket = "blokport-dev-staging-3e58a6"
 # --- PROD (the one active prod) --------------------------------------------
 # Set prod_staging_bucket to a non-empty value to STAND PROD UP. Leave it "" to
 # keep prod on standby (dev-only) until Blokport's prod platform state exists.
-prod_staging_bucket   = "" # FILL to activate prod: blokport-prod-staging-<suffix>
-prod_sales_channel_id = "" # FILL: prod Medusa sales channel id (required once prod is up)
+# STOOD UP 2026-09-02: Blokport delivered the prod platform state, bucket, tokens
+# and the prod sales-channel id.
+prod_staging_bucket   = "blokport-prod-staging"
+prod_sales_channel_id = "sc_01M1GGAHFVHZ8XEY20KVZP2QV5" # Default Sales Channel, prod bootstrap
 prod_home_env         = "prod"
 
+# Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
+# core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
+prod_image_tag     = "126b76b8920947c0c5c997c3fbe7772ea694e625" # dev-proven :core (rev 126b76b)
+prod_gpu_image_tag = "gpu-f9d828e0f1429cd18ed689c7c8a17ae64793371d"
+
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
-fal_key_ssm_name       = "" # FILL: /blokport-prod/FAL_KEY        (de-watermark)
-scraper_proxy_ssm_name = "" # FILL: /blokport-prod/BLOKPORT_SCRAPER_PROXY (residential proxy)
+fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                 # de-watermark
+scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY"  # residential proxy
 
 # --- shared / ops -----------------------------------------------------------
 platform_state_bucket = "blokport-tfstate"
 region                = "eu-west-1"
-alert_email           = "" # FILL: ops alert address for prod alarms
+alert_email           = "error@blokport.com" # ops alert address for prod alarms
