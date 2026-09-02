@@ -406,6 +406,19 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     _names, codes, err = _resolve(sources, require_non_empty=False)
     if err:
         return err
+    if pristine:
+        # A runtime-loaded env (prod, and future brands) keeps its base on S3 -- it is NOT baked in the image
+        # (only a COMMITTED from_medusa/<env>/variants_export_base.csv bakes; prod has none) and NOT restored
+        # on a cold task. So a freshly-rolled config task has no from_medusa/ base, and the reconcile / reseed /
+        # content re-derive below would run seedless and the re-derive would FileNotFoundError. Pull the current
+        # inputs from S3 first, exactly as the produce does. Best-effort: a failed fetch falls through to the
+        # existing seedless path, never blocks the reset (the ledger/config are still reset).
+        try:
+            from deploy import fetch_inputs
+            fetch_inputs.main()
+        except Exception:
+            log.warning("reset: could not fetch from_medusa/ inputs from S3; reconcile/reseed may run seedless",
+                        exc_info=True)
     # pristine = TRUE cold start: reconcile the variation table to the committed seed BEFORE the sync-state
     # reset, so duplicate / re-key OLD SIDES seeded before a seed cleanup are tombstoned (Medusa deletes
     # them on the removals pull) AND dropped locally -- not left to re-render every produce. Read from the
