@@ -114,18 +114,10 @@ def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
     seed = Path(seed_path or SETTINGS.paths.variants_export_base_seed_csv)
     base = Path(base_path or SETTINGS.paths.variants_export_base_csv)
     if not seed.exists():
-        # A runtime-loaded env (prod, or a new brand) has NO baked *.seed.csv: only an env whose
-        # from_medusa/<env>/variants_export_base.csv is COMMITTED gets one baked at image build (Dockerfile).
-        # Fall back to the live base, which IS the pristine source there -- the same fallback
-        # _load_pristine_seed_keys already uses. Without it the reset never publishes the base to to_upload/
-        # and Medusa's restore/dry-run has nothing to read (the prod failure this fixes).
-        seed = base
-    if not seed.exists():
-        log.warning("reset: no base seed baked AND no live base on disk; leaving the base file as-is")
-        return {"reseeded": False, "reason": "no base source"}
+        log.warning("reset: no pristine base seed baked; leaving the base file as-is (local dev)")
+        return {"reseeded": False, "reason": "no pristine seed"}
     try:
-        if seed.resolve() != base.resolve():
-            shutil.copyfile(seed, base)                 # local base := pristine seed (no-op when already the same file)
+        shutil.copyfile(seed, base)                     # local base := pristine seed
         from stone_pipeline.reference.sync_variants_base import publish_base_to_import, publish_base_to_s3
         published = publish_base_to_s3(base)            # S3 base := pristine seed, so the cold start reads it
         # ALSO publish the seed to the import namespace (to_upload/) so Medusa's bulk-restore reads the SEED.
@@ -406,19 +398,6 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     _names, codes, err = _resolve(sources, require_non_empty=False)
     if err:
         return err
-    if pristine:
-        # A runtime-loaded env (prod, and future brands) keeps its base on S3 -- it is NOT baked in the image
-        # (only a COMMITTED from_medusa/<env>/variants_export_base.csv bakes; prod has none) and NOT restored
-        # on a cold task. So a freshly-rolled config task has no from_medusa/ base, and the reconcile / reseed /
-        # content re-derive below would run seedless and the re-derive would FileNotFoundError. Pull the current
-        # inputs from S3 first, exactly as the produce does. Best-effort: a failed fetch falls through to the
-        # existing seedless path, never blocks the reset (the ledger/config are still reset).
-        try:
-            from deploy import fetch_inputs
-            fetch_inputs.main()
-        except Exception:
-            log.warning("reset: could not fetch from_medusa/ inputs from S3; reconcile/reseed may run seedless",
-                        exc_info=True)
     # pristine = TRUE cold start: reconcile the variation table to the committed seed BEFORE the sync-state
     # reset, so duplicate / re-key OLD SIDES seeded before a seed cleanup are tombstoned (Medusa deletes
     # them on the removals pull) AND dropped locally -- not left to re-render every produce. Read from the
@@ -629,10 +608,9 @@ def rebuild_curation() -> tuple[dict, int]:
         return guard, code
     reseed = _reseed_base_from_pristine()
     if not reseed.get("reseeded"):
-        # no base source at all -- neither a baked seed nor a live base on disk (bare host): nothing to
-        # rebuild from -- report, do not silently re-derive
+        # no pristine seed baked (local dev): nothing to rebuild from -- report, do not silently re-derive
         return {"rebuilt": False, "base_reseed": reseed,
-                "note": "no base source (pristine seed or live base) to rebuild from"}, 409
+                "note": "no committed pristine seed to rebuild from"}, 409
     from stone_pipeline.config import runner
     rec, run_code = runner.start_run(None, "catalog")   # re-derive all sources from the clean base (async)
     return {"rebuilt": True, "base_reseed": reseed, "rederive": rec, "rederive_status": run_code,
