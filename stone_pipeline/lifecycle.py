@@ -362,7 +362,7 @@ def _prune_stale_medusa_export() -> dict:
     return out
 
 
-def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
+def reset(sources=None, hard=False, pristine=False, keep_images=False) -> tuple[dict, int]:
     """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
     re-scrape; hard also drops the scraped products AND wipes the hosted product images (scoped -> only the
     named sources' images, global -> all), so a re-scrape regenerates them from scratch (the "spend GPU/FAL"
@@ -386,7 +386,13 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
     GLOBAL image wipe. The cheaper 'clean raw scraped data' (stone_pipeline.clean, a SEPARATE endpoint) and a
     SOFT reset KEEP the images so the manifest reuses them (no GPU/FAL). Variant textures (<env>/variations/)
     are never touched by any of these. Registered sources and run history are left alone -- neither affects
-    the catalog output."""
+    the catalog output.
+
+    `keep_images` OVERRIDES the hard/factory image wipe: the reset does everything else (ledger reset +
+    reseed, overlay wipe, stale-variation prune on pristine) but LEAVES the hosted product images and their
+    enhanced/discarded markers, so a re-scrape reuses the already GPU/FAL-processed images instead of paying
+    to rebuild them. This is the TEST-reset path -- repeatedly factory-reset the catalog without re-enhancing
+    every image. No effect on a soft reset (which keeps images regardless)."""
     if pristine and sources is not None:
         return {"error": "pristine (factory) reset is global-only; do not pass sources"}, 400
     if sources is not None and not sources:
@@ -472,7 +478,7 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
                 # from a pre-reset products_export.csv (Medusa is wiped on a factory reset -> that file is stale).
                 out["medusa_export_pruned"] = _prune_stale_medusa_export()
             out["config"] = config
-        if hard:
+        if hard and not keep_images:
             # EXPENSIVE restart: a HARD reset ("Remove data (keep config)", and the factory reset which forces
             # hard) wipes the hosted product images (raw scraped + treated improved + markers + manifest), so
             # the next scrape re-downloads and re-processes from scratch -- the "spend GPU/FAL" restart. SCOPED
@@ -488,6 +494,14 @@ def reset(sources=None, hard=False, pristine=False) -> tuple[dict, int]:
             except Exception as exc:
                 log.exception("reset: product-image wipe FAILED; images were kept")
                 out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
+        elif hard:
+            # keep_images: a hard/factory reset that PRESERVES the hosted product images AND their enhanced/
+            # discarded markers. Everything else runs normally (ledger reset + reseed, overlay wipe, stale-
+            # variation prune on pristine), but the S3 product images stay -- so a re-scrape reuses the
+            # existing GPU/FAL-processed images (the enhance delta sees the markers as done and skips them)
+            # instead of rebuilding them. This is the "test reset" path: repeatedly factory-reset the catalog
+            # without paying to re-enhance every image. Variant textures were never touched either way.
+            out["images_wiped"] = {"kept": "keep_images -- product images + enhanced markers preserved"}
         return out
 
     result, code = _ledger_op("reset", _do_reset)

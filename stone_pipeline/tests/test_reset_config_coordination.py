@@ -135,6 +135,32 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     assert wiped == [True] and out["artifacts_wiped"]["s3"] == ["k1", "k2"]
 
 
+def test_pristine_keep_images_skips_the_product_image_wipe(tmp_path, monkeypatch):
+    """keep_images: a factory reset that LEAVES the hosted product images + enhanced markers (a re-scrape
+    reuses them, no GPU/FAL rebuild). The rest of the factory reset still runs (overlay wipe). The default
+    (test above) DOES wipe -- so this proves only that the flag skips the wipe."""
+    from stone_pipeline import lifecycle
+    from stone_pipeline.ledger import snapshot
+    from deploy import cleanup_images
+
+    yaml_path = tmp_path / "sources.yaml"
+    yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
+    _seed_config(tmp_path, monkeypatch)
+    store.seed_from_yaml(yaml_path=yaml_path)
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
+    wipe_calls: list[bool] = []
+    monkeypatch.setattr(cleanup_images, "wipe_all_product_images",
+                        lambda **k: (wipe_calls.append(True), {})[1])
+    monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: {"local": [], "s3": []})
+
+    out, code = lifecycle.reset(sources=None, pristine=True, keep_images=True)
+    assert code == 200 and out["mode"] == "pristine"
+    assert wipe_calls == []                       # the expensive product-image wipe never ran
+    assert "kept" in out["images_wiped"]          # images explicitly preserved
+    # the rest of the factory reset still happened -- the durable overlay is gone
+    assert decisions_store.variety_seed_types() == {}
+
+
 def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch):
     """Only a PRISTINE (factory) reset clears the cached scrape. A hard/soft reset keeps it, so a targeted
     republish still works -- wiping it there would break the "release without re-scrape" flow."""

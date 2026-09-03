@@ -254,13 +254,17 @@ def test_dispatch_routes_reset_with_hard_and_sources(monkeypatch):
     from stone_pipeline.config.server import dispatch
     seen = {}
     monkeypatch.setattr(lifecycle, "reset",
-                        lambda sources=None, hard=False, pristine=False:
-                        seen.update(sources=sources, hard=hard, pristine=pristine) or ({"ok": 1}, 200))
+                        lambda sources=None, hard=False, pristine=False, keep_images=False:
+                        seen.update(sources=sources, hard=hard, pristine=pristine, keep_images=keep_images)
+                        or ({"ok": 1}, 200))
     code, body = dispatch("POST", ["reset"], {"hard": True, "sources": ["zucchi"]})
-    assert code == 200 and seen == {"sources": ["zucchi"], "hard": True, "pristine": False}
+    assert code == 200 and seen == {"sources": ["zucchi"], "hard": True, "pristine": False, "keep_images": False}
+    # keep_images routes through the endpoint (the factory test-reset path)
+    dispatch("POST", ["reset"], {"pristine": True, "keep_images": True})
+    assert seen == {"sources": None, "hard": False, "pristine": True, "keep_images": True}
     # the factory-reset flag threads through as pristine=True (global, no sources)
     code, body = dispatch("POST", ["reset"], {"pristine": True})
-    assert code == 200 and seen == {"sources": None, "hard": False, "pristine": True}
+    assert code == 200 and seen == {"sources": None, "hard": False, "pristine": True, "keep_images": False}
 
 
 def test_current_returns_current_and_last_and_survives_restart(tmp_path, monkeypatch):
