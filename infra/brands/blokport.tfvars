@@ -34,8 +34,8 @@ prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :g
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
 # :4200 admin UI (source.enhance / source.watermarked), NOT these infra flags -- these just make prod's
-# task config identical to dev so the UI behaves the same. gpu image (gpu-f9d828e0) == dev's :gpu digest
-# sha256:801ee2f4 -> carries ben2, so auto_texture is safe.
+# task config identical to dev so the UI behaves the same. prod gpu image (gpu-782f18c7) == dev's :gpu
+# digest sha256:20767ddd -> carries ben2 + reads SCRAPER_ env, so auto_texture + prod bucket are safe.
 prod_auto_enhance     = true
 prod_auto_texture     = true
 prod_require_enhanced = true
