@@ -107,6 +107,12 @@ variable "auto_enhance_enabled" {
   description = "BLOKPORT_AUTO_ENHANCE on the produce container. Ships false (dark); flip to true to auto-fire the GPU reprocess on new images."
 }
 
+variable "enhance_max_jobs" {
+  type        = number
+  default     = 40
+  description = "SCRAPER_ENHANCE_MAX_JOBS: max GPU enhance jobs one produce dispatches (over-cap windows ride the next produce). The code default is 8, which starves a big source when another comes first; 40 clears a full scrape's pending windows in one pass. Same on dev + prod."
+}
+
 variable "auto_texture_enabled" {
   type        = bool
   default     = false
