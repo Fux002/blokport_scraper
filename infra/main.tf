@@ -284,6 +284,10 @@ module "gpu_enhance_prod" {
   image_repo_url = local.ecr_repo_url
   image_tag      = var.prod_gpu_image_tag
   region         = var.region
+  # 96 vCPU = up to 24 g4dn.xlarge in parallel (account G/VT quota is 384). Prod ran the module default 16
+  # (4 GPUs) = ~6h for a full-catalog enhance backlog; 96 compresses it to ~1.5-2h. min stays 0 ($0 idle),
+  # same total GPU-hours -- only wall-clock shrinks. Dev is 128; both are well within the 384 quota.
+  max_vcpus      = 96
   alert_email    = var.alert_email
   # FAL_KEY (+ proxy) for FLUX texture gen + FAL de-watermark, by convention like dev. Empty until the
   # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
