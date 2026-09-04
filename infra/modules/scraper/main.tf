@@ -206,6 +206,10 @@ resource "aws_ecs_task_definition" "this" {
       # Auto-enhance: submit the GPU reprocess for the delta after the scheduled scrape stages new images.
       # Ships OFF (flag false); queue/def names let the trigger reach Batch once enabled. CLASSIFY stays false.
       { name = "SCRAPER_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
+      # Fan-out cap: max GPU enhance jobs one produce dispatches (over-cap windows ride the next). Raised
+      # from the default 8 so one produce clears every source's pending windows instead of starving a big
+      # source; actual FAL spend stays bounded by real pending images (per-job fal_max_usd ceiling).
+      { name = "SCRAPER_ENHANCE_MAX_JOBS", value = tostring(var.enhance_max_jobs) },
       { name = "SCRAPER_GPU_QUEUE", value = var.gpu_job_queue_name },
       { name = "SCRAPER_GPU_JOBDEF", value = var.gpu_job_definition_name },
       # HARD publish gate: only images the GPU actually enhanced (enhanced/ marker) may be linked. Ships OFF

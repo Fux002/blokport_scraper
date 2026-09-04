@@ -228,6 +228,11 @@ resource "aws_ecs_task_definition" "this" {
         # GPU spins up on demand and back to zero. Ships OFF (flag false); the queue/job-def names let the
         # trigger reach Batch once enabled. CLASSIFY stays false in the auto path (no uncalibrated discards).
         { name = "SCRAPER_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
+        # Fan-out cap: max GPU enhance jobs a single produce dispatches (windows over the cap ride the NEXT
+        # produce). The default 8 starves a big source when another comes first in the order -- so raise it
+        # enough that one produce dispatches every source's pending windows in one pass. Actual FAL spend is
+        # still bounded by real pending images (each job keeps its own fal_max_usd ceiling).
+        { name = "SCRAPER_ENHANCE_MAX_JOBS", value = tostring(var.enhance_max_jobs) },
         # Auto-texture: after produce QUEUES new-variant textures, submit ONE GPU job (RUN_MODE=generate-
         # textures) to generate + upload them -- reusing the SAME queue/jobdef below. Ships OFF; flip on only
         # after the :gpu image carries ben2 (else the job fails at background-removal).
