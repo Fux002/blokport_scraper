@@ -323,9 +323,14 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
                   for k in keys if k != survivor_of(keys, _seed)}
     delete_keys = delete_keys | dup_losers
     for record in records:
-        vid = (record.get("Id") or "").strip()
         name = (record.get("Name") or "").strip()
         key = (record.get("Key") or "").strip()
+        # The Id-free base is the matcher's fallback source when the live export is absent (post factory
+        # reset -- see load_all). It has no Id column, so use the Key as the variation_id: Keys are unique,
+        # so every base variety indexes distinctly instead of colliding on an empty id, and the matcher
+        # recognizes it rather than minting a duplicate. Products link by Key (match_variation._key_for);
+        # the real Medusa id fills in on the next pull. The live export (with an Id) is unaffected.
+        vid = (record.get("Id") or "").strip() or key
         if not vid or not name:
             continue
         # Never match products to a JUNK existing variant -- a bare-code one ('Mgt','Gs', a supplier
@@ -825,12 +830,20 @@ def load_all() -> ReferenceData:
     # The seed file is never mutated; the overlay is applied in memory, here, in the one place ref is built.
     backbone = load_backbone()
     backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
+    # The matcher's existing-variety index reads the live Medusa export (paths.export_file). A factory reset
+    # DELETES that file (lifecycle._prune_stale_medusa_export) and Blokport re-exports it only after the next
+    # pull -- so between those the export is absent. Fall back to the committed Id-free BASE (the full variety
+    # union) so the matcher still recognizes every existing variety instead of mass-minting them all as new
+    # (products link by Key, not id; the real Medusa id fills in on the pull). SCOPED to the matcher on
+    # purpose: emit / tree_build / curate keep reading paths.export_file, so they never treat the id-free base
+    # as the live id-bearing export.
+    matcher_export = paths.export_file if paths.export_file.exists() else paths.variants_export_base_csv
     ref = ReferenceData(
         attributes=load_attributes(),
         # ONE combined export for every category; the category is the Key prefix, so
         # the same file is split into a per-category index, one per registry entry
         # that shares the stone-variety vocabulary.
-        variants={c.name: load_variants(paths.export_file, c.name, key_prefix=c.name)
+        variants={c.name: load_variants(matcher_export, c.name, key_prefix=c.name)
                   for c in CATEGORIES if c.shares_variety_vocab},
         backbone=backbone,
         ports=load_ports(),
