@@ -216,17 +216,31 @@ class VariationStage:
         # the lookup key matches the one curate/decisions_store store the decision under.
         if match.cid is None and not (scraped_type and match.method.endswith("ambiguous")):
             clean = clean_variety(query, scraped_type)
-            op_type = self.ref.variety_seed_types.get(proj.norm(clean))
-            if op_type and proj.norm(op_type) != proj.norm(scraped_type):
-                # Retry under the operator's authoritative type AND the cleaned identity name: the scrape's
-                # match key often still carries the type token ('Absolute Black Marble'), which only fuzzy-
-                # matches the clean variety and the fuzzy length-guard then rejects (a freshly minted variety
-                # has no 'X Marble' alias yet). The cleaned name 'Absolute Black' + the operator type binds at
-                # the exact tier -- exactly the (name, type) the operator minted.
-                retry = engine.match(clean, block_type=op_type, block_color=block_color)
+            # CLEAN-NAME RETRY: the scrape's match key carries the supplier's type token ('Crystal White
+            # Granite'). That full string exists only as an ALIAS on sibling same-type varieties (Bianco,
+            # Storen), never on the CANONICAL variety of that exact name (which lists no '<name> <type>'
+            # alias) -- so the exact tier sees several different-canonical candidates and gaps, and the
+            # variety re-queues for mint every produce even though it already exists. Retry with the type-
+            # STRIPPED name under the SAME scraped type: the engine's identity-beats-alias narrowing then
+            # keeps the canonical owner and binds it ('Crystal White' -> the canonical Crystal White granite).
+            # Identity stays (type, name): the scraped type still blocks, so a genuinely new-type scrape
+            # ('Imperial Blue' quartzite, existing only as granite) still gaps and holds for review.
+            if proj.norm(clean) != proj.norm(query):
+                retry = engine.match(clean, block_type=scraped_type, block_color=block_color)
                 if retry.cid is not None:
                     match = VariationMatch(retry.cid, retry.canonical, retry.confidence,
-                                           f"operator_type_{retry.method}", retry.score, retry.candidates)
+                                           f"clean_variety_{retry.method}", retry.score, retry.candidates)
+            # OPERATOR-TYPE FALLBACK: still no home under the scraped type -- the operator's MINT decision is
+            # the authority. Retry under the operator's type AND the cleaned identity name: the cleaned name
+            # 'Absolute Black' + the operator type binds at the exact tier -- exactly the (name, type) the
+            # operator minted. A scraped type that DID match a variety is never overridden.
+            if match.cid is None:
+                op_type = self.ref.variety_seed_types.get(proj.norm(clean))
+                if op_type and proj.norm(op_type) != proj.norm(scraped_type):
+                    retry = engine.match(clean, block_type=op_type, block_color=block_color)
+                    if retry.cid is not None:
+                        match = VariationMatch(retry.cid, retry.canonical, retry.confidence,
+                                               f"operator_type_{retry.method}", retry.score, retry.candidates)
 
         if match.cid is not None and match.confidence >= Confidence.medium:
             row.variation_id = match.cid
