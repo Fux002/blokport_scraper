@@ -29,6 +29,8 @@ marenostone:
     - Brindisi
   emit_on_review: true
   origin_default: IT  # VERIFY supplier country
+  primary_origin: IR  # PRIMARY quarry origin: marenostone sources predominantly Iranian stone. Gates the
+  #                     origin map -- a map origin that isn't IR for this vendor holds for confirmation.
   default_bundle_size: 6
   min_expected_rows: 60   # recent ~260
 zucchi:

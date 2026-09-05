@@ -1095,6 +1095,10 @@ def write_curation(result: CurationResult) -> None:
     # alias spellings, code-like names, images) are logged as counts, not clutter files.
     from stone_pipeline.stages import decisions
     decisions.write_confirm_file(result.pending_confirm)
+    # SEPARATE origin queue: rows held because a vendor's primary_origin was not corroborated by the map
+    # (origin_needs_confirmation). One entry per (source, variety, type); never mixed into the variety queue
+    # above. Always called (empty clears it) so a confirmed origin drops off, like the variety queue.
+    decisions.write_origin_confirm_file(rows)
     decisions.save_rejected(result.rejected)
     if result.backbone_updates:   # human-readable audit of the leaf additions (the queue below is the surface)
         _write_csv(additions / "backbone_value_updates.csv", decisions.LEAF_COLUMNS, result.backbone_updates)

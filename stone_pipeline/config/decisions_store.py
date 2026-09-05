@@ -32,7 +32,7 @@ from stone_pipeline.config.domain import active_pack
 from stone_pipeline.matching import projections as proj
 
 _ACTIONS = ("mint", "reject", "alias")
-_PENDING_KINDS = ("variety", "attribute", "backbone_leaf")
+_PENDING_KINDS = ("variety", "attribute", "backbone_leaf", "origin")
 # The vocabularies a backbone variety carries an allowed SET of; each maps to a leaf-decision `attribute`.
 # Value additions to these are what the backbone-leaf loop grows (all already in Medusa). Declared by the
 # active product-domain pack (all attributes except the identity disambiguator); stone = color/finish/quality.
@@ -204,6 +204,49 @@ def learn_rejects(names: set[str]) -> None:
             "(variant_norm, variant_display, action, alias_of, decided_at) VALUES (?, ?, 'reject', NULL, ?)",
             [(_norm(n), n, now) for n in names if _norm(n)])
         conn.commit()
+
+
+# -- per-vendor origin decisions (produce READS these; the separate origin review queue) --------------
+
+def set_origin_decision(source: str, variety: str, stone_type: str, country_iso: str) -> None:
+    """Upsert ONE operator origin confirmation: for THIS (source, variety, type), the origin is `country_iso`.
+    Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Idempotent.
+    The caller (config server) validates country_iso is a real ISO code before storing (never garbage)."""
+    src = (source or "").strip()
+    v_norm = _norm(variety)
+    t_norm = _norm(stone_type)
+    iso = (country_iso or "").strip().upper()
+    if not src or not v_norm or not t_norm or not iso:
+        raise InvalidDecision("origin decision requires source, variety, stone_type and country_iso")
+    with closing(store.open_store()) as conn:
+        conn.execute(
+            "INSERT INTO origin_decision (source, variant_norm, stone_type_norm, variant_display, "
+            "country_iso, decided_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(source, variant_norm, stone_type_norm) DO UPDATE SET "
+            "variant_display = excluded.variant_display, country_iso = excluded.country_iso, "
+            "decided_at = excluded.decided_at",
+            (src, v_norm, t_norm, variety.strip(), iso, _now()))
+        conn.commit()
+
+
+def origin_decisions() -> dict[tuple[str, str, str], str]:
+    """(normalized source, normalized variety, normalized type) -> ISO country. Overlaid onto
+    origin_overrides at load, so derive resolves a confirmed origin at the supplier_override tier. Empty for
+    a fresh store (a genuine empty set)."""
+    with closing(store.open_store()) as conn:
+        return {(_norm(r["source"]), r["variant_norm"], r["stone_type_norm"]): r["country_iso"]
+                for r in conn.execute(
+                    "SELECT source, variant_norm, stone_type_norm, country_iso FROM origin_decision")}
+
+
+def clear_origin_decisions() -> int:
+    """Drop EVERY per-vendor origin confirmation. PRISTINE reset ONLY (same rationale as
+    clear_variety_decisions): a factory reset returns to the pure base, so the operator overlay is wiped and
+    the origins are re-confirmed after the reset. A soft/hard reset keeps them. Returns rows deleted."""
+    with closing(store.open_store()) as conn:
+        n = conn.execute("DELETE FROM origin_decision").rowcount
+        conn.commit()
+        return n
 
 
 # -- attribute decisions (produce READS these) ---------------------------------
@@ -482,6 +525,10 @@ def list_pending(kind: str) -> list[dict]:
     recorded for it (so the UI can show a decision made between runs, applied on the next produce)."""
     actions = variety_actions() if kind == "variety" else {}
     leaf_actions = _leaf_actions_by_ref() if kind == "backbone_leaf" else {}
+    # for origin, key the confirmed country by the SAME composite ref the queue uses, so a decision made
+    # between runs shows as current_country until the next produce regenerates the queue (and drops it).
+    origin_actions = ({f"{s}|{v}|{t}": iso for (s, v, t), iso in origin_decisions().items()}
+                      if kind == "origin" else {})
     with closing(store.open_store()) as conn:
         rows = conn.execute(
             "SELECT ref, payload, sources FROM review_pending WHERE kind = ? ORDER BY ref", (kind,)
@@ -503,5 +550,7 @@ def list_pending(kind: str) -> list[dict]:
             item["current_seed_country"] = actions.get(r["ref"], {}).get("seed_country")
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
+        elif kind == "origin":
+            item["current_country"] = origin_actions.get(r["ref"])
         out.append(item)
     return out

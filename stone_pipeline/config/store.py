@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS source (
     vendor              TEXT NOT NULL DEFAULT '',      -- the company this source belongs to (agnostic name)
     company_id          TEXT NOT NULL DEFAULT '',      -- Medusa company id for this source (ENV-SPECIFIC; empty = resolve by vendor name)
     origin_default      TEXT NOT NULL DEFAULT '',      -- supplier ISO-2 country (provenance fallback)
+    primary_origin      TEXT NOT NULL DEFAULT '',      -- vendor's PRIMARY quarry ISO-2 (opt-in origin-confirmation gate)
     collection_country  TEXT NOT NULL DEFAULT '',      -- supplier collection ISO-2 country (independent of origin)
     collection_city     TEXT NOT NULL DEFAULT '',      -- supplier collection city
     ports               TEXT,                          -- JSON array of port names / LOCODEs
@@ -102,6 +103,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "fal_prompt" not in cols:   # per-source de-watermark instruction; older rows default to the global fallback
         conn.execute("ALTER TABLE source ADD COLUMN fal_prompt TEXT NOT NULL DEFAULT ''")
         conn.commit()
+    if "primary_origin" not in cols:   # vendor primary quarry country (opt-in origin gate); older rows blank
+        conn.execute("ALTER TABLE source ADD COLUMN primary_origin TEXT NOT NULL DEFAULT ''")
+        conn.commit()
     if "collection_country" not in cols:   # supplier collection location (independent of origin); older rows blank
         conn.execute("ALTER TABLE source ADD COLUMN collection_country TEXT NOT NULL DEFAULT ''")
         conn.commit()
@@ -162,6 +166,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_type TEXT")    # DBs created before it
     if "seed_country" not in _variety_cols:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_country TEXT")  # DBs created before it
+    # Operator-confirmed PER-VENDOR origins (the separate origin review queue): a (source, variety, type)
+    # the operator picked a country for, because the vendor's primary_origin did not corroborate the map.
+    # Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Overlaid
+    # onto origin_overrides at load, so derive resolves it at the supplier_override tier and never re-asks.
+    conn.execute("CREATE TABLE IF NOT EXISTS origin_decision ("
+                 "source TEXT NOT NULL, variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
+                 "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
+                 "decided_at TEXT NOT NULL, PRIMARY KEY (source, variant_norm, stone_type_norm))")
     # New colour/finish/type/quality VALUES the operator created in Medusa and pasted the id for, keyed
     # by (kind, normalized value). The next produce adopts the id into the attribute vocab.
     conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("
@@ -228,6 +240,7 @@ def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
     return SourceConfig(
         source=r["source"], source_code=r["source_code"],
         vendor=r["vendor"], company_id=r["company_id"], origin_default=r["origin_default"],
+        primary_origin=r["primary_origin"],
         collection_country_default=r["collection_country"], collection_city_default=r["collection_city"],
         ports_default=json.loads(r["ports"] or "[]"), mode=r["mode"],
         watermarked=bool(r["watermarked"]), enhance=bool(r["enhance"]), emit_on_review=bool(r["emit_on_review"]),
@@ -241,7 +254,8 @@ def _params(cfg: SourceConfig, enabled: bool) -> dict:
         "source": cfg.source, "enabled": 1 if enabled else 0,
         "source_code": cfg.source_code, "vendor": cfg.vendor,
         "company_id": cfg.company_id,
-        "origin_default": cfg.origin_default, "ports": json.dumps(cfg.ports_default or []),
+        "origin_default": cfg.origin_default, "primary_origin": cfg.primary_origin,
+        "ports": json.dumps(cfg.ports_default or []),
         "collection_country": cfg.collection_country_default, "collection_city": cfg.collection_city_default,
         "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0, "enhance": 1 if cfg.enhance else 0,
         "fal_prompt": cfg.fal_prompt,
@@ -265,7 +279,8 @@ def _row_dict(r: sqlite3.Row) -> dict:
         "source": r["source"], "enabled": bool(r["enabled"]),
         "source_code": r["source_code"], "vendor": r["vendor"],
         "company_id": r["company_id"],
-        "origin_default": r["origin_default"], "ports": json.loads(r["ports"] or "[]"),
+        "origin_default": r["origin_default"], "primary_origin": r["primary_origin"],
+        "ports": json.loads(r["ports"] or "[]"),
         "collection_country": r["collection_country"], "collection_city": r["collection_city"],
         "mode": r["mode"], "watermarked": bool(r["watermarked"]), "enhance": bool(r["enhance"]),
         "fal_prompt": r["fal_prompt"],
@@ -296,7 +311,8 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
         source=data["source"],
         source_code=data.get("source_code", ""), vendor=data.get("vendor", ""),
         company_id=data.get("company_id", ""),
-        origin_default=data.get("origin_default", ""), ports_default=data.get("ports") or [],
+        origin_default=data.get("origin_default", ""), primary_origin=data.get("primary_origin", ""),
+        ports_default=data.get("ports") or [],
         collection_country_default=data.get("collection_country", ""),
         collection_city_default=data.get("collection_city", ""),
         mode=data.get("mode", "review"), watermarked=bool(data.get("watermarked", False)),

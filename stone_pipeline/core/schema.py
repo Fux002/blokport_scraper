@@ -34,6 +34,10 @@ class FlagCode(str, Enum):
     origin_unresolved = "origin_unresolved"
     origin_supplier_default = "origin_supplier_default"
     origin_multi_home_absent = "origin_multi_home_absent"
+    # a vendor with a configured primary_origin has a map origin that does NOT corroborate it (different
+    # country, multi-country, or no map entry), so the origin is NOT known for this vendor -- the row is
+    # held for a one-time origin CONFIRMATION (the separate origin review queue), never silently shipped.
+    origin_needs_confirmation = "origin_needs_confirmation"
     # the curated (name, type) origin lookups were SKIPPED because the row's type is not
     # variation-authoritative (name-derived / fallback), so a homonym could not resolve the wrong stone's
     # origin; the row fell to the supplier default and needs its variety type verified.
