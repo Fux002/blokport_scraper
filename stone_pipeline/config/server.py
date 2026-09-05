@@ -361,6 +361,59 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
                 return 404, {"error": f"no pending or decided backbone-leaf for ref {ref!r}"}
             return 200, {"ref": ref, "action": action}
         return 404, {"error": "expected GET/PUT/POST /config/v1/review/{variants,attributes,backbone}[/<ref>]"}
+    if segments and segments[0] == "origins":
+        # PER-VARIETY origin EDITS (the "edit origins" admin action) -- the same channel a mint uses for its
+        # origin (seed_country), but for ANY variety and holding a country LIST. Overlaid onto the origin map
+        # on the next produce; the per-vendor gate then picks each vendor's country from that list. This is
+        # DISTINCT from /review/origins, which is the per-VENDOR confirmation QUEUE for held products.
+        #   GET    /config/v1/origins                                 -> every variety that has an edit
+        #   GET    /config/v1/origins/lookup?variety=&stone_type=     -> base + edited + effective for one
+        #   PUT    /config/v1/origins/<ref>  {variety, stone_type, countries:[...], city?, county?}
+        #   DELETE /config/v1/origins/<ref>                           -> revert that variety to the base map
+        from stone_pipeline.config import decisions_store
+        if len(segments) == 1 and method == "GET":
+            return 200, {"origins": decisions_store.list_variety_origins()}
+        if len(segments) == 2 and segments[1] == "lookup" and method == "GET":
+            params = parse_qs(query)
+            variety = (params.get("variety", [""])[0] or "").strip()
+            stone_type = (params.get("stone_type", [""])[0] or "").strip()
+            if not (variety and stone_type):
+                return 400, {"error": "lookup needs ?variety=&stone_type="}
+            from stone_pipeline.reference import loaders
+            rule = loaders.load_origin_map().exact(variety, stone_type)
+            base = list(rule.countries) if rule else []
+            edit = decisions_store.get_variety_origin(variety, stone_type)
+            return 200, {"variety": variety, "stone_type": stone_type, "base_countries": base,
+                         "edited_countries": (edit["countries"] if edit else None),
+                         "effective_countries": (edit["countries"] if edit else base)}
+        if len(segments) == 2 and method == "PUT":
+            if not isinstance(body, dict):
+                return 400, {"error": "body must be {variety, stone_type, countries:[...]}"}
+            variety = (body.get("variety") or "").strip()
+            stone_type = (body.get("stone_type") or "").strip()
+            raw = body.get("countries") or []
+            if not (variety and stone_type and raw):
+                return 400, {"error": "variety, stone_type and a non-empty countries list are required"}
+            isos = []
+            for c in raw:
+                if not (iso := _country_iso((c or "").strip())):
+                    return 400, {"error": f"country {c!r} is not a real ISO-3166 country"}
+                isos.append(iso)
+            try:
+                decisions_store.set_variety_origin(variety, stone_type, ",".join(isos),
+                                                   (body.get("city") or "").strip(),
+                                                   (body.get("county") or "").strip())
+            except decisions_store.InvalidDecision as e:
+                return 400, {"error": str(e)}
+            return 200, {"variety": variety, "stone_type": stone_type, "countries": isos}
+        if len(segments) == 2 and method == "DELETE":
+            parts = unquote(segments[1]).split("|")
+            if len(parts) != 2:
+                return 400, {"error": "ref must be <variety_norm>|<stone_type_norm>"}
+            removed = decisions_store.delete_variety_origin(parts[0], parts[1])
+            return (200, {"ref": unquote(segments[1]), "removed": True}) if removed \
+                else (404, {"error": f"no origin edit {unquote(segments[1])!r}"})
+        return 404, {"error": "expected GET/PUT/DELETE /config/v1/origins[/<ref>|/lookup]"}
     if segments and segments[0] == "varieties":
         # existing variety names (+ stone_type) for the review alias-to dropdown, from the durable ledger.
         # Optional ?q=<substring> + ?limit=<n> back a type-ahead: the full set is ~25k, so a client can

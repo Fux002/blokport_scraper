@@ -174,6 +174,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "source TEXT NOT NULL, variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
                  "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
                  "decided_at TEXT NOT NULL, PRIMARY KEY (source, variant_norm, stone_type_norm))")
+    # Operator-edited PER-VARIETY origins (the "edit origins" admin action, same channel as a mint's
+    # seed_country but for any variety and holding a LIST of countries). Keyed by (normalized variety,
+    # normalized type). country_iso is a comma-list ("IN,IR"). Overlaid onto the origin MAP at load, so
+    # derive resolves the variety against the edited countries and the per-vendor gate picks from the list.
+    conn.execute("CREATE TABLE IF NOT EXISTS variety_origin ("
+                 "variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
+                 "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
+                 "city TEXT NOT NULL DEFAULT '', county TEXT NOT NULL DEFAULT '', "
+                 "decided_at TEXT NOT NULL, PRIMARY KEY (variant_norm, stone_type_norm))")
     # New colour/finish/type/quality VALUES the operator created in Medusa and pasted the id for, keyed
     # by (kind, normalized value). The next produce adopts the id into the attribute vocab.
     conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("

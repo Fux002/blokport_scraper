@@ -575,16 +575,18 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         return
     # 2b. PER-VENDOR ORIGIN GATE (opt-in via primary_origin). A vendor that declares its own primary quarry
     #     country does NOT inherit a per-variety map origin blindly: an origin is trusted only when the map
-    #     CORROBORATES the vendor -- the map's origin for this (variety, type) is exactly that one country
-    #     (two independent facts agreeing). Any other case -- a different country, a multi-country map row,
-    #     or no map row -- is NOT known for THIS vendor, so the row is held for a one-time origin
-    #     CONFIRMATION (the separate origin review queue) rather than silently shipping the map's guess. A
-    #     confirmed answer returns above as a supplier_override. Opt-in: an unset primary_origin runs the
-    #     classic map + supplier-default ladder below unchanged, so every other vendor is untouched.
+    #     CORROBORATES the vendor -- the vendor's primary country is ONE OF the variety's documented origins
+    #     (the vendor sources from a real quarry country for this stone). If it is, use it. If it is NOT -- the
+    #     variety's map lists other countries but not this vendor's, or has no row -- the origin is NOT known
+    #     for THIS vendor, so the row is held for a one-time origin CONFIRMATION (the separate origin review
+    #     queue) rather than silently shipping the map's guess. Operators widen a variety's origins (the "edit
+    #     origins" action) to add a vendor's real country; a confirmed answer returns above as a
+    #     supplier_override. Opt-in: an unset primary_origin runs the classic ladder below, every other vendor
+    #     untouched.
     if source_cfg.primary_origin:
         vendor_iso = _to_iso(source_cfg.primary_origin, ref)
         rule = ref.origin_map.exact(name, row.type_name) if (type_authoritative and vendor_iso) else None
-        if rule and list(rule.countries) == [vendor_iso]:
+        if rule and vendor_iso in rule.countries:
             row.origin_country_code = vendor_iso
             row.origin_city = rule.city
             row.origin_county = rule.county

@@ -61,10 +61,20 @@ def test_mismatch_holds_for_confirmation(ref):
     assert any(f.code == FlagCode.origin_needs_confirmation for f in row.review_flags)
 
 
-def test_multi_country_map_holds_strict_equality(ref):
-    # IR is listed, but the map is not the SOLE country -> not equal -> held (strict equality, as designed).
+def test_multi_country_map_resolves_when_vendor_is_one_of_them(ref):
+    # MEMBERSHIP: IR is one of the variety's documented origins ([IR, IN]) and IR is the vendor's primary,
+    # so the vendor sources it from a real quarry country -> resolve IR (do not hold). This is what makes the
+    # operator's "add a country to the variety" action actually resolve for that vendor.
     row = _row()
     derive.derive_origin(row, _with_map(ref, ("Crystal White", "IR,IN", "", "", "Granite")), _cfg())
+    assert row.origin_country_code == "IR"
+    assert row.origin_source == "vendor_origin"
+
+
+def test_multi_country_map_holds_when_vendor_country_absent(ref):
+    # The variety is quarried in [IN, TR] but NOT the vendor's IR -> genuinely unknown for this vendor -> hold.
+    row = _row()
+    derive.derive_origin(row, _with_map(ref, ("Crystal White", "IN,TR", "", "", "Granite")), _cfg())
     assert not (row.origin_country_code or "")
     assert row.origin_source == "origin_needs_confirmation"
 

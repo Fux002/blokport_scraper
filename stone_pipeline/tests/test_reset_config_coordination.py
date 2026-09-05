@@ -32,6 +32,7 @@ def _seed_config(tmp_path, monkeypatch):
     decisions_store.set_variety_decision("Black Absolute", "mint", seed_type="Granite")
     decisions_store.set_backbone_leaf_decision("Black Absolute", "Granite", "color", "Gold", "approve")
     decisions_store.set_origin_decision("marenostone", "Crystal White", "Granite", "IR")   # a confirmed origin
+    decisions_store.set_variety_origin("Crystal White", "Granite", "IN,IR")                # a variety origin edit
     store.add_retired("slab_granite_x_uuid")
 
 
@@ -124,8 +125,8 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     assert code == 200 and out["mode"] == "pristine"
     # every clearable store reported in the response.config
     assert out["config"] == {"review_pending": 2, "attribute_ids": 1, "source_diagnostics": 0,
-                             "variety_decisions": 1, "origin_decisions": 1, "leaf_decisions": 1,
-                             "retired_keys": 1}
+                             "variety_decisions": 1, "origin_decisions": 1, "variety_origins": 1,
+                             "leaf_decisions": 1, "retired_keys": 1}
     # the durable overlay is GONE (unlike a normal reset), so the catalog is seed-only next produce
     assert decisions_store.confirm_map() == {}
     assert decisions_store.variety_seed_types() == {}
