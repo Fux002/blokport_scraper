@@ -1033,7 +1033,7 @@ def _write_csv(path: Path, cols: list[str], rows: list[dict], sanitize: bool = T
     csvio.write_dicts(path, cols, rows, sanitize=sanitize)
 
 
-def write_curation(result: CurationResult) -> None:
+def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     """Write the catalog curation outputs to the fixed top-level folders:
       to_upload/1_variants_update.csv      the new + alias-update DELTA (incremental upload)
       catalog_source/backbone_additions/   new varieties to append to the backbones
@@ -1113,7 +1113,7 @@ def write_curation(result: CurationResult) -> None:
 def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     from stone_pipeline.stages import decisions
     result = build_curation(rows, ref)
-    write_curation(result)
+    write_curation(result, rows)
     attr = build_attribute_curation(rows, ref)
     # ONE attribute decision file: adopt any Medusa ids you filled in last run -> attributes.csv,
     # then re-list every unresolved colour/finish/type/quality value (new ones to create + id, plus

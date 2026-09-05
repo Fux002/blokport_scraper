@@ -95,3 +95,27 @@ def test_origin_queue_cleared_by_review_pending_clear():
     assert ds.list_pending("origin")
     ds.clear_review_pending()                                                  # a reset path
     assert ds.list_pending("origin") == []
+
+
+def test_write_curation_threads_rows_to_origin_queue(tmp_path, monkeypatch):
+    """REGRESSION: write_curation must pass `rows` to write_origin_confirm_file. A prior version referenced
+    an undefined `rows` inside write_curation (only `result` was in scope), which NameError-crashed the whole
+    produce at the catalog step. This drives the REAL write_curation path with a held row."""
+    import dataclasses
+    from stone_pipeline.stages import curate, decisions
+    from stone_pipeline.stages.curate import CurationResult, BRANCHES
+    from stone_pipeline.config.settings import SETTINGS
+    dirs = {}
+    for attr in ("to_upload_dir", "catalog_source_dir", "review_dir"):
+        d = tmp_path / attr
+        d.mkdir(parents=True, exist_ok=True)
+        dirs[attr] = d
+    new = dataclasses.replace(SETTINGS, paths=dataclasses.replace(SETTINGS.paths, **dirs))
+    monkeypatch.setattr(curate, "SETTINGS", new)                    # curate writes into tmp, not the repo
+    monkeypatch.setattr(decisions, "save_rejected", lambda *a, **k: None)          # unrelated writers off
+    monkeypatch.setattr(decisions, "write_backbone_leaf_pending", lambda *a, **k: 0)
+    result = CurationResult(alias_additions={b: [] for b in BRANCHES},
+                            new_variants={b: [] for b in BRANCHES},
+                            backbone_new={b: [] for b in BRANCHES})
+    curate.write_curation(result, [_held()])          # must NOT raise NameError
+    assert [o["variety"] for o in ds.list_pending("origin")] == ["Crystal White"]
