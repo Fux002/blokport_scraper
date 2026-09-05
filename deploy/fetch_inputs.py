@@ -23,8 +23,10 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SE
 #   - variants_export.csv is the live matching reference; a thin copy makes the matcher treat the whole
 #     ~24.7k catalog as new -- mass re-mint / mass gap (the ledger-gap failure mode).
 #   - variants_export_base.csv is the committed full seed of truth (base == full).
+#   - ports.csv carries the env's Medusa port ids; a thin copy loses port-of-origin resolution for the
+#     whole run (every product ships no port), and in prod there is no dev fallback to catch it.
 # These keep the local copy unless the S3 copy is at least half as complete (_MIN_KEEP_FRACTION).
-_PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv"}
+_PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv", "ports.csv"}
 _MIN_KEEP_FRACTION = 0.5
 
 
