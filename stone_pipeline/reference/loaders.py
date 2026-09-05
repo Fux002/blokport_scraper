@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS
+from stone_pipeline.config.settings import CATEGORIES, IS_PRODUCTION, SETTINGS
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.numbers import parse_number
@@ -505,11 +505,26 @@ class Ports:
 
 
 def load_ports(path: Path | None = None) -> Ports:
-    """ports.csv is supplied by the user into catalog_source; fall back to the
-    reference stub if absent (section 6, section 3.3)."""
-    candidate = Path(path) if path else SETTINGS.paths.ports_csv
-    if not candidate.exists():
-        candidate = SETTINGS.paths.ports_csv_fallback
+    """Load the env's Medusa port ids from from_medusa/<env>/ports.csv. Port ids differ per env, so
+    PRODUCTION resolves ONLY against its own downloaded file and REFUSES the dev-id catalog_source
+    fallback: shipping dev ids into prod makes Medusa silently drop every port (all port_of_origin
+    blank). Dev may fall back to the committed catalog_source master. An explicit `path` (tests)
+    is honored verbatim, env-independent."""
+    if path is not None:
+        candidate = Path(path)
+    else:
+        candidate = SETTINGS.paths.ports_csv
+        if not candidate.exists():
+            if IS_PRODUCTION:
+                # No prod ports export in place yet. Return empty so ports resolve to nothing and every
+                # row is flagged port_unresolved (visible in review), instead of SILENTLY loading dev
+                # ids. Self-heals once from_medusa/production/ports.csv is fetched. Never fall back to
+                # the dev-id master in prod -- same invariant as the prod bucket/owner-id guards.
+                log.error("production ports.csv missing (%s): ports UNRESOLVED until the prod Medusa "
+                          "ports export is placed there -- refusing the dev-id fallback",
+                          SETTINGS.paths.ports_csv)
+                return Ports()
+            candidate = SETTINGS.paths.ports_csv_fallback
     ports = Ports()
     if not candidate.exists():
         log.warning("ports.csv absent; origin->ports resolution will fall back to default")
@@ -858,7 +873,10 @@ def load_all() -> ReferenceData:
             "variants_export": content_hash(paths.export_file),
             "backbone": content_hash(paths.backbone_json),
             "ports": content_hash(
-                paths.ports_csv if paths.ports_csv.exists() else paths.ports_csv_fallback
+                paths.ports_csv if paths.ports_csv.exists()
+                # prod never provenances the dev-id fallback (load_ports refuses it): hash the absent
+                # primary ("absent") so the version reflects what actually resolved.
+                else (paths.ports_csv if IS_PRODUCTION else paths.ports_csv_fallback)
             ),
             "units": content_hash(paths.units_csv),
             "origin_map": content_hash(

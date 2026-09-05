@@ -296,9 +296,12 @@ class Paths:
     def origin_overrides_csv(self) -> Path:
         # per-supplier origin overrides, same pack-namespacing. Optional (absent file = no overrides).
         return _catalog_source_file("origin_supplier_overrides.csv")
-    # ports.csv is supplied by the user into catalog_source; loader falls back to reference/.
-    ports_csv: Path = WORKSPACE_ROOT / "catalog_source" / "ports.csv"
-    ports_csv_fallback: Path = REPO_ROOT / "reference" / "ports.csv"
+    # ports.csv carries Medusa PORT IDS, which differ per environment (exactly like attributes.csv), so
+    # it lives under from_medusa/<env>/ and is fetched from that env's Medusa. The fallback is the
+    # committed catalog_source master (the 601-port name/LOCODE list, carrying DEV ids). load_ports
+    # REFUSES this dev fallback in production -- prod resolves only against its own downloaded file.
+    ports_csv: Path = _FROM_MEDUSA / "ports.csv"
+    ports_csv_fallback: Path = WORKSPACE_ROOT / "catalog_source" / "ports.csv"
     units_csv: Path = REPO_ROOT / "reference" / "units.csv"
     # origin_map + origin_overrides are HAND-MAINTAINED material-specific catalog_source files -> now
     # PACK-NAMESPACED properties (below), so a non-stone pack reads its own or gaps loudly, never stone's.
