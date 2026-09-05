@@ -35,6 +35,14 @@ class SourceConfig:
     # country and origin_map doesn't cover the variety -- Medusa requires an origin for its
     # pricing-rule lookup. origin_map (per-variety) overrides it for known specific origins.
     origin_default: str = ""
+    # Per-vendor PRIMARY origin (ISO-2): the quarry country this vendor actually sources from. Opt-in.
+    # When set, derive_origin no longer trusts the per-variety origin_map blindly: it uses the map origin
+    # ONLY when the map corroborates this value (map lists exactly this one country). Any other case --
+    # a different country, a multi-country map row, or no map row -- is NOT known for this vendor, so the
+    # product is held for a one-time origin CONFIRMATION (the separate origin review queue) instead of
+    # silently shipping the map's guess. Blank -> the classic origin ladder (map + origin_default) runs
+    # unchanged, so this is fully backward-compatible per source.
+    primary_origin: str = ""
     # supplier COLLECTION location: ISO-2 country + city where this source's products are physically
     # collected before shipping (the supplier's warehouse). Independent of origin_default (provenance) and
     # of ports_default (departure). Stamped onto every row (derive_collection) and emitted in the sync

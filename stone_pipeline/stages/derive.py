@@ -573,6 +573,32 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         row.origin_source = "supplier_override"
         row.origin_confidence = _conf_name(Confidence.high)
         return
+    # 2b. PER-VENDOR ORIGIN GATE (opt-in via primary_origin). A vendor that declares its own primary quarry
+    #     country does NOT inherit a per-variety map origin blindly: an origin is trusted only when the map
+    #     CORROBORATES the vendor -- the map's origin for this (variety, type) is exactly that one country
+    #     (two independent facts agreeing). Any other case -- a different country, a multi-country map row,
+    #     or no map row -- is NOT known for THIS vendor, so the row is held for a one-time origin
+    #     CONFIRMATION (the separate origin review queue) rather than silently shipping the map's guess. A
+    #     confirmed answer returns above as a supplier_override. Opt-in: an unset primary_origin runs the
+    #     classic map + supplier-default ladder below unchanged, so every other vendor is untouched.
+    if source_cfg.primary_origin:
+        vendor_iso = _to_iso(source_cfg.primary_origin, ref)
+        rule = ref.origin_map.exact(name, row.type_name) if (type_authoritative and vendor_iso) else None
+        if rule and list(rule.countries) == [vendor_iso]:
+            row.origin_country_code = vendor_iso
+            row.origin_city = rule.city
+            row.origin_county = rule.county
+            row.origin_source = "vendor_origin"
+            row.origin_confidence = _conf_name(Confidence.high)
+            return
+        # Not corroborated -> leave origin UNRESOLVED so validate holds the product (never a Medusa-breaking
+        # blank shipped, never a silent guess), and flag it for the origin review queue.
+        row.origin_source = "origin_needs_confirmation"
+        row.origin_confidence = _conf_name(Confidence.none)
+        row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_needs_confirmation,
+                                raw_value=",".join(rule.countries) if rule else "", best_guess=vendor_iso,
+                                confidence=Confidence.none, method="vendor_map_mismatch", src_url=row.src_url))
+        return
     # 3. the per-variety origin map = curated origin_map.csv + operator-minted overlay (seed_country).
     #    Strict (name, type) match; the map is the source of truth. A row may list SEVERAL candidate
     #    countries (same trade name quarried in more than one place) -- pick the one that fits the

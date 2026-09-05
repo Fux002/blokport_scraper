@@ -741,6 +741,18 @@ class OriginOverrides:
     def lookup(self, source: str, variety: str, stone_type: str | None) -> Optional[str]:
         return self.rules.get((_norm(source), _norm(variety), _norm(stone_type or "")))
 
+    def apply_overlay(self, decisions: dict[tuple[str, str, str], str]) -> int:
+        """Overlay operator-confirmed per-vendor origins ((norm source, norm variety, norm type) -> ISO)
+        onto the CSV-loaded rules -- a confirmation from the origin review queue REPLACES any CSV rule for
+        the same key, and derive then resolves it at the supplier_override tier. Returns the count applied."""
+        n = 0
+        for key, iso in decisions.items():
+            iso = (iso or "").strip().upper()
+            if len(key) == 3 and all(key) and iso:
+                self.rules[key] = iso
+                n += 1
+        return n
+
 
 def load_origin_overrides(path: Path | None = None) -> OriginOverrides:
     path = Path(path) if path else SETTINGS.paths.origin_overrides_csv
@@ -831,7 +843,15 @@ def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
 
 def load_all() -> ReferenceData:
     from stone_pipeline.state.overrides import load_overrides
-    from stone_pipeline.config import decisions_store, settings
+    from stone_pipeline.config import decisions_store, settings, store
+
+    # load_all is a READ path. The operator overlays below live in config.db, but merely READING them via
+    # open_store() CREATES the file if it is absent -- which then flips load_source (config store vs yaml) for
+    # the rest of the process and is wrong for a pure read. Guard every decisions_store read on the store
+    # already existing: in prod it always does (control plane, snapshotted + restored on boot), so the overlays
+    # always apply; when it is absent (tests, a fresh checkout) there are no decisions to overlay anyway, so
+    # skipping is equivalent -- minus the surprise file. See the origin-map overlay note below.
+    _have_config_db = store.config_db_path().exists()
 
     paths = SETTINGS.paths
     # Realign the category registry with the export NOW on disk, BEFORE any stage reads category
@@ -844,7 +864,8 @@ def load_all() -> ReferenceData:
     # The effective backbone = the committed seed grown by the operator-approved leaf overlay (config.db).
     # The seed file is never mutated; the overlay is applied in memory, here, in the one place ref is built.
     backbone = load_backbone()
-    backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
+    if _have_config_db:
+        backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
     # The matcher's existing-variety index reads the live Medusa export (paths.export_file). A factory reset
     # DELETES that file (lifecycle._prune_stale_medusa_export) and Blokport re-exports it only after the next
     # pull -- so between those the export is absent. Fall back to the committed Id-free BASE (the full variety
@@ -887,14 +908,22 @@ def load_all() -> ReferenceData:
     # The effective origin map = the curated CSV grown by operator-minted origins (variety_decision
     # seed_type + seed_country), overlaid in memory here -- the one place ref is built, mirroring the leaf
     # overlay. Type-scoped, so a mint under one type never clobbers a homonym's origin under another.
-    ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_country_rules())
-    # Operator MINT types folded in (canonical-gated, the SAME gate curate mints under), keyed by norm(clean
-    # variety name) exactly as decisions_store + curate key them. Lets the matcher bind a product to an
-    # operator-minted (name, type) whose type the scrape did not carry -- the mint decision reaching the
-    # product, not only the variety. A non-canonical seed_type is dropped (no such variety can exist).
-    _valid_types = {_norm(t) for t in ref.attributes.canonical_names("type")}
-    ref.variety_seed_types = {n: t for n, t in decisions_store.variety_seed_types().items()
-                              if _norm(t) in _valid_types}
+    # Operator overlays from config.db (guarded on the store already existing -- see the note in load_all):
+    #   * seed_country grows the per-variety origin MAP (type-scoped, so a mint under one type never clobbers
+    #     a homonym's origin under another);
+    #   * origin CONFIRMATIONS from the separate origin review queue grow the per-vendor origin OVERRIDES, so a
+    #     confirmed (source, variety, type) origin resolves at derive's supplier_override tier and is never
+    #     re-asked;
+    #   * operator MINT types (canonical-gated, keyed by norm(clean variety name) exactly as decisions_store +
+    #     curate key them) let the matcher bind a product to an operator-minted (name, type) whose type the
+    #     scrape did not carry -- the mint decision reaching the product, not only the variety.
+    ref.variety_seed_types = {}
+    if _have_config_db:
+        ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_country_rules())
+        ref.origin_overrides.apply_overlay(decisions_store.origin_decisions())
+        _valid_types = {_norm(t) for t in ref.attributes.canonical_names("type")}
+        ref.variety_seed_types = {n: t for n, t in decisions_store.variety_seed_types().items()
+                                  if _norm(t) in _valid_types}
     _assert_pack_defaults_resolve(ref)   # a pack default value not in Medusa's vocabulary fails loud here
     log.info(
         "reference loaded",

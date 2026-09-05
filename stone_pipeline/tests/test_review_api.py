@@ -211,3 +211,46 @@ def test_reject_ignores_a_seed_country(seeded_queue):
     server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"],
                     {"action": "reject", "country": "brazil"})
     assert decisions_store.variety_seed_countries() == {}      # only mint carries a seed country
+
+
+# --- the SEPARATE origin-confirmation queue (GET/PUT /review/origins) ---------
+def _seed_origin_pending(map_country="IN", vendor_origin="IR"):
+    from stone_pipeline.reference.loaders import _norm
+    ref = f"{_norm('marenostone')}|{_norm('Crystal White')}|{_norm('Granite')}"
+    decisions_store.replace_pending("origin", [{
+        "ref": ref, "sources": ["marenostone"],
+        "payload": {"source": "marenostone", "variety": "Crystal White", "stone_type": "Granite",
+                    "map_country": map_country, "vendor_origin": vendor_origin}}])
+    return ref
+
+
+def test_origins_get_lists_pending_confirmations():
+    _seed_origin_pending()
+    code, body = server.dispatch("GET", ["review", "origins"], None)
+    assert code == 200
+    item = body["origins"][0]
+    assert item["source"] == "marenostone" and item["stone_type"] == "Granite"
+    assert item["map_country"] == "IN" and item["vendor_origin"] == "IR"
+    assert item["current_country"] is None
+
+
+def test_origins_put_stores_and_reflects_the_country():
+    from stone_pipeline.reference.loaders import _norm
+    ref = _seed_origin_pending()
+    code, body = server.dispatch("PUT", ["review", "origins", ref], {"country_iso": "Iran"})   # name or code
+    assert code == 200 and body["country_iso"] == "IR"
+    assert decisions_store.origin_decisions()[
+        (_norm("marenostone"), _norm("Crystal White"), _norm("Granite"))] == "IR"
+    item = server.dispatch("GET", ["review", "origins"], None)[1]["origins"][0]
+    assert item["current_country"] == "IR"
+
+
+def test_origins_put_bad_country_is_400():
+    ref = _seed_origin_pending()
+    code, _ = server.dispatch("PUT", ["review", "origins", ref], {"country_iso": "Notacountry"})
+    assert code == 400
+
+
+def test_origins_put_unknown_ref_is_404():
+    code, _ = server.dispatch("PUT", ["review", "origins", "no|such|ref"], {"country_iso": "IR"})
+    assert code == 404

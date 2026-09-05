@@ -310,6 +310,31 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
             return 200, {"value": value, "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
+        # the SEPARATE origin-confirmation queue: a (source, variety, type) whose vendor primary_origin the
+        # map did not corroborate. The operator picks the country here; the NEXT produce applies it (stored
+        # as a per-vendor origin override). Distinct from the variety queue -- an existing variety never
+        # appears in 'variants'; it only surfaces here, and only for its origin.
+        #   GET /config/v1/review/origins            -> pending origin confirmations
+        #   PUT /config/v1/review/origins/<ref>      {"country_iso": "IR"}
+        if len(segments) == 2 and segments[1] == "origins" and method == "GET":
+            return 200, {"origins": decisions_store.list_pending("origin")}
+        if len(segments) == 3 and segments[1] == "origins" and method == "PUT":
+            if not isinstance(body, dict):
+                return 400, {"error": "body must be a JSON object {country_iso}"}
+            ref = unquote(segments[2])   # same decode-before-key rule as the variety PUT
+            payload = decisions_store.pending_payload("origin", ref)
+            if not payload:
+                return 404, {"error": f"no pending origin confirmation {ref!r}"}
+            raw_country = (body.get("country_iso") or body.get("country") or "").strip()
+            if not (country := _country_iso(raw_country)):
+                return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
+            try:
+                decisions_store.set_origin_decision(payload["source"], payload["variety"],
+                                                    payload["stone_type"], country)
+            except decisions_store.InvalidDecision as e:
+                return 400, {"error": str(e)}
+            return 200, {"ref": ref, "source": payload["source"], "variety": payload["variety"],
+                         "stone_type": payload["stone_type"], "country_iso": country}
         if len(segments) == 2 and segments[1] == "backbone" and method == "GET":
             return 200, {"backbone": decisions_store.list_pending("backbone_leaf")}
         if len(segments) == 3 and segments[1] == "backbone" and segments[2] == "decided" and method == "GET":

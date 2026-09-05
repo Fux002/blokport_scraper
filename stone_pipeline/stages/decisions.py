@@ -107,6 +107,36 @@ def write_confirm_file(pending: list[dict]) -> int:
     return len(rows)
 
 
+def write_origin_confirm_file(rows) -> int:
+    """Replace the pending ORIGIN queue with this run's rows held for origin confirmation (a vendor whose
+    primary_origin the per-variety map did not corroborate). ONE entry per (source, variety, type) -- keyed
+    so it is per-vendor and per-identity, separate from the variety mint queue. A resolved origin is simply
+    absent next run, so it stops appearing (same lifecycle as the variety queue). Returns the count."""
+    from stone_pipeline.core.schema import FlagCode
+    pending: dict[str, dict] = {}
+    for row in rows:
+        if getattr(row, "origin_source", "") != "origin_needs_confirmation":
+            continue
+        variety = (row.variation_name or row.raw_name or "").strip()
+        stone_type = (row.type_name or "").strip()
+        source = (row.src_site or "").strip()
+        if not (source and variety and stone_type):
+            continue
+        ref = f"{_norm(source)}|{_norm(variety)}|{_norm(stone_type)}"
+        if ref in pending:
+            continue                             # first occurrence per (source, variety, type) is enough
+        flag = next((f for f in row.review_flags if f.code == FlagCode.origin_needs_confirmation), None)
+        pending[ref] = {
+            "ref": ref,
+            "payload": {"source": source, "variety": title_case(variety), "stone_type": stone_type,
+                        "map_country": (flag.raw_value if flag else ""),
+                        "vendor_origin": (flag.best_guess if flag else "")},
+            "sources": [source],
+        }
+    decisions_store.replace_pending("origin", list(pending.values()))
+    return len(pending)
+
+
 # -- retired variation keys (already durable in config.db) ---------------------
 
 def load_retired() -> set[str]:
