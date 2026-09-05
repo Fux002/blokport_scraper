@@ -920,6 +920,10 @@ def load_all() -> ReferenceData:
     ref.variety_seed_types = {}
     if _have_config_db:
         ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_country_rules())
+        # Operator "edit origins" edits win over both the CSV base and a mint's seed_country: applied LAST,
+        # they set the variety's origin country LIST (the per-vendor gate then picks from it). Same overlay
+        # machinery as the mint origin above, keyed by (name, type), country_iso may be a comma-list.
+        ref.origin_map.apply_origin_overlay(decisions_store.variety_origins())
         ref.origin_overrides.apply_overlay(decisions_store.origin_decisions())
         _valid_types = {_norm(t) for t in ref.attributes.canonical_names("type")}
         ref.variety_seed_types = {n: t for n, t in decisions_store.variety_seed_types().items()

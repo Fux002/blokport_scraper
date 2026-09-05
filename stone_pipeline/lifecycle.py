@@ -444,6 +444,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False) -> tuple[
             if pristine:                           # factory reset: also forget the durable operator overlay
                 config["variety_decisions"] = decisions_store.clear_variety_decisions()
                 config["origin_decisions"] = decisions_store.clear_origin_decisions()
+                config["variety_origins"] = decisions_store.clear_variety_origins()
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()
                 out["base_reseed"] = _reseed_base_from_pristine()   # S0: the base file itself starts pristine
