@@ -151,8 +151,10 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
     if segments and segments[0] == "reset":
         # clean-start the ledger sync state (the coordinated ①②③ reset, our ① half). Body (optional):
         #   {"hard": true, "sources": ["zucchi", ...]}   hard also drops scraped products; sources scopes.
+        #     Hard and soft resets never touch the hosted product images.
         #   {"pristine": true}                           factory cold start: global hard reset + wipe the
-        #     durable operator overlay (variety/leaf/retired decisions) so the next produce is seed-only.
+        #     durable operator overlay (variety/leaf/retired decisions) so the next produce is seed-only,
+        #     AND the only image wipe in the system (hosted product images + enhanced markers + manifest).
         #   {"pristine": true, "keep_images": true}      same, but KEEP the hosted product images + enhanced
         #     markers (a re-scrape reuses them, no GPU/FAL rebuild) -- the test-reset path.
         # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted. A GLOBAL

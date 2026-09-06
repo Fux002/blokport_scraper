@@ -115,7 +115,7 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     _seed_config(tmp_path, monkeypatch)
     store.seed_from_yaml(yaml_path=yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
-    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})   # global hard wipes images
+    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})   # pristine wipes images
     # guard the real scrape-cache wipe (rmtree + S3) behind a recorder, so the test never touches real dirs
     wiped: list[bool] = []
     monkeypatch.setattr(snapshot, "wipe_artifacts",
@@ -173,7 +173,8 @@ def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch)
 
     _seed_config(tmp_path, monkeypatch)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
-    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})   # global hard wipes images
+    monkeypatch.setattr(cleanup_images, "wipe_all_product_images",
+                        lambda **k: (_ for _ in ()).throw(AssertionError("image wipe must not run")))
     wiped: list[bool] = []
     monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: (wiped.append(True), {})[1])
 
@@ -238,39 +239,33 @@ def test_a_refused_ledger_reset_does_not_touch_config(tmp_path, monkeypatch):
     assert decisions_store.list_pending("variety") and decisions_store.attribute_ids()
 
 
-def test_hard_reset_wipes_images_scoped_per_source_soft_keeps_them(tmp_path, monkeypatch):
-    """A HARD reset ('Remove data (keep config)') wipes the hosted product images -- ONLY the named source's
-    when scoped, all when global; a SOFT reset keeps them (the cheap reuse-images restart)."""
+def test_only_the_factory_reset_wipes_images(tmp_path, monkeypatch):
+    """Hosted product images are deleted by ONE routine only: the factory (pristine) reset without
+    keep_images. Hard and soft resets, scoped or global, never touch them (the 2026-09-06 prod incident:
+    a hard reset wiped 32k images and the next republish re-spent GPU on all of them)."""
     from stone_pipeline import lifecycle
+    from stone_pipeline.ledger import snapshot
     from deploy import cleanup_images
 
     yaml_path = tmp_path / "sources.yaml"
     yaml_path.write_text("varsha:\n  source_code: var\n  vendor: V\n"
                          "zucchi:\n  source_code: zuc\n  vendor: Z\n", encoding="utf-8")
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    _seed_config(tmp_path, monkeypatch)
     store.seed_from_yaml(yaml_path=yaml_path)
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
+    monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: {"local": [], "s3": []})
 
-    wiped_sources: list[str] = []
     wiped_global: list[bool] = []
-    monkeypatch.setattr(cleanup_images, "wipe_source_product_images",
-                        lambda s, **k: (wiped_sources.append(s), {"improved": 1})[1])
     monkeypatch.setattr(cleanup_images, "wipe_all_product_images",
-                        lambda **k: (wiped_global.append(True), {})[1])
+                        lambda **k: (wiped_global.append(True), {"improved": 1})[1])
 
-    # SOFT scoped reset -> images KEPT
-    lifecycle.reset(sources=["varsha"], hard=False)
-    assert wiped_sources == [] and wiped_global == []
+    for sources, hard in ((["varsha"], False), (["varsha"], True), (None, False), (None, True)):
+        out, code = lifecycle.reset(sources=sources, hard=hard)
+        assert code == 200 and wiped_global == [] and "images_wiped" not in out
 
-    # HARD scoped reset -> wipes ONLY varsha's images, never the global path
-    out, code = lifecycle.reset(sources=["varsha"], hard=True)
-    assert code == 200 and wiped_sources == ["varsha"] and wiped_global == []
-    assert out["images_wiped"] == {"varsha": {"improved": 1}}
-
-    # HARD global reset -> wipes ALL (single global call, no per-source)
-    wiped_sources.clear()
-    lifecycle.reset(sources=None, hard=True)
-    assert wiped_global == [True] and wiped_sources == []
+    out, code = lifecycle.reset(sources=None, pristine=True)
+    assert code == 200 and wiped_global == [True]
+    assert out["images_wiped"] == {"improved": 1}
 
 
 def test_reset_rejects_an_explicit_empty_sources_list(tmp_path, monkeypatch):
