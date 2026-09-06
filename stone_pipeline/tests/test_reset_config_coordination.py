@@ -359,3 +359,34 @@ def test_clear_variety_decision_is_scoped_to_one_variant(tmp_path, monkeypatch):
     assert decisions_store.clear_variety_decision("Crystal White") == 1
     assert decisions_store.clear_variety_decision("Crystal White") == 0   # idempotent: already gone
     assert decisions_store.confirm_map() == {"absolute black": "no"}      # the other decision survives
+
+
+def test_bulk_unmint_processes_each_key_best_effort(tmp_path, monkeypatch):
+    """Bulk unmint applies unmint_variation to every Key and is per-key isolated: a 404/409 on one Key is
+    recorded in `skipped` and the rest still proceed (a partial failure never blocks the batch)."""
+    from stone_pipeline import lifecycle
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+
+    seen = []
+
+    def fake_unmint(key, force=False):
+        seen.append(key)
+        if key == "bad_key":
+            return {"error": "unknown variation 'bad_key'"}, 404
+        return {"retired": key, "mint_decision_cleared": 1}, 200
+
+    monkeypatch.setattr(lifecycle, "unmint_variation", fake_unmint)
+    result, code = lifecycle.unmint_variations(
+        ["slab_granite_x", "block_granite_x", "bad_key"])
+    assert code == 200
+    assert seen == ["slab_granite_x", "block_granite_x", "bad_key"]        # every Key attempted
+    assert result["requested"] == 3 and result["unminted_count"] == 2
+    assert result["skipped"] == [{"key": "bad_key", "code": 404, "error": "unknown variation 'bad_key'"}]
+
+
+def test_bulk_unmint_rejects_empty_or_invalid_keys(tmp_path, monkeypatch):
+    from stone_pipeline import lifecycle
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    assert lifecycle.unmint_variations([])[1] == 400
+    assert lifecycle.unmint_variations(None)[1] == 400
+    assert lifecycle.unmint_variations(["ok", ""])[1] == 400     # any blank Key invalidates the request
