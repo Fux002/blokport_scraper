@@ -315,3 +315,47 @@ def test_pristine_reset_prunes_both_stale_medusa_exports(tmp_path, monkeypatch):
     assert out["local"] == 2 and out["s3"] == 2
     assert any(k.endswith("from_medusa/products_export.csv") for k in deleted)
     assert any(k.endswith("from_medusa/variants_export.csv") for k in deleted)
+
+
+def test_unmint_removes_from_medusa_clears_decision_and_does_not_exclude(tmp_path, monkeypatch):
+    """unmint = retire's removal (tombstone + cascade) MINUS the permanent exclusion PLUS clearing the mint
+    decision, so the variety resurfaces UNDECIDED for a fresh call -- distinct from retire (excluded) and
+    reject (never mint). Verifies it removes like retire, clears ONLY this decision, and never excludes."""
+    from stone_pipeline import lifecycle
+
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
+    decisions_store.set_variety_decision("Absolute Black", "mint", seed_type="Granite")   # a bystander decision
+
+    captured = {}
+
+    class _Sync:
+        def variation_live_products(self, lg, key):
+            return 0
+
+        def retire_variation(self, lg, key, force=False, reason="variation_removed"):
+            captured["key"], captured["reason"] = key, reason
+            return {"retired": key, "tombstoned_variation": True}
+
+    class _LG:
+        def get(self, table, col, key):
+            return {"key": key, "name": "Crystal White", "medusa_id": "var_1"}
+
+    monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: (work(_LG(), _Sync()), 200))
+
+    result, code = lifecycle.unmint_variation("slab_granite_crystal_white_uuid")
+    assert code == 200
+    assert captured["key"] == "slab_granite_crystal_white_uuid"   # removed from Medusa the same as retire
+    assert captured["reason"] == "variation_unminted"
+    assert result["mint_decision_cleared"] == 1                   # its mint decision is cleared -> resurfaces
+    assert decisions_store.confirm_map() == {"absolute black": "yes"}   # ONLY this one cleared; bystander kept
+    assert store.load_retired() == set()                         # NOT excluded (the whole point vs retire)
+
+
+def test_clear_variety_decision_is_scoped_to_one_variant(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
+    decisions_store.set_variety_decision("Absolute Black", "reject")
+    assert decisions_store.clear_variety_decision("Crystal White") == 1
+    assert decisions_store.clear_variety_decision("Crystal White") == 0   # idempotent: already gone
+    assert decisions_store.confirm_map() == {"absolute black": "no"}      # the other decision survives
