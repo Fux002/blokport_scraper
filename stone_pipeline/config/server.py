@@ -228,6 +228,13 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         #     (curation state 2): keep the variety + record a durable 'protected' verdict so a future
         #     seed-reconcile never re-drops it. Idempotent + scoped result.
         from stone_pipeline import lifecycle
+        # BULK unmint: POST /config/v1/variations/unmint {"keys": [...], "force"?} -- unmint many varieties in
+        # ONE call (each block/slab/tile of a variety is its own Key, so pass every Key you want removed).
+        if len(segments) == 2 and segments[1] == "unmint" and method == "POST":
+            keys = body.get("keys") if isinstance(body, dict) else None
+            force = bool(body.get("force")) if isinstance(body, dict) else False
+            result, code = lifecycle.unmint_variations(keys, force=force)
+            return code, result
         if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "unmint", "un_retire", "not_a_duplicate"):
             key = segments[1]
             if segments[2] in ("retire", "unmint"):
@@ -239,7 +246,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             else:
                 result, code = lifecycle.not_a_duplicate(key)
             return code, result
-        return 404, {"error": "expected POST /config/v1/variations/<key>/{retire,unmint,un_retire,not_a_duplicate}"}
+        return 404, {"error": "expected POST /config/v1/variations/unmint (bulk) or "
+                              "/config/v1/variations/<key>/{retire,unmint,un_retire,not_a_duplicate}"}
     if segments and segments[0] == "review":
         # the new-variant review queue for the :4200 admin. The produce SURFACES uncertain items; the
         # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so

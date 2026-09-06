@@ -608,6 +608,28 @@ def unmint_variation(key: str, force: bool = False) -> tuple[dict, int]:
     return result, 200
 
 
+def unmint_variations(keys: list[str], force: bool = False) -> tuple[dict, int]:
+    """BULK unmint: apply unmint_variation to every Key in `keys` (correct a batch of minting mistakes in one
+    call -- remove them from Medusa + clear each mint decision so they resurface UNDECIDED). Best-effort and
+    per-key isolated: a 404 (already gone) or 409 (still has live products) on one Key is recorded in
+    `skipped` and the rest proceed, so a partial failure never blocks the batch. Each Key is a separate
+    variation entity (block/slab/tile of a variety are three Keys), so pass all the Keys you want removed.
+    Returns {unminted:[...], skipped:[...], unminted_count, requested}. 400 on an empty/invalid list."""
+    if not isinstance(keys, list) or not keys or not all(isinstance(k, str) and k.strip() for k in keys):
+        return {"error": "keys must be a non-empty list of variation Key strings"}, 400
+    out = {"unminted": [], "skipped": [], "requested": len(keys)}
+    for key in keys:
+        r, code = unmint_variation(key.strip(), force=force)
+        if code == 200:
+            out["unminted"].append(key)
+        else:
+            out["skipped"].append({"key": key, "code": code, "error": r.get("error", "")})
+    out["unminted_count"] = len(out["unminted"])
+    log.warning("bulk unmint", extra={"extra_fields": {
+        "requested": out["requested"], "unminted": out["unminted_count"], "skipped": len(out["skipped"])}})
+    return out, 200
+
+
 def un_retire(key: str) -> tuple[dict, int]:
     """Reverse a retire (mirrors source resume): clear the exclusion memory so the next produce can
     re-mint the variety, flip a still-'retiring' row back to serving, and clear its pending tombstone so
