@@ -214,7 +214,12 @@ class VariationStage:
         # bound row flows through the SAME reconcile/derive/texture path a suggested variant uses. A scraped
         # type that DID match a variety is never overridden. Keyed by the shared clean-variety identity, so
         # the lookup key matches the one curate/decisions_store store the decision under.
-        if match.cid is None and not (scraped_type and match.method.endswith("ambiguous")):
+        # The `not (scraped_type and match.ambiguous)` gate enforces the "never a same-type ambiguity" rule
+        # above: a genuine tied same-name duplicate (2+ varieties of the scraped type sharing one canonical,
+        # detected at the exact OR the fuzzy tier and flagged match.ambiguous) must SURFACE for review, not be
+        # silently bound/escaped by a retry under a different (cleaned or operator) identity. Only a real
+        # no-candidate miss retries.
+        if match.cid is None and not (scraped_type and match.ambiguous):
             clean = clean_variety(query, scraped_type)
             # CLEAN-NAME RETRY: the scrape's match key carries the supplier's type token ('Crystal White
             # Granite'). That full string exists only as an ALIAS on sibling same-type varieties (Bianco,

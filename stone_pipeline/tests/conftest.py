@@ -76,6 +76,8 @@ _HERMETIC_EXEMPTIONS = {
     "test_m5_variation::test_projection_tiers_work_in_isolation",
     "test_m5_variation::test_token_set_false_positive_is_rejected",
     "test_m5_variation::test_color_blocking_prevents_cross_color_match",
+    "test_m5_variation::test_tied_same_name_duplicate_is_flagged_ambiguous_at_both_tiers",
+    "test_m5_variation::test_non_duplicate_near_match_is_not_flagged_ambiguous",
     "test_m8_emit::test_product_image_columns_match_slot_setting",
     "test_m8_emit::test_product_images_fill_up_to_cap_then_blank",
     "test_m8_emit::test_images_slab_slot_cap_tracks_setting",
