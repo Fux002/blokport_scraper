@@ -680,6 +680,25 @@ def list_minted_variations() -> tuple[dict, int]:
             "key_count": sum(len(v["keys"]) for v in minted)}, 200
 
 
+def unmint_all_minted(force: bool = False) -> tuple[dict, int]:
+    """Unmint EVERY variety not in the committed base -- the operator does not paste any Keys, the scraper
+    finds them itself (via list_minted_variations, the same ledger-minus-base set) and unmints them all in
+    one call. Same removal + re-surface as the by-keys bulk, applied to the whole non-base set. Inherits its
+    503 guard: if no committed base/seed is available it refuses rather than unmint the entire catalogue.
+    Returns the bulk summary (adds `source: "all_minted"`); a no-op when nothing is minted."""
+    listed, code = list_minted_variations()
+    if code != 200:
+        return listed, code
+    keys = [k for v in listed["minted"] for k in v["keys"]]
+    if not keys:
+        return {"unminted": [], "skipped": [], "requested": 0, "unminted_count": 0,
+                "source": "all_minted", "note": "no minted (non-base) varieties to unmint"}, 200
+    result, rc = unmint_variations(keys, force=force)
+    if isinstance(result, dict):
+        result["source"] = "all_minted"                 # provenance: keys were auto-derived, not pasted
+    return result, rc
+
+
 def un_retire(key: str) -> tuple[dict, int]:
     """Reverse a retire (mirrors source resume): clear the exclusion memory so the next produce can
     re-mint the variety, flip a still-'retiring' row back to serving, and clear its pending tombstone so
