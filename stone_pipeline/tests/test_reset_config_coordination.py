@@ -390,3 +390,40 @@ def test_bulk_unmint_rejects_empty_or_invalid_keys(tmp_path, monkeypatch):
     assert lifecycle.unmint_variations([])[1] == 400
     assert lifecycle.unmint_variations(None)[1] == 400
     assert lifecycle.unmint_variations(["ok", ""])[1] == 400     # any blank Key invalidates the request
+
+
+def test_list_minted_variations_groups_non_base_keys(monkeypatch):
+    """The minted list = ledger varieties whose Key is NOT in the committed base, grouped by variety with
+    its category Keys (the key-bearing surface Blokport needs for checkbox-select unmint)."""
+    from stone_pipeline import lifecycle
+    from stone_pipeline.ledger import writethrough
+    import stone_pipeline.ledger.db as db
+
+    monkeypatch.setattr(lifecycle, "_committed_base_keys", lambda: {"slab_granite_base_x"})
+    monkeypatch.setattr(writethrough, "ledger_path", lambda: "/tmp/x.db", raising=False)
+    monkeypatch.setattr(writethrough, "backend_fingerprint", lambda: "fp", raising=False)
+    rows = [
+        {"key": "slab_granite_base_x", "name": "Base Stone", "type": "Granite"},        # in base -> excluded
+        {"key": "slab_quartzite_ocean_blue_a", "name": "Ocean Blue", "type": "Quartzite"},
+        {"key": "block_quartzite_ocean_blue_b", "name": "Ocean Blue", "type": "Quartzite"},
+        {"key": "slab_crystal_lumiere_c", "name": "Lumiere", "type": "Crystal"},
+    ]
+
+    class _LG:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql): return type("C", (), {"fetchall": staticmethod(lambda: rows)})()
+
+    monkeypatch.setattr(db.Ledger, "open", classmethod(lambda cls, *a, **k: _LG()))
+    result, code = lifecycle.list_minted_variations()
+    assert code == 200
+    assert result["variety_count"] == 2 and result["key_count"] == 3
+    assert {v["variety"] for v in result["minted"]} == {"Ocean Blue", "Lumiere"}
+    ob = next(v for v in result["minted"] if v["variety"] == "Ocean Blue")
+    assert sorted(ob["keys"]) == ["block_quartzite_ocean_blue_b", "slab_quartzite_ocean_blue_a"]
+
+
+def test_list_minted_variations_refuses_without_a_committed_base(monkeypatch):
+    from stone_pipeline import lifecycle
+    monkeypatch.setattr(lifecycle, "_committed_base_keys", lambda: set())
+    assert lifecycle.list_minted_variations()[1] == 503     # never lists the whole catalogue as 'minted'

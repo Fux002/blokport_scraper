@@ -228,6 +228,12 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         #     (curation state 2): keep the variety + record a durable 'protected' verdict so a future
         #     seed-reconcile never re-drops it. Idempotent + scoped result.
         from stone_pipeline import lifecycle
+        # GET /config/v1/variations/minted -- the KEY-BEARING list of varieties minted since the committed
+        # base (each grouped with its category Keys), so the UI can offer checkbox-select unmint. Needed
+        # because unmint is keyed by the variation Key while the mint-review queue is name-keyed candidates.
+        if len(segments) == 2 and segments[1] == "minted" and method == "GET":
+            result, code = lifecycle.list_minted_variations()
+            return code, result
         # BULK unmint: POST /config/v1/variations/unmint {"keys": [...], "force"?} -- unmint many varieties in
         # ONE call (each block/slab/tile of a variety is its own Key, so pass every Key you want removed).
         if len(segments) == 2 and segments[1] == "unmint" and method == "POST":
