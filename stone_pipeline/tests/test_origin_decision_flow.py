@@ -58,7 +58,8 @@ def test_clear_origin_decisions_wipes_the_overlay():
 
 # -- produce-side queue population ---------------------------------------------
 def _held(source="marenostone", variety="Crystal White", stype="Granite", map_c="IN", vendor="IR"):
-    row = CanonicalRow(src_site=source, surrogate_key="1", variation_name=variety, type_name=stype)
+    row = CanonicalRow(src_site=source, surrogate_key="1", variation_name=variety, type_name=stype,
+                       src_url=f"https://{source}.example/{variety}".replace(" ", "-"))
     row.origin_source = "origin_needs_confirmation"
     row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_needs_confirmation,
                             raw_value=map_c, best_guess=vendor, confidence=Confidence.none, method="x"))
@@ -73,6 +74,7 @@ def test_write_origin_confirm_file_dedupes_and_carries_payload():
     cw = by_ref[_ref("marenostone", "Crystal White", "Granite")]
     assert cw["source"] == "marenostone" and cw["stone_type"] == "Granite"
     assert cw["map_country"] == "IN" and cw["vendor_origin"] == "IR"
+    assert cw["src_url"] == "https://marenostone.example/Crystal-White"       # product link for the operator
     assert cw["current_country"] is None                                      # not yet decided
 
 

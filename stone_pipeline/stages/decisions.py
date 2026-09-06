@@ -126,11 +126,17 @@ def write_origin_confirm_file(rows) -> int:
         if ref in pending:
             continue                             # first occurrence per (source, variety, type) is enough
         flag = next((f for f in row.review_flags if f.code == FlagCode.origin_needs_confirmation), None)
+        # Carry the product EVIDENCE, same as the mint queue's review card: the supplier listing url so the
+        # operator can OPEN the product to judge the origin, and one product image. Prefer the raw supplier
+        # url/image (survives Medusa product churn) exactly like curate._review_evidence.
+        imgs = (getattr(row, "raw_image_urls", None) or []) or (getattr(row, "image_keys", None) or [])
         pending[ref] = {
             "ref": ref,
             "payload": {"source": source, "variety": title_case(variety), "stone_type": stone_type,
                         "map_country": (flag.raw_value if flag else ""),
-                        "vendor_origin": (flag.best_guess if flag else "")},
+                        "vendor_origin": (flag.best_guess if flag else ""),
+                        "src_url": (getattr(row, "src_url", "") or ""),
+                        "image": next((u for u in imgs if u), "")},
             "sources": [source],
         }
     decisions_store.replace_pending("origin", list(pending.values()))
