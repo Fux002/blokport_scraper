@@ -362,7 +362,7 @@ def _prune_stale_medusa_export() -> dict:
     return out
 
 
-def reset(sources=None, hard=False, pristine=False, keep_images=False) -> tuple[dict, int]:
+def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scrape=False) -> tuple[dict, int]:
     """Clean-start the ledger sync overlay (the coordinated reset). soft re-serves from zero without a
     re-scrape; hard also drops the scraped products. Neither touches the hosted product images: the ONLY
     image wipe in the system is the factory reset below, and only when `keep_images` is off. Variation/backbone
@@ -391,7 +391,13 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False) -> tuple[
     `keep_images` (factory reset only): everything else runs (ledger reset + reseed, overlay wipe,
     stale-variation prune) but the hosted product images and their enhanced/discarded markers stay, so the
     re-scrape reuses the already GPU/FAL-processed images -- the repeatable test-reset path. No effect on a
-    hard or soft reset, which keep images regardless."""
+    hard or soft reset, which keep images regardless.
+
+    `keep_scrape` (factory reset only): keep the cached scrape (data/ + outputs/ and their S3 snapshots) so
+    the catalog can be rebuilt from scratch with a Republish All instead of re-scraping every site. Safe
+    because the same reset wipes every operator decision: a republish from the cached scrape reclassifies
+    fresh and re-surfaces every candidate undecided, it cannot re-mint. With both keep flags on, a factory
+    reset costs neither a scrape nor a GPU/FAL run."""
     if pristine and sources is not None:
         return {"error": "pristine (factory) reset is global-only; do not pass sources"}, 400
     if sources is not None and not sources:
@@ -462,16 +468,19 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False) -> tuple[
                     log.exception("reset: re-deriving variation content from the clean base FAILED; a seed "
                                   "variety may keep stale aliases")
                     out["base_reseed_content"] = {"error": f"content re-derive failed: {exc}"}
-                # Also drop the cached scrape (raw scrapes + canonical parquets, local AND S3 snapshots): a
-                # factory reset returns to the seed, so a later republish/catalog must not re-mint from the
-                # pre-reset scrape, and a cold boot must not restore it. Best-effort + LOUD (never fails the
-                # reset -- the ledger/base are already reset).
-                try:
-                    from stone_pipeline.ledger import snapshot
-                    out["artifacts_wiped"] = snapshot.wipe_artifacts()
-                except Exception as exc:
-                    log.exception("reset: scrape-artifact wipe FAILED; a stale scrape may remain")
-                    out["artifacts_wiped"] = {"error": f"wipe failed, scrape cache kept: {exc}"}
+                # Also drop the cached scrape (raw scrapes + canonical parquets, local AND S3 snapshots) unless
+                # keep_scrape: a factory reset returns to the seed, and without the cache a cold boot cannot
+                # restore a pre-reset scrape. Best-effort + LOUD (never fails the reset -- the ledger/base are
+                # already reset).
+                if keep_scrape:
+                    out["artifacts_wiped"] = {"kept": "keep_scrape -- cached scrape preserved; rebuild with a Republish All"}
+                else:
+                    try:
+                        from stone_pipeline.ledger import snapshot
+                        out["artifacts_wiped"] = snapshot.wipe_artifacts()
+                    except Exception as exc:
+                        log.exception("reset: scrape-artifact wipe FAILED; a stale scrape may remain")
+                        out["artifacts_wiped"] = {"error": f"wipe failed, scrape cache kept: {exc}"}
                 # prune the pre-reset per-source product exports so to_upload/ holds only the seed (they refill
                 # on the next produce; the admin reads the ledger, not these files).
                 out["product_exports_pruned"] = _prune_stale_product_exports()
