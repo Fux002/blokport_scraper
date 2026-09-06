@@ -579,70 +579,115 @@ def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
     return result, 200
 
 
-def unmint_variation(key: str, force: bool = False) -> tuple[dict, int]:
-    """Un-mint a variety for RE-REVIEW (correct a minting mistake). Removes it from Medusa the SAME way as
-    retire -- tombstone + cascade its products/combinations (so the removals pull deletes it) -- but instead
-    of retire's PERMANENT exclusion, it CLEARS the variety's stored mint decision, so the NEXT produce
-    re-surfaces it in the mint queue UNDECIDED for a fresh mint/alias/reject call. The three intents stay
-    distinct: retire = permanent (excluded), reject = never mint, unmint = remove and reconsider. 404 unknown
-    key; 409 if it still has LIVE products (delist/move first) unless `force` cascades them. Purely additive
-    and operator-invoked: it never runs inside a produce, so a produce with no unmint is unchanged."""
-    def work(lg, sync):
-        var = lg.get("variation", "key", key)
-        if var is None:
-            raise _NotFound(f"unknown variation {key!r}")
-        live = sync.variation_live_products(lg, key)
-        if live and not force:
-            raise _Busy(f"variety {key!r} has {live} live product(s); delist or move them first (or force)")
-        result = sync.retire_variation(lg, key, force=force, reason="variation_unminted")
-        result["variant"] = var["name"]        # carry the name out so we can clear its decision below
-        return result
+def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
+    """The ONE unmint primitive -- VARIETY-scoped. Resolves the requested Keys to their varieties (a variety
+    = every category Key, block/slab/tile, sharing the branch-free identity (type-slug, name-slug): the same
+    rule the dedup uses, minus the branch), then for EACH variety removes ALL its sibling Keys (tombstone +
+    cascade, exactly like retire, so the removals pull deletes them) and clears its mint decision ONCE, so it
+    re-surfaces in the mint queue UNDECIDED. One ledger op, one scan, one lock: 66 Keys collapse to their 22
+    varieties, and a single Key can never half-remove a variety.
 
-    result, code = _ledger_op("unmint_variation", work)
+    Ordering (partial-failure safety): the in-flight-pull guard runs FIRST (a live pull -> 409 for the whole
+    batch before anything is touched); then the mint decisions are cleared BEFORE the tombstones, so if a
+    tombstone fails the worst case is "decision cleared, variety still present" (visible; retry) -- never
+    "tombstoned but the stored mint re-creates it next produce" (a silent undo). The two stores cannot share
+    one transaction; this order picks the benign failure.
+
+    Status (honest): 200 only if at least one variety was unminted (partial success carries `skipped`);
+    otherwise the dominant skip reason -- 409 if a variety still has live products (delist/move, or force),
+    else 404 for unknown Keys. A pull in flight is 409 for the whole batch (via _ledger_op)."""
+    from stone_pipeline.reference.loaders import variety_identity
+    from stone_pipeline.config import decisions_store
+    wanted = [k.strip() for k in keys]
+
+    def work(lg, sync):
+        sync._lock_and_check_in_flight(lg)            # 409 up front: never touch config.db mid-pull
+        ident_of: dict[str, tuple] = {}
+        by_ident: dict[tuple, list[tuple[str, str]]] = {}
+        for r in lg.execute("SELECT key, name FROM variation").fetchall():
+            k, n = (r["key"] or "").strip(), (r["name"] or "").strip()
+            ident = variety_identity(k, n)[1:]         # branch-free: (type-slug, name-slug)
+            ident_of[k] = ident
+            by_ident.setdefault(ident, []).append((k, n))
+        out = {"unminted": [], "varieties": [], "skipped": []}
+        seen: set = set()
+        targets: list[list[tuple[str, str]]] = []
+        for k in wanted:
+            ident = ident_of.get(k)
+            if ident is None:
+                out["skipped"].append({"key": k, "code": 404, "error": f"unknown variation {k!r}"})
+                continue
+            if ident in seen:
+                continue                                # a sibling already claimed this whole variety
+            seen.add(ident)
+            siblings = by_ident[ident]
+            live = sum(sync.variation_live_products(lg, sk) for sk, _ in siblings)
+            if live and not force:
+                out["skipped"].append({"key": k, "code": 409, "error": (
+                    f"variety {siblings[0][1]!r} has {live} live product(s); delist or move them first "
+                    f"(or force)")})
+                continue
+            targets.append(siblings)
+        # Clear the mint decisions FIRST (config.db), then tombstone (ledger) -- see the docstring ordering.
+        out["mint_decisions_cleared"] = sum(decisions_store.clear_variety_decision(sibs[0][1])
+                                            for sibs in targets)
+        for sibs in targets:
+            for sk, _ in sibs:
+                sync.retire_variation(lg, sk, force=force, reason="variation_unminted")
+                out["unminted"].append(sk)
+            out["varieties"].append({"variety": sibs[0][1], "keys": [sk for sk, _ in sibs]})
+        return out
+
+    result, code = _ledger_op("unmint_varieties", work)
     if code != 200:
         return result, code
-    # CLEAR the mint decision, do NOT add_retired: the variety must resurface UNDECIDED (re-decidable),
-    # not be excluded. This is the ONLY difference from retire.
-    from stone_pipeline.config import decisions_store
-    result["mint_decision_cleared"] = decisions_store.clear_variety_decision(result.get("variant") or "")
+    result["unminted_count"] = len(result["unminted"])
+    result["variety_count"] = len(result["varieties"])
+    result["requested"] = len(wanted)
+    if result["variety_count"] == 0:                    # nothing removed: report the real reason, not 200
+        codes = {s["code"] for s in result["skipped"]}
+        return result, (409 if 409 in codes else 404)
+    log.warning("unmint", extra={"extra_fields": {
+        "requested": result["requested"], "varieties": result["variety_count"],
+        "keys": result["unminted_count"], "skipped": len(result["skipped"])}})
     return result, 200
 
 
+def unmint_variation(key: str, force: bool = False) -> tuple[dict, int]:
+    """Un-mint the WHOLE variety this Key belongs to (all its category Keys) for RE-REVIEW -- correct a
+    minting mistake. Removes it from Medusa like retire (tombstone + cascade) but CLEARS the mint decision
+    instead of retire's permanent exclusion, so the next produce re-surfaces it UNDECIDED. Three intents:
+    retire = permanent, reject = never mint, unmint = remove and reconsider. 404 unknown; 409 if it still has
+    live products unless `force`. Operator-invoked only; a produce with no unmint is unchanged."""
+    if not isinstance(key, str) or not key.strip():
+        return {"error": "key must be a non-empty variation Key"}, 400
+    return _unmint_varieties([key], force=force)
+
+
 def unmint_variations(keys: list[str], force: bool = False) -> tuple[dict, int]:
-    """BULK unmint: apply unmint_variation to every Key in `keys` (correct a batch of minting mistakes in one
-    call -- remove them from Medusa + clear each mint decision so they resurface UNDECIDED). Best-effort and
-    per-key isolated: a 404 (already gone) or 409 (still has live products) on one Key is recorded in
-    `skipped` and the rest proceed, so a partial failure never blocks the batch. Each Key is a separate
-    variation entity (block/slab/tile of a variety are three Keys), so pass all the Keys you want removed.
-    Returns {unminted:[...], skipped:[...], unminted_count, requested}. 400 on an empty/invalid list."""
+    """BULK unmint by Keys: the same variety-scoped removal for many Keys in ONE call (Keys collapse to their
+    distinct varieties, so passing all three category Keys of a variety removes it once). 400 on an empty or
+    invalid list. Partial success returns 200 with `skipped`; nothing removed returns 409/404."""
     if not isinstance(keys, list) or not keys or not all(isinstance(k, str) and k.strip() for k in keys):
         return {"error": "keys must be a non-empty list of variation Key strings"}, 400
-    out = {"unminted": [], "skipped": [], "requested": len(keys)}
-    for key in keys:
-        r, code = unmint_variation(key.strip(), force=force)
-        if code == 200:
-            out["unminted"].append(key)
-        else:
-            out["skipped"].append({"key": key, "code": code, "error": r.get("error", "")})
-    out["unminted_count"] = len(out["unminted"])
-    log.warning("bulk unmint", extra={"extra_fields": {
-        "requested": out["requested"], "unminted": out["unminted_count"], "skipped": len(out["skipped"])}})
-    return out, 200
+    return _unmint_varieties(keys, force=force)
 
 
 def _committed_base_keys() -> set[str]:
-    """The variation Keys of the committed base: the CURRENT base file if present (so 'minted' means 'not in
-    the base' -- the operator's mental model), else the baked pristine seed. Empty when neither is available
-    -- the caller MUST refuse rather than treat every variety as minted."""
+    """The variation Keys of the committed base -- the CURRENT base file ONLY (variants_export_base.csv), so
+    'minted' means exactly one thing: not in the base. Deliberately NO fallback to the baked pristine seed:
+    after a deploy roll the base file is absent until the next produce re-fetches it, and silently falling
+    back to the smaller, frozen seed would count every older mint already folded into the base as 'minted'
+    and OVER-REMOVE. Empty when the base is absent -- the caller refuses (503) rather than guess."""
     import csv
-    for path in (SETTINGS.paths.variants_export_base_csv, SETTINGS.paths.variants_export_base_seed_csv):
-        if path and path.exists():
-            with path.open(newline="", encoding="utf-8-sig") as fh:
-                keys = {(r.get("Key") or "").strip() for r in csv.DictReader(fh)}
-                keys.discard("")
-                if keys:
-                    return keys
-    return set()
+    from stone_pipeline.config.settings import SETTINGS      # function-local, like every SETTINGS use here
+    path = SETTINGS.paths.variants_export_base_csv
+    if not path.exists():
+        return set()
+    with path.open(newline="", encoding="utf-8-sig") as fh:
+        keys = {(r.get("Key") or "").strip() for r in csv.DictReader(fh)}
+    keys.discard("")
+    return keys
 
 
 def list_minted_variations() -> tuple[dict, int]:
@@ -654,7 +699,8 @@ def list_minted_variations() -> tuple[dict, int]:
     503 instead of listing the whole catalogue as 'minted'."""
     base_keys = _committed_base_keys()
     if not base_keys:
-        return {"error": "no committed base/seed available on this task; cannot compute the minted set"}, 503
+        return {"error": "base file not present on this task (a produce re-fetches it); "
+                         "run a Republish All first, then retry"}, 503
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.matching import projections as proj
@@ -682,17 +728,18 @@ def list_minted_variations() -> tuple[dict, int]:
 
 def unmint_all_minted(force: bool = False) -> tuple[dict, int]:
     """Unmint EVERY variety not in the committed base -- the operator does not paste any Keys, the scraper
-    finds them itself (via list_minted_variations, the same ledger-minus-base set) and unmints them all in
-    one call. Same removal + re-surface as the by-keys bulk, applied to the whole non-base set. Inherits its
-    503 guard: if no committed base/seed is available it refuses rather than unmint the entire catalogue.
-    Returns the bulk summary (adds `source: "all_minted"`); a no-op when nothing is minted."""
+    finds them itself (via list_minted_variations, the same ledger-minus-current-base set) and unmints them
+    all in one call. Same variety-scoped removal + re-surface as the by-keys bulk. Inherits the 503 guard:
+    if the current base file is absent (post-roll, before a produce) it refuses rather than guess against the
+    seed. Returns the bulk summary (adds `source: "all_minted"`); a no-op (200) when nothing is minted."""
     listed, code = list_minted_variations()
     if code != 200:
         return listed, code
     keys = [k for v in listed["minted"] for k in v["keys"]]
     if not keys:
-        return {"unminted": [], "skipped": [], "requested": 0, "unminted_count": 0,
-                "source": "all_minted", "note": "no minted (non-base) varieties to unmint"}, 200
+        return {"unminted": [], "varieties": [], "skipped": [], "requested": 0, "unminted_count": 0,
+                "variety_count": 0, "mint_decisions_cleared": 0, "source": "all_minted",
+                "note": "no minted (non-base) varieties to unmint"}, 200
     result, rc = unmint_variations(keys, force=force)
     if isinstance(result, dict):
         result["source"] = "all_minted"                 # provenance: keys were auto-derived, not pasted
