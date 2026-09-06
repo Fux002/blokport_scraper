@@ -220,22 +220,26 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
     if segments and segments[0] == "variations":
         # variation lifecycle (the variety half): explicit removal + undo.
         #   POST /config/v1/variations/<key>/retire     {"force": true?}   remove a variety (E11 re-key old side)
+        #   POST /config/v1/variations/<key>/unmint     {"force": true?}   remove it AND clear its mint decision
+        #     so the next produce re-surfaces it in the mint queue UNDECIDED (correct a minting mistake).
+        #     Contrast retire (permanent, excluded) and reject (never mint); unmint = remove and reconsider.
         #   POST /config/v1/variations/<key>/un_retire                     reverse it (mirrors source resume)
         #   POST /config/v1/variations/<key>/not_a_duplicate               cancel a false-positive dup tombstone
         #     (curation state 2): keep the variety + record a durable 'protected' verdict so a future
         #     seed-reconcile never re-drops it. Idempotent + scoped result.
         from stone_pipeline import lifecycle
-        if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "un_retire", "not_a_duplicate"):
+        if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "unmint", "un_retire", "not_a_duplicate"):
             key = segments[1]
-            if segments[2] == "retire":
+            if segments[2] in ("retire", "unmint"):
                 force = bool(body.get("force")) if isinstance(body, dict) else False
-                result, code = lifecycle.retire_variation(key, force=force)
+                op = lifecycle.retire_variation if segments[2] == "retire" else lifecycle.unmint_variation
+                result, code = op(key, force=force)
             elif segments[2] == "un_retire":
                 result, code = lifecycle.un_retire(key)
             else:
                 result, code = lifecycle.not_a_duplicate(key)
             return code, result
-        return 404, {"error": "expected POST /config/v1/variations/<key>/{retire,un_retire,not_a_duplicate}"}
+        return 404, {"error": "expected POST /config/v1/variations/<key>/{retire,unmint,un_retire,not_a_duplicate}"}
     if segments and segments[0] == "review":
         # the new-variant review queue for the :4200 admin. The produce SURFACES uncertain items; the
         # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so

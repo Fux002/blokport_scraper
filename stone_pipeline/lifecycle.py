@@ -579,6 +579,35 @@ def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
     return result, 200
 
 
+def unmint_variation(key: str, force: bool = False) -> tuple[dict, int]:
+    """Un-mint a variety for RE-REVIEW (correct a minting mistake). Removes it from Medusa the SAME way as
+    retire -- tombstone + cascade its products/combinations (so the removals pull deletes it) -- but instead
+    of retire's PERMANENT exclusion, it CLEARS the variety's stored mint decision, so the NEXT produce
+    re-surfaces it in the mint queue UNDECIDED for a fresh mint/alias/reject call. The three intents stay
+    distinct: retire = permanent (excluded), reject = never mint, unmint = remove and reconsider. 404 unknown
+    key; 409 if it still has LIVE products (delist/move first) unless `force` cascades them. Purely additive
+    and operator-invoked: it never runs inside a produce, so a produce with no unmint is unchanged."""
+    def work(lg, sync):
+        var = lg.get("variation", "key", key)
+        if var is None:
+            raise _NotFound(f"unknown variation {key!r}")
+        live = sync.variation_live_products(lg, key)
+        if live and not force:
+            raise _Busy(f"variety {key!r} has {live} live product(s); delist or move them first (or force)")
+        result = sync.retire_variation(lg, key, force=force, reason="variation_unminted")
+        result["variant"] = var["name"]        # carry the name out so we can clear its decision below
+        return result
+
+    result, code = _ledger_op("unmint_variation", work)
+    if code != 200:
+        return result, code
+    # CLEAR the mint decision, do NOT add_retired: the variety must resurface UNDECIDED (re-decidable),
+    # not be excluded. This is the ONLY difference from retire.
+    from stone_pipeline.config import decisions_store
+    result["mint_decision_cleared"] = decisions_store.clear_variety_decision(result.get("variant") or "")
+    return result, 200
+
+
 def un_retire(key: str) -> tuple[dict, int]:
     """Reverse a retire (mirrors source resume): clear the exclusion memory so the next produce can
     re-mint the variety, flip a still-'retiring' row back to serving, and clear its pending tombstone so

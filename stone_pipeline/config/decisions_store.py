@@ -371,6 +371,20 @@ def clear_variety_decisions() -> int:
     return n
 
 
+def clear_variety_decision(variant: str) -> int:
+    """Drop ONE variety's operator decision by name. Used by `unmint` (lifecycle): removing a minted variety
+    for RE-REVIEW must forget its stored 'mint' decision, or the next produce silently re-applies it and the
+    variety never resurfaces in the queue for a fresh call. Scoped to one variant_norm (unlike the pristine
+    clear_variety_decisions), so every OTHER operator decision survives. Returns rows dropped (0 if none)."""
+    norm = _norm(variant)
+    if not norm:
+        return 0
+    with closing(store.open_store()) as conn:
+        n = conn.execute("DELETE FROM variety_decision WHERE variant_norm = ?", (norm,)).rowcount
+        conn.commit()
+    return n
+
+
 def clear_leaf_decisions() -> int:
     """Drop EVERY backbone leaf-growth decision (approve/reject). PRISTINE reset ONLY, same rationale as
     clear_variety_decisions: an approved leaf grows the tree via the load-time overlay (apply_leaf_overlay),
