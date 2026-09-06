@@ -427,3 +427,32 @@ def test_list_minted_variations_refuses_without_a_committed_base(monkeypatch):
     from stone_pipeline import lifecycle
     monkeypatch.setattr(lifecycle, "_committed_base_keys", lambda: set())
     assert lifecycle.list_minted_variations()[1] == 503     # never lists the whole catalogue as 'minted'
+
+
+def test_unmint_all_minted_derives_keys_from_the_minted_list(monkeypatch):
+    """all_minted mode: the scraper finds the non-base Keys itself (list_minted_variations) and unmints
+    them all -- no paste. A no-op when nothing is minted; refuses (503) if the minted list can't be built."""
+    from stone_pipeline import lifecycle
+    monkeypatch.setattr(lifecycle, "list_minted_variations", lambda: (
+        {"minted": [{"variety": "Ocean Blue", "stone_type": "Quartzite",
+                     "keys": ["slab_q_ocean_a", "block_q_ocean_b"]},
+                    {"variety": "Lumiere", "stone_type": "Crystal", "keys": ["slab_c_lumiere_c"]}],
+         "variety_count": 2, "key_count": 3}, 200))
+    got = {}
+    monkeypatch.setattr(lifecycle, "unmint_variations",
+                        lambda keys, force=False: (got.update(keys=keys, force=force) or
+                                                   {"unminted": keys, "unminted_count": len(keys)}, 200))
+    result, code = lifecycle.unmint_all_minted(force=True)
+    assert code == 200
+    assert got["keys"] == ["slab_q_ocean_a", "block_q_ocean_b", "slab_c_lumiere_c"] and got["force"] is True
+    assert result["source"] == "all_minted"
+
+    # no minted varieties -> clean no-op, never calls unmint
+    monkeypatch.setattr(lifecycle, "list_minted_variations",
+                        lambda: ({"minted": [], "variety_count": 0, "key_count": 0}, 200))
+    result, code = lifecycle.unmint_all_minted()
+    assert code == 200 and result["unminted_count"] == 0
+
+    # no committed base -> the 503 guard propagates
+    monkeypatch.setattr(lifecycle, "list_minted_variations", lambda: ({"error": "no base"}, 503))
+    assert lifecycle.unmint_all_minted()[1] == 503

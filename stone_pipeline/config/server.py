@@ -234,12 +234,17 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if len(segments) == 2 and segments[1] == "minted" and method == "GET":
             result, code = lifecycle.list_minted_variations()
             return code, result
-        # BULK unmint: POST /config/v1/variations/unmint {"keys": [...], "force"?} -- unmint many varieties in
-        # ONE call (each block/slab/tile of a variety is its own Key, so pass every Key you want removed).
+        # BULK unmint: POST /config/v1/variations/unmint -- two modes:
+        #   {"keys": [...], "force"?}       unmint the pasted Keys (each block/slab/tile is its own Key)
+        #   {"all_minted": true, "force"?}  unmint EVERY variety not in the committed base (scraper finds the
+        #                                   Keys itself -- no paste needed; refuses 503 if no base is available)
         if len(segments) == 2 and segments[1] == "unmint" and method == "POST":
-            keys = body.get("keys") if isinstance(body, dict) else None
             force = bool(body.get("force")) if isinstance(body, dict) else False
-            result, code = lifecycle.unmint_variations(keys, force=force)
+            if isinstance(body, dict) and body.get("all_minted"):
+                result, code = lifecycle.unmint_all_minted(force=force)
+            else:
+                keys = body.get("keys") if isinstance(body, dict) else None
+                result, code = lifecycle.unmint_variations(keys, force=force)
             return code, result
         if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "unmint", "un_retire", "not_a_duplicate"):
             key = segments[1]
