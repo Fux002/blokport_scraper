@@ -630,6 +630,56 @@ def unmint_variations(keys: list[str], force: bool = False) -> tuple[dict, int]:
     return out, 200
 
 
+def _committed_base_keys() -> set[str]:
+    """The variation Keys of the committed base: the CURRENT base file if present (so 'minted' means 'not in
+    the base' -- the operator's mental model), else the baked pristine seed. Empty when neither is available
+    -- the caller MUST refuse rather than treat every variety as minted."""
+    import csv
+    for path in (SETTINGS.paths.variants_export_base_csv, SETTINGS.paths.variants_export_base_seed_csv):
+        if path and path.exists():
+            with path.open(newline="", encoding="utf-8-sig") as fh:
+                keys = {(r.get("Key") or "").strip() for r in csv.DictReader(fh)}
+                keys.discard("")
+                if keys:
+                    return keys
+    return set()
+
+
+def list_minted_variations() -> tuple[dict, int]:
+    """READ-ONLY: every ledger variety whose Key is NOT in the committed base (operator-minted since the
+    base), grouped by variety with its category Keys. This is the KEY-BEARING minted list Blokport needs for
+    checkbox-select unmint: unmint is keyed by the variation Key (a slug), while the mint-review queue is
+    name-keyed and holds not-yet-minted CANDIDATES (no Key), so it cannot drive unmint. Plain SELECT, no
+    exclusive slot -- safe alongside a pull. GUARDED: if no committed base/seed is available (empty), returns
+    503 instead of listing the whole catalogue as 'minted'."""
+    base_keys = _committed_base_keys()
+    if not base_keys:
+        return {"error": "no committed base/seed available on this task; cannot compute the minted set"}, 503
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
+    from stone_pipeline.matching import projections as proj
+    import collections
+    try:
+        with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME,
+                         backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+            rows = lg.execute("SELECT key, name, type FROM variation").fetchall()
+    except Exception as exc:                                # noqa: BLE001 -- best-effort read, surfaced as 500
+        log.exception("list_minted_variations failed")
+        return {"error": str(exc)}, 500
+    by_variety: "collections.OrderedDict[tuple, dict]" = collections.OrderedDict()
+    for r in rows:
+        key = (r["key"] or "").strip()
+        if not key or key in base_keys:                     # committed-base variety -> not minted, never listed
+            continue
+        name, stype = (r["name"] or "").strip(), (r["type"] or "").strip()
+        v = by_variety.setdefault((proj.norm(name), proj.norm(stype)),
+                                  {"variety": name, "stone_type": stype, "keys": []})
+        v["keys"].append(key)
+    minted = sorted(by_variety.values(), key=lambda x: x["variety"].lower())
+    return {"minted": minted, "variety_count": len(minted),
+            "key_count": sum(len(v["keys"]) for v in minted)}, 200
+
+
 def un_retire(key: str) -> tuple[dict, int]:
     """Reverse a retire (mirrors source resume): clear the exclusion memory so the next produce can
     re-mint the variety, flip a still-'retiring' row back to serving, and clear its pending tombstone so
