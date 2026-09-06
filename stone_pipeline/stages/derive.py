@@ -583,9 +583,9 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
     #     origins" action) to add a vendor's real country; a confirmed answer returns above as a
     #     supplier_override. Opt-in: an unset primary_origin runs the classic ladder below, every other vendor
     #     untouched.
-    if source_cfg.primary_origin:
+    if source_cfg.primary_origin and type_authoritative:
         vendor_iso = _to_iso(source_cfg.primary_origin, ref)
-        rule = ref.origin_map.exact(name, row.type_name) if (type_authoritative and vendor_iso) else None
+        rule = ref.origin_map.exact(name, row.type_name) if vendor_iso else None
         if rule and vendor_iso in rule.countries:
             row.origin_country_code = vendor_iso
             row.origin_city = rule.city
