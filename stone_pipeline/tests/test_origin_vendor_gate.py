@@ -85,6 +85,17 @@ def test_no_map_entry_holds(ref):
     assert row.origin_source == "origin_needs_confirmation"
 
 
+def test_non_authoritative_row_is_not_gated_into_the_origin_queue(ref):
+    # A row whose variety did NOT bind (type not variation-authoritative) must NOT be held for origin
+    # confirmation -- it has no real variety to confirm an origin for, and holding it surfaced the RAW
+    # scraped name ("Arabescato Marble Slab") in the origin queue. It falls to the classic supplier-default
+    # path instead, so the origin queue only ever contains cleanly-bound varieties.
+    row = _row(variation_name="", raw_name="Arabescato Marble Slab", type_method="type_name_fallback")
+    derive.derive_origin(row, _with_map(ref, ("Arabescato", "BR", "", "", "Marble")), _cfg())
+    assert row.origin_source != "origin_needs_confirmation"     # NOT in the origin queue
+    assert row.origin_source == "supplier_default"
+
+
 def test_no_primary_origin_uses_classic_ladder_unchanged(ref):
     # opt-out: a vendor without primary_origin behaves exactly as before (the map value is used).
     row = _row()
