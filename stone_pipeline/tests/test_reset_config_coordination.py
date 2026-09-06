@@ -317,39 +317,60 @@ def test_pristine_reset_prunes_both_stale_medusa_exports(tmp_path, monkeypatch):
     assert any(k.endswith("from_medusa/variants_export.csv") for k in deleted)
 
 
-def test_unmint_removes_from_medusa_clears_decision_and_does_not_exclude(tmp_path, monkeypatch):
-    """unmint = retire's removal (tombstone + cascade) MINUS the permanent exclusion PLUS clearing the mint
-    decision, so the variety resurfaces UNDECIDED for a fresh call -- distinct from retire (excluded) and
-    reject (never mint). Verifies it removes like retire, clears ONLY this decision, and never excludes."""
+def _stub_ledger_and_sync(monkeypatch, captured, live=0):
+    """A hermetic ledger + sync for the VARIETY-scoped unmint: one variety 'Crystal White' (Granite) with its
+    three category Keys, plus a bystander variety. variety_identity is stubbed to the branch-free rule so
+    the sibling grouping is deterministic without the type vocab."""
     from stone_pipeline import lifecycle
-
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
-    decisions_store.set_variety_decision("Absolute Black", "mint", seed_type="Granite")   # a bystander decision
-
-    captured = {}
+    from stone_pipeline.reference import loaders
+    rows = [
+        {"key": "slab_granite_crystal_white_a", "name": "Crystal White"},
+        {"key": "block_granite_crystal_white_b", "name": "Crystal White"},
+        {"key": "tile_granite_crystal_white_c", "name": "Crystal White"},
+        {"key": "slab_granite_absolute_black_d", "name": "Absolute Black"},
+    ]
+    monkeypatch.setattr(loaders, "variety_identity",
+                        lambda key, name: (key.split("_")[0], "granite", name.lower().replace(" ", "_")))
 
     class _Sync:
+        def _lock_and_check_in_flight(self, lg):
+            pass
+
         def variation_live_products(self, lg, key):
-            return 0
+            return live
 
         def retire_variation(self, lg, key, force=False, reason="variation_removed"):
-            captured["key"], captured["reason"] = key, reason
-            return {"retired": key, "tombstoned_variation": True}
+            captured.setdefault("retired", []).append(key)
+            captured["reason"] = reason
+            return {"retired": key}
 
     class _LG:
-        def get(self, table, col, key):
-            return {"key": key, "name": "Crystal White", "medusa_id": "var_1"}
+        def execute(self, sql):
+            return type("C", (), {"fetchall": staticmethod(lambda: rows)})()
 
     monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: (work(_LG(), _Sync()), 200))
 
-    result, code = lifecycle.unmint_variation("slab_granite_crystal_white_uuid")
+
+def test_unmint_removes_the_whole_variety_clears_decision_once_and_does_not_exclude(tmp_path, monkeypatch):
+    """unmint is VARIETY-scoped: ONE Key removes ALL its category siblings (block/slab/tile), clears the mint
+    decision ONCE, and never adds the retired-exclusion -- so it resurfaces UNDECIDED (vs retire = excluded,
+    reject = never mint). A single Key can no longer half-remove a variety."""
+    from stone_pipeline import lifecycle
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
+    decisions_store.set_variety_decision("Absolute Black", "mint", seed_type="Granite")   # bystander
+    captured = {}
+    _stub_ledger_and_sync(monkeypatch, captured)
+
+    result, code = lifecycle.unmint_variation("slab_granite_crystal_white_a")       # ONE Key in...
     assert code == 200
-    assert captured["key"] == "slab_granite_crystal_white_uuid"   # removed from Medusa the same as retire
+    assert sorted(captured["retired"]) == ["block_granite_crystal_white_b",           # ...ALL three siblings out
+                                          "slab_granite_crystal_white_a", "tile_granite_crystal_white_c"]
     assert captured["reason"] == "variation_unminted"
-    assert result["mint_decision_cleared"] == 1                   # its mint decision is cleared -> resurfaces
-    assert decisions_store.confirm_map() == {"absolute black": "yes"}   # ONLY this one cleared; bystander kept
-    assert store.load_retired() == set()                         # NOT excluded (the whole point vs retire)
+    assert result["variety_count"] == 1 and result["unminted_count"] == 3
+    assert result["mint_decisions_cleared"] == 1                                      # cleared ONCE per variety
+    assert decisions_store.confirm_map() == {"absolute black": "yes"}                 # bystander untouched
+    assert store.load_retired() == set()                                             # NOT excluded
 
 
 def test_clear_variety_decision_is_scoped_to_one_variant(tmp_path, monkeypatch):
@@ -361,27 +382,31 @@ def test_clear_variety_decision_is_scoped_to_one_variant(tmp_path, monkeypatch):
     assert decisions_store.confirm_map() == {"absolute black": "no"}      # the other decision survives
 
 
-def test_bulk_unmint_processes_each_key_best_effort(tmp_path, monkeypatch):
-    """Bulk unmint applies unmint_variation to every Key and is per-key isolated: a 404/409 on one Key is
-    recorded in `skipped` and the rest still proceed (a partial failure never blocks the batch)."""
+def test_bulk_unmint_collapses_siblings_to_one_variety_and_is_best_effort(tmp_path, monkeypatch):
+    """Bulk: Keys collapse to distinct varieties (two sibling Keys -> the variety removed ONCE, all three
+    siblings out); an unknown Key lands in `skipped` and the rest proceed; partial success is 200."""
     from stone_pipeline import lifecycle
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-
-    seen = []
-
-    def fake_unmint(key, force=False):
-        seen.append(key)
-        if key == "bad_key":
-            return {"error": "unknown variation 'bad_key'"}, 404
-        return {"retired": key, "mint_decision_cleared": 1}, 200
-
-    monkeypatch.setattr(lifecycle, "unmint_variation", fake_unmint)
+    captured = {}
+    _stub_ledger_and_sync(monkeypatch, captured)
     result, code = lifecycle.unmint_variations(
-        ["slab_granite_x", "block_granite_x", "bad_key"])
+        ["slab_granite_crystal_white_a", "block_granite_crystal_white_b", "bad_key"])
     assert code == 200
-    assert seen == ["slab_granite_x", "block_granite_x", "bad_key"]        # every Key attempted
-    assert result["requested"] == 3 and result["unminted_count"] == 2
+    assert result["requested"] == 3 and result["variety_count"] == 1 and result["unminted_count"] == 3
     assert result["skipped"] == [{"key": "bad_key", "code": 404, "error": "unknown variation 'bad_key'"}]
+
+
+def test_unmint_reports_an_honest_status_when_nothing_was_removed(tmp_path, monkeypatch):
+    """#3: nothing removed must NOT look like success -- all unknown -> 404; live products with no force ->
+    409 (and force cascades to 200)."""
+    from stone_pipeline import lifecycle
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    _stub_ledger_and_sync(monkeypatch, {})
+    assert lifecycle.unmint_variations(["nope_1", "nope_2"])[1] == 404
+    _stub_ledger_and_sync(monkeypatch, {}, live=2)                                   # variety has live products
+    result, code = lifecycle.unmint_variation("slab_granite_crystal_white_a")
+    assert code == 409 and result["variety_count"] == 0 and result["skipped"][0]["code"] == 409
+    assert lifecycle.unmint_variation("slab_granite_crystal_white_a", force=True)[1] == 200
 
 
 def test_bulk_unmint_rejects_empty_or_invalid_keys(tmp_path, monkeypatch):
@@ -456,3 +481,69 @@ def test_unmint_all_minted_derives_keys_from_the_minted_list(monkeypatch):
     # no committed base -> the 503 guard propagates
     monkeypatch.setattr(lifecycle, "list_minted_variations", lambda: ({"error": "no base"}, 503))
     assert lifecycle.unmint_all_minted()[1] == 503
+
+
+def test_committed_base_keys_reads_the_real_csv_and_never_falls_back_to_the_seed(tmp_path, monkeypatch):
+    """#1: 'minted' = not in the CURRENT base file, and ONLY that. Reads a real CSV; an ABSENT base returns
+    EMPTY (so callers 503) instead of silently falling back to the frozen pristine seed and over-removing."""
+    import types
+    from stone_pipeline import lifecycle
+    from stone_pipeline.config import settings as settings_mod
+    base = tmp_path / "variants_export_base.csv"
+    base.write_text("Key,Name,Image,Aliases\nslab_granite_a_1,A,,\nblock_granite_a_2,A,,\n,blank,,\n",
+                    encoding="utf-8")
+    seed = tmp_path / "variants_export_base.seed.csv"
+    seed.write_text("Key,Name\nslab_granite_SEEDONLY_9,Seed\n", encoding="utf-8")    # a seed that DIFFERS
+    # _committed_base_keys imports SETTINGS function-locally, so patch the settings MODULE attribute it reads
+    monkeypatch.setattr(settings_mod, "SETTINGS", types.SimpleNamespace(paths=types.SimpleNamespace(
+        variants_export_base_csv=base, variants_export_base_seed_csv=seed)))
+    assert lifecycle._committed_base_keys() == {"slab_granite_a_1", "block_granite_a_2"}   # blank Key dropped
+    base.unlink()                                                                       # base absent post-roll
+    assert lifecycle._committed_base_keys() == set()                                    # NOT the seed's keys
+
+
+def test_unmint_against_a_real_ledger_tombstones_every_sibling_and_keeps_the_key_unexcluded(tmp_path, monkeypatch):
+    """#4 seam test -- the REAL path: a real Ledger and the real sync.retire_variation / in-flight guard /
+    live-products check (only the ledger file location is swapped). ONE Key of a 3-Key synced variety ->
+    three kind='variation' tombstones (the removals pull deletes all three), the rows held 'retiring', the
+    bystander untouched, the mint decision cleared, and the Key NOT in the retired-exclusion (resurfaces)."""
+    from stone_pipeline import lifecycle
+    from stone_pipeline.ledger import sync
+    from stone_pipeline.ledger.db import Ledger, now_iso
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
+    p, now = tmp_path / "dev.ledger", now_iso()
+
+    def _var(ledger, key, name):
+        ledger.upsert("variation", {"key": key, "branch": key.split("_")[0], "type": "Granite", "name": name,
+                                    "aliases": "[]", "image_url": "", "image_sha256": None,
+                                    "image_model": None, "volume": "", "medusa_id": "V", "in_full": 1,
+                                    "payload_hash": "", "state": "synced", "first_seen": now,
+                                    "last_synced": now, "created_at": now, "updated_at": now}, pk=("key",))
+
+    sibs = ["slab_granite_crystal_white_aaaaaaaa-aaaa-5aaa-aaaa-aaaaaaaaaaaa",
+            "block_granite_crystal_white_bbbbbbbb-bbbb-5bbb-bbbb-bbbbbbbbbbbb",
+            "tile_granite_crystal_white_cccccccc-cccc-5ccc-cccc-cccccccccccc"]
+    other = "slab_granite_absolute_black_dddddddd-dddd-5ddd-dddd-dddddddddddd"
+    with Ledger.open(p, env="development") as ledger:
+        for k in sibs:
+            _var(ledger, k, "Crystal White")
+        _var(ledger, other, "Absolute Black")
+
+    def _real_op(name, work):                       # real ledger + real sync; only the path is swapped
+        with Ledger.open(p, env="development") as ledger:
+            return work(ledger, sync), 200
+    monkeypatch.setattr(lifecycle, "_ledger_op", _real_op)
+
+    result, code = lifecycle.unmint_variation(sibs[0])                              # ONE key in
+    assert code == 200 and result["variety_count"] == 1
+    assert sorted(result["unminted"]) == sorted(sibs)                              # all three siblings out
+    with Ledger.open(p, env="development") as ledger:
+        removed = {(r["external_id"], r["kind"])
+                   for r in ledger.execute("SELECT external_id, kind FROM removed")}
+        assert removed == {(k, "variation") for k in sibs}                         # tombstoned; bystander not
+        for k in sibs:
+            assert ledger.get("variation", "key", k)["state"] == "retiring"        # held until Medusa acks
+        assert ledger.get("variation", "key", other)["state"] == "synced"          # bystander untouched
+    assert decisions_store.confirm_map() == {}                                     # mint decision cleared
+    assert store.load_retired() == set()                                           # NOT excluded -> resurfaces
