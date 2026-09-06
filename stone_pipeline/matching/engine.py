@@ -154,6 +154,18 @@ class VariationMatch:
     method: str
     score: float
     candidates: list[tuple[str, str, float]]  # (cid, canonical, score) for review
+    # A genuine same-name duplicate the block could not separate (2+ varieties sharing one canonical name,
+    # detected at either the exact tier or the fuzzy top-score tie). It is a same-type AMBIGUITY, not a miss:
+    # the match-stage retries (clean-name, operator-type) must NOT fire on it and silently pick/escape one,
+    # so this is the single, explicit signal the guard reads instead of decoding the method string.
+    ambiguous: bool = False
+
+
+# Phonetic tier (4) char-similarity floor, on char_similarity's 0..100 scale (jaro-winkler x 100). Guards
+# the phonetic exact tier so a phonetic collision does not over-merge across dissimilar spellings. A pure
+# NAME-similarity threshold: independent of product domain and brand (a matcher tuning value, not a per-pack
+# or per-source setting), so it lives here with the engine, alongside the alias_resolver's _CHAR_* floors.
+_PHONETIC_CHAR_FLOOR = 85.0
 
 
 class VariationEngine:
@@ -184,6 +196,19 @@ class VariationEngine:
         if nc and cand.block_colors and nc not in cand.block_colors:
             return False
         return True
+
+    def _duplicate_canonical_group(self, cids) -> Optional[list[str]]:
+        """The first group of 2+ candidate ids that share ONE canonical name -- a genuine same-name
+        duplicate the block could not separate (e.g. two 'Calacatta Gold' varieties). None when every
+        candidate has a distinct canonical: candidates that merely SHARE a family ALIAS ('Arabescato' ->
+        many 'Arabescato ...') have different canonicals and are NOT duplicates. Defined ONCE here so the
+        exact tier and the fuzzy top-score tie decide 'tied duplicate -> ambiguous' the same way."""
+        groups: dict[str, list[str]] = {}
+        for cid in cids:
+            c = self._candidate(cid)
+            if c:
+                groups.setdefault(proj.norm(c.canonical), []).append(cid)
+        return next((g for g in groups.values() if len(g) > 1), None)
 
     def _resolve_single(
         self,
@@ -252,15 +277,11 @@ class VariationEngine:
             # export-row order). Route those to review. Candidates that merely SHARE this surface as an
             # alias but have DIFFERENT canonicals (e.g. 12 'Arabescato ...' varieties sharing the
             # 'Arabescato' family alias) are NOT ambiguous -- let block + fuzzy resolve them normally.
-            canon = {}
-            for cid in ids:
-                c = self._candidate(cid)
-                if c:
-                    canon.setdefault(proj.norm(c.canonical), []).append(cid)
-            dup = next((cids for cids in canon.values() if len(cids) > 1), None)
+            dup = self._duplicate_canonical_group(ids)
             if dup:
                 cands = [(cid, c.canonical if (c := self._candidate(cid)) else None, 100.0) for cid in dup[:3]]
-                return VariationMatch(None, None, Confidence.low, f"{method}_ambiguous", 100.0, cands)
+                return VariationMatch(None, None, Confidence.low, f"{method}_ambiguous", 100.0, cands,
+                                      ambiguous=True)
         return None
 
     def match(
@@ -313,7 +334,7 @@ class VariationEngine:
                 continue
             if _colour_conflict(query, cand.canonical):
                 continue
-            if proj.char_similarity(query, cand.canonical) >= 85.0:
+            if proj.char_similarity(query, cand.canonical) >= _PHONETIC_CHAR_FLOOR:
                 guarded.append(cid)
         match = self._resolve_single(set(guarded), "phonetic", Confidence.medium,
                                      block_type, block_color)
@@ -350,18 +371,14 @@ class VariationEngine:
                 # HOLD-not-guess: mirror the exact tier -- if the top fuzzy score is TIED between candidates
                 # that share a canonical name (the same variety name under >1 stone type, e.g. 'Calacatta
                 # Gold' marble vs dolomite_marble), auto-accepting picks one by arbitrary export-row order.
-                # Route that duplicate to review. A shared family ALIAS across distinct varieties
-                # ('Arabescato' -> many 'Arabescato ...') has different canonicals, so it still resolves;
-                # a lone typo correction ('Bianco Carara' -> the one 'Bianco Carrara') is unaffected.
-                tied_canon: dict[str, int] = {}
-                for cid, _n, s in scored:
-                    if s != top_score:
-                        break
-                    c = self._candidate(cid)
-                    if c:
-                        tied_canon[proj.norm(c.canonical)] = tied_canon.get(proj.norm(c.canonical), 0) + 1
-                if any(n > 1 for n in tied_canon.values()):
-                    return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3])
+                # Route that duplicate to review, flagged AMBIGUOUS so the match-stage retries do not fire
+                # on it (same-type ambiguity, the same rule as the exact tier -- one detector, one flag). A
+                # shared family ALIAS across distinct varieties ('Arabescato' -> many 'Arabescato ...') has
+                # different canonicals, so it still resolves; a lone typo ('Bianco Carara') is unaffected.
+                tied = [cid for cid, _n, s in scored if s == top_score]
+                if self._duplicate_canonical_group(tied):
+                    return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3],
+                                          ambiguous=True)
                 return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy", top_score, scored[:3])
             if top_score >= self.review_floor:
                 return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3])

@@ -122,6 +122,33 @@ def test_two_same_name_candidates_of_a_foreign_type_still_do_not_bind():
     assert engine.match("Absolute Black", block_type="marble").cid is None
 
 
+def test_tied_same_name_duplicate_is_flagged_ambiguous_at_both_tiers():
+    """A genuine same-type duplicate -- 2+ varieties of the SAME type sharing one canonical name -- must not
+    bind and must carry the explicit `ambiguous` flag, whether it surfaces at the EXACT tier (the query is
+    the shared name) or the FUZZY tier (a typo ties them at the top score). The flag is what the match stage
+    reads to keep its clean-name / operator-type retries from silently picking or escaping the duplicate; it
+    is the ONE signal, replacing the old method-string suffix, so both tiers behave consistently. A real
+    same-type duplicate quarry name (two 'Calacatta Gold' marbles in the export) is the case."""
+    index = CandidateIndex()
+    index.add("m1", "Calacatta Gold", surfaces=[], block_type="marble")
+    index.add("m2", "Calacatta Gold", surfaces=[], block_type="marble")
+    engine = VariationEngine(index, auto_accept=92, review_floor=84)
+    exact = engine.match("Calacatta Gold", block_type="marble")   # exact tier: shared surface
+    assert exact.cid is None and exact.ambiguous is True
+    fuzzy = engine.match("Calacata Gold", block_type="marble")    # fuzzy tier: a typo ties them
+    assert fuzzy.cid is None and fuzzy.ambiguous is True
+
+
+def test_non_duplicate_near_match_is_not_flagged_ambiguous():
+    """A near-match to a SINGLE variety (no shared-canonical duplicate) is a normal resolve, never flagged
+    ambiguous -- so the match stage's retries still apply to a genuine miss/near-match, unchanged."""
+    index = CandidateIndex()
+    index.add("m1", "Calacatta Gold", surfaces=[], block_type="marble")
+    engine = VariationEngine(index, auto_accept=92, review_floor=84)
+    match = engine.match("Calacata Gold", block_type="marble")
+    assert match.ambiguous is False
+
+
 def test_color_blocking_prevents_cross_color_match():
     index = CandidateIndex()
     index.add("b1", "Pearl", surfaces=[], block_type="granite", block_colors={"Black"})
