@@ -157,6 +157,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         #     AND the only image wipe in the system (hosted product images + enhanced markers + manifest).
         #   {"pristine": true, "keep_images": true}      same, but KEEP the hosted product images + enhanced
         #     markers (a re-scrape reuses them, no GPU/FAL rebuild) -- the test-reset path.
+        #   {"pristine": true, "keep_scrape": true}      same, but KEEP the cached scrape (data/ + outputs/)
+        #     so the catalog is rebuilt with a Republish All instead of a re-scrape.
         # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted. A GLOBAL
         # reset also clears the config.db review queue + operator-pasted attribute ids (response.config),
         # so the clean start is coherent across both stores; a scoped reset leaves config.db alone.
@@ -166,7 +168,9 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             hard = bool(body.get("hard")) if isinstance(body, dict) else False
             pristine = bool(body.get("pristine")) if isinstance(body, dict) else False
             keep_images = bool(body.get("keep_images")) if isinstance(body, dict) else False
-            result, code = lifecycle.reset(srcs, hard, pristine=pristine, keep_images=keep_images)
+            keep_scrape = bool(body.get("keep_scrape")) if isinstance(body, dict) else False
+            result, code = lifecycle.reset(srcs, hard, pristine=pristine, keep_images=keep_images,
+                                           keep_scrape=keep_scrape)
             return code, result
         return 405, {"error": "POST /config/v1/reset to reset the ledger"}
     if segments and segments[0] == "curation":
