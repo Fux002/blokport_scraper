@@ -379,10 +379,12 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         # appears in 'variants'; it only surfaces here, and only for its origin.
         #   GET /config/v1/review/origins            -> pending origin confirmations
         #   PUT /config/v1/review/origins/<ref>      {"country_iso": "IR"}         confirm: it IS this variety, from here
-        #                                            {"alias_of": "Golden Lightning", "type"?}   re-bind: it is NOT this
-        #     variety -- for THIS vendor the scraped spelling is that other existing variety (a vendor-scoped
-        #     alias, applied by the matcher's override tier on the next produce; the origin then resolves from
-        #     the right variety's documented origins, so the card does not come back).
+        #                                            {"alias_of": "Golden Lightning", "type"?, "country_iso"?}
+        #     re-bind: it is NOT this variety -- for THIS vendor the scraped spelling is that other existing
+        #     variety (a vendor-scoped alias, applied by the matcher's override tier on the next produce; the
+        #     origin then resolves from the right variety's documented origins, so the card does not come back).
+        #     With country_iso the operator also fixes the origin for THIS vendor + the target variety (a
+        #     supplier override, the top curated rung), instead of leaving it to the vendor gate's own pick.
         if len(segments) == 2 and segments[1] == "origins" and method == "GET":
             return 200, {"origins": decisions_store.list_pending("origin")}
         if len(segments) == 3 and segments[1] == "origins" and method == "PUT":
@@ -402,12 +404,21 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
                         return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
                     seed_type = vocab[proj.norm(raw_type)]
                 spelling = payload.get("scraped") or payload["variety"]
+                # the origin decision is keyed by the variety the product will BIND to (the alias target and
+                # its type), which is what derive looks up after the re-bind; validated before anything is stored
+                raw_country = (body.get("country_iso") or body.get("country") or "").strip()
+                country = _country_iso(raw_country) if raw_country else ""
+                if raw_country and not country:
+                    return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
+                target_type = seed_type or payload["stone_type"]
                 try:
                     decisions_store.set_scoped_alias(payload["source"], spelling, alias_of, seed_type)
+                    if country:
+                        decisions_store.set_origin_decision(payload["source"], alias_of, target_type, country)
                 except decisions_store.InvalidDecision as e:
                     return 400, {"error": str(e)}
                 return 200, {"ref": ref, "source": payload["source"], "spelling": spelling,
-                             "alias_of": alias_of, "seed_type": seed_type}
+                             "alias_of": alias_of, "seed_type": seed_type, "country_iso": country or None}
             raw_country = (body.get("country_iso") or body.get("country") or "").strip()
             if not (country := _country_iso(raw_country)):
                 return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
