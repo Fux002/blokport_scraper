@@ -149,3 +149,9 @@ variable "sales_channel_id" {
   default     = ""
   description = "BLOKPORT_SALES_CHANNEL_ID: this brand's Medusa sales channel (storefront). One per deployment; empty falls back to the code dev default in dev, required in prod."
 }
+
+variable "image_upgrade_batch" {
+  description = "Max legacy variant textures re-made on the best model per produce (demand-driven: only variants a product links to). 0 disables the upgrade drip."
+  type        = number
+  default     = 0
+}

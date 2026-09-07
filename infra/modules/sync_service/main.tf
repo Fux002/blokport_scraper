@@ -233,6 +233,10 @@ resource "aws_ecs_task_definition" "this" {
         # enough that one produce dispatches every source's pending windows in one pass. Actual FAL spend is
         # still bounded by real pending images (each job keeps its own fal_max_usd ceiling).
         { name = "SCRAPER_ENHANCE_MAX_JOBS", value = tostring(var.enhance_max_jobs) },
+        # Texture quality drip: per produce, re-make up to N legacy textures on the current best model,
+        # ONLY for variants a product actually links to, once each (durable marker). Bounded spend per
+        # run while the backlog drains. 0 = off.
+        { name = "SCRAPER_IMAGE_UPGRADE_BATCH", value = tostring(var.image_upgrade_batch) },
         # Auto-texture: after produce QUEUES new-variant textures, submit ONE GPU job (RUN_MODE=generate-
         # textures) to generate + upload them -- reusing the SAME queue/jobdef below. Ships OFF; flip on only
         # after the :gpu image carries ben2 (else the job fails at background-removal).

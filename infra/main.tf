@@ -287,8 +287,8 @@ module "gpu_enhance_prod" {
   # 96 vCPU = up to 24 g4dn.xlarge in parallel (account G/VT quota is 384). Prod ran the module default 16
   # (4 GPUs) = ~6h for a full-catalog enhance backlog; 96 compresses it to ~1.5-2h. min stays 0 ($0 idle),
   # same total GPU-hours -- only wall-clock shrinks. Dev is 128; both are well within the 384 quota.
-  max_vcpus      = 96
-  alert_email    = var.alert_email
+  max_vcpus   = 96
+  alert_email = var.alert_email
   # FAL_KEY (+ proxy) for FLUX texture gen + FAL de-watermark, by convention like dev. Empty until the
   # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
   ssm_secret_arns     = local.prod_ssm_secrets
@@ -332,9 +332,10 @@ module "sync_service_dev" {
   target_env     = "development"
   image_repo_url = local.ecr_repo_url
   # DEV tracks :core (= what's on main); the branch is merged. :core = bbf35a2 (WAL + local-disk ledger).
-  image_tag      = var.image_tag
-  region         = var.region
-  staging_bucket = var.dev_staging_bucket
+  image_tag           = var.image_tag
+  image_upgrade_batch = var.dev_image_upgrade_batch
+  region              = var.region
+  staging_bucket      = var.dev_staging_bucket
   # The produce subprocess builds ~2M combinations in RAM (the catalog peak) sharing the task with BOTH
   # servers -- 2 GB OOM-killed it (exit -9). tree_build no longer duplicates that 2M-row set (a2433dd),
   # dropping the peak by a full copy, so 8 GB is comfortable (produce ~1.5 GB + servers ~0.5 GB) at 1
@@ -416,12 +417,13 @@ module "sync_service_prod" {
   sales_channel_id = var.prod_sales_channel_id
   count            = local.prod_enabled ? 1 : 0
 
-  target_env     = "production"
-  image_repo_url = local.ecr_repo_url
-  image_tag      = var.prod_image_tag
-  region         = var.region
-  staging_bucket = var.prod_staging_bucket
-  memory         = 8192 # same catalog RAM peak as dev (produce ~1.5 GB + servers ~0.5 GB)
+  target_env          = "production"
+  image_repo_url      = local.ecr_repo_url
+  image_tag           = var.prod_image_tag
+  region              = var.region
+  staging_bucket      = var.prod_staging_bucket
+  memory              = 8192 # same catalog RAM peak as dev (produce ~1.5 GB + servers ~0.5 GB)
+  image_upgrade_batch = var.prod_image_upgrade_batch
 
   vpc_id                = data.terraform_remote_state.platform_prod[0].outputs.vpc_id
   private_subnet_ids    = data.terraform_remote_state.platform_prod[0].outputs.private_subnet_ids

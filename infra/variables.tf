@@ -193,3 +193,18 @@ variable "platform_state_bucket" {
   default     = "blokport-tfstate"
   description = "S3 bucket holding the PLATFORM terraform state this brand's tasks read (VPC/cluster/SG outputs). Per-brand platform -> set to that brand's state bucket. The scraper's OWN backend bucket is in backend.tf (a backend block can't take a variable; a 2nd brand overrides it with -backend-config)."
 }
+
+# Texture quality drip: legacy variant textures re-made on the current best model, capped per produce and
+# scoped to variants a product actually links to (never a whole-catalog backfill). Each Key is upgraded
+# once, recorded in a durable marker, so a re-run never re-charges. 0 disables it.
+variable "dev_image_upgrade_batch" {
+  description = "Max legacy textures upgraded per produce in dev. 0 = off."
+  type        = number
+  default     = 0
+}
+
+variable "prod_image_upgrade_batch" {
+  description = "Max legacy textures upgraded per produce in prod. 0 = off."
+  type        = number
+  default     = 0
+}

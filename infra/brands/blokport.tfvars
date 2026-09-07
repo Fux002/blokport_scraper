@@ -36,6 +36,11 @@ prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :g
 # :4200 admin UI (source.enhance / source.watermarked), NOT these infra flags -- these just make prod's
 # task config identical to dev so the UI behaves the same. prod gpu image (gpu-782f18c7) == dev's :gpu
 # digest sha256:20767ddd -> carries ben2 + reads SCRAPER_ env, so auto_texture + prod bucket are safe.
+# Texture quality drip: per produce, re-make up to N legacy textures on the current best model, ONLY for
+# variants a product actually links to, once each (durable S3 marker). 257 product-backed textures are on
+# the old model today, so 300 clears the backlog in one produce and then idles at ~0 (each Key once).
+prod_image_upgrade_batch = 300
+
 prod_auto_enhance     = true
 prod_auto_texture     = true
 prod_require_enhanced = true
