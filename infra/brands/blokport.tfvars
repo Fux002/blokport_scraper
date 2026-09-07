@@ -39,6 +39,8 @@ prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :g
 # Texture quality drip: per produce, re-make up to N legacy textures on the current best model, ONLY for
 # variants a product actually links to, once each (durable S3 marker). 257 product-backed textures are on
 # the old model today, so 300 clears the backlog in one produce and then idles at ~0 (each Key once).
+dev_image_upgrade_batch  = 300
+
 prod_image_upgrade_batch = 300
 
 prod_auto_enhance     = true
