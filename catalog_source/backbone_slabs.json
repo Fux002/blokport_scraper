@@ -3438,7 +3438,7 @@
     },
     {
       "variant_id": 236,
-      "variant": "Blue Stone Basalt",
+      "variant": "Blue Stone",
       "category": "Slabs",
       "stone_type": "Basalt",
       "color": [
@@ -3467,16 +3467,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Blue Stone Basalt"
+      ],
       "image_file": "slab_rb_236_basalt_blue_stone_basalt.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_basalt_blue_stone_basalt_321641af-5bb8-4c8d-bda6-168af0eb3564"
+      "key": "slab_basalt_blue_stone_948260e4-570c-5b93-94ca-234607f8206b"
     },
     {
       "variant_id": 237,
-      "variant": "Mongolian Black Basalt",
+      "variant": "Mongolian Black",
       "category": "Slabs",
       "stone_type": "Basalt",
       "color": [
@@ -3505,12 +3507,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Mongolian Black Basalt"
+      ],
       "image_file": "slab_rb_237_basalt_mongolian_black_basalt.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_basalt_mongolian_black_basalt_79911b7e-44c7-4c81-a69f-771bcf4b805f"
+      "key": "slab_basalt_mongolian_black_ba585d52-eead-576b-9e92-98b5fa5f4017"
     },
     {
       "variant_id": 238,
@@ -3630,7 +3634,7 @@
     },
     {
       "variant_id": 241,
-      "variant": "Columbia Black Basalt",
+      "variant": "Columbia Black",
       "category": "Slabs",
       "stone_type": "Basalt",
       "color": [
@@ -3659,12 +3663,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Columbia Black Basalt"
+      ],
       "image_file": "slab_rb_241_basalt_columbia_black_basalt.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_basalt_columbia_black_basalt_7fcb7d1f-6639-46e6-9a74-4a45435a2f3e"
+      "key": "slab_basalt_columbia_black_f4a7e5c9-197f-5492-807c-20f6e36a12c3"
     },
     {
       "variant_id": 399,
@@ -13734,7 +13740,7 @@
     },
     {
       "variant_id": 248,
-      "variant": "Super White Dolomite",
+      "variant": "Super White",
       "category": "Slabs",
       "stone_type": "Dolomite",
       "color": [
@@ -13763,12 +13769,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Super White Dolomite"
+      ],
       "image_file": "slab_rb_248_dolomite_super_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_dolomite_super_white_dolomite_341fad68-352d-4e79-a35b-924a5b4de7f6"
+      "key": "slab_dolomite_super_white_c84613a4-eae0-5fe8-920f-1b63b5bfe4e6"
     },
     {
       "variant_id": 249,
@@ -13849,7 +13857,7 @@
     },
     {
       "variant_id": 251,
-      "variant": "Fantasy White Dolomite",
+      "variant": "Fantasy White",
       "category": "Slabs",
       "stone_type": "Dolomite",
       "color": [
@@ -13878,16 +13886,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fantasy White Dolomite"
+      ],
       "image_file": "slab_rb_251_dolomite_fantasy_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_dolomite_fantasy_white_dolomite_2b058bd7-d032-40d1-b5b2-dabeeaf8b3b6"
+      "key": "slab_dolomite_fantasy_white_8e4bff64-af04-528e-81e8-8276b702464a"
     },
     {
       "variant_id": 252,
-      "variant": "King White Dolomite",
+      "variant": "King White",
       "category": "Slabs",
       "stone_type": "Dolomite",
       "color": [
@@ -13916,16 +13926,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "King White Dolomite"
+      ],
       "image_file": "slab_rb_252_dolomite_king_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_dolomite_king_white_dolomite_0ee60960-9332-43d0-b059-cebe8e5cf017"
+      "key": "slab_dolomite_king_white_505beb2b-e394-52fb-b86d-fc7ce1267778"
     },
     {
       "variant_id": 253,
-      "variant": "Areti White Dolomite",
+      "variant": "Areti White",
       "category": "Slabs",
       "stone_type": "Dolomite",
       "color": [
@@ -13954,12 +13966,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Areti White Dolomite"
+      ],
       "image_file": "slab_rb_253_dolomite_areti_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_dolomite_areti_white_dolomite_79ad2c38-eca2-486c-b9b8-dd54a4e6a4d2"
+      "key": "slab_dolomite_areti_white_84648091-371a-5fe5-9078-83b9f1f0548f"
     },
     {
       "variant_id": 293,
@@ -15448,7 +15462,7 @@
     },
     {
       "variant_id": 261,
-      "variant": "Via Lattea Gneiss",
+      "variant": "Via Lattea",
       "category": "Slabs",
       "stone_type": "Gneiss",
       "color": [
@@ -15479,12 +15493,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Via Lattea Gneiss"
+      ],
       "image_file": "slab_rb_261_gneiss_via_lattea_gneiss.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_gneiss_via_lattea_gneiss_5a71ce97-b4b1-4a24-a466-095dc6a01ae1"
+      "key": "slab_gneiss_via_lattea_1c728643-33ba-508b-844a-00e358204a1b"
     },
     {
       "variant_id": 262,
@@ -15528,7 +15544,7 @@
     },
     {
       "variant_id": 263,
-      "variant": "Silver Waves Gneiss",
+      "variant": "Silver Waves",
       "category": "Slabs",
       "stone_type": "Gneiss",
       "color": [
@@ -15558,12 +15574,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Silver Waves Gneiss"
+      ],
       "image_file": "slab_rb_263_gneiss_silver_waves_gneiss.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_gneiss_silver_waves_gneiss_ebc3f57b-91e1-4cc9-bf77-8d70a9850d23"
+      "key": "slab_gneiss_silver_waves_f9dcaf20-110a-5c3e-a7de-33a1f6767151"
     },
     {
       "variant_id": 264,
@@ -257837,6 +257855,11 @@
           "variant": "Sahara Gold Limestone",
           "variant_id": 156,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Sahara Gold Limestone",
+          "variant_id": 156,
+          "reason": "stone_suffix"
         }
       ],
       "key": "slab_limestone_sahara_gold_74943407-edff-4b5e-9c66-230d5d1db660"
@@ -273330,7 +273353,7 @@
     },
     {
       "variant_id": 308,
-      "variant": "Wooden Black Marble",
+      "variant": "Wooden Black",
       "category": "Slabs",
       "stone_type": "Marble",
       "color": [
@@ -273359,12 +273382,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Wooden Black Marble"
+      ],
       "image_file": "slab_rb_308_marble_wooden_black_marble.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_marble_wooden_black_marble_d0cfc749-402f-428b-9a5d-2762537f71e7"
+      "key": "slab_marble_wooden_black_d7b3f90d-17bd-5267-acf3-3eb11a3dd68d"
     },
     {
       "variant_id": 309,
@@ -476823,7 +476848,7 @@
     },
     {
       "variant_id": 161,
-      "variant": "Green Onyx Dark",
+      "variant": "Green Dark",
       "category": "Slabs",
       "stone_type": "Onyx",
       "color": [
@@ -476845,12 +476870,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Green Onyx Dark"
+      ],
       "image_file": "slab_rb_161_onyx_green_onyx_dark.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_onyx_green_onyx_dark_3ab5fa67-5714-4d6a-9dec-12a8f4e024ca"
+      "key": "slab_onyx_green_dark_42a4202f-1846-5f14-8572-df83dc8d089f"
     },
     {
       "variant_id": 162,
@@ -478554,6 +478581,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Arco Iris Onyx",
+          "variant_id": 170,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Arco Iris Onyx",
           "variant_id": 170,
@@ -492577,7 +492609,7 @@
     },
     {
       "variant_id": 265,
-      "variant": "Trentino Red Porphyry",
+      "variant": "Trentino Red",
       "category": "Slabs",
       "stone_type": "Porphyry",
       "color": [
@@ -492602,50 +492634,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Trentino Red Porphyry"
+      ],
       "image_file": "slab_rb_265_porphyry_trentino_red_porphyry.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_porphyry_trentino_red_porphyry_e2a83c93-618b-41c4-8e2b-6989c394cf31"
-    },
-    {
-      "variant_id": 266,
-      "variant": "Trentino Grey Porphyry",
-      "category": "Slabs",
-      "stone_type": "Porphyry",
-      "color": [
-        "Grey"
-      ],
-      "finishes": [
-        "Sawn Cut",
-        "Brushed and Tumbled",
-        "Tumbled",
-        "Split Face",
-        "Brushed",
-        "Chiseled",
-        "Flamed and Brushed",
-        "Antique",
-        "Raw",
-        "Bush Hammered",
-        "Sandblasted",
-        "Sandblasted and Brushed",
-        "Natural Cleft",
-        "Flamed"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_266_porphyry_trentino_grey_porphyry.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [],
-      "key": "slab_porphyry_trentino_grey_porphyry_bf3e4d0b-9303-4127-8ba0-b65f95b85163"
+      "key": "slab_porphyry_trentino_red_2c22d459-d5f2-5220-82ec-d796c0fef22c"
     },
     {
       "variant_id": 267,
-      "variant": "Trentino Purple Porphyry",
+      "variant": "Trentino Purple",
       "category": "Slabs",
       "stone_type": "Porphyry",
       "color": [
@@ -492671,12 +492671,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Trentino Purple Porphyry"
+      ],
       "image_file": "slab_rb_267_porphyry_trentino_purple_porphyry.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_porphyry_trentino_purple_porphyry_a2f797e6-b42e-40c0-8ab6-25279ec54624"
+      "key": "slab_porphyry_trentino_purple_76964cbb-120f-59b7-a2bc-1f03ce9c70fc"
     },
     {
       "variant_id": 268,
@@ -494879,12 +494881,19 @@
         "Grey Porphyry Granite",
         "Grigio",
         "Grey Granite",
-        "Grey"
+        "Grey",
+        "Trentino Grey Porphyry"
       ],
       "image_file": "slab_rb_10507_porphyry_trentino_grey.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
+      "merged_from": [
+        {
+          "variant": "Trentino Grey Porphyry",
+          "variant_id": 266,
+          "reason": "stone_suffix"
+        }
+      ],
       "key": "slab_porphyry_trentino_grey_57357152-5239-49ce-88f4-0ee750305ecb"
     },
     {
@@ -495186,7 +495195,7 @@
     },
     {
       "variant_id": 196,
-      "variant": "Sea Pearl Quartzite",
+      "variant": "Sea Pearl",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495218,12 +495227,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Sea Pearl Quartzite"
+      ],
       "image_file": "slab_rb_196_quartzite_sea_pearl_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_quartzite_sea_pearl_quartzite_e9c5fa01-6e3a-4da2-ac89-8850aa9c9e39"
+      "key": "slab_quartzite_sea_pearl_0c3cf2dc-c6c2-5897-b2db-8ddc746e8677"
     },
     {
       "variant_id": 197,
@@ -495346,7 +495357,7 @@
     },
     {
       "variant_id": 201,
-      "variant": "Mont Blanc Quartzite",
+      "variant": "Mont Blanc",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495377,16 +495388,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Mont Blanc Quartzite"
+      ],
       "image_file": "slab_rb_201_quartzite_mont_blanc_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_quartzite_mont_blanc_quartzite_1a1a8f4f-890f-4406-a592-cbb26cde2329"
+      "key": "slab_quartzite_mont_blanc_300f2814-b54a-5560-a4c8-956fc68e025e"
     },
     {
       "variant_id": 202,
-      "variant": "Super White Quartzite",
+      "variant": "Super White",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495416,12 +495429,20 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Super White Quartzite"
+      ],
       "image_file": "slab_rb_202_quartzite_super_white_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
-      "merged_from": [],
-      "key": "slab_quartzite_super_white_quartzite_8646f9be-d917-41c7-aa90-6ca1d3e3d486"
+      "merged_from": [
+        {
+          "variant": "Super White Quartzite",
+          "variant_id": 202,
+          "reason": "stone_suffix"
+        }
+      ],
+      "key": "slab_quartzite_super_white_c84613a4-eae0-5fe8-920f-1b63b5bfe4e6"
     },
     {
       "variant_id": 203,
@@ -495583,7 +495604,7 @@
     },
     {
       "variant_id": 208,
-      "variant": "Madre Perla Quartzite",
+      "variant": "Madre Perla",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495614,16 +495635,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Madre Perla Quartzite"
+      ],
       "image_file": "slab_rb_208_quartzite_madre_perla_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_quartzite_madre_perla_quartzite_85143d1d-5537-413a-bf37-8dd88983535c"
+      "key": "slab_quartzite_madre_perla_f3ed54fa-2c2b-5883-b6c0-c91161a863f4"
     },
     {
       "variant_id": 209,
-      "variant": "Fantasy Brown Quartzite",
+      "variant": "Fantasy Brown",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495653,12 +495676,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fantasy Brown Quartzite"
+      ],
       "image_file": "slab_rb_209_quartzite_fantasy_brown_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_quartzite_fantasy_brown_quartzite_3e9da17a-f5b4-4ac0-b589-c1277a839e06"
+      "key": "slab_quartzite_fantasy_brown_6316ad84-f6b3-5b03-b370-9ca07640f938"
     },
     {
       "variant_id": 210,
@@ -495703,7 +495728,7 @@
     },
     {
       "variant_id": 211,
-      "variant": "Golden Storm Quartzite",
+      "variant": "Golden Storm",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495733,16 +495758,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Golden Storm Quartzite"
+      ],
       "image_file": "slab_rb_211_quartzite_golden_storm_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_quartzite_golden_storm_quartzite_f1730a54-940f-42dd-81a3-c15f0d538235"
+      "key": "slab_quartzite_golden_storm_678b352f-0b5a-53d2-b18e-3375837e0072"
     },
     {
       "variant_id": 212,
-      "variant": "Fleur de Lis Quartzite",
+      "variant": "Fleur de Lis",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495774,12 +495801,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fleur de Lis Quartzite"
+      ],
       "image_file": "slab_rb_212_quartzite_fleur_de_lis_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_quartzite_fleur_de_lis_quartzite_8c2d8bef-dbc3-4bea-9d10-a1e15da8342f"
+      "key": "slab_quartzite_fleur_de_lis_b3efe65d-f082-5fc1-89ad-8dbb0db94fa8"
     },
     {
       "variant_id": 213,
@@ -495823,7 +495852,7 @@
     },
     {
       "variant_id": 214,
-      "variant": "Iron Red Quartzite",
+      "variant": "Iron Red",
       "category": "Slabs",
       "stone_type": "Quartzite",
       "color": [
@@ -495853,12 +495882,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Iron Red Quartzite"
+      ],
       "image_file": "slab_rb_214_quartzite_iron_red_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_quartzite_iron_red_quartzite_387424fb-26f8-42fd-88f5-a9bfd5101244"
+      "key": "slab_quartzite_iron_red_f31b4fc0-d96f-55b1-a0e7-f8a1e0cb068a"
     },
     {
       "variant_id": 215,
@@ -495952,6 +495983,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Perla Venata Quartzite",
+          "variant_id": 205,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Perla Venata Quartzite",
           "variant_id": 205,
@@ -502220,6 +502256,11 @@
           "variant": "Taj Mahal Quartzite",
           "variant_id": 195,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Taj Mahal Quartzite",
+          "variant_id": 195,
+          "reason": "stone_suffix"
         }
       ],
       "key": "slab_quartzite_taj_mahal_d1336325-93c8-494a-b5a8-147f03c5ba72"
@@ -503951,7 +503992,7 @@
     },
     {
       "variant_id": 180,
-      "variant": "Jodhpur Pink Sandstone",
+      "variant": "Jodhpur Pink",
       "category": "Slabs",
       "stone_type": "Sandstone",
       "color": [
@@ -503977,12 +504018,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Jodhpur Pink Sandstone"
+      ],
       "image_file": "slab_rb_180_sandstone_jodhpur_pink_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_sandstone_jodhpur_pink_sandstone_a82caaa6-23af-4087-bb72-d86288c5b106"
+      "key": "slab_sandstone_jodhpur_pink_c6b7c631-0f46-5ce7-9df7-ae4309785764"
     },
     {
       "variant_id": 181,
@@ -504036,7 +504079,7 @@
     },
     {
       "variant_id": 182,
-      "variant": "Autumn Brown Sandstone",
+      "variant": "Autumn Brown",
       "category": "Slabs",
       "stone_type": "Sandstone",
       "color": [
@@ -504062,16 +504105,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Autumn Brown Sandstone"
+      ],
       "image_file": "slab_rb_182_sandstone_autumn_brown_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_sandstone_autumn_brown_sandstone_1d4865ef-a618-456f-9a64-8850e9e54af7"
+      "key": "slab_sandstone_autumn_brown_bd8a90f9-7406-5736-8ace-4f928ea3273b"
     },
     {
       "variant_id": 186,
-      "variant": "Kandla Grey Sandstone",
+      "variant": "Kandla Grey",
       "category": "Slabs",
       "stone_type": "Sandstone",
       "color": [
@@ -504097,16 +504142,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Kandla Grey Sandstone"
+      ],
       "image_file": "slab_rb_186_sandstone_kandla_grey_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_sandstone_kandla_grey_sandstone_15db2e4f-f502-4239-ab34-eeffc5d398b4"
+      "key": "slab_sandstone_kandla_grey_79afc268-6a35-5d8f-8253-fcaf8f7dd7d5"
     },
     {
       "variant_id": 187,
-      "variant": "Desert Sand Sandstone",
+      "variant": "Desert Sand",
       "category": "Slabs",
       "stone_type": "Sandstone",
       "color": [
@@ -504132,12 +504179,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Desert Sand Sandstone"
+      ],
       "image_file": "slab_rb_187_sandstone_desert_sand_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_sandstone_desert_sand_sandstone_274fc219-738b-4b6b-a8af-29b8a52217fe"
+      "key": "slab_sandstone_desert_sand_939579ca-612b-5dc1-a7f1-99e84088228f"
     },
     {
       "variant_id": 188,
@@ -504483,6 +504532,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Agra Red Sandstone",
+          "variant_id": 179,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Agra Red Sandstone",
           "variant_id": 179,
@@ -507646,6 +507700,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Camel Dust Sandstone",
+          "variant_id": 183,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Camel Dust Sandstone",
           "variant_id": 183,
@@ -520164,6 +520223,11 @@
           "variant": "Raj Green Sandstone",
           "variant_id": 184,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Raj Green Sandstone",
+          "variant_id": 184,
+          "reason": "stone_suffix"
         }
       ],
       "key": "slab_sandstone_raj_green_9dddf2c9-729d-46a9-a632-45c4c01d708a"
@@ -521351,6 +521415,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Sagar Black Sandstone",
+          "variant_id": 193,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Sagar Black Sandstone",
           "variant_id": 193,
@@ -524093,6 +524162,11 @@
           "variant": "Teak Wood Sandstone",
           "variant_id": 176,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Teak Wood Sandstone",
+          "variant_id": 176,
+          "reason": "stone_suffix"
         }
       ],
       "key": "slab_sandstone_teak_wood_542c94f4-3ae1-4e1b-926d-d9136f90dc36"
@@ -526682,7 +526756,7 @@
     },
     {
       "variant_id": 270,
-      "variant": "Silver Grey Schist",
+      "variant": "Silver Grey",
       "category": "Slabs",
       "stone_type": "Schist",
       "color": [
@@ -526706,12 +526780,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Silver Grey Schist"
+      ],
       "image_file": "slab_rb_270_schist_silver_grey_schist.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_schist_silver_grey_schist_3d1fe11f-34bc-427f-afd7-906be143b180"
+      "key": "slab_schist_silver_grey_d3eb6f48-7c8d-55f9-a475-1d4b2a986196"
     },
     {
       "variant_id": 271,
@@ -526813,7 +526889,7 @@
     },
     {
       "variant_id": 274,
-      "variant": "Ostrich Grey Schist",
+      "variant": "Ostrich Grey",
       "category": "Slabs",
       "stone_type": "Schist",
       "color": [
@@ -526836,12 +526912,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Ostrich Grey Schist"
+      ],
       "image_file": "slab_rb_274_schist_ostrich_grey_schist.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "slab_schist_ostrich_grey_schist_96d98321-f868-4c68-ac08-3067bed5369f"
+      "key": "slab_schist_ostrich_grey_bc20325d-68a0-5f5a-8851-db974f7eb1eb"
     },
     {
       "variant_id": 11231,
@@ -527818,7 +527896,7 @@
     },
     {
       "variant_id": 223,
-      "variant": "Silver Grey Slate",
+      "variant": "Silver Grey",
       "category": "Slabs",
       "stone_type": "Slate",
       "color": [
@@ -527862,7 +527940,8 @@
         "Silver Grey India",
         "Raj Grey",
         "银啡麻",
-        "Yín fēi má"
+        "Yín fēi má",
+        "Silver Grey Slate"
       ],
       "image_file": "slab_rb_223_slate_silver_grey_slate.png",
       "exists": "yes",
@@ -527874,7 +527953,7 @@
           "reason": "translation"
         }
       ],
-      "key": "slab_slate_silver_grey_slate_eb104fe3-d9fa-4c73-a3c4-cc61fdf91b46"
+      "key": "slab_slate_silver_grey_d3eb6f48-7c8d-55f9-a475-1d4b2a986196"
     },
     {
       "variant_id": 224,
@@ -527982,7 +528061,7 @@
     },
     {
       "variant_id": 228,
-      "variant": "China Multicolor Slate",
+      "variant": "China Multicolor",
       "category": "Slabs",
       "stone_type": "Slate",
       "color": [
@@ -528016,7 +528095,8 @@
         "China Multicolor Rust",
         "China Rust",
         "Rustic",
-        "幻彩板"
+        "幻彩板",
+        "China Multicolor Slate"
       ],
       "image_file": "slab_rb_228_slate_china_multicolor_slate.png",
       "exists": "yes",
@@ -528028,7 +528108,7 @@
           "reason": "stone_suffix"
         }
       ],
-      "key": "slab_slate_china_multicolor_slate_c6165417-a1af-4209-825c-ed0b3666ad1d"
+      "key": "slab_slate_china_multicolor_066745bc-e089-5de4-a2f9-f1ba9b0eaff8"
     },
     {
       "variant_id": 229,
@@ -533485,6 +533565,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Montauk Blue Slate",
+          "variant_id": 227,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Montauk Blue Slate",
           "variant_id": 227,
@@ -573141,218 +573226,6 @@
       "key": "slab_limestone_vratza_limestone_04ec3232-7a83-4a38-b3b1-fd98cecc9b27"
     },
     {
-      "variant_id": 156,
-      "variant": "Sahara Gold Limestone",
-      "category": "Slabs",
-      "stone_type": "Limestone",
-      "color": [
-        "Gold",
-        "Yellow"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_156_limestone_sahara_gold_limestone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_limestone_sahara_gold_limestone_eaa13bdd-dff1-4f72-a123-ba39081da55b"
-    },
-    {
-      "variant_id": 170,
-      "variant": "Arco Iris Onyx",
-      "category": "Slabs",
-      "stone_type": "Onyx",
-      "color": [
-        "Multicolor",
-        "Green"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Sawn Cut",
-        "Split Face",
-        "Tumbled",
-        "Honed and Brushed",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_170_onyx_arco_iris_onyx.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_onyx_arco_iris_onyx_9cec4e4c-9ee9-4c74-aa75-3bfb41b7aaf2"
-    },
-    {
-      "variant_id": 176,
-      "variant": "Teak Wood Sandstone",
-      "category": "Slabs",
-      "stone_type": "Sandstone",
-      "color": [
-        "Brown",
-        "Beige"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_176_sandstone_teak_wood_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_sandstone_teak_wood_sandstone_3978328d-1aa1-4fb6-a1ff-86bce025bbb7"
-    },
-    {
-      "variant_id": 179,
-      "variant": "Agra Red Sandstone",
-      "category": "Slabs",
-      "stone_type": "Sandstone",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_179_sandstone_agra_red_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_sandstone_agra_red_sandstone_c048dd81-65e5-4728-9c84-3356a8ba264c"
-    },
-    {
-      "variant_id": 183,
-      "variant": "Camel Dust Sandstone",
-      "category": "Slabs",
-      "stone_type": "Sandstone",
-      "color": [
-        "Beige"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_183_sandstone_camel_dust_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_sandstone_camel_dust_sandstone_29e95a45-a6a3-492b-b2c0-6db30f974d37"
-    },
-    {
-      "variant_id": 184,
-      "variant": "Raj Green Sandstone",
-      "category": "Slabs",
-      "stone_type": "Sandstone",
-      "color": [
-        "Green"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_184_sandstone_raj_green_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_sandstone_raj_green_sandstone_a9867672-cf72-4dad-9ab6-0452c7caf080"
-    },
-    {
       "variant_id": 185,
       "variant": "Modak Sandstone",
       "category": "Slabs",
@@ -573425,81 +573298,6 @@
       "key": "slab_sandstone_berea_sandstone_4e197e41-00fb-4b17-97e0-098d711678a6"
     },
     {
-      "variant_id": 193,
-      "variant": "Sagar Black Sandstone",
-      "category": "Slabs",
-      "stone_type": "Sandstone",
-      "color": [
-        "Black"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_193_sandstone_sagar_black_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_sandstone_sagar_black_sandstone_017f997d-a68f-4b48-81b0-1d88f67728e0"
-    },
-    {
-      "variant_id": 195,
-      "variant": "Taj Mahal Quartzite",
-      "category": "Slabs",
-      "stone_type": "Quartzite",
-      "color": [
-        "Beige",
-        "Cream"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_195_quartzite_taj_mahal_quartzite.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_quartzite_taj_mahal_quartzite_8a70d014-5ce6-4818-9f49-116d9060594e"
-    },
-    {
       "variant_id": 198,
       "variant": "Blue Macaubas",
       "category": "Slabs",
@@ -573537,80 +573335,6 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "slab_quartzite_blue_macaubas_1005f699-f36e-414a-b15a-4c4a2f30365d"
-    },
-    {
-      "variant_id": 205,
-      "variant": "Perla Venata Quartzite",
-      "category": "Slabs",
-      "stone_type": "Quartzite",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_205_quartzite_perla_venata_quartzite.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_quartzite_perla_venata_quartzite_c06e83b3-604f-4ee1-87b0-2c8b3d522429"
-    },
-    {
-      "variant_id": 227,
-      "variant": "Montauk Blue Slate",
-      "category": "Slabs",
-      "stone_type": "Slate",
-      "color": [
-        "Blue",
-        "Grey"
-      ],
-      "finishes": [
-        "Natural Cleft",
-        "Honed",
-        "Polished",
-        "Brushed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Split Face",
-        "Tumbled",
-        "Chiseled",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "slab_rb_227_slate_montauk_blue_slate.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_slate_montauk_blue_slate_c0498586-9fc1-4a97-8bb6-5f1ae91f6e65"
     },
     {
       "variant_id": 245,

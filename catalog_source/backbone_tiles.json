@@ -3347,8 +3347,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_basalt_blue_stone_basalt_bb92dcb6-6c42-5910-977b-f9d1f9846c35",
-      "variant": "Blue Stone Basalt",
+      "key": "tile_basalt_blue_stone_257228af-6b47-5c74-bdc2-f140c9a777ba",
+      "variant": "Blue Stone",
       "category": "Tiles",
       "stone_type": "Basalt",
       "color": [
@@ -3377,15 +3377,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Blue Stone Basalt"
+      ],
       "image_file": "tile_basalt_blue_stone_basalt_bb92dcb6-6c42-5910-977b-f9d1f9846c35.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_basalt_mongolian_black_basalt_5129c0b7-271d-54e1-9776-7e3a84d8b774",
-      "variant": "Mongolian Black Basalt",
+      "key": "tile_basalt_mongolian_black_37f278aa-2210-53c3-83c7-011d5e4bf559",
+      "variant": "Mongolian Black",
       "category": "Tiles",
       "stone_type": "Basalt",
       "color": [
@@ -3414,7 +3416,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Mongolian Black Basalt"
+      ],
       "image_file": "tile_basalt_mongolian_black_basalt_5129c0b7-271d-54e1-9776-7e3a84d8b774.png",
       "exists": "no",
       "in_csv": "no",
@@ -3534,8 +3538,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_basalt_columbia_black_basalt_e2b0d1b0-8911-56d5-b542-444146044060",
-      "variant": "Columbia Black Basalt",
+      "key": "tile_basalt_columbia_black_27bf84fa-e239-5a7d-a576-e59b78bfb492",
+      "variant": "Columbia Black",
       "category": "Tiles",
       "stone_type": "Basalt",
       "color": [
@@ -3564,7 +3568,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Columbia Black Basalt"
+      ],
       "image_file": "tile_basalt_columbia_black_basalt_e2b0d1b0-8911-56d5-b542-444146044060.png",
       "exists": "no",
       "in_csv": "no",
@@ -13391,8 +13397,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_dolomite_super_white_dolomite_ff023606-4fa5-515c-942d-f88d83f629f8",
-      "variant": "Super White Dolomite",
+      "key": "tile_dolomite_super_white_bea4f3ba-a202-540e-9922-5722e8124efa",
+      "variant": "Super White",
       "category": "Tiles",
       "stone_type": "Dolomite",
       "color": [
@@ -13421,7 +13427,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Super White Dolomite"
+      ],
       "image_file": "tile_dolomite_super_white_dolomite_ff023606-4fa5-515c-942d-f88d83f629f8.png",
       "exists": "no",
       "in_csv": "no",
@@ -13503,8 +13511,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_dolomite_fantasy_white_dolomite_aa53dc4e-b27f-5a6b-a919-373b436d6896",
-      "variant": "Fantasy White Dolomite",
+      "key": "tile_dolomite_fantasy_white_ac1dfe27-c1e8-5edd-be63-ba604c15a8b6",
+      "variant": "Fantasy White",
       "category": "Tiles",
       "stone_type": "Dolomite",
       "color": [
@@ -13533,15 +13541,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fantasy White Dolomite"
+      ],
       "image_file": "tile_dolomite_fantasy_white_dolomite_aa53dc4e-b27f-5a6b-a919-373b436d6896.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_dolomite_king_white_dolomite_b55410eb-f3d9-5860-a0da-c9e6f2ea6df8",
-      "variant": "King White Dolomite",
+      "key": "tile_dolomite_king_white_6d1cd7cf-8023-5349-a68e-7e2c84ca242a",
+      "variant": "King White",
       "category": "Tiles",
       "stone_type": "Dolomite",
       "color": [
@@ -13570,15 +13580,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "King White Dolomite"
+      ],
       "image_file": "tile_dolomite_king_white_dolomite_b55410eb-f3d9-5860-a0da-c9e6f2ea6df8.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_dolomite_areti_white_dolomite_1e018611-120d-511b-97a4-2d2900ed5a6a",
-      "variant": "Areti White Dolomite",
+      "key": "tile_dolomite_areti_white_c1aaeb2f-0c23-5084-ac4c-e9c2763b5076",
+      "variant": "Areti White",
       "category": "Tiles",
       "stone_type": "Dolomite",
       "color": [
@@ -13607,7 +13619,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Areti White Dolomite"
+      ],
       "image_file": "tile_dolomite_areti_white_dolomite_1e018611-120d-511b-97a4-2d2900ed5a6a.png",
       "exists": "no",
       "in_csv": "no",
@@ -15063,8 +15077,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_gneiss_via_lattea_gneiss_fee131f8-5802-5d9e-ab87-b9ecb6e55dd9",
-      "variant": "Via Lattea Gneiss",
+      "key": "tile_gneiss_via_lattea_bd73db78-fc16-5dc5-a067-59f9f8de4647",
+      "variant": "Via Lattea",
       "category": "Tiles",
       "stone_type": "Gneiss",
       "color": [
@@ -15095,7 +15109,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Via Lattea Gneiss"
+      ],
       "image_file": "tile_gneiss_via_lattea_gneiss_fee131f8-5802-5d9e-ab87-b9ecb6e55dd9.png",
       "exists": "no",
       "in_csv": "no",
@@ -15141,8 +15157,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_gneiss_silver_waves_gneiss_2b0d1aae-b3c8-5f05-8893-9db59dfe6bde",
-      "variant": "Silver Waves Gneiss",
+      "key": "tile_gneiss_silver_waves_4c38eef2-f318-51fd-9299-a49c721aa3eb",
+      "variant": "Silver Waves",
       "category": "Tiles",
       "stone_type": "Gneiss",
       "color": [
@@ -15172,7 +15188,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Silver Waves Gneiss"
+      ],
       "image_file": "tile_gneiss_silver_waves_gneiss_2b0d1aae-b3c8-5f05-8893-9db59dfe6bde.png",
       "exists": "no",
       "in_csv": "no",
@@ -252282,7 +252300,13 @@
       "image_file": "tile_limestone_sahara_gold_89123626-6f9e-5416-be6a-f2989d147907.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Sahara Gold Limestone",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_limestone_sahara_pearl_c9a4d3f0-6402-5e23-87a2-72e93f4fcb59",
@@ -267414,8 +267438,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_marble_wooden_black_marble_b4dfb8ac-3a38-52b3-895f-119b0c50de1c",
-      "variant": "Wooden Black Marble",
+      "key": "tile_marble_wooden_black_dd5e397b-21dd-5173-bc09-584c9817688f",
+      "variant": "Wooden Black",
       "category": "Tiles",
       "stone_type": "Marble",
       "color": [
@@ -267444,7 +267468,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Wooden Black Marble"
+      ],
       "image_file": "tile_marble_wooden_black_marble_b4dfb8ac-3a38-52b3-895f-119b0c50de1c.png",
       "exists": "no",
       "in_csv": "no",
@@ -466697,8 +466723,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_onyx_green_onyx_dark_306de4f3-e5d7-5303-8036-07e6675c5dc8",
-      "variant": "Green Onyx Dark",
+      "key": "tile_onyx_green_dark_daae558c-a6bd-55ba-81ed-10a5dd076b34",
+      "variant": "Green Dark",
       "category": "Tiles",
       "stone_type": "Onyx",
       "color": [
@@ -466720,7 +466746,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Green Onyx Dark"
+      ],
       "image_file": "tile_onyx_green_onyx_dark_306de4f3-e5d7-5303-8036-07e6675c5dc8.png",
       "exists": "no",
       "in_csv": "no",
@@ -468339,7 +468367,13 @@
       "image_file": "tile_onyx_arco_iris_66c63ecc-0d93-501c-ba4c-15f603111a15.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Arco Iris Onyx",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_onyx_arcobaleno_17fb8c30-42e3-5208-9050-235dee655d92",
@@ -481995,8 +482029,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_porphyry_trentino_red_porphyry_992b7f59-5e31-5b9d-b644-b4ae24e9133e",
-      "variant": "Trentino Red Porphyry",
+      "key": "tile_porphyry_trentino_red_bb927736-665e-5389-9984-9066985599f1",
+      "variant": "Trentino Red",
       "category": "Tiles",
       "stone_type": "Porphyry",
       "color": [
@@ -482021,48 +482055,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Trentino Red Porphyry"
+      ],
       "image_file": "tile_porphyry_trentino_red_porphyry_992b7f59-5e31-5b9d-b644-b4ae24e9133e.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_porphyry_trentino_grey_porphyry_bd3ba915-bf2e-58ed-a884-37efbefcbf56",
-      "variant": "Trentino Grey Porphyry",
-      "category": "Tiles",
-      "stone_type": "Porphyry",
-      "color": [
-        "Grey"
-      ],
-      "finishes": [
-        "Sawn Cut",
-        "Brushed and Tumbled",
-        "Tumbled",
-        "Split Face",
-        "Brushed",
-        "Chiseled",
-        "Flamed and Brushed",
-        "Antique",
-        "Raw",
-        "Bush Hammered",
-        "Sandblasted",
-        "Sandblasted and Brushed",
-        "Natural Cleft",
-        "Flamed"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_porphyry_trentino_grey_porphyry_bd3ba915-bf2e-58ed-a884-37efbefcbf56.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_porphyry_trentino_purple_porphyry_6643719a-dfb1-555c-aa6d-dcfd73378bfd",
-      "variant": "Trentino Purple Porphyry",
+      "key": "tile_porphyry_trentino_purple_515c76a6-8dd9-5667-982a-3a7b7745125e",
+      "variant": "Trentino Purple",
       "category": "Tiles",
       "stone_type": "Porphyry",
       "color": [
@@ -482088,7 +482091,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Trentino Purple Porphyry"
+      ],
       "image_file": "tile_porphyry_trentino_purple_porphyry_6643719a-dfb1-555c-aa6d-dcfd73378bfd.png",
       "exists": "no",
       "in_csv": "no",
@@ -484245,12 +484250,19 @@
         "Grey Porphyry Granite",
         "Grigio",
         "Grey Granite",
-        "Grey"
+        "Grey",
+        "Trentino Grey Porphyry"
       ],
       "image_file": "tile_porphyry_trentino_grey_050be550-b274-5d38-9abe-dd9bd3cae33c.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Trentino Grey Porphyry",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_porphyry_verde_peru_aaa2ff19-2f76-5505-91ab-5e459ead0bee",
@@ -484542,8 +484554,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_sea_pearl_quartzite_453c0b79-7355-5970-b952-f5731ed22ab5",
-      "variant": "Sea Pearl Quartzite",
+      "key": "tile_quartzite_sea_pearl_8de80967-7127-5ba1-9d32-ec2947191749",
+      "variant": "Sea Pearl",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -484575,7 +484587,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Sea Pearl Quartzite"
+      ],
       "image_file": "tile_quartzite_sea_pearl_quartzite_453c0b79-7355-5970-b952-f5731ed22ab5.png",
       "exists": "no",
       "in_csv": "no",
@@ -484698,8 +484712,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_mont_blanc_quartzite_e9e44dd0-d97c-56e2-a0eb-8ff0bac8d6f7",
-      "variant": "Mont Blanc Quartzite",
+      "key": "tile_quartzite_mont_blanc_a12a96b2-ff3c-5256-ac31-3b6fccd7810e",
+      "variant": "Mont Blanc",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -484730,15 +484744,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Mont Blanc Quartzite"
+      ],
       "image_file": "tile_quartzite_mont_blanc_quartzite_e9e44dd0-d97c-56e2-a0eb-8ff0bac8d6f7.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_super_white_quartzite_ffc43735-ea1d-5960-a555-370355c14052",
-      "variant": "Super White Quartzite",
+      "key": "tile_quartzite_super_white_bea4f3ba-a202-540e-9922-5722e8124efa",
+      "variant": "Super White",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -484768,11 +484784,19 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Super White Quartzite"
+      ],
       "image_file": "tile_quartzite_super_white_quartzite_ffc43735-ea1d-5960-a555-370355c14052.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Super White Quartzite",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_quartzite_cristallo_quartzite_a003aaf5-e185-542a-9d9c-2a7bf9e0a78f",
@@ -484929,8 +484953,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_madre_perla_quartzite_76a07c01-81c9-5c66-9896-b4159023addd",
-      "variant": "Madre Perla Quartzite",
+      "key": "tile_quartzite_madre_perla_84dd9477-a400-5b64-b692-543fe5be5db4",
+      "variant": "Madre Perla",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -484961,15 +484985,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Madre Perla Quartzite"
+      ],
       "image_file": "tile_quartzite_madre_perla_quartzite_76a07c01-81c9-5c66-9896-b4159023addd.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_fantasy_brown_quartzite_754a3949-2a2e-5591-b5be-1b59b54d3f3e",
-      "variant": "Fantasy Brown Quartzite",
+      "key": "tile_quartzite_fantasy_brown_861097e1-7961-5768-b545-5c7894a41b15",
+      "variant": "Fantasy Brown",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -484999,7 +485025,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fantasy Brown Quartzite"
+      ],
       "image_file": "tile_quartzite_fantasy_brown_quartzite_754a3949-2a2e-5591-b5be-1b59b54d3f3e.png",
       "exists": "no",
       "in_csv": "no",
@@ -485046,8 +485074,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_golden_storm_quartzite_6be6d3ed-4b37-5998-a197-5714f31e2b0f",
-      "variant": "Golden Storm Quartzite",
+      "key": "tile_quartzite_golden_storm_13a3124f-91fb-59ce-b7e5-0aefd8ed7b1f",
+      "variant": "Golden Storm",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -485077,15 +485105,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Golden Storm Quartzite"
+      ],
       "image_file": "tile_quartzite_golden_storm_quartzite_6be6d3ed-4b37-5998-a197-5714f31e2b0f.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_fleur_de_lis_quartzite_e8f8039e-9e22-5bd6-8d95-80eb82055897",
-      "variant": "Fleur de Lis Quartzite",
+      "key": "tile_quartzite_fleur_de_lis_83002d55-9866-5bc0-be00-0bb71bc5ca6a",
+      "variant": "Fleur de Lis",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -485117,7 +485147,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fleur de Lis Quartzite"
+      ],
       "image_file": "tile_quartzite_fleur_de_lis_quartzite_e8f8039e-9e22-5bd6-8d95-80eb82055897.png",
       "exists": "no",
       "in_csv": "no",
@@ -485163,8 +485195,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_quartzite_iron_red_quartzite_116c7b27-ba05-5756-a015-8e20308ebd45",
-      "variant": "Iron Red Quartzite",
+      "key": "tile_quartzite_iron_red_5dce0085-2e80-573e-ade6-a5a3d176d6f0",
+      "variant": "Iron Red",
       "category": "Tiles",
       "stone_type": "Quartzite",
       "color": [
@@ -485194,7 +485226,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Iron Red Quartzite"
+      ],
       "image_file": "tile_quartzite_iron_red_quartzite_116c7b27-ba05-5756-a015-8e20308ebd45.png",
       "exists": "no",
       "in_csv": "no",
@@ -485290,7 +485324,13 @@
       "image_file": "tile_quartzite_perla_venata_71b9ea05-d0d4-5a99-adcf-45a8f65b92ac.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Perla Venata Quartzite",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_quartzite_acquamare_d0828100-ac2d-5902-a285-0302b2ca6523",
@@ -491399,7 +491439,13 @@
       "image_file": "tile_quartzite_taj_mahal_50c63612-f43c-5410-95b2-1c279e69b6ee.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Taj Mahal Quartzite",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_quartzite_tanzanita_ae648825-08b2-52a0-b655-1109499d9d47",
@@ -493086,8 +493132,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_sandstone_jodhpur_pink_sandstone_cc6e7e75-506c-59b1-8772-2d2de0b33362",
-      "variant": "Jodhpur Pink Sandstone",
+      "key": "tile_sandstone_jodhpur_pink_d22bc816-4887-5c59-baab-c52f1c6758be",
+      "variant": "Jodhpur Pink",
       "category": "Tiles",
       "stone_type": "Sandstone",
       "color": [
@@ -493113,7 +493159,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Jodhpur Pink Sandstone"
+      ],
       "image_file": "tile_sandstone_jodhpur_pink_sandstone_cc6e7e75-506c-59b1-8772-2d2de0b33362.png",
       "exists": "no",
       "in_csv": "no",
@@ -493163,8 +493211,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_sandstone_autumn_brown_sandstone_7ea47447-348b-5eb2-b5d0-e591282b3a13",
-      "variant": "Autumn Brown Sandstone",
+      "key": "tile_sandstone_autumn_brown_590cd3e8-1396-5b0d-860b-23f4c302a019",
+      "variant": "Autumn Brown",
       "category": "Tiles",
       "stone_type": "Sandstone",
       "color": [
@@ -493190,15 +493238,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Autumn Brown Sandstone"
+      ],
       "image_file": "tile_sandstone_autumn_brown_sandstone_7ea47447-348b-5eb2-b5d0-e591282b3a13.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_sandstone_kandla_grey_sandstone_92b2d5c7-2b10-52c2-b51c-1b3ab91286b3",
-      "variant": "Kandla Grey Sandstone",
+      "key": "tile_sandstone_kandla_grey_d843a995-64c0-5d0a-9b3e-fb58af118f6e",
+      "variant": "Kandla Grey",
       "category": "Tiles",
       "stone_type": "Sandstone",
       "color": [
@@ -493224,15 +493274,17 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Kandla Grey Sandstone"
+      ],
       "image_file": "tile_sandstone_kandla_grey_sandstone_92b2d5c7-2b10-52c2-b51c-1b3ab91286b3.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []
     },
     {
-      "key": "tile_sandstone_desert_sand_sandstone_17bf3485-1815-543a-9f91-5607d6f448d3",
-      "variant": "Desert Sand Sandstone",
+      "key": "tile_sandstone_desert_sand_7bbb4d64-7632-576c-9def-3b3386eb96e3",
+      "variant": "Desert Sand",
       "category": "Tiles",
       "stone_type": "Sandstone",
       "color": [
@@ -493258,7 +493310,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Desert Sand Sandstone"
+      ],
       "image_file": "tile_sandstone_desert_sand_sandstone_17bf3485-1815-543a-9f91-5607d6f448d3.png",
       "exists": "no",
       "in_csv": "no",
@@ -493600,7 +493654,13 @@
       "image_file": "tile_sandstone_agra_red_69cb9398-7c42-5a76-81a9-f916101aad80.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Agra Red Sandstone",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_sandstone_agra_white_4726800f-b454-5ac0-9908-44e0641442f4",
@@ -496676,7 +496736,13 @@
       "image_file": "tile_sandstone_camel_dust_3a45bef2-a8cd-5e55-a6d8-4647ae8e6a97.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Camel Dust Sandstone",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_sandstone_canela_ed22ed40-f648-528f-9caf-140eaef9f459",
@@ -508876,7 +508942,13 @@
       "image_file": "tile_sandstone_raj_green_004f7f46-1f89-5727-9e9d-14a16afb77d4.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Raj Green Sandstone",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_sandstone_raj_red_8cbb51f4-6031-5329-ba29-18a0769c7db6",
@@ -510033,7 +510105,13 @@
       "image_file": "tile_sandstone_sagar_black_5b9de2fe-0614-5e92-a055-6b734d974df4.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Sagar Black Sandstone",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_sandstone_sagebrush_9ddd6374-5bdd-5cd9-89d9-4a417579a527",
@@ -512698,7 +512776,13 @@
       "image_file": "tile_sandstone_teak_wood_875719a4-e715-51eb-b9ec-4b9f3907748f.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Teak Wood Sandstone",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_sandstone_teka_rosal_13b4b8e3-1f65-59d6-b660-dcb2c9ffedfa",
@@ -515221,8 +515305,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_schist_silver_grey_schist_6ce0e0d5-0e51-535a-a7d4-1d525cec81fb",
-      "variant": "Silver Grey Schist",
+      "key": "tile_schist_silver_grey_9608d7fb-3fb4-581a-91e6-23466987e04e",
+      "variant": "Silver Grey",
       "category": "Tiles",
       "stone_type": "Schist",
       "color": [
@@ -515246,7 +515330,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Silver Grey Schist"
+      ],
       "image_file": "tile_schist_silver_grey_schist_6ce0e0d5-0e51-535a-a7d4-1d525cec81fb.png",
       "exists": "no",
       "in_csv": "no",
@@ -515348,8 +515434,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_schist_ostrich_grey_schist_d4b33cc1-0070-574a-aaa1-6626fda6b22e",
-      "variant": "Ostrich Grey Schist",
+      "key": "tile_schist_ostrich_grey_b0098475-2051-5705-8c4a-8fe44d532a57",
+      "variant": "Ostrich Grey",
       "category": "Tiles",
       "stone_type": "Schist",
       "color": [
@@ -515372,7 +515458,9 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Ostrich Grey Schist"
+      ],
       "image_file": "tile_schist_ostrich_grey_schist_d4b33cc1-0070-574a-aaa1-6626fda6b22e.png",
       "exists": "no",
       "in_csv": "no",
@@ -516309,8 +516397,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_slate_silver_grey_slate_57f92cdd-cb54-59ba-bb21-df1a7d693bf8",
-      "variant": "Silver Grey Slate",
+      "key": "tile_slate_silver_grey_9608d7fb-3fb4-581a-91e6-23466987e04e",
+      "variant": "Silver Grey",
       "category": "Tiles",
       "stone_type": "Slate",
       "color": [
@@ -516354,7 +516442,8 @@
         "Silver Grey India",
         "Raj Grey",
         "银啡麻",
-        "Yín fēi má"
+        "Yín fēi má",
+        "Silver Grey Slate"
       ],
       "image_file": "tile_slate_silver_grey_slate_57f92cdd-cb54-59ba-bb21-df1a7d693bf8.png",
       "exists": "no",
@@ -516463,8 +516552,8 @@
       "merged_from": []
     },
     {
-      "key": "tile_slate_china_multicolor_slate_c26af0c0-1bf3-5da2-ad0a-c6689aea0517",
-      "variant": "China Multicolor Slate",
+      "key": "tile_slate_china_multicolor_cef2c8e7-0e1f-5dd5-9485-3a01c9955a0d",
+      "variant": "China Multicolor",
       "category": "Tiles",
       "stone_type": "Slate",
       "color": [
@@ -516498,7 +516587,8 @@
         "China Multicolor Rust",
         "China Rust",
         "Rustic",
-        "幻彩板"
+        "幻彩板",
+        "China Multicolor Slate"
       ],
       "image_file": "tile_slate_china_multicolor_slate_c26af0c0-1bf3-5da2-ad0a-c6689aea0517.png",
       "exists": "no",
@@ -521815,7 +521905,13 @@
       "image_file": "tile_slate_montauk_blue_ff016138-5a22-589e-8109-cd14dd1e0924.png",
       "exists": "no",
       "in_csv": "no",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Montauk Blue Slate",
+          "variant_id": null,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "key": "tile_slate_morisca_negra_7b7eb6b6-59db-5da4-9c84-af095d208499",
@@ -560596,212 +560692,6 @@
       "merged_from": []
     },
     {
-      "key": "tile_limestone_sahara_gold_limestone_c0ed1962-7400-5ac0-a518-73e87e8b318f",
-      "variant": "Sahara Gold Limestone",
-      "category": "Tiles",
-      "stone_type": "Limestone",
-      "color": [
-        "Gold",
-        "Yellow"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_limestone_sahara_gold_limestone_c0ed1962-7400-5ac0-a518-73e87e8b318f.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_onyx_arco_iris_onyx_fa2c3b18-7baa-5847-b656-ee03a5029749",
-      "variant": "Arco Iris Onyx",
-      "category": "Tiles",
-      "stone_type": "Onyx",
-      "color": [
-        "Multicolor",
-        "Green"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Sawn Cut",
-        "Split Face",
-        "Tumbled",
-        "Honed and Brushed",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_onyx_arco_iris_onyx_fa2c3b18-7baa-5847-b656-ee03a5029749.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_sandstone_teak_wood_sandstone_f958b2c3-4c8b-5e06-b7ee-dce95252205a",
-      "variant": "Teak Wood Sandstone",
-      "category": "Tiles",
-      "stone_type": "Sandstone",
-      "color": [
-        "Brown",
-        "Beige"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_sandstone_teak_wood_sandstone_f958b2c3-4c8b-5e06-b7ee-dce95252205a.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_sandstone_agra_red_sandstone_86c42dfb-faff-5e6a-a37e-df3e9c38b6fe",
-      "variant": "Agra Red Sandstone",
-      "category": "Tiles",
-      "stone_type": "Sandstone",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_sandstone_agra_red_sandstone_86c42dfb-faff-5e6a-a37e-df3e9c38b6fe.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_sandstone_camel_dust_sandstone_fa7ba408-acd6-5b4f-97ec-262a9a546aed",
-      "variant": "Camel Dust Sandstone",
-      "category": "Tiles",
-      "stone_type": "Sandstone",
-      "color": [
-        "Beige"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_sandstone_camel_dust_sandstone_fa7ba408-acd6-5b4f-97ec-262a9a546aed.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_sandstone_raj_green_sandstone_56966940-5ba5-51ab-88e7-53c1633e16f9",
-      "variant": "Raj Green Sandstone",
-      "category": "Tiles",
-      "stone_type": "Sandstone",
-      "color": [
-        "Green"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_sandstone_raj_green_sandstone_56966940-5ba5-51ab-88e7-53c1633e16f9.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
       "key": "tile_sandstone_modak_sandstone_49a49253-bf3f-5763-b12d-c96299f707d3",
       "variant": "Modak Sandstone",
       "category": "Tiles",
@@ -560872,79 +560762,6 @@
       "merged_from": []
     },
     {
-      "key": "tile_sandstone_sagar_black_sandstone_562ea553-9619-596d-a868-858878ced163",
-      "variant": "Sagar Black Sandstone",
-      "category": "Tiles",
-      "stone_type": "Sandstone",
-      "color": [
-        "Black"
-      ],
-      "finishes": [
-        "Honed",
-        "Sawn Cut",
-        "Natural Cleft",
-        "Split Face",
-        "Brushed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Chiseled",
-        "Waterjet",
-        "Shotblasted",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_sandstone_sagar_black_sandstone_562ea553-9619-596d-a868-858878ced163.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_quartzite_taj_mahal_quartzite_34b4c739-a598-53c9-807c-a8cd0c166232",
-      "variant": "Taj Mahal Quartzite",
-      "category": "Tiles",
-      "stone_type": "Quartzite",
-      "color": [
-        "Beige",
-        "Cream"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_quartzite_taj_mahal_quartzite_34b4c739-a598-53c9-807c-a8cd0c166232.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
       "key": "tile_quartzite_blue_macaubas_4fe1f3e3-c47a-55ab-9fc8-cf94b9739c31",
       "variant": "Blue Macaubas",
       "category": "Tiles",
@@ -560978,78 +560795,6 @@
       ],
       "aliases": [],
       "image_file": "tile_quartzite_blue_macaubas_4fe1f3e3-c47a-55ab-9fc8-cf94b9739c31.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_quartzite_perla_venata_quartzite_577cf95b-da75-5dad-ae98-547b5b8c4745",
-      "variant": "Perla Venata Quartzite",
-      "category": "Tiles",
-      "stone_type": "Quartzite",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Leathered",
-        "Brushed",
-        "Flamed",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Flamed and Brushed",
-        "Flamed and Waterjet",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_quartzite_perla_venata_quartzite_577cf95b-da75-5dad-ae98-547b5b8c4745.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
-      "key": "tile_slate_montauk_blue_slate_810f2928-5606-5c9a-935b-ce2983c34849",
-      "variant": "Montauk Blue Slate",
-      "category": "Tiles",
-      "stone_type": "Slate",
-      "color": [
-        "Blue",
-        "Grey"
-      ],
-      "finishes": [
-        "Natural Cleft",
-        "Honed",
-        "Polished",
-        "Brushed",
-        "Sandblasted",
-        "Sawn Cut",
-        "Split Face",
-        "Tumbled",
-        "Chiseled",
-        "Sandblasted and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "tile_slate_montauk_blue_slate_810f2928-5606-5c9a-935b-ce2983c34849.png",
       "exists": "no",
       "in_csv": "no",
       "merged_from": []

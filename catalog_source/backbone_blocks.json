@@ -3213,7 +3213,7 @@
     },
     {
       "variant_id": 236,
-      "variant": "Blue Stone Basalt",
+      "variant": "Blue Stone",
       "category": "Blocks",
       "stone_type": "Basalt",
       "color": [
@@ -3235,16 +3235,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Blue Stone Basalt"
+      ],
       "image_file": "block_rb_236_basalt_blue_stone_basalt.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_basalt_blue_stone_basalt_35680df3-2077-40df-888f-ab56dd043844"
+      "key": "block_basalt_blue_stone_8d644a6e-373d-5fb4-a0aa-a1aace1ac5c2"
     },
     {
       "variant_id": 237,
-      "variant": "Mongolian Black Basalt",
+      "variant": "Mongolian Black",
       "category": "Blocks",
       "stone_type": "Basalt",
       "color": [
@@ -3266,12 +3268,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Mongolian Black Basalt"
+      ],
       "image_file": "block_rb_237_basalt_mongolian_black_basalt.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_basalt_mongolian_black_basalt_21524077-cfef-4133-948d-eb2fdb155fb2"
+      "key": "block_basalt_mongolian_black_a2fc2ad2-06af-5515-b7f2-23576c058432"
     },
     {
       "variant_id": 238,
@@ -3370,7 +3374,7 @@
     },
     {
       "variant_id": 241,
-      "variant": "Columbia Black Basalt",
+      "variant": "Columbia Black",
       "category": "Blocks",
       "stone_type": "Basalt",
       "color": [
@@ -3392,12 +3396,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Columbia Black Basalt"
+      ],
       "image_file": "block_rb_241_basalt_columbia_black_basalt.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_basalt_columbia_black_basalt_71030ab7-8b62-4c1b-b141-8e6d2b469f0c"
+      "key": "block_basalt_columbia_black_cdfd4173-e9bf-5c1e-a05f-c29410d56a2c"
     },
     {
       "variant_id": 399,
@@ -12298,7 +12304,7 @@
     },
     {
       "variant_id": 248,
-      "variant": "Super White Dolomite",
+      "variant": "Super White",
       "category": "Blocks",
       "stone_type": "Dolomite",
       "color": [
@@ -12320,12 +12326,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Super White Dolomite"
+      ],
       "image_file": "block_rb_248_dolomite_super_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_dolomite_super_white_dolomite_5e0d33e2-3883-42d2-a163-ade1d9275adf"
+      "key": "block_dolomite_super_white_131d09ad-addf-5ce6-a46a-c66ca1efc893"
     },
     {
       "variant_id": 249,
@@ -12392,7 +12400,7 @@
     },
     {
       "variant_id": 251,
-      "variant": "Fantasy White Dolomite",
+      "variant": "Fantasy White",
       "category": "Blocks",
       "stone_type": "Dolomite",
       "color": [
@@ -12414,16 +12422,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fantasy White Dolomite"
+      ],
       "image_file": "block_rb_251_dolomite_fantasy_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_dolomite_fantasy_white_dolomite_01cbb33d-7955-4f6d-b4a3-b7302ad4d105"
+      "key": "block_dolomite_fantasy_white_6fe7dec5-daec-5407-8ba6-4015aabd86bc"
     },
     {
       "variant_id": 252,
-      "variant": "King White Dolomite",
+      "variant": "King White",
       "category": "Blocks",
       "stone_type": "Dolomite",
       "color": [
@@ -12445,16 +12455,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "King White Dolomite"
+      ],
       "image_file": "block_rb_252_dolomite_king_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_dolomite_king_white_dolomite_17678500-2fde-484a-b163-b7645bd0fec5"
+      "key": "block_dolomite_king_white_0f42d4d2-3996-5040-af6a-45f62a9f4a00"
     },
     {
       "variant_id": 253,
-      "variant": "Areti White Dolomite",
+      "variant": "Areti White",
       "category": "Blocks",
       "stone_type": "Dolomite",
       "color": [
@@ -12476,12 +12488,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Areti White Dolomite"
+      ],
       "image_file": "block_rb_253_dolomite_areti_white_dolomite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_dolomite_areti_white_dolomite_949968fc-e0fc-46aa-b404-199d8f8522df"
+      "key": "block_dolomite_areti_white_0e313f6a-c718-5534-aa35-20598e5af830"
     },
     {
       "variant_id": 293,
@@ -13693,7 +13707,7 @@
     },
     {
       "variant_id": 261,
-      "variant": "Via Lattea Gneiss",
+      "variant": "Via Lattea",
       "category": "Blocks",
       "stone_type": "Gneiss",
       "color": [
@@ -13716,12 +13730,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Via Lattea Gneiss"
+      ],
       "image_file": "block_rb_261_gneiss_via_lattea_gneiss.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_gneiss_via_lattea_gneiss_21094e90-1d98-415b-b3a5-c26e010a03bb"
+      "key": "block_gneiss_via_lattea_1704e348-2f46-5ece-a82d-a01c1fb87a5e"
     },
     {
       "variant_id": 262,
@@ -13757,7 +13773,7 @@
     },
     {
       "variant_id": 263,
-      "variant": "Silver Waves Gneiss",
+      "variant": "Silver Waves",
       "category": "Blocks",
       "stone_type": "Gneiss",
       "color": [
@@ -13779,12 +13795,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Silver Waves Gneiss"
+      ],
       "image_file": "block_rb_263_gneiss_silver_waves_gneiss.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_gneiss_silver_waves_gneiss_80faba50-2b30-4f18-b3a3-be995366e4f3"
+      "key": "block_gneiss_silver_waves_6c2e1e9f-7175-54ae-b772-381328e06b35"
     },
     {
       "variant_id": 264,
@@ -212246,6 +212264,11 @@
           "variant": "Sahara Gold Limestone",
           "variant_id": 156,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Sahara Gold Limestone",
+          "variant_id": 156,
+          "reason": "stone_suffix"
         }
       ]
     },
@@ -225217,7 +225240,7 @@
     },
     {
       "variant_id": 308,
-      "variant": "Wooden Black Marble",
+      "variant": "Wooden Black",
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
@@ -225239,12 +225262,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Wooden Black Marble"
+      ],
       "image_file": "block_rb_308_marble_wooden_black_marble.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_marble_wooden_black_marble_c34b821e-e46e-459f-8306-5ff5eee80976"
+      "key": "block_marble_wooden_black_dea2bba5-8824-52d4-9a93-00a373a4cba9"
     },
     {
       "variant_id": 309,
@@ -395215,7 +395240,7 @@
     },
     {
       "variant_id": 161,
-      "variant": "Green Onyx Dark",
+      "variant": "Green Dark",
       "category": "Blocks",
       "stone_type": "Onyx",
       "color": [
@@ -395237,12 +395262,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Green Onyx Dark"
+      ],
       "image_file": "block_rb_161_onyx_green_onyx_dark.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_onyx_green_onyx_dark_2e59a999-d680-47f8-952f-d166d3f1b11f"
+      "key": "block_onyx_green_dark_bca92ba4-b861-53c6-8fd3-f0f7fb65edbb"
     },
     {
       "variant_id": 162,
@@ -396918,6 +396945,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Arco Iris Onyx",
+          "variant_id": 170,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Arco Iris Onyx",
           "variant_id": 170,
@@ -410580,7 +410612,7 @@
     },
     {
       "variant_id": 265,
-      "variant": "Trentino Red Porphyry",
+      "variant": "Trentino Red",
       "category": "Blocks",
       "stone_type": "Porphyry",
       "color": [
@@ -410602,47 +410634,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Trentino Red Porphyry"
+      ],
       "image_file": "block_rb_265_porphyry_trentino_red_porphyry.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_porphyry_trentino_red_porphyry_f095c495-dccb-4511-b37a-a347e0d3d0c0"
-    },
-    {
-      "variant_id": 266,
-      "variant": "Trentino Grey Porphyry",
-      "category": "Blocks",
-      "stone_type": "Porphyry",
-      "color": [
-        "Grey"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_266_porphyry_trentino_grey_porphyry.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [],
-      "key": "block_porphyry_trentino_grey_porphyry_596ecf23-c52b-4886-ae1a-d1c7ad3c0ef4"
+      "key": "block_porphyry_trentino_red_524acbf1-5287-5dbb-94ca-53b3d3c3544e"
     },
     {
       "variant_id": 267,
-      "variant": "Trentino Purple Porphyry",
+      "variant": "Trentino Purple",
       "category": "Blocks",
       "stone_type": "Porphyry",
       "color": [
@@ -410665,12 +410668,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Trentino Purple Porphyry"
+      ],
       "image_file": "block_rb_267_porphyry_trentino_purple_porphyry.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_porphyry_trentino_purple_porphyry_29472bed-4761-4f26-8422-54ea4c6457a0"
+      "key": "block_porphyry_trentino_purple_c9bd1190-27d5-5beb-8012-5e5b190cd0b7"
     },
     {
       "variant_id": 268,
@@ -412672,12 +412677,19 @@
         "Grey Porphyry Granite",
         "Grigio",
         "Grey Granite",
-        "Grey"
+        "Grey",
+        "Trentino Grey Porphyry"
       ],
       "image_file": "block_rb_10507_porphyry_trentino_grey.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": []
+      "merged_from": [
+        {
+          "variant": "Trentino Grey Porphyry",
+          "variant_id": 266,
+          "reason": "stone_suffix"
+        }
+      ]
     },
     {
       "variant_id": 10508,
@@ -412974,7 +412986,7 @@
     },
     {
       "variant_id": 196,
-      "variant": "Sea Pearl Quartzite",
+      "variant": "Sea Pearl",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
@@ -412998,12 +413010,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Sea Pearl Quartzite"
+      ],
       "image_file": "block_rb_196_quartzite_sea_pearl_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_quartzite_sea_pearl_quartzite_a27af3d4-5ead-4d1f-82a8-4a24827164e7"
+      "key": "block_quartzite_sea_pearl_9106b943-9329-570d-a8e6-24e6c5569708"
     },
     {
       "variant_id": 197,
@@ -413102,7 +413116,7 @@
     },
     {
       "variant_id": 201,
-      "variant": "Mont Blanc Quartzite",
+      "variant": "Mont Blanc",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
@@ -413125,43 +413139,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Mont Blanc Quartzite"
+      ],
       "image_file": "block_rb_201_quartzite_mont_blanc_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_quartzite_mont_blanc_quartzite_640eb5cc-6d2a-4649-82ec-33d2deb3aa26"
-    },
-    {
-      "variant_id": 202,
-      "variant": "Super White Quartzite",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "White"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_202_quartzite_super_white_quartzite.png",
-      "exists": "yes",
-      "in_csv": "no",
-      "merged_from": [],
-      "key": "block_quartzite_super_white_quartzite_9a73a510-f01e-4e12-a903-6f5cb44481f9"
+      "key": "block_quartzite_mont_blanc_6af7a371-5e69-5553-b674-0dbce31e0a83"
     },
     {
       "variant_id": 203,
@@ -413291,7 +413276,7 @@
     },
     {
       "variant_id": 208,
-      "variant": "Madre Perla Quartzite",
+      "variant": "Madre Perla",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
@@ -413314,16 +413299,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Madre Perla Quartzite"
+      ],
       "image_file": "block_rb_208_quartzite_madre_perla_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_quartzite_madre_perla_quartzite_457f622d-0a69-458a-a8bc-f6dc2d8cb395"
+      "key": "block_quartzite_madre_perla_af474b1a-554f-5a4e-a7d5-c5f32688b662"
     },
     {
       "variant_id": 209,
-      "variant": "Fantasy Brown Quartzite",
+      "variant": "Fantasy Brown",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
@@ -413345,12 +413332,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fantasy Brown Quartzite"
+      ],
       "image_file": "block_rb_209_quartzite_fantasy_brown_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_quartzite_fantasy_brown_quartzite_7550a60b-def4-4b74-929a-14c229f22319"
+      "key": "block_quartzite_fantasy_brown_f020562c-df62-5063-be84-826b14f285c2"
     },
     {
       "variant_id": 210,
@@ -413387,7 +413376,7 @@
     },
     {
       "variant_id": 211,
-      "variant": "Golden Storm Quartzite",
+      "variant": "Golden Storm",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
@@ -413409,16 +413398,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Golden Storm Quartzite"
+      ],
       "image_file": "block_rb_211_quartzite_golden_storm_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_quartzite_golden_storm_quartzite_70e1252a-90c9-4adf-a361-15da828332c3"
+      "key": "block_quartzite_golden_storm_e0955bc4-416f-5ebc-b12b-89dac61388ba"
     },
     {
       "variant_id": 212,
-      "variant": "Fleur de Lis Quartzite",
+      "variant": "Fleur de Lis",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
@@ -413442,12 +413433,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Fleur de Lis Quartzite"
+      ],
       "image_file": "block_rb_212_quartzite_fleur_de_lis_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_quartzite_fleur_de_lis_quartzite_ff13e92a-ce97-4925-8a50-1017adbde21a"
+      "key": "block_quartzite_fleur_de_lis_9a3689f8-97ce-5030-986c-07b09bd6727b"
     },
     {
       "variant_id": 213,
@@ -413483,7 +413476,7 @@
     },
     {
       "variant_id": 214,
-      "variant": "Iron Red Quartzite",
+      "variant": "Iron Red",
       "category": "Blocks",
       "stone_type": "Quartzite",
       "color": [
@@ -413505,12 +413498,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Iron Red Quartzite"
+      ],
       "image_file": "block_rb_214_quartzite_iron_red_quartzite.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_quartzite_iron_red_quartzite_e6a72ee2-a393-4145-9882-b47c445f8c91"
+      "key": "block_quartzite_iron_red_de68ebfc-ad34-5000-89f3-ee654a5296ff"
     },
     {
       "variant_id": 215,
@@ -413588,6 +413583,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Perla Venata Quartzite",
+          "variant_id": 205,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Perla Venata Quartzite",
           "variant_id": 205,
@@ -418609,6 +418609,11 @@
           "variant": "Taj Mahal Quartzite",
           "variant_id": 195,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Taj Mahal Quartzite",
+          "variant_id": 195,
+          "reason": "stone_suffix"
         }
       ]
     },
@@ -420049,7 +420054,7 @@
     },
     {
       "variant_id": 180,
-      "variant": "Jodhpur Pink Sandstone",
+      "variant": "Jodhpur Pink",
       "category": "Blocks",
       "stone_type": "Sandstone",
       "color": [
@@ -420071,12 +420076,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Jodhpur Pink Sandstone"
+      ],
       "image_file": "block_rb_180_sandstone_jodhpur_pink_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_sandstone_jodhpur_pink_sandstone_4afc50aa-d55f-4339-9dc4-01bc461b268d"
+      "key": "block_sandstone_jodhpur_pink_6e50dd36-0b38-5abf-b058-fca54e777a19"
     },
     {
       "variant_id": 181,
@@ -420126,7 +420133,7 @@
     },
     {
       "variant_id": 182,
-      "variant": "Autumn Brown Sandstone",
+      "variant": "Autumn Brown",
       "category": "Blocks",
       "stone_type": "Sandstone",
       "color": [
@@ -420148,16 +420155,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Autumn Brown Sandstone"
+      ],
       "image_file": "block_rb_182_sandstone_autumn_brown_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_sandstone_autumn_brown_sandstone_7c836c18-d467-4d4b-9ec0-c314186b2969"
+      "key": "block_sandstone_autumn_brown_7a6b09da-a272-5c19-bb86-e4967c3bbfa4"
     },
     {
       "variant_id": 186,
-      "variant": "Kandla Grey Sandstone",
+      "variant": "Kandla Grey",
       "category": "Blocks",
       "stone_type": "Sandstone",
       "color": [
@@ -420179,16 +420188,18 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Kandla Grey Sandstone"
+      ],
       "image_file": "block_rb_186_sandstone_kandla_grey_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_sandstone_kandla_grey_sandstone_82ad7e1c-c3d8-4164-8810-6b0e3a1fe6c6"
+      "key": "block_sandstone_kandla_grey_05d6e55b-6c10-54dc-a12b-363399ce51c0"
     },
     {
       "variant_id": 187,
-      "variant": "Desert Sand Sandstone",
+      "variant": "Desert Sand",
       "category": "Blocks",
       "stone_type": "Sandstone",
       "color": [
@@ -420210,12 +420221,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Desert Sand Sandstone"
+      ],
       "image_file": "block_rb_187_sandstone_desert_sand_sandstone.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_sandstone_desert_sand_sandstone_673e88d6-8bc4-4cca-9d7c-474c3ec961a8"
+      "key": "block_sandstone_desert_sand_4ce5e2e1-7ddf-579c-914d-c222afedfed8"
     },
     {
       "variant_id": 188,
@@ -420527,6 +420540,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Agra Red Sandstone",
+          "variant_id": 179,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Agra Red Sandstone",
           "variant_id": 179,
@@ -423315,6 +423333,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Camel Dust Sandstone",
+          "variant_id": 183,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Camel Dust Sandstone",
           "variant_id": 183,
@@ -434323,6 +434346,11 @@
           "variant": "Raj Green Sandstone",
           "variant_id": 184,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Raj Green Sandstone",
+          "variant_id": 184,
+          "reason": "stone_suffix"
         }
       ]
     },
@@ -435370,6 +435398,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Sagar Black Sandstone",
+          "variant_id": 193,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Sagar Black Sandstone",
           "variant_id": 193,
@@ -437777,6 +437810,11 @@
           "variant": "Teak Wood Sandstone",
           "variant_id": 176,
           "reason": "stone_suffix"
+        },
+        {
+          "variant": "Teak Wood Sandstone",
+          "variant_id": 176,
+          "reason": "stone_suffix"
         }
       ]
     },
@@ -440050,7 +440088,7 @@
     },
     {
       "variant_id": 270,
-      "variant": "Silver Grey Schist",
+      "variant": "Silver Grey",
       "category": "Blocks",
       "stone_type": "Schist",
       "color": [
@@ -440073,12 +440111,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Silver Grey Schist"
+      ],
       "image_file": "block_rb_270_schist_silver_grey_schist.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_schist_silver_grey_schist_a893fcd5-7524-43b3-8e56-a9c655e5156c"
+      "key": "block_schist_silver_grey_29056316-15b4-5156-bbcc-2973a80d5c89"
     },
     {
       "variant_id": 271,
@@ -440177,7 +440217,7 @@
     },
     {
       "variant_id": 274,
-      "variant": "Ostrich Grey Schist",
+      "variant": "Ostrich Grey",
       "category": "Blocks",
       "stone_type": "Schist",
       "color": [
@@ -440199,12 +440239,14 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Ostrich Grey Schist"
+      ],
       "image_file": "block_rb_274_schist_ostrich_grey_schist.png",
       "exists": "yes",
       "in_csv": "no",
       "merged_from": [],
-      "key": "block_schist_ostrich_grey_schist_1ebdbea9-3131-43ea-879b-09aca377e9eb"
+      "key": "block_schist_ostrich_grey_68122ca8-cfa9-51e8-833c-35dd7c48c253"
     },
     {
       "variant_id": 11231,
@@ -441254,7 +441296,7 @@
     },
     {
       "variant_id": 223,
-      "variant": "Silver Grey Slate",
+      "variant": "Silver Grey",
       "category": "Blocks",
       "stone_type": "Slate",
       "color": [
@@ -441296,7 +441338,8 @@
         "Silver Grey India",
         "Raj Grey",
         "银啡麻",
-        "Yín fēi má"
+        "Yín fēi má",
+        "Silver Grey Slate"
       ],
       "image_file": "block_rb_223_slate_silver_grey_slate.png",
       "exists": "yes",
@@ -441308,7 +441351,7 @@
           "reason": "translation"
         }
       ],
-      "key": "block_slate_silver_grey_slate_8fc8b292-d145-40a2-a4d0-57b8c900a47c"
+      "key": "block_slate_silver_grey_29056316-15b4-5156-bbcc-2973a80d5c89"
     },
     {
       "variant_id": 224,
@@ -441410,7 +441453,7 @@
     },
     {
       "variant_id": 228,
-      "variant": "China Multicolor Slate",
+      "variant": "China Multicolor",
       "category": "Blocks",
       "stone_type": "Slate",
       "color": [
@@ -441442,7 +441485,8 @@
         "China Multicolor Rust",
         "China Rust",
         "Rustic",
-        "幻彩板"
+        "幻彩板",
+        "China Multicolor Slate"
       ],
       "image_file": "block_rb_228_slate_china_multicolor_slate.png",
       "exists": "yes",
@@ -441454,7 +441498,7 @@
           "reason": "stone_suffix"
         }
       ],
-      "key": "block_slate_china_multicolor_slate_bac76cb3-da57-43fc-938b-0563c89f156a"
+      "key": "block_slate_china_multicolor_d3ccd9be-1150-5fda-857b-2f37eda18a6a"
     },
     {
       "variant_id": 229,
@@ -446497,6 +446541,11 @@
       "exists": "no",
       "in_csv": "yes",
       "merged_from": [
+        {
+          "variant": "Montauk Blue Slate",
+          "variant_id": 227,
+          "reason": "stone_suffix"
+        },
         {
           "variant": "Montauk Blue Slate",
           "variant_id": 227,
@@ -477758,195 +477807,6 @@
       "key": "block_limestone_vratza_limestone_459f7ce2-5967-446b-9f20-da54c0c3efbb"
     },
     {
-      "variant_id": 156,
-      "variant": "Sahara Gold Limestone",
-      "category": "Blocks",
-      "stone_type": "Limestone",
-      "color": [
-        "Gold",
-        "Yellow"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_156_limestone_sahara_gold_limestone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_limestone_sahara_gold_limestone_87a6a866-07e2-46c0-947f-ae44c17f31cc"
-    },
-    {
-      "variant_id": 170,
-      "variant": "Arco Iris Onyx",
-      "category": "Blocks",
-      "stone_type": "Onyx",
-      "color": [
-        "Multicolor",
-        "Green"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_170_onyx_arco_iris_onyx.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_onyx_arco_iris_onyx_d95ef177-09ff-4434-aabd-1674f29b53b8"
-    },
-    {
-      "variant_id": 176,
-      "variant": "Teak Wood Sandstone",
-      "category": "Blocks",
-      "stone_type": "Sandstone",
-      "color": [
-        "Brown",
-        "Beige"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_176_sandstone_teak_wood_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_sandstone_teak_wood_sandstone_c1c99bdd-9b2e-447c-a46a-d064a3830f81"
-    },
-    {
-      "variant_id": 179,
-      "variant": "Agra Red Sandstone",
-      "category": "Blocks",
-      "stone_type": "Sandstone",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_179_sandstone_agra_red_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_sandstone_agra_red_sandstone_001f4c6c-854e-4b88-a83e-540bbc1e051c"
-    },
-    {
-      "variant_id": 183,
-      "variant": "Camel Dust Sandstone",
-      "category": "Blocks",
-      "stone_type": "Sandstone",
-      "color": [
-        "Beige"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_183_sandstone_camel_dust_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_sandstone_camel_dust_sandstone_a8a547d4-28c9-4c71-a014-0ebb3dfe7f37"
-    },
-    {
-      "variant_id": 184,
-      "variant": "Raj Green Sandstone",
-      "category": "Blocks",
-      "stone_type": "Sandstone",
-      "color": [
-        "Green"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_184_sandstone_raj_green_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_sandstone_raj_green_sandstone_e4933352-d362-44a0-bc29-5a3354aac7b2"
-    },
-    {
       "variant_id": 185,
       "variant": "Modak Sandstone",
       "category": "Blocks",
@@ -478011,69 +477871,6 @@
       "key": "block_sandstone_berea_sandstone_a966b73b-8294-4fe3-a637-0a52f6ccad47"
     },
     {
-      "variant_id": 193,
-      "variant": "Sagar Black Sandstone",
-      "category": "Blocks",
-      "stone_type": "Sandstone",
-      "color": [
-        "Black"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_193_sandstone_sagar_black_sandstone.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_sandstone_sagar_black_sandstone_e0f71510-2c03-42c9-9d6c-7b7955ed6585"
-    },
-    {
-      "variant_id": 195,
-      "variant": "Taj Mahal Quartzite",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "Beige",
-        "Cream"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_195_quartzite_taj_mahal_quartzite.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_taj_mahal_quartzite_ae35c44a-4d89-4bc5-99e8-eae4bcc247e5"
-    },
-    {
       "variant_id": 198,
       "variant": "Blue Macaubas",
       "category": "Blocks",
@@ -478103,70 +477900,6 @@
       "in_csv": "yes",
       "merged_from": [],
       "key": "block_quartzite_blue_macaubas_3ab72cdf-c19c-4c39-9ec3-d6f209436c3c"
-    },
-    {
-      "variant_id": 205,
-      "variant": "Perla Venata Quartzite",
-      "category": "Blocks",
-      "stone_type": "Quartzite",
-      "color": [
-        "White",
-        "Grey"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_205_quartzite_perla_venata_quartzite.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_quartzite_perla_venata_quartzite_e4f8cf7a-4607-45da-94bd-05d111970ade"
-    },
-    {
-      "variant_id": 227,
-      "variant": "Montauk Blue Slate",
-      "category": "Blocks",
-      "stone_type": "Slate",
-      "color": [
-        "Blue",
-        "Grey"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [],
-      "image_file": "block_rb_227_slate_montauk_blue_slate.png",
-      "exists": "yes",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "block_slate_montauk_blue_slate_d03db503-92bf-4b95-8683-a691f2f5fdbe"
     },
     {
       "variant_id": 245,
@@ -478253,12 +477986,19 @@
         "A"
       ],
       "aliases": [
-        "Brazilian White Quartzite"
+        "Brazilian White Quartzite",
+        "Super White Quartzite"
       ],
       "image_file": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb.png",
       "exists": "no",
       "in_csv": "yes",
-      "merged_from": [],
+      "merged_from": [
+        {
+          "variant": "Super White Quartzite",
+          "variant_id": 202,
+          "reason": "stone_suffix"
+        }
+      ],
       "key": "block_quartzite_brazilian_white_da310347-aa7b-52a5-8d26-0bee1f4a71cb"
     },
     {
