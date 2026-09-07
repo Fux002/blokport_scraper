@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag = "70aa93941b1102c4c067d6dce2f9b5105ca304c8" # :core w/ factory-reset keep_scrape (290) + factory-only image wipe (288) on top of unmint variety-scoped (286)
+prod_image_tag = "d9a8715617d8238f05c59b806f109de6ce3b6797" # :core w/ Dolomite Marble collapsed into Dolomite (293) + product-form words (292) on top of keep_scrape (290) / factory-only image wipe (288)
 prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :gpu (reads SCRAPER_ env, prod bucket); was gpu-f9d828e0 (Aug18, pre-rename -> hit dev bucket)
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
