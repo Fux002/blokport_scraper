@@ -245,6 +245,30 @@ def test_origins_put_stores_and_reflects_the_country():
     assert item["current_country"] == "IR"
 
 
+def test_origins_put_alias_with_country_stores_both_for_this_vendor(monkeypatch):
+    # re-bind AND fix the origin: the scoped alias for the vendor, plus a supplier override keyed by the
+    # variety the product will bind to (the alias target, the card's type), so derive resolves it top-rung
+    # instead of the vendor gate picking from the target's documented origins.
+    from stone_pipeline.reference.loaders import _norm
+    monkeypatch.setattr(varieties, "exists", lambda name: name == "Golden Lightning")
+    ref = _seed_origin_pending()
+    code, body = server.dispatch("PUT", ["review", "origins", ref],
+                                 {"alias_of": "Golden Lightning", "country_iso": "Brazil"})
+    assert code == 200 and body["alias_of"] == "Golden Lightning" and body["country_iso"] == "BR"
+    assert decisions_store.scoped_aliases()[(_norm("marenostone"), _norm("Crystal White"))][0] == "Golden Lightning"
+    assert decisions_store.origin_decisions()[
+        (_norm("marenostone"), _norm("Golden Lightning"), _norm("Granite"))] == "BR"
+
+
+def test_origins_put_alias_with_bad_country_stores_nothing(monkeypatch):
+    monkeypatch.setattr(varieties, "exists", lambda name: name == "Golden Lightning")
+    ref = _seed_origin_pending()
+    code, _ = server.dispatch("PUT", ["review", "origins", ref],
+                              {"alias_of": "Golden Lightning", "country_iso": "Notacountry"})
+    assert code == 400
+    assert not decisions_store.scoped_aliases() and not decisions_store.origin_decisions()
+
+
 def test_origins_put_bad_country_is_400():
     ref = _seed_origin_pending()
     code, _ = server.dispatch("PUT", ["review", "origins", ref], {"country_iso": "Notacountry"})
