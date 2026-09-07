@@ -401,7 +401,7 @@ def _inject_existing(monkeypatch, *entries):
     from stone_pipeline.matching import projections as proj
 
     def load(branch):
-        imp = curate.ImportFile(branch=branch, path=None, present=True)
+        imp = curate.ImportFile(branch=branch, path=None)
         for name, typ in entries:
             key = f"{branch}_{proj.norm(typ)}_{proj.norm(name).replace(' ', '_')}_x"
             v = {"Key": key, "Name": name, "Image": "", "Aliases": "", "Volume": "", "type": proj.norm(typ)}

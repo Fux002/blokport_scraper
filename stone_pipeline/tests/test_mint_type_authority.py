@@ -34,7 +34,7 @@ def _slab_imports() -> dict[str, ImportFile]:
     is populated by production code, not by hand."""
     branches = {}
     for b in ("slab", "block", "tile"):
-        imp = ImportFile(branch=b, path=None, present=(b == "slab"))
+        imp = ImportFile(branch=b, path=None)
         if b == "slab":
             # Granite first, MARBLE last, so the name-only fallback (by_name, last-wins) resolves to MARBLE.
             # The keyed path must still land on Granite -- so if line 359 ever regressed to a name-only owner,
@@ -56,7 +56,7 @@ def test_load_existing_keys_same_name_different_type_separately(tmp_path, monkey
         w.writeheader()
         w.writerow({"Id": "1", "Key": MARBLE_KEY, "Name": "Arabescato"})
         w.writerow({"Id": "2", "Key": GRANITE_KEY, "Name": "Arabescato"})
-    monkeypatch.setattr(curate, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(export_file=exp)))
+    monkeypatch.setattr(curate, "existing_varieties_file", lambda: exp)
 
     imp = curate.load_existing("slab")
     # both stones survive under one name, addressed by (name, TYPE) -- not collapsed to a single variety
@@ -134,7 +134,7 @@ def test_typeless_scrape_holds_for_type_even_when_name_has_one_existing_type(tmp
     # type. The code no longer auto-completes it to that single type (that was the code guessing the type).
     branches = {}
     for b in ("slab", "block", "tile"):
-        imp = curate.ImportFile(branch=b, path=None, present=(b == "slab"))
+        imp = curate.ImportFile(branch=b, path=None)
         if b == "slab":
             key, nm = "slab_marble_solo_stone_1", "Solo Stone"
             v = {"Key": key, "Name": nm, "Image": "", "Aliases": "", "Volume": "",
@@ -164,7 +164,7 @@ def test_alias_family_surfaces_to_review_not_a_hidden_side_file(tmp_path, monkey
     # identity -> it must appear on the review list (pick which / mint new), never be filed away silently.
     branches = {}
     for b in ("slab", "block", "tile"):
-        imp = curate.ImportFile(branch=b, path=None, present=(b == "slab"))
+        imp = curate.ImportFile(branch=b, path=None)
         if b == "slab":
             # two DIFFERENT varieties (Alpha, Beta) that both carry 'Shared Surface' as an alias
             for key, nm in (("slab_marble_alpha_1", "Alpha"), ("slab_granite_beta_2", "Beta")):
@@ -267,7 +267,7 @@ def _verde_imports() -> dict[str, ImportFile]:
     which lists 'Verde Scuro' as an ALIAS. So the surface 'verde scuro' resolves to BOTH owners."""
     branches = {}
     for b in ("slab", "block", "tile"):
-        imp = ImportFile(branch=b, path=None, present=(b == "slab"))
+        imp = ImportFile(branch=b, path=None)
         if b == "slab":
             for key, nm, al in ((VERDE_ONYX_SCURO_KEY, "Verde Onyx Scuro", "Verde Scuro"),  # alias-owner FIRST
                                 (VERDE_SCURO_KEY, "Verde Scuro", "")):                       # exact-name owner
@@ -303,7 +303,7 @@ def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatc
 
 
 def _empty_imports() -> dict[str, ImportFile]:
-    return {b: ImportFile(branch=b, path=None, present=(b == "slab")) for b in ("slab", "block", "tile")}
+    return {b: ImportFile(branch=b, path=None) for b in ("slab", "block", "tile")}
 
 
 def _typed_gap_row(name: str, raw_type: str) -> CanonicalRow:
