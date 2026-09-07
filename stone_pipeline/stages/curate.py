@@ -116,6 +116,9 @@ def _review_evidence(row) -> dict:
     variety (a variant texture does not). Falls back to the improved/ key only when no raw url was captured."""
     imgs = (getattr(row, "raw_image_urls", None) or []) or (getattr(row, "image_keys", None) or [])
     return {"src": getattr(row, "src_site", "") or "",
+            # the scraped spelling a decision is keyed on (the matcher's query), distinct from the cleaned
+            # identity the card is titled with ('Amazon Green Granite' vs 'Amazon Green')
+            "scraped": getattr(row, "variety_match_key", "") or getattr(row, "raw_name", "") or "",
             "src_url": getattr(row, "src_url", "") or "",
             "image": next((u for u in imgs if u), ""),
             "description": _evidence_description(getattr(row, "description", "") or "")}
@@ -311,6 +314,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     seed_colors = decisions.load_variety_seed_colors()   # norm(variant) -> operator mint colour (over 'Natural')
     seed_types = decisions.load_variety_seed_types()     # norm(variant) -> operator-assigned stone type (fills a void)
     seed_names = decisions.load_variety_seed_names()     # norm(variant) -> operator-corrected NAME to mint under (rename)
+    seed_scopes = decisions.load_variety_seed_scopes()   # norm(variant) -> the ONE vendor a rename was made for
     pending_confirm: list[dict] = []
     result = CurationResult(
         alias_additions={b: [] for b in BRANCHES},
@@ -556,9 +560,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         renamed = seed_names.get(proj.norm(clean), "")
         display = title_case(renamed) if renamed and proj.norm(renamed) != proj.norm(clean) else title_case(clean)
         owner = (proj.norm(display), proj.norm(stone_type))
-        if proj.norm(display) != proj.norm(clean):
+        if proj.norm(display) != proj.norm(clean) and not seed_scopes.get(proj.norm(clean)):
             # the scraped spelling rides onto the mint row via sib_aliases (owner[0] == norm(title)); for a
             # variety that does not exist yet emit_alias_rows finds no import row and skips it, as intended.
+            # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its
+            # products, and the same spelling from another vendor keeps its own identity.
             alias_new.setdefault(owner, set()).add(title_case(clean))
         if owner in minted_display:
             return                          # a second spelling of the same renamed variety: alias only

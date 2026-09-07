@@ -168,6 +168,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_country TEXT")  # DBs created before it
     if "seed_name" not in _variety_cols:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_name TEXT")     # mint + rename (DBs before it)
+    # source: the vendor a decision was made FOR ('' = every vendor). A variety is global by nature, so a
+    # mint always creates it for all; the vendor only scopes how the scraped SPELLING binds: a vendor-made
+    # rename attaches the spelling as that vendor's scoped alias, never as a global one.
+    if "source" not in _variety_cols:
+        conn.execute("ALTER TABLE variety_decision ADD COLUMN source TEXT NOT NULL DEFAULT ''")
     # Operator-confirmed PER-VENDOR origins (the separate origin review queue): a (source, variety, type)
     # the operator picked a country for, because the vendor's primary_origin did not corroborate the map.
     # Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Overlaid

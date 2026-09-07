@@ -64,10 +64,11 @@ def variety_actions() -> dict[str, dict]:
     with closing(store.open_store()) as conn:
         return {r["variant_norm"]: {"action": r["action"], "alias_of": r["alias_of"],
                                     "seed_color": r["seed_color"], "seed_type": r["seed_type"],
-                                    "seed_country": r["seed_country"], "seed_name": r["seed_name"]}
+                                    "seed_country": r["seed_country"], "seed_name": r["seed_name"],
+                                    "source": r["source"]}
                 for r in conn.execute(
-                    "SELECT variant_norm, action, alias_of, seed_color, seed_type, seed_country, seed_name "
-                    "FROM variety_decision")}
+                    "SELECT variant_norm, action, alias_of, seed_color, seed_type, seed_country, seed_name, "
+                    "source FROM variety_decision")}
 
 
 def variety_seed_colors() -> dict[str, str]:
@@ -99,6 +100,17 @@ def variety_seed_names() -> dict[str, str]:
         return {}
     return {n: d["seed_name"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d.get("seed_name")}
+
+
+def variety_seed_scopes() -> dict[str, str]:
+    """norm(scraped variant) -> the vendor a MINT + RENAME was made for, for every such decision made for ONE
+    vendor. curate then does NOT attach the scraped spelling as a global alias of the renamed variety: that
+    vendor's scoped alias (stored with the decision) binds its products, and another vendor's identical
+    spelling keeps its own identity. Same fresh-store guard as variety_seed_types."""
+    if not store.config_db_path().exists():
+        return {}
+    return {n: d["source"] for n, d in variety_actions().items()
+            if d["action"] == "mint" and d.get("seed_name") and d.get("source")}
 
 
 def variety_seed_countries() -> dict[str, str]:
@@ -162,7 +174,8 @@ def alias_type_map() -> dict[str, str]:
 
 def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
                          seed_color: str | None = None, seed_type: str | None = None,
-                         seed_country: str | None = None, seed_name: str | None = None) -> None:
+                         seed_country: str | None = None, seed_name: str | None = None,
+                         source: str = "") -> None:
     """Upsert ONE operator decision. Raises InvalidDecision on a bad action or an alias with no target.
     Idempotent: re-deciding a variety overwrites the prior decision. For a MINT, `seed_color`, `seed_type`
     and `seed_country` are the colour / stone type / ISO origin to mint the variety with, and `seed_name` is
@@ -170,7 +183,8 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
     display name and the scraped spelling becomes its alias. For an ALIAS, `seed_type` is the TARGET
     variety's stone type (which of a multi-type name to alias into); seed_color / seed_country / seed_name
     are ignored. reject ignores all four. The caller validates seed_country is a real ISO code and that
-    seed_name is not an existing (type, name)."""
+    seed_name is not an existing (type, name). `source` records the vendor a MINT was made for ('' = every
+    vendor); see variety_seed_scopes for the one behaviour it changes."""
     action = (action or "").strip().lower()
     if action not in _ACTIONS:
         raise InvalidDecision(f"action must be one of {_ACTIONS}, got {action!r}")
@@ -191,6 +205,7 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
         seed_color = seed_country = seed_name = None
     elif action != "mint":
         seed_color = seed_type = seed_country = seed_name = None
+    source = (source or "").strip() if action == "mint" else ""
     norm = _norm(variant)
     if not norm:
         raise InvalidDecision("variant name is empty")
@@ -200,14 +215,94 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO variety_decision (variant_norm, variant_display, action, alias_of, seed_color, "
-            "seed_type, seed_country, seed_name, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "seed_type, seed_country, seed_name, source, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(variant_norm) DO UPDATE SET "
             "variant_display = excluded.variant_display, action = excluded.action, "
             "alias_of = excluded.alias_of, seed_color = excluded.seed_color, "
             "seed_type = excluded.seed_type, seed_country = excluded.seed_country, "
-            "seed_name = excluded.seed_name, decided_at = excluded.decided_at",
-            (norm, variant.strip(), action, alias_of, seed_color, seed_type, seed_country, seed_name, _now()))
+            "seed_name = excluded.seed_name, source = excluded.source, decided_at = excluded.decided_at",
+            (norm, variant.strip(), action, alias_of, seed_color, seed_type, seed_country, seed_name, source,
+             _now()))
         conn.commit()
+
+
+def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "", origin: str = "",
+           widen: bool = False, exists_as=None) -> dict:
+    """ONE operator statement about a vendor's product -- "this is `name`, a `stone_type`, `color`, from
+    `origin`" -- resolved to the decisions that make the next produce do exactly that. The operator never
+    picks mint / alias / origin: the outcome is derived from how the statement compares with what exists.
+
+      * (name, stone_type) is an existing variety -> the vendor's spelling binds to it (scoped alias), and the
+        origin, when given, is that vendor's origin for it (supplier override, derive's top curated rung);
+      * no such variety -> a mint with those seeds, keyed by the scraped spelling; a corrected name is a
+        mint + rename, and the spelling binds through the vendor's scoped alias rather than a global one;
+      * widen -> the origin is also added to the variety's documented origins (every vendor's gate).
+
+    `exists_as(name, stone_type) -> bool` is the variety lookup (config.varieties.exists_as), injected so the
+    rule is testable without the export on disk. The caller validates the vocabulary (type, ISO) first; this
+    stores everything or nothing. Returns what was stored."""
+    src = (source or "").strip()
+    spelling = (scraped or "").strip()
+    name = (name or "").strip()
+    stone_type = (stone_type or "").strip()
+    color = (color or "").strip()
+    origin = (origin or "").strip().upper()
+    if not src or not spelling or not name or not stone_type:
+        raise InvalidDecision("a decision requires source, scraped spelling, name and stone_type")
+    if exists_as is None:
+        from stone_pipeline.config import varieties
+        exists_as = varieties.exists_as
+    outcome: dict = {"source": src, "scraped": spelling, "name": name, "stone_type": stone_type,
+                     "color": color or None, "origin": origin or None}
+    # a statement REPLACES the vendor's previous one for this spelling: nothing of the old target survives
+    # (its origin decision would otherwise linger on a variety the product no longer binds to)
+    clear_decisions(src, spelling)
+    if exists_as(name, stone_type):
+        set_scoped_alias(src, spelling, name, stone_type)
+        outcome["result"] = "bound"
+    else:
+        renamed = _norm(name) != _norm(spelling)
+        set_variety_decision(spelling, "mint", seed_color=color, seed_type=stone_type, seed_country=origin,
+                             seed_name=name if renamed else None, source=src)
+        if renamed:
+            set_scoped_alias(src, spelling, name, stone_type)
+        outcome["result"] = "minted"
+    if origin:
+        set_origin_decision(src, name, stone_type, origin)
+        if widen:
+            set_variety_origin(name, stone_type, origin)
+            outcome["widened"] = True
+    return outcome
+
+
+def clear_decisions(source: str, scraped: str) -> dict[str, int]:
+    """Undo everything `decide` stored for ONE vendor's spelling: its scoped alias, the mint made for that
+    vendor (a global mint, made for every vendor, is left alone), and the vendor's origin for the variety
+    those pointed at. The next produce then resolves the product on its own again. Returns rows dropped."""
+    src = (source or "").strip()
+    norm = _norm(scraped)
+    if not src or not norm:
+        raise InvalidDecision("clearing a decision requires source and scraped spelling")
+    with closing(store.open_store()) as conn:
+        alias = conn.execute("SELECT alias_of, seed_type FROM scoped_alias WHERE source = ? AND variant_norm = ?",
+                             (src, norm)).fetchone()
+        mint = conn.execute("SELECT seed_name, seed_type, variant_display FROM variety_decision "
+                            "WHERE variant_norm = ? AND action = 'mint' AND source = ?", (norm, src)).fetchone()
+        targets = set()
+        if alias:
+            targets.add((_norm(alias["alias_of"]), _norm(alias["seed_type"])))
+        if mint:
+            targets.add((_norm(mint["seed_name"] or mint["variant_display"]), _norm(mint["seed_type"])))
+        dropped = {"scoped_alias": conn.execute(
+            "DELETE FROM scoped_alias WHERE source = ? AND variant_norm = ?", (src, norm)).rowcount}
+        dropped["mint"] = conn.execute(
+            "DELETE FROM variety_decision WHERE variant_norm = ? AND action = 'mint' AND source = ?",
+            (norm, src)).rowcount
+        dropped["origin"] = sum(conn.execute(
+            "DELETE FROM origin_decision WHERE source = ? AND variant_norm = ? AND stone_type_norm = ?",
+            (src, v, t)).rowcount for v, t in targets)
+        conn.commit()
+    return dropped
 
 
 def learn_rejects(names: set[str]) -> None:
