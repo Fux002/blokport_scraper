@@ -20,7 +20,7 @@ def _imports() -> dict[str, ImportFile]:
     """Three SAME-TYPE granites that all list 'Amazon Green Granite' as an alias; none is named that."""
     branches = {}
     for b in ("slab", "block", "tile"):
-        imp = ImportFile(branch=b, path=None, present=(b == "slab"))
+        imp = ImportFile(branch=b, path=None)
         if b == "slab":
             for key, nm in OWNERS:
                 # both the full spelling and the type-stripped one the cleaner produces ('Amazon Green')
