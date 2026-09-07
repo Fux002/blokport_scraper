@@ -892,8 +892,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # spelling as an alias (alias_new). Carry that SAME alias onto the new sibling so its product
         # resolves in ONE upload, not two (mint the variety AND attach its alias in the same leg --
         # otherwise a brand-new branch like a block needs a second round-trip to add the alias).
+        # Match the FULL (name, type) owner: a same-name variety of another type (Aqua Blue is four types)
+        # must not inherit this one's spellings, or the spelling becomes a cross-type ambiguous surface.
         sib_aliases = sorted({s for owner, sp in alias_new.items()
-                              if owner[0] == proj.norm(title) for s in sp})
+                              if owner == (proj.norm(title), proj.norm(stone_type)) for s in sp})
         for branch in active_branches():
             key = gen_key(branch, stone_type, title)
             if _core(key, branch) in existing_cores[branch]:

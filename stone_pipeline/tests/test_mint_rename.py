@@ -43,8 +43,8 @@ def _vocab(monkeypatch, rows: list[dict]) -> None:
     monkeypatch.setattr(varieties, "_rows", lambda q=None: rows)
 
 
-def _row(name: str, key: str, **attrs) -> CanonicalRow:
-    base = _typed_gap_row(name, "Onyx")
+def _row(name: str, key: str, stone_type: str = "Onyx", **attrs) -> CanonicalRow:
+    base = _typed_gap_row(name, stone_type)
     gaps = [g.model_copy(update={"surrogate_key": key}) for g in base.tree_gaps]
     return base.model_copy(update={"surrogate_key": key, "tree_gaps": gaps, **attrs})
 
@@ -171,6 +171,21 @@ def test_two_spellings_renamed_to_one_name_mint_one_variety(monkeypatch):
         rows = _new(res, b)
         assert [r["Name"] for r in rows] == [RENAMED], (b, rows)
         assert set(rows[0]["Aliases"].split("|")) >= {SCRAPED, "Honig Onyx"}, rows[0]["Aliases"]
+
+
+def test_same_name_mints_of_different_types_keep_their_own_aliases(monkeypatch):
+    # Identity is (type, name): an Onyx 'Honey' and a Marble 'Honey' minted in ONE run must each carry only
+    # their own scraped spelling. Leaking a spelling across types would make it an ambiguous surface of two
+    # owners and send its products to review on the next produce.
+    _isolate_curate(monkeypatch, {"honey onyx": "yes", "honey marble": "yes"},
+                    {"honey onyx": RENAMED, "honey marble": RENAMED})
+    res = curate.build_curation([_row(SCRAPED, "t1"), _row("Honey Marble", "t2", stone_type="Marble")],
+                                loaders.load_all())
+    rows = _new(res, "slab")
+    by_type = {("_onyx_" in r["Key"] and "Onyx") or ("_marble_" in r["Key"] and "Marble"): r for r in rows}
+    assert set(by_type) == {"Onyx", "Marble"}, rows
+    assert by_type["Onyx"]["Aliases"] == SCRAPED
+    assert by_type["Marble"]["Aliases"] == "Honey Marble"
 
 
 def test_mint_without_a_seed_name_is_unchanged(monkeypatch):
