@@ -254,7 +254,7 @@ block_schist_golden_schist_f9424cfb-ec8f-43d9-90a9-5b4db0f89e57,Golden Schist,ht
 block_porphyry_trentino_grey_porphyry_596ecf23-c52b-4886-ae1a-d1c7ad3c0ef4,Trentino Grey Porphyry,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_porphyry_trentino_grey_porphyry_596ecf23-c52b-4886-ae1a-d1c7ad3c0ef4.png,,0.0014348
 block_serpentine_afghan_green_d860201b-19c0-47c8-b40e-bc0586b935be,Afghan Green,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_serpentine_afghan_green_d860201b-19c0-47c8-b40e-bc0586b935be.png,,0.0014348
 block_porphyry_mexican_porphyry_ac4eacb1-d564-4fdc-a63a-45ed9702c048,Mexican Porphyry,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_porphyry_mexican_porphyry_ac4eacb1-d564-4fdc-a63a-45ed9702c048.png,,0.0014348
-block_dolomite_super_white_dolomite_5e0d33e2-3883-42d2-a163-ade1d9275adf,Super White Dolomite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_dolomite_super_white_dolomite_5e0d33e2-3883-42d2-a163-ade1d9275adf.png,,0.0014348
+block_dolomite_super_white_dolomite_5e0d33e2-3883-42d2-a163-ade1d9275adf,Super White Dolomite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_dolomite_super_white_dolomite_5e0d33e2-3883-42d2-a163-ade1d9275adf.png,Super White,0.0014348
 block_schist_ostrich_grey_schist_1ebdbea9-3131-43ea-879b-09aca377e9eb,Ostrich Grey Schist,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_schist_ostrich_grey_schist_1ebdbea9-3131-43ea-879b-09aca377e9eb.png,,0.0014348
 block_soapstone_black_soapstone_75047acd-59db-4a08-aa58-49cd8ef09631,Black Soapstone,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_soapstone_black_soapstone_75047acd-59db-4a08-aa58-49cd8ef09631.png,,0.0014348
 block_schist_rustic_schist_8a0c93a2-b54f-4ed6-9bad-d6c8c200d740,Rustic Schist,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_schist_rustic_schist_8a0c93a2-b54f-4ed6-9bad-d6c8c200d740.png,,0.0014348
@@ -548,7 +548,7 @@ slab_basalt_lava_stone_pietra_lavica_0717b671-5a7e-4876-acc6-24f14698df6b,Lava S
 slab_basalt_wollongong_basalt_fe68b31d-e991-4406-b532-b51ab94ef54a,Wollongong Basalt,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_basalt_wollongong_basalt_fe68b31d-e991-4406-b532-b51ab94ef54a.png,,0.0017
 slab_dolomite_calacatta_dolomite_ce769f56-df07-4ae8-810f-fc0d23f1afd0,Calacatta Dolomite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_calacatta_dolomite_ce769f56-df07-4ae8-810f-fc0d23f1afd0.png,,0.0017
 slab_basalt_mongolian_black_basalt_79911b7e-44c7-4c81-a69f-771bcf4b805f,Mongolian Black Basalt,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_basalt_mongolian_black_basalt_79911b7e-44c7-4c81-a69f-771bcf4b805f.png,,0.0017
-slab_dolomite_super_white_dolomite_341fad68-352d-4e79-a35b-924a5b4de7f6,Super White Dolomite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_super_white_dolomite_341fad68-352d-4e79-a35b-924a5b4de7f6.png,,0.0017
+slab_dolomite_super_white_dolomite_341fad68-352d-4e79-a35b-924a5b4de7f6,Super White Dolomite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_super_white_dolomite_341fad68-352d-4e79-a35b-924a5b4de7f6.png,Super White,0.0017
 slab_gneiss_beola_gneiss_b51499be-2448-4d5b-aa1a-8c812648a762,Beola Gneiss,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_gneiss_beola_gneiss_b51499be-2448-4d5b-aa1a-8c812648a762.png,,0.0017
 slab_dolomite_bianco_dolomite_276fc83e-fcce-4719-92ae-0a3935144115,Bianco Dolomite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_bianco_dolomite_276fc83e-fcce-4719-92ae-0a3935144115.png,,0.0017
 slab_soapstone_green_soapstone_6947844f-7d60-4ec8-8de8-f270b47389c7,Green Soapstone,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_soapstone_green_soapstone_6947844f-7d60-4ec8-8de8-f270b47389c7.png,,0.0017
@@ -12388,13 +12388,13 @@ slab_marble_beige_marble_ffc42629-259a-53e4-aa81-e8146e4763f4,Beige Marble,https
 slab_granite_grey_granite_4036348b-a08f-5197-a5d0-8e3a06f68e28,Grey Granite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_granite_grey_granite_4036348b-a08f-5197-a5d0-8e3a06f68e28.png,,0.0017
 slab_granite_crystal_white_fbf5d48c-2589-5a9c-af39-ef91658c0caf,Crystal White,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_granite_crystal_white_fbf5d48c-2589-5a9c-af39-ef91658c0caf.png,,0.0017
 slab_granite_brown_granite_ee9f5cd5-93db-5ea4-8868-f05ef9c6fe68,Brown Granite,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_granite_brown_granite_ee9f5cd5-93db-5ea4-8868-f05ef9c6fe68.png,,0.0017
-slab_dolomite_marble_angelus_dolomitico_0c31b815-59cb-5b84-bef3-39f59e400a37,Angelus Dolomitico,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_marble_angelus_dolomitico_0c31b815-59cb-5b84-bef3-39f59e400a37.png,,0.0017
+slab_dolomite_angelus_dolomitico_0c31b815-59cb-5b84-bef3-39f59e400a37,Angelus Dolomitico,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_angelus_dolomitico_0c31b815-59cb-5b84-bef3-39f59e400a37.png,,0.0017
 slab_marble_cream_marble_940c569f-12d4-549c-9209-df15b81ba6ee,Cream Marble,,,0.0017
 slab_onyx_dark_5c17089d-db04-5247-ab45-64a338827894,Dark,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_onyx_dark_5c17089d-db04-5247-ab45-64a338827894.png,,0.0017
 slab_travertine_golden_silver_f8aa0cac-5f87-5e89-9529-4f31d59636f8,Golden Silver,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_travertine_golden_silver_f8aa0cac-5f87-5e89-9529-4f31d59636f8.png,,0.0017
 slab_travertine_maran_049fe344-8c18-5029-9631-73584a28bbb9,Maran,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_travertine_maran_049fe344-8c18-5029-9631-73584a28bbb9.png,,0.0017
 slab_travertine_red_travertine_b6628a51-3a6a-588a-9f70-17f08eea5b61,Red Travertine,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_travertine_red_travertine_b6628a51-3a6a-588a-9f70-17f08eea5b61.png,Persian Red,0.0017
-slab_dolomite_marble_callacata_nuvolatto_a4d443c4-de71-5748-acde-172342477de1,Callacata Nuvolatto,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_marble_callacata_nuvolatto_a4d443c4-de71-5748-acde-172342477de1.png,,0.0017
+slab_dolomite_callacata_nuvolatto_a4d443c4-de71-5748-acde-172342477de1,Callacata Nuvolatto,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_callacata_nuvolatto_a4d443c4-de71-5748-acde-172342477de1.png,,0.0017
 slab_quartzite_horizon_grey_3c7a7c17-9f04-5185-8348-d48d2579386a,Horizon Grey,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_horizon_grey_3c7a7c17-9f04-5185-8348-d48d2579386a.png,,0.0017
 slab_travertine_cream_travertine_7d4e69c8-251d-527e-b3d9-22c48dcaaf12,Cream Travertine,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_travertine_cream_travertine_7d4e69c8-251d-527e-b3d9-22c48dcaaf12.png,,0.0017
 slab_marble_lilac_marble_3cbec0b3-08a7-5e49-9e4b-299d3091577e,Lilac Marble,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_marble_lilac_marble_3cbec0b3-08a7-5e49-9e4b-299d3091577e.png,,0.0017
@@ -12409,22 +12409,21 @@ slab_crystal_cristallus_fire_5708105a-34bd-5ac5-b7ba-623f33a59a8b,Cristallus Fir
 slab_granite_splendoure_dior_ac48680d-defe-57ce-b15d-ae73aa063efd,Splendoure Dior,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_granite_splendoure_dior_ac48680d-defe-57ce-b15d-ae73aa063efd.png,,0.0017
 slab_granite_etna_black_eb39b504-6439-5546-b5a5-63f36b4dae50,Etna Black,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_granite_etna_black_eb39b504-6439-5546-b5a5-63f36b4dae50.png,,0.0017
 slab_marble_white_marble_8c51f445-99de-5f6d-a302-2f8ccbb8fea1,White Marble,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_marble_white_marble_8c51f445-99de-5f6d-a302-2f8ccbb8fea1.png,,0.0017
-slab_dolomite_marble_calacatta_white_silk_fb540622-7937-5378-bcdc-6f73454ee110,Calacatta White Silk,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_marble_calacatta_white_silk_fb540622-7937-5378-bcdc-6f73454ee110.png,,0.0017
+slab_dolomite_calacatta_white_silk_fb540622-7937-5378-bcdc-6f73454ee110,Calacatta White Silk,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_calacatta_white_silk_fb540622-7937-5378-bcdc-6f73454ee110.png,,0.0017
 slab_marble_mist_5a858d39-99d0-570d-b9f0-630cbca9f2a2,Mist,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_marble_mist_5a858d39-99d0-570d-b9f0-630cbca9f2a2.png,,0.0017
-slab_dolomite_marble_super_white_c84613a4-eae0-5fe8-920f-1b63b5bfe4e6,Super White,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_marble_super_white_c84613a4-eae0-5fe8-920f-1b63b5bfe4e6.png,,0.0017
 block_travertine_maran_1cfcc849-19b8-55b8-9925-8908d5d5892f,Maran,,,0.0014348
 slab_quartzite_sky_fall_9669c931-c91e-5265-9fd2-10d79b9e432f,Sky Fall,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_sky_fall_9669c931-c91e-5265-9fd2-10d79b9e432f.png,,0.0017
 slab_quartzite_amarelo_fusion_82b0ba32-0cf2-506b-8252-e38d71aa8cec,Amarelo Fusion,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_amarelo_fusion_82b0ba32-0cf2-506b-8252-e38d71aa8cec.png,,0.0017
 slab_granite_white_dallas_285e3772-632a-5081-a6c7-c0f1752a8306,White Dallas,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_granite_white_dallas_285e3772-632a-5081-a6c7-c0f1752a8306.png,,0.0017
 slab_quartzite_platinuns_blue_5b9e63eb-650d-5b97-87bd-9d1ccfa7d57a,Platinuns Blue,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_platinuns_blue_5b9e63eb-650d-5b97-87bd-9d1ccfa7d57a.png,,0.0017
 slab_quartzite_emerald_bay_d837f7b9-b663-5772-9e6e-96201b8ff834,Emerald Bay,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_emerald_bay_d837f7b9-b663-5772-9e6e-96201b8ff834.png,,0.0017
-slab_dolomite_marble_arabescatto_extra_ad1fc41e-3944-5b60-a077-7e326c88f539,Arabescatto Extra,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_marble_arabescatto_extra_ad1fc41e-3944-5b60-a077-7e326c88f539.png,,0.0017
+slab_dolomite_arabescatto_extra_ad1fc41e-3944-5b60-a077-7e326c88f539,Arabescatto Extra,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_arabescatto_extra_ad1fc41e-3944-5b60-a077-7e326c88f539.png,,0.0017
 block_onyx_dark_c0b9f73b-baa8-5ec1-b9a8-40e30c60ec18,Dark,,,0.0014348
 slab_quartzite_spectra_crystal_87e275ff-4a7b-54a6-8571-d0787ce311ff,Spectra Crystal,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_spectra_crystal_87e275ff-4a7b-54a6-8571-d0787ce311ff.png,,0.0017
 block_onyx_aqua_e6e90a7a-e2ff-598f-9026-306920d1c9db,Aqua,,,0.0014348
 block_marble_pietra_7ee84904-c383-515c-ae3b-827c09ad3032,Pietra,,,0.0014348
 slab_granite_vermelhor_brasil_941e5d42-d740-5ab4-b1cc-4232b4d1479c,Vermelhor Brasil,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_granite_vermelhor_brasil_941e5d42-d740-5ab4-b1cc-4232b4d1479c.png,,0.0017
-slab_dolomite_marble_calacatta_gold_c7ef4ff9-3011-534f-99d9-d61e42b6c288,Calacatta Gold,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_marble_calacatta_gold_c7ef4ff9-3011-534f-99d9-d61e42b6c288.png,,0.0017
+slab_dolomite_calacatta_gold_c7ef4ff9-3011-534f-99d9-d61e42b6c288,Calacatta Gold,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_calacatta_gold_c7ef4ff9-3011-534f-99d9-d61e42b6c288.png,,0.0017
 block_marble_cream_marble_c5ee8cf0-6ddf-5344-b355-5522e12cf12b,Cream Marble,,,0.0014348
 block_travertine_super_2354f7c6-0317-5ab3-a745-d0fc2e561b72,Super,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/block_travertine_super_2354f7c6-0317-5ab3-a745-d0fc2e561b72.png,,0.0014348
 slab_quartzite_nuovo_louise_blue_a6cd939e-d909-5f09-87a2-cbbc2455b6f9,Nuovo Louise Blue,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_nuovo_louise_blue_a6cd939e-d909-5f09-87a2-cbbc2455b6f9.png,,0.0017
@@ -12443,7 +12442,7 @@ slab_crystal_venaria_real_e528f664-e4ee-59af-9970-9c141e59e4a9,Venaria Real,http
 block_marble_lilac_marble_813ffe40-4321-5d8e-9835-aaee19b18ba6,Lilac Marble,,,0.0014348
 block_marble_bela_8c5bb67f-c06d-5e83-9ad4-7bff3c865cff,Bela,,Bela Cream Marble,0.0014348
 block_onyx_brown_onyx_1ec9cc87-49f1-5e5b-a13b-23e3ced26eca,Brown Onyx,,,0.0014348
-block_dolomite_marble_arabescatto_extra_b70d7d86-ad22-56bd-8688-54bc0cd0aac2,Arabescatto Extra,,,0.0014348
+block_dolomite_arabescatto_extra_b70d7d86-ad22-56bd-8688-54bc0cd0aac2,Arabescatto Extra,,,0.0014348
 block_granite_etna_black_57218bcd-97c5-50fb-8707-6e4223f7901c,Etna Black,,,0.0014348
 block_marble_golden_blue_bd61e24c-513d-5d5b-af15-010d7e74a7af,Golden Blue,,,0.0014348
 block_marble_grey_marble_8d4355bc-9a87-58be-a839-19967f5ce08f,Grey Marble,,,0.0014348
@@ -12452,8 +12451,8 @@ block_travertine_red_travertine_d1828d3c-c645-50d7-9b01-852c25ac55e5,Red Travert
 block_quartzite_emerald_bay_a92a3f99-a2f8-5611-9d2e-52b748942273,Emerald Bay,,,0.0014348
 block_marble_lilac_white_381adae5-3c45-50ca-bd96-3eeae9a1059d,Lilac White,,,0.0014348
 block_quartzite_amarelo_fusion_b4588637-1ca8-58e4-9871-8f76e5ca37f1,Amarelo Fusion,,,0.0014348
-block_dolomite_marble_calacatta_gold_611602e3-ffba-5342-ab9b-05fea33aff02,Calacatta Gold,,,0.0014348
-block_dolomite_marble_angelus_dolomitico_c3aed7d6-9665-56ac-93f2-3b813769db1e,Angelus Dolomitico,,,0.0014348
+block_dolomite_calacatta_gold_611602e3-ffba-5342-ab9b-05fea33aff02,Calacatta Gold,,,0.0014348
+block_dolomite_angelus_dolomitico_c3aed7d6-9665-56ac-93f2-3b813769db1e,Angelus Dolomitico,,,0.0014348
 block_travertine_cream_travertine_6fc7dbce-5107-5d3d-a560-89c2c8f6e41d,Cream Travertine,,,0.0014348
 block_quartzite_taj_polonine_1c4a844d-d837-5c23-bd1b-36ec13190957,Taj Polonine,,,0.0014348
 block_granite_brown_granite_827f42be-0b78-50ca-964d-4cb2690625c7,Brown Granite,,,0.0014348
@@ -12463,13 +12462,11 @@ block_marble_beige_marble_8aa60cbb-cdc0-5fd5-9b4f-0d77f9638137,Beige Marble,,,0.
 block_quartzite_horizon_grey_d7982b8c-a878-56c4-864c-dc447ba6334d,Horizon Grey,,,0.0014348
 block_granite_crystal_white_1e058bf4-207c-58f8-a439-019ec5e9322d,Crystal White,,,0.0014348
 block_crystal_cristallus_fire_5ec5e5fa-18f5-5a9a-a992-c3dc4df47f8b,Cristallus Fire,,,0.0014348
-block_dolomite_marble_callacata_nuvolatto_c08670d1-9039-5638-b13e-93eb3167ef3d,Callacata Nuvolatto,,,0.0014348
+block_dolomite_callacata_nuvolatto_c08670d1-9039-5638-b13e-93eb3167ef3d,Callacata Nuvolatto,,,0.0014348
 block_granite_splendoure_dior_47acd03c-72aa-5299-84dc-343bfe24d7b6,Splendoure Dior,,,0.0014348
 block_granite_white_dallas_5f6c657d-1fde-580f-944a-8cb45a7284fb,White Dallas,,,0.0014348
 block_quartzite_spectra_crystal_df0c70c5-aa87-5bbc-9c2f-ec25b36c45ef,Spectra Crystal,,,0.0014348
-block_dolomite_marble_super_white_131d09ad-addf-5ce6-a46a-c66ca1efc893,Super White,,,0.0014348
-block_dolomite_marble_calacatta_white_silk_2a69f314-f9bb-5eb3-b26e-09901ddc2d14,Calacatta White Silk,,,0.0014348
-block_dolomite_marble_matarazzo_3d0eb5f1-1cdd-54f4-8b18-a4c1200ac9ed,Matarazzo,,,0.0014348
+block_dolomite_calacatta_white_silk_2a69f314-f9bb-5eb3-b26e-09901ddc2d14,Calacatta White Silk,,,0.0014348
 block_quartzite_nuovo_louise_blue_9c6a122a-809a-530f-8e2a-072d3f82f6db,Nuovo Louise Blue,,,0.0014348
 block_granite_sparta_white_2e3d20d0-ac1d-53a2-b431-5151e7c60733,Sparta White,,,0.0014348
 block_granite_netuno_bourdeaux_fbfc5f2b-74e7-5762-b85d-3ef3b8271c32,Netuno Bourdeaux,,,0.0014348
@@ -12490,7 +12487,7 @@ tile_marble_lilac_marble_529bd21e-e135-549c-92d0-1c1e3440193c,Lilac Marble,,,0.0
 tile_onyx_dark_91190bb7-8c09-580e-aaff-bf629bf0797c,Dark,,,0.0014348
 tile_granite_tiger_769d13c7-c940-543f-aaae-60ddf3a509c1,Tiger,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/tile_granite_tiger_769d13c7-c940-543f-aaae-60ddf3a509c1.png,,0.0014348
 tile_marble_veined_1bfd8fb7-e328-55d4-9646-c076ecc5e63e,Veined,,,0.0014348
-tile_dolomite_marble_angelus_dolomitico_0eea61a9-3004-569b-a310-47834a847686,Angelus Dolomitico,,,0.0014348
+tile_dolomite_angelus_dolomitico_0eea61a9-3004-569b-a310-47834a847686,Angelus Dolomitico,,,0.0014348
 tile_travertine_maran_bf0fab4b-516c-5087-a729-6ee24e66dcd6,Maran,,,0.0014348
 tile_granite_grey_granite_fbe8f311-b47f-56aa-bd32-b5392acb5e15,Grey Granite,,,0.0014348
 tile_travertine_super_5dfc35d3-ce0e-5718-a585-93199c2c55f6,Super,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/tile_travertine_super_5dfc35d3-ce0e-5718-a585-93199c2c55f6.png,,0.0014348
@@ -12500,9 +12497,9 @@ tile_onyx_brown_onyx_9c0c4257-fea3-5fb9-ab77-ecc8aceec501,Brown Onyx,,,0.0014348
 tile_granite_etna_black_e4f691dd-ed94-5dae-8613-8e65f3c22d6b,Etna Black,,,0.0014348
 tile_marble_golden_blue_801c730c-9c25-5210-b942-11a905ab8cdd,Golden Blue,,,0.0014348
 tile_travertine_golden_silver_2194cf24-5dc1-597e-b390-022bfa1d7d1e,Golden Silver,,,0.0014348
-tile_dolomite_marble_calacatta_gold_a2b35b35-38d5-5149-b284-d7db1f560aae,Calacatta Gold,,,0.0014348
+tile_dolomite_calacatta_gold_a2b35b35-38d5-5149-b284-d7db1f560aae,Calacatta Gold,,,0.0014348
 tile_marble_white_marble_7251f9ee-a0ea-5ed3-82fe-e5759723f299,White Marble,,,0.0014348
-tile_dolomite_marble_arabescatto_extra_7886833f-2113-574d-a60f-2853cf5d7c84,Arabescatto Extra,,,0.0014348
+tile_dolomite_arabescatto_extra_7886833f-2113-574d-a60f-2853cf5d7c84,Arabescatto Extra,,,0.0014348
 tile_granite_sparta_white_44b4e033-ee4c-5be7-9ded-d8f51483afed,Sparta White,,,0.0014348
 tile_marble_grey_marble_94d2fe58-1e9b-5095-b16f-915caed53939,Grey Marble,,,0.0014348
 tile_granite_brown_granite_f96b482b-d030-5888-aea8-5afbaeab4b44,Brown Granite,,,0.0014348
@@ -12514,8 +12511,8 @@ tile_granite_white_dallas_37b2e656-212f-520c-8c4a-4ed1f311139a,White Dallas,,,0.
 tile_quartzite_amarelo_fusion_0383c29a-e6bb-5c72-8dbf-a1c0db5b7179,Amarelo Fusion,,,0.0014348
 tile_quartzite_sky_fall_9560602d-d012-5772-98b5-73222463c127,Sky Fall,,,0.0014348
 tile_quartzite_horizon_grey_490dfed2-be14-5efd-ad51-fa12497e8f50,Horizon Grey,,,0.0014348
-tile_dolomite_marble_calacatta_white_silk_b0ad1942-5a8d-5cbf-a70b-e6ff9fbdcad1,Calacatta White Silk,,,0.0014348
-tile_dolomite_marble_callacata_nuvolatto_e206520d-d4d3-5e18-8a9b-c22ea8b8d970,Callacata Nuvolatto,,,0.0014348
+tile_dolomite_calacatta_white_silk_b0ad1942-5a8d-5cbf-a70b-e6ff9fbdcad1,Calacatta White Silk,,,0.0014348
+tile_dolomite_callacata_nuvolatto_e206520d-d4d3-5e18-8a9b-c22ea8b8d970,Callacata Nuvolatto,,,0.0014348
 tile_travertine_cream_travertine_6496c625-c6fa-5498-be05-2aec17dfdaf0,Cream Travertine,,,0.0014348
 tile_granite_splendoure_dior_a11254e5-9b13-5c11-8224-6d29995014be,Splendoure Dior,,,0.0014348
 tile_quartzite_spectra_crystal_a425f245-69b7-5789-9bfc-bce1b350c8e5,Spectra Crystal,,,0.0014348
@@ -12523,7 +12520,6 @@ tile_quartzite_white_polonine_2d8b1be2-8f41-57c7-ab12-7464502eb0f3,White Polonin
 tile_agate_antique_blue_jumbo_bafb2e1e-b457-5da7-acc9-1869c6ce7b9e,Antique Blue Jumbo,,Antique Bleu Jumbo|Antique Bleu Jumbo Agate|Antique Blue Jumbo Agate|Antique Azul Jumbo|Antique Azul Jumbo Agate|Antique Blu Jumbo|Antique Blu Jumbo Agate,0.0014348
 tile_quartzite_taj_polonine_8931ded8-64b0-5264-ad26-aeca69388e37,Taj Polonine,,,0.0014348
 tile_quartzite_emerald_bay_7af4d67a-576e-5aab-b245-7ca72180861f,Emerald Bay,,,0.0014348
-tile_dolomite_marble_super_white_bea4f3ba-a202-540e-9922-5722e8124efa,Super White,,,0.0014348
 tile_crystal_cristallus_fire_534857c2-fa79-59ac-a03b-e4d280161115,Cristallus Fire,,,0.0014348
 tile_alabaster_cotton_b303e12f-7d01-5ed4-ad19-2ad597d045db,Cotton,,Cotton Alabaster,0.0014348
 tile_granite_netuno_bourdeaux_5151b1a0-b9e7-5a7e-861f-d04e55ff43cc,Netuno Bourdeaux,,,0.0014348
@@ -12860,7 +12856,7 @@ tile_crystal_saint_859402e7-c11f-5141-9c70-d16169443ec1,Saint,,Branco Crystal Sa
 tile_crystal_translucent_rose_ed0f9f17-4e77-5676-b57e-f4f3fa84e7d9,Translucent Rose,,Translucent Rose Crystal|Translucent Pink|Translucent Pink Crystal|Translucent Rosa|Translucent Rosa Crystal|Rose Translucent|Rose Translucent Crystal,0.0014348
 tile_crystal_diamond_oro_19fdb3c6-937b-5b64-92ee-857142b629a2,Diamond Oro,,Diamond Crystal|Diamond,0.0014348
 tile_dolomite_fantasy_white_dolomite_aa53dc4e-b27f-5a6b-a919-373b436d6896,Fantasy White Dolomite,,,0.0014348
-tile_dolomite_super_white_dolomite_ff023606-4fa5-515c-942d-f88d83f629f8,Super White Dolomite,,,0.0014348
+tile_dolomite_super_white_dolomite_ff023606-4fa5-515c-942d-f88d83f629f8,Super White Dolomite,,Super White,0.0014348
 tile_crystal_smoky_6d7980fc-5ee2-514a-82fa-dc1b54304f97,Smoky,,Smoky Crystal,0.0014348
 tile_dolomite_king_white_dolomite_b55410eb-f3d9-5860-a0da-c9e6f2ea6df8,King White Dolomite,,,0.0014348
 tile_dolomite_avorio_10ca09dd-5c74-5852-aa2f-489829fa3210,Avorio,,Avorio Dolomite|Ivory|Ivory Dolomite,0.0014348
@@ -24707,7 +24703,6 @@ slab_conglomerate_red_conglomerate_8bab7f72-6f79-5817-9e54-36f7b716625a,Red Cong
 slab_dolomite_wonderful_black_0ad596b7-74b0-57a8-9982-147982b1385a,Wonderful Black,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_dolomite_wonderful_black_0ad596b7-74b0-57a8-9982-147982b1385a.png,,0.0017
 slab_marble_white_super_69969001-9b10-5199-a50b-05f509ed1356,White Super,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_marble_white_super_69969001-9b10-5199-a50b-05f509ed1356.png,White Super Es,0.0017
 slab_quartzite_yalos_c7c1e632-651d-55df-8770-12c04dd1d1a0,Yalos,https://blokport-dev-staging-3e58a6.s3.eu-west-1.amazonaws.com/dev/variations/slab_quartzite_yalos_c7c1e632-651d-55df-8770-12c04dd1d1a0.png,,0.0017
-slab_dolomite_marble_matarazzo_38b7f9f5-26bd-53a3-92ab-059334d33ca7,Matarazzo,,,0.0017
 block_agate_agata_blue_c341e377-43fb-512c-b503-6b2aa760fde6,Agata Blue,,Azul Agata|Agate Blue|Blue,0.0014348
 block_agate_antique_blue_31416d67-606e-5343-a2c0-91ea1651baeb,Antique Blue,,Antique Blue Agate|Antique Azul|Antique Azul Agate|Antique Blu|Antique Blu Agate|Antique Bleu|Antique Bleu Agate|Blue Antique|Blue Antique Agate,0.0014348
 block_agate_earth_jumbo_374ec92f-3f4e-5df4-8778-1bf3a8760b3c,Earth Jumbo,,Earth Jumbo Agate,0.0014348
@@ -36511,7 +36506,6 @@ block_conglomerate_red_conglomerate_14d82ebf-dff1-56ee-ab49-43d9f8bdd6d0,Red Con
 block_dolomite_wonderful_black_1ccbb1b1-e485-5f96-bbf1-b1e321107913,Wonderful Black,,,0.0014348
 block_marble_white_super_b8aaaa69-2922-5200-9e69-8e3ce688de0e,White Super,,White Super Es,0.0014348
 block_quartzite_yalos_e68c7488-93c5-53d0-9374-599c012faf60,Yalos,,,0.0014348
-tile_dolomite_marble_matarazzo_af2e3b92-0deb-5386-80b4-b07404e4f060,Matarazzo,,,0.0014348
 tile_quartzite_everest_quartzite_73c29a4e-1ee8-5494-9645-a4dcb53f4d00,Everest Quartzite,,,0.0014348
 tile_quartzite_smoky_quartzite_0c4d333c-e17c-5bfc-ba2a-5b9ced0f91cf,Smoky Quartzite,,,0.0014348
 tile_quartzite_super_white_bea4f3ba-a202-540e-9922-5722e8124efa,Super White,,Brazilian White Quartzite|Brazilian White|White Super|White Super Es,0.0014348

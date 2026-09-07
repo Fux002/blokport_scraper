@@ -63,7 +63,13 @@ class AliasResolver:
         if self.generic:
             return self.generic
         from stone_pipeline.config.domain import active_pack   # lazy: avoid an import cycle at module load
-        return active_pack().generic_descriptors
+        pack = active_pack()
+        # The pack's product-FORM words are generic too ('Pietra Grey Step' ~ 'Pietra Grey'). Single tokens
+        # only: a phrase entry ('cross cut', 'pier cap') is stripped whole by the name cleaner before matching
+        # and must not leak its parts here -- 'cap'/'wall'/'cut' as bare generic words would alias real
+        # varieties (Cap Star, Blue Vein) into their neighbours.
+        forms = frozenset(w for w in pack.product_form_words if " " not in w and "-" not in w)
+        return pack.generic_descriptors | forms
 
     def decide(self, a: str, ta: str, ca, b: str, tb: str, cb) -> Decision:
         return self.decide_against(a, ta, ca, [b], tb, cb)

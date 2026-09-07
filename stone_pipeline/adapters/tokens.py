@@ -60,12 +60,25 @@ def explicit_type_word(name: str) -> str | None:
     if len(toks) < 2:
         return None
     clear = _clear_type_words()
+    # A SPLIT spelling of a one-word type ('Black Soap Stone' -> 'Soap Stone') is read as the type it names --
+    # 'Stone' alone is the generic material word and would otherwise hide it, leaving the vendor's mis-tag
+    # (Granite) in charge. Three or more tokens only: a two-token name that IS such a spelling is a variety
+    # named after a type, like the single-token rule above. PRIORITY: a trailing single type word always wins
+    # ('Blue Stone Basalt' IS a basalt; a leading 'Blue Stone' there is a colour+material descriptor, not the
+    # type Bluestone), so each bigram check runs only after its single-word counterpart at the same end.
+    split = _split_type_spellings() if len(toks) >= 3 else {}
     if match_key(toks[-1]) in clear:
         if match_key(toks[-2]) in _NEGATION_WORDS:          # 'Falsa Agata' -> not the Agate type
             return None
         return toks[-1]
+    if split and match_key(f"{toks[-2]} {toks[-1]}") in split:
+        if match_key(toks[-3]) in _NEGATION_WORDS:          # 'Falsa Soap Stone' -> not the type
+            return None
+        return f"{toks[-2]} {toks[-1]}"
     if match_key(toks[0]) in clear:
         return toks[0]
+    if split and match_key(f"{toks[0]} {toks[1]}") in split:
+        return f"{toks[0]} {toks[1]}"
     return None
 
 
@@ -98,6 +111,59 @@ FORMAT_TOKENS = [t for c in CATEGORIES for t in (c.label, c.name.title())]
 
 def _word_re(token: str) -> re.Pattern:
     return re.compile(rf"\b{re.escape(token)}\b", flags=re.IGNORECASE)
+
+
+@lru_cache(maxsize=None)
+def _form_patterns() -> tuple[re.Pattern, ...]:
+    """The active pack's product-FORM words (step, sill, coping, cross-cut ...) as whole-word/phrase patterns,
+    longest first so a phrase is removed before a word it contains could be. Any run of spaces/hyphens joins
+    a phrase's words, so 'Cross-cut' == 'cross cut' == the pack entry. Empty for a pack that declares none:
+    nothing is ever stripped that a pack did not ask for."""
+    words = sorted(active_pack().product_form_words, key=lambda w: (-len(w), w))
+    patterns = []
+    for word in words:
+        parts = [re.escape(p) for p in re.split(r"[\s\-]+", word) if p]
+        if parts:
+            patterns.append(re.compile(r"\b" + r"[\s\-]+".join(parts) + r"\b", flags=re.IGNORECASE))
+    return tuple(patterns)
+
+
+def strip_forms(name: str) -> str:
+    """Remove the pack's product-form words -- a physical form or trade unit ('Step', 'Sill', 'Cross-cut',
+    'Sample'). A form never carries variety identity ('Pietra Grey Marble Step' is the variety Pietra Grey
+    sold as a step), so it is removed unconditionally, exactly like the category format words."""
+    text = name or ""
+    for pattern in _form_patterns():
+        text = pattern.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+@lru_cache(maxsize=None)
+def _split_type_spellings() -> dict[str, str]:
+    """match_key of a SPLIT spelling of a one-word type -> that canonical type ('soap stone' -> 'Soapstone',
+    'sand stone' -> 'Sandstone'), from the type synonyms: a multi-word raw whose letters, joined, equal the
+    canonical. ONLY these are read as a type inside a name; a genuine two-word type or a synonym that is not
+    a mere spelling ('dolomite marble' -> Dolomite) stays with the single-word rules, so this cannot change
+    how any name is typed beyond the split-spelling case. A split spelling that also occurs as a plain
+    colour+material descriptor inside real variety names ('Blue Stone Basalt' is a basalt) must NOT be a
+    type synonym: it would re-type those varieties. Gate every new entry against the committed base."""
+    from stone_pipeline.reference.loaders import load_synonyms
+    return {raw: canon for raw, canon in load_synonyms("type").items()
+            if " " in raw and raw.replace(" ", "") == match_key(canon).replace(" ", "")}
+
+
+def _canonical_type_spelling(text: str) -> tuple[str, str]:
+    """Rewrite a split type spelling inside a name to the reference's spelling ('Black Soap Stone' ->
+    'Black Soapstone'), so the identity keys on the one spelling the variety reference uses. Returns
+    (text, canonical type found or '')."""
+    found = ""
+    for raw, canon in _split_type_spellings().items():
+        pattern = re.compile(r"\b" + r"[\s\-]+".join(re.escape(p) for p in raw.split()) + r"\b",
+                             flags=re.IGNORECASE)
+        if pattern.search(text):
+            text = pattern.sub(canon, text)
+            found = canon
+    return text, found
 
 
 @lru_cache(maxsize=None)
@@ -142,7 +208,7 @@ def _strip_tokens() -> tuple[str, ...]:
 def strip_variety(name: str) -> str:
     """Remove colour, type, and format tokens from a descriptor name, leaving the candidate variety
     (often empty for a purely generic descriptor). Word-boundary matched, so 'Gold' never bites 'Golden'."""
-    text = name or ""
+    text = strip_forms(name or "")
     for token in _strip_tokens():
         text = _word_re(token).sub(" ", text)
     return re.sub(r"\s+", " ", text).strip()
@@ -153,7 +219,7 @@ def strip_format(name: str) -> str:
     descriptor that is actually a real variety (White Travertine, Pink Onyx) then resolves, while a purely
     generic one (Cream Marble) finds no exact match and routes to review or gap rather than being discarded
     before it is even tried."""
-    text = name or ""
+    text = strip_forms(name or "")
     for token in FORMAT_TOKENS:
         text = _word_re(token).sub(" ", text)
     return re.sub(r"\s+", " ", text).strip()
@@ -170,8 +236,15 @@ def clean_variety(name: str, stone_type: str) -> str:
     word (slab/block/tile). Strip the stone-type token(s) too, but ONLY when a distinctive multi-word name
     remains -- otherwise keep the type so we don't reduce a name to a bare generic colour ('Crystal White
     Granite Slab' -> 'Crystal White', but 'White Onyx Slab' -> 'White Onyx', not 'White'). Never empty."""
-    toks = html.unescape(name or "").split()   # decode &#8211; etc. before cleaning
-    type_toks = {t.casefold() for t in (stone_type or "").split()}
+    # decode &#8211; etc., then drop the pack's product-form words (step, sill, cross-cut ...) -- a form never
+    # carries identity -- and rewrite a split type spelling to the reference's ('Soap Stone' -> 'Soapstone'),
+    # so the identity keys on the one spelling the variety reference uses.
+    raw, name_type = _canonical_type_spelling(strip_forms(html.unescape(name or "")))
+    toks = raw.split()
+    # the type tokens to strip: the resolved type's AND the type the name itself spells out, so a vendor
+    # mis-type (a 'Soap Stone' tagged Granite) still sheds its type word under the same guard below.
+    type_toks = ({t.casefold() for t in (stone_type or "").split()}
+                 | {t.casefold() for t in name_type.split()})
     no_fmt = [t for t in toks if t.casefold() not in _VARIETY_FORMAT_WORDS]
     no_type = [t for t in no_fmt if t.casefold() not in type_toks]
     # Strip the type when a distinctive multi-word name remains, OR when the single remaining token is a
