@@ -546,6 +546,10 @@ finish_phrases:
   split face: "a bold, three-dimensional natural cleft with real depth"
   sandblasted: "a fine, even matte texture"
   tumbled: "a softened, antique-worn character"
+  # the two remaining finishes that occur on real products (raw blocks; textured slabs). Finish-true: raw is
+  # the as-quarried, unworked state; textured is a deliberately non-smooth surface treatment.
+  raw: "an unworked, quarry-fresh surface, ready to be cut and finished to your specification"
+  textured: "a tactile, uneven surface with natural grip and visual depth"
 # Phrase when the finish has no specific entry (was the default in derive.derive_description).
 finish_phrase_default: "a refined natural surface"
 
