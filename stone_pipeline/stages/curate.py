@@ -51,7 +51,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind
 from stone_pipeline.core.text import (ascii_fold, looks_code_shaped,
                                       looks_like_artifact as _looks_like_artifact, title_case)
 from stone_pipeline.matching import projections as proj
-from stone_pipeline.reference.loaders import ReferenceData, type_slug_from_key
+from stone_pipeline.reference.loaders import ReferenceData, existing_varieties_file, type_slug_from_key
 from stone_pipeline.stages.format_resolve import branch_of
 from stone_pipeline.stages.normalize import AttributeResolvers
 
@@ -159,8 +159,7 @@ def image_url(filename: str) -> str:
 @dataclass
 class ImportFile:
     branch: str
-    path: Path
-    present: bool
+    path: Path | None
     # A variety's identity is (name, TYPE), not name alone: the SAME name legitimately exists as several
     # stones ('Aqua Blue' is a gneiss AND a granite AND a marble AND an onyx). Keying by name alone
     # collapsed them to one arbitrary type (last row wins), so a type-less scrape was silently tied to the
@@ -172,14 +171,13 @@ class ImportFile:
 
 
 def load_existing(branch: str) -> ImportFile:
-    """The EXISTING variants of one category, read from the immutable Medusa export (download-only) and
-    indexed by (normalized Name, normalized stone TYPE). Used to decide alias-vs-new and to dedup. The
-    export is never written by the pipeline, so the catalog is a pure function of (export + scrapes) --
-    re-running yields the identical output."""
-    path = SETTINGS.paths.export_file
-    imp = ImportFile(branch=branch, path=path, present=path.exists())
-    if not imp.present:
-        return imp
+    """The EXISTING variants of one category, read from the same file the matcher's candidate index is built
+    from (`existing_varieties_file`: the live Medusa export, else the committed base) and indexed by
+    (normalized Name, normalized stone TYPE). Used to decide alias-vs-new and to dedup. Neither file is written
+    by the pipeline, so the catalog is a pure function of (export + scrapes) -- re-running yields the identical
+    output. A missing file raises: an empty existing index would mint every known variety again."""
+    path = existing_varieties_file()
+    imp = ImportFile(branch=branch, path=path)
     with path.open(newline="", encoding="utf-8-sig") as handle:
         for r in csv.DictReader(handle):
             name = (r.get("Name") or "").strip()

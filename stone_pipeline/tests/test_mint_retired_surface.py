@@ -32,7 +32,7 @@ def _row() -> CanonicalRow:
 
 
 def _empty_imports() -> dict[str, ImportFile]:
-    return {b: ImportFile(branch=b, path=None, present=True) for b in _BRANCHES}
+    return {b: ImportFile(branch=b, path=None) for b in _BRANCHES}
 
 
 def _seed(monkeypatch, tmp_path, imports, retired_ref: set):

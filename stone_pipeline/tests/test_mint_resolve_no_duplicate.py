@@ -28,7 +28,7 @@ def _imports_with_mona_lisa(branches: set[str]) -> dict[str, ImportFile]:
     """Existing catalog carrying 'Mona Lisa' Granite (alias 'Monalisa') in the given branches only."""
     out = {}
     for b in ("slab", "block", "tile"):
-        imp = ImportFile(branch=b, path=None, present=True)
+        imp = ImportFile(branch=b, path=None)
         if b in branches:
             v = {"Key": f"{b}_granite_mona_lisa_x", "Name": "Mona Lisa", "Image": "",
                  "Aliases": "Monalisa", "Volume": "", "type": "granite"}

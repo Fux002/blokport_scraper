@@ -866,6 +866,25 @@ def _assert_pack_defaults_resolve(ref: ReferenceData) -> None:
                          "does not have): " + ", ".join(f"{v}={val!r}" for v, val in missing))
 
 
+def existing_varieties_file() -> Path:
+    """The ONE file every existing-variety index is built from (the matcher's candidate index AND curate's
+    alias-vs-new index): the live Medusa export when it exists, else the committed Id-free base.
+
+    The base is a CORRECT source for both readers, not a degraded fallback: neither reads the Medusa Id. They
+    use Key, Name, Aliases, Image and Volume and derive the type from the Key, all of which the base carries,
+    and the base is the canonical full variety union while the live export lags it after a factory reset
+    (lifecycle._prune_stale_medusa_export deletes the export; Blokport re-exports only after the next pull).
+    Reading the base in that window keeps every existing variety known, so nothing is minted twice. Only
+    these two readers use it: emit, tree build and the catalog gate need Medusa ids and keep reading the live
+    export alone. Neither file present is an error, never an empty index."""
+    paths = SETTINGS.paths
+    for path in (paths.export_file, paths.variants_export_base_csv):
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        f"no existing-variety file: neither {paths.export_file} nor {paths.variants_export_base_csv} exists")
+
+
 def load_all() -> ReferenceData:
     from stone_pipeline.state.overrides import load_overrides
     from stone_pipeline.config import decisions_store, settings, store
@@ -891,14 +910,9 @@ def load_all() -> ReferenceData:
     backbone = load_backbone()
     if _have_config_db:
         backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
-    # The matcher's existing-variety index reads the live Medusa export (paths.export_file). A factory reset
-    # DELETES that file (lifecycle._prune_stale_medusa_export) and Blokport re-exports it only after the next
-    # pull -- so between those the export is absent. Fall back to the committed Id-free BASE (the full variety
-    # union) so the matcher still recognizes every existing variety instead of mass-minting them all as new
-    # (products link by Key, not id; the real Medusa id fills in on the pull). SCOPED to the matcher on
-    # purpose: emit / tree_build / curate keep reading paths.export_file, so they never treat the id-free base
-    # as the live id-bearing export.
-    matcher_export = paths.export_file if paths.export_file.exists() else paths.variants_export_base_csv
+    # products link by Key, not id, so the matcher's candidate index may come from the Id-free base while the
+    # live export is absent; the real Medusa id fills in on the pull.
+    matcher_export = existing_varieties_file()
     ref = ReferenceData(
         attributes=load_attributes(),
         # ONE combined export for every category; the category is the Key prefix, so
