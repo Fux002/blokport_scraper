@@ -270,8 +270,11 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so
         # an edit takes effect on the following run -- same "applies next run" contract as the run guard).
         #   GET /config/v1/review/variants               pending varieties (+ current_action)
-        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?,"type"?}
+        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?,"type"?,
+        #                                                 "color"?,"country"?,"name"?}
         #     for alias, "type" is the TARGET's stone type (which of a multi-type name to alias into)
+        #     for mint, "name" is an optional operator-corrected NAME to mint under (mint + rename): the
+        #     variety is created with that display name and the scraped spelling becomes its alias
         #   GET /config/v1/review/attributes             pending attribute values (need a Medusa id)
         #   PUT /config/v1/review/attributes/<value>     {"kind":..., "medusa_id":...}
         #   GET  /config/v1/review/backbone              pending leaf additions (value not yet on a variety)
@@ -321,13 +324,33 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             if (raw_country := (body.get("country") or "").strip()):
                 if not (seed_country := _country_iso(raw_country)):
                     return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
+            # an optional operator NAME for a mint (mint + rename): the variety is created under this display
+            # name and the scraped spelling becomes its alias. Identity is (type, name), so a name that ALREADY
+            # exists under the mint's type is an alias, not a mint -- refuse it loudly here, because curate's
+            # existing-cores guard would otherwise skip the mint silently and the product would never bind.
+            # The type is the sent seed_type, else the pending card's stone_type; with no type known at all,
+            # refuse a name that exists under ANY type (conservative: the operator can send the type).
+            seed_name = (body.get("name") or "").strip() or None
+            if seed_name and action == "mint":
+                card = decisions_store.pending_payload("variety", proj.norm(variant)) or {}
+                mint_type = seed_type or (card.get("stone_type") or "").strip()
+                if mint_type and varieties.exists_as(seed_name, mint_type):
+                    return 400, {"error": f"name {seed_name!r} already exists as {mint_type}; "
+                                          "alias the spelling onto it instead of minting"}
+                if not mint_type and varieties.exists(seed_name):
+                    return 400, {"error": f"name {seed_name!r} already exists; send its stone type to mint it "
+                                          "as a different type, or alias the spelling onto it"}
             try:
                 decisions_store.set_variety_decision(variant, action, alias_of, seed_color=seed_color,
-                                                     seed_type=seed_type, seed_country=seed_country)
+                                                     seed_type=seed_type, seed_country=seed_country,
+                                                     seed_name=seed_name)
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
+            # echo the STORED name (the store drops it for reject/alias and for a rename to the same name)
+            stored_name = decisions_store.variety_actions().get(proj.norm(variant), {}).get("seed_name")
             return 200, {"variant": variant, "action": action, "alias_of": alias_of,
-                         "seed_color": seed_color, "seed_type": seed_type, "seed_country": seed_country}
+                         "seed_color": seed_color, "seed_type": seed_type, "seed_country": seed_country,
+                         "seed_name": stored_name}
         if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
             return 200, {"attributes": decisions_store.list_pending("attribute")}
         if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":

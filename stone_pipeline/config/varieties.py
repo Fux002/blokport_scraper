@@ -76,3 +76,12 @@ def exists(name: str) -> bool:
     the dropdown, so the picker and the validator agree by construction."""
     n = proj.norm(name or "")
     return bool(n) and any(proj.norm(v["name"]) == n for v in _rows())
+
+
+def exists_as(name: str, stone_type: str) -> bool:
+    """True iff `name` already exists as a variety OF `stone_type`. Identity is (type, name), so a mint's
+    operator-corrected name (mint + rename) is refused only when that exact pair exists -- 'Calacatta' as a
+    Quartzite is legal beside the Marble one. Same ledger source as exists()."""
+    n, t = proj.norm(name or ""), proj.norm(stone_type or "")
+    return bool(n) and bool(t) and any(
+        proj.norm(v["name"]) == n and proj.norm(v["stone_type"]) == t for v in _rows())
