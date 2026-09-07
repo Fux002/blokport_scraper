@@ -37,9 +37,224 @@ ambiguous_type_words: [crystal, quartz, agate, amethyst, coral]
 # variety ('Bardiglio Nuvolato' ~ 'Bardiglio Nuvolato Marble'). Colour/varietal words are NOT here.
 # (Was the hardcoded _GENERIC frozenset in matching/alias_resolver.py; moved here verbatim so a non-stone
 # pack supplies its own descriptors.)
-generic_descriptors: [marble, granite, slab, slabs, stone, tile, tiles, block, blocks,
-                      natural, polished, honed, brazilian, brazil, italian, turkish, indian,
-                      premium, classic, extra, standard, the, and]
+# Extended 2026-09-07 and PAIR-TESTED against the live catalog: a word goes in only if no two REAL varieties
+# of the same type differ by that word alone (else the judge would silently alias one into the other). The
+# same-type pairs a TYPE word does produce ('Taj Mahal Quartzite' ~ 'Taj Mahal', 'Limra Limestone' ~ 'Limra')
+# are exactly the duplicates the judge should merge; a cross-type pair is gated to review by the judge.
+# The pack's product_form_words (single tokens) are merged in programmatically -- do not repeat them here.
+# DELIBERATELY ABSENT (they distinguish real varieties): nationality/origin words beyond the four legacy
+# ones -- 'Persian Green' vs 'Green', 'Norwegian Rose' vs 'Rose', 'Irish Green', 'African Fusion', 'China
+# Aurora', 'Turkey Beige' (31 real pairs); 'new' ('New Kashmir' is another quarry), 'exotic', 'line', 'real',
+# 'export', 'superior', 'fine', 'rare', 'pure'; the finish tokens 'antique' ('Antique Blue Jumbo'), 'diamond'
+# ('Black Diamond'), 'water' ('Blue Water'), 'jet' ('Jet Black'); the split sub-tokens 'sand'/'lime'/'soap'
+# ('Mystic Sand', 'Lime Peacock'); every colour word; the ambiguous type words (crystal, quartz, agate,
+# amethyst, coral, agata); 'van' ('Van Light Green').
+generic_descriptors:
+  # legacy set (moved verbatim from the resolver; the four nationality words are kept for byte-parity but
+  # carry the identity risk described above)
+  - marble
+  - granite
+  - slab
+  - slabs
+  - stone
+  - tile
+  - tiles
+  - block
+  - blocks
+  - natural
+  - polished
+  - honed
+  - brazilian
+  - brazil
+  - italian
+  - turkish
+  - indian
+  - premium
+  - classic
+  - extra
+  - standard
+  - the
+  - and
+  # stone-type words: canonical single-word types + their language synonyms (pt/es/it)
+  - alabaster
+  - andesite
+  - basalt
+  - bluestone
+  - calcario
+  - cantera
+  - conglomerate
+  - dolomite
+  - gneiss
+  - granito
+  - limestone
+  - marmol
+  - marmore
+  - onyx
+  - porphyry
+  - quartzite
+  - quartzitic
+  - quartzito
+  - rhyolite
+  - sandstone
+  - schist
+  - serpentine
+  - slate
+  - soapstone
+  - sodalite
+  - sodalita
+  - syenite
+  - travertine
+  - travertino
+  - tuff
+  - precious
+  - semiprecious
+  # finish words (the Medusa finish vocabulary + its synonyms, single tokens)
+  - brushed
+  - leathered
+  - leather
+  - flamed
+  - flame
+  - sandblasted
+  - sanded
+  - tumbled
+  - sawn
+  - saw
+  - cut
+  - split
+  - face
+  - cleft
+  - hammered
+  - bush
+  - chiseled
+  - chiselled
+  - carved
+  - thermal
+  - shotblasted
+  - waterjet
+  - waxed
+  - oiled
+  - filled
+  - unfilled
+  - squared
+  - resined
+  - fluted
+  - textured
+  - matte
+  - drill
+  - dual
+  - wire
+  - acid
+  - washed
+  - aerated
+  - velvety
+  - finish
+  - raw
+  # grade / marketing words that never name a stone
+  - select
+  - selected
+  - choice
+  - commercial
+  - prime
+  - deluxe
+  - luxury
+  - grade
+  - quality
+  - top
+  - best
+  - finest
+  - special
+  - exclusive
+  - unique
+  - signature
+  - collection
+  - series
+  - range
+  - edition
+  - limited
+  - original
+  - genuine
+  - authentic
+  - "true"       # quoted: bare true/on/yes/no/off are YAML 1.1 booleans, not words
+  - imported
+  - import
+  - exported
+  - wholesale
+  - retail
+  - sale
+  - offer
+  # connectors / stopwords (en, it, es, pt, fr, de)
+  - of
+  - de
+  - di
+  - da
+  - del
+  - della
+  - dello
+  - dei
+  - degli
+  - la
+  - le
+  - il
+  - lo
+  - el
+  - los
+  - las
+  - du
+  - des
+  - von
+  - der
+  - den
+  - with
+  - in
+  - from
+  - by
+  - for
+  - at
+  - "on"         # quoted: YAML 1.1 boolean otherwise
+  - to
+  - an
+  # format words in the vendors' languages (slab / tile / block in pt, es, it, fr, de)
+  - lastre
+  - lastra
+  - placa
+  - placas
+  - chapa
+  - chapas
+  - bloco
+  - blocos
+  - bloque
+  - bloques
+  - piso
+  - pisos
+  - ladrilho
+  - ladrilhos
+  - azulejo
+  - azulejos
+  - baldosa
+  - baldosas
+  - dalle
+  - dalles
+  - fliese
+  - fliesen
+  - platte
+  - platten
+  # units and dimension noise
+  - cm
+  - mm
+  - sqm
+  - sqft
+  - m2
+  - m3
+  - kg
+  - ton
+  - tons
+  - thickness
+  - thick
+  - size
+  - sizes
+  - dimension
+  - dimensions
+  - x
 
 # Product-FORM words: a physical form or trade unit a stone vendor puts in a product title that never
 # carries variety identity ('Pietra Grey Marble Step' is the variety Pietra Grey sold as a step; 'White

@@ -75,11 +75,29 @@ def test_form_word_difference_is_an_alias():
 
 
 def test_phrase_parts_do_not_leak_into_the_generic_set():
-    # 'vein cut' is a phrase entry; its parts 'vein'/'cut' must not become generic, or 'White Vein Cut'
-    # would alias onto 'White' and 'Blue Vein' onto 'Blue'.
+    # 'vein cut' / 'pier cap' / 'wall cap' are phrase entries; the identity-bearing parts 'vein', 'cap',
+    # 'wall' must never become generic, or 'Blue Vein' would alias onto 'Blue' and 'Cap Star' onto 'Star'.
+    # ('cut' IS generic -- it is a finish token (Sawn Cut) that pair-tests clean; with 'vein' kept out,
+    # 'White Vein Cut' still never aliases onto 'White'.)
     generic = AliasResolver()._generic_set()
     assert "step" in generic
-    assert "vein" not in generic and "cut" not in generic and "cap" not in generic and "wall" not in generic
+    assert "vein" not in generic and "cap" not in generic and "wall" not in generic
+
+
+def test_generic_descriptors_are_strings_and_carry_the_extension():
+    # YAML 1.1 parses bare on/true/yes/no/off as booleans: every entry must be a real word (quoted in the
+    # pack), or the alias judge silently carries a non-string in its generic set.
+    generic = active_pack().generic_descriptors
+    assert all(isinstance(w, str) for w in generic), [w for w in generic if not isinstance(w, str)]
+    assert {"on", "true"} <= generic
+    # the pair-tested extension: type words, finish words, vendor-language format words, units
+    assert {"quartzite", "travertine", "soapstone", "brushed", "sawn", "chapa", "bloco", "lastra", "mm", "cm"} <= generic
+    # nationality/identity words stay OUT (they distinguish real varieties: 'Persian Green' vs 'Green')
+    assert not ({"persian", "china", "new", "exotic", "antique", "diamond", "van"} & generic)
+    # no colour word beyond the legacy 'natural' (kept for byte-parity) may be generic
+    attrs = load_attributes()
+    colour = {tokens.match_key(v) for v in attrs.canonical_names("color")}
+    assert (generic & colour) <= {"natural"}, generic & colour
 
 
 # --- split type spellings: 'Soap Stone' is the type Soapstone ------------------------------------------------
