@@ -41,6 +41,229 @@ generic_descriptors: [marble, granite, slab, slabs, stone, tile, tiles, block, b
                       natural, polished, honed, brazilian, brazil, italian, turkish, indian,
                       premium, classic, extra, standard, the, and]
 
+# Product-FORM words: a physical form or trade unit a stone vendor puts in a product title that never
+# carries variety identity ('Pietra Grey Marble Step' is the variety Pietra Grey sold as a step; 'White
+# Travertine Cross-cut Slab' is White Travertine in a cross-cut orientation). The name cleaner strips
+# every entry unconditionally (like the category format words slab/block/tile), and the alias judge treats
+# the single-token entries as generic descriptors. A hyphen in a scraped name matches a space here.
+# STONE-ONLY (this pack is per material; wood/lime declare their own forms). Collision-gated 2026-09-07
+# against the 36,525 live variety names and the finish/colour/type vocabularies -- these words are
+# deliberately ABSENT because they occur inside real variety names or attribute values and would
+# mutilate them: vein (Blue Vein, Gold Vein; only the compound vein-cut is listed), rock/rocks (Silver
+# Rock, Grey Rocks), mosaic (White Mosaic), paver/pavers (Savanna Paver), hearth (White Hearth),
+# pebble/pebbles, gravel (Gravel Gray), brick/bricks (Gold Brick Grey), cap/caps (Cap Star; the phrases
+# pier cap / wall cap are safe), island, quoin, ledge, wall, garden, carved (a finish value).
+product_form_words:
+  # cut orientation
+  - cross-cut
+  - crosscut
+  - cross cut
+  - vein-cut
+  - veincut
+  - vein cut
+  - cut-to-size
+  - cut to size
+  - cts
+  - bookmatch
+  - bookmatched
+  - book match
+  # stairs and edges
+  - step
+  - steps
+  - stair
+  - stairs
+  - staircase
+  - riser
+  - risers
+  - tread
+  - treads
+  - nosing
+  - bullnose
+  - landing
+  # paving
+  - paving
+  - cobble
+  - cobbles
+  - cobblestone
+  - sett
+  - setts
+  - flagstone
+  - flagstones
+  - crazy paving
+  - stepping stone
+  - stepping stones
+  # sills, thresholds, copings
+  - sill
+  - sills
+  - windowsill
+  - window sill
+  - door sill
+  - doorstep
+  - door step
+  - threshold
+  - thresholds
+  - coping
+  - copings
+  - pool coping
+  - curb
+  - kerb
+  - curbstone
+  - kerbstone
+  # wall and cladding
+  - skirting
+  - baseboard
+  - ledger
+  - ledgestone
+  - stacked stone
+  - veneer
+  - cladding
+  - wall cladding
+  - facade
+  - panel
+  - panels
+  - walling
+  - pier cap
+  - wall cap
+  # architectural elements
+  - column
+  - columns
+  - pillar
+  - pillars
+  - balustrade
+  - baluster
+  - railing
+  - fireplace
+  - fire surround
+  - mantel
+  - mantle
+  - fire pit
+  - firepit
+  - lintel
+  - keystone
+  - cornice
+  - capital
+  - plinth
+  - pedestal
+  - bollard
+  # surfaces
+  - countertop
+  - countertops
+  - counter top
+  - worktop
+  - kitchen top
+  - backsplash
+  - splashback
+  - vanity
+  - vanity top
+  - tabletop
+  - table top
+  - bench
+  - benchtop
+  - shelf
+  - shelves
+  - niche
+  - flooring
+  - floor
+  - kitchen
+  - bathroom
+  # bath and objects
+  - basin
+  - sink
+  - bathtub
+  - tub
+  - shower
+  - shower tray
+  - tray
+  - fountain
+  - planter
+  - sculpture
+  - statue
+  - monument
+  - headstone
+  - tombstone
+  - urn
+  - vase
+  - coaster
+  - bookend
+  - bookends
+  - paperweight
+  - chessboard
+  - mortar
+  - pestle
+  - cutting board
+  - cheese board
+  - serving board
+  - platter
+  - bowl
+  - tealight
+  - soap dish
+  - birdbath
+  - sundial
+  - plaque
+  - sign
+  - signage
+  - lettering
+  - engraving
+  - trophy
+  - award
+  - frame
+  - clock
+  - lamp
+  # loose stone
+  - chips
+  - aggregate
+  - crushed
+  - boulder
+  - boulders
+  - cube
+  - cubes
+  - rubble
+  - riprap
+  - armour stone
+  - armourstone
+  - landscaping
+  - pond
+  # trim and tile patterns
+  - strip
+  - strips
+  - border
+  - borders
+  - medallion
+  - medallions
+  - inlay
+  - listello
+  - molding
+  - moulding
+  - trim
+  - edge
+  - edging
+  - subway
+  - hexagon
+  - herringbone
+  - chevron
+  # commercial units
+  - sample
+  - samples
+  - remnant
+  - remnants
+  - offcut
+  - offcuts
+  - lot
+  - bundle
+  - bundles
+  - pallet
+  - crate
+  - piece
+  - pieces
+  - pcs
+  - set
+  - sets
+  - kit
+  - box
+  - boxes
+  - container
+  - truckload
+
 # The generic material noun (title material fallback + stripped when a type name is purely generic).
 # (Was the hardcoded 'stone' literal / _GENERIC_TYPE_TOKENS in stages/derive.py.)
 generic_material_word: stone

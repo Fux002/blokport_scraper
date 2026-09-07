@@ -75,6 +75,13 @@ class DomainPack:
     # A domain whose tones that palette cannot read sets this false: colour then comes from the pack
     # fallback_color / the Medusa-supplied value, and its CLASSIFIABLE_COLORS need not exist in Medusa.
     classify_texture_color: bool = True
+    # Product-FORM words -- a physical form or trade unit (step, sill, coping, sample, cross-cut ...) that
+    # never carries variety identity. The name cleaner strips them unconditionally, like the category
+    # format words, and the alias judge treats the single-token ones as generic. Optional: a pack that
+    # declares none strips nothing extra. Entries are lowercase words or space-separated phrases; a hyphen
+    # in a scraped name matches a space here ('Cross-cut' == 'cross cut'). Every entry must be
+    # collision-checked against the domain's real variety names before it is added (see stone.yaml).
+    product_form_words: frozenset[str] = frozenset()
 
 
 def _pack_path(name: str) -> Path:
@@ -201,6 +208,8 @@ def load_pack(name: str | None = None) -> DomainPack:
         name_code_pattern=data.get("name_code_pattern"),
         trailing_grade_letters=bool(data.get("trailing_grade_letters", False)),
         classify_texture_color=bool(data.get("classify_texture_color", True)),
+        product_form_words=frozenset(str(w).strip().lower() for w in (data.get("product_form_words") or [])
+                                     if str(w).strip()),
     )
 
 
