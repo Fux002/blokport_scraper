@@ -385,6 +385,58 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         #     origin then resolves from the right variety's documented origins, so the card does not come back).
         #     With country_iso the operator also fixes the origin for THIS vendor + the target variety (a
         #     supplier override, the top curated rung), instead of leaving it to the vendor gate's own pick.
+        # ONE statement, whatever list it comes from (pending card or resolved row): "for vendor <source>, the
+        # product scraped as <scraped> is <name>, a <type>, <color>, from <origin>". The backend derives the
+        # outcome (bind to the existing variety / mint it / the vendor's origin), see decisions_store.decide.
+        #   PUT    /config/v1/review/decide   {source, scraped, name, type, color?, origin?, widen?}
+        #   DELETE /config/v1/review/decide   {source, scraped}     clear that vendor's decisions for the spelling
+        #   GET    /config/v1/review/resolved[?source=&decided=true|false]   the last produce's resolution per
+        #                                      product, with the standing decision overlaid (no approval needed)
+        if len(segments) == 2 and segments[1] == "decide" and method in ("PUT", "DELETE"):
+            if not isinstance(body, dict):
+                return 400, {"error": "body must be a JSON object {source, scraped, name, type, ...}"}
+            source = (body.get("source") or "").strip()
+            raw_scraped = body.get("scraped") or ""
+            # a card can aggregate several listings of one identity; one statement covers every spelling
+            spellings = [s.strip() for s in (raw_scraped if isinstance(raw_scraped, list) else [raw_scraped])
+                         if isinstance(s, str) and s.strip()]
+            if not source or not spellings:
+                return 400, {"error": "source and scraped (a spelling or a list of spellings) are required"}
+            if method == "DELETE":
+                return 200, {"source": source, "scraped": spellings,
+                             "cleared": [decisions_store.clear_decisions(source, s) for s in spellings]}
+            from stone_pipeline.matching import projections as proj
+            name = (body.get("name") or "").strip()
+            raw_type = (body.get("type") or "").strip()
+            if not name or not raw_type:
+                return 400, {"error": "name and type are required"}
+            vocab = _type_vocab()
+            if proj.norm(raw_type) not in vocab:
+                return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
+            stone_type = vocab[proj.norm(raw_type)]
+            raw_origin = (body.get("origin") or "").strip()
+            origin = _country_iso(raw_origin) if raw_origin else ""
+            if raw_origin and not origin:
+                return 400, {"error": f"origin {raw_origin!r} is not a real ISO-3166 country"}
+            from stone_pipeline.stages.curate import active_branches, gen_key
+            from stone_pipeline.stages import decisions as _decisions
+            retired = _decisions.load_retired()
+            if any(gen_key(b, stone_type, name) in retired for b in active_branches()):
+                return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
+                             "retired": True}
+            try:
+                outcomes = [decisions_store.decide(source, s, name, stone_type, body.get("color") or "",
+                                                   origin, bool(body.get("widen"))) for s in spellings]
+            except decisions_store.InvalidDecision as e:
+                return 400, {"error": str(e)}
+            return 200, {**outcomes[0], "scraped": spellings, "decided": len(outcomes)}
+        if len(segments) == 2 and segments[1] == "resolved" and method == "GET":
+            from stone_pipeline.config import resolved
+            params = parse_qs(query)
+            decided = (params.get("decided") or [None])[0]
+            return 200, {"resolved": resolved.list_resolved(
+                source=(params.get("source") or [None])[0] or None,
+                decided=None if decided is None else decided.lower() == "true")}
         if len(segments) == 2 and segments[1] == "origins" and method == "GET":
             return 200, {"origins": decisions_store.list_pending("origin")}
         if len(segments) == 3 and segments[1] == "origins" and method == "PUT":

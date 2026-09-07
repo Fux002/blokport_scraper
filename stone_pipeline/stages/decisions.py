@@ -31,7 +31,7 @@ ATTR_COLUMNS = ["medusa_id", "kind", "value", "count", "suggested_value", "actio
 # (which of the Gneiss/Granite/Marble/Onyx 'Aqua Blue' this product is) needs to see the actual product,
 # not just the name. Empty when the row that raised the hold carried none. Not display-cased (URLs/free text).
 CONFIRM_COLUMNS = ["confirm", "variant", "reason", "stone_type", "color", "nearest_existing",
-                   "score", "model_prob", "src", "src_url", "image", "description"]
+                   "score", "model_prob", "src", "scraped", "src_url", "image", "description"]
 _PENDING_VARIETY_FIELDS = [c for c in CONFIRM_COLUMNS if c != "confirm"]   # 'confirm' now lives as `action`
 # scrape-derived display names title-cased at the write boundary (uniform casing regardless of curate path).
 # nearest_existing is included: the code-shaped hold writes a raw supplier-cased base there while the
@@ -90,6 +90,12 @@ def load_variety_seed_names() -> dict[str, str]:
     return decisions_store.variety_seed_names()
 
 
+def load_variety_seed_scopes() -> dict[str, str]:
+    """norm(scraped variant) -> the vendor a mint + rename was made FOR. curate then leaves the scraped spelling
+    off the renamed variety's global aliases: that vendor's scoped alias binds its products instead."""
+    return decisions_store.variety_seed_scopes()
+
+
 def save_rejected(rejected: set[str]) -> None:
     """Persist runtime-learned rejects. Never overwrites an explicit mint/alias decision."""
     decisions_store.learn_rejects(rejected)
@@ -108,8 +114,19 @@ def write_confirm_file(pending: list[dict]) -> int:
     def _payload(row: dict) -> dict:
         return {c: (title_case(str(row.get(c) or "")) if c in _DISPLAY_CASE_FIELDS else row.get(c, ""))
                 for c in _PENDING_VARIETY_FIELDS}
-    rows = [{"ref": _norm(row.get("variant", "")), "payload": _payload(row), "sources": row.get("sources")}
-            for row in pending if _norm(row.get("variant", ""))]
+    # one card per identity; every scraped spelling behind it rides along, so ONE statement on the card can
+    # be applied to each spelling (decisions are keyed by vendor + spelling)
+    by_ref: dict[str, dict] = {}
+    for row in pending:
+        ref = _norm(row.get("variant", ""))
+        if not ref:
+            continue
+        card = by_ref.setdefault(ref, {"ref": ref, "payload": _payload(row), "sources": row.get("sources")})
+        if row.get("scraped"):
+            card["payload"].setdefault("spellings", [])
+            if row["scraped"] not in card["payload"]["spellings"]:
+                card["payload"]["spellings"].append(row["scraped"])
+    rows = list(by_ref.values())
     decisions_store.replace_pending("variety", rows)
     return len(rows)
 
