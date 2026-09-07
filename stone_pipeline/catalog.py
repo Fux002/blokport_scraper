@@ -162,8 +162,16 @@ def _auto_queue_images() -> int:
     import os
 
     from stone_pipeline.stages import image_prompts
+    from stone_pipeline import refresh_images
+    # Demand-driven QUALITY upgrade: alongside the new mints, drip up to images.upgrade_batch
+    # product-backed variants whose texture predates the current best model. Once-only via the durable
+    # refreshed marker; capped so a produce's FAL spend stays predictable. Upgrade-then-list: a legacy
+    # texture is never held back, it is just replaced within a few produces. cap 0 == mints only.
+    cap = SETTINGS.images.upgrade_batch
+    refreshed = refresh_images.load_refreshed() if cap > 0 else set()
     try:
-        prompts_path = image_prompts.build()
+        prompts_path = (image_prompts.build_with_upgrades(refreshed, cap) if cap > 0
+                        else image_prompts.build())
     except Exception:
         log.exception("image prompt queue build failed")
         return 0
@@ -183,6 +191,28 @@ def _auto_queue_images() -> int:
         log.info("auto image generation: FAL_KEY + deps present, generating", extra={"extra_fields": {"queued": len(items)}})
         failed = _generate_queued_images()
         generated_inline = True
+        # Publish EVERY texture this run made (mints and upgrades alike) and record them as best-model:
+        # the inline branch previously left the PNGs local. Mints must be marked too -- they are generated
+        # by the current best model, so an unmarked mint would be picked up by the upgrade drip later and
+        # regenerated for nothing. Mark ONLY on a clean upload, mirroring refresh_images: a partial run
+        # leaves the Keys eligible so the next produce retries them. Under s3.dry_run (the dev default)
+        # uploads are suppressed by design, so skip the whole block rather than report a false failure.
+        produced = [i["output_name"] for i in items if i.get("output_name")]
+        if produced and SETTINGS.s3.dry_run:
+            log.info("s3 dry run: %d generated texture(s) NOT uploaded or marked", len(produced),
+                     extra={"extra_fields": {"produced": len(produced)}})
+        elif produced:
+            from stone_pipeline.prepare_variant_images import upload_variant_images
+            uploaded, missing = upload_variant_images(produced)
+            if failed or missing:
+                log.error("texture run incomplete; marker NOT advanced", extra={"extra_fields": {
+                    "produced": len(produced), "uploaded": uploaded, "missing": missing[:8],
+                    "failed_scripts": failed}})
+            else:
+                refresh_images.mark_best_model(produced)
+                log.info("textures published + marked best-model", extra={"extra_fields": {
+                    "uploaded": uploaded,
+                    "upgrades": sum(1 for i in items if i.get("mode") == image_prompts.UPGRADE_MODE)}})
         if failed:
             # distinct error-level signal: generation failed, so some {Key}.png will be absent. The
             # image gate downstream HOLDS imageless variants, but only when S3 is reachable -- surface

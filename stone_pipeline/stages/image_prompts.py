@@ -160,6 +160,49 @@ def build_refresh(refreshed: set[str], out_path: Path | None = None) -> Path:
     return _write(items, out_path, "refresh")
 
 
+UPGRADE_MODE = "upgrade"          # queue-item marker: an EXISTING texture being re-made, not a new mint
+
+
+def upgrade_candidates(refreshed: set[str], cap: int) -> list[str]:
+    """Product-backed variants whose texture exists but was NOT made by the current best model, capped to
+    `cap` for this run. This is the DEMAND-DRIVEN half of the quality upgrade: a variant is only eligible
+    once a product links to it (product_backed_keys), so we never spend on a texture nobody lists. Ordered
+    by Key so the drip is deterministic and a re-run resumes where it left off rather than reshuffling.
+    `refreshed` is the durable already-upgraded set, so each Key is upgraded exactly ONCE. cap <= 0 (the
+    default) disables upgrades entirely and returns nothing."""
+    if cap <= 0:
+        return []
+    variants = _variants()
+    eligible = [k for k in sorted(product_backed_keys())
+                if k not in refreshed                                   # once-only
+                and (variants.get(k, {}).get("Image") or "").strip()]   # has a texture => upgrade, not mint
+    return eligible[:cap]
+
+
+def build_with_upgrades(refreshed: set[str], cap: int, out_path: Path | None = None) -> Path:
+    """The produce's queue: new-mint prompts (build()) PLUS up to `cap` legacy-texture upgrades. Upgrade
+    items carry mode=UPGRADE_MODE so the already-on-S3 prune keeps them (their {Key}.png exists by
+    definition, which is exactly what the mint-idempotency prune drops). One queue, so every downstream
+    branch (inline generate, GPU dispatch, queue-only) handles both kinds unchanged."""
+    build(out_path=out_path)
+    path = Path(out_path or SETTINGS.paths.workspace_root / "image_pipeline" / "prompts_to_generate.json")
+    items = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    minted = {i.get("output_name") for i in items}
+    ktype, variants = _backbone_types(), _variants()
+    added = 0
+    for key in upgrade_candidates(refreshed, cap):
+        if key in minted:                      # a mint this run already covers it; never queue twice
+            continue
+        item = _prompt_item(key, ktype.get(key, ""), (variants.get(key, {}).get("Name") or "").strip())
+        if item:
+            item["mode"] = UPGRADE_MODE
+            items.append(item)
+            added += 1
+    log.info("texture upgrades queued", extra={"extra_fields": {
+        "mints": len(minted), "upgrades": added, "cap": cap}})
+    return _write(items, out_path, "new+upgrade")   # _write logs the final counts
+
+
 def build_for_keys(keys: list[str], out_path: Path | None = None) -> Path:
     """A specific set of variant Keys -- regenerate just these (e.g. replace a few bad images)."""
     ktype, variants = _backbone_types(), _variants()

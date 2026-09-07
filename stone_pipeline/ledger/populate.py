@@ -31,6 +31,25 @@ from stone_pipeline.stages.product_state import inventory_str
 _PRODUCT_PAYLOAD_CONTRACT = "v3-collection"
 
 
+def _image_models(path: str | Path | None = None) -> dict[str, str]:
+    """{Key: model} from catalog_source/image_model.csv, the provenance audit of which generator made each
+    variant texture. Absent/corrupt -> empty, so a missing audit degrades to no provenance rather than
+    failing a produce. Pure + cheap (one small CSV), so it is safe to read per write-through. `path`
+    overrides the default location (tests; Paths is frozen so it cannot be monkeypatched)."""
+    from stone_pipeline.config.settings import SETTINGS
+    path = Path(path) if path else SETTINGS.paths.catalog_source_dir / "image_model.csv"
+    out: dict[str, str] = {}
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            for r in csv.DictReader(handle):
+                key, model = (r.get("Key") or "").strip(), (r.get("model") or "").strip()
+                if key and model:
+                    out[key] = model
+    except (OSError, csv.Error):
+        return {}
+    return out
+
+
 def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     """Reflect the produced 1_variants_full.csv onto the variation table: update each
     variant's content (name, aliases, image, volume) and mark it in_full=1; insert
@@ -52,6 +71,11 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 shas = loaded
         except (json.JSONDecodeError, OSError):
             shas = {}   # a corrupt sidecar must never crash the write-through; degrade to no fingerprint
+    # {Key: generator} from the committed provenance audit, so the ledger records WHICH model made each
+    # texture (design section: image_model drives the once-only quality upgrade). Tolerant of absence or a
+    # corrupt file -> no provenance, never a crash. NOT part of payload_hash: the generator is our own
+    # bookkeeping, not content Medusa receives, so recording it must never re-serve a variant.
+    models = _image_models()
     ledger.execute("UPDATE variation SET in_full = 0")
     n = 0
     with Path(path).open(encoding="utf-8-sig", newline="") as handle:
@@ -81,6 +105,8 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "aliases = excluded.aliases, image_url = excluded.image_url, "
                 "image_sha256 = excluded.image_sha256, "
                 "volume = excluded.volume, in_full = 1, payload_hash = excluded.payload_hash, "
+                # provenance refresh: adopt a newly recorded generator, never blank one we already have.
+                "image_model = COALESCE(excluded.image_model, variation.image_model), "
                 # a content change re-serves (synced -> dirty); unchanged keeps its state. medusa_id
                 # and first_seen are never touched, so an acked id survives a re-run. E5/un-retire: a
                 # 'retiring' variety that reappears in the produced set (its exclusion was cleared) must
@@ -89,7 +115,8 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "WHEN variation.payload_hash != excluded.payload_hash THEN 'dirty' "
                 "ELSE variation.state END, "
                 "updated_at = excluded.updated_at",
-                (key, branch, "", name, json.dumps(aliases), image_url, image_sha256, None, volume,
+                (key, branch, "", name, json.dumps(aliases), image_url, image_sha256,
+                 models.get(key), volume,
                  None, ph, "pending", now, None, now, now),
             )
             n += 1

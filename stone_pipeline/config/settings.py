@@ -584,6 +584,14 @@ class ImagesConfig:
     # the image-slotting stage and the emit columns so they can never drift (the template header
     # must carry exactly this many Product Image columns -- asserted in tests).
     product_image_slots: int = 15
+    # One-time QUALITY upgrade of legacy variant textures, drip-fed by the produce. A product-backed
+    # variant whose {Key}.png was made by an older model is re-made ONCE with the current best model and
+    # recorded in the durable refreshed marker, so it never re-generates (or re-bills) twice. Capped per
+    # run so a produce's FAL spend stays predictable while the backlog drains over successive runs.
+    # Upgrade-then-list, never hold: a legacy texture still ships, it is just replaced within a few
+    # produces. Ships OFF (0) -- enable deliberately with BLOKPORT_IMAGE_UPGRADE_BATCH once the marker
+    # reflects everything already upgraded, else an enabled run re-does images that are already best.
+    upgrade_batch: int = _env_int("BLOKPORT_IMAGE_UPGRADE_BATCH", 0)
     processing: ImageProcessingConfig = field(default_factory=ImageProcessingConfig)
 
 
