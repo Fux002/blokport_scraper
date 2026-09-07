@@ -312,6 +312,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     rejected = decisions.load_rejected()
     seed_colors = decisions.load_variety_seed_colors()   # norm(variant) -> operator mint colour (over 'Natural')
     seed_types = decisions.load_variety_seed_types()     # norm(variant) -> operator-assigned stone type (fills a void)
+    seed_names = decisions.load_variety_seed_names()     # norm(variant) -> operator-corrected NAME to mint under (rename)
     pending_confirm: list[dict] = []
     result = CurationResult(
         alias_additions={b: [] for b in BRANCHES},
@@ -523,12 +524,31 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             evidence, stone_type=title_case(stone_type), color=title_case(obs_color or ""),
             nearest_existing=_named_with_types(title)))
 
+    minted_display: set[tuple[str, str]] = set()   # (norm type, norm display name) minted THIS run
+
     def _mint(clean: str, stone_type: str, row, gap) -> None:
         """Create a NEW variety row (clean + stone_type) -- the PHASE 5 last-resort mint. Shared with the
         BUG6 confirm path so an operator's confirmed NEW type on an existing multi-type name mints DIRECTLY,
-        instead of the fuzzy aliaser absorbing it onto a same-name sibling of a different type."""
+        instead of the fuzzy aliaser absorbing it onto a same-name sibling of a different type.
+
+        MINT + RENAME: an operator mint decision may carry a corrected NAME (seed_name, keyed by the scraped
+        `clean`). The variety is then minted under that display name -- Name AND Key -- and the scraped
+        spelling is recorded as its alias, so the product binds on the next produce through the alias surface
+        exactly like every alias does (two-pass, the same path a plain mint takes). The decision stays keyed by
+        the scraped spelling, so nothing in decision lookup or matching changes. Two different spellings
+        renamed to ONE name mint one variety: the second only adds its spelling as an alias."""
+        renamed = seed_names.get(proj.norm(clean), "")
+        display = title_case(renamed) if renamed and proj.norm(renamed) != proj.norm(clean) else title_case(clean)
+        owner = (proj.norm(display), proj.norm(stone_type))
+        if proj.norm(display) != proj.norm(clean):
+            # the scraped spelling rides onto the mint row via sib_aliases (owner[0] == norm(title)); for a
+            # variety that does not exist yet emit_alias_rows finds no import row and skips it, as intended.
+            alias_new.setdefault(owner, set()).add(title_case(clean))
+        if owner in minted_display:
+            return                          # a second spelling of the same renamed variety: alias only
+        minted_display.add(owner)
         new_variant_rows.append((
-            clean, title_case(clean), stone_type,
+            clean, display, stone_type,
             title_case(_attr_surface(row, "color")),
             (row.quality_name or last_resort_quality).strip() or last_resort_quality,
             title_case(_attr_surface(row, "finish")), gap,
@@ -849,14 +869,19 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if any(gen_key(b, stone_type, title) in retired_keys for b in active_branches()):
             _hold_retired(title, stone_type, obs_color, evidence)
             continue
-        _u = obs_union.get((proj.norm(stone_type), proj.norm(title)),
+        # Look up observed attributes (and the seed colour below) by the SCRAPED identity -- `name` is the
+        # cleaned scraped spelling -- not by the display title: obs_union is keyed by (type, clean) and the
+        # seed colour by the decision's scraped variant, so for a renamed mint (title != name) a title-keyed
+        # lookup would silently drop the observed colours/finishes and the seed colour. For every non-renamed
+        # row name and title normalise identically, so this is byte-identical there.
+        _u = obs_union.get((proj.norm(stone_type), proj.norm(name)),
                            {"colors": set(), "qualities": set(), "finishes": set()})
         # colour is REQUIRED for a Medusa product; a source like zucchi often supplies none, so a
         # variety would be born colourless and null every product's colour_id. Fall back to the
         # generic 'Multicolor' (a real attribute) so the variety + its products are always priceable.
         # an operator-chosen mint colour (from the new-variety review) WINS over the observed/fallback
         # chain, so a colourless source is seeded with a real colour instead of the generic 'Natural'.
-        seeded = seed_colors.get(proj.norm(title))
+        seeded = seed_colors.get(proj.norm(name))       # scraped-keyed, see the obs_union note above
         _pack = active_pack()
         colors = ([seeded] if seeded
                   else sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_pack.fallback_color])
@@ -867,8 +892,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # spelling as an alias (alias_new). Carry that SAME alias onto the new sibling so its product
         # resolves in ONE upload, not two (mint the variety AND attach its alias in the same leg --
         # otherwise a brand-new branch like a block needs a second round-trip to add the alias).
+        # Match the FULL (name, type) owner: a same-name variety of another type (Aqua Blue is four types)
+        # must not inherit this one's spellings, or the spelling becomes a cross-type ambiguous surface.
         sib_aliases = sorted({s for owner, sp in alias_new.items()
-                              if owner[0] == proj.norm(title) for s in sp})
+                              if owner == (proj.norm(title), proj.norm(stone_type)) for s in sp})
         for branch in active_branches():
             key = gen_key(branch, stone_type, title)
             if _core(key, branch) in existing_cores[branch]:

@@ -157,7 +157,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS variety_decision ("
                  "variant_norm TEXT PRIMARY KEY, variant_display TEXT NOT NULL DEFAULT '', "
                  "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), "
-                 "alias_of TEXT, seed_color TEXT, seed_type TEXT, seed_country TEXT, "
+                 "alias_of TEXT, seed_color TEXT, seed_type TEXT, seed_country TEXT, seed_name TEXT, "
                  "decided_at TEXT NOT NULL)")
     _variety_cols = {r["name"] for r in conn.execute("PRAGMA table_info(variety_decision)")}
     if "seed_color" not in _variety_cols:
@@ -166,6 +166,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_type TEXT")    # DBs created before it
     if "seed_country" not in _variety_cols:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_country TEXT")  # DBs created before it
+    if "seed_name" not in _variety_cols:
+        conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_name TEXT")     # mint + rename (DBs before it)
     # Operator-confirmed PER-VENDOR origins (the separate origin review queue): a (source, variety, type)
     # the operator picked a country for, because the vendor's primary_origin did not corroborate the map.
     # Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Overlaid

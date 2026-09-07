@@ -83,6 +83,13 @@ def load_variety_seed_types() -> dict[str, str]:
     return decisions_store.variety_seed_types()
 
 
+def load_variety_seed_names() -> dict[str, str]:
+    """norm(scraped variant) -> the operator-corrected NAME to mint under (mint + rename). curate creates the
+    variety with this display name (Name and Key) and records the scraped spelling as its alias, so the
+    product binds on the next produce through the alias surface like every alias does."""
+    return decisions_store.variety_seed_names()
+
+
 def save_rejected(rejected: set[str]) -> None:
     """Persist runtime-learned rejects. Never overwrites an explicit mint/alias decision."""
     decisions_store.learn_rejects(rejected)
