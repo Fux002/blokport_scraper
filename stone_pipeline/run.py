@@ -357,10 +357,13 @@ def run_source(
 
     # Stage 3: normalize
     _record(manifest, run_log, normalize.run(rows, ref))
-    # Stage 4: variation (collects alias write-back for persistence at run end)
+    # Stage 4: variation (collects alias write-back for persistence at run end). The source config carries
+    # the vendor's declared origin, the matcher's origin evidence when a listing states none.
     writeback = WriteBack()
+    source_cfg = load_source(source)
     _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback, writeback_path=writeback_path,
-                                                   generic_descriptor=adapter.generic_descriptor))
+                                                   generic_descriptor=adapter.generic_descriptor,
+                                                   source_cfg=source_cfg))
     # Stage 5: reconcile tree
     stats = reconcile_tree.run(rows, ref)
     _reconcile_status = _ratio_status(stats.isolated, len(rows), SETTINGS.thresholds.row_isolated_degraded)
@@ -375,7 +378,6 @@ def run_source(
     _apply_gate(rows, gate_defs.clean_contract(ref), manifest, run_log)
 
     # Stage 6: derivation
-    source_cfg = load_source(source)
     _record(manifest, run_log, derive.run(rows, ref, source_cfg))
 
     # Per-row isolation ABORT gate: the four row-loop stages above dead-letter a row that raises an

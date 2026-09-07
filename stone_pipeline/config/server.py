@@ -330,6 +330,17 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             # existing-cores guard would otherwise skip the mint silently and the product would never bind.
             # The type is the sent seed_type, else the pending card's stone_type; with no type known at all,
             # refuse a name that exists under ANY type (conservative: the operator can send the type).
+            # VENDOR-SCOPED alias: 'for THIS vendor, the spelling is that variety'. A collision card (one
+            # trade name, several stones) is often true per seller, so the alias is stored per source and
+            # applied by the matcher's override tier for that vendor only; a global alias goes the ordinary
+            # variety-decision route below.
+            if action == "alias" and (source := (body.get("source") or "").strip()):
+                try:
+                    decisions_store.set_scoped_alias(source, variant, alias_of, seed_type)
+                except decisions_store.InvalidDecision as e:
+                    return 400, {"error": str(e)}
+                return 200, {"variant": variant, "action": action, "alias_of": alias_of,
+                             "seed_type": seed_type, "source": source}
             seed_name = (body.get("name") or "").strip() or None
             if seed_name and action == "mint":
                 card = decisions_store.pending_payload("variety", proj.norm(variant)) or {}
@@ -367,16 +378,36 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         # as a per-vendor origin override). Distinct from the variety queue -- an existing variety never
         # appears in 'variants'; it only surfaces here, and only for its origin.
         #   GET /config/v1/review/origins            -> pending origin confirmations
-        #   PUT /config/v1/review/origins/<ref>      {"country_iso": "IR"}
+        #   PUT /config/v1/review/origins/<ref>      {"country_iso": "IR"}         confirm: it IS this variety, from here
+        #                                            {"alias_of": "Golden Lightning", "type"?}   re-bind: it is NOT this
+        #     variety -- for THIS vendor the scraped spelling is that other existing variety (a vendor-scoped
+        #     alias, applied by the matcher's override tier on the next produce; the origin then resolves from
+        #     the right variety's documented origins, so the card does not come back).
         if len(segments) == 2 and segments[1] == "origins" and method == "GET":
             return 200, {"origins": decisions_store.list_pending("origin")}
         if len(segments) == 3 and segments[1] == "origins" and method == "PUT":
             if not isinstance(body, dict):
-                return 400, {"error": "body must be a JSON object {country_iso}"}
+                return 400, {"error": "body must be a JSON object {country_iso} or {alias_of, type?}"}
             ref = unquote(segments[2])   # same decode-before-key rule as the variety PUT
             payload = decisions_store.pending_payload("origin", ref)
             if not payload:
                 return 404, {"error": f"no pending origin confirmation {ref!r}"}
+            if (alias_of := (body.get("alias_of") or "").strip()):
+                if not varieties.exists(alias_of):
+                    return 400, {"error": f"alias_of {alias_of!r} is not an existing variety"}
+                seed_type = None
+                if (raw_type := (body.get("type") or "").strip()):
+                    vocab = _type_vocab()
+                    if proj.norm(raw_type) not in vocab:
+                        return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
+                    seed_type = vocab[proj.norm(raw_type)]
+                spelling = payload.get("scraped") or payload["variety"]
+                try:
+                    decisions_store.set_scoped_alias(payload["source"], spelling, alias_of, seed_type)
+                except decisions_store.InvalidDecision as e:
+                    return 400, {"error": str(e)}
+                return 200, {"ref": ref, "source": payload["source"], "spelling": spelling,
+                             "alias_of": alias_of, "seed_type": seed_type}
             raw_country = (body.get("country_iso") or body.get("country") or "").strip()
             if not (country := _country_iso(raw_country)):
                 return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}

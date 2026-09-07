@@ -25,7 +25,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.core.text import match_key, slugify, title_case
-from stone_pipeline.reference.loaders import ReferenceData
+from stone_pipeline.reference.loaders import ReferenceData, resolve_iso
 
 log = logfmt.get_logger("derive")
 
@@ -514,19 +514,8 @@ def _pos_int(raw) -> int | None:
 
 # --- origin (section 7 Stage 6) -----------------------------------------------
 def _to_iso(value: str, ref: ReferenceData) -> str | None:
-    """Resolve a country NAME or alias ('India', 'UK'->GB) via country_codes FIRST, then accept a
-    bare 2-letter token only if it is a real ISO-3166 alpha-2 code. Name-first so a common alias like
-    'UK' maps to GB instead of short-circuiting to the (invalid) literal 'UK'; the ISO-set check
-    rejects a bogus 'XX'/'EN' rather than passing it through as a confident country."""
-    v = (value or "").strip()
-    if not v:
-        return None
-    hit = ref.country_codes.get(match_key(v))   # same key the country table was built with (loaders._norm)
-    if hit:
-        return hit
-    if len(v) == 2 and v.isalpha() and v.upper() in ref.valid_iso_codes:
-        return v.upper()
-    return None
+    """The reference's ONE country resolver (loaders.resolve_iso), kept under its local name here."""
+    return resolve_iso(value, ref.country_codes, ref.valid_iso_codes)
 
 
 def _select_origin(candidates: list[str], home_iso: str) -> tuple[str, Confidence, FlagCode | None]:

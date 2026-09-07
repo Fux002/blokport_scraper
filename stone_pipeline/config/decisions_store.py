@@ -267,6 +267,45 @@ def clear_origin_decisions() -> int:
         return n
 
 
+# -- vendor-scoped aliases (the re-bind action on an origin card) -----------------------------------------
+
+def set_scoped_alias(source: str, spelling: str, alias_of: str, seed_type: str | None = None) -> None:
+    """Upsert ONE vendor-scoped alias: for `source`, the scraped `spelling` is the existing variety `alias_of`
+    (of `seed_type`, when the operator picked one among same-name varieties). Keyed by (source, normalized
+    spelling), idempotent. The caller (config server) validates that alias_of is a real variety."""
+    src, s_norm = (source or "").strip(), _norm(spelling)
+    target = (alias_of or "").strip()
+    if not src or not s_norm or not target:
+        raise InvalidDecision("scoped alias requires source, spelling and alias_of")
+    with closing(store.open_store()) as conn:
+        conn.execute(
+            "INSERT INTO scoped_alias (source, variant_norm, variant_display, alias_of, seed_type, decided_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(source, variant_norm) DO UPDATE SET "
+            "variant_display = excluded.variant_display, alias_of = excluded.alias_of, "
+            "seed_type = excluded.seed_type, decided_at = excluded.decided_at",
+            (src, s_norm, spelling.strip(), target, (seed_type or "").strip() or None, _now()))
+        conn.commit()
+
+
+def scoped_aliases() -> dict[tuple[str, str], tuple[str, str]]:
+    """(normalized source, normalized spelling) -> (target variety name, target type or ''). Read by load_all
+    into ref.scoped_aliases for the matcher's override tier. No side effect on a fresh store (load_all must
+    not materialise config.db, same rule as variety_seed_types)."""
+    if not store.config_db_path().exists():
+        return {}
+    with closing(store.open_store()) as conn:
+        return {(_norm(r["source"]), r["variant_norm"]): (r["alias_of"], r["seed_type"] or "")
+                for r in conn.execute("SELECT source, variant_norm, alias_of, seed_type FROM scoped_alias")}
+
+
+def clear_scoped_aliases() -> int:
+    """Drop EVERY vendor-scoped alias. PRISTINE reset ONLY, like the other operator decisions."""
+    with closing(store.open_store()) as conn:
+        n = conn.execute("DELETE FROM scoped_alias").rowcount
+        conn.commit()
+        return n
+
+
 # -- per-variety origin edits (the "edit origins" admin action; same channel as a mint's seed_country) ----
 
 def set_variety_origin(variety: str, stone_type: str, country_iso: str, city: str = "", county: str = "") -> None:

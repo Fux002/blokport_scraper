@@ -29,6 +29,7 @@ def _stage(seed_types):
             "v_granite": SimpleNamespace(key="slab_granite_absolute_black_1"),
             "v_agate": SimpleNamespace(key="slab_agate_absolute_black_2")})},
         variety_seed_types=seed_types,
+        scoped_aliases={},
     )
     return match_variation.VariationStage(ref=ref, engines={"slab": eng}, writeback=WriteBack())
 

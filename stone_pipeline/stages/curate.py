@@ -454,6 +454,24 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     new_variant_rows: list[tuple] = []  # (name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed_branches, evidence)
     last_resort_quality = active_pack().last_resort_quality   # pack default when a mint has no observed quality
 
+    def _collision_owners(row, gap) -> set[tuple[str, str]]:
+        """The (norm name, norm type) owners the MATCHER listed on a collision gap ('Amazon Green Granite'
+        -> Amazon Blue, Amazonia, Verde Ubatuba), resolved to their existing types. Empty for any other
+        gap, so only the matcher's explicit verdict widens the surface lookup."""
+        if not (row.variation_method or "").endswith("_collision") or not gap.nearest_existing:
+            return set()
+        return {o for n in gap.nearest_existing.split(",")
+                for o in existing_surface.get(proj.norm(n.strip()), set())}
+
+    def _hold_collision(clean: str, stone_type: str, owner_names: list[str], row) -> None:
+        """ONE surface, SEVERAL varieties: the operator picks which variety it is (globally, or for this
+        vendor only), or mints it new. The one review card for every collision, whichever path found it."""
+        fam = _human_join([title_case(n) for n in owner_names])
+        pending_confirm.append(_review_card(
+            clean,
+            f"Matches several existing varieties ({fam}). Alias it to the right one, or mint as new.",
+            _review_evidence(row), stone_type=stone_type, nearest_existing=fam))
+
     def _alias_and_backfill(owner: tuple[str, str], spelling: str, clean: str, stype: str, row, gap) -> None:
         """Attach a scraped spelling to an EXISTING variety (by its (name, type) owner). If a product backs
         the variety in a branch where it does NOT yet exist, also mint the missing sibling so the product
@@ -671,17 +689,24 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         #   * type-less + one name across SEVERAL types -> HOLD for the human to assign the correct type
         #   * a surface shared across several NAMES (an alias family) -> review which variety
         #   * product carries a NEW type (not among the existing) -> fall through to MINT that new variety
-        owners = existing_surface.get(proj.norm(clean))
+        # the matcher's own COLLISION verdict (a known surface owned by several same-type varieties) names
+        # the owners on the gap; they are the owners even where the cleaned surface differs from the
+        # matched one (a projection hit), so a collision never falls to the fuzzy aliaser below.
+        owners = existing_surface.get(proj.norm(clean)) or _collision_owners(row, gap)
         if owners and not generic:
             st = proj.norm(stone_type)
             same_type = sorted(o for o in owners if st and o[1] == st)
-            if same_type:                              # product's type matches an existing variety -> alias
-                # prefer the variety whose canonical NAME equals the cleaned name over one that merely
-                # carries it as an ALIAS: 'Verde Scuro' aliases onto the variety named 'Verde Scuro', not
-                # onto 'Verde Onyx Scuro' that lists it as a spelling. same_type is sorted, so the fallback
-                # (no exact-name owner -> a genuine alias) stays deterministic.
-                target = next((o for o in same_type if o[0] == proj.norm(clean)), same_type[0])
-                _alias_and_backfill(target, name, clean, stone_type, row, gap)
+            if same_type:                              # product's type matches an existing variety
+                # IDENTITY beats alias: the variety whose canonical NAME equals the cleaned name owns it
+                # ('Verde Scuro' aliases onto the variety named 'Verde Scuro', not onto 'Verde Onyx Scuro'
+                # that lists it as a spelling). Otherwise exactly ONE same-type owner is an unambiguous
+                # alias. SEVERAL same-type owners and no canonical is a trade-name COLLISION: the name means
+                # different stones to different sellers -- held for the human, never aliased to the first.
+                named = next((o for o in same_type if o[0] == proj.norm(clean)), None)
+                if named or len({o[0] for o in same_type}) == 1:
+                    _alias_and_backfill(named or same_type[0], name, clean, stone_type, row, gap)
+                    continue
+                _hold_collision(clean, stone_type, sorted({o[0] for o in same_type}), row)
                 continue
             if not st:                                 # TYPE-LESS scrape -> ALWAYS review to set the type.
                 # A type the scrape did not make clear is NEVER auto-completed -- not even to a single
@@ -695,11 +720,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 # the review list, where the operator picks which variety it is (which sets its type) or mints
                 # it new. Not a hidden advisory-alias suggestion (which could rubber-stamp a wrong merge): an
                 # uncertain identity is a review decision like every other -- one list, nothing filed away.
-                fam = _human_join(sorted({title_case(o[0]) for o in owners}))
-                pending_confirm.append(_review_card(
-                    clean,
-                    f"Matches several existing varieties ({fam}). Alias it to the right one, or mint as new.",
-                    _review_evidence(row), nearest_existing=fam))
+                _hold_collision(clean, "", sorted({o[0] for o in owners}), row)
                 continue
             # st is set but NOT among the existing types -> the scrape claims a NEW stone type on an EXISTING
             # multi-type name. BUG6 / HOLD-never-guess: never silently mint a possible mis-tag ('Ocean Blue

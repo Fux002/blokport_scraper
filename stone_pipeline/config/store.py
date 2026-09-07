@@ -176,6 +176,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "source TEXT NOT NULL, variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
                  "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
                  "decided_at TEXT NOT NULL, PRIMARY KEY (source, variant_norm, stone_type_norm))")
+    # Operator VENDOR-SCOPED aliases (the re-bind action on an origin card): for THIS source, the scraped
+    # spelling is THAT variety. Keyed by (source, normalized spelling) so a trade name that means one stone
+    # to a Brazilian seller and another to an Iranian one gets one answer per vendor, never a global alias
+    # that breaks the other. seed_type picks the target among same-name varieties (nullable = by name).
+    conn.execute("CREATE TABLE IF NOT EXISTS scoped_alias ("
+                 "source TEXT NOT NULL, variant_norm TEXT NOT NULL, variant_display TEXT NOT NULL DEFAULT '', "
+                 "alias_of TEXT NOT NULL, seed_type TEXT, decided_at TEXT NOT NULL, "
+                 "PRIMARY KEY (source, variant_norm))")
     # Operator-edited PER-VARIETY origins (the "edit origins" admin action, same channel as a mint's
     # seed_country but for any variety and holding a LIST of countries). Keyed by (normalized variety,
     # normalized type). country_iso is a comma-list ("IN,IR"). Overlaid onto the origin MAP at load, so

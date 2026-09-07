@@ -33,6 +33,12 @@ def _stage(seed_types=None):
     idx.add("v_storen", "Storen", surfaces=["Crystal White Granite"], block_type="granite")
     # a name that exists ONLY under granite -- used to prove the scraped type still gates the retry.
     idx.add("v_ib", "Imperial Blue", surfaces=[], block_type="granite")
+    # the raw spelling is an exact ALIAS of one onyx while the stripped name only word-swaps to another.
+    idx.add("v_pg", "Pakistan Green", surfaces=["Dark Green Onyx"], block_type="onyx")
+    idx.add("v_gd", "Green Dark", surfaces=[], block_type="onyx")
+    # the stripped name IS a canonical onyx while the raw spelling is an exact alias of a sibling.
+    idx.add("v_pw", "Pure White", surfaces=[], block_type="onyx")
+    idx.add("v_wo", "White Onyx", surfaces=["Pure White Onyx"], block_type="onyx")
     eng = VariationEngine(idx, auto_accept=92, review_floor=84)
     ref = SimpleNamespace(
         overrides=Overrides(by_key={}),
@@ -40,8 +46,13 @@ def _stage(seed_types=None):
             "v_cw": SimpleNamespace(key="slab_granite_crystal_white_1"),
             "v_bianco": SimpleNamespace(key="slab_granite_bianco_2"),
             "v_storen": SimpleNamespace(key="slab_granite_storen_3"),
-            "v_ib": SimpleNamespace(key="slab_granite_imperial_blue_4")})},
+            "v_ib": SimpleNamespace(key="slab_granite_imperial_blue_4"),
+            "v_pg": SimpleNamespace(key="slab_onyx_pakistan_green_5"),
+            "v_gd": SimpleNamespace(key="slab_onyx_green_dark_6"),
+            "v_pw": SimpleNamespace(key="slab_onyx_pure_white_7"),
+            "v_wo": SimpleNamespace(key="slab_onyx_white_onyx_8")})},
         variety_seed_types=seed_types or {},
+        scoped_aliases={},
     )
     return match_variation.VariationStage(ref=ref, engines={"slab": eng}, writeback=WriteBack())
 
@@ -77,6 +88,24 @@ def test_no_type_token_is_unchanged():
     _stage().resolve_row(row)
     assert row.variation_id is None
     assert any(g.gap_kind == GapKind.missing_variation for g in row.tree_gaps)
+
+
+def test_raw_exact_alias_beats_a_similarity_guess_on_the_identity_name():
+    # 'Dark Green Onyx' strips to 'Dark Green', which only word-swaps (fuzzy) to Green Dark; the raw spelling
+    # is an exact alias of Pakistan Green. Stronger evidence wins, whichever form carries it.
+    row = _row("Dark Green Onyx", "Onyx")
+    _stage().resolve_row(row)
+    assert row.variation_id == "v_pg"
+    assert row.variation_method == "exact"
+
+
+def test_equal_evidence_stays_with_the_identity_name():
+    # 'Pure White Onyx' strips to the canonical onyx 'Pure White' (exact); the raw spelling is an exact alias
+    # of the sibling White Onyx. Equal tiers: the identity binds, the alias does not pre-empt it.
+    row = _row("Pure White Onyx", "Onyx")
+    _stage().resolve_row(row)
+    assert row.variation_id == "v_pw"
+    assert row.variation_method.startswith("clean_variety_exact")
 
 
 def test_matching_type_binds_at_primary_without_retry():

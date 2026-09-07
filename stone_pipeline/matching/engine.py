@@ -197,6 +197,17 @@ class VariationEngine:
             return False
         return True
 
+    def _narrow_by_origin(self, ids: set[str], block_origin: str) -> set[str]:
+        """Keep the candidates whose DOCUMENTED origins include the product's origin evidence (ISO-2).
+        Narrows only, never picks: with no corroborated candidate the set is returned unchanged (the
+        evidence rules out none of them), and several corroborated candidates stay a tie. So origin can
+        turn a wrong bind into a right bind or a review, never a right bind into a wrong one."""
+        if len(ids) < 2 or not block_origin:
+            return ids
+        iso = block_origin.strip().upper()
+        corroborated = {cid for cid in ids if (c := self._candidate(cid)) and iso in c.origins}
+        return corroborated or ids
+
     def _duplicate_canonical_group(self, cids) -> Optional[list[str]]:
         """The first group of 2+ candidate ids that share ONE canonical name -- a genuine same-name
         duplicate the block could not separate (e.g. two 'Calacatta Gold' varieties). None when every
@@ -219,6 +230,7 @@ class VariationEngine:
         block_color: str = "",
         ambiguous_to_review: bool = False,
         query: str = "",
+        block_origin: str = "",
     ) -> Optional[VariationMatch]:
         # a single id resolves directly; several ids for the same surface (the
         # reference has duplicate names) are disambiguated by type/colour blocking,
@@ -260,6 +272,14 @@ class VariationEngine:
             if len(by_color) == 1:
                 ids = by_color
                 method = f"{method}_blocked"
+        # ORIGIN, the last narrowing rung: a tie that type and colour left is broken by which candidates
+        # DOCUMENT the product's origin evidence (a trade name means different stones to different sellers;
+        # the seller's country tells them apart). Narrows only -- see _narrow_by_origin.
+        if len(ids) > 1 and block_origin:
+            by_origin = self._narrow_by_origin(ids, block_origin)
+            if by_origin != ids:
+                method = f"{method}_origin"
+            ids = by_origin
         if len(ids) == 1:
             cid = next(iter(ids))
             cand = self._candidate(cid)
@@ -282,6 +302,16 @@ class VariationEngine:
                 cands = [(cid, c.canonical if (c := self._candidate(cid)) else None, 100.0) for cid in dup[:3]]
                 return VariationMatch(None, None, Confidence.low, f"{method}_ambiguous", 100.0, cands,
                                       ambiguous=True)
+            # A KNOWN surface owned by several DISTINCT varieties that type, colour and origin could not
+            # separate is a trade-name COLLISION ('Amazon Green Granite' is an alias of Amazon Blue, Amazonia
+            # and Verde Ubatuba). Hold it for review with the owners listed. Never fall through to the
+            # similarity tiers: fuzzy and phonetic pick by string or sound, which is meaningless for a name
+            # that means different stones to different sellers. Not flagged `ambiguous`: the stage may still
+            # retry with the type-stripped name (a canonical owner then wins by identity), but no tier below
+            # this one ever binds it.
+            cands = [(cid, c.canonical if (c := self._candidate(cid)) else None, 100.0)
+                     for cid in sorted(ids)[:3]]
+            return VariationMatch(None, None, Confidence.low, f"{method}_collision", 100.0, cands)
         return None
 
     def match(
@@ -290,6 +320,7 @@ class VariationEngine:
         block_type: str = "",
         block_color: str = "",
         overrides: Optional[dict[str, str]] = None,
+        block_origin: str = "",
     ) -> VariationMatch:
         empty = VariationMatch(None, None, Confidence.none, "no_candidate", 0.0, [])
         if not query or not query.strip():
@@ -304,20 +335,24 @@ class VariationEngine:
                 return VariationMatch(cid, cand.canonical if cand else None, Confidence.high, "override", 100.0, [])
 
         # tier 2: exact on norm (canonical + aliases). A genuine same-surface duplicate that blocking
-        # can't separate routes to review here, not to an arbitrary fuzzy-tier pick.
+        # can't separate routes to review here, not to an arbitrary fuzzy-tier pick; so does a known
+        # surface owned by several distinct varieties (a trade-name collision).
         match = self._resolve_single(self.index.lookup_norm(query), "exact", Confidence.high,
-                                     block_type, block_color, ambiguous_to_review=True, query=query)
+                                     block_type, block_color, ambiguous_to_review=True, query=query,
+                                     block_origin=block_origin)
         if match:
             return match
 
-        # tier 3: projection-exact (compact, tokenset, deprefixed)
+        # tier 3: projection-exact (compact, tokenset, deprefixed). The same rules as tier 2: a projection
+        # hit is still a KNOWN surface, so its ties are reviewed, never handed to the similarity tiers.
         for method, ids in (
             ("compact", self.index.lookup_compact(query)),
             ("tokenset", self.index.lookup_tokenset(query)),
             ("deprefixed", self.index.lookup_deprefixed(query)),
         ):
             match = self._resolve_single(ids, f"projection_{method}", Confidence.high,
-                                         block_type, block_color, query=query)
+                                         block_type, block_color, ambiguous_to_review=True, query=query,
+                                         block_origin=block_origin)
             if match:
                 return match
 
@@ -337,7 +372,7 @@ class VariationEngine:
             if proj.char_similarity(query, cand.canonical) >= _PHONETIC_CHAR_FLOOR:
                 guarded.append(cid)
         match = self._resolve_single(set(guarded), "phonetic", Confidence.medium,
-                                     block_type, block_color)
+                                     block_type, block_color, block_origin=block_origin)
         if match:
             return match
 
@@ -376,6 +411,14 @@ class VariationEngine:
                 # shared family ALIAS across distinct varieties ('Arabescato' -> many 'Arabescato ...') has
                 # different canonicals, so it still resolves; a lone typo ('Bianco Carara') is unaffected.
                 tied = [cid for cid, _n, s in scored if s == top_score]
+                if len(tied) > 1:
+                    # a fuzzy tie is broken by origin exactly like an exact-tier tie (one rule, one rung)
+                    by_origin = self._narrow_by_origin(set(tied), block_origin)
+                    if len(by_origin) == 1:
+                        top_cid = next(iter(by_origin))
+                        top_name = next(n for c, n, _s in scored if c == top_cid)
+                        return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy_origin", top_score,
+                                              scored[:3])
                 if self._duplicate_canonical_group(tied):
                     return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3],
                                           ambiguous=True)
