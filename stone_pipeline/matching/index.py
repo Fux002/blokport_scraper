@@ -25,6 +25,10 @@ class Candidate:
     block_type: str = ""  # normalized parent stone type, for blocking
     # a variety may allow several colours; blocking is set-membership, not equality
     block_colors: set[str] = field(default_factory=set)
+    # the variety's DOCUMENTED origins (ISO-2, from the origin map + operator edits). A match-time narrowing
+    # signal only: among several same-type candidates the engine keeps those that document the product's
+    # origin evidence. Never part of identity, never the product's derived origin (derive owns that).
+    origins: set[str] = field(default_factory=set)
     surfaces: list[str] = field(default_factory=list)  # all known surface forms
 
 
@@ -55,6 +59,7 @@ class CandidateIndex:
         surfaces: list[str],
         block_type: str = "",
         block_colors: set[str] | None = None,
+        origins: set[str] | None = None,
     ) -> None:
         candidate = self.candidates.get(cid)
         if candidate is None:
@@ -63,6 +68,7 @@ class CandidateIndex:
                 canonical=canonical,
                 block_type=proj.norm(block_type),
                 block_colors={proj.norm(c) for c in (block_colors or set()) if c},
+                origins={o.strip().upper() for o in (origins or set()) if o and o.strip()},
             )
             self.candidates[cid] = candidate
         for surface in [canonical, *surfaces]:
@@ -97,13 +103,15 @@ class CandidateIndex:
         return self.by_phonetic.get(phon, set()) if phon else set()
 
 
-def build_variation_index(variant_table, backbone) -> "CandidateIndex":
+def build_variation_index(variant_table, backbone, origin_map=None) -> "CandidateIndex":
     """Build a per-branch candidate index from a VariantTable, enriched with the
     backbone's stone_type and allowed colours for blocking (section 5A.1). When
     the backbone lacks the variety, the type is recovered from the variant Key and
     the colour from a colour word in the variant name, so blocking still works for
     the many variants that have no backbone record (this prevents cross-colour
-    fuzzy matches like White -> the Cream variety).
+    fuzzy matches like White -> the Cream variety). `origin_map` (the per-variety
+    origin map with the operator's edits already overlaid) adds each variety's
+    documented origins, the engine's origin narrowing signal; None leaves them empty.
     """
     from stone_pipeline.adapters.tokens import known_values
 
@@ -126,12 +134,14 @@ def build_variation_index(variant_table, backbone) -> "CandidateIndex":
         block_type = key_type
         block_colors = set(variety.colors) if variety and variety.colors else colors_from_name(variant.name)
         surfaces = set(variant.aliases)
+        rule = origin_map.exact(variant.name, key_type) if origin_map is not None else None
         index.add(
             cid=variant.variation_id,
             canonical=variant.name,
             surfaces=list(surfaces),
             block_type=block_type,
             block_colors=block_colors,
+            origins=set(rule.countries) if rule else set(),
         )
     return index
 

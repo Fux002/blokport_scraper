@@ -122,12 +122,15 @@ def test_duplicate_canonical_block_disambiguates():
     m = eng.match("Imperial White", block_type="granite")   # block narrows to one
     assert m.cid == "v1"
 
-def test_shared_alias_different_canonicals_still_resolves():
-    # two variants share an ALIAS token but have DIFFERENT canonicals -> NOT ambiguous; resolves.
+def test_shared_alias_different_canonicals_is_a_collision_not_a_pick():
+    # two variants share an ALIAS but have DIFFERENT canonicals: the canonical query resolves by identity;
+    # the bare shared alias is a trade-name COLLISION -> held for review with both owners, never one of
+    # them picked by string similarity or sound.
     eng = _engine(("v1", "Arabescato Garfagnana", ["Arabescato Garfagnana", "Arabescato"], "marble"),
                   ("v2", "Arabescato Cervaiole", ["Arabescato Cervaiole", "Arabescato"], "marble"))
     assert eng.match("Arabescato Garfagnana").cid == "v1"    # exact canonical
-    assert eng.match("Arabescato", block_type="marble").cid in ("v1", "v2")  # shared alias -> still resolves
+    m = eng.match("Arabescato", block_type="marble")
+    assert m.cid is None and m.method.endswith("_collision") and {c[0] for c in m.candidates} == {"v1", "v2"}
 
 def test_typeless_query_tied_across_types_routes_to_review():
     # HOLD-not-guess: a type-less query whose top FUZZY score ties across stone types must not auto-accept

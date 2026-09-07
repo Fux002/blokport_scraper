@@ -56,13 +56,15 @@ def test_near_miss_resolves(slab_engine, query, expected_name):
 
 
 def test_cross_type_alias_needs_block(slab_engine):
-    """'Aspen White' is an alias of a Granite AND a Marble variety. WITHOUT a type it is ambiguous, so it
-    must NOT be attributed to a specific stone by name alone (never-guess). WITH the product's type as a
-    block, it resolves to the variety of that type -- the real pipeline always passes block_type."""
+    """'Aspen White' is an alias of a Granite AND of TWO Marble varieties. WITHOUT a type it is ambiguous, so
+    it must NOT be attributed to a specific stone by name alone (never-guess). WITH the product's type as a
+    block, granite resolves to its one owner; marble still has two distinct owners, which is a trade-name
+    COLLISION -- held for review with both listed, never picked by string or sound."""
     granite = slab_engine.match("Aspen White", block_type="Granite")
     assert granite.canonical == "Indian Aspen White"
     marble = slab_engine.match("Aspen White", block_type="Marble")
-    assert marble.canonical in ("Afyon White", "Afyon White Billur")
+    assert marble.cid is None and marble.method.endswith("_collision")
+    assert {c[1] for c in marble.candidates} >= {"Afyon White", "Afyon White Billur"}
 
 
 def test_projection_tiers_work_in_isolation():

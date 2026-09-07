@@ -449,6 +449,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
             if pristine:                           # factory reset: also forget the durable operator overlay
                 config["variety_decisions"] = decisions_store.clear_variety_decisions()
                 config["origin_decisions"] = decisions_store.clear_origin_decisions()
+                config["scoped_aliases"] = decisions_store.clear_scoped_aliases()
                 config["variety_origins"] = decisions_store.clear_variety_origins()
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()

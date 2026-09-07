@@ -19,7 +19,7 @@ Outcomes (section 5A.3):
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, category
 from stone_pipeline.core import logfmt
@@ -50,6 +50,31 @@ def _apply_writeback(index, entries: list[tuple[str, str]]) -> None:
         index.add_surface_alias(vid, alias)
 
 
+def origin_evidence(row: CanonicalRow, source_cfg, ref: ReferenceData) -> str:
+    """The product's origin EVIDENCE for matching, as ISO-2 or '': the scraped origin field when the listing
+    states one, else the vendor's declared primary origin. A narrowing signal for the engine (it keeps the
+    candidates whose documented origins include it), never the product's derived origin: derive decides
+    that later with its own ladder, and a vendor that resells a stone from elsewhere corroborates nothing
+    here, so the product goes to review instead of being forced onto a wrong variety."""
+    for value in (row.raw_origin, getattr(source_cfg, "primary_origin", "")):
+        if value:
+            iso = ref.to_iso(value)
+            if iso:
+                return iso
+    return ""
+
+
+# Engine method prefixes from weakest to strongest evidence; an unlisted method (no_candidate) is weakest.
+_METHOD_TIERS = ("semantic", "fuzzy", "phonetic", "projection", "exact", "override")
+
+
+def match_strength(match: VariationMatch) -> tuple[int, bool, bool]:
+    """How much evidence a match carries, comparable across query forms: its engine tier, then whether it
+    bound, then whether it offers candidates at all (so a gap still gets the nearer suggestions)."""
+    tier = next((i + 1 for i, prefix in enumerate(_METHOD_TIERS) if match.method.startswith(prefix)), 0)
+    return tier, match.cid is not None, bool(match.candidates)
+
+
 def _build_suggester(index):
     """Build the tier-8 semantic suggester only when enabled (section 5A.2)."""
     if not SETTINGS.matching.enable_semantic:
@@ -74,10 +99,12 @@ class VariationStage:
     engines: dict[str, VariationEngine]   # category name -> engine (one per registry vocab category)
     writeback: WriteBack
     generic_descriptor: bool = False
+    source_cfg: object = None             # the run's SourceConfig (its declared origin feeds origin_evidence)
+    _scoped: dict = field(default_factory=dict)   # (branch, source) -> norm(spelling) -> cid, built once
 
     @classmethod
     def build(cls, ref: ReferenceData, writeback: WriteBack | None = None,
-              writeback_path=None, generic_descriptor: bool = False) -> "VariationStage":
+              writeback_path=None, generic_descriptor: bool = False, source_cfg=None) -> "VariationStage":
         thresholds = SETTINGS.thresholds
         # Stick to the category: each branch matches only against its OWN variants
         # (no cross-category borrowing). One engine per registry category; a new
@@ -86,19 +113,46 @@ class VariationStage:
         auto, floor = thresholds.variation_auto_accept, thresholds.variation_review_floor
         engines: dict[str, VariationEngine] = {}
         for name, table in ref.variants.items():
-            index = build_variation_index(table, ref.backbone)
+            index = build_variation_index(table, ref.backbone, ref.origin_map)
             _apply_writeback(index, persisted)
             engines[name] = VariationEngine(index, auto, floor, suggester=_build_suggester(index))
         return cls(
             ref=ref, engines=engines,
             writeback=writeback or WriteBack(),
             generic_descriptor=generic_descriptor,
+            source_cfg=source_cfg,
         )
 
     def _engine(self, branch: str) -> VariationEngine:
         # branches reaching here always have their own engine (each registry vocab
         # category is loaded); the fallback is a defensive default, registry-agnostic.
         return self.engines.get(branch) or next(iter(self.engines.values()))
+
+    def _scoped_overrides(self, engine: VariationEngine, branch: str, source: str) -> dict[str, str]:
+        """norm(spelling) -> cid for the operator's VENDOR-SCOPED alias decisions of `source` ('for this
+        vendor, this spelling is that variety'), resolved against this branch's candidates: the target by
+        canonical name, and by type when the operator gave one. The engine applies it at its override tier,
+        so it wins before any alias lookup and only for this vendor; a global alias stays what it is. Built
+        once per (branch, source). A target that does not resolve to exactly ONE candidate is skipped loudly:
+        an alias must never bind to an arbitrary same-name variety."""
+        key = (branch, source)
+        if key in self._scoped:
+            return self._scoped[key]
+        out: dict[str, str] = {}
+        for (src, spelling), (target, target_type) in self.ref.scoped_aliases.items():
+            if src != proj.norm(source):
+                continue
+            hits = [cid for cid, c in engine.index.candidates.items()
+                    if proj.norm(c.canonical) == proj.norm(target)
+                    and (not target_type or c.block_type == proj.norm(target_type))]
+            if len(hits) == 1:
+                out[spelling] = hits[0]
+            else:
+                log.warning("scoped alias target does not resolve to ONE variety in this branch; ignored",
+                            extra={"extra_fields": {"source": source, "spelling": spelling, "target": target,
+                                                    "type": target_type, "branch": branch, "hits": len(hits)}})
+        self._scoped[key] = out
+        return out
 
     def _key_for(self, cid: str | None) -> str | None:
         """The matched variety's STABLE Key for a Medusa variation id. The product links to its
@@ -205,47 +259,28 @@ class VariationStage:
         # block_type is the canonical variety.stone_type, so the raw tag mis-blocks (a mis-tagged
         # 'Azul White Quartzite' under an Onyx tag, or a name-corrected type).
         scraped_type = row.type_name or row.raw_type or ""
-        match = engine.match(query, block_type=scraped_type, block_color=block_color)
+        # the product's origin evidence (scraped field, else the vendor's declared origin) is the engine's
+        # last narrowing rung; the vendor's scoped alias decisions are its override tier.
+        origin = origin_evidence(row, self.source_cfg, self.ref)
+        scoped = self._scoped_overrides(engine, branch, row.src_site or "")
+        clean = clean_variety(query, scraped_type)
+        match = self._match_identity(engine, clean, query, block_type=scraped_type, block_color=block_color,
+                                     overrides=scoped, block_origin=origin)
         # OPERATOR-TYPE FALLBACK: when the scrape's type finds NO home (a genuine no-candidate gap, never a
         # same-type ambiguity), the operator's MINT decision for this variety is the authority -- re-match
-        # under the operator's type so the product binds to the operator-minted (name, type) instead of
-        # gapping forever (its scraped type matches neither the minted variety nor any other). This is the
-        # one place a mint decision reaches a PRODUCT, mirroring how curate mints the variety; from here the
-        # bound row flows through the SAME reconcile/derive/texture path a suggested variant uses. A scraped
-        # type that DID match a variety is never overridden. Keyed by the shared clean-variety identity, so
-        # the lookup key matches the one curate/decisions_store store the decision under.
-        # The `not (scraped_type and match.ambiguous)` gate enforces the "never a same-type ambiguity" rule
-        # above: a genuine tied same-name duplicate (2+ varieties of the scraped type sharing one canonical,
-        # detected at the exact OR the fuzzy tier and flagged match.ambiguous) must SURFACE for review, not be
-        # silently bound/escaped by a retry under a different (cleaned or operator) identity. Only a real
-        # no-candidate miss retries.
+        # under the operator's type AND the identity name, so the product binds to the operator-minted
+        # (name, type) instead of gapping forever (its scraped type matches neither the minted variety nor
+        # any other). This is the one place a mint decision reaches a PRODUCT, mirroring how curate mints
+        # the variety; from here the bound row flows through the SAME reconcile/derive/texture path a
+        # suggested variant uses. A scraped type that DID match a variety is never overridden.
         if match.cid is None and not (scraped_type and match.ambiguous):
-            clean = clean_variety(query, scraped_type)
-            # CLEAN-NAME RETRY: the scrape's match key carries the supplier's type token ('Crystal White
-            # Granite'). That full string exists only as an ALIAS on sibling same-type varieties (Bianco,
-            # Storen), never on the CANONICAL variety of that exact name (which lists no '<name> <type>'
-            # alias) -- so the exact tier sees several different-canonical candidates and gaps, and the
-            # variety re-queues for mint every produce even though it already exists. Retry with the type-
-            # STRIPPED name under the SAME scraped type: the engine's identity-beats-alias narrowing then
-            # keeps the canonical owner and binds it ('Crystal White' -> the canonical Crystal White granite).
-            # Identity stays (type, name): the scraped type still blocks, so a genuinely new-type scrape
-            # ('Imperial Blue' quartzite, existing only as granite) still gaps and holds for review.
-            if proj.norm(clean) != proj.norm(query):
-                retry = engine.match(clean, block_type=scraped_type, block_color=block_color)
+            op_type = self.ref.variety_seed_types.get(proj.norm(clean))
+            if op_type and proj.norm(op_type) != proj.norm(scraped_type):
+                retry = engine.match(clean, block_type=op_type, block_color=block_color,
+                                     overrides=scoped, block_origin=origin)
                 if retry.cid is not None:
                     match = VariationMatch(retry.cid, retry.canonical, retry.confidence,
-                                           f"clean_variety_{retry.method}", retry.score, retry.candidates)
-            # OPERATOR-TYPE FALLBACK: still no home under the scraped type -- the operator's MINT decision is
-            # the authority. Retry under the operator's type AND the cleaned identity name: the cleaned name
-            # 'Absolute Black' + the operator type binds at the exact tier -- exactly the (name, type) the
-            # operator minted. A scraped type that DID match a variety is never overridden.
-            if match.cid is None:
-                op_type = self.ref.variety_seed_types.get(proj.norm(clean))
-                if op_type and proj.norm(op_type) != proj.norm(scraped_type):
-                    retry = engine.match(clean, block_type=op_type, block_color=block_color)
-                    if retry.cid is not None:
-                        match = VariationMatch(retry.cid, retry.canonical, retry.confidence,
-                                               f"operator_type_{retry.method}", retry.score, retry.candidates)
+                                           f"operator_type_{retry.method}", retry.score, retry.candidates)
 
         if match.cid is not None and match.confidence >= Confidence.medium:
             row.variation_id = match.cid
@@ -283,6 +318,27 @@ class VariationStage:
         # below floor or no candidate -> gap
         self._gap(row, match)
 
+    @staticmethod
+    def _match_identity(engine: VariationEngine, clean: str, query: str, **block) -> VariationMatch:
+        """IDENTITY FIRST. The variety identity is the type-stripped name (every committed base Name is a
+        clean_variety fixed point), so that form is matched before the raw spelling: 'Volakas Marble' is the
+        variety named Volakas, even though the raw spelling is an alias on four other marbles. The raw spelling
+        replaces the identity's verdict only with STRICTLY stronger evidence (an exact alias hit over a
+        similarity guess; equals stay with the identity), and never escapes a same-type ambiguity: a tied
+        same-name duplicate under the identity name must surface for review."""
+        match = engine.match(clean, **block)
+        if proj.norm(clean) == proj.norm(query):
+            return match
+        if block["block_type"] and match.ambiguous:
+            return match
+        raw = engine.match(query, **block)
+        if match_strength(raw) > match_strength(match):
+            return raw
+        if match.cid is None:
+            return match
+        return VariationMatch(match.cid, match.canonical, match.confidence, f"clean_variety_{match.method}",
+                              match.score, match.candidates)
+
     def _try_canonical_name(self, row: CanonicalRow, engine: VariationEngine) -> bool:
         """Strict recovery for generic descriptors: match the colour+type name
         (minus the format word) but accept ONLY a deterministic hit on the
@@ -294,7 +350,8 @@ class VariationStage:
         if not candidate_name:
             return False
         block_color = row.color_name or row.raw_color or ""
-        match = engine.match(candidate_name, block_type=row.type_name or row.raw_type or "", block_color=block_color)
+        match = engine.match(candidate_name, block_type=row.type_name or row.raw_type or "", block_color=block_color,
+                             block_origin=origin_evidence(row, self.source_cfg, self.ref))
         # Name identity is the real safety check, not the match tier: when the matched
         # variant's name IS the colour+type candidate, it is that variety even if the
         # engine reached it via phonetic/fuzzy (e.g. "Silver Travertine"). A generic
@@ -323,6 +380,10 @@ class VariationStage:
     def _gap(self, row: CanonicalRow, match: VariationMatch) -> None:
         row.variation_method = match.method
         nearest = match.candidates[0] if match.candidates else None
+        # a COLLISION names every owner, so curate holds the row with that list instead of re-resolving
+        # the surface itself (which could miss a projection hit and fall to the fuzzy aliaser)
+        if match.method.endswith("_collision"):
+            nearest = (None, ", ".join(n for _c, n, _s in match.candidates if n), match.score)
         row.add_gap(
             TreeGap(
                 src_site=row.src_site,
@@ -346,9 +407,9 @@ def _fmt_candidates(candidates: list[tuple[str, str, float]]) -> str:
 
 
 def run(rows: list[CanonicalRow], ref: ReferenceData, writeback: WriteBack | None = None,
-        writeback_path=None, generic_descriptor: bool = False) -> StageMetric:
+        writeback_path=None, generic_descriptor: bool = False, source_cfg=None) -> StageMetric:
     stage = VariationStage.build(ref, writeback=writeback, writeback_path=writeback_path,
-                                 generic_descriptor=generic_descriptor)
+                                 generic_descriptor=generic_descriptor, source_cfg=source_cfg)
     isolated = isolate_rows(rows, "match_variation", stage.resolve_row, log)
     # The Resolve layer is the essential-complexity core: surface its own health. A high UNMATCHED share
     # on an established source signals a tree/index/vocab drift (not just new varieties), caught here.

@@ -140,6 +140,8 @@ def write_origin_confirm_file(rows) -> int:
         pending[ref] = {
             "ref": ref,
             "payload": {"source": source, "variety": title_case(variety), "stone_type": stone_type,
+                        # the vendor's own spelling: what a re-bind (alias_of) is keyed on, per vendor
+                        "scraped": (getattr(row, "variety_match_key", "") or getattr(row, "raw_name", "") or ""),
                         "map_country": (flag.raw_value if flag else ""),
                         "vendor_origin": (flag.best_guess if flag else ""),
                         "src_url": (getattr(row, "src_url", "") or ""),

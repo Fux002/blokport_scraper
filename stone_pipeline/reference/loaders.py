@@ -800,6 +800,10 @@ class ReferenceData:
     # to the operator-minted (name, type) instead of gapping -- the operator's authority reaching the PRODUCT,
     # not just the variety. Folded in at load (below), mirroring the seed_country origin overlay.
     variety_seed_types: dict[str, str] = field(default_factory=dict)
+    # (norm source, norm scraped spelling) -> (target variety name, target stone type or ''): the operator's
+    # VENDOR-SCOPED alias decisions ('for marenostone, Amazon Green Granite is Golden Lightning'). Applied by
+    # the matcher's override tier for that vendor only; a global alias goes the ordinary alias route.
+    scoped_aliases: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
 
     @cached_property
     def valid_iso_codes(self) -> frozenset:
@@ -807,6 +811,27 @@ class ReferenceData:
         scraped token can be VALIDATED rather than blindly trusted (rejects 'XX'; lets 'UK' resolve
         to GB via the name/alias path instead of passing through as a bogus code)."""
         return frozenset(self.country_codes.values())
+
+    def to_iso(self, value: str) -> str | None:
+        """The product-facing country resolver: see resolve_iso."""
+        return resolve_iso(value, self.country_codes, self.valid_iso_codes)
+
+
+def resolve_iso(value: str, country_codes: dict[str, str], valid_iso_codes) -> str | None:
+    """Resolve a country NAME or alias ('India', 'UK'->GB) via country_codes FIRST, then accept a bare
+    2-letter token only if it is a real ISO-3166 alpha-2 code. Name-first so a common alias like 'UK' maps
+    to GB instead of short-circuiting to the (invalid) literal 'UK'; the ISO-set check rejects a bogus
+    'XX'/'EN' rather than passing it through as a confident country. The ONE country resolver, shared by
+    derive (the product's origin) and the matcher (its origin evidence)."""
+    v = (value or "").strip()
+    if not v:
+        return None
+    hit = country_codes.get(match_key(v))   # same key the country table was built with (_norm)
+    if hit:
+        return hit
+    if len(v) == 2 and v.isalpha() and v.upper() in valid_iso_codes:
+        return v.upper()
+    return None
 
     # A specific category's variant table is `self.variants[<category name>]` (keyed by the active pack's
     # category names) -- no per-product-type accessor, so nothing here assumes a 'slab'/'block'/'tile' pack.
@@ -918,7 +943,9 @@ def load_all() -> ReferenceData:
     #     curate key them) let the matcher bind a product to an operator-minted (name, type) whose type the
     #     scrape did not carry -- the mint decision reaching the product, not only the variety.
     ref.variety_seed_types = {}
+    ref.scoped_aliases = {}
     if _have_config_db:
+        ref.scoped_aliases = decisions_store.scoped_aliases()
         ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_country_rules())
         # Operator "edit origins" edits win over both the CSV base and a mint's seed_country: applied LAST,
         # they set the variety's origin country LIST (the per-vendor gate then picks from it). Same overlay
