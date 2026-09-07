@@ -42,16 +42,17 @@ ambiguous_type_words: [crystal, quartz, agate, amethyst, coral]
 # same-type pairs a TYPE word does produce ('Taj Mahal Quartzite' ~ 'Taj Mahal', 'Limra Limestone' ~ 'Limra')
 # are exactly the duplicates the judge should merge; a cross-type pair is gated to review by the judge.
 # The pack's product_form_words (single tokens) are merged in programmatically -- do not repeat them here.
-# DELIBERATELY ABSENT (they distinguish real varieties): nationality/origin words beyond the four legacy
-# ones -- 'Persian Green' vs 'Green', 'Norwegian Rose' vs 'Rose', 'Irish Green', 'African Fusion', 'China
+# DELIBERATELY ABSENT (they distinguish real varieties): ALL nationality/origin words, including the five
+# legacy ones removed 2026-09-07 -- 'Persian Green' vs 'Green', 'Norwegian Rose' vs 'Rose', 'Irish Green', 'China
 # Aurora', 'Turkey Beige' (31 real pairs); 'new' ('New Kashmir' is another quarry), 'exotic', 'line', 'real',
 # 'export', 'superior', 'fine', 'rare', 'pure'; the finish tokens 'antique' ('Antique Blue Jumbo'), 'diamond'
 # ('Black Diamond'), 'water' ('Blue Water'), 'jet' ('Jet Black'); the split sub-tokens 'sand'/'lime'/'soap'
 # ('Mystic Sand', 'Lime Peacock'); every colour word; the ambiguous type words (crystal, quartz, agate,
 # amethyst, coral, agata); 'van' ('Van Light Green').
 generic_descriptors:
-  # legacy set (moved verbatim from the resolver; the four nationality words are kept for byte-parity but
-  # carry the identity risk described above)
+  # legacy set (moved from the resolver). Its five nationality words -- brazilian, brazil, italian, turkish,
+  # indian -- were REMOVED 2026-09-07: nationality is identity in this catalog (see above), so a name that
+  # differs only by one is a distinct variety, never an alias.
   - marble
   - granite
   - slab
@@ -64,11 +65,6 @@ generic_descriptors:
   - natural
   - polished
   - honed
-  - brazilian
-  - brazil
-  - italian
-  - turkish
-  - indian
   - premium
   - classic
   - extra
