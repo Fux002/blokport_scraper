@@ -755,7 +755,11 @@ class ConfigHandler(BaseHTTPRequestHandler):
         self._handle("DELETE")
 
     def log_message(self, *args) -> None:
-        log.info("config request", extra={"extra_fields": {"client": self.address_string()}})
+        # method + path + query + status per request (the token travels in a header, never in the path), so
+        # what a UI screen actually asked for, and what it got, can be read from the task log
+        log.info("config request", extra={"extra_fields": {
+            "client": self.address_string(), "request": self.requestline,
+            "status": str(args[1]) if len(args) > 1 else ""}})
 
 
 def serve(host: str | None = None, port: int = 8724) -> None:
