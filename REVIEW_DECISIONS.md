@@ -34,9 +34,10 @@ spelling overwrite each other; the earlier vendor's product then surfaces again 
 `DELETE /config/v1/review/decide` with `{"source", "scraped"}` removes exactly what the statement stored;
 the next produce resolves the product on its own again.
 
-The previous per-action bodies on `/review/variants/<v>` (`mint`, `alias`, `reject`) and the origin-card
-bodies on `/review/origins/<ref>` keep working. `reject` stays an explicit action: "not a variety" is not
-a statement about fields.
+`reject` stays the one explicit action, `PUT /review/variants/<v>` with `{"action": "reject"}`: "not a
+variety" is not a statement about fields. The previous `mint` and `alias` bodies and the
+`/review/origins` routes were removed once the UI switched (2026-09-08); a `mint` or `alias` body is
+answered with 400 pointing at `/review/decide`.
 
 ## Pending: a decision is required
 

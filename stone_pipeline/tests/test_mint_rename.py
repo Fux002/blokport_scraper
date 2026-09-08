@@ -64,59 +64,6 @@ def _new(res, branch: str) -> list[dict]:
 
 # -- API -----------------------------------------------------------------------
 
-def test_put_mint_with_name_stores_and_echoes_seed_name(config_db, monkeypatch):
-    _card(); _vocab(monkeypatch, [])
-    code, body = server.dispatch("PUT", ["review", "variants", SCRAPED], {"action": "mint", "name": RENAMED})
-    assert code == 200, body
-    assert body["seed_name"] == RENAMED
-    assert decisions.load_variety_seed_names() == {"honey onyx": RENAMED}
-    _, listing = server.dispatch("GET", ["review", "variants"], None)
-    card = next(v for v in listing["variants"] if v["variant"] == SCRAPED)
-    assert card["current_seed_name"] == RENAMED
-
-
-def test_put_mint_name_refused_when_the_type_name_pair_exists(config_db, monkeypatch):
-    _card(); _vocab(monkeypatch, [{"name": RENAMED, "stone_type": "Onyx"}])
-    code, body = server.dispatch("PUT", ["review", "variants", SCRAPED], {"action": "mint", "name": RENAMED})
-    assert code == 400
-    assert "already exists" in body["error"]
-    assert decisions.load_variety_seed_names() == {}
-    assert decisions_store.confirm_map() == {}                 # refused = nothing stored, not a half-mint
-
-
-def test_put_mint_name_allowed_under_a_different_type(config_db, monkeypatch):
-    _card(); _vocab(monkeypatch, [{"name": RENAMED, "stone_type": "Marble"}])
-    code, body = server.dispatch("PUT", ["review", "variants", SCRAPED], {"action": "mint", "name": RENAMED})
-    assert code == 200, body
-    assert body["seed_name"] == RENAMED
-
-
-def test_put_mint_name_without_a_type_refuses_any_existing_spelling(config_db, monkeypatch):
-    # No type on the card and none sent: the guard cannot be type-aware, so it refuses the name under ANY type
-    # (never guess an identity into the catalog); the operator sends the type to unlock it.
-    _card(stone_type=""); _vocab(monkeypatch, [{"name": RENAMED, "stone_type": "Marble"}])
-    code, body = server.dispatch("PUT", ["review", "variants", SCRAPED], {"action": "mint", "name": RENAMED})
-    assert code == 400
-    assert decisions.load_variety_seed_names() == {}
-
-
-def test_reject_and_alias_ignore_the_name(config_db, monkeypatch):
-    _card(); _vocab(monkeypatch, [{"name": "Zucchi Blue", "stone_type": "Onyx"}])
-    code, body = server.dispatch("PUT", ["review", "variants", SCRAPED], {"action": "reject", "name": RENAMED})
-    assert code == 200 and body["seed_name"] is None
-    code, body = server.dispatch("PUT", ["review", "variants", SCRAPED],
-                                 {"action": "alias", "alias_of": "Zucchi Blue", "name": RENAMED})
-    assert code == 200 and body["seed_name"] is None
-    assert decisions.load_variety_seed_names() == {}
-
-
-def test_rename_to_the_same_spelling_stores_nothing(config_db, monkeypatch):
-    _card(); _vocab(monkeypatch, [])
-    code, body = server.dispatch("PUT", ["review", "variants", SCRAPED], {"action": "mint", "name": "honey  ONYX"})
-    assert code == 200 and body["seed_name"] is None
-    assert decisions.load_variety_seed_names() == {}
-    assert decisions_store.confirm_map() == {"honey onyx": "yes"}   # still a plain mint
-
 
 # -- store ---------------------------------------------------------------------
 
@@ -194,3 +141,40 @@ def test_mint_without_a_seed_name_is_unchanged(monkeypatch):
     rows = _new(res, "slab")
     assert [r["Name"] for r in rows] == [SCRAPED]
     assert rows[0]["Aliases"] == ""
+
+
+# -- API: a rename is a statement whose name differs from the spelling ---------------------------------
+
+def test_statement_with_a_corrected_name_is_a_mint_plus_rename(config_db, monkeypatch):
+    _card(); _vocab(monkeypatch, [])
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
+    assert code == 200 and body["result"] == "minted"
+    assert decisions.load_variety_seed_names() == {"honey onyx": RENAMED}
+    assert decisions_store.scoped_aliases()[("zucchi", "honey onyx")] == (RENAMED, "Onyx")
+
+
+def test_statement_naming_an_existing_type_name_pair_binds_instead_of_minting(config_db, monkeypatch):
+    _card(); _vocab(monkeypatch, [{"name": RENAMED, "stone_type": "Onyx"}])
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
+    assert code == 200 and body["result"] == "bound"
+    assert decisions.load_variety_seed_names() == {}
+    assert decisions_store.confirm_map() == {}                 # bound = nothing minted, not a half-mint
+
+
+def test_statement_naming_the_pair_under_a_different_type_mints(config_db, monkeypatch):
+    _card(); _vocab(monkeypatch, [{"name": RENAMED, "stone_type": "Marble"}])
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
+    assert code == 200 and body["result"] == "minted"
+
+
+def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch):
+    _card(); _vocab(monkeypatch, [])
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "zucchi", "scraped": SCRAPED, "name": "honey  ONYX", "type": "Onyx"})
+    assert code == 200 and body["result"] == "minted"
+    assert decisions.load_variety_seed_names() == {}
+    assert decisions_store.confirm_map() == {"honey onyx": "yes"}
+    assert decisions_store.scoped_aliases() == {}
