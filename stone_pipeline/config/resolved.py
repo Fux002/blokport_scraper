@@ -1,8 +1,9 @@
-"""The RESOLVED list: what the last produce decided for every product, per vendor -- the variety it bound
-to, the type, the colour, the origin, and HOW each was decided -- with the operator's standing decisions
+"""The RESOLVED list: what the last produce decided for every product it BOUND, per vendor -- the variety,
+the type, the colour, the origin, and HOW each was decided -- with the operator's standing decisions
 overlaid. No approval is needed: the next produce reproduces exactly this. A row can be adjusted through
 the same statement the pending list uses (decisions_store.decide); until the next produce the row shows
-that decision as pending.
+that decision as pending. A product the produce could NOT bind is not here: it is a pending card, and the
+two lists never show the same product.
 
 Source: the newest run's canonical staging per source (outputs/<env>/<source>/<run>/diagnostics/
 canonical.parquet), which the container restores on boot with the rest of the artifact tree.
@@ -72,6 +73,9 @@ def list_resolved(source: str | None = None, decided: bool | None = None,
     if not files:
         return []
     frame = pl.concat([pl.read_parquet(f, columns=_COLUMNS) for f in files], how="vertical_relaxed")
+    # RESOLVED means bound: a product the last produce could not bind belongs to the pending list (its card,
+    # with any decision made on it as the card's current action), never to both lists at once
+    frame = frame.filter(pl.col("variation_key").is_not_null() & (pl.col("variation_key") != ""))
     if source:
         frame = frame.filter(pl.col("src_site") == source)
     scoped = decisions_store.scoped_aliases()

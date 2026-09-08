@@ -42,7 +42,7 @@ answered with 400 pointing at `/review/decide`.
 ## Pending: a decision is required
 
 `GET /config/v1/review/variants` is the one list: the variety cards plus the origin confirmations in the
-same card shape. (`GET /config/v1/review/origins` still serves the origin subset until the UI switches.)
+same card shape.
 
 Every card carries `kind`, `src`, `scraped`, `listings` (`[{source, scraped}]`, every listing behind the
 card, what a statement is sent with), `spellings` (the same, flat, for display), `variant` (the
@@ -70,7 +70,7 @@ vendor's country corroborates, and without that evidence the product holds as `n
 
 `GET /config/v1/review/resolved?source=<vendor>&decided=true|false`
 
-One row per product of the last produce: `scraped`, `name`, `variation_key`, `stone_type`, `color`,
+One row per product the last produce BOUND (an unbound product is a pending card; a product is never in both lists): `scraped`, `name`, `variation_key`, `stone_type`, `color`,
 `origin`, `resolved_by` (`variety`: the matcher tier, `type`: the type authority, `origin`: the origin
 rung), and `decision`, the operator's standing statement for that vendor and spelling, or null. The next
 produce reproduces exactly these rows; a row with a `decision` shows the last outcome until then. The same
