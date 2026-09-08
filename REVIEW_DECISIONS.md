@@ -36,11 +36,29 @@ a statement about fields.
 
 ## Pending: a decision is required
 
-`GET /config/v1/review/variants` (and, until the UI switches, `GET /config/v1/review/origins`).
+`GET /config/v1/review/variants` is the one list: the variety cards plus the origin confirmations in the
+same card shape. (`GET /config/v1/review/origins` still serves the origin subset until the UI switches.)
 
-Every card carries `src`, `scraped`, `spellings` (every listing behind the card), `variant` (the cleaned
-identity), `stone_type`, `color`, `reason`, `nearest_existing`, `src_url`, `image`, `description`. The
-reason says why the card exists; it never limits what may be changed.
+Every card carries `kind`, `src`, `scraped`, `spellings` (every listing behind the card), `variant` (the
+cleaned identity), `stone_type`, `color`, `origin` (origin cards: the vendor's declared country, prefilled),
+`reason`, `nearest_existing`, `src_url`, `image`, `description`. The reason says why the card exists; it
+never limits what may be stated.
+
+| kind | why the card exists | prefilled |
+|---|---|---|
+| `new` | the name exists under no type | name, type, colour as read |
+| `similar` | close to an existing variety, not the same spelling | name, type; the nearest in evidence |
+| `collision` | one spelling owned by several same-type varieties | name, type; the owners in the reason |
+| `no_type` | no stone type could be read, or the name and the site's tag name two real stones | name; the existing types in the reason |
+| `new_type` | the name exists, but under other types than the scrape's | name, the scrape's type; existing types in the reason |
+| `alias_target` | an alias decision points at a multi-type name | name; the types in the reason |
+| `code` | the name looks like a supplier code | name |
+| `retired` | the variety was retired; un-retire or leave | name, type |
+| `origin` | bound fine, the vendor's country is not in the stone's documented list | name, type, the vendor's origin |
+
+A name whose title and site tag name two different stones that both exist (Azul White: onyx and quartzite)
+is no longer typed from the title: the type stays open, the matcher's origin rung binds the stone the
+vendor's country corroborates, and without that evidence the product holds as `no_type`.
 
 ## Resolved: no decision required
 

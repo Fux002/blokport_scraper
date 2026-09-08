@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.core.schema import CanonicalRow, GapKind
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.stages import match_variation
@@ -31,6 +31,9 @@ def _engine():
             block_colors={"green", "gold"}, origins={"BR", "CN", "IR", "US"})
     # a lone variety with documented origins, to prove a single candidate is never rejected by origin
     idx.add("v_star", "Star Black", surfaces=[], block_type="granite", origins={"IN", "ZA"})
+    # one name, two real stones: the type-conflict case normalize leaves open for origin to settle
+    idx.add("v_azul_onyx", "Azul White", surfaces=[], block_type="onyx", block_colors={"white"}, origins={"IR"})
+    idx.add("v_azul_qtz", "Azul White", surfaces=[], block_type="quartzite", block_colors={"white"}, origins={"BR"})
     return VariationEngine(idx, auto_accept=92, review_floor=84)
 
 
@@ -85,7 +88,9 @@ def _ref(scoped=None):
             "v_blue": SimpleNamespace(key="slab_granite_amazon_blue_1"),
             "v_amazonia": SimpleNamespace(key="slab_granite_amazonia_2"),
             "v_golden": SimpleNamespace(key="slab_granite_golden_lightning_3"),
-            "v_star": SimpleNamespace(key="slab_granite_star_black_4")})},
+            "v_star": SimpleNamespace(key="slab_granite_star_black_4"),
+            "v_azul_onyx": SimpleNamespace(key="slab_onyx_azul_white_5"),
+            "v_azul_qtz": SimpleNamespace(key="slab_quartzite_azul_white_6")})},
         variety_seed_types={},
         scoped_aliases=scoped or {},
         country_codes={"iran": "IR", "brazil": "BR"},
@@ -168,3 +173,23 @@ def test_origin_card_carries_the_scraped_spelling(tmp_path, monkeypatch):
     card = decisions_store.list_pending("origin")[0]
     assert card["scraped"] == "Amazon Green Granite" and card["variety"] == "Amazonia"
     assert card["map_country"] == "BR" and card["vendor_origin"] == "IR"
+
+
+# --- stage: a type left open by the name/tag conflict is settled by origin, else held --------------------
+
+def test_type_open_listing_binds_the_variety_whose_origin_the_vendor_corroborates():
+    # normalize left the type open ('Azul White Quartzite' tagged Onyx, both exist); the Iranian vendor's
+    # evidence picks the onyx (documents IR) over the quartzite (BR), with no card.
+    row = CanonicalRow(src_site="marenostone", surrogate_key="1", variety_match_key="Azul White Quartzite",
+                       raw_type="", raw_format="Slab")
+    _stage().resolve_row(row)
+    assert row.variation_id == "v_azul_onyx" and row.variation_key == "slab_onyx_azul_white_5"
+    assert row.variation_method.endswith("_origin")
+
+
+def test_type_open_listing_without_origin_evidence_is_held_not_guessed():
+    row = CanonicalRow(src_site="polonine", surrogate_key="1", variety_match_key="Azul White Quartzite",
+                       raw_type="", raw_format="Slab")
+    _stage(primary_origin="").resolve_row(row)
+    assert row.variation_id is None
+    assert row.tree_gaps and any(g.gap_kind == GapKind.missing_variation for g in row.tree_gaps)

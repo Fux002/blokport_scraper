@@ -221,3 +221,24 @@ def test_resolve_multi_slash_is_a_combination():
     r = _finish_resolver(extra=["Honed and Filled"])
     res = r.resolve_multi("Honed / Filled")
     assert res.value == "Honed and Filled" and res.method == "compound"
+
+
+def test_name_over_tag_holds_when_the_identity_exists_under_both_types(ref):
+    # 'Azul White' is an onyx AND a quartzite in the base; the listing is tagged Onyx and titled Quartzite.
+    # Neither word may win: the type stays open (the matcher's origin rung or the operator settles it).
+    assert {"onyx", "quartzite"} <= ref.variety_types("Azul White")
+    resolvers = normalize.AttributeResolvers.build(ref)
+    row = CanonicalRow(src_site="marenostone", raw_name="Azul White Quartzite", raw_type="Onyx")
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.type_name is None and row.type_id is None
+    assert row.type_method == "name_tag_conflict"
+    assert any(f.method == "name_tag_conflict" and f.raw_value == "Onyx | Quartzite" for f in row.review_flags)
+
+
+def test_name_over_tag_still_wins_when_only_the_name_type_exists(ref):
+    # 'Grey Basalt' exists only as basalt; the Granite tag is simply wrong and the name corrects it.
+    assert ref.variety_types("Grey Basalt") == {"basalt"}
+    resolvers = normalize.AttributeResolvers.build(ref)
+    row = CanonicalRow(src_site="marenostone", raw_name="Grey Basalt", raw_type="Granite")
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.type_name == "Basalt" and row.type_method == "name_explicit"

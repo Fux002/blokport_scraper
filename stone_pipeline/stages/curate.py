@@ -135,12 +135,15 @@ def _evidence_description(text: str, limit: int = 400) -> str:
     return re.sub(r"\s+", " ", t).strip()[:limit]
 
 
-def _review_card(variant: str, reason: str, evidence: dict, *, stone_type: str = "", color: str = "",
+def _review_card(kind: str, variant: str, reason: str, evidence: dict, *, stone_type: str = "", color: str = "",
                  nearest_existing: str = "", score="", model_prob="") -> dict:
     """One shape for every review-queue card (variants_to_confirm) so the operator queue is uniform no
-    matter which hold path built it, and no arm can silently omit a column. `evidence` is _review_evidence()
-    (src/src_url/image/description); its keys never collide with the card fields, so the spread is additive."""
-    return {"confirm": "", "variant": variant, "reason": reason, "stone_type": stone_type,
+    matter which hold path built it, and no arm can silently omit a column. `kind` names WHY the card exists
+    (new, similar, collision, no_type, new_type, alias_target, code, retired; the origin queue adds origin):
+    it explains, it never limits what the operator may state. `evidence` is _review_evidence()
+    (src/scraped/src_url/image/description); its keys never collide with the card fields, so the spread is
+    additive."""
+    return {"confirm": "", "kind": kind, "variant": variant, "reason": reason, "stone_type": stone_type,
             "color": color, "nearest_existing": nearest_existing, "score": score,
             "model_prob": model_prob, **evidence}
 
@@ -469,7 +472,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         """ONE surface, SEVERAL varieties: the operator picks which variety it is (globally, or for this
         vendor only), or mints it new. The one review card for every collision, whichever path found it."""
         fam = _human_join([title_case(n) for n in owner_names])
-        pending_confirm.append(_review_card(
+        pending_confirm.append(_review_card("collision", 
             clean,
             f"Matches several existing varieties ({fam}). Alias it to the right one, or mint as new.",
             _review_evidence(row), stone_type=stone_type, nearest_existing=fam))
@@ -510,7 +513,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         to assign the correct type, surfacing the candidate types -- never a typeless clone onto an
         arbitrary type. (Stage C adds the scraped evidence to help the human decide.)"""
         types_txt = _human_join([title_case(t) for t in cand_types])
-        pending_confirm.append(_review_card(
+        pending_confirm.append(_review_card("no_type", 
             clean,
             f"'{title_case(clean)}' already exists as {types_txt}. Pick one of those types to add "
             f"this to the existing variety, or choose a different type to create a new one.",
@@ -523,7 +526,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         mint a new-type variety -- a mis-tag would become a phantom. Hold it for the operator to confirm it
         is a genuinely new variety (mint) or a mis-tag. An explicit mint decision on this name un-holds it."""
         types_txt = _human_join([title_case(t) for t in existing_types])
-        pending_confirm.append(_review_card(
+        pending_confirm.append(_review_card("new_type", 
             clean,
             f"'{title_case(clean)}' already exists as {types_txt}, but this scrape is typed "
             f"'{title_case(stone_type)}'. Confirm it is a genuinely NEW variety to mint "
@@ -537,7 +540,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         let it slip into the update delta -- surface an explicit un-retire decision instead. It stays retired
         until the operator un-retires it (POST /config/v1/variations/<key>/un_retire), after which the next
         produce matches it normally. Mirrors the other _hold_* surfacing; never mints, never writes a delta."""
-        pending_confirm.append(_review_card(
+        pending_confirm.append(_review_card("retired", 
             title,
             f"'{title}' was previously RETIRED. Un-retire it to bring it back; it will not be "
             f"re-created otherwise.",
@@ -600,7 +603,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         else:
             reason = (f"Alias target '{title_case(alias_to)}' is not an existing variety here. "
                       f"Reject '{title_case(clean)}' or choose a real target.")
-        pending_confirm.append(_review_card(
+        pending_confirm.append(_review_card("alias_target", 
             clean, reason, _review_evidence(row), nearest_existing=_named_with_types(alias_to)))
         return True
 
@@ -676,7 +679,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if code_why:
             # an UNDECIDED code-shaped name -> hold for review (an operator mint/reject/alias was already
             # honoured at 3c/3c-bis above, so this arm only ever sees undecided rows).
-            pending_confirm.append(_review_card(
+            pending_confirm.append(_review_card("code", 
                 clean, _code_reason(code_why, base), _review_evidence(row),
                 stone_type=stone_type, nearest_existing=_named_with_types(base)))
             continue
@@ -756,7 +759,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                     type_note = (f" ({_human_join([title_case(t) for t in near_types])})"
                                  if near_types else "")
                     pick_type = " and pick the matching type" if len(near_types) > 1 else ""
-                    pending_confirm.append(_review_card(
+                    pending_confirm.append(_review_card("similar", 
                         clean,
                         f"Very similar to existing '{title_case(nearest)}'{type_note}. If it is "
                         f"the same stone, alias it to '{title_case(nearest)}'{pick_type}. Mint "
@@ -778,7 +781,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # A TYPE-LESS new variety is NOT gated here: it falls through to _mint -> the type-less hold at the
         # single enforcement point ("No stone type detected"). Gate only typed new varieties.
         if stone_type:
-            pending_confirm.append(_review_card(
+            pending_confirm.append(_review_card("new", 
                 clean,
                 "New variety (no close existing match). Confirm to add it as a new variety, or reject.",
                 _review_evidence(row), stone_type=stone_type,
@@ -877,7 +880,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             # wrong identity). HOLD it for the operator to assign one via the review (seed_type) instead
             # of guessing or shipping it type-less. This is the single enforcement point for the invariant.
             # Carry the scraped evidence (src/image/description) so the human can judge the type.
-            pending_confirm.append(_review_card(
+            pending_confirm.append(_review_card("no_type", 
                 title,
                 "No stone type detected. Assign the correct type to mint it. "
                 "A variety cannot exist without a type.",

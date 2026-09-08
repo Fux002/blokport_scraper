@@ -241,11 +241,17 @@ def clean_variety(name: str, stone_type: str) -> str:
     # so the identity keys on the one spelling the variety reference uses.
     raw, name_type = _canonical_type_spelling(strip_forms(html.unescape(name or "")))
     toks = raw.split()
+    no_fmt = [t for t in toks if t.casefold() not in _VARIETY_FORMAT_WORDS]
+    # With the type left OPEN (a name/tag conflict, a type-less scrape) the name's own trailing type word is
+    # the type to strip: '{Variety} {Type}' is the supplier convention, so 'Azul White Quartzite' keys on
+    # 'Azul White' exactly as it would under a resolved type. Trailing only, never a leading word ('Agata
+    # Blue Spiral' is a name), and only when no type is given: a resolved type keeps today's behaviour.
+    if not stone_type and not name_type and no_fmt and match_key(no_fmt[-1]) in _clear_type_words():
+        name_type = no_fmt[-1]
     # the type tokens to strip: the resolved type's AND the type the name itself spells out, so a vendor
     # mis-type (a 'Soap Stone' tagged Granite) still sheds its type word under the same guard below.
     type_toks = ({t.casefold() for t in (stone_type or "").split()}
                  | {t.casefold() for t in name_type.split()})
-    no_fmt = [t for t in toks if t.casefold() not in _VARIETY_FORMAT_WORDS]
     no_type = [t for t in no_fmt if t.casefold() not in type_toks]
     # Strip the type when a distinctive multi-word name remains, OR when the single remaining token is a
     # supplier CODE -- so 'MGT Onyx' -> 'MGT' is caught downstream as a bare code and routed to review, NOT

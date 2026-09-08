@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from stone_pipeline.adapters.tokens import explicit_type_word
+from stone_pipeline.adapters.tokens import clean_variety, explicit_type_word
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, default_form_name
 from stone_pipeline.core import logfmt
@@ -138,19 +138,32 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
             )
 
     # Name-over-tag type: a variety NAME with an explicit, valid stone-type word is more reliable
-    # than the supplier's category tag, which is often wrong ('Azul White Quartzite' tagged Onyx,
-    # 'Grey Basalt' tagged Granite). When the name carries exactly ONE valid type word that differs
-    # from the resolved type, the NAME wins -- so a mis-tagged variety is corrected here in the
-    # cleaning flow, never minted or imaged under the wrong type.
+    # than the supplier's category tag, which is often wrong ('Grey Basalt' tagged Granite, 'Glory White
+    # Marble' tagged Onyx). When the name carries exactly ONE valid type word that differs from the
+    # resolved type, the NAME wins -- so a mis-tagged variety is corrected here in the cleaning flow,
+    # never minted or imaged under the wrong type. EXCEPT when the identity exists under BOTH types ('Azul
+    # White' is an onyx AND a quartzite): then the two words name two real stones and picking either is a
+    # guess. The type is left open: the matcher's origin rung binds the one the vendor's country
+    # corroborates, and failing that the row holds for the operator to assign the type.
     name_type = explicit_type_word(row.variety_match_key or row.raw_name or "")
     if name_type and name_type.casefold() != (row.type_name or "").casefold():
         looked = ref.attributes.resolve_id("type", name_type)
         if looked:
-            # looked is (canonical_name, id) -- use the canonical name, not the raw
-            # token, so a miscased source word ('QUARTZITE') becomes 'Quartzite'.
-            row.type_name, row.type_id = looked
-            row.type_confidence = _confidence_name(Confidence.high)
-            row.type_method = "name_explicit"
+            known = ref.variety_types(clean_variety(row.variety_match_key or row.raw_name or "", looked[0]))
+            tag = row.type_name or ""
+            if tag and tag.casefold() in known and looked[0].casefold() in known:
+                row.add_flag(ReviewFlag(field="type", code=FlagCode.attr_unresolved,
+                                        raw_value=f"{tag} | {looked[0]}", confidence=Confidence.none,
+                                        method="name_tag_conflict", src_url=row.src_url))
+                row.type_name, row.type_id = None, None
+                row.type_confidence = _confidence_name(Confidence.none)
+                row.type_method = "name_tag_conflict"
+            else:
+                # looked is (canonical_name, id) -- use the canonical name, not the raw
+                # token, so a miscased source word ('QUARTZITE') becomes 'Quartzite'.
+                row.type_name, row.type_id = looked
+                row.type_confidence = _confidence_name(Confidence.high)
+                row.type_method = "name_explicit"
 
     # Blocks are sold raw/unfinished, so sources rarely give a finish ('' or 'Other');
     # that would null finish_id and reject the row at validate (finish is required).

@@ -804,6 +804,20 @@ class ReferenceData:
     # VENDOR-SCOPED alias decisions ('for marenostone, Amazon Green Granite is Golden Lightning'). Applied by
     # the matcher's override tier for that vendor only; a global alias goes the ordinary alias route.
     scoped_aliases: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
+    # norm(variety name) -> the stone types it exists under, built once on first use from the variant tables
+    name_types: dict[str, set[str]] | None = None
+
+    def variety_types(self, name: str) -> set[str]:
+        """The normalized stone types an existing variety NAME is known under ('azul white' -> {'onyx',
+        'quartzite'}); empty for an unknown name. Identity is (type, name), so a name under several types is
+        several varieties: the callers that must not guess between them ask here."""
+        if self.name_types is None:
+            index: dict[str, set[str]] = {}
+            for table in self.variants.values():
+                for v in table.by_id.values():
+                    index.setdefault(_norm(v.name), set()).add(_norm(type_slug_from_key(v.key).replace("_", " ")))
+            self.name_types = index
+        return self.name_types.get(_norm(name), set())
 
     @cached_property
     def valid_iso_codes(self) -> frozenset:

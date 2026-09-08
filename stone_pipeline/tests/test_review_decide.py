@@ -191,3 +191,29 @@ def test_resolved_lists_the_last_produce_with_the_standing_decision(tmp_path):
 
 def test_resolved_is_empty_without_a_produce(tmp_path):
     assert resolved.list_resolved(outputs_dir=tmp_path / "nothing") == []
+
+
+# --- one list, one card shape -------------------------------------------------------------------------------
+
+def test_variants_list_includes_origin_confirmations_as_origin_cards():
+    from stone_pipeline.stages import decisions as stage_decisions
+    stage_decisions.write_confirm_file([{"variant": "Amazon Green", "reason": "r", "stone_type": "Granite",
+                                         "src": "marenostone", "scraped": "Amazon Green Granite", "kind": "collision",
+                                         "sources": ["marenostone"]}])
+    decisions_store.replace_pending("origin", [{
+        "ref": "marenostone|azul white|quartzite", "sources": ["marenostone"],
+        "payload": {"source": "marenostone", "variety": "Azul White", "stone_type": "Quartzite",
+                    "scraped": "Azul White Quartzite", "map_country": "BR", "vendor_origin": "IR",
+                    "src_url": "https://m/azul", "image": "https://m/azul.jpg"}}])
+    code, body = server.dispatch("GET", ["review", "variants"], None)
+    assert code == 200
+    kinds = {c["variant"]: c["kind"] for c in body["variants"]}
+    assert kinds == {"Amazon Green": "collision", "Azul White": "origin"}
+    origin = next(c for c in body["variants"] if c["kind"] == "origin")
+    assert origin["scraped"] == "Azul White Quartzite" and origin["spellings"] == ["Azul White Quartzite"]
+    assert origin["origin"] == "IR" and origin["stone_type"] == "Quartzite" and "BR" in origin["reason"]
+    # the same statement resolves it
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": origin["src"], "scraped": origin["spellings"],
+                                  "name": "Azul White", "type": "Onyx", "origin": "IR"})
+    assert code == 200 and body["result"] == "bound"
