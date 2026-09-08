@@ -13,9 +13,11 @@ what exists. Valid combinations, attribute ids and textures are outside this mod
  "name": "Golden Lightning", "type": "Granite", "color": "Green", "origin": "IR", "widen": false}
 ```
 
-`scraped` is the spelling the decision is keyed on (a card's `scraped`, or its whole `spellings` list).
-`name` and `type` are required; `color`, `origin`, `widen` are optional. `type` must be a Medusa stone
-type, `origin` an ISO-3166 country (code or name). Nothing is stored unless everything validates.
+The listings a statement applies to are the card's `listings` (`[{"source", "scraped"}]`, one per vendor
+and spelling behind the card); send them as `listings`. `source` + `scraped` (a spelling or a list) is the
+single-vendor form. `name` and `type` are required; `color`, `origin`, `widen` are optional. `type` must be
+a Medusa stone type, `origin` an ISO-3166 country (code or name). Nothing is stored unless everything
+validates. The response lists each listing with its `result`.
 
 | name + type | result | stored for the vendor |
 |---|---|---|
@@ -25,7 +27,9 @@ type, `origin` an ISO-3166 country (code or name). Nothing is stored unless ever
 
 A statement replaces the vendor's previous one for that spelling. It never touches another vendor, and it
 never changes the variety's documented origins unless `widen` is true, which adds the origin to the stone's
-list for every vendor's origin gate.
+list for every vendor's origin gate. A mint already made for every vendor stays global when a vendor restates
+it. Known limit: one mint decision per spelling, so two vendors stating two DIFFERENT new names for the same
+spelling overwrite each other; the earlier vendor's product then surfaces again as a card.
 
 `DELETE /config/v1/review/decide` with `{"source", "scraped"}` removes exactly what the statement stored;
 the next produce resolves the product on its own again.
@@ -39,7 +43,8 @@ a statement about fields.
 `GET /config/v1/review/variants` is the one list: the variety cards plus the origin confirmations in the
 same card shape. (`GET /config/v1/review/origins` still serves the origin subset until the UI switches.)
 
-Every card carries `kind`, `src`, `scraped`, `spellings` (every listing behind the card), `variant` (the
+Every card carries `kind`, `src`, `scraped`, `listings` (`[{source, scraped}]`, every listing behind the
+card, what a statement is sent with), `spellings` (the same, flat, for display), `variant` (the
 cleaned identity), `stone_type`, `color`, `origin` (origin cards: the vendor's declared country, prefilled),
 `reason`, `nearest_existing`, `src_url`, `image`, `description`. The reason says why the card exists; it
 never limits what may be stated.

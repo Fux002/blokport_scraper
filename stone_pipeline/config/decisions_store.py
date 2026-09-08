@@ -262,9 +262,13 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
         outcome["result"] = "bound"
     else:
         renamed = _norm(name) != _norm(spelling)
+        # a mint already made for EVERY vendor stays global: a vendor restating it must not narrow the
+        # spelling's binding to itself (the global alias attach would stop for the other vendors)
+        prior = variety_actions().get(_norm(spelling))
+        scope = "" if prior and prior["action"] == "mint" and not prior.get("source") else src
         set_variety_decision(spelling, "mint", seed_color=color, seed_type=stone_type, seed_country=origin,
-                             seed_name=name if renamed else None, source=src)
-        if renamed:
+                             seed_name=name if renamed else None, source=scope)
+        if renamed and scope:
             set_scoped_alias(src, spelling, name, stone_type)
         outcome["result"] = "minted"
     if origin:
