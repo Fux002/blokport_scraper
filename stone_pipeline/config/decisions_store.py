@@ -796,6 +796,10 @@ def list_pending(kind: str) -> list[dict]:
         item["sources"] = json.loads(r["sources"]) if r["sources"] else []
         if kind == "variety":
             item["current_action"] = actions.get(r["ref"], {}).get("action")
+            # Explicit progress flag. A decided card STAYS pending until the next produce binds it, so the
+            # list length never moves while the operator works -- without this the UI cannot tell a settled
+            # card from an untouched one and there is no "where did I stop" marker across a session.
+            item["decided"] = actions.get(r["ref"], {}).get("action") is not None
             item["current_alias_of"] = actions.get(r["ref"], {}).get("alias_of")
             item["current_seed_color"] = actions.get(r["ref"], {}).get("seed_color")
             item["current_seed_type"] = actions.get(r["ref"], {}).get("seed_type")
@@ -803,7 +807,10 @@ def list_pending(kind: str) -> list[dict]:
             item["current_seed_name"] = actions.get(r["ref"], {}).get("seed_name")
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
+            item["decided"] = leaf_actions.get(r["ref"]) is not None
         elif kind == "origin":
             item["current_country"] = origin_actions.get(r["ref"])
+            # an origin card is settled once its country is confirmed (its statement is the country)
+            item["decided"] = origin_actions.get(r["ref"]) is not None
         out.append(item)
     return out

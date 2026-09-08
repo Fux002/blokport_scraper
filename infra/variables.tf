@@ -208,3 +208,9 @@ variable "prod_image_upgrade_batch" {
   type        = number
   default     = 0
 }
+
+variable "dev_enable_execute_command" {
+  description = "Allow ECS Exec into the dev sync service (operator access to the live ledger). Prod deliberately has no equivalent."
+  type        = bool
+  default     = false
+}

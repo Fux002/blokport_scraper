@@ -67,7 +67,8 @@ def _origin_as_card(item: dict) -> dict:
             "listings": ([{"source": item.get("source", ""), "scraped": item["scraped"]}]
                          if item.get("scraped") else []),
             "src_url": item.get("src_url", ""), "image": item.get("image", ""), "description": "",
-            "sources": item.get("sources"), "current_action": None}
+            "sources": item.get("sources"), "current_action": None,
+            "decided": item.get("decided", False)}
 
 
 def _country_iso(raw: str) -> str | None:
@@ -303,8 +304,19 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if len(segments) == 2 and segments[1] == "variants" and method == "GET":
             # ONE list: the variety cards plus the origin confirmations in the same card shape (kind
             # 'origin'), so the operator reviews everything in one place with one statement (/review/decide).
-            return 200, {"variants": decisions_store.list_pending("variety") + [
-                _origin_as_card(o) for o in decisions_store.list_pending("origin")]}
+            cards = decisions_store.list_pending("variety") + [
+                _origin_as_card(o) for o in decisions_store.list_pending("origin")]
+            # Decided cards sink to the END, undecided keep their order at the top, so the operator always
+            # works the front of one list and never loses their place. A decided card is NOT removed: it
+            # stays pending until the next produce binds it, and re-stating over it revises the decision.
+            # Stable sort, so the deterministic order within each group is preserved.
+            cards.sort(key=lambda c: bool(c.get("decided")))
+            decided = sum(1 for c in cards if c.get("decided"))
+            return 200, {"variants": cards,
+                         # progress signal: the list length cannot move while reviewing, so without a count
+                         # there is no way to tell a finished review from an untouched one.
+                         "counts": {"total": len(cards), "decided": decided,
+                                    "undecided": len(cards) - decided}}
         if len(segments) == 3 and segments[1] == "variants" and method == "PUT":
             if not isinstance(body, dict):
                 return 400, {"error": "body must be a JSON object {action, alias_of?}"}

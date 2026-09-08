@@ -155,3 +155,9 @@ variable "image_upgrade_batch" {
   type        = number
   default     = 0
 }
+
+variable "enable_execute_command" {
+  description = "Allow ECS Exec (aws ecs execute-command) into the running task. Off by default: it opens an interactive shell into a task that holds the live ledger, so it is enabled per environment, deliberately."
+  type        = bool
+  default     = false
+}

@@ -39,6 +39,10 @@ prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :g
 # Texture quality drip: per produce, re-make up to N legacy textures on the current best model, ONLY for
 # variants a product actually links to, once each (durable S3 marker). 257 product-backed textures are on
 # the old model today, so 300 clears the backlog in one produce and then idles at ~0 (each Key once).
+# Operator shell into the dev sync task (ECS Exec), so the ledger can be reset/inspected without the UI.
+# Dev only, on purpose: prod has no equivalent and its reset stays a UI/API action behind the run lock.
+dev_enable_execute_command = true
+
 dev_image_upgrade_batch  = 300
 
 prod_image_upgrade_batch = 300

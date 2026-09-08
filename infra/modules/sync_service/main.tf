@@ -118,6 +118,22 @@ resource "aws_iam_role" "task" {
 }
 
 data "aws_iam_policy_document" "task" {
+  # ECS Exec channel. Only present when enable_execute_command is set, so a normal deployment carries no
+  # interactive-shell permission at all.
+  dynamic "statement" {
+    for_each = var.enable_execute_command ? [1] : []
+    content {
+      sid     = "EcsExecChannel"
+      actions = [
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel",
+      ]
+      resources = ["*"]
+    }
+  }
+
   statement {
     sid       = "StagingBucketRW"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
@@ -285,6 +301,9 @@ resource "aws_ecs_service" "this" {
   task_definition = aws_ecs_task_definition.this.arn
   desired_count   = 1
   launch_type     = "FARGATE"
+  # ECS Exec: an interactive shell into the task that owns the live ledger. Gated per environment so it
+  # is never on by accident; the task role below gains the ssmmessages channel actions only when set.
+  enable_execute_command = var.enable_execute_command
 
   network_configuration {
     subnets          = var.private_subnet_ids

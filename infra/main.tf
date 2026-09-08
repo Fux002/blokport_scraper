@@ -332,10 +332,11 @@ module "sync_service_dev" {
   target_env     = "development"
   image_repo_url = local.ecr_repo_url
   # DEV tracks :core (= what's on main); the branch is merged. :core = bbf35a2 (WAL + local-disk ledger).
-  image_tag           = var.image_tag
-  image_upgrade_batch = var.dev_image_upgrade_batch
-  region              = var.region
-  staging_bucket      = var.dev_staging_bucket
+  image_tag              = var.image_tag
+  image_upgrade_batch    = var.dev_image_upgrade_batch
+  enable_execute_command = var.dev_enable_execute_command
+  region                 = var.region
+  staging_bucket         = var.dev_staging_bucket
   # The produce subprocess builds ~2M combinations in RAM (the catalog peak) sharing the task with BOTH
   # servers -- 2 GB OOM-killed it (exit -9). tree_build no longer duplicates that 2M-row set (a2433dd),
   # dropping the peak by a full copy, so 8 GB is comfortable (produce ~1.5 GB + servers ~0.5 GB) at 1
