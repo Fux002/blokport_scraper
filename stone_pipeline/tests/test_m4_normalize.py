@@ -232,7 +232,12 @@ def test_name_over_tag_holds_when_the_identity_exists_under_both_types(ref):
     normalize.normalize_row(row, resolvers, ref)
     assert row.type_name is None and row.type_id is None
     assert row.type_method == "name_tag_conflict"
-    assert any(f.method == "name_tag_conflict" and f.raw_value == "Onyx | Quartzite" for f in row.review_flags)
+    flag = next(f for f in row.review_flags if f.method == "name_tag_conflict")
+    assert flag.raw_value == "Onyx | Quartzite"
+    # its own code: the attribute review must never propose "Onyx | Quartzite" as a new stone type
+    assert flag.code == FlagCode.type_conflict
+    from stone_pipeline.stages import curate
+    assert [a for a in curate.build_attribute_curation([row], ref) if a["kind"] == "type"] == []
 
 
 def test_name_over_tag_still_wins_when_only_the_name_type_exists(ref):

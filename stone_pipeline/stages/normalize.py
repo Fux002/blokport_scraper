@@ -152,7 +152,7 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
             known = ref.variety_types(clean_variety(row.variety_match_key or row.raw_name or "", looked[0]))
             tag = row.type_name or ""
             if tag and tag.casefold() in known and looked[0].casefold() in known:
-                row.add_flag(ReviewFlag(field="type", code=FlagCode.attr_unresolved,
+                row.add_flag(ReviewFlag(field="type", code=FlagCode.type_conflict,
                                         raw_value=f"{tag} | {looked[0]}", confidence=Confidence.none,
                                         method="name_tag_conflict", src_url=row.src_url))
                 row.type_name, row.type_id = None, None
