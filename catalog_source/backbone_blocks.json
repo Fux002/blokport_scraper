@@ -14256,7 +14256,6 @@
       "category": "Blocks",
       "stone_type": "Gneiss",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -14370,7 +14369,6 @@
       "category": "Blocks",
       "stone_type": "Gneiss",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -18545,8 +18543,7 @@
       "color": [
         "White",
         "Grey",
-        "Black",
-        "Semi"
+        "Black"
       ],
       "finishes": [
         "Raw",
@@ -22006,7 +22003,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -26738,7 +26734,6 @@
       "stone_type": "Granite",
       "color": [
         "White",
-        "Semi",
         "Cream",
         "Beige",
         "Grey",
@@ -27952,7 +27947,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Cream"
       ],
@@ -28388,7 +28382,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -30800,8 +30793,7 @@
         "Cream",
         "Gold",
         "Grey",
-        "Brown",
-        "Semi"
+        "Brown"
       ],
       "finishes": [
         "Raw",
@@ -44083,7 +44075,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -55273,7 +55264,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -57005,7 +56995,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Ivory",
         "Cream",
@@ -74446,7 +74435,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -82228,7 +82216,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Ivory",
         "Grey"
@@ -90441,7 +90428,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -108547,7 +108533,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -109449,7 +109434,6 @@
       "stone_type": "Granite",
       "color": [
         "Grey",
-        "Semi",
         "White",
         "Silver"
       ],
@@ -120697,7 +120681,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Black",
         "Grey"
@@ -146428,7 +146411,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver"
@@ -147225,7 +147207,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -164476,7 +164457,6 @@
       "category": "Blocks",
       "stone_type": "Granite",
       "color": [
-        "Semi",
         "White",
         "Ivory"
       ],
@@ -225726,7 +225706,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Green"
@@ -226776,7 +226755,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -226858,7 +226836,6 @@
       "stone_type": "Marble",
       "color": [
         "Grey",
-        "Semi",
         "White",
         "Silver"
       ],
@@ -226956,7 +226933,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -227219,7 +227195,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -228284,7 +228259,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -229422,7 +229396,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Green"
@@ -229599,7 +229572,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Ivory",
         "Grey"
@@ -229635,7 +229607,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -229846,7 +229817,6 @@
       "stone_type": "Marble",
       "color": [
         "White",
-        "Semi",
         "Beige",
         "Grey",
         "Gold"
@@ -230052,7 +230022,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -230770,7 +230739,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -230878,7 +230846,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -233318,7 +233285,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -234281,7 +234247,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -235290,7 +235255,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver"
@@ -235392,7 +235356,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -235542,7 +235505,6 @@
       "color": [
         "Grey",
         "Silver",
-        "Semi",
         "White",
         "Brown"
       ],
@@ -235676,7 +235638,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Gold"
       ],
@@ -235754,7 +235715,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "Grey",
         "Brown",
         "White"
@@ -235919,7 +235879,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -236701,8 +236660,7 @@
         "Grey",
         "White",
         "Silver",
-        "Blue",
-        "Semi"
+        "Blue"
       ],
       "finishes": [
         "Raw",
@@ -238691,7 +238649,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -240100,7 +240057,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Cream",
         "Grey",
@@ -241107,7 +241063,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -244807,7 +244762,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -245205,7 +245159,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -246381,7 +246334,6 @@
       "color": [
         "White",
         "Grey",
-        "Semi",
         "Cream",
         "Blue"
       ],
@@ -246785,7 +246737,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Ivory",
         "Grey",
@@ -247032,7 +246983,6 @@
         "Grey",
         "Brown",
         "Gold",
-        "Semi",
         "Cream"
       ],
       "finishes": [
@@ -247507,7 +247457,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Silver"
       ],
@@ -248162,7 +248111,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Cream",
         "Grey",
@@ -250541,7 +250489,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Blue"
       ],
@@ -250904,7 +250851,6 @@
       "stone_type": "Marble",
       "color": [
         "Blue",
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -250940,7 +250886,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Blue"
       ],
@@ -251768,7 +251713,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -251810,7 +251754,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Ivory",
         "Cream",
@@ -254721,7 +254664,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -257190,7 +257132,6 @@
       "stone_type": "Marble",
       "color": [
         "White",
-        "Semi",
         "Cream",
         "Beige",
         "Grey",
@@ -259667,7 +259608,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Black"
       ],
@@ -259758,7 +259698,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Beige",
         "Brown"
@@ -260238,7 +260177,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -260418,7 +260356,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Gold",
@@ -261930,7 +261867,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -262781,7 +262717,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver"
@@ -263480,7 +263415,6 @@
       "color": [
         "White",
         "Grey",
-        "Semi",
         "Black"
       ],
       "finishes": [
@@ -264010,8 +263944,7 @@
         "Grey",
         "Silver",
         "Black",
-        "White",
-        "Semi"
+        "White"
       ],
       "finishes": [
         "Raw",
@@ -266264,7 +266197,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver"
@@ -266737,7 +266669,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "Cream",
         "Beige",
         "Grey",
@@ -267109,7 +267040,6 @@
       "stone_type": "Marble",
       "color": [
         "Black",
-        "Semi",
         "White",
         "Ivory"
       ],
@@ -274322,7 +274252,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Cream",
         "Beige",
@@ -274469,7 +274398,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver",
@@ -274511,7 +274439,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -275046,7 +274973,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -275502,7 +275428,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -276068,7 +275993,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -276440,7 +276364,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -277061,7 +276984,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -277345,7 +277267,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Black"
       ],
@@ -282444,7 +282365,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -285700,7 +285620,6 @@
         "Ivory",
         "Cream",
         "Grey",
-        "Semi",
         "Beige",
         "Gold"
       ],
@@ -286894,7 +286813,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Black"
@@ -290698,7 +290616,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Brown"
@@ -294571,7 +294488,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Black"
@@ -297240,7 +297156,6 @@
       "color": [
         "Grey",
         "Silver",
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -298262,7 +298177,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "Grey",
         "White"
       ],
@@ -299158,7 +299072,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -302584,7 +302497,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -302701,7 +302613,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -303646,7 +303557,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -303680,7 +303590,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -305076,7 +304985,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -305179,7 +305087,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -308613,7 +308520,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Beige",
         "Grey",
@@ -309343,7 +309249,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -311571,7 +311476,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -312573,7 +312477,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -312943,7 +312846,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -313917,7 +313819,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -314311,7 +314212,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -315513,8 +315413,7 @@
       "color": [
         "Grey",
         "White",
-        "Silver",
-        "Semi"
+        "Silver"
       ],
       "finishes": [
         "Raw",
@@ -317259,7 +317158,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -319338,7 +319236,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -319745,7 +319642,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Brown"
@@ -320104,7 +320000,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Black",
@@ -321707,7 +321602,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -322021,8 +321915,7 @@
       "color": [
         "White",
         "Grey",
-        "Blue",
-        "Semi"
+        "Blue"
       ],
       "finishes": [
         "Raw",
@@ -322176,7 +322069,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -323678,7 +323570,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -328188,7 +328079,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -328395,7 +328285,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -328667,7 +328556,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -331445,7 +331333,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Cream",
         "Beige",
@@ -331491,7 +331378,6 @@
       "stone_type": "Marble",
       "color": [
         "Beige",
-        "Semi",
         "Cream",
         "Grey",
         "Brown",
@@ -331619,7 +331505,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Cream",
         "Beige",
@@ -333243,8 +333128,7 @@
       "stone_type": "Marble",
       "color": [
         "White",
-        "Multicolor",
-        "Semi"
+        "Multicolor"
       ],
       "finishes": [
         "Raw",
@@ -333304,7 +333188,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Silver"
       ],
@@ -334417,7 +334300,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -334451,7 +334333,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -334885,7 +334766,6 @@
       "stone_type": "Marble",
       "color": [
         "White",
-        "Semi",
         "Cream",
         "Beige",
         "Grey",
@@ -335275,7 +335155,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -336613,7 +336492,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "Ivory",
         "Cream",
         "Grey",
@@ -337030,7 +336908,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver",
@@ -339496,7 +339373,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Blue",
         "Multicolor",
@@ -339591,7 +339467,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Blue"
       ],
@@ -339676,7 +339551,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Cream",
         "Beige",
@@ -339846,8 +339720,7 @@
       "stone_type": "Marble",
       "color": [
         "White",
-        "Black",
-        "Semi"
+        "Black"
       ],
       "finishes": [
         "Raw",
@@ -339888,7 +339761,6 @@
       "stone_type": "Marble",
       "color": [
         "Grey",
-        "Semi",
         "White",
         "Brown",
         "Blue",
@@ -339931,7 +339803,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -340517,7 +340388,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Black"
@@ -341501,7 +341371,6 @@
         "White",
         "Grey",
         "Silver",
-        "Semi",
         "Beige",
         "Gold"
       ],
@@ -343772,7 +343641,6 @@
       "color": [
         "Grey",
         "Blue",
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -344820,7 +344688,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Green",
         "Beige",
@@ -345068,7 +344935,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Black"
@@ -346284,7 +346150,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "Silver",
         "White"
       ],
@@ -347160,7 +347025,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Blue"
@@ -348755,8 +348619,7 @@
         "White",
         "Brown",
         "Purple",
-        "Black",
-        "Semi"
+        "Black"
       ],
       "finishes": [
         "Raw",
@@ -348811,7 +348674,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -348888,7 +348750,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -349626,7 +349487,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -349928,7 +349788,6 @@
       "stone_type": "Marble",
       "color": [
         "White",
-        "Semi",
         "Grey",
         "Green"
       ],
@@ -358939,7 +358798,6 @@
         "Grey",
         "White",
         "Ivory",
-        "Semi",
         "Gold",
         "Orange",
         "Yellow",
@@ -359468,7 +359326,6 @@
       "color": [
         "White",
         "Grey",
-        "Semi",
         "Black",
         "Blue"
       ],
@@ -360363,7 +360220,6 @@
       "color": [
         "Beige",
         "Cream",
-        "Semi",
         "White",
         "Gold"
       ],
@@ -364225,7 +364081,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Black",
         "Grey",
@@ -364774,7 +364629,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -367965,8 +367819,7 @@
         "Silver",
         "Grey",
         "White",
-        "Beige",
-        "Semi"
+        "Beige"
       ],
       "finishes": [
         "Raw",
@@ -368178,7 +368031,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Silver"
       ],
@@ -368258,7 +368110,6 @@
       "color": [
         "White",
         "Silver",
-        "Semi",
         "Beige",
         "Grey",
         "Blue"
@@ -368869,7 +368720,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver",
@@ -370698,7 +370548,6 @@
       "stone_type": "Marble",
       "color": [
         "Grey",
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -371705,7 +371554,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -372706,7 +372554,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -372740,7 +372587,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -373276,7 +373122,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Black",
@@ -373603,7 +373448,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -374009,7 +373853,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -374044,7 +373887,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -374378,7 +374220,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -374613,7 +374454,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -374728,7 +374568,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -375280,7 +375119,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -375824,7 +375662,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Brown"
@@ -376195,7 +376032,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Black"
       ],
@@ -377724,7 +377560,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Ivory",
         "Grey",
@@ -378838,7 +378673,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -379231,7 +379065,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Brown",
         "Gold",
@@ -379275,7 +379108,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "Grey",
         "Black",
         "Brown",
@@ -379622,7 +379454,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -379764,7 +379595,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -381134,7 +380964,6 @@
       "color": [
         "Beige",
         "Cream",
-        "Semi",
         "White",
         "Grey",
         "Gold",
@@ -382908,7 +382737,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -383317,7 +383145,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Black"
@@ -383360,7 +383187,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "Grey",
         "Silver",
         "White"
@@ -384169,7 +383995,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -384584,7 +384409,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -384935,7 +384759,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Lilac"
@@ -387169,7 +386992,6 @@
       "stone_type": "Marble",
       "color": [
         "White",
-        "Semi",
         "Grey"
       ],
       "finishes": [
@@ -388940,7 +388762,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -390068,7 +389889,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Silver"
       ],
@@ -391352,7 +391172,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Green"
       ],
@@ -392251,7 +392070,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -392329,7 +392147,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Grey"
       ],
@@ -393024,7 +392841,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -394413,7 +394229,6 @@
       "stone_type": "Marble",
       "color": [
         "Grey",
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -394557,7 +394372,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -394593,7 +394407,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Ivory",
         "Grey",
@@ -394633,7 +394446,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White",
         "Gold"
       ],
@@ -394672,7 +394484,6 @@
       "category": "Blocks",
       "stone_type": "Marble",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -395991,7 +395802,6 @@
       "category": "Blocks",
       "stone_type": "Onyx",
       "color": [
-        "Semi",
         "White"
       ],
       "finishes": [
@@ -423967,7 +423777,6 @@
       "category": "Blocks",
       "stone_type": "Sandstone",
       "color": [
-        "Semi",
         "White",
         "Grey",
         "Silver"
