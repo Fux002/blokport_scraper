@@ -254,3 +254,13 @@ def test_decide_without_any_listing_is_400():
     assert code == 400
     code, _ = server.dispatch("PUT", ["review", "decide"], {"scraped": "X", "name": "X", "type": "Granite"})
     assert code == 400                                                     # a spelling without its vendor
+
+
+def test_a_renamed_mint_documents_its_origin_under_the_new_name():
+    # the origin map is looked up by the variety's NAME: a mint + rename with a country must overlay the
+    # country under the name the variety is created with, not under the scraped spelling
+    decisions_store.decide("varsha", "Arctic White", "Arctic White Varsha", "Quartzite", origin="IN", exists_as=_exists)
+    assert decisions_store.variety_seed_country_rules() == {("arctic white varsha", "quartzite"): "IN"}
+    assert decisions_store.variety_seed_countries() == {"arctic white varsha": "IN"}
+    decisions_store.decide("zucchi", "Acquaclara", "Acquaclara", "Quartzite", origin="BR", exists_as=_exists)
+    assert decisions_store.variety_seed_country_rules()[("acquaclara", "quartzite")] == "BR"
