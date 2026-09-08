@@ -776,6 +776,12 @@ def list_pending(kind: str) -> list[dict]:
     """The pending items for `kind`, each = its payload plus `sources` and the `current_action` already
     recorded for it (so the UI can show a decision made between runs, applied on the next produce)."""
     actions = variety_actions() if kind == "variety" else {}
+    # An ALIAS decision lands in scoped_alias (per vendor), NOT variety_decision -- so a card settled by
+    # "this is <existing variety>" has no variety_action at all. Reading only variety_actions left every
+    # aliased card looking undecided: unbadged, unsorted, and missing from the decided count. Key by the
+    # spelling (any vendor), which is what the card's ref is.
+    aliased = ({spelling: target for (_src, spelling), target in scoped_aliases().items()}
+               if kind == "variety" else {})
     leaf_actions = _leaf_actions_by_ref() if kind == "backbone_leaf" else {}
     # for origin, key the confirmed country by the SAME composite ref the queue uses, so a decision made
     # between runs shows as current_country until the next produce regenerates the queue (and drops it).
@@ -795,16 +801,19 @@ def list_pending(kind: str) -> list[dict]:
         item["ref"] = r["ref"]
         item["sources"] = json.loads(r["sources"]) if r["sources"] else []
         if kind == "variety":
-            item["current_action"] = actions.get(r["ref"], {}).get("action")
-            # Explicit progress flag. A decided card STAYS pending until the next produce binds it, so the
-            # list length never moves while the operator works -- without this the UI cannot tell a settled
-            # card from an untouched one and there is no "where did I stop" marker across a session.
-            item["decided"] = actions.get(r["ref"], {}).get("action") is not None
-            item["current_alias_of"] = actions.get(r["ref"], {}).get("alias_of")
-            item["current_seed_color"] = actions.get(r["ref"], {}).get("seed_color")
-            item["current_seed_type"] = actions.get(r["ref"], {}).get("seed_type")
-            item["current_seed_country"] = actions.get(r["ref"], {}).get("seed_country")
-            item["current_seed_name"] = actions.get(r["ref"], {}).get("seed_name")
+            act = actions.get(r["ref"], {})
+            scoped = aliased.get(r["ref"])          # (target variety, target type) or None
+            item["current_action"] = act.get("action") or ("alias" if scoped else None)
+            # A card is settled by EITHER store: a mint / reject / global alias (variety_decision), or a
+            # VENDOR-SCOPED alias to an existing variety (scoped_alias). Reading variety_decision alone left
+            # every aliased card looking untouched -- unbadged, not sorted to the end, and missing from the
+            # decided count -- which is exactly the case "this is an existing variety", the commonest verdict.
+            item["decided"] = bool(act.get("action")) or scoped is not None
+            item["current_alias_of"] = act.get("alias_of") or (scoped[0] if scoped else None)
+            item["current_seed_color"] = act.get("seed_color")
+            item["current_seed_type"] = act.get("seed_type") or (scoped[1] if scoped else None) or None
+            item["current_seed_country"] = act.get("seed_country")
+            item["current_seed_name"] = act.get("seed_name")
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
             item["decided"] = leaf_actions.get(r["ref"]) is not None

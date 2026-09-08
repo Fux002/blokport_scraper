@@ -53,3 +53,35 @@ def test_origin_cards_carry_the_flag_too(monkeypatch):
     assert [c["ref"] for c in got["variants"]] == ["v", "s|o|t"]     # decided origin card sinks
     assert got["variants"][-1]["kind"] == "origin" and got["variants"][-1]["decided"] is True
     assert got["counts"] == {"total": 2, "decided": 1, "undecided": 1}
+
+
+def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
+    """The regression from prod: "this is an existing variety" is stored in scoped_alias, NOT
+    variety_decision. Reading only variety_decision left every aliased card looking untouched."""
+    from stone_pipeline.config import decisions_store as ds
+
+    monkeypatch.setattr(ds, "variety_actions", lambda: {})            # no mint/reject anywhere
+    monkeypatch.setattr(ds, "scoped_aliases",
+                        lambda: {("zucchi", "agata dark blue"): ("Agata Blue", "Agate")})
+
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    rows = [_Row(ref="agata dark blue", payload='{"variant": "Agata Dark Blue"}', sources=None),
+            _Row(ref="untouched name", payload='{"variant": "Untouched"}', sources=None)]
+
+    class _Cur:
+        def fetchall(self): return rows
+
+    class _Conn:
+        def execute(self, *a, **k): return _Cur()
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    out = {i["ref"]: i for i in ds.list_pending("variety")}
+    a = out["agata dark blue"]
+    assert a["decided"] is True                 # the bug: was False
+    assert a["current_action"] == "alias"       # and the UI showed nothing
+    assert a["current_alias_of"] == "Agata Blue"
+    assert a["current_seed_type"] == "Agate"
+    assert out["untouched name"]["decided"] is False
