@@ -51,6 +51,23 @@ def _type_vocab() -> dict[str, str]:
     return {proj.norm(t): t for t in load_attributes().canonical_names("type")}
 
 
+def _origin_as_card(item: dict) -> dict:
+    """An origin confirmation in the variety-card shape: the product bound fine, only its origin could not be
+    corroborated, so the card says so and prefills the vendor's declared country. Every field stays open to
+    the operator's statement, like any other card."""
+    return {"kind": "origin", "ref": item.get("ref", ""), "variant": item.get("variety", ""),
+            "stone_type": item.get("stone_type", ""), "color": "",
+            "reason": (f"Origin not corroborated: the vendor declares {item.get('vendor_origin') or '?'}, the "
+                       f"stone documents {item.get('map_country') or 'no country'}. Confirm the origin, or "
+                       f"state what this product is."),
+            "origin": item.get("current_country") or item.get("vendor_origin") or "",
+            "nearest_existing": "", "score": "", "model_prob": "",
+            "src": item.get("source", ""), "scraped": item.get("scraped", ""),
+            "spellings": [item["scraped"]] if item.get("scraped") else [],
+            "src_url": item.get("src_url", ""), "image": item.get("image", ""), "description": "",
+            "sources": item.get("sources"), "current_action": None}
+
+
 def _country_iso(raw: str) -> str | None:
     """Resolve a country NAME or ISO2 to a canonical ISO-3166 alpha-2, or None if it is not a real country.
     Name-first (so 'UK' -> GB) then a bare valid ISO2 -- mirrors derive._to_iso. Validates the operator's
@@ -284,7 +301,10 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         #                                                (approve/reject also un-approve a DECIDED leaf; clear undoes it)
         from stone_pipeline.config import decisions_store, varieties
         if len(segments) == 2 and segments[1] == "variants" and method == "GET":
-            return 200, {"variants": decisions_store.list_pending("variety")}
+            # ONE list: the variety cards plus the origin confirmations in the same card shape (kind
+            # 'origin'), so the operator reviews everything in one place with one statement (/review/decide).
+            return 200, {"variants": decisions_store.list_pending("variety") + [
+                _origin_as_card(o) for o in decisions_store.list_pending("origin")]}
         if len(segments) == 3 and segments[1] == "variants" and method == "PUT":
             if not isinstance(body, dict):
                 return 400, {"error": "body must be a JSON object {action, alias_of?}"}
