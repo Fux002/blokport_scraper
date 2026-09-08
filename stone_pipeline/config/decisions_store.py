@@ -121,19 +121,21 @@ def variety_seed_countries() -> dict[str, str]:
     so it must NOT materialise config.db, mirroring backbone_leaf_overlay."""
     if not store.config_db_path().exists():
         return {}
-    return {n: d["seed_country"] for n, d in variety_actions().items()
+    return {_norm(d["seed_name"] or n): d["seed_country"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_country"]}
 
 
 def variety_seed_country_rules() -> dict[tuple[str, str], str]:
-    """(norm(variant), norm(stone_type)) -> the operator-chosen ISO origin, for every MINT that set a
-    country. TYPE-SCOPED so a homonym minted under different types carries different origins. A mint with no
-    stone_type keys ('', ); apply_origin_overlay SKIPS it -- origin is (name, type) and a type-less origin can
-    never emit. This is the shape apply_origin_overlay consumes (variety_seed_countries is the flat name->iso
-    accessor). No side effect on a fresh store (load_all reads it every build)."""
+    """(norm(variety NAME), norm(stone_type)) -> the operator-chosen ISO origin, for every MINT that set a
+    country. Keyed by the name the variety is CREATED under (seed_name for a mint + rename, else the scraped
+    spelling), because the origin map is looked up by the variety's name: keyed by the spelling, a renamed
+    mint's stone carried no documented origin at all. TYPE-SCOPED so a homonym minted under different types
+    carries different origins. A mint with no stone_type keys ('', ); apply_origin_overlay SKIPS it -- origin
+    is (name, type) and a type-less origin can never emit. This is the shape apply_origin_overlay consumes
+    (variety_seed_countries is the flat name->iso accessor). No side effect on a fresh store."""
     if not store.config_db_path().exists():
         return {}
-    return {(n, _norm(d["seed_type"])): d["seed_country"]
+    return {(_norm(d["seed_name"] or n), _norm(d["seed_type"])): d["seed_country"]
             for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_country"]}
 
