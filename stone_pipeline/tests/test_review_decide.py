@@ -162,15 +162,17 @@ def _canonical(tmp_path: Path) -> Path:
     run = tmp_path / "outputs" / "marenostone_20260907_000000" / "diagnostics"
     run.mkdir(parents=True)
     pl.DataFrame({
-        "src_site": ["marenostone", "marenostone"], "surrogate_key": ["1", "2"],
-        "raw_name": ["Azul White Quartzite Slab", "Volakas Marble Slab"],
-        "variety_match_key": ["Azul White Quartzite", "Volakas Marble"],
-        "variation_key": ["slab_quartzite_azul_white_x", "slab_marble_spider_red_x"],
-        "variation_name": ["Azul White", "Spider Red"], "variation_method": ["clean_variety_exact", "exact_origin"],
-        "type_name": ["Quartzite", "Marble"], "type_method": ["variety_authoritative", "variety_authoritative"],
-        "color_name": ["White", "White"], "origin_country_code": [None, "IR"],
-        "origin_source": ["origin_needs_confirmation", "vendor_origin"],
-        "src_url": ["https://m/azul", "https://m/volakas"],
+        "src_site": ["marenostone", "marenostone", "marenostone"], "surrogate_key": ["1", "2", "3"],
+        "raw_name": ["Azul White Quartzite Slab", "Volakas Marble Slab", "Amazon Green Granite Slab"],
+        "variety_match_key": ["Azul White Quartzite", "Volakas Marble", "Amazon Green Granite"],
+        "variation_key": ["slab_quartzite_azul_white_x", "slab_marble_spider_red_x", None],
+        "variation_name": ["Azul White", "Spider Red", None],
+        "variation_method": ["clean_variety_exact", "exact_origin", "exact_blocked_collision"],
+        "type_name": ["Quartzite", "Marble", "Granite"],
+        "type_method": ["variety_authoritative", "variety_authoritative", "name_explicit"],
+        "color_name": ["White", "White", "Green"], "origin_country_code": [None, "IR", None],
+        "origin_source": ["origin_needs_confirmation", "vendor_origin", "supplier_default"],
+        "src_url": ["https://m/azul", "https://m/volakas", "https://m/amazon"],
     }).write_parquet(run / "canonical.parquet")
     return tmp_path / "outputs"
 
@@ -178,6 +180,7 @@ def _canonical(tmp_path: Path) -> Path:
 def test_resolved_lists_the_last_produce_with_the_standing_decision(tmp_path):
     outputs = _canonical(tmp_path)
     rows = resolved.list_resolved(outputs_dir=outputs)
+    # the unbound Amazon Green (a pending card) is NOT here: the two lists never show the same product
     assert [r["scraped"] for r in rows] == ["Azul White Quartzite", "Volakas Marble"]
     assert rows[0]["decision"] is None and rows[0]["resolved_by"]["origin"] == "origin_needs_confirmation"
     decisions_store.decide("marenostone", "Azul White Quartzite", "Azul White", "Onyx", origin="IR", exists_as=_exists)
