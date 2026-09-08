@@ -67,8 +67,12 @@ def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
     class _Row(dict):
         def __getitem__(self, k): return dict.__getitem__(self, k)
 
-    rows = [_Row(ref="agata dark blue", payload='{"variant": "Agata Dark Blue"}', sources=None),
-            _Row(ref="untouched name", payload='{"variant": "Untouched"}', sources=None)]
+    rows = [_Row(ref="agata dark blue",
+                 payload=('{"variant": "Agata Dark Blue", "src": "zucchi", "scraped": "Agata Dark Blue",'
+                          ' "listings": [{"source": "zucchi", "scraped": "Agata Dark Blue"}]}'),
+                 sources=None),
+            _Row(ref="untouched name",
+                 payload='{"variant": "Untouched", "src": "zucchi", "scraped": "Untouched"}', sources=None)]
 
     class _Cur:
         def fetchall(self): return rows
@@ -85,3 +89,69 @@ def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
     assert a["current_alias_of"] == "Agata Blue"
     assert a["current_seed_type"] == "Agate"
     assert out["untouched name"]["decided"] is False
+
+
+def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
+    """The Gold-card bug: a card's ref is the CLEANED name (type word stripped), but decide() keys a mint
+    and an alias on the SCRAPED spelling. Matching on ref alone missed every card whose cleaner stripped a
+    suffix. Match on the card's spellings/listings instead."""
+    from stone_pipeline.config import decisions_store as ds
+
+    # alias stored under the SCRAPED spelling; card ref is the cleaned name
+    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "scoped_aliases",
+                        lambda: {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")})
+
+    class _Cur:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    payload = ('{"variant": "Amazon Green", "src": "marenostone", "scraped": "Amazon Green Granite",'
+               ' "spellings": ["Amazon Green Granite"],'
+               ' "listings": [{"source": "marenostone", "scraped": "Amazon Green Granite"}]}')
+    rows = [_Row(ref="amazon green", payload=payload, sources=None)]
+
+    class _Conn:
+        def execute(self, *a, **k): return _Cur(rows)
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    card = ds.list_pending("variety")[0]
+    assert card["ref"] == "amazon green"                 # cleaned name != scraped spelling
+    assert card["decided"] is True                       # the bug: was False
+    assert card["current_action"] == "alias"
+    assert card["current_alias_of"] == "Golden Lightning"
+    assert card["current_seed_type"] == "Granite"
+
+
+def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
+    """decide() stores a mint under the scraped spelling, not the ref -- same mismatch class as the alias."""
+    from stone_pipeline.config import decisions_store as ds
+    monkeypatch.setattr(ds, "variety_actions",
+                        lambda: {"blue dunes quartzite": {"action": "mint", "alias_of": None,
+                                                          "seed_color": None, "seed_type": "Quartzite",
+                                                          "seed_country": "BR", "seed_name": None}})
+    monkeypatch.setattr(ds, "scoped_aliases", lambda: {})
+
+    class _Cur:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    payload = ('{"variant": "Blue Dunes", "src": "zucchi", "scraped": "Blue Dunes Quartzite",'
+               ' "spellings": ["Blue Dunes Quartzite"]}')
+    rows = [_Row(ref="blue dunes", payload=payload, sources=None)]
+
+    class _Conn:
+        def execute(self, *a, **k): return _Cur(rows)
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    card = ds.list_pending("variety")[0]
+    assert card["decided"] is True and card["current_action"] == "mint"
+    assert card["current_seed_type"] == "Quartzite"

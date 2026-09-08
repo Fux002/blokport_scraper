@@ -776,12 +776,13 @@ def list_pending(kind: str) -> list[dict]:
     """The pending items for `kind`, each = its payload plus `sources` and the `current_action` already
     recorded for it (so the UI can show a decision made between runs, applied on the next produce)."""
     actions = variety_actions() if kind == "variety" else {}
-    # An ALIAS decision lands in scoped_alias (per vendor), NOT variety_decision -- so a card settled by
-    # "this is <existing variety>" has no variety_action at all. Reading only variety_actions left every
-    # aliased card looking undecided: unbadged, unsorted, and missing from the decided count. Key by the
-    # spelling (any vendor), which is what the card's ref is.
-    aliased = ({spelling: target for (_src, spelling), target in scoped_aliases().items()}
-               if kind == "variety" else {})
+    # Match a decision to a card WITHOUT relying on the card ref. The ref is the CLEANED variety name (the
+    # cleaner strips a trailing type word: "Amazon Green Granite" -> ref "amazon green"), but decide() keys
+    # a mint and an alias on the SCRAPED spelling ("amazon green granite"). So the flag has to match on the
+    # card's own scraped spellings, not its ref -- otherwise every card whose cleaner stripped a suffix
+    # comes back undecided even though the bind is stored (the Gold-card bug). Reject is the exception: it
+    # is keyed on the ref, so ref is kept as a candidate too.
+    scoped = scoped_aliases() if kind == "variety" else {}      # {(nsrc, nspell): (target, type)}
     leaf_actions = _leaf_actions_by_ref() if kind == "backbone_leaf" else {}
     # for origin, key the confirmed country by the SAME composite ref the queue uses, so a decision made
     # between runs shows as current_country until the next produce regenerates the queue (and drops it).
@@ -801,17 +802,24 @@ def list_pending(kind: str) -> list[dict]:
         item["ref"] = r["ref"]
         item["sources"] = json.loads(r["sources"]) if r["sources"] else []
         if kind == "variety":
-            act = actions.get(r["ref"], {})
-            scoped = aliased.get(r["ref"])          # (target variety, target type) or None
-            item["current_action"] = act.get("action") or ("alias" if scoped else None)
-            # A card is settled by EITHER store: a mint / reject / global alias (variety_decision), or a
-            # VENDOR-SCOPED alias to an existing variety (scoped_alias). Reading variety_decision alone left
-            # every aliased card looking untouched -- unbadged, not sorted to the end, and missing from the
-            # decided count -- which is exactly the case "this is an existing variety", the commonest verdict.
-            item["decided"] = bool(act.get("action")) or scoped is not None
-            item["current_alias_of"] = act.get("alias_of") or (scoped[0] if scoped else None)
+            # variety_decision candidates: the ref (a reject is keyed on the cleaned name) OR any scraped
+            # spelling (a mint is keyed on the spelling). Whichever the store actually holds, we find it.
+            spellings = [_norm(s) for s in (item.get("spellings") or []) if s]
+            if item.get("scraped"):
+                spellings.append(_norm(item["scraped"]))
+            act = actions.get(r["ref"]) or next((actions[s] for s in spellings if s in actions), {})
+            # scoped-alias candidates: the card's exact (source, scraped) listings, keyed the way decide()
+            # stored them. Fall back to (src, scraped) on a single-vendor card.
+            keys = [(_norm(l.get("source", "")), _norm(l.get("scraped", "")))
+                    for l in (item.get("listings") or []) if isinstance(l, dict)]
+            if item.get("src") and item.get("scraped"):
+                keys.append((_norm(item["src"]), _norm(item["scraped"])))
+            hit = next((scoped[k] for k in keys if k in scoped), None)   # (target variety, target type)
+            item["decided"] = bool(act.get("action")) or hit is not None
+            item["current_action"] = act.get("action") or ("alias" if hit else None)
+            item["current_alias_of"] = act.get("alias_of") or (hit[0] if hit else None)
             item["current_seed_color"] = act.get("seed_color")
-            item["current_seed_type"] = act.get("seed_type") or (scoped[1] if scoped else None) or None
+            item["current_seed_type"] = act.get("seed_type") or (hit[1] if hit else None) or None
             item["current_seed_country"] = act.get("seed_country")
             item["current_seed_name"] = act.get("seed_name")
         elif kind == "backbone_leaf":
