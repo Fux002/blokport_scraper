@@ -89,15 +89,15 @@ def test_a_single_same_type_owner_still_aliases(monkeypatch):
     assert _card(res) is None
 
 
-def test_variety_alias_decision_can_be_vendor_scoped(tmp_path, monkeypatch):
+
+
+def test_a_statement_binds_the_spelling_for_that_vendor_only(tmp_path, monkeypatch):
     from stone_pipeline.config import decisions_store, server, varieties
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(varieties, "exists", lambda name: name == "Golden Lightning")
-    code, body = server.dispatch("PUT", ["review", "variants", "Amazon Green Granite"],
-                                 {"action": "alias", "alias_of": "Golden Lightning", "source": "marenostone"})
-    assert code == 200 and body["source"] == "marenostone"
-    assert decisions_store.scoped_aliases() == {("marenostone", "amazon green granite"): ("Golden Lightning", "")}
-    assert decisions_store.variety_actions() == {}          # scoped: NOT a global alias decision
-    code, body = server.dispatch("PUT", ["review", "variants", "Amazon Green Granite"],
-                                 {"action": "alias", "alias_of": "Nobody", "source": "marenostone"})
-    assert code == 400                                       # the target must be a real variety, scoped or not
+    monkeypatch.setattr(varieties, "exists_as", lambda n, t: (n, t) == ("Golden Lightning", "Granite"))
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "marenostone", "scraped": "Amazon Green Granite",
+                                  "name": "Golden Lightning", "type": "Granite"})
+    assert code == 200 and body["result"] == "bound"
+    assert decisions_store.scoped_aliases() == {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")}
+    assert decisions_store.variety_actions() == {}          # scoped: NOT a global decision

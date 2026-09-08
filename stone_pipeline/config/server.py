@@ -288,12 +288,10 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         # the new-variant review queue for the :4200 admin. The produce SURFACES uncertain items; the
         # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so
         # an edit takes effect on the following run -- same "applies next run" contract as the run guard).
-        #   GET /config/v1/review/variants               pending varieties (+ current_action)
-        #   PUT /config/v1/review/variants/<variant>     {"action":"mint"|"reject"|"alias","alias_of"?,"type"?,
-        #                                                 "color"?,"country"?,"name"?}
-        #     for alias, "type" is the TARGET's stone type (which of a multi-type name to alias into)
-        #     for mint, "name" is an optional operator-corrected NAME to mint under (mint + rename): the
-        #     variety is created with that display name and the scraped spelling becomes its alias
+        #   GET /config/v1/review/variants               the ONE pending list: variety cards + origin cards
+        #   PUT /config/v1/review/variants/<variant>     {"action":"reject"}   the one explicit action: "not a
+        #                                                variety" is not a statement about fields. Everything
+        #                                                else is a statement (PUT /review/decide, below).
         #   GET /config/v1/review/attributes             pending attribute values (need a Medusa id)
         #   PUT /config/v1/review/attributes/<value>     {"kind":..., "medusa_id":...}
         #   GET  /config/v1/review/backbone              pending leaf additions (value not yet on a variety)
@@ -301,7 +299,7 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         #   POST /config/v1/review/backbone/approve_all  {"verdict"?: "likely_real"}  bulk-approve
         #   PUT  /config/v1/review/backbone/<ref>        {"action":"approve"|"reject"|"clear"}  one verdict
         #                                                (approve/reject also un-approve a DECIDED leaf; clear undoes it)
-        from stone_pipeline.config import decisions_store, varieties
+        from stone_pipeline.config import decisions_store
         if len(segments) == 2 and segments[1] == "variants" and method == "GET":
             # ONE list: the variety cards plus the origin confirmations in the same card shape (kind
             # 'origin'), so the operator reviews everything in one place with one statement (/review/decide).
@@ -318,72 +316,13 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             # (mirrors the backbone PUT).
             variant = unquote(segments[2])
             action = body.get("action", "")
-            alias_of = body.get("alias_of")
-            # domain guard (server's job, not the store's): an alias MUST target a real variety, else it
-            # would resolve to nothing at produce time -- a silent no-op. Reject it loudly here instead.
-            if action == "alias" and not varieties.exists(alias_of or ""):
-                return 400, {"error": f"alias_of {alias_of!r} is not an existing variety"}
-            # an optional mint colour / stone type must be a real Medusa attribute, else the variety
-            # would be seeded with a value that null-ids every product -- same loud guard as the alias
-            # target. A type-less variety is HELD until the operator assigns a type here.
-            from stone_pipeline.matching import projections as proj
-            seed_color = None
-            if (raw_color := (body.get("color") or "").strip()):
-                vocab = _color_vocab()
-                if proj.norm(raw_color) not in vocab:
-                    return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
-                seed_color = vocab[proj.norm(raw_color)]   # store the canonical casing
-            seed_type = None
-            if (raw_type := (body.get("type") or "").strip()):
-                vocab = _type_vocab()
-                if proj.norm(raw_type) not in vocab:
-                    return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
-                seed_type = vocab[proj.norm(raw_type)]
-            # the mint ORIGIN: a real ISO country (name or code). Required at mint is enforced in the
-            # :4200 UI so nothing breaks here before it ships the field; when a country IS sent it must be
-            # a real one (never store garbage). A minted country overlays origin_map as a confirmed rule.
-            seed_country = None
-            if (raw_country := (body.get("country") or "").strip()):
-                if not (seed_country := _country_iso(raw_country)):
-                    return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
-            # an optional operator NAME for a mint (mint + rename): the variety is created under this display
-            # name and the scraped spelling becomes its alias. Identity is (type, name), so a name that ALREADY
-            # exists under the mint's type is an alias, not a mint -- refuse it loudly here, because curate's
-            # existing-cores guard would otherwise skip the mint silently and the product would never bind.
-            # The type is the sent seed_type, else the pending card's stone_type; with no type known at all,
-            # refuse a name that exists under ANY type (conservative: the operator can send the type).
-            # VENDOR-SCOPED alias: 'for THIS vendor, the spelling is that variety'. A collision card (one
-            # trade name, several stones) is often true per seller, so the alias is stored per source and
-            # applied by the matcher's override tier for that vendor only; a global alias goes the ordinary
-            # variety-decision route below.
-            if action == "alias" and (source := (body.get("source") or "").strip()):
-                try:
-                    decisions_store.set_scoped_alias(source, variant, alias_of, seed_type)
-                except decisions_store.InvalidDecision as e:
-                    return 400, {"error": str(e)}
-                return 200, {"variant": variant, "action": action, "alias_of": alias_of,
-                             "seed_type": seed_type, "source": source}
-            seed_name = (body.get("name") or "").strip() or None
-            if seed_name and action == "mint":
-                card = decisions_store.pending_payload("variety", proj.norm(variant)) or {}
-                mint_type = seed_type or (card.get("stone_type") or "").strip()
-                if mint_type and varieties.exists_as(seed_name, mint_type):
-                    return 400, {"error": f"name {seed_name!r} already exists as {mint_type}; "
-                                          "alias the spelling onto it instead of minting"}
-                if not mint_type and varieties.exists(seed_name):
-                    return 400, {"error": f"name {seed_name!r} already exists; send its stone type to mint it "
-                                          "as a different type, or alias the spelling onto it"}
+            if action != "reject":
+                return 400, {"error": "action must be 'reject'; anything else is a statement: PUT /review/decide"}
             try:
-                decisions_store.set_variety_decision(variant, action, alias_of, seed_color=seed_color,
-                                                     seed_type=seed_type, seed_country=seed_country,
-                                                     seed_name=seed_name)
+                decisions_store.set_variety_decision(variant, "reject")
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
-            # echo the STORED name (the store drops it for reject/alias and for a rename to the same name)
-            stored_name = decisions_store.variety_actions().get(proj.norm(variant), {}).get("seed_name")
-            return 200, {"variant": variant, "action": action, "alias_of": alias_of,
-                         "seed_color": seed_color, "seed_type": seed_type, "seed_country": seed_country,
-                         "seed_name": stored_name}
+            return 200, {"variant": variant, "action": "reject"}
         if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
             return 200, {"attributes": decisions_store.list_pending("attribute")}
         if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
@@ -395,18 +334,6 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
             return 200, {"value": value, "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
-        # the SEPARATE origin-confirmation queue: a (source, variety, type) whose vendor primary_origin the
-        # map did not corroborate. The operator picks the country here; the NEXT produce applies it (stored
-        # as a per-vendor origin override). Distinct from the variety queue -- an existing variety never
-        # appears in 'variants'; it only surfaces here, and only for its origin.
-        #   GET /config/v1/review/origins            -> pending origin confirmations
-        #   PUT /config/v1/review/origins/<ref>      {"country_iso": "IR"}         confirm: it IS this variety, from here
-        #                                            {"alias_of": "Golden Lightning", "type"?, "country_iso"?}
-        #     re-bind: it is NOT this variety -- for THIS vendor the scraped spelling is that other existing
-        #     variety (a vendor-scoped alias, applied by the matcher's override tier on the next produce; the
-        #     origin then resolves from the right variety's documented origins, so the card does not come back).
-        #     With country_iso the operator also fixes the origin for THIS vendor + the target variety (a
-        #     supplier override, the top curated rung), instead of leaving it to the vendor gate's own pick.
         # ONE statement, whatever list it comes from (pending card or resolved row): "for vendor <source>, the
         # product scraped as <scraped> is <name>, a <type>, <color>, from <origin>". The backend derives the
         # outcome (bind to the existing variety / mint it / the vendor's origin), see decisions_store.decide.
@@ -440,6 +367,14 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             if proj.norm(raw_type) not in vocab:
                 return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
             stone_type = vocab[proj.norm(raw_type)]
+            # a colour, when given, must be a real Medusa colour attribute (a minted variety is seeded with
+            # it; a value Medusa lacks would null-id every product), stored in its canonical casing
+            color = ""
+            if (raw_color := (body.get("color") or "").strip()):
+                colors = _color_vocab()
+                if proj.norm(raw_color) not in colors:
+                    return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
+                color = colors[proj.norm(raw_color)]
             raw_origin = (body.get("origin") or "").strip()
             origin = _country_iso(raw_origin) if raw_origin else ""
             if raw_origin and not origin:
@@ -451,8 +386,8 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
                 return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
                              "retired": True}
             try:
-                outcomes = [decisions_store.decide(s, sp, name, stone_type, body.get("color") or "",
-                                                   origin, bool(body.get("widen"))) for s, sp in listings]
+                outcomes = [decisions_store.decide(s, sp, name, stone_type, color, origin, bool(body.get("widen")))
+                            for s, sp in listings]
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
             return 200, {**outcomes[0], "listings": [{"source": s, "scraped": sp, "result": o["result"]}
@@ -465,50 +400,6 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
             return 200, {"resolved": resolved.list_resolved(
                 source=(params.get("source") or [None])[0] or None,
                 decided=None if decided is None else decided.lower() == "true")}
-        if len(segments) == 2 and segments[1] == "origins" and method == "GET":
-            return 200, {"origins": decisions_store.list_pending("origin")}
-        if len(segments) == 3 and segments[1] == "origins" and method == "PUT":
-            if not isinstance(body, dict):
-                return 400, {"error": "body must be a JSON object {country_iso} or {alias_of, type?}"}
-            ref = unquote(segments[2])   # same decode-before-key rule as the variety PUT
-            payload = decisions_store.pending_payload("origin", ref)
-            if not payload:
-                return 404, {"error": f"no pending origin confirmation {ref!r}"}
-            if (alias_of := (body.get("alias_of") or "").strip()):
-                if not varieties.exists(alias_of):
-                    return 400, {"error": f"alias_of {alias_of!r} is not an existing variety"}
-                seed_type = None
-                if (raw_type := (body.get("type") or "").strip()):
-                    vocab = _type_vocab()
-                    if proj.norm(raw_type) not in vocab:
-                        return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
-                    seed_type = vocab[proj.norm(raw_type)]
-                spelling = payload.get("scraped") or payload["variety"]
-                # the origin decision is keyed by the variety the product will BIND to (the alias target and
-                # its type), which is what derive looks up after the re-bind; validated before anything is stored
-                raw_country = (body.get("country_iso") or body.get("country") or "").strip()
-                country = _country_iso(raw_country) if raw_country else ""
-                if raw_country and not country:
-                    return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
-                target_type = seed_type or payload["stone_type"]
-                try:
-                    decisions_store.set_scoped_alias(payload["source"], spelling, alias_of, seed_type)
-                    if country:
-                        decisions_store.set_origin_decision(payload["source"], alias_of, target_type, country)
-                except decisions_store.InvalidDecision as e:
-                    return 400, {"error": str(e)}
-                return 200, {"ref": ref, "source": payload["source"], "spelling": spelling,
-                             "alias_of": alias_of, "seed_type": seed_type, "country_iso": country or None}
-            raw_country = (body.get("country_iso") or body.get("country") or "").strip()
-            if not (country := _country_iso(raw_country)):
-                return 400, {"error": f"country {raw_country!r} is not a real ISO-3166 country"}
-            try:
-                decisions_store.set_origin_decision(payload["source"], payload["variety"],
-                                                    payload["stone_type"], country)
-            except decisions_store.InvalidDecision as e:
-                return 400, {"error": str(e)}
-            return 200, {"ref": ref, "source": payload["source"], "variety": payload["variety"],
-                         "stone_type": payload["stone_type"], "country_iso": country}
         if len(segments) == 2 and segments[1] == "backbone" and method == "GET":
             return 200, {"backbone": decisions_store.list_pending("backbone_leaf")}
         if len(segments) == 3 and segments[1] == "backbone" and segments[2] == "decided" and method == "GET":
