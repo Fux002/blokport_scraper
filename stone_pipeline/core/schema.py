@@ -21,6 +21,9 @@ from stone_pipeline.config.settings import Confidence
 # --- Review flag codes: a closed enum (section 9.1) ---------------------------
 class FlagCode(str, Enum):
     attr_unresolved = "attr_unresolved"
+    # the listing's title and the site's type tag name two stones that BOTH exist: the type is left open for
+    # the matcher's origin rung (or the operator). Not an unresolved attribute value: never a Medusa id to add.
+    type_conflict = "type_conflict"
     variation_review = "variation_review"
     leaf_snapped = "leaf_snapped"
     bundle_default = "bundle_default"
