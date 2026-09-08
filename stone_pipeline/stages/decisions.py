@@ -114,18 +114,22 @@ def write_confirm_file(pending: list[dict]) -> int:
     def _payload(row: dict) -> dict:
         return {c: (title_case(str(row.get(c) or "")) if c in _DISPLAY_CASE_FIELDS else row.get(c, ""))
                 for c in _PENDING_VARIETY_FIELDS}
-    # one card per identity; every scraped spelling behind it rides along, so ONE statement on the card can
-    # be applied to each spelling (decisions are keyed by vendor + spelling)
+    # one card per identity; every (vendor, scraped spelling) listing behind it rides along as `listings`, so
+    # ONE statement on the card is applied to each listing under ITS vendor (decisions are keyed by vendor +
+    # spelling; a card shared by two vendors must never decide the second vendor's listings as the first's).
+    # `spellings` is the flat display list of the same.
     by_ref: dict[str, dict] = {}
     for row in pending:
         ref = _norm(row.get("variant", ""))
         if not ref:
             continue
         card = by_ref.setdefault(ref, {"ref": ref, "payload": _payload(row), "sources": row.get("sources")})
-        if row.get("scraped"):
-            card["payload"].setdefault("spellings", [])
-            if row["scraped"] not in card["payload"]["spellings"]:
-                card["payload"]["spellings"].append(row["scraped"])
+        if row.get("scraped") and row.get("src"):
+            listing = {"source": row["src"], "scraped": row["scraped"]}
+            listings = card["payload"].setdefault("listings", [])
+            if listing not in listings:
+                listings.append(listing)
+            card["payload"]["spellings"] = list(dict.fromkeys(l["scraped"] for l in listings))
     rows = list(by_ref.values())
     decisions_store.replace_pending("variety", rows)
     return len(rows)

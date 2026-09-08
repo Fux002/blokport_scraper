@@ -217,3 +217,40 @@ def test_variants_list_includes_origin_confirmations_as_origin_cards():
                                  {"source": origin["src"], "scraped": origin["spellings"],
                                   "name": "Azul White", "type": "Onyx", "origin": "IR"})
     assert code == 200 and body["result"] == "bound"
+
+
+# --- edge cases: a global mint is never narrowed; a card shared by two vendors decides each under its own ---
+
+def test_a_vendor_restating_a_global_mint_keeps_it_global():
+    decisions_store.set_variety_decision("Totally New", "mint", seed_type="Granite")          # every vendor
+    decisions_store.decide("marenostone", "Totally New", "Totally New Stone", "Granite", exists_as=_exists)
+    dec = decisions_store.variety_actions()[_norm("Totally New")]
+    assert dec["source"] == "" and dec["seed_name"] == "Totally New Stone"
+    assert decisions_store.variety_seed_scopes() == {}                     # the global alias attach still runs
+    assert decisions_store.scoped_aliases() == {}
+
+
+def test_a_card_shared_by_two_vendors_decides_each_listing_under_its_own_vendor():
+    from stone_pipeline.stages import decisions as stage_decisions
+    stage_decisions.write_confirm_file([
+        {"variant": "Via Lactea", "reason": "r", "stone_type": "Granite", "src": "polonine",
+         "scraped": "VIA LACTEA", "sources": ["polonine", "zucchi"]},
+        {"variant": "Via Lactea", "reason": "r", "stone_type": "Granite", "src": "zucchi",
+         "scraped": "Via Lactea", "sources": ["polonine", "zucchi"]}])
+    card = decisions_store.list_pending("variety")[0]
+    assert card["listings"] == [{"source": "polonine", "scraped": "VIA LACTEA"},
+                                {"source": "zucchi", "scraped": "Via Lactea"}]
+    assert card["spellings"] == ["VIA LACTEA", "Via Lactea"]
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"listings": card["listings"], "name": "Golden Lightning", "type": "Granite"})
+    assert code == 200 and body["decided"] == 2
+    assert {k for k in decisions_store.scoped_aliases()} == {("polonine", _norm("VIA LACTEA")), ("zucchi", _norm("Via Lactea"))}
+    code, body = server.dispatch("DELETE", ["review", "decide"], {"listings": card["listings"]})
+    assert code == 200 and len(body["cleared"]) == 2 and decisions_store.scoped_aliases() == {}
+
+
+def test_decide_without_any_listing_is_400():
+    code, _ = server.dispatch("PUT", ["review", "decide"], {"name": "X", "type": "Granite"})
+    assert code == 400
+    code, _ = server.dispatch("PUT", ["review", "decide"], {"scraped": "X", "name": "X", "type": "Granite"})
+    assert code == 400                                                     # a spelling without its vendor

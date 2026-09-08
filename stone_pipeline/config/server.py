@@ -64,6 +64,8 @@ def _origin_as_card(item: dict) -> dict:
             "nearest_existing": "", "score": "", "model_prob": "",
             "src": item.get("source", ""), "scraped": item.get("scraped", ""),
             "spellings": [item["scraped"]] if item.get("scraped") else [],
+            "listings": ([{"source": item.get("source", ""), "scraped": item["scraped"]}]
+                         if item.get("scraped") else []),
             "src_url": item.get("src_url", ""), "image": item.get("image", ""), "description": "",
             "sources": item.get("sources"), "current_action": None}
 
@@ -415,16 +417,20 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if len(segments) == 2 and segments[1] == "decide" and method in ("PUT", "DELETE"):
             if not isinstance(body, dict):
                 return 400, {"error": "body must be a JSON object {source, scraped, name, type, ...}"}
+            # the listings a statement applies to: the card's `listings` ([{source, scraped}], a card shared
+            # by several vendors), or one `source` with `scraped` as a spelling or a list of spellings
             source = (body.get("source") or "").strip()
             raw_scraped = body.get("scraped") or ""
-            # a card can aggregate several listings of one identity; one statement covers every spelling
-            spellings = [s.strip() for s in (raw_scraped if isinstance(raw_scraped, list) else [raw_scraped])
-                         if isinstance(s, str) and s.strip()]
-            if not source or not spellings:
-                return 400, {"error": "source and scraped (a spelling or a list of spellings) are required"}
+            listings = [(str(l.get("source") or "").strip(), str(l.get("scraped") or "").strip())
+                        for l in (body.get("listings") or []) if isinstance(l, dict)]
+            listings += [(source, s.strip()) for s in (raw_scraped if isinstance(raw_scraped, list) else [raw_scraped])
+                         if isinstance(s, str) and s.strip() and source]
+            listings = list(dict.fromkeys(l for l in listings if l[0] and l[1]))
+            if not listings:
+                return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
             if method == "DELETE":
-                return 200, {"source": source, "scraped": spellings,
-                             "cleared": [decisions_store.clear_decisions(source, s) for s in spellings]}
+                return 200, {"listings": [{"source": s, "scraped": sp} for s, sp in listings],
+                             "cleared": [decisions_store.clear_decisions(s, sp) for s, sp in listings]}
             from stone_pipeline.matching import projections as proj
             name = (body.get("name") or "").strip()
             raw_type = (body.get("type") or "").strip()
@@ -445,11 +451,13 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
                 return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
                              "retired": True}
             try:
-                outcomes = [decisions_store.decide(source, s, name, stone_type, body.get("color") or "",
-                                                   origin, bool(body.get("widen"))) for s in spellings]
+                outcomes = [decisions_store.decide(s, sp, name, stone_type, body.get("color") or "",
+                                                   origin, bool(body.get("widen"))) for s, sp in listings]
             except decisions_store.InvalidDecision as e:
                 return 400, {"error": str(e)}
-            return 200, {**outcomes[0], "scraped": spellings, "decided": len(outcomes)}
+            return 200, {**outcomes[0], "listings": [{"source": s, "scraped": sp, "result": o["result"]}
+                                                     for (s, sp), o in zip(listings, outcomes)],
+                         "decided": len(outcomes)}
         if len(segments) == 2 and segments[1] == "resolved" and method == "GET":
             from stone_pipeline.config import resolved
             params = parse_qs(query)
