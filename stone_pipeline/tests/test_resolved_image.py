@@ -34,8 +34,8 @@ def test_resolved_row_carries_widen_keyed_on_the_decided_target(monkeypatch):
            "variation_method": "", "type_name": "Marble", "type_method": "", "color_name": "",
            "origin_country_code": "", "origin_source": "", "src_url": "", "raw_image_urls": "", "image_keys": ""}
     scoped = {("zucchi", "amazon marble"): ("Silver Stream", "Marble")}   # bound to Silver Stream
-    vorigins = {("silver stream", "marble"): "IR"}                        # widened
-    row = resolved._row(rec, scoped, {}, {}, vorigins)
+    owiden = {("zucchi", "silver stream", "marble"): "IR"}               # widened, per (src,variety,type)
+    row = resolved._row(rec, scoped, {}, {}, owiden)
     assert row["decision"]["name"] == "Silver Stream"
     assert row["widen"] is True and row["documented_origin"] == "IR"
     # not widened -> False

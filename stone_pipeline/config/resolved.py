@@ -53,7 +53,7 @@ def _first_image(rec: dict) -> str:
     return ""
 
 
-def _row(rec: dict, scoped: dict, origins: dict, actions: dict, vorigins: dict | None = None) -> dict:
+def _row(rec: dict, scoped: dict, origins: dict, actions: dict, owiden: dict | None = None) -> dict:
     source = rec["src_site"] or ""
     scraped = rec["variety_match_key"] or rec["raw_name"] or ""
     name = rec["variation_name"] or ""
@@ -75,9 +75,10 @@ def _row(rec: dict, scoped: dict, origins: dict, actions: dict, vorigins: dict |
     origin = origins.get((_norm(source), _norm(target[0]), _norm(target[1])))
     if origin:
         decision = {**(decision or {"kind": "origin"}), "origin": origin}
-    # WIDEN ("added to the stone's documented origins"), keyed on the DECIDED target (variety, type) --
-    # the same target the origin lookup uses. Inert until Blokport reads it.
-    doc_iso = (vorigins or {}).get((_norm(target[0]), _norm(target[1])))
+    # WIDEN ("added to the stone's documented origins"): the OPERATOR's checkbox on THIS decision, per-record
+    # from origin_widen, keyed on (source, decided target, type). NOT variety-level membership (which would
+    # show widen on every sibling decision that binds the same variety).
+    doc_iso = (owiden or {}).get((_norm(source), _norm(target[0]), _norm(target[1])))
     return {
         "ref": f"{_norm(source)}|{_norm(scraped)}",
         "source": source, "scraped": scraped, "surrogate_key": rec["surrogate_key"] or "",
@@ -126,8 +127,8 @@ def list_resolved(source: str | None = None, decided: bool | None = None,
     scoped = decisions_store.scoped_aliases()
     origins = decisions_store.origin_decisions()
     actions = decisions_store.variety_actions()
-    vorigins = decisions_store.variety_origins()   # the WIDEN table: {(vnorm, tnorm): iso}
-    rows = [_row(rec, scoped, origins, actions, vorigins) for rec in frame.to_dicts()]
+    owiden = decisions_store.origin_widen()   # PER-DECISION widen: {(nsrc, vnorm, tnorm): iso}
+    rows = [_row(rec, scoped, origins, actions, owiden) for rec in frame.to_dicts()]
     if decided is not None:
         rows = [r for r in rows if (r["decision"] is not None) == decided]
     rows.sort(key=lambda r: (r["source"], _norm(r["scraped"]), r["surrogate_key"]))

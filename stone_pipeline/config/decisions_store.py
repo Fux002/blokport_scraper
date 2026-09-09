@@ -274,7 +274,7 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
             set_scoped_alias(src, spelling, name, stone_type)
         outcome["result"] = "minted"
     if origin:
-        set_origin_decision(src, name, stone_type, origin)
+        set_origin_decision(src, name, stone_type, origin, widen=widen)
         if widen:
             set_variety_origin(name, stone_type, origin)
             outcome["widen"] = True
@@ -327,10 +327,13 @@ def learn_rejects(names: set[str]) -> None:
 
 # -- per-vendor origin decisions (produce READS these; the separate origin review queue) --------------
 
-def set_origin_decision(source: str, variety: str, stone_type: str, country_iso: str) -> None:
+def set_origin_decision(source: str, variety: str, stone_type: str, country_iso: str,
+                        widen: bool = False) -> None:
     """Upsert ONE operator origin confirmation: for THIS (source, variety, type), the origin is `country_iso`.
     Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Idempotent.
-    The caller (config server) validates country_iso is a real ISO code before storing (never garbage)."""
+    `widen` records the operator's "add to the stone's documented origins" checkbox FOR THIS decision, so a
+    later reader can tell a plain per-vendor origin from a widened one -- it is per-record, never derived from
+    whether the variety happens to have a documented origin. The caller validates country_iso is a real ISO."""
     src = (source or "").strip()
     v_norm = _norm(variety)
     t_norm = _norm(stone_type)
@@ -340,12 +343,25 @@ def set_origin_decision(source: str, variety: str, stone_type: str, country_iso:
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO origin_decision (source, variant_norm, stone_type_norm, variant_display, "
-            "country_iso, decided_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "country_iso, widen, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(source, variant_norm, stone_type_norm) DO UPDATE SET "
             "variant_display = excluded.variant_display, country_iso = excluded.country_iso, "
-            "decided_at = excluded.decided_at",
-            (src, v_norm, t_norm, variety.strip(), iso, _now()))
+            "widen = excluded.widen, decided_at = excluded.decided_at",
+            (src, v_norm, t_norm, variety.strip(), iso, 1 if widen else 0, _now()))
         conn.commit()
+
+
+def origin_widen() -> dict[tuple[str, str, str], str]:
+    """(normalized source, normalized variety, normalized type) -> ISO, for the origin decisions the operator
+    WIDENED (ticked "add to documented origins"). Per-record, so a decided card reflects the actual checkbox,
+    not whether the target variety happens to carry a documented origin. Empty on a fresh store."""
+    if not store.config_db_path().exists():
+        return {}
+    with closing(store.open_store()) as conn:
+        return {(_norm(r["source"]), r["variant_norm"], r["stone_type_norm"]): r["country_iso"]
+                for r in conn.execute(
+                    "SELECT source, variant_norm, stone_type_norm, country_iso FROM origin_decision "
+                    "WHERE widen = 1")}
 
 
 def origin_decisions() -> dict[tuple[str, str, str], str]:
@@ -783,7 +799,7 @@ def list_pending(kind: str) -> list[dict]:
     # comes back undecided even though the bind is stored (the Gold-card bug). Reject is the exception: it
     # is keyed on the ref, so ref is kept as a candidate too.
     scoped = scoped_aliases() if kind in ("variety", "origin") else {}   # {(nsrc, nspell): (target, type)}
-    vorigins = variety_origins() if kind in ("variety", "origin") else {}   # {(vnorm, tnorm): iso} the WIDEN table
+    owiden = origin_widen() if kind in ("variety", "origin") else {}   # {(nsrc, vnorm, tnorm): iso} PER-DECISION
     leaf_actions = _leaf_actions_by_ref() if kind == "backbone_leaf" else {}
     # for origin, key the confirmed country by the SAME composite ref the queue uses, so a decision made
     # between runs shows as current_country until the next produce regenerates the queue (and drops it).
@@ -828,12 +844,15 @@ def list_pending(kind: str) -> list[dict]:
             item["current_seed_type"] = act.get("seed_type") or (hit[1] if hit else None) or None
             item["current_seed_country"] = act.get("seed_country")
             item["current_seed_name"] = act.get("seed_name")
-            # WIDEN ("documented origin"): the origin was added to the variety's documented origins, keyed on
-            # the DECIDED target (the variety it binds/mints to). Surface it so the badge shows it like the
-            # rest of the decision.
+            # WIDEN ("documented origin"): the OPERATOR's checkbox on THIS decision, per-record from
+            # origin_widen -- NOT whether the target variety happens to carry a documented origin (which is
+            # shared and would show widen on every sibling decision). Keyed on (source, target, type).
             tgt_n = _norm(item.get("current_alias_of") or item.get("current_seed_name") or item.get("variant", ""))
             tgt_t = _norm(item.get("current_seed_type") or item.get("stone_type", ""))
-            doc = vorigins.get((tgt_n, tgt_t))
+            srcs = {_norm(l.get("source", "")) for l in (item.get("listings") or []) if isinstance(l, dict)}
+            if item.get("src"):
+                srcs.add(_norm(item["src"]))
+            doc = next((owiden[(s, tgt_n, tgt_t)] for s in srcs if (s, tgt_n, tgt_t) in owiden), None)
             item["documented_origin"] = doc
             item["widen"] = doc is not None
         elif kind == "backbone_leaf":
@@ -858,7 +877,7 @@ def list_pending(kind: str) -> list[dict]:
                 item["current_action"] = item.get("current_action") or "origin"
             tgt_n = _norm(item.get("current_alias_of") or item.get("variety", ""))
             tgt_t = _norm(item.get("stone_type", ""))
-            doc = vorigins.get((tgt_n, tgt_t))
+            doc = owiden.get((_norm(item.get("source", "")), tgt_n, tgt_t))
             item["documented_origin"] = doc
             item["widen"] = doc is not None
         out.append(item)

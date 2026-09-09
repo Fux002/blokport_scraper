@@ -86,6 +86,10 @@ def _connect(path: Path) -> sqlite3.Connection:
 def _migrate(conn: sqlite3.Connection) -> None:
     """Idempotent column adds for config DBs created before a field existed (the dev
     config.db predates company_id). Cheap PRAGMA check per connect, ALTER only once."""
+    ocols = {r["name"] for r in conn.execute("PRAGMA table_info(origin_decision)")}
+    if ocols and "widen" not in ocols:   # per-decision "add to documented origins" checkbox, added later
+        conn.execute("ALTER TABLE origin_decision ADD COLUMN widen INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(source)")}
     if "company_id" not in cols:
         conn.execute("ALTER TABLE source ADD COLUMN company_id TEXT NOT NULL DEFAULT ''")
@@ -180,6 +184,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS origin_decision ("
                  "source TEXT NOT NULL, variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
                  "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
+                 "widen INTEGER NOT NULL DEFAULT 0, "   # the operator's "add to documented origins" checkbox
                  "decided_at TEXT NOT NULL, PRIMARY KEY (source, variant_norm, stone_type_norm))")
     # Operator VENDOR-SCOPED aliases (the re-bind action on an origin card): for THIS source, the scraped
     # spelling is THAT variety. Keyed by (source, normalized spelling) so a trade name that means one stone
