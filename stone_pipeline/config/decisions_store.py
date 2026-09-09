@@ -840,8 +840,12 @@ def list_pending(kind: str) -> list[dict]:
             src_n, scr_n = _norm(item.get("source", "")), _norm(item.get("scraped", ""))
             bound = bool(scr_n) and (src_n, scr_n) in scoped
             item["decided"] = origin_actions.get(r["ref"]) is not None or bound
-            if bound and not item.get("current_action"):
-                item["current_action"] = "alias"
-                item["current_alias_of"] = scoped[(src_n, scr_n)][0]
+            # Always name the outcome on a decided card. A bind reads "alias" (+ its target); a card settled
+            # purely by confirming the country reads "origin". Never decided:true with no action.
+            if bound:
+                item["current_action"] = item.get("current_action") or "alias"
+                item["current_alias_of"] = item.get("current_alias_of") or scoped[(src_n, scr_n)][0]
+            elif origin_actions.get(r["ref"]) is not None:
+                item["current_action"] = item.get("current_action") or "origin"
         out.append(item)
     return out

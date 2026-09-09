@@ -217,3 +217,31 @@ def test_origin_card_decided_when_its_listing_is_bound(monkeypatch):
     assert card["decided"] is True                    # the bug: was False
     assert card["current_action"] == "alias"
     assert card["current_alias_of"] == "Silver Stream"
+
+
+def test_every_decided_card_names_its_action(monkeypatch):
+    """Invariant Blokport relies on: decided:true always carries current_action (never a bare "Decided").
+    Covers the origin-country case (action "origin") that previously had decided:true with no action."""
+    from stone_pipeline.config import decisions_store as ds
+    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "scoped_aliases", lambda: {})
+    monkeypatch.setattr(ds, "origin_decisions",
+                        lambda: {("marenostone", "amazon white", "marble"): "IR"})   # country only, no bind
+
+    class _Cur:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    payload = ('{"source": "marenostone", "variety": "Amazon White", "stone_type": "Marble",'
+               ' "scraped": "Amazon Marble"}')
+    rows = [_Row(ref="marenostone|amazon white|marble", payload=payload, sources=None)]
+    class _Conn:
+        def execute(self, *a, **k): return _Cur(rows)
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    card = ds.list_pending("origin")[0]
+    assert card["decided"] is True
+    assert card["current_action"] == "origin"          # was None before -> bare "Decided"

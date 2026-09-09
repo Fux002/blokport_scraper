@@ -67,7 +67,12 @@ def _origin_as_card(item: dict) -> dict:
             "listings": ([{"source": item.get("source", ""), "scraped": item["scraped"]}]
                          if item.get("scraped") else []),
             "src_url": item.get("src_url", ""), "image": item.get("image", ""), "description": "",
-            "sources": item.get("sources"), "current_action": None,
+            "sources": item.get("sources"),
+            # carry the outcome list_pending computed, so a decided origin card names what it decided
+            # (origin | alias) instead of a bare "Decided"; None only when genuinely undecided.
+            "current_action": item.get("current_action"),
+            "current_alias_of": item.get("current_alias_of"),
+            "current_country": item.get("current_country"),
             "decided": item.get("decided", False)}
 
 
