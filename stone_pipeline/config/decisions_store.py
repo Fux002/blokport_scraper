@@ -277,7 +277,7 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
         set_origin_decision(src, name, stone_type, origin)
         if widen:
             set_variety_origin(name, stone_type, origin)
-            outcome["widened"] = True
+            outcome["widen"] = True
     return outcome
 
 
@@ -835,7 +835,7 @@ def list_pending(kind: str) -> list[dict]:
             tgt_t = _norm(item.get("current_seed_type") or item.get("stone_type", ""))
             doc = vorigins.get((tgt_n, tgt_t))
             item["documented_origin"] = doc
-            item["widened"] = doc is not None
+            item["widen"] = doc is not None
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
             item["decided"] = leaf_actions.get(r["ref"]) is not None
@@ -860,6 +860,6 @@ def list_pending(kind: str) -> list[dict]:
             tgt_t = _norm(item.get("stone_type", ""))
             doc = vorigins.get((tgt_n, tgt_t))
             item["documented_origin"] = doc
-            item["widened"] = doc is not None
+            item["widen"] = doc is not None
         out.append(item)
     return out

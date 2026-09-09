@@ -74,7 +74,7 @@ def _origin_as_card(item: dict) -> dict:
             "current_alias_of": item.get("current_alias_of"),
             "current_country": item.get("current_country"),
             # whether the operator ticked "add to documented origins" (widen) + the country it documents
-            "widened": item.get("widened", False),
+            "widen": item.get("widen", False),
             "documented_origin": item.get("documented_origin"),
             "decided": item.get("decided", False)}
 

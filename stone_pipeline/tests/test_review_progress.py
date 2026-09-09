@@ -279,8 +279,8 @@ def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
 
     card = ds.list_pending("variety")[0]
     assert card["current_action"] == "alias" and card["current_alias_of"] == "Silver Stream"
-    assert card["widened"] is True and card["documented_origin"] == "IR"
+    assert card["widen"] is True and card["documented_origin"] == "IR"
 
     monkeypatch.setattr(ds, "variety_origins", lambda: {})
     card = ds.list_pending("variety")[0]
-    assert card["widened"] is False and card["documented_origin"] is None
+    assert card["widen"] is False and card["documented_origin"] is None
