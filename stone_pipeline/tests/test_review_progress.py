@@ -284,3 +284,56 @@ def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
     card = ds.list_pending("variety")[0]
     assert card["widen"] is False and card["documented_origin"] is None
+
+
+def _one_card(monkeypatch, actions, aliases, payload, ref="foo"):
+    """Drive list_pending('variety') for a single hand-built card with the given decision stores."""
+    from stone_pipeline.config import decisions_store as ds
+    monkeypatch.setattr(ds, "variety_actions", lambda: actions)
+    monkeypatch.setattr(ds, "scoped_aliases", lambda: aliases)
+    monkeypatch.setattr(ds, "origin_widen", lambda: {})
+
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    class _Cur:
+        def fetchall(self): return [_Row(ref=ref, payload=payload, sources=None)]
+
+    class _Conn:
+        def execute(self, *a, **k): return _Cur()
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    return ds.list_pending("variety")[0]
+
+
+_FOO = ('{"variant": "Foo", "src": "vendor", "scraped": "Foo",'
+        ' "listings": [{"source": "vendor", "scraped": "Foo"}]}')
+
+
+def test_a_scoped_bind_supersedes_a_stale_mint_in_the_display(monkeypatch):
+    """The card must show the LAST decision. A mint left behind under a different source (a global mint, a
+    cross-vendor spelling) that clear_decisions cannot drop must NOT shadow the newer per-vendor bind: the
+    card reads the alias, not the superseded mint."""
+    card = _one_card(monkeypatch,
+                     actions={"foo": {"action": "mint", "alias_of": None, "seed_color": "Grey",
+                                      "seed_type": "Granite", "seed_country": "BR", "seed_name": "Old Mint"}},
+                     aliases={("vendor", "foo"): ("New Target", "Granite")},
+                     payload=_FOO)
+    assert card["decided"] is True
+    assert card["current_action"] == "alias"
+    assert card["current_alias_of"] == "New Target"
+    assert card["current_seed_type"] == "Granite"
+    assert card["current_seed_name"] is None            # the stale mint's seeds are gone from the display
+
+
+def test_a_mint_plus_rename_still_reads_as_the_mint(monkeypatch):
+    """A mint+rename writes both a mint and a scoped alias pointing at the minted name -- that is ONE
+    decision and must still read as the mint (not be mistaken for a superseding bind)."""
+    card = _one_card(monkeypatch,
+                     actions={"foo": {"action": "mint", "alias_of": None, "seed_color": "Grey",
+                                      "seed_type": "Granite", "seed_country": "BR", "seed_name": "Corrected"}},
+                     aliases={("vendor", "foo"): ("Corrected", "Granite")},
+                     payload=_FOO)
+    assert card["decided"] is True
+    assert card["current_action"] == "mint"
+    assert card["current_seed_name"] == "Corrected"

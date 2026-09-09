@@ -851,6 +851,14 @@ def list_pending(kind: str) -> list[dict]:
             if item.get("src") and item.get("scraped"):
                 keys.append((_norm(item["src"]), _norm(item["scraped"])))
             hit = next((scoped[k] for k in keys if k in scoped), None)   # (target variety, target type)
+            # The card must always show the LAST decision, until a produce clears it. A per-vendor scoped
+            # alias is the current bind; a mint reads as the decision only when the alias does not supersede
+            # it. A mint+rename writes BOTH (its scoped alias points at the minted name), so it still reads as
+            # the mint. But a mint left behind by a re-decide under a different source -- a global mint, or a
+            # cross-vendor spelling, which clear_decisions (source-scoped) cannot drop -- is superseded by the
+            # newer bind, so drop the stale mint from the display rather than let it shadow the bind.
+            if act.get("action") == "mint" and hit is not None and _norm(act.get("seed_name") or "") != _norm(hit[0]):
+                act = {}
             item["decided"] = bool(act.get("action")) or hit is not None
             item["current_action"] = act.get("action") or ("alias" if hit else None)
             item["current_alias_of"] = act.get("alias_of") or (hit[0] if hit else None)
