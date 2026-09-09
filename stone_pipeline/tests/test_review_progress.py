@@ -337,3 +337,29 @@ def test_a_mint_plus_rename_still_reads_as_the_mint(monkeypatch):
     assert card["decided"] is True
     assert card["current_action"] == "mint"
     assert card["current_seed_name"] == "Corrected"
+
+
+_TYPELESS = ('{"variant": "Foo", "src": "vendor", "scraped": "Foo", "stone_type": "",'
+             ' "listings": [{"source": "vendor", "scraped": "Foo"}]}')
+
+
+def test_a_decided_type_less_card_is_re_keyable_by_the_decided_type(monkeypatch):
+    """A type-less scraped variety carries stone_type='' (the vendor declared no type). Once decided, the
+    card must still expose a type so the operator can restate it -- backfilled from the decided (alias
+    target / mint) type. Without it the UI has nothing to key on and Confirm cannot fire."""
+    card = _one_card(monkeypatch,
+                     actions={},
+                     aliases={("vendor", "foo"): ("Some Variety", "Granite")},
+                     payload=_TYPELESS)
+    assert card["decided"] is True
+    assert card["stone_type"] == "Granite"            # backfilled from the decision (was '')
+    assert card["current_seed_type"] == "Granite"
+    assert card["listings"] == [{"source": "vendor", "scraped": "Foo"}]   # identity fields untouched
+
+
+def test_an_undecided_type_less_card_keeps_its_empty_type(monkeypatch):
+    """Backfill is decided-only: an untouched type-less card stays type-less (there is no decision to key
+    it on yet), so nothing is invented."""
+    card = _one_card(monkeypatch, actions={}, aliases={}, payload=_TYPELESS)
+    assert card["decided"] is False
+    assert card["stone_type"] == ""

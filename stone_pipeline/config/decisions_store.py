@@ -866,6 +866,13 @@ def list_pending(kind: str) -> list[dict]:
             item["current_seed_type"] = act.get("seed_type") or (hit[1] if hit else None) or None
             item["current_seed_country"] = act.get("seed_country")
             item["current_seed_name"] = act.get("seed_name")
+            # A decided card must be RE-keyable: to restate a product the operator needs its type. `stone_type`
+            # is the SCRAPED type, which is empty for a type-less variety (the vendor declared no type) -- so a
+            # decided type-less card would carry no type to key on and the UI cannot form the next statement.
+            # Backfill it from the DECIDED type (the alias target's / the mint's type) so the card is always
+            # self-keying; a card that already carries a scraped type is left as-is.
+            if item["decided"] and not item.get("stone_type") and item["current_seed_type"]:
+                item["stone_type"] = item["current_seed_type"]
             # WIDEN ("documented origin"): the OPERATOR's checkbox on THIS decision, per-record from
             # origin_widen -- NOT whether the target variety happens to carry a documented origin (which is
             # shared and would show widen on every sibling decision). Keyed on (source, target, type).
