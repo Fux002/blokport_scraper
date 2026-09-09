@@ -53,7 +53,7 @@ def _first_image(rec: dict) -> str:
     return ""
 
 
-def _row(rec: dict, scoped: dict, origins: dict, actions: dict) -> dict:
+def _row(rec: dict, scoped: dict, origins: dict, actions: dict, vorigins: dict | None = None) -> dict:
     source = rec["src_site"] or ""
     scraped = rec["variety_match_key"] or rec["raw_name"] or ""
     name = rec["variation_name"] or ""
@@ -75,6 +75,9 @@ def _row(rec: dict, scoped: dict, origins: dict, actions: dict) -> dict:
     origin = origins.get((_norm(source), _norm(target[0]), _norm(target[1])))
     if origin:
         decision = {**(decision or {"kind": "origin"}), "origin": origin}
+    # WIDEN ("added to the stone's documented origins"), keyed on the DECIDED target (variety, type) --
+    # the same target the origin lookup uses. Inert until Blokport reads it.
+    doc_iso = (vorigins or {}).get((_norm(target[0]), _norm(target[1])))
     return {
         "ref": f"{_norm(source)}|{_norm(scraped)}",
         "source": source, "scraped": scraped, "surrogate_key": rec["surrogate_key"] or "",
@@ -89,6 +92,8 @@ def _row(rec: dict, scoped: dict, origins: dict, actions: dict) -> dict:
         # when that stops matching, the images vanish. Supply the image from the SAME field the pending
         # card uses (the supplier photo, which survives Medusa product churn), image_keys as a fallback.
         "image": _first_image(rec),
+        "widen": doc_iso is not None,
+        "documented_origin": doc_iso,
     }
 
 
@@ -121,7 +126,8 @@ def list_resolved(source: str | None = None, decided: bool | None = None,
     scoped = decisions_store.scoped_aliases()
     origins = decisions_store.origin_decisions()
     actions = decisions_store.variety_actions()
-    rows = [_row(rec, scoped, origins, actions) for rec in frame.to_dicts()]
+    vorigins = decisions_store.variety_origins()   # the WIDEN table: {(vnorm, tnorm): iso}
+    rows = [_row(rec, scoped, origins, actions, vorigins) for rec in frame.to_dicts()]
     if decided is not None:
         rows = [r for r in rows if (r["decision"] is not None) == decided]
     rows.sort(key=lambda r: (r["source"], _norm(r["scraped"]), r["surrogate_key"]))

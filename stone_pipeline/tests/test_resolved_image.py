@@ -24,3 +24,20 @@ def test_first_image_tolerates_empty_and_garbage():
 
 def test_first_image_skips_empty_entries():
     assert resolved._first_image({"raw_image_urls": '["", "https://x/b.jpg"]'}) == "https://x/b.jpg"
+
+
+def test_resolved_row_carries_widen_keyed_on_the_decided_target(monkeypatch):
+    """Blokport reads `widen` on resolved rows to show "added to documented origins" + prefill the amend
+    checkbox. It is keyed on the DECIDED target variety (the bound/minted identity), not the scraped name."""
+    rec = {"src_site": "zucchi", "surrogate_key": "1", "raw_name": "Amazon Marble",
+           "variety_match_key": "Amazon Marble", "variation_key": "k", "variation_name": "Amazon White",
+           "variation_method": "", "type_name": "Marble", "type_method": "", "color_name": "",
+           "origin_country_code": "", "origin_source": "", "src_url": "", "raw_image_urls": "", "image_keys": ""}
+    scoped = {("zucchi", "amazon marble"): ("Silver Stream", "Marble")}   # bound to Silver Stream
+    vorigins = {("silver stream", "marble"): "IR"}                        # widened
+    row = resolved._row(rec, scoped, {}, {}, vorigins)
+    assert row["decision"]["name"] == "Silver Stream"
+    assert row["widen"] is True and row["documented_origin"] == "IR"
+    # not widened -> False
+    row2 = resolved._row(rec, scoped, {}, {}, {})
+    assert row2["widen"] is False and row2["documented_origin"] is None
