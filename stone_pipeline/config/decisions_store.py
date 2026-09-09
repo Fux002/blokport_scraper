@@ -802,11 +802,16 @@ def list_pending(kind: str) -> list[dict]:
         item["ref"] = r["ref"]
         item["sources"] = json.loads(r["sources"]) if r["sources"] else []
         if kind == "variety":
-            # variety_decision candidates: the ref (a reject is keyed on the cleaned name) OR any scraped
-            # spelling (a mint is keyed on the spelling). Whichever the store actually holds, we find it.
-            spellings = [_norm(s) for s in (item.get("spellings") or []) if s]
+            # Candidate spellings a decision could be keyed on: the ref (a REJECT keys on the cleaned name),
+            # and EVERY scraped spelling the card carries -- its `spellings`, its top-level `scraped`, AND
+            # each listing's `scraped`. decide() keys a mint/alias on the PUT's scraped, which is a LISTING
+            # spelling; a renamed GLOBAL mint (no scoped_alias to catch it) is found only if the listing
+            # spelling is a candidate here. Omitting listings was the renamed-mint reattachment gap.
+            spellings = {_norm(s) for s in (item.get("spellings") or []) if s}
             if item.get("scraped"):
-                spellings.append(_norm(item["scraped"]))
+                spellings.add(_norm(item["scraped"]))
+            spellings |= {_norm(l.get("scraped", "")) for l in (item.get("listings") or [])
+                          if isinstance(l, dict) and l.get("scraped")}
             act = actions.get(r["ref"]) or next((actions[s] for s in spellings if s in actions), {})
             # scoped-alias candidates: the card's exact (source, scraped) listings, keyed the way decide()
             # stored them. Fall back to (src, scraped) on a single-vendor card.

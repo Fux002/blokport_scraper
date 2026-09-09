@@ -155,3 +155,35 @@ def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
     card = ds.list_pending("variety")[0]
     assert card["decided"] is True and card["current_action"] == "mint"
     assert card["current_seed_type"] == "Quartzite"
+
+
+def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
+    """The reattachment gap Blokport flagged: a renamed GLOBAL mint is keyed on the scraped spelling
+    (a listing value), with NO scoped_alias to catch it. If the card's `spellings` doesn't include that
+    listing spelling, the flag missed -> a successful mint showed undecided on refresh."""
+    from stone_pipeline.config import decisions_store as ds
+    # mint keyed on the LISTING spelling, which is NOT in the card's display `spellings`
+    monkeypatch.setattr(ds, "variety_actions",
+                        lambda: {"brown granite slab 2cm": {"action": "mint", "alias_of": None,
+                                 "seed_color": None, "seed_type": "Granite", "seed_country": "IR",
+                                 "seed_name": "Chocolate Brown"}})
+    monkeypatch.setattr(ds, "scoped_aliases", lambda: {})   # global mint: no scoped alias
+
+    class _Cur:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    payload = ('{"variant": "Brown", "spellings": ["Brown Granite"],'          # display spelling differs
+               ' "listings": [{"source": "marenostone", "scraped": "Brown Granite Slab 2cm"}]}')  # real key
+    rows = [_Row(ref="brown", payload=payload, sources=None)]
+    class _Conn:
+        def execute(self, *a, **k): return _Cur(rows)
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    card = ds.list_pending("variety")[0]
+    assert card["decided"] is True                    # found via the listing spelling
+    assert card["current_action"] == "mint"
+    assert card["current_seed_type"] == "Granite"
