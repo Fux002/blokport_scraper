@@ -782,7 +782,7 @@ def list_pending(kind: str) -> list[dict]:
     # card's own scraped spellings, not its ref -- otherwise every card whose cleaner stripped a suffix
     # comes back undecided even though the bind is stored (the Gold-card bug). Reject is the exception: it
     # is keyed on the ref, so ref is kept as a candidate too.
-    scoped = scoped_aliases() if kind == "variety" else {}      # {(nsrc, nspell): (target, type)}
+    scoped = scoped_aliases() if kind in ("variety", "origin") else {}   # {(nsrc, nspell): (target, type)}
     leaf_actions = _leaf_actions_by_ref() if kind == "backbone_leaf" else {}
     # for origin, key the confirmed country by the SAME composite ref the queue uses, so a decision made
     # between runs shows as current_country until the next produce regenerates the queue (and drops it).
@@ -832,7 +832,16 @@ def list_pending(kind: str) -> list[dict]:
             item["decided"] = leaf_actions.get(r["ref"]) is not None
         elif kind == "origin":
             item["current_country"] = origin_actions.get(r["ref"])
-            # an origin card is settled once its country is confirmed (its statement is the country)
-            item["decided"] = origin_actions.get(r["ref"]) is not None
+            # An origin card is settled when its country is confirmed OR its listing has been bound.
+            # Confirming an origin card BINDS the vendor spelling (a scoped_alias on the listing
+            # (source, scraped)) as well as recording the country; and if the product was aliased from a
+            # variety card, its listing is already bound. The origin-country check alone keys on the card's
+            # (source, VARIETY) ref and missed both -- so the card came back undecided after a real confirm.
+            src_n, scr_n = _norm(item.get("source", "")), _norm(item.get("scraped", ""))
+            bound = bool(scr_n) and (src_n, scr_n) in scoped
+            item["decided"] = origin_actions.get(r["ref"]) is not None or bound
+            if bound and not item.get("current_action"):
+                item["current_action"] = "alias"
+                item["current_alias_of"] = scoped[(src_n, scr_n)][0]
         out.append(item)
     return out

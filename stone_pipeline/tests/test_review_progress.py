@@ -187,3 +187,33 @@ def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
     assert card["decided"] is True                    # found via the listing spelling
     assert card["current_action"] == "mint"
     assert card["current_seed_type"] == "Granite"
+
+
+def test_origin_card_decided_when_its_listing_is_bound(monkeypatch):
+    """An origin card is keyed (source, variety, type), but confirming it BINDS the vendor spelling -- a
+    scoped_alias on the listing (source, scraped). Reading only the origin country by ref missed the bind,
+    so a confirmed origin card came back undecided (the Amazon White case)."""
+    from stone_pipeline.config import decisions_store as ds
+
+    monkeypatch.setattr(ds, "origin_decisions", lambda: {})              # no origin-country row for this ref
+    monkeypatch.setattr(ds, "scoped_aliases",
+                        lambda: {("marenostone", "amazon marble"): ("Silver Stream", "Marble")})  # listing bound
+
+    class _Cur:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    payload = ('{"source": "marenostone", "variety": "Amazon White", "stone_type": "Marble",'
+               ' "scraped": "Amazon Marble"}')
+    rows = [_Row(ref="marenostone|amazon white|marble", payload=payload, sources=None)]
+    class _Conn:
+        def execute(self, *a, **k): return _Cur(rows)
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    card = ds.list_pending("origin")[0]
+    assert card["decided"] is True                    # the bug: was False
+    assert card["current_action"] == "alias"
+    assert card["current_alias_of"] == "Silver Stream"
