@@ -72,6 +72,12 @@ def _origin_as_card(item: dict) -> dict:
             # (origin | alias) instead of a bare "Decided"; None only when genuinely undecided.
             "current_action": item.get("current_action"),
             "current_alias_of": item.get("current_alias_of"),
+            # field parity with a variety card so the SAME editable-name editor renders both: the current
+            # decision's name/type/colour/country, so the UI prefills them and can send a restated name
+            "current_seed_name": item.get("current_seed_name"),
+            "current_seed_type": item.get("current_seed_type"),
+            "current_seed_color": item.get("current_seed_color"),
+            "current_seed_country": item.get("current_seed_country"),
             "current_country": item.get("current_country"),
             # whether the operator ticked "add to documented origins" (widen) + the country it documents
             "widen": item.get("widen", False),

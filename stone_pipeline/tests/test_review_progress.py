@@ -363,3 +363,38 @@ def test_an_undecided_type_less_card_keeps_its_empty_type(monkeypatch):
     card = _one_card(monkeypatch, actions={}, aliases={}, payload=_TYPELESS)
     assert card["decided"] is False
     assert card["stone_type"] == ""
+
+
+def test_an_origin_card_has_variety_field_parity_so_it_is_editable(monkeypatch):
+    """An origin card must be restated through the SAME statement as a variety card. It was missing the
+    current_seed_* fields the editor uses to prefill/re-key name+type, so the UI locked its name to the
+    bound variety. It now carries the decision's target name (current_alias_of) AND type
+    (current_seed_type), plus the seed_* keys, matching a variety card's shape."""
+    from stone_pipeline.config import decisions_store as ds, server
+    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "scoped_aliases", lambda: {("polonine", "artemis"): ("Andes", "Quartzite")})
+    monkeypatch.setattr(ds, "origin_decisions", lambda: {("polonine", "andes", "quartzite"): "BR"})
+    monkeypatch.setattr(ds, "origin_widen", lambda: {})
+
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    payload = ('{"variety": "Andes", "stone_type": "Quartzite", "source": "polonine", "scraped": "ARTEMIS",'
+               ' "variant": "Andes", "listings": [{"source": "polonine", "scraped": "ARTEMIS"}]}')
+
+    class _Cur:
+        def fetchall(self): return [_Row(ref="polonine|andes|quartzite", payload=payload, sources=None)]
+
+    class _Conn:
+        def execute(self, *a, **k): return _Cur()
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    raw = ds.list_pending("origin")[0]
+    card = server._origin_as_card(raw)
+    assert card["decided"] is True and card["current_action"] == "alias"
+    assert card["current_alias_of"] == "Andes"
+    assert card["current_seed_type"] == "Quartzite"          # the missing field that locked the name
+    for k in ("current_seed_name", "current_seed_color", "current_seed_country"):
+        assert k in card                                     # full shape parity with a variety card
+    assert card["listings"] == [{"source": "polonine", "scraped": "ARTEMIS"}]

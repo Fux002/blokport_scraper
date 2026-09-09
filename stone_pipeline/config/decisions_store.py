@@ -899,9 +899,19 @@ def list_pending(kind: str) -> list[dict]:
             item["decided"] = origin_actions.get(r["ref"]) is not None or bound
             # Always name the outcome on a decided card. A bind reads "alias" (+ its target); a card settled
             # purely by confirming the country reads "origin". Never decided:true with no action.
+            # Field parity with a variety card, so an origin card is editable through the SAME statement:
+            # carry the current decision's target name AND type as current_alias_of / current_seed_type. An
+            # origin card's decision is a bind, so there is no minted name/colour/country -- expose the keys
+            # (None) anyway so the card shape matches a variety card exactly and the UI can restate it.
+            item.setdefault("current_seed_name", None)
+            item.setdefault("current_seed_color", None)
+            item.setdefault("current_seed_country", None)
+            item["current_seed_type"] = item.get("current_seed_type") or None
             if bound:
+                tgt_variety, tgt_type = scoped[(src_n, scr_n)]
                 item["current_action"] = item.get("current_action") or "alias"
-                item["current_alias_of"] = item.get("current_alias_of") or scoped[(src_n, scr_n)][0]
+                item["current_alias_of"] = item.get("current_alias_of") or tgt_variety
+                item["current_seed_type"] = item["current_seed_type"] or tgt_type or None
             elif origin_actions.get(r["ref"]) is not None:
                 item["current_action"] = item.get("current_action") or "origin"
             tgt_n = _norm(item.get("current_alias_of") or item.get("variety", ""))
