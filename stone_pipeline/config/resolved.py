@@ -17,16 +17,40 @@ import polars as pl
 
 from stone_pipeline.catalog import find_canonical
 from stone_pipeline.config import decisions_store
+import json
+
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.matching import projections as proj
 
 _COLUMNS = ["src_site", "surrogate_key", "raw_name", "variety_match_key", "variation_key", "variation_name",
             "variation_method", "type_name", "type_method", "color_name", "origin_country_code",
-            "origin_source", "src_url"]
+            "origin_source", "src_url", "raw_image_urls", "image_keys"]
 
 
 def _norm(s: str | None) -> str:
     return proj.norm(s or "")
+
+
+def _first_image(rec: dict) -> str:
+    """First usable image URL for a resolved row, from the SAME fields the pending card uses. The parquet
+    stores these list fields as JSON strings (io.staging.JSON_FIELDS), so parse them; prefer the supplier
+    photo (raw_image_urls, survives Medusa churn), fall back to the processed image_keys. Tolerant of a bad
+    value -> no image, never a crash."""
+    for col in ("raw_image_urls", "image_keys"):
+        raw = rec.get(col)
+        if not raw:
+            continue
+        try:
+            urls = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            urls = [raw] if isinstance(raw, str) else []
+        if isinstance(urls, list):
+            for u in urls:
+                if u:
+                    return u
+        elif isinstance(urls, str) and urls:
+            return urls
+    return ""
 
 
 def _row(rec: dict, scoped: dict, origins: dict, actions: dict) -> dict:
@@ -61,7 +85,23 @@ def _row(rec: dict, scoped: dict, origins: dict, actions: dict) -> dict:
                         "origin": rec["origin_source"] or ""},
         "decision": decision,
         "src_url": rec["src_url"] or "",
+        # Resolved rows never carried a scraper image, so they depended entirely on a Medusa SKU fallback;
+        # when that stops matching, the images vanish. Supply the image from the SAME field the pending
+        # card uses (the supplier photo, which survives Medusa product churn), image_keys as a fallback.
+        "image": _first_image(rec),
     }
+
+
+def _read_canonical(f) -> "pl.DataFrame":
+    """Read the resolved columns from one canonical parquet, tolerant of a file that predates the image
+    columns (raw_image_urls/image_keys were added later): request only the columns the file has, then
+    backfill any missing one as empty so every frame shares _COLUMNS' schema for the concat."""
+    present = set(pl.scan_parquet(f).collect_schema().names())
+    df = pl.read_parquet(f, columns=[c for c in _COLUMNS if c in present])
+    missing = [c for c in _COLUMNS if c not in present]
+    if missing:
+        df = df.with_columns([pl.lit("").alias(c) for c in missing])
+    return df.select(_COLUMNS)
 
 
 def list_resolved(source: str | None = None, decided: bool | None = None,
@@ -72,7 +112,7 @@ def list_resolved(source: str | None = None, decided: bool | None = None,
     files = [f for f in find_canonical(outputs_dir or SETTINGS.paths.outputs_dir) if f.exists()]
     if not files:
         return []
-    frame = pl.concat([pl.read_parquet(f, columns=_COLUMNS) for f in files], how="vertical_relaxed")
+    frame = pl.concat([_read_canonical(f) for f in files], how="vertical_relaxed")
     # RESOLVED means bound: a product the last produce could not bind belongs to the pending list (its card,
     # with any decision made on it as the card's current action), never to both lists at once
     frame = frame.filter(pl.col("variation_key").is_not_null() & (pl.col("variation_key") != ""))
