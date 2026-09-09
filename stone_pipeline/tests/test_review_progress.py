@@ -81,6 +81,7 @@ def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
         def execute(self, *a, **k): return _Cur()
         def close(self): pass
     monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds, "variety_origins", lambda: {})
 
     out = {i["ref"]: i for i in ds.list_pending("variety")}
     a = out["agata dark blue"]
@@ -118,6 +119,7 @@ def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
     monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds, "variety_origins", lambda: {})
 
     card = ds.list_pending("variety")[0]
     assert card["ref"] == "amazon green"                 # cleaned name != scraped spelling
@@ -151,6 +153,7 @@ def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
     monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds, "variety_origins", lambda: {})
 
     card = ds.list_pending("variety")[0]
     assert card["decided"] is True and card["current_action"] == "mint"
@@ -182,6 +185,7 @@ def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
     monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds, "variety_origins", lambda: {})
 
     card = ds.list_pending("variety")[0]
     assert card["decided"] is True                    # found via the listing spelling
@@ -212,6 +216,7 @@ def test_origin_card_decided_when_its_listing_is_bound(monkeypatch):
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
     monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds, "variety_origins", lambda: {})
 
     card = ds.list_pending("origin")[0]
     assert card["decided"] is True                    # the bug: was False
@@ -241,7 +246,41 @@ def test_every_decided_card_names_its_action(monkeypatch):
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
     monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds, "variety_origins", lambda: {})
 
     card = ds.list_pending("origin")[0]
     assert card["decided"] is True
     assert card["current_action"] == "origin"          # was None before -> bare "Decided"
+
+
+def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
+    """When the operator ticked "add to documented origins" (widen), the card shows it -- widened=True and
+    the documented country -- keyed on the DECIDED target variety, like the rest of the decision."""
+    from stone_pipeline.config import decisions_store as ds
+    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "scoped_aliases",
+                        lambda: {("zucchi", "amazon marble"): ("Silver Stream", "Marble")})
+    monkeypatch.setattr(ds, "origin_decisions", lambda: {})
+    monkeypatch.setattr(ds, "variety_origins", lambda: {("silver stream", "marble"): "IR"})
+
+    class _Cur:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+    class _Row(dict):
+        def __getitem__(self, k): return dict.__getitem__(self, k)
+
+    payload = ('{"variant": "Amazon Marble", "src": "zucchi", "scraped": "Amazon Marble",'
+               ' "listings": [{"source": "zucchi", "scraped": "Amazon Marble"}]}')
+    rows = [_Row(ref="amazon marble", payload=payload, sources=None)]
+    class _Conn:
+        def execute(self, *a, **k): return _Cur(rows)
+        def close(self): pass
+    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+
+    card = ds.list_pending("variety")[0]
+    assert card["current_action"] == "alias" and card["current_alias_of"] == "Silver Stream"
+    assert card["widened"] is True and card["documented_origin"] == "IR"
+
+    monkeypatch.setattr(ds, "variety_origins", lambda: {})
+    card = ds.list_pending("variety")[0]
+    assert card["widened"] is False and card["documented_origin"] is None

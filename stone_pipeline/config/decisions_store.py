@@ -783,6 +783,7 @@ def list_pending(kind: str) -> list[dict]:
     # comes back undecided even though the bind is stored (the Gold-card bug). Reject is the exception: it
     # is keyed on the ref, so ref is kept as a candidate too.
     scoped = scoped_aliases() if kind in ("variety", "origin") else {}   # {(nsrc, nspell): (target, type)}
+    vorigins = variety_origins() if kind in ("variety", "origin") else {}   # {(vnorm, tnorm): iso} the WIDEN table
     leaf_actions = _leaf_actions_by_ref() if kind == "backbone_leaf" else {}
     # for origin, key the confirmed country by the SAME composite ref the queue uses, so a decision made
     # between runs shows as current_country until the next produce regenerates the queue (and drops it).
@@ -827,6 +828,14 @@ def list_pending(kind: str) -> list[dict]:
             item["current_seed_type"] = act.get("seed_type") or (hit[1] if hit else None) or None
             item["current_seed_country"] = act.get("seed_country")
             item["current_seed_name"] = act.get("seed_name")
+            # WIDEN ("documented origin"): the origin was added to the variety's documented origins, keyed on
+            # the DECIDED target (the variety it binds/mints to). Surface it so the badge shows it like the
+            # rest of the decision.
+            tgt_n = _norm(item.get("current_alias_of") or item.get("current_seed_name") or item.get("variant", ""))
+            tgt_t = _norm(item.get("current_seed_type") or item.get("stone_type", ""))
+            doc = vorigins.get((tgt_n, tgt_t))
+            item["documented_origin"] = doc
+            item["widened"] = doc is not None
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
             item["decided"] = leaf_actions.get(r["ref"]) is not None
@@ -847,5 +856,10 @@ def list_pending(kind: str) -> list[dict]:
                 item["current_alias_of"] = item.get("current_alias_of") or scoped[(src_n, scr_n)][0]
             elif origin_actions.get(r["ref"]) is not None:
                 item["current_action"] = item.get("current_action") or "origin"
+            tgt_n = _norm(item.get("current_alias_of") or item.get("variety", ""))
+            tgt_t = _norm(item.get("stone_type", ""))
+            doc = vorigins.get((tgt_n, tgt_t))
+            item["documented_origin"] = doc
+            item["widened"] = doc is not None
         out.append(item)
     return out
