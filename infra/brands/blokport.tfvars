@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag = "1c1c61708f01293eba94319bf4337e3acbb2d549" # :core w/ origin-card field parity (editable name) + prior review fixes
+prod_image_tag = "14ff463c491b5fe2f10a9e7d54b0f94607c6805f" # :core w/ shared decision projection refactor (behavior-identical) + prior review fixes
 prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :gpu (reads SCRAPER_ env, prod bucket); was gpu-f9d828e0 (Aug18, pre-rename -> hit dev bucket)
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
