@@ -85,3 +85,35 @@ def exists_as(name: str, stone_type: str) -> bool:
     n, t = proj.norm(name or ""), proj.norm(stone_type or "")
     return bool(n) and bool(t) and any(
         proj.norm(v["name"]) == n and proj.norm(v["stone_type"]) == t for v in _rows())
+
+
+def alias_target(name: str, stone_type: str) -> str | None:
+    """Canonical variety NAME when `name` is an existing ALIAS (exact, normalized) of a variety OF
+    `stone_type`, else None. A statement naming a known alias must bind to the variety that alias already
+    resolves to, never mint a duplicate of it (e.g. 'Artemis' is an alias of 'Andes' Quartzite, so a mint of
+    'Artemis' Quartzite is really a bind to 'Andes'). Match is normalized equality ONLY -- never fuzzy or
+    phonetic -- and type-scoped, so the atomic (type, name) identity is preserved. Ambiguous (the alias sits
+    on two distinct same-type varieties) -> None, never a guess. Same ledger source as exists_as; None when
+    no ledger exists yet."""
+    import json
+
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
+    from stone_pipeline.stages import decisions
+    n, t = proj.norm(name or ""), proj.norm(stone_type or "")
+    if not n or not t or not writethrough.ledger_path().exists():
+        return None
+    retired = decisions.load_retired()
+    hits: set[str] = set()
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
+        for r in lg.execute("SELECT key, name, type, aliases FROM variation "
+                            "WHERE name IS NOT NULL AND name != '' AND aliases IS NOT NULL AND aliases != ''"):
+            if r["key"] in retired or proj.norm(r["type"] or "") != t:
+                continue
+            try:
+                aliases = json.loads(r["aliases"])
+            except (ValueError, TypeError):
+                continue
+            if any(proj.norm(a) == n for a in aliases):
+                hits.add(r["name"])
+    return next(iter(hits)) if len(hits) == 1 else None    # never guess across an ambiguous alias

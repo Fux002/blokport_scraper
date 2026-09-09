@@ -22,6 +22,7 @@ EXISTING = {("golden lightning", "granite"), ("azul white", "onyx"), ("azul whit
 def _db(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "config_db_path", lambda: tmp_path / "config.db")
     monkeypatch.setattr(varieties, "exists_as", lambda n, t: (_norm(n), _norm(t)) in EXISTING)
+    monkeypatch.setattr(varieties, "alias_target", lambda n, t: None)   # no alias resolution unless a test opts in
     monkeypatch.setattr(server, "_type_vocab", lambda: {"granite": "Granite", "onyx": "Onyx", "quartzite": "Quartzite"})
     yield
 
@@ -52,6 +53,20 @@ def test_unknown_variety_mints_globally_and_binds_the_vendor_spelling():
     assert decisions_store.variety_seed_scopes() == {_norm("Azul White Quartzite"): "marenostone"}
     assert decisions_store.scoped_aliases()[("marenostone", _norm("Azul White Quartzite"))] == ("Azul White Persian", "Onyx")
     assert decisions_store.origin_decisions()[("marenostone", "azul white persian", "onyx")] == "IR"
+
+
+def test_name_that_is_an_existing_alias_binds_to_its_variety_not_a_mint(monkeypatch):
+    # an origin card names 'Artemis' (already an alias of 'Andes' Quartzite): the statement must bind the
+    # vendor's spelling to Andes and record Andes' origin, never mint a duplicate variety 'Artemis'
+    monkeypatch.setattr(varieties, "alias_target",
+                        lambda n, t: "Andes" if (_norm(n), _norm(t)) == ("artemis", "quartzite") else None)
+    out = decisions_store.decide("polonine", "ARTEMIS", "Artemis", "Quartzite", origin="BR", widen=True,
+                                 exists_as=_exists)
+    assert out["result"] == "bound" and out["resolved_alias"] is True and out["name"] == "Andes"
+    assert decisions_store.scoped_aliases()[("polonine", _norm("ARTEMIS"))] == ("Andes", "Quartzite")
+    assert decisions_store.origin_decisions()[("polonine", "andes", "quartzite")] == "BR"
+    assert decisions_store.variety_actions() == {}                       # nothing minted -- no duplicate Artemis
+    assert decisions_store.variety_origins()[("andes", "quartzite")] == "BR"   # widen keyed to the variety
 
 
 def test_same_name_mint_is_not_a_rename():

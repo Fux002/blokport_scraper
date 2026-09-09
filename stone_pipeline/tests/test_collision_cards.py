@@ -95,6 +95,7 @@ def test_a_statement_binds_the_spelling_for_that_vendor_only(tmp_path, monkeypat
     from stone_pipeline.config import decisions_store, server, varieties
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(varieties, "exists_as", lambda n, t: (n, t) == ("Golden Lightning", "Granite"))
+    monkeypatch.setattr(varieties, "alias_target", lambda n, t: None)
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "marenostone", "scraped": "Amazon Green Granite",
                                   "name": "Golden Lightning", "type": "Granite"})

@@ -129,6 +129,7 @@ def test_origins_routes_are_gone():
 
 def test_decide_colour_must_be_a_real_attribute(monkeypatch):
     monkeypatch.setattr(varieties, "exists_as", lambda n, t: False)
+    monkeypatch.setattr(varieties, "alias_target", lambda n, t: None)
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": "Zucchi Blue X", "name": "Zucchi Blue X",
                                   "type": "Granite", "color": "definitely-not-a-colour"})

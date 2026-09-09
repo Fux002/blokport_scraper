@@ -229,20 +229,24 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
 
 
 def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "", origin: str = "",
-           widen: bool = False, exists_as=None) -> dict:
+           widen: bool = False, exists_as=None, alias_target=None) -> dict:
     """ONE operator statement about a vendor's product -- "this is `name`, a `stone_type`, `color`, from
     `origin`" -- resolved to the decisions that make the next produce do exactly that. The operator never
     picks mint / alias / origin: the outcome is derived from how the statement compares with what exists.
 
       * (name, stone_type) is an existing variety -> the vendor's spelling binds to it (scoped alias), and the
         origin, when given, is that vendor's origin for it (supplier override, derive's top curated rung);
-      * no such variety -> a mint with those seeds, keyed by the scraped spelling; a corrected name is a
-        mint + rename, and the spelling binds through the vendor's scoped alias rather than a global one;
+      * `name` is a known ALIAS of an existing same-type variety -> it resolves to that variety and the
+        vendor's spelling binds to it (never a duplicate mint of a name that already resolves elsewhere:
+        e.g. stating a polonine product is 'Artemis' Quartzite binds it to 'Andes', whose alias Artemis is);
+      * neither -> a mint with those seeds, keyed by the scraped spelling; a corrected name is a mint +
+        rename, and the spelling binds through the vendor's scoped alias rather than a global one;
       * widen -> the origin is also added to the variety's documented origins (every vendor's gate).
 
-    `exists_as(name, stone_type) -> bool` is the variety lookup (config.varieties.exists_as), injected so the
-    rule is testable without the export on disk. The caller validates the vocabulary (type, ISO) first; this
-    stores everything or nothing. Returns what was stored."""
+    `exists_as(name, stone_type) -> bool` and `alias_target(name, stone_type) -> canonical name | None` are
+    the variety lookups (config.varieties), injected so the rule is testable without the ledger on disk. The
+    caller validates the vocabulary (type, ISO) first; this stores everything or nothing. Returns what was
+    stored (`result` is 'bound' when a name resolved through its alias, with `resolved_alias` set)."""
     src = (source or "").strip()
     spelling = (scraped or "").strip()
     name = (name or "").strip()
@@ -251,17 +255,27 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     origin = (origin or "").strip().upper()
     if not src or not spelling or not name or not stone_type:
         raise InvalidDecision("a decision requires source, scraped spelling, name and stone_type")
-    if exists_as is None:
+    if exists_as is None or alias_target is None:
         from stone_pipeline.config import varieties
-        exists_as = varieties.exists_as
+        exists_as = exists_as or varieties.exists_as
+        alias_target = alias_target or varieties.alias_target
+    # a name the operator states may already be an existing variety's ALIAS (same type); it then resolves to
+    # that variety's canonical name, so the statement binds instead of minting a duplicate of a known alias
+    resolved_alias = False
+    if not exists_as(name, stone_type):
+        canonical = alias_target(name, stone_type)
+        if canonical:
+            name, resolved_alias = canonical, True
     outcome: dict = {"source": src, "scraped": spelling, "name": name, "stone_type": stone_type,
                      "color": color or None, "origin": origin or None}
     # a statement REPLACES the vendor's previous one for this spelling: nothing of the old target survives
     # (its origin decision would otherwise linger on a variety the product no longer binds to)
     clear_decisions(src, spelling)
-    if exists_as(name, stone_type):
+    if exists_as(name, stone_type) or resolved_alias:
         set_scoped_alias(src, spelling, name, stone_type)
         outcome["result"] = "bound"
+        if resolved_alias:
+            outcome["resolved_alias"] = True
     else:
         renamed = _norm(name) != _norm(spelling)
         # a mint already made for EVERY vendor stays global: a vendor restating it must not narrow the
