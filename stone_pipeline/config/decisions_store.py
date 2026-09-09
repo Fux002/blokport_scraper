@@ -802,6 +802,64 @@ def pending_payload(kind: str, ref: str) -> dict | None:
     return json.loads(r["payload"]) if r else None
 
 
+def _project_decision(item: dict, scoped: dict, actions: dict, owiden: dict) -> None:
+    """Overlay the operator's standing decision onto ONE pending card, in place. This is the single source of
+    the `current_*` view every restatement card (variety AND origin) shows, so the two kinds derive their
+    editable decision identically and cannot drift apart. It reads two stores:
+
+      * `scoped`  -- the per-vendor bind {(nsrc, nspell): (target variety, target type)}; the card's own
+                     (source, scraped) listings are the keys, with a single-vendor (src, scraped) fallback;
+      * `actions` -- the variety action {nspell|ref: mint/reject/rename}; pass EMPTY for a kind that has no
+                     variety_action (origin), so the view is driven by the bind alone.
+
+    From those it sets decided, current_action, current_alias_of and current_seed_name/type/colour/country,
+    backfills an empty scraped type from the decided type (so a decided card stays re-keyable), and resolves
+    the per-decision widen (`owiden`, the "documented origin" checkbox) keyed on (source, target, type).
+    The card always reflects the LAST decision: a per-vendor bind supersedes a stale mint that the
+    source-scoped clear could not drop, unless that mint's own rename points at the same bind (mint+rename is
+    one decision, still read as the mint)."""
+    keys = [(_norm(l.get("source", "")), _norm(l.get("scraped", "")))
+            for l in (item.get("listings") or []) if isinstance(l, dict)]
+    # single-vendor fallback: a variety card carries the vendor as `src`, an origin card as `source` (and no
+    # listings in its stored payload), so accept either as the (vendor, scraped) key the bind was stored under
+    if item.get("scraped"):
+        if item.get("src"):
+            keys.append((_norm(item["src"]), _norm(item["scraped"])))
+        if item.get("source"):
+            keys.append((_norm(item["source"]), _norm(item["scraped"])))
+    hit = next((scoped[k] for k in keys if k in scoped), None)       # (target variety, target type)
+    # a mint/rename/reject is keyed on a scraped spelling (or the cleaned ref for a reject), never guaranteed
+    # to equal the card ref, so match on every spelling the card carries
+    spellings = {_norm(s) for s in (item.get("spellings") or []) if s}
+    if item.get("scraped"):
+        spellings.add(_norm(item["scraped"]))
+    spellings |= {_norm(l.get("scraped", "")) for l in (item.get("listings") or [])
+                  if isinstance(l, dict) and l.get("scraped")}
+    act = actions.get(item["ref"]) or next((actions[s] for s in spellings if s in actions), {})
+    if act.get("action") == "mint" and hit is not None and _norm(act.get("seed_name") or "") != _norm(hit[0]):
+        act = {}                                                     # stale mint superseded by the newer bind
+    item["decided"] = bool(act.get("action")) or hit is not None
+    item["current_action"] = act.get("action") or ("alias" if hit else None)
+    item["current_alias_of"] = act.get("alias_of") or (hit[0] if hit else None)
+    item["current_seed_color"] = act.get("seed_color")
+    item["current_seed_type"] = act.get("seed_type") or (hit[1] if hit else None) or None
+    item["current_seed_country"] = act.get("seed_country")
+    item["current_seed_name"] = act.get("seed_name")
+    if item["decided"] and not item.get("stone_type") and item["current_seed_type"]:
+        item["stone_type"] = item["current_seed_type"]              # re-keyable: fill an empty scraped type
+    tgt_n = _norm(item.get("current_alias_of") or item.get("current_seed_name")
+                  or item.get("variant") or item.get("variety", ""))
+    tgt_t = _norm(item.get("current_seed_type") or item.get("stone_type", ""))
+    srcs = {_norm(l.get("source", "")) for l in (item.get("listings") or []) if isinstance(l, dict)}
+    if item.get("src"):
+        srcs.add(_norm(item["src"]))
+    if item.get("source"):
+        srcs.add(_norm(item["source"]))
+    doc = next((owiden[(s, tgt_n, tgt_t)] for s in srcs if (s, tgt_n, tgt_t) in owiden), None)
+    item["documented_origin"] = doc
+    item["widen"] = doc is not None
+
+
 def list_pending(kind: str) -> list[dict]:
     """The pending items for `kind`, each = its payload plus `sources` and the `current_action` already
     recorded for it (so the UI can show a decision made between runs, applied on the next produce)."""
@@ -833,91 +891,19 @@ def list_pending(kind: str) -> list[dict]:
         item["ref"] = r["ref"]
         item["sources"] = json.loads(r["sources"]) if r["sources"] else []
         if kind == "variety":
-            # Candidate spellings a decision could be keyed on: the ref (a REJECT keys on the cleaned name),
-            # and EVERY scraped spelling the card carries -- its `spellings`, its top-level `scraped`, AND
-            # each listing's `scraped`. decide() keys a mint/alias on the PUT's scraped, which is a LISTING
-            # spelling; a renamed GLOBAL mint (no scoped_alias to catch it) is found only if the listing
-            # spelling is a candidate here. Omitting listings was the renamed-mint reattachment gap.
-            spellings = {_norm(s) for s in (item.get("spellings") or []) if s}
-            if item.get("scraped"):
-                spellings.add(_norm(item["scraped"]))
-            spellings |= {_norm(l.get("scraped", "")) for l in (item.get("listings") or [])
-                          if isinstance(l, dict) and l.get("scraped")}
-            act = actions.get(r["ref"]) or next((actions[s] for s in spellings if s in actions), {})
-            # scoped-alias candidates: the card's exact (source, scraped) listings, keyed the way decide()
-            # stored them. Fall back to (src, scraped) on a single-vendor card.
-            keys = [(_norm(l.get("source", "")), _norm(l.get("scraped", "")))
-                    for l in (item.get("listings") or []) if isinstance(l, dict)]
-            if item.get("src") and item.get("scraped"):
-                keys.append((_norm(item["src"]), _norm(item["scraped"])))
-            hit = next((scoped[k] for k in keys if k in scoped), None)   # (target variety, target type)
-            # The card must always show the LAST decision, until a produce clears it. A per-vendor scoped
-            # alias is the current bind; a mint reads as the decision only when the alias does not supersede
-            # it. A mint+rename writes BOTH (its scoped alias points at the minted name), so it still reads as
-            # the mint. But a mint left behind by a re-decide under a different source -- a global mint, or a
-            # cross-vendor spelling, which clear_decisions (source-scoped) cannot drop -- is superseded by the
-            # newer bind, so drop the stale mint from the display rather than let it shadow the bind.
-            if act.get("action") == "mint" and hit is not None and _norm(act.get("seed_name") or "") != _norm(hit[0]):
-                act = {}
-            item["decided"] = bool(act.get("action")) or hit is not None
-            item["current_action"] = act.get("action") or ("alias" if hit else None)
-            item["current_alias_of"] = act.get("alias_of") or (hit[0] if hit else None)
-            item["current_seed_color"] = act.get("seed_color")
-            item["current_seed_type"] = act.get("seed_type") or (hit[1] if hit else None) or None
-            item["current_seed_country"] = act.get("seed_country")
-            item["current_seed_name"] = act.get("seed_name")
-            # A decided card must be RE-keyable: to restate a product the operator needs its type. `stone_type`
-            # is the SCRAPED type, which is empty for a type-less variety (the vendor declared no type) -- so a
-            # decided type-less card would carry no type to key on and the UI cannot form the next statement.
-            # Backfill it from the DECIDED type (the alias target's / the mint's type) so the card is always
-            # self-keying; a card that already carries a scraped type is left as-is.
-            if item["decided"] and not item.get("stone_type") and item["current_seed_type"]:
-                item["stone_type"] = item["current_seed_type"]
-            # WIDEN ("documented origin"): the OPERATOR's checkbox on THIS decision, per-record from
-            # origin_widen -- NOT whether the target variety happens to carry a documented origin (which is
-            # shared and would show widen on every sibling decision). Keyed on (source, target, type).
-            tgt_n = _norm(item.get("current_alias_of") or item.get("current_seed_name") or item.get("variant", ""))
-            tgt_t = _norm(item.get("current_seed_type") or item.get("stone_type", ""))
-            srcs = {_norm(l.get("source", "")) for l in (item.get("listings") or []) if isinstance(l, dict)}
-            if item.get("src"):
-                srcs.add(_norm(item["src"]))
-            doc = next((owiden[(s, tgt_n, tgt_t)] for s in srcs if (s, tgt_n, tgt_t) in owiden), None)
-            item["documented_origin"] = doc
-            item["widen"] = doc is not None
+            # a variety statement carries a variety_action (mint/rename/reject) AND may carry a bind
+            _project_decision(item, scoped, actions, owiden)
+        elif kind == "origin":
+            # an origin card has NO variety_action -- its decision is the bind (+ the confirmed country), so
+            # the SAME projection drives it with actions empty; the country is the only origin-specific field
+            _project_decision(item, scoped, {}, owiden)
+            item["current_country"] = origin_actions.get(r["ref"])
+            # a card settled purely by confirming the country (no bind) still reads decided, action "origin"
+            if origin_actions.get(r["ref"]) is not None:
+                item["decided"] = True
+                item["current_action"] = item.get("current_action") or "origin"
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
             item["decided"] = leaf_actions.get(r["ref"]) is not None
-        elif kind == "origin":
-            item["current_country"] = origin_actions.get(r["ref"])
-            # An origin card is settled when its country is confirmed OR its listing has been bound.
-            # Confirming an origin card BINDS the vendor spelling (a scoped_alias on the listing
-            # (source, scraped)) as well as recording the country; and if the product was aliased from a
-            # variety card, its listing is already bound. The origin-country check alone keys on the card's
-            # (source, VARIETY) ref and missed both -- so the card came back undecided after a real confirm.
-            src_n, scr_n = _norm(item.get("source", "")), _norm(item.get("scraped", ""))
-            bound = bool(scr_n) and (src_n, scr_n) in scoped
-            item["decided"] = origin_actions.get(r["ref"]) is not None or bound
-            # Always name the outcome on a decided card. A bind reads "alias" (+ its target); a card settled
-            # purely by confirming the country reads "origin". Never decided:true with no action.
-            # Field parity with a variety card, so an origin card is editable through the SAME statement:
-            # carry the current decision's target name AND type as current_alias_of / current_seed_type. An
-            # origin card's decision is a bind, so there is no minted name/colour/country -- expose the keys
-            # (None) anyway so the card shape matches a variety card exactly and the UI can restate it.
-            item.setdefault("current_seed_name", None)
-            item.setdefault("current_seed_color", None)
-            item.setdefault("current_seed_country", None)
-            item["current_seed_type"] = item.get("current_seed_type") or None
-            if bound:
-                tgt_variety, tgt_type = scoped[(src_n, scr_n)]
-                item["current_action"] = item.get("current_action") or "alias"
-                item["current_alias_of"] = item.get("current_alias_of") or tgt_variety
-                item["current_seed_type"] = item["current_seed_type"] or tgt_type or None
-            elif origin_actions.get(r["ref"]) is not None:
-                item["current_action"] = item.get("current_action") or "origin"
-            tgt_n = _norm(item.get("current_alias_of") or item.get("variety", ""))
-            tgt_t = _norm(item.get("stone_type", ""))
-            doc = owiden.get((_norm(item.get("source", "")), tgt_n, tgt_t))
-            item["documented_origin"] = doc
-            item["widen"] = doc is not None
         out.append(item)
     return out
