@@ -43,9 +43,9 @@ prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :g
 # Dev only, on purpose: prod has no equivalent and its reset stays a UI/API action behind the run lock.
 dev_enable_execute_command = true
 
-dev_image_upgrade_batch  = 300
+dev_image_upgrade_batch  = 1000
 
-prod_image_upgrade_batch = 300
+prod_image_upgrade_batch = 1000
 
 prod_auto_enhance     = true
 prod_auto_texture     = true
