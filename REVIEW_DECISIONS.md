@@ -85,7 +85,9 @@ statement adjusts a row; `DELETE` clears it.
   rung, above the origin map and the vendor gate, for that vendor's products only.
 - **Mint** (`variety_decision`): spelling -> the variety to create, with the vendor that asked for it. The
   variety itself is global by nature; only the spelling's binding is scoped.
-- **Documented origins** (`variety_origin`, only with `widen`): the stone's country list, every vendor.
+- **Documented origins**: `widen` is recorded on the decision (`origin_decision.widen`) and at load the
+  country is ADDED to the stone's documented list, a union with what the map already documents, never a
+  replacement. `variety_origin` is the admin's explicit list edit only (it sets the list).
 
 All of it lives in `config.db`, snapshotted every five minutes and restored on boot. Republish, redeploy,
 soft and hard reset keep it. Only the pristine factory reset clears it.

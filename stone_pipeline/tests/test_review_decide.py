@@ -66,7 +66,8 @@ def test_name_that_is_an_existing_alias_binds_to_its_variety_not_a_mint(monkeypa
     assert decisions_store.scoped_aliases()[("polonine", _norm("ARTEMIS"))] == ("Andes", "Quartzite")
     assert decisions_store.origin_decisions()[("polonine", "andes", "quartzite")] == "BR"
     assert decisions_store.variety_actions() == {}                       # nothing minted -- no duplicate Artemis
-    assert decisions_store.variety_origins()[("andes", "quartzite")] == "BR"   # widen keyed to the variety
+    assert decisions_store.origin_widen()[("polonine", "andes", "quartzite")] == "BR"   # widen keyed to the target
+    assert decisions_store.variety_origins() == {}                                        # the list is unioned at load, never rewritten
 
 
 def test_same_name_mint_is_not_a_rename():
@@ -77,11 +78,33 @@ def test_same_name_mint_is_not_a_rename():
     assert decisions_store.variety_seed_scopes() == {}
 
 
-def test_widen_adds_the_origin_to_the_variety_for_every_vendor():
+def test_widen_is_recorded_on_the_decision_and_never_rewrites_the_stones_list():
+    from stone_pipeline.reference.loaders import OriginMap, OriginRule
     decisions_store.decide("marenostone", "Golden Lightning", "Golden Lightning", "Granite",
                            origin="IR", widen=True, exists_as=_exists)
-    assert decisions_store.variety_origins()[("golden lightning", "granite")] == "IR"
     assert decisions_store.origin_decisions()[("marenostone", "golden lightning", "granite")] == "IR"
+    assert decisions_store.origin_widen() == {("marenostone", "golden lightning", "granite"): "IR"}
+    assert decisions_store.variety_origins() == {}                     # the explicit list edit is untouched
+    # at load the widened country is ADDED to what the map documents, never replacing it
+    m = OriginMap(rules=[OriginRule(variety="Golden Lightning", country_iso="BR,CN", city="", county="", stone_type="Granite")])
+    assert m.widen(decisions_store.origin_widen()) == 1
+    assert m.exact("Golden Lightning", "Granite").countries == ["BR", "CN", "IR"]
+    assert m.widen(decisions_store.origin_widen()) == 0                 # idempotent
+    # a stone the map does not document yet gets its first documented origin
+    decisions_store.decide("zucchi", "Andes", "Andes", "Quartzite", origin="BR", widen=True, exists_as=_exists)
+    assert m.widen(decisions_store.origin_widen()) == 1 and m.exact("Andes", "Quartzite").countries == ["BR"]
+
+
+def test_store_repairs_the_lists_an_old_widen_rewrote():
+    # before the union: widen WROTE the variety's list as its one country. Such a row (single country equal to
+    # a widen decision on the same variety) is dropped on open; an explicit list edit (any other row) stays.
+    decisions_store.set_origin_decision("varsha", "Black Cosmic", "Granite", "IN", widen=True)
+    decisions_store.set_variety_origin("Black Cosmic", "Granite", "IN")            # what the old widen wrote
+    decisions_store.set_variety_origin("Volakas", "Marble", "GR,TR")                  # an operator list edit
+    decisions_store.set_variety_origin("Porto Branco", "Granite", "PT")               # an edit, no widen on it
+    import sqlite3
+    conn = store.open_store(); conn.close()                                          # the migration runs on open
+    assert decisions_store.variety_origins() == {("volakas", "marble"): "GR,TR", ("porto branco", "granite"): "PT"}
 
 
 def test_redeciding_overwrites_and_clearing_removes_exactly_that_vendors_decisions():
