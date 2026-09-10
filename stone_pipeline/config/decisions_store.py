@@ -27,7 +27,6 @@ import json
 from contextlib import closing
 from datetime import datetime, timezone
 
-from stone_pipeline.adapters.tokens import clean_variety
 from stone_pipeline.config import store
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.matching import projections as proj
@@ -59,19 +58,10 @@ class InvalidDecision(ValueError):
 
 # -- variety decisions (produce READS these) -----------------------------------
 
-def _col(r, name: str, default=None):
-    """A column of a row that may be a sqlite3.Row, a dict, or a test stub lacking newer columns."""
-    try:
-        return r[name]
-    except (KeyError, IndexError):
-        return default
-
-
 def _decision_row(r) -> dict:
     return {"action": r["action"], "alias_of": r["alias_of"], "seed_color": r["seed_color"],
             "seed_type": r["seed_type"], "seed_country": r["seed_country"], "seed_name": r["seed_name"],
-            "spelling": _col(r, "variant_display", "") or "",
-            "source": _col(r, "source", "") or "", "asked_by": _col(r, "asked_by", "") or ""}
+            "spelling": r["variant_display"], "source": r["source"], "asked_by": r["asked_by"]}
 
 
 def _decision_rows() -> list:
@@ -80,28 +70,36 @@ def _decision_rows() -> list:
                             "seed_country, seed_name, asked_by FROM variety_decision").fetchall()
 
 
+# THE SCOPE KEY. A decision map is keyed by the scope a decision applies to: the GLOBAL level (what a spelling
+# means for every vendor) is keyed by norm(spelling) alone -- the historic shape every reader and test knows --
+# and the VENDOR level (one vendor's own stone) by (norm source, norm spelling). scope_key builds a key,
+# key_spelling reads one back; nothing else inspects a key's shape. Readers resolve vendor first, then global.
+
+def scope_key(source: str, spelling: str):
+    """The map key of a decision at `source`'s level ('' = global)."""
+    return (_norm(source), _norm(spelling)) if source else _norm(spelling)
+
+
+def key_spelling(key) -> str:
+    """The norm(spelling) a scope key carries, at either level."""
+    return key if isinstance(key, str) else key[1]
+
+
 def variety_actions() -> dict[str, dict]:
     """The GLOBAL level: norm(spelling) -> the decision that spelling means for every vendor ({'action':
-    mint|reject|alias, 'alias_of', 'seed_*', 'source' (''), 'asked_by'}). Empty for a fresh store."""
-    return {r["variant_norm"]: _decision_row(r) for r in _decision_rows() if not (_col(r, "source", "") or "")}
+    mint|reject|alias, 'alias_of', 'seed_*', 'spelling', 'source' (''), 'asked_by'}). Empty for a fresh store."""
+    return {r["variant_norm"]: _decision_row(r) for r in _decision_rows() if not r["source"]}
 
 
 def variety_actions_scoped() -> dict[tuple[str, str], dict]:
     """The VENDOR level: (norm source, norm spelling) -> the decision that vendor made for itself, beyond what
     the spelling means for everyone (a different new stone from the same trade name)."""
-    return {(_norm(r["source"]), r["variant_norm"]): _decision_row(r)
-            for r in _decision_rows() if (_col(r, "source", "") or "")}
+    return {scope_key(r["source"], r["variant_norm"]): _decision_row(r) for r in _decision_rows() if r["source"]}
 
 
 def variety_actions_all() -> dict:
-    """Both levels in one map: plain norm(spelling) keys for the global level, (norm source, norm spelling)
-    tuple keys for the vendor level. Every reader resolves a row's decision vendor first, then global."""
+    """Both levels in one map, keyed by scope_key."""
     return {**variety_actions(), **variety_actions_scoped()}
-
-
-def _spelling(key) -> str:
-    """The spelling of a decision key at either level."""
-    return key[1] if isinstance(key, tuple) else key
 
 
 def variety_seed_colors() -> dict[str, str]:
@@ -152,7 +150,7 @@ def variety_seed_countries() -> dict[str, str]:
     so it must NOT materialise config.db, mirroring backbone_leaf_overlay."""
     if not store.config_db_path().exists():
         return {}
-    return {_norm(d["seed_name"] or _spelling(n)): d["seed_country"] for n, d in variety_actions_all().items()
+    return {_norm(d["seed_name"] or key_spelling(n)): d["seed_country"] for n, d in variety_actions_all().items()
             if d["action"] == "mint" and d["seed_country"]}
 
 
@@ -166,7 +164,7 @@ def variety_seed_country_rules() -> dict[tuple[str, str], str]:
     (variety_seed_countries is the flat name->iso accessor). No side effect on a fresh store."""
     if not store.config_db_path().exists():
         return {}
-    return {(_norm(d["seed_name"] or _spelling(n)), _norm(d["seed_type"])): d["seed_country"]
+    return {(_norm(d["seed_name"] or key_spelling(n)), _norm(d["seed_type"])): d["seed_country"]
             for n, d in variety_actions_all().items()
             if d["action"] == "mint" and d["seed_country"]}
 
@@ -259,12 +257,24 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
         conn.commit()
 
 
-def _spelling_means(spelling: str, stone_type: str, exists_as, alias_target) -> str | None:
+def _lookups(exists_as, alias_target, clean) -> tuple:
+    """The three variety lookups a statement is judged against, injected by tests and resolved here otherwise:
+    exists_as / alias_target read the ledger (config.varieties), clean is the matcher's cleaner (adapters.tokens).
+    Resolved per call, not at import, so this store stays free of the pipeline's settings and adapter packages."""
+    if exists_as is None or alias_target is None:
+        from stone_pipeline.config import varieties
+        exists_as, alias_target = exists_as or varieties.exists_as, alias_target or varieties.alias_target
+    if clean is None:
+        from stone_pipeline.adapters.tokens import clean_variety as clean
+    return exists_as, alias_target, clean
+
+
+def _spelling_means(spelling: str, stone_type: str, exists_as, alias_target, clean) -> str | None:
     """The existing variety a scraped spelling ALREADY means for every vendor: itself when it is an existing
     variety of `stone_type`, else the variety it is a known alias of; checked on the spelling and on its cleaned
     form, the two surfaces the matcher binds through ('Black Wave Marble' -> 'Black Wave' -> alias of Silver
     Waves). None when the spelling resolves to nothing, so a mint on it defines its global meaning."""
-    for s in dict.fromkeys((spelling, clean_variety(spelling, stone_type))):
+    for s in dict.fromkeys((spelling, clean(spelling, stone_type))):
         if exists_as(s, stone_type):
             return s
         target = alias_target(s, stone_type)
@@ -273,18 +283,18 @@ def _spelling_means(spelling: str, stone_type: str, exists_as, alias_target) -> 
     return None
 
 
-def _global_meaning(spelling: str, stone_type: str, exists_as, alias_target) -> tuple[str, str] | None:
+def _global_meaning(spelling: str, stone_type: str, exists_as, alias_target, clean) -> tuple[str, str] | None:
     """(name, type) the spelling means for every vendor today: the global mint on it, else the existing
     variety it resolves to (see _spelling_means), else None (the spelling is undefined: the next mint defines it)."""
     prior = variety_actions().get(_norm(spelling))
     if prior and prior["action"] == "mint":
         return (prior.get("seed_name") or spelling, prior.get("seed_type") or "")
-    existing = _spelling_means(spelling, stone_type, exists_as, alias_target)
+    existing = _spelling_means(spelling, stone_type, exists_as, alias_target, clean)
     return (existing, stone_type) if existing else None
 
 
 def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "", origin: str = "",
-           widen: bool = False, exists_as=None, alias_target=None) -> dict:
+           widen: bool = False, exists_as=None, alias_target=None, clean=None) -> dict:
     """ONE operator statement about a vendor's product -- "this is `name`, a `stone_type`, `color`, from
     `origin`" -- resolved to the decisions that make the next produce do exactly that. The operator never
     picks mint / alias / origin: the outcome is derived from how the statement compares with what exists.
@@ -298,8 +308,9 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
         rename, and the spelling binds through the vendor's scoped alias rather than a global one;
       * widen -> the origin is also added to the variety's documented origins (every vendor's gate).
 
-    `exists_as(name, stone_type) -> bool` and `alias_target(name, stone_type) -> canonical name | None` are
-    the variety lookups (config.varieties), injected so the rule is testable without the ledger on disk. The
+    `exists_as(name, stone_type) -> bool`, `alias_target(name, stone_type) -> canonical name | None` and
+    `clean(spelling, stone_type) -> str` are the variety lookups (see _lookups), injected so the rule is
+    testable without the ledger on disk. The
     caller validates the vocabulary (type, ISO) first; this stores everything or nothing. Returns what was
     stored (`result` is 'bound' when a name resolved through its alias, with `resolved_alias` set)."""
     src = (source or "").strip()
@@ -310,10 +321,7 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     origin = (origin or "").strip().upper()
     if not src or not spelling or not name or not stone_type:
         raise InvalidDecision("a decision requires source, scraped spelling, name and stone_type")
-    if exists_as is None or alias_target is None:
-        from stone_pipeline.config import varieties
-        exists_as = exists_as or varieties.exists_as
-        alias_target = alias_target or varieties.alias_target
+    exists_as, alias_target, clean = _lookups(exists_as, alias_target, clean)
     # a name the operator states may already be an existing variety's ALIAS (same type); it then resolves to
     # that variety's canonical name, so the statement binds instead of minting a duplicate of a known alias
     resolved_alias = False
@@ -338,7 +346,7 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
         # products bind everywhere, a rename attaches the spelling as an alias for everyone. A statement that
         # restates the global meaning changes nothing; one that names a DIFFERENT new stone is that vendor's
         # own mint, kept beside the global meaning and bound by its vendor alias, so no other vendor moves.
-        meaning = _global_meaning(spelling, stone_type, exists_as, alias_target)
+        meaning = _global_meaning(spelling, stone_type, exists_as, alias_target, clean)
         if meaning and _norm(meaning[0]) == _norm(name) and _norm(meaning[1]) == _norm(stone_type):
             outcome["result"] = "minted"
             outcome["level"] = "global"
@@ -363,24 +371,26 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     return outcome
 
 
-def backfill_levels(exists_as=None, alias_target=None) -> list[dict]:
-    """The data half of the two-level migration (store._migrate rebuilt the table with every old mint global).
-    A global mint whose spelling already resolves to a DIFFERENT existing variety cannot be the spelling's
-    global meaning (the matcher binds every vendor's 'Brown Granite' to Brown Granite): it is the vendor's own
-    stone, exactly what decide() stores today, so it moves to that vendor's level and gets the vendor alias
-    that binds its products. Runs at server boot AFTER the ledger restore (the lookups read the ledger), is
-    idempotent (a moved row is no longer global) and touches nothing else. Returns the rows moved."""
-    if exists_as is None or alias_target is None:
-        from stone_pipeline.config import varieties
-        exists_as = exists_as or varieties.exists_as
-        alias_target = alias_target or varieties.alias_target
+BACKFILL_LEVELS = "two_levels_backfill"
+
+
+def backfill_levels(exists_as=None, alias_target=None, clean=None) -> list[dict] | None:
+    """The data half of the two-level migration, run ONCE (store.migration records it; None when already
+    applied). store._migrate rebuilt the table with every old mint global; a global mint whose spelling already
+    resolved to a DIFFERENT existing variety cannot be the spelling's global meaning (the matcher binds every
+    vendor's 'Brown Granite' to Brown Granite): it is the vendor's own stone, exactly what decide() stores
+    today, so it moves to that vendor's level and gets the vendor alias that binds its products. Runs at server
+    boot AFTER the ledger restore (the lookups read the ledger). Returns the rows moved."""
+    if store.migration_applied(BACKFILL_LEVELS):
+        return None
+    exists_as, alias_target, clean = _lookups(exists_as, alias_target, clean)
     moved: list[dict] = []
     for norm, dec in variety_actions().items():
         if dec["action"] != "mint" or not dec["asked_by"] or not dec["seed_type"]:
             continue
         spelling = dec["spelling"] or norm
         target = dec["seed_name"] or spelling
-        existing = _spelling_means(spelling, dec["seed_type"], exists_as, alias_target)
+        existing = _spelling_means(spelling, dec["seed_type"], exists_as, alias_target, clean)
         if not existing or _norm(existing) == _norm(target):
             continue
         with closing(store.open_store()) as conn:
@@ -391,6 +401,7 @@ def backfill_levels(exists_as=None, alias_target=None) -> list[dict]:
         set_scoped_alias(dec["asked_by"], spelling, target, dec["seed_type"])
         moved.append({"source": dec["asked_by"], "scraped": spelling, "name": target,
                       "stone_type": dec["seed_type"], "spelling_means": existing})
+    store.mark_migration(BACKFILL_LEVELS)
     return moved
 
 

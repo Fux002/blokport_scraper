@@ -60,7 +60,7 @@ def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
     variety_decision. Reading only variety_decision left every aliased card looking untouched."""
     from stone_pipeline.config import decisions_store as ds
 
-    monkeypatch.setattr(ds, "variety_actions", lambda: {})            # no mint/reject anywhere
+    monkeypatch.setattr(ds, "variety_actions_all", lambda: {})            # no mint/reject anywhere
     monkeypatch.setattr(ds, "scoped_aliases",
                         lambda: {("zucchi", "agata dark blue"): ("Agata Blue", "Agate")})
 
@@ -99,7 +99,7 @@ def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
     from stone_pipeline.config import decisions_store as ds
 
     # alias stored under the SCRAPED spelling; card ref is the cleaned name
-    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "variety_actions_all", lambda: {})
     monkeypatch.setattr(ds, "scoped_aliases",
                         lambda: {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")})
 
@@ -132,7 +132,7 @@ def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
 def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
     """decide() stores a mint under the scraped spelling, not the ref -- same mismatch class as the alias."""
     from stone_pipeline.config import decisions_store as ds
-    monkeypatch.setattr(ds, "variety_actions",
+    monkeypatch.setattr(ds, "variety_actions_all",
                         lambda: {"blue dunes quartzite": {"action": "mint", "alias_of": None,
                                                           "seed_color": None, "seed_type": "Quartzite",
                                                           "seed_country": "BR", "seed_name": None}})
@@ -166,7 +166,7 @@ def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
     listing spelling, the flag missed -> a successful mint showed undecided on refresh."""
     from stone_pipeline.config import decisions_store as ds
     # mint keyed on the LISTING spelling, which is NOT in the card's display `spellings`
-    monkeypatch.setattr(ds, "variety_actions",
+    monkeypatch.setattr(ds, "variety_actions_all",
                         lambda: {"brown granite slab 2cm": {"action": "mint", "alias_of": None,
                                  "seed_color": None, "seed_type": "Granite", "seed_country": "IR",
                                  "seed_name": "Chocolate Brown"}})
@@ -228,7 +228,7 @@ def test_every_decided_card_names_its_action(monkeypatch):
     """Invariant Blokport relies on: decided:true always carries current_action (never a bare "Decided").
     Covers the origin-country case (action "origin") that previously had decided:true with no action."""
     from stone_pipeline.config import decisions_store as ds
-    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "variety_actions_all", lambda: {})
     monkeypatch.setattr(ds, "scoped_aliases", lambda: {})
     monkeypatch.setattr(ds, "origin_decisions",
                         lambda: {("marenostone", "amazon white", "marble"): "IR"})   # country only, no bind
@@ -257,7 +257,7 @@ def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
     """When the operator ticked "add to documented origins" (widen), the card shows it -- widened=True and
     the documented country -- keyed on the DECIDED target variety, like the rest of the decision."""
     from stone_pipeline.config import decisions_store as ds
-    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "variety_actions_all", lambda: {})
     monkeypatch.setattr(ds, "scoped_aliases",
                         lambda: {("zucchi", "amazon marble"): ("Silver Stream", "Marble")})
     monkeypatch.setattr(ds, "origin_decisions", lambda: {})
@@ -289,7 +289,7 @@ def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
 def _one_card(monkeypatch, actions, aliases, payload, ref="foo"):
     """Drive list_pending('variety') for a single hand-built card with the given decision stores."""
     from stone_pipeline.config import decisions_store as ds
-    monkeypatch.setattr(ds, "variety_actions", lambda: actions)
+    monkeypatch.setattr(ds, "variety_actions_all", lambda: actions)
     monkeypatch.setattr(ds, "scoped_aliases", lambda: aliases)
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
@@ -371,7 +371,7 @@ def test_an_origin_card_has_variety_field_parity_so_it_is_editable(monkeypatch):
     bound variety. It now carries the decision's target name (current_alias_of) AND type
     (current_seed_type), plus the seed_* keys, matching a variety card's shape."""
     from stone_pipeline.config import decisions_store as ds, server
-    monkeypatch.setattr(ds, "variety_actions", lambda: {})
+    monkeypatch.setattr(ds, "variety_actions_all", lambda: {})
     monkeypatch.setattr(ds, "scoped_aliases", lambda: {("polonine", "artemis"): ("Andes", "Quartzite")})
     monkeypatch.setattr(ds, "origin_decisions", lambda: {("polonine", "andes", "quartzite"): "BR"})
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
