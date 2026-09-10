@@ -631,7 +631,8 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
                 continue
             targets.append(siblings)
         # Clear the mint decisions FIRST (config.db), then tombstone (ledger) -- see the docstring ordering.
-        out["mint_decisions_cleared"] = sum(decisions_store.clear_variety_decision(sibs[0][1])
+        # by (type, name): the type-slug from the variety's Key keeps a same-name variety of another type intact
+        out["mint_decisions_cleared"] = sum(decisions_store.clear_variety_decision(sibs[0][1], ident_of[sibs[0][0]][0])
                                             for sibs in targets)
         for sibs in targets:
             for sk, _ in sibs:

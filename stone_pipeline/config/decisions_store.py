@@ -559,23 +559,33 @@ def clear_variety_decisions() -> int:
     return n
 
 
-def clear_variety_decision(variant: str) -> int:
-    """Drop ONE variety's operator decision by name. Used by `unmint` (lifecycle): removing a minted variety
+def clear_variety_decision(variant: str, stone_type: str = "") -> int:
+    """Drop ONE variety's operator decisions by name. Used by `unmint` (lifecycle): removing a minted variety
     for RE-REVIEW must forget its stored 'mint' decision, or the next produce silently re-applies it and the
-    variety never resurfaces in the queue for a fresh call. Scoped to one variant_norm (unlike the pristine
-    clear_variety_decisions), so every OTHER operator decision survives. Returns rows dropped (0 if none)."""
+    variety never resurfaces in the queue for a fresh call. Scoped to one variety (unlike the pristine
+    clear_variety_decisions), so every OTHER operator decision survives. Returns rows dropped (0 if none).
+
+    Identity is (type, name), so `stone_type` (canonical name or Key type-slug, e.g. 'Dolomite Marble' or
+    'dolomite_marble') narrows the match to decisions whose seed_type is that type: unminting the Onyx 'Honey'
+    must not drop the rename that made the Marble 'Honey'. A decision with no seed_type (a legacy mint) still
+    matches by name alone, as before. Without a type every same-name decision is dropped (legacy callers)."""
     norm = _norm(variant)
     if not norm:
         return 0
+    type_norm = _norm((stone_type or "").replace("_", " "))
+
+    def _same_type(seed_type) -> bool:
+        return not type_norm or not seed_type or _norm(seed_type.replace("_", " ")) == type_norm
+
     with closing(store.open_store()) as conn:
         # A RENAMED mint's variety carries seed_name as its Name, and unmint passes that Name here -- so match
         # the decision by its seed_name too. Without this the mint decision (keyed by the scraped spelling)
         # survives the unmint and the variety silently re-mints on the next produce (a zombie).
-        renamed = [r["variant_norm"] for r in conn.execute(
-            "SELECT variant_norm, seed_name FROM variety_decision WHERE seed_name IS NOT NULL")
-                   if _norm(r["seed_name"]) == norm]
-        n = conn.execute("DELETE FROM variety_decision WHERE variant_norm = ?", (norm,)).rowcount
-        for variant_norm in renamed:
+        doomed = [r["variant_norm"] for r in conn.execute(
+            "SELECT variant_norm, seed_name, seed_type FROM variety_decision")
+                  if (r["variant_norm"] == norm or _norm(r["seed_name"] or "") == norm) and _same_type(r["seed_type"])]
+        n = 0
+        for variant_norm in doomed:
             n += conn.execute("DELETE FROM variety_decision WHERE variant_norm = ?", (variant_norm,)).rowcount
         conn.commit()
     return n
