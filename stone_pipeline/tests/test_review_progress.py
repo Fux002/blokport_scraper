@@ -11,7 +11,7 @@ def _cards(monkeypatch, variety, origin=()):
     from stone_pipeline.config import decisions_store
 
     def fake(kind):
-        return list(variety) if kind == "variety" else list(origin)
+        return {"variety": list(variety), "origin": list(origin)}.get(kind, [])
     monkeypatch.setattr(decisions_store, "list_pending", fake)
     status, body = server.dispatch("GET", ["review", "variants"], None)
     assert status == 200

@@ -1200,4 +1200,20 @@ def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     result.counts["attribute_values"] = len(attr)
     result.counts["attributes_to_add"] = len(to_add)
     result.counts["attributes_adopted"] = adopted
+    # Did this produce honour every stored decision? The gaps become cards in the one review list, so a
+    # decision the pipeline ignores is visible on the FIRST produce after it, never a day later.
+    from stone_pipeline.config import decisions_store
+    from stone_pipeline.stages import decision_audit
+    existing = {owner for b in BRANCHES for owner in load_existing(b).by_name_type}
+    created = {(proj.norm(v["Name"]), proj.norm(type_slug_from_key(v["Key"]).replace("_", " ")))
+               for lst in result.new_variants.values() for v in lst}
+    pending_spellings = {proj.norm(p["scraped"]) for p in result.pending_confirm if p.get("scraped")}
+    gaps = decision_audit.audit(rows, existing, created, decisions_store.variety_actions(),
+                                decisions_store.scoped_aliases(), decisions_store.origin_decisions(),
+                                pending_spellings)
+    decisions.write_decision_gaps(gaps)
+    result.counts["decision_gaps"] = len(gaps)
+    if gaps:
+        log.warning("decisions NOT applied by this produce", extra={"extra_fields": {
+            "count": len(gaps), "gaps": [f"{g['decision']} {g['source']} {g['scraped'] or g['name']}" for g in gaps[:20]]}})
     return result

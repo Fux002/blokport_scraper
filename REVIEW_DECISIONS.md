@@ -61,6 +61,7 @@ never limits what may be stated.
 | `code` | the name looks like a supplier code | name |
 | `retired` | the variety was retired; un-retire or leave | name, type |
 | `origin` | bound fine, the vendor's country is not in the stone's documented list | name, type, the vendor's origin |
+| `decision_gap` | a decision the last produce did NOT honour (mint whose variety does not exist, alias whose listings bound elsewhere, origin not at the operator rung, reject whose card remains); `current_action` names the decision | name, type, origin as decided; restate it, or clear it with DELETE |
 
 A name whose title and site tag name two different stones that both exist (Azul White: onyx and quartzite)
 is no longer typed from the title: the type stays open, the matcher's origin rung binds the stone the

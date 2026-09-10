@@ -32,7 +32,7 @@ from stone_pipeline.config.domain import active_pack
 from stone_pipeline.matching import projections as proj
 
 _ACTIONS = ("mint", "reject", "alias")
-_PENDING_KINDS = ("variety", "attribute", "backbone_leaf", "origin")
+_PENDING_KINDS = ("variety", "attribute", "backbone_leaf", "origin", "decision_gap")
 # The vocabularies a backbone variety carries an allowed SET of; each maps to a leaf-decision `attribute`.
 # Value additions to these are what the backbone-leaf loop grows (all already in Medusa). Declared by the
 # active product-domain pack (all attributes except the identity disambiguator); stone = color/finish/quality.
