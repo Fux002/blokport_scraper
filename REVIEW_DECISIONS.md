@@ -22,14 +22,21 @@ validates. The response lists each listing with its `result`.
 | name + type | result | stored for the vendor |
 |---|---|---|
 | an existing variety | `bound`: the product binds to it on the next produce | scoped alias, plus the origin as a supplier override |
-| no such variety | `minted`: the variety is created with these attributes | mint (global variety), scoped alias when the name differs from the spelling, plus the origin |
+| no such variety, spelling undefined | `minted`, `level: global`: the variety is created and the spelling MEANS it for every vendor | global mint; a renamed spelling becomes the variety's alias for everyone, plus the origin |
+| no such variety, spelling already means another stone | `minted`, `level: vendor`: the variety is created for this vendor only | vendor mint + scoped alias (other vendors keep the spelling's meaning), plus the origin |
 | a retired variety | `409`, nothing stored | un-retire it first |
 
 A statement replaces the vendor's previous one for that spelling. It never touches another vendor, and it
 never changes the variety's documented origins unless `widen` is true, which adds the origin to the stone's
-list for every vendor's origin gate. A mint already made for every vendor stays global when a vendor restates
-it. Known limit: one mint decision per spelling, so two vendors stating two DIFFERENT new names for the same
-spelling overwrite each other; the earlier vendor's product then surfaces again as a card.
+list for every vendor's origin gate.
+
+**Two levels.** A spelling means ONE variety for every vendor: the global mint on it, or the existing variety
+it already resolves to (by name or alias, on the spelling and on its cleaned form). The first mint on an
+undefined spelling defines that meaning ("Tropical Green IS Tropical Green Bahia", for everyone). A later
+statement that names the same stone stores nothing. One that names a DIFFERENT new stone is that vendor's own
+mint, kept beside the global meaning and bound by its vendor alias; no other vendor moves. `DELETE` on a
+vendor-level mint removes it and the vendor falls back to the global meaning; a global mint is cleared only by
+un-minting the variety.
 
 `DELETE /config/v1/review/decide` with `{"source", "scraped"}` removes exactly what the statement stored;
 the next produce resolves the product on its own again.
@@ -83,8 +90,9 @@ statement adjusts a row; `DELETE` clears it.
   before any alias or similarity lookup, for that vendor only.
 - **Vendor origin** (`origin_decision`): vendor + variety + type -> country. Read by derive at its top curated
   rung, above the origin map and the vendor gate, for that vendor's products only.
-- **Mint** (`variety_decision`): spelling -> the variety to create, with the vendor that asked for it. The
-  variety itself is global by nature; only the spelling's binding is scoped.
+- **Mint** (`variety_decision`, keyed vendor + spelling): the global level (vendor `''`, `asked_by` = who
+  stated it) is what the spelling means for everyone; a vendor level is that vendor's own stone beside it.
+  Every reader resolves a listing vendor-first, then global.
 - **Documented origins**: `widen` is recorded on the decision (`origin_decision.widen`) and at load the
   country is ADDED to the stone's documented list, a union with what the map already documents, never a
   replacement. `variety_origin` is the admin's explicit list edit only (it sets the list).
