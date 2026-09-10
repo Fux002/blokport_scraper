@@ -178,3 +178,18 @@ def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch
     assert decisions.load_variety_seed_names() == {}
     assert decisions_store.confirm_map() == {"honey onyx": "yes"}
     assert decisions_store.scoped_aliases() == {}
+
+
+# -- a statement keyed on a spelling that carries a type word must still fire in curate ----------------
+
+def test_decision_keyed_on_a_type_word_spelling_mints_and_seeds(monkeypatch):
+    # the card's scraped spelling is 'Bianco White Marble'; curate's cleaned identity is 'Bianco White'.
+    # A statement stores mint / rename / colour under the SPELLING: curate must find them.
+    _isolate_curate(monkeypatch, {"bianco white marble": "yes"}, {"bianco white marble": "Bianco White"},
+                    {"bianco white marble": "White"})
+    res = curate.build_curation([_row("Bianco White Marble", "b1", stone_type="Marble")], loaders.load_all())
+    rows = _new(res, "slab")
+    assert [r["Name"] for r in rows] == ["Bianco White"], rows
+    # no alias needed: the product's cleaned identity 'Bianco White' binds the new variety by exact name
+    assert rows[0]["Aliases"] == ""
+    assert res.backbone_new["slab"][0]["color"] == ["White"]

@@ -274,7 +274,10 @@ class VariationStage:
         # the variety; from here the bound row flows through the SAME reconcile/derive/texture path a
         # suggested variant uses. A scraped type that DID match a variety is never overridden.
         if match.cid is None and not (scraped_type and match.ambiguous):
-            op_type = self.ref.variety_seed_types.get(proj.norm(clean))
+            # a mint statement is keyed by the scraped spelling the card carries, an older mint by the
+            # cleaned identity: consult both, spelling first (curate resolves decisions the same way)
+            op_type = (self.ref.variety_seed_types.get(proj.norm(query))
+                       or self.ref.variety_seed_types.get(proj.norm(clean)))
             if op_type and proj.norm(op_type) != proj.norm(scraped_type):
                 retry = engine.match(clean, block_type=op_type, block_color=block_color,
                                      overrides=scoped, block_origin=origin)

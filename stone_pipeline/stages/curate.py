@@ -277,6 +277,20 @@ def _alias_model():
     return from_backbones()
 
 
+def _decided(table, name: str, clean: str):
+    """The operator's decision for a row, from a norm-keyed map or set. A statement (review/decide) is keyed
+    by the SCRAPED spelling the card carries ('bianco white marble'); an older decision is keyed by the cleaned
+    identity ('bianco white'). Spelling first, identity second, so both fire; a spelling that carries a type
+    word is never silently ignored again."""
+    for key in (proj.norm(name), proj.norm(clean)):
+        if isinstance(table, set):
+            if key in table:
+                return True
+        elif key in table:
+            return table[key]
+    return False if isinstance(table, set) else None
+
+
 def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     imports = {b: load_existing(b) for b in BRANCHES}
     resolver, near_meta = _alias_model() if SETTINGS.curation.enable_alias_model else (None, {})
@@ -368,11 +382,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # mint type, the scrape type stands; absent both, an ALIAS decision's target type fills a type-less
         # row (which lets a 'pick the type' answer on an aliased multi-type target resolve the row instead
         # of re-holding forever). Non-canonical operator types are dropped, same as the scrape gate above.
-        op_mint_type = seed_types.get(proj.norm(clean), "")
+        op_mint_type = _decided(seed_types, name, clean) or ""
         if op_mint_type and proj.norm(op_mint_type) in valid_type_norms:
             stone_type = op_mint_type
         else:
-            stone_type = scrape_type or alias_types.get(proj.norm(clean), "")
+            stone_type = scrape_type or _decided(alias_types, name, clean) or ""
             if stone_type and proj.norm(stone_type) not in valid_type_norms:
                 stone_type = ""
         return name, stone_type, clean
@@ -496,7 +510,8 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             new_variant_rows.append((owner_name, owner_name, stype,
                                      title_case(_attr_surface(row, "color")),
                                      (row.quality_name or last_resort_quality).strip() or last_resort_quality,
-                                     title_case(_attr_surface(row, "finish")), gap, backed, _review_evidence(row)))
+                                     title_case(_attr_surface(row, "finish")), gap, backed, _review_evidence(row),
+                                     spelling))
 
     def _named_with_types(name: str) -> str:
         """'Name (Type1, Type2)' for the review's nearest-existing column: an existing variety name
@@ -560,10 +575,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         exactly like every alias does (two-pass, the same path a plain mint takes). The decision stays keyed by
         the scraped spelling, so nothing in decision lookup or matching changes. Two different spellings
         renamed to ONE name mint one variety: the second only adds its spelling as an alias."""
-        renamed = seed_names.get(proj.norm(clean), "")
+        name = (row.variety_match_key or strip_format(row.raw_name or "")).strip()   # the scraped spelling
+        renamed = _decided(seed_names, name, clean) or ""
         display = title_case(renamed) if renamed and proj.norm(renamed) != proj.norm(clean) else title_case(clean)
         owner = (proj.norm(display), proj.norm(stone_type))
-        if proj.norm(display) != proj.norm(clean) and not seed_scopes.get(proj.norm(clean)):
+        if proj.norm(display) != proj.norm(clean) and not _decided(seed_scopes, name, clean):
             # the scraped spelling rides onto the mint row via sib_aliases (owner[0] == norm(title)); for a
             # variety that does not exist yet emit_alias_rows finds no import row and skips it, as intended.
             # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its
@@ -578,7 +594,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             (row.quality_name or last_resort_quality).strip() or last_resort_quality,
             title_case(_attr_surface(row, "finish")), gap,
             variety_branches.get(proj.norm(clean), set()),
-            _review_evidence(row),
+            _review_evidence(row), name,
         ))
 
     def _apply_operator_alias(clean: str, name: str, row, stone_type: str) -> bool:
@@ -588,10 +604,10 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         NAME that exists under several types with no type to pick by is HELD LOUDLY -- naming the types and
         asking which -- never a silent no-op onto an arbitrary same-name stone (the bug an alias to a
         multi-type target like 'Black Sea' = andesite + soapstone otherwise causes)."""
-        alias_to = alias_decisions.get(proj.norm(clean))
+        alias_to = _decided(alias_decisions, name, clean)
         if not alias_to:
             return False
-        target_type = alias_types.get(proj.norm(clean)) or stone_type
+        target_type = _decided(alias_types, name, clean) or stone_type
         if own := _by_name_owner(proj.norm(alias_to), target_type):
             alias_new.setdefault(own, set()).add(name)
             return True
@@ -634,7 +650,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if _looks_like_artifact(clean):            # 3a. not a variety name at all (code artifact)
             suspicious.append({"src_site": row.src_site, "raw_name": name, "cleaned_name": clean})
             continue
-        if proj.norm(clean) in rejected:           # 3b. a human said 'no' on a past run
+        if _decided(rejected, name, clean):        # 3b. a human said 'no' on a past run
             continue
         # 3c. OPERATOR ALIAS -- authoritative, consulted UNIFORMLY (not only in the code-shaped / fuzzy-
         # review arms). An explicit "this spelling is variety X" decision is honored here for EVERY row, so
@@ -652,7 +668,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # decision can no longer be silently dropped by whichever similarity path a row happens to take.
         # Every mint edge (type-less, already-exists, retired) is handled at the single enforcement point in
         # the new_variant_rows loop, so _mint is safe to call directly.
-        dec = confirm_decisions.get(proj.norm(clean))
+        dec = _decided(confirm_decisions, name, clean)
         if dec == "yes":
             _mint(clean, stone_type, row, gap)
             continue
@@ -874,7 +890,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if _r.finish_name:
             u["finishes"].add(title_case(_r.finish_name))
 
-    for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed, evidence in new_variant_rows:
+    for name, title, stone_type, obs_color, obs_quality, obs_finish, gap, observed, evidence, spelling in new_variant_rows:
         if not stone_type:
             # a variety cannot mint without a stone type (it drives the Key, so a wrong/empty type is a
             # wrong identity). HOLD it for the operator to assign one via the review (seed_type) instead
@@ -909,7 +925,7 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # generic 'Multicolor' (a real attribute) so the variety + its products are always priceable.
         # an operator-chosen mint colour (from the new-variety review) WINS over the observed/fallback
         # chain, so a colourless source is seeded with a real colour instead of the generic 'Natural'.
-        seeded = seed_colors.get(proj.norm(name))       # scraped-keyed, see the obs_union note above
+        seeded = _decided(seed_colors, spelling, name)   # by the scraped spelling, then the cleaned identity
         _pack = active_pack()
         colors = ([seeded] if seeded
                   else sorted(_u["colors"]) or ([obs_color] if obs_color else []) or [_pack.fallback_color])
