@@ -13,6 +13,7 @@ Contract under test (API -> store -> curate):
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -193,3 +194,62 @@ def test_decision_keyed_on_a_type_word_spelling_mints_and_seeds(monkeypatch):
     # no alias needed: the product's cleaned identity 'Bianco White' binds the new variety by exact name
     assert rows[0]["Aliases"] == ""
     assert res.backbone_new["slab"][0]["color"] == ["White"]
+
+
+# -- vendor scope + type-aware unmint (found in the full re-review) ------------------------------------
+
+def _statement_setup(tmp_path, monkeypatch):
+    from stone_pipeline.tests.test_mint_rename_two_produce import _paths, _write_export, EXISTING_KEY
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
+    monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
+    monkeypatch.setattr(varieties, "_rows", lambda q=None: [])
+    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
+    return loaders.load_all()
+
+
+def test_a_vendor_scoped_rename_does_not_decide_another_vendors_identical_spelling(tmp_path, monkeypatch):
+    # zucchi's statement "Honey Onyx is Honey (Onyx)" is about zucchi's product. polonine's identical spelling
+    # is undecided: it must not inherit the mint + rename (which would leave it with neither a global alias
+    # nor a scoped one -- never bound, never a card). It keeps its own identity and takes the normal path.
+    ref = _statement_setup(tmp_path, monkeypatch)
+    assert decisions_store.decide("zucchi", "Honey Onyx", "Honey", "Onyx", color="Yellow")["result"] == "minted"
+    zucchi = _typed_gap_row("Honey Onyx", "Onyx")
+    polonine = _typed_gap_row("Honey Onyx", "Onyx").model_copy(update={"src_site": "polonine"})
+    res = curate.build_curation([zucchi, polonine], ref)
+    names = [r["Name"] for r in res.new_variants["slab"]]
+    assert "Honey" in names                                   # zucchi's statement is applied
+    own_identity_minted = "Honey Onyx" in names
+    carded = any(c.get("variant") == "Honey Onyx" for c in res.pending_confirm)
+    assert own_identity_minted or carded, (names, res.pending_confirm)
+    if own_identity_minted:                                   # zucchi's seed colour is not polonine's
+        bb = next(r for r in res.backbone_new["slab"] if r["variant"] == "Honey Onyx")
+        assert bb["color"] != ["Yellow"]
+
+
+def test_a_global_mint_decision_still_decides_every_vendor(tmp_path, monkeypatch):
+    ref = _statement_setup(tmp_path, monkeypatch)
+    decisions_store.set_variety_decision("Honey Onyx", "mint", seed_type="Onyx", seed_name="Honey")   # '' scope
+    rows = [_typed_gap_row("Honey Onyx", "Onyx"),
+            _typed_gap_row("Honey Onyx", "Onyx").model_copy(update={"src_site": "polonine"})]
+    res = curate.build_curation(rows, ref)
+    assert [r["Name"] for r in res.new_variants["slab"]] == ["Honey"]
+    assert res.pending_confirm == []
+
+
+def test_unmint_clears_by_type_and_name(config_db):
+    decisions_store.set_variety_decision("Honey Onyx", "mint", seed_type="Onyx", seed_name="Honey")
+    decisions_store.set_variety_decision("Honey Marble", "mint", seed_type="Marble", seed_name="Honey")
+    decisions_store.set_variety_decision("Honey", "mint", seed_type="Marble")            # plain mint, Marble
+    assert decisions_store.clear_variety_decision("Honey", "onyx") == 1                # the Key type-slug form
+    assert decisions_store.variety_seed_names() == {"honey marble": "Honey"}
+    assert decisions_store.confirm_map() == {"honey marble": "yes", "honey": "yes"}
+    assert decisions_store.clear_variety_decision("Honey", "Marble") == 2               # canonical form
+    assert decisions_store.confirm_map() == {}
+
+
+def test_unmint_without_a_type_keeps_legacy_name_only_semantics(config_db):
+    decisions_store.set_variety_decision("Honey Onyx", "mint", seed_type="Onyx", seed_name="Honey")
+    decisions_store.set_variety_decision("Honey Marble", "mint", seed_type="Marble", seed_name="Honey")
+    assert decisions_store.clear_variety_decision("Honey") == 2
