@@ -826,7 +826,7 @@ class ReferenceData:
     # The matcher consults this so a product whose scraped type matches no existing variety of its name binds
     # to the operator-minted (name, type) instead of gapping -- the operator's authority reaching the PRODUCT,
     # not just the variety. Folded in at load (below), mirroring the seed_country origin overlay.
-    variety_seed_types: dict[str, str] = field(default_factory=dict)
+    variety_seed_types: dict[tuple[str, str], str] = field(default_factory=dict)   # scope_key -> type
     # (norm source, norm scraped spelling) -> (target variety name, target stone type or ''): the operator's
     # VENDOR-SCOPED alias decisions ('for marenostone, Amazon Green Granite is Golden Lightning'). Applied by
     # the matcher's override tier for that vendor only; a global alias goes the ordinary alias route.

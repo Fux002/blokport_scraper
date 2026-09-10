@@ -79,7 +79,7 @@ def test_new_variant_emitted_for_active_categories(ref, monkeypatch):
     assert not held.new_variants["slab"], "must not auto-mint before confirmation"
 
     # once the operator confirms it, the NEXT produce mints it into every active category (emit unchanged).
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"totally novel xyz": "yes"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "totally novel xyz"): "yes"})
     result = curate.build_curation([_row()], ref)
     # variant created in EVERY active category (uniform catalog): slab, block, tile.
     keys = {}
@@ -154,12 +154,12 @@ def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, mon
     assert p["stone_type"] == "Quartzite" and "New variety" in p["reason"]
     assert not held.new_variants["slab"]
 
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"nebula quartz prime": "yes"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "nebula quartz prime"): "yes"})
     minted = curate.build_curation([_row()], ref)
     assert any(r["Name"] == "Nebula Quartz Prime" for r in minted.new_variants["slab"])
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in minted.pending_confirm)
 
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"nebula quartz prime": "no"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "nebula quartz prime"): "no"})
     rejected = curate.build_curation([_row()], ref)
     assert not rejected.new_variants["slab"], "a 'no' must not mint"
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in rejected.pending_confirm), "a 'no' must not re-surface"
@@ -204,7 +204,7 @@ def test_new_variant_emits_backbone_entry_per_active_category(ref, monkeypatch):
         return r
 
     # unconfirmed new variety holds; once confirmed it mints its per-category backbone entry (below).
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"brand new stone": "yes"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "brand new stone"): "yes"})
     result = curate.build_curation([_row()], ref)
     for branch, cat in (("slab", "Slabs"), ("block", "Blocks"), ("tile", "Tiles")):
         post = next(p for p in result.backbone_new[branch] if p["variant"] == "Brand New Stone")
@@ -346,7 +346,7 @@ def test_alias_decision_routes_spelling_onto_target_and_mints_nothing(ref):
 
     # decide: alias 'White G' onto the existing variety 'Alpine'
     decisions_store.set_variety_decision("White G", "alias", alias_of="Alpine")
-    assert decisions.load_alias_decisions() == {"white g": "Alpine"}
+    assert decisions.load_alias_decisions() == {("", "white g"): "Alpine"}
 
     result = curate_white_g()
     # no longer held, never minted

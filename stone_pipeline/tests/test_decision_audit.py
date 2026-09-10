@@ -17,7 +17,7 @@ EXISTING = {("golden lightning", "granite"), ("azul white", "onyx")}
 
 
 def test_mint_is_a_gap_until_its_variety_exists():
-    mints = {"bianco white marble": {"action": "mint", "seed_name": "Bianco White", "seed_type": "Marble",
+    mints = {("", "bianco white marble"): {"action": "mint", "seed_name": "Bianco White", "seed_type": "Marble",
                                      "seed_country": "IR", "source": "marenostone", "variant_display": "Bianco White Marble"}}
     gaps = decision_audit.audit([], EXISTING, set(), mints, {}, {}, set())
     assert [g["decision"] for g in gaps] == ["mint"] and "Bianco White" in gaps[0]["reason"]
@@ -26,7 +26,7 @@ def test_mint_is_a_gap_until_its_variety_exists():
 
 
 def test_reject_is_a_gap_while_its_card_remains():
-    mints = {"junk code": {"action": "reject", "seed_name": None, "seed_type": None, "source": ""}}
+    mints = {("", "junk code"): {"action": "reject", "seed_name": None, "seed_type": None, "source": ""}}
     assert decision_audit.audit([], EXISTING, set(), mints, {}, {}, {"junk code"})[0]["decision"] == "reject"
     assert decision_audit.audit([], EXISTING, set(), mints, {}, {}, set()) == []
 

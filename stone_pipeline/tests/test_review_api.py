@@ -103,7 +103,7 @@ def test_get_types_returns_the_medusa_vocab():
 def test_put_reject_stores_and_reflects(seeded_queue):
     code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "reject"})
     assert code == 200 and body["action"] == "reject"
-    assert decisions.load_rejected() == {"zucchi blue x"}
+    assert decisions.load_rejected() == {("", "zucchi blue x")}
     v = server.dispatch("GET", ["review", "variants"], None)[1]["variants"][0]
     assert v["current_action"] == "reject"
 
@@ -139,5 +139,5 @@ def test_decide_colour_must_be_a_real_attribute(monkeypatch):
                                  {"source": "zucchi", "scraped": "Zucchi Blue X", "name": "Zucchi Blue X",
                                   "type": "Granite", "color": "beige", "origin": "brazil"})
     assert code == 200 and body["color"] == "Beige" and body["origin"] == "BR"
-    assert decisions.load_variety_seed_colors() == {"zucchi blue x": "Beige"}
+    assert decisions.load_variety_seed_colors() == {("", "zucchi blue x"): "Beige"}
     assert decisions_store.variety_seed_countries() == {"zucchi blue x": "BR"}

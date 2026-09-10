@@ -20,7 +20,6 @@ Pure: takes the rows and the decision maps, returns the gaps. curate.run writes 
 
 from __future__ import annotations
 
-from stone_pipeline.config.decisions_store import key_spelling
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.matching import projections as proj
 
@@ -40,7 +39,7 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
           mints: dict[str, dict], scoped: dict[tuple[str, str], tuple[str, str]],
           origins: dict[tuple[str, str, str], str], pending_spellings: set[str]) -> list[dict]:
     """The decisions this produce did NOT honour. `existing` and `created` are (norm name, norm type) sets of
-    the varieties in the reference and the ones minted this run; `mints` is decisions_store.variety_actions_all();
+    the varieties in the reference and the ones minted this run; `mints` is decisions_store.variety_actions();
     `scoped` / `origins` are the vendor alias and origin maps; `pending_spellings` are the norm scraped spellings
     still carried by a pending variety card."""
     gaps: list[dict] = []
@@ -48,8 +47,7 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
     for r in rows:
         by_listing.setdefault((_norm(r.src_site), _norm(r.variety_match_key or r.raw_name)), []).append(r)
 
-    for key, dec in mints.items():
-        spelling = key_spelling(key)
+    for (_, spelling), dec in mints.items():
         if dec["action"] == "mint":
             name = dec.get("seed_name") or dec.get("variant_display") or spelling
             target = (_norm(name), _norm(dec.get("seed_type")))

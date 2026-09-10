@@ -70,47 +70,30 @@ def _decision_rows() -> list:
                             "seed_country, seed_name, asked_by FROM variety_decision").fetchall()
 
 
-# THE SCOPE KEY. A decision map is keyed by the scope a decision applies to: the GLOBAL level (what a spelling
-# means for every vendor) is keyed by norm(spelling) alone -- the historic shape every reader and test knows --
-# and the VENDOR level (one vendor's own stone) by (norm source, norm spelling). scope_key builds a key,
-# key_spelling reads one back; nothing else inspects a key's shape. Readers resolve vendor first, then global.
+# THE SCOPE KEY. Every decision map is keyed (norm vendor, norm spelling): vendor '' is the GLOBAL level (what
+# the spelling means for every vendor), a vendor is that vendor's own level. scope_key is the one builder;
+# readers resolve a row vendor first, then global.
 
-def scope_key(source: str, spelling: str):
+def scope_key(source: str, spelling: str) -> tuple[str, str]:
     """The map key of a decision at `source`'s level ('' = global)."""
-    return (_norm(source), _norm(spelling)) if source else _norm(spelling)
+    return (_norm(source), _norm(spelling))
 
 
-def key_spelling(key) -> str:
-    """The norm(spelling) a scope key carries, at either level."""
-    return key if isinstance(key, str) else key[1]
-
-
-def variety_actions() -> dict[str, dict]:
-    """The GLOBAL level: norm(spelling) -> the decision that spelling means for every vendor ({'action':
-    mint|reject|alias, 'alias_of', 'seed_*', 'spelling', 'source' (''), 'asked_by'}). Empty for a fresh store."""
-    return {r["variant_norm"]: _decision_row(r) for r in _decision_rows() if not r["source"]}
-
-
-def variety_actions_scoped() -> dict[tuple[str, str], dict]:
-    """The VENDOR level: (norm source, norm spelling) -> the decision that vendor made for itself, beyond what
-    the spelling means for everyone (a different new stone from the same trade name)."""
-    return {scope_key(r["source"], r["variant_norm"]): _decision_row(r) for r in _decision_rows() if r["source"]}
-
-
-def variety_actions_all() -> dict:
-    """Both levels in one map, keyed by scope_key."""
-    return {**variety_actions(), **variety_actions_scoped()}
+def variety_actions() -> dict[tuple[str, str], dict]:
+    """Every decision, keyed by scope_key: {'action': mint|reject|alias, 'alias_of', 'seed_*', 'spelling',
+    'source', 'asked_by'}. Empty for a fresh store."""
+    return {scope_key(r["source"], r["variant_norm"]): _decision_row(r) for r in _decision_rows()}
 
 
 def variety_seed_colors() -> dict[str, str]:
-    """norm(variant) -> the operator-chosen mint colour, for every MINT decision that set one. The next
+    """scope_key -> the operator-chosen mint colour, for every MINT decision that set one. The next
     produce seeds the minted variety with this instead of the generic 'Natural' fallback."""
-    return {n: d["seed_color"] for n, d in variety_actions_all().items()
+    return {n: d["seed_color"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_color"]}
 
 
 def variety_seed_types() -> dict[str, str]:
-    """norm(variant) -> the operator-assigned stone type, for every MINT decision that set one. curate mints
+    """scope_key -> the operator-assigned stone type, for every MINT decision that set one. curate mints
     a type-less variety with this instead of holding it, and load_all folds it into ref.variety_seed_types so
     the matcher can bind a product to the operator-minted (name, type). No side effect (does NOT create the
     DB) on a fresh store: load_all reads this every build, so it must NOT materialise config.db -- mirroring
@@ -118,18 +101,18 @@ def variety_seed_types() -> dict[str, str]:
     sources.yaml seed for load_source."""
     if not store.config_db_path().exists():
         return {}
-    return {n: d["seed_type"] for n, d in variety_actions_all().items()
+    return {n: d["seed_type"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_type"]}
 
 
 def variety_seed_names() -> dict[str, str]:
-    """norm(scraped variant) -> the operator-corrected NAME to mint under (mint + rename), for every MINT
+    """scope_key -> the operator-corrected NAME to mint under (mint + rename), for every MINT
     decision that set one. curate creates the variety with this display name (Name and Key) and records the
     scraped spelling as its alias; the decision itself stays keyed by the scraped spelling. Same fresh-store
     guard as variety_seed_types (never materialise config.db from a read)."""
     if not store.config_db_path().exists():
         return {}
-    return {n: d["seed_name"] for n, d in variety_actions_all().items()
+    return {n: d["seed_name"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d.get("seed_name")}
 
 
@@ -139,7 +122,7 @@ def variety_seed_scopes() -> dict[tuple[str, str], str]:
     Same fresh-store guard as variety_seed_types."""
     if not store.config_db_path().exists():
         return {}
-    return {n: d["source"] for n, d in variety_actions_scoped().items() if d["action"] == "mint"}
+    return {n: d["source"] for n, d in variety_actions().items() if d["action"] == "mint" and d["source"]}
 
 
 def variety_seed_countries() -> dict[str, str]:
@@ -150,7 +133,7 @@ def variety_seed_countries() -> dict[str, str]:
     so it must NOT materialise config.db, mirroring backbone_leaf_overlay."""
     if not store.config_db_path().exists():
         return {}
-    return {_norm(d["seed_name"] or key_spelling(n)): d["seed_country"] for n, d in variety_actions_all().items()
+    return {_norm(d["seed_name"] or n[1]): d["seed_country"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_country"]}
 
 
@@ -164,16 +147,16 @@ def variety_seed_country_rules() -> dict[tuple[str, str], str]:
     (variety_seed_countries is the flat name->iso accessor). No side effect on a fresh store."""
     if not store.config_db_path().exists():
         return {}
-    return {(_norm(d["seed_name"] or key_spelling(n)), _norm(d["seed_type"])): d["seed_country"]
-            for n, d in variety_actions_all().items()
+    return {(_norm(d["seed_name"] or n[1]), _norm(d["seed_type"])): d["seed_country"]
+            for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_country"]}
 
 
 def confirm_map() -> dict[str, str]:
-    """norm(variant) -> 'yes'|'no' -- the mint/reject view the legacy confirm-file reader expects.
+    """scope_key -> 'yes'|'no' -- the mint/reject view the legacy confirm-file reader expects.
     alias decisions are NOT in this map; the alias router consumes them separately (`alias_map`)."""
     out: dict[str, str] = {}
-    for name, dec in variety_actions_all().items():
+    for name, dec in variety_actions().items():
         if dec["action"] == "mint":
             out[name] = "yes"
         elif dec["action"] == "reject":
@@ -182,24 +165,24 @@ def confirm_map() -> dict[str, str]:
 
 
 def rejected_names() -> set[str]:
-    """norm(variant) for every reject decision -- the learned 'never propose again' memory."""
-    return {n for n, d in variety_actions_all().items() if d["action"] == "reject"}
+    """scope_key of every reject decision -- the learned 'never propose again' memory."""
+    return {n for n, d in variety_actions().items() if d["action"] == "reject"}
 
 
 def alias_map() -> dict[str, str]:
-    """norm(spelling) -> alias_of (the target variety NAME) for every alias decision. The router adds
+    """scope_key -> alias_of (the target variety NAME) for every alias decision. The router adds
     the spelling to the target variety's alias set so the product resolves onto it."""
-    return {n: d["alias_of"] for n, d in variety_actions_all().items()
+    return {n: d["alias_of"] for n, d in variety_actions().items()
             if d["action"] == "alias" and d["alias_of"]}
 
 
 def alias_type_map() -> dict[str, str]:
-    """norm(spelling) -> the alias TARGET's stone type, for alias decisions where the operator picked one.
+    """scope_key -> the alias TARGET's stone type, for alias decisions where the operator picked one.
     Disambiguates a multi-type target name (Black Sea = andesite + soapstone): the spelling aliases into
     the target variety of THIS type, not an arbitrary same-name one. Absent (no entry) when the operator
     did not choose a type; the router then falls back to the scraped row's own type, and holds if neither
     disambiguates."""
-    return {n: d["seed_type"] for n, d in variety_actions_all().items()
+    return {n: d["seed_type"] for n, d in variety_actions().items()
             if d["action"] == "alias" and d.get("seed_type")}
 
 
@@ -286,7 +269,7 @@ def _spelling_means(spelling: str, stone_type: str, exists_as, alias_target, cle
 def _global_meaning(spelling: str, stone_type: str, exists_as, alias_target, clean) -> tuple[str, str] | None:
     """(name, type) the spelling means for every vendor today: the global mint on it, else the existing
     variety it resolves to (see _spelling_means), else None (the spelling is undefined: the next mint defines it)."""
-    prior = variety_actions().get(_norm(spelling))
+    prior = variety_actions().get(scope_key("", spelling))
     if prior and prior["action"] == "mint":
         return (prior.get("seed_name") or spelling, prior.get("seed_type") or "")
     existing = _spelling_means(spelling, stone_type, exists_as, alias_target, clean)
@@ -385,8 +368,8 @@ def backfill_levels(exists_as=None, alias_target=None, clean=None) -> list[dict]
         return None
     exists_as, alias_target, clean = _lookups(exists_as, alias_target, clean)
     moved: list[dict] = []
-    for norm, dec in variety_actions().items():
-        if dec["action"] != "mint" or not dec["asked_by"] or not dec["seed_type"]:
+    for (level, norm), dec in variety_actions().items():
+        if level or dec["action"] != "mint" or not dec["asked_by"] or not dec["seed_type"]:
             continue
         spelling = dec["spelling"] or norm
         target = dec["seed_name"] or spelling
@@ -929,8 +912,9 @@ def _project_decision(item: dict, scoped: dict, actions: dict, owiden: dict) -> 
 
       * `scoped`  -- the per-vendor bind {(nsrc, nspell): (target variety, target type)}; the card's own
                      (source, scraped) listings are the keys, with a single-vendor (src, scraped) fallback;
-      * `actions` -- the variety action {nspell|ref: mint/reject/rename}; pass EMPTY for a kind that has no
-                     variety_action (origin), so the view is driven by the bind alone.
+      * `actions` -- the variety action {scope_key: mint/reject/rename} (a reject is keyed by the card ref);
+                     pass EMPTY for a kind that has no variety_action (origin), so the view is driven by the
+                     bind alone.
 
     From those it sets decided, current_action, current_alias_of and current_seed_name/type/colour/country,
     backfills an empty scraped type from the decided type (so a decided card stays re-keyable), and resolves
@@ -956,7 +940,8 @@ def _project_decision(item: dict, scoped: dict, actions: dict, owiden: dict) -> 
     spellings |= {_norm(l.get("scraped", "")) for l in (item.get("listings") or [])
                   if isinstance(l, dict) and l.get("scraped")}
     act = (next((actions[k] for k in keys if k in actions), None)               # the vendor's own level
-           or actions.get(item["ref"]) or next((actions[s] for s in spellings if s in actions), {}))
+           or actions.get(scope_key("", item["ref"]))
+           or next((actions[scope_key("", s)] for s in spellings if scope_key("", s) in actions), {}))
     if act.get("action") == "mint" and hit is not None and _norm(act.get("seed_name") or "") != _norm(hit[0]):
         act = {}                                                     # stale mint superseded by the newer bind
     item["decided"] = bool(act.get("action")) or hit is not None
@@ -984,7 +969,7 @@ def _project_decision(item: dict, scoped: dict, actions: dict, owiden: dict) -> 
 def list_pending(kind: str) -> list[dict]:
     """The pending items for `kind`, each = its payload plus `sources` and the `current_action` already
     recorded for it (so the UI can show a decision made between runs, applied on the next produce)."""
-    actions = variety_actions_all() if kind == "variety" else {}
+    actions = variety_actions() if kind == "variety" else {}
     # Match a decision to a card WITHOUT relying on the card ref. The ref is the CLEANED variety name (the
     # cleaner strips a trailing type word: "Amazon Green Granite" -> ref "amazon green"), but decide() keys
     # a mint and an alias on the SCRAPED spelling ("amazon green granite"). So the flag has to match on the

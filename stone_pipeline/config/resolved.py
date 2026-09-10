@@ -126,7 +126,7 @@ def list_resolved(source: str | None = None, decided: bool | None = None,
         frame = frame.filter(pl.col("src_site") == source)
     scoped = decisions_store.scoped_aliases()
     origins = decisions_store.origin_decisions()
-    actions = decisions_store.variety_actions_all()
+    actions = decisions_store.variety_actions()
     owiden = decisions_store.origin_widen()   # PER-DECISION widen: {(nsrc, vnorm, tnorm): iso}
     rows = [_row(rec, scoped, origins, actions, owiden) for rec in frame.to_dicts()]
     if decided is not None:

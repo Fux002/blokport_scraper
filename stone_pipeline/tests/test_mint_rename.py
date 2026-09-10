@@ -90,7 +90,7 @@ def test_old_schema_gains_the_seed_name_column(config_db):
 # -- curate --------------------------------------------------------------------
 
 def test_mint_under_seed_name_creates_the_renamed_variety_with_the_scraped_alias(monkeypatch):
-    _isolate_curate(monkeypatch, {"honey onyx": "yes"}, {"honey onyx": RENAMED})
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {("", "honey onyx"): RENAMED})
     res = curate.build_curation([_row(SCRAPED, "t1", color_name="yellow", finish_name="polished")],
                                 loaders.load_all())
     for b in ("slab", "block", "tile"):
@@ -105,15 +105,15 @@ def test_mint_under_seed_name_creates_the_renamed_variety_with_the_scraped_alias
 
 
 def test_seed_colour_survives_the_rename(monkeypatch):
-    _isolate_curate(monkeypatch, {"honey onyx": "yes"}, {"honey onyx": RENAMED}, {"honey onyx": "Gold"})
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {("", "honey onyx"): RENAMED}, {("", "honey onyx"): "Gold"})
     res = curate.build_curation([_row(SCRAPED, "t1", color_name="yellow")], loaders.load_all())
     bb = [r for r in res.backbone_new["slab"] if r["variant"] == RENAMED]
     assert bb and bb[0]["color"] == ["Gold"]
 
 
 def test_two_spellings_renamed_to_one_name_mint_one_variety(monkeypatch):
-    _isolate_curate(monkeypatch, {"honey onyx": "yes", "honig onyx": "yes"},
-                    {"honey onyx": RENAMED, "honig onyx": RENAMED})
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes", ("", "honig onyx"): "yes"},
+                    {("", "honey onyx"): RENAMED, ("", "honig onyx"): RENAMED})
     res = curate.build_curation([_row(SCRAPED, "t1"), _row("Honig Onyx", "t2")], loaders.load_all())
     for b in ("slab", "block", "tile"):
         rows = _new(res, b)
@@ -125,8 +125,8 @@ def test_same_name_mints_of_different_types_keep_their_own_aliases(monkeypatch):
     # Identity is (type, name): an Onyx 'Honey' and a Marble 'Honey' minted in ONE run must each carry only
     # their own scraped spelling. Leaking a spelling across types would make it an ambiguous surface of two
     # owners and send its products to review on the next produce.
-    _isolate_curate(monkeypatch, {"honey onyx": "yes", "honey marble": "yes"},
-                    {"honey onyx": RENAMED, "honey marble": RENAMED})
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes", ("", "honey marble"): "yes"},
+                    {("", "honey onyx"): RENAMED, ("", "honey marble"): RENAMED})
     res = curate.build_curation([_row(SCRAPED, "t1"), _row("Honey Marble", "t2", stone_type="Marble")],
                                 loaders.load_all())
     rows = _new(res, "slab")
@@ -137,7 +137,7 @@ def test_same_name_mints_of_different_types_keep_their_own_aliases(monkeypatch):
 
 
 def test_mint_without_a_seed_name_is_unchanged(monkeypatch):
-    _isolate_curate(monkeypatch, {"honey onyx": "yes"}, {})
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
     res = curate.build_curation([_row(SCRAPED, "t1")], loaders.load_all())
     rows = _new(res, "slab")
     assert [r["Name"] for r in rows] == [SCRAPED]
@@ -151,7 +151,7 @@ def test_statement_with_a_corrected_name_is_a_mint_plus_rename(config_db, monkey
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
     assert code == 200 and body["result"] == "minted" and body["level"] == "global"
-    assert decisions.load_variety_seed_names() == {"honey onyx": RENAMED}       # the spelling's meaning for everyone
+    assert decisions.load_variety_seed_names() == {("", "honey onyx"): RENAMED}       # the spelling's meaning for everyone
     assert decisions_store.scoped_aliases() == {}                                # curate attaches the alias globally
 
 
@@ -177,7 +177,7 @@ def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch
                                  {"source": "zucchi", "scraped": SCRAPED, "name": "honey  ONYX", "type": "Onyx"})
     assert code == 200 and body["result"] == "minted"
     assert decisions.load_variety_seed_names() == {}
-    assert decisions_store.confirm_map() == {"honey onyx": "yes"}
+    assert decisions_store.confirm_map() == {("", "honey onyx"): "yes"}
     assert decisions_store.scoped_aliases() == {}
 
 
@@ -186,8 +186,8 @@ def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch
 def test_decision_keyed_on_a_type_word_spelling_mints_and_seeds(monkeypatch):
     # the card's scraped spelling is 'Bianco White Marble'; curate's cleaned identity is 'Bianco White'.
     # A statement stores mint / rename / colour under the SPELLING: curate must find them.
-    _isolate_curate(monkeypatch, {"bianco white marble": "yes"}, {"bianco white marble": "Bianco White"},
-                    {"bianco white marble": "White"})
+    _isolate_curate(monkeypatch, {("", "bianco white marble"): "yes"}, {("", "bianco white marble"): "Bianco White"},
+                    {("", "bianco white marble"): "White"})
     res = curate.build_curation([_row("Bianco White Marble", "b1", stone_type="Marble")], loaders.load_all())
     rows = _new(res, "slab")
     assert [r["Name"] for r in rows] == ["Bianco White"], rows
@@ -244,8 +244,8 @@ def test_unmint_clears_by_type_and_name(config_db):
     decisions_store.set_variety_decision("Honey Marble", "mint", seed_type="Marble", seed_name="Honey")
     decisions_store.set_variety_decision("Honey", "mint", seed_type="Marble")            # plain mint, Marble
     assert decisions_store.clear_variety_decision("Honey", "onyx") == 1                # the Key type-slug form
-    assert decisions_store.variety_seed_names() == {"honey marble": "Honey"}
-    assert decisions_store.confirm_map() == {"honey marble": "yes", "honey": "yes"}
+    assert decisions_store.variety_seed_names() == {("", "honey marble"): "Honey"}
+    assert decisions_store.confirm_map() == {("", "honey marble"): "yes", ("", "honey"): "yes"}
     assert decisions_store.clear_variety_decision("Honey", "Marble") == 2               # canonical form
     assert decisions_store.confirm_map() == {}
 
@@ -269,7 +269,7 @@ def test_a_matched_row_is_overridden_by_an_operator_mint_rename(monkeypatch):
     # The persistent decision_gap: a scraped spelling the matcher resolved to an existing variety (no gap)
     # was skipped, so the operator's "this is really a NEW variety" never applied. An explicit mint+rename on
     # a matched row must still mint the new variety (the scraped spelling becomes its alias, binds next run).
-    _isolate_curate(monkeypatch, {"brown granite": "yes"}, {"brown granite": "Chocolate Classic"})
+    _isolate_curate(monkeypatch, {("", "brown granite"): "yes"}, {("", "brown granite"): "Chocolate Classic"})
     res = curate.build_curation([_matched_row("Brown Granite", "Brown Granite", color_name="brown")],
                                 loaders.load_all())
     for b in ("slab", "block", "tile"):
