@@ -139,14 +139,14 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
     _write_export(paths.export_file, _read_export(paths.export_file) + [
         {"Id": "var_honey", "Key": honey_key, "Name": "Honey", "Aliases": minted[0]["Aliases"]}])
 
-    # ... produce 3: the zucchi product binds to 'Honey' through the vendor-scoped alias the statement made;
-    # another vendor's identical spelling is NOT bound by it (the statement was about zucchi's product).
+    # ... produce 3: the first mint on a spelling is its GLOBAL meaning: the zucchi product binds to 'Honey'
+    # through the alias the rename attached for everyone, and so does another vendor's identical spelling.
     ref3 = loaders.load_all()
     zucchi, other = _scrape_row("p1"), _scrape_row("p2").model_copy(update={"src_site": "polonine"})
     _match([zucchi, other], ref3)
     assert zucchi.variation_key == honey_key and zucchi.variation_id == "var_honey"
     assert not zucchi.tree_gaps
-    assert other.variation_key is None and other.tree_gaps
+    assert other.variation_key == honey_key and not other.tree_gaps
     assert curate.build_curation([zucchi], ref3).new_variants["slab"] == []   # nothing proposed again
 
 

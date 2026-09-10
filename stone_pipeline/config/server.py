@@ -719,6 +719,11 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
     # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
     snapshot.restore(writethrough.ledger_path(), required=True)   # durable: fail loud if present-but-unfetchable
+    # TWO LEVELS data backfill: needs the ledger (variety lookups), so it runs here and not in the store
+    # migration, which fires on the first config.db open above, before the ledger is back.
+    if moved := decisions_store.backfill_levels():
+        log.warning("boot: moved mint(s) to the vendor level (spelling already means another stone)",
+                    extra={"extra_fields": {"moved": moved}})
     # Restore the last scrape's artifact trees (outputs_dir + data/) too: catalog/republish consume them
     # off the ephemeral disk, so without this a redeploy wipes the last scrape and they abort with "no
     # source runs". No-op when a local scrape already exists or none has been snapshotted yet.

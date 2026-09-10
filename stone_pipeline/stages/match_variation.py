@@ -276,8 +276,9 @@ class VariationStage:
         if match.cid is None and not (scraped_type and match.ambiguous):
             # a mint statement is keyed by the scraped spelling the card carries, an older mint by the
             # cleaned identity: consult both, spelling first (curate resolves decisions the same way)
-            op_type = (self.ref.variety_seed_types.get(proj.norm(query))
-                       or self.ref.variety_seed_types.get(proj.norm(clean)))
+            seeds, src = self.ref.variety_seed_types, proj.norm(row.src_site or "")
+            op_type = (seeds.get((src, proj.norm(query))) or seeds.get((src, proj.norm(clean)))
+                       or seeds.get(proj.norm(query)) or seeds.get(proj.norm(clean)))
             if op_type and proj.norm(op_type) != proj.norm(scraped_type):
                 retry = engine.match(clean, block_type=op_type, block_color=block_color,
                                      overrides=scoped, block_origin=origin)

@@ -150,9 +150,9 @@ def test_statement_with_a_corrected_name_is_a_mint_plus_rename(config_db, monkey
     _card(); _vocab(monkeypatch, [])
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
-    assert code == 200 and body["result"] == "minted"
-    assert decisions.load_variety_seed_names() == {"honey onyx": RENAMED}
-    assert decisions_store.scoped_aliases()[("zucchi", "honey onyx")] == (RENAMED, "Onyx")
+    assert code == 200 and body["result"] == "minted" and body["level"] == "global"
+    assert decisions.load_variety_seed_names() == {"honey onyx": RENAMED}       # the spelling's meaning for everyone
+    assert decisions_store.scoped_aliases() == {}                                # curate attaches the alias globally
 
 
 def test_statement_naming_an_existing_type_name_pair_binds_instead_of_minting(config_db, monkeypatch):
@@ -209,23 +209,24 @@ def _statement_setup(tmp_path, monkeypatch):
     return loaders.load_all()
 
 
-def test_a_vendor_scoped_rename_does_not_decide_another_vendors_identical_spelling(tmp_path, monkeypatch):
-    # zucchi's statement "Honey Onyx is Honey (Onyx)" is about zucchi's product. polonine's identical spelling
-    # is undecided: it must not inherit the mint + rename (which would leave it with neither a global alias
-    # nor a scoped one -- never bound, never a card). It keeps its own identity and takes the normal path.
+def test_the_first_mint_on_a_spelling_decides_every_vendor_and_a_vendor_may_still_differ(tmp_path, monkeypatch):
+    # TWO LEVELS. zucchi's statement "Honey Onyx is Honey (Onyx)" is the first mint on that spelling, so it is
+    # what the spelling MEANS: polonine's identical spelling mints the same Honey (no card, no duplicate).
     ref = _statement_setup(tmp_path, monkeypatch)
-    assert decisions_store.decide("zucchi", "Honey Onyx", "Honey", "Onyx", color="Yellow")["result"] == "minted"
+    assert decisions_store.decide("zucchi", "Honey Onyx", "Honey", "Onyx", color="Yellow")["level"] == "global"
     zucchi = _typed_gap_row("Honey Onyx", "Onyx")
     polonine = _typed_gap_row("Honey Onyx", "Onyx").model_copy(update={"src_site": "polonine"})
     res = curate.build_curation([zucchi, polonine], ref)
-    names = [r["Name"] for r in res.new_variants["slab"]]
-    assert "Honey" in names                                   # zucchi's statement is applied
-    own_identity_minted = "Honey Onyx" in names
-    carded = any(c.get("variant") == "Honey Onyx" for c in res.pending_confirm)
-    assert own_identity_minted or carded, (names, res.pending_confirm)
-    if own_identity_minted:                                   # zucchi's seed colour is not polonine's
-        bb = next(r for r in res.backbone_new["slab"] if r["variant"] == "Honey Onyx")
-        assert bb["color"] != ["Yellow"]
+    assert [r["Name"] for r in res.new_variants["slab"]] == ["Honey"]
+    assert not any(c.get("variant") == "Honey Onyx" for c in res.pending_confirm)
+    # polonine then says its Honey Onyx is a DIFFERENT new stone: that is polonine's own level, beside the global
+    assert decisions_store.decide("polonine", "Honey Onyx", "Honey Polonia", "Onyx", color="Beige")["level"] == "vendor"
+    res = curate.build_curation([zucchi, polonine], ref)
+    names = sorted(r["Name"] for r in res.new_variants["slab"])
+    assert names == ["Honey", "Honey Polonia"], names
+    assert decisions_store.scoped_aliases()[("polonine", "honey onyx")] == ("Honey Polonia", "Onyx")
+    bb = {r["variant"]: r["color"] for r in res.backbone_new["slab"]}
+    assert bb["Honey"] == ["Yellow"] and bb["Honey Polonia"] == ["Beige"]   # each level keeps its own colour
 
 
 def test_a_global_mint_decision_still_decides_every_vendor(tmp_path, monkeypatch):
