@@ -71,8 +71,8 @@ def test_renamed_mint_binds_the_product_on_the_next_produce(tmp_path, monkeypatc
     _match(rows1, ref1)
     assert rows1[0].variation_key is None, "must gap before the mint exists"
 
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"honey onyx": "yes"})
-    monkeypatch.setattr(decisions, "load_variety_seed_names", lambda: {"honey onyx": "Honey"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "honey onyx"): "yes"})
+    monkeypatch.setattr(decisions, "load_variety_seed_names", lambda: {("", "honey onyx"): "Honey"})
     res1 = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref1)
     minted = res1.new_variants["slab"]
     assert [r["Name"] for r in minted] == ["Honey"]
@@ -122,7 +122,7 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": "Honey Onyx", "name": "Honey", "type": "Onyx"})
     assert code == 200 and body["result"] == "minted", body
-    assert decisions.load_variety_seed_names() == {"honey onyx": "Honey"}
+    assert decisions.load_variety_seed_names() == {("", "honey onyx"): "Honey"}
 
     # ... produce 2 mints 'Honey' under the corrected name, reading the real store ...
     res1 = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref)
@@ -157,8 +157,8 @@ def test_renamed_mint_is_idempotent_while_the_pull_lags(tmp_path, monkeypatch):
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"honey onyx": "yes"})
-    monkeypatch.setattr(decisions, "load_variety_seed_names", lambda: {"honey onyx": "Honey"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "honey onyx"): "yes"})
+    monkeypatch.setattr(decisions, "load_variety_seed_names", lambda: {("", "honey onyx"): "Honey"})
     ref = loaders.load_all()
     first = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref).new_variants
     second = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref).new_variants

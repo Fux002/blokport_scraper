@@ -279,10 +279,10 @@ def _alias_model():
 
 
 def _decided(table, source: str, name: str, clean: str):
-    """The operator's decision for a row, from a map or set keyed at TWO levels: (norm source, norm spelling)
-    for a decision the vendor made for itself, norm spelling for what the spelling means to everyone. Vendor
-    first, then global; and at each level the SCRAPED spelling first ('bianco white marble', what a statement
-    is keyed by), the cleaned identity second ('bianco white', what an older decision is keyed by)."""
+    """The operator's decision for a row, from a map or set keyed by scope_key: (vendor, spelling) for a
+    decision the vendor made for itself, ('', spelling) for what the spelling means to everyone. Vendor first,
+    then global; and at each level the SCRAPED spelling first ('bianco white marble', what a statement is keyed
+    by), the cleaned identity second ('bianco white', what an older decision is keyed by)."""
     for key in (scope_key(source, name), scope_key(source, clean), scope_key("", name), scope_key("", clean)):
         if isinstance(table, set):
             if key in table:
@@ -326,13 +326,13 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # human decisions read back from the ledger (variants_to_confirm.csv) + the persistent reject memory
     from stone_pipeline.stages import decisions
     confirm_decisions = decisions.load_confirm_decisions()
-    alias_decisions = decisions.load_alias_decisions()   # norm(spelling) -> existing variety NAME to alias onto
-    alias_types = decisions.load_alias_types()            # norm(spelling) -> operator-chosen TARGET type (multi-type)
+    alias_decisions = decisions.load_alias_decisions()   # scope_key -> existing variety NAME to alias onto
+    alias_types = decisions.load_alias_types()            # scope_key -> operator-chosen TARGET type (multi-type)
     rejected = decisions.load_rejected()
-    seed_colors = decisions.load_variety_seed_colors()   # norm(variant) -> operator mint colour (over 'Natural')
-    seed_types = decisions.load_variety_seed_types()     # norm(variant) -> operator-assigned stone type (fills a void)
-    seed_names = decisions.load_variety_seed_names()     # norm(variant) -> operator-corrected NAME to mint under (rename)
-    seed_scopes = decisions.load_variety_seed_scopes()   # norm(variant) -> the ONE vendor a rename was made for
+    seed_colors = decisions.load_variety_seed_colors()   # scope_key -> operator mint colour (over 'Natural')
+    seed_types = decisions.load_variety_seed_types()     # scope_key -> operator-assigned stone type (fills a void)
+    seed_names = decisions.load_variety_seed_names()     # scope_key -> operator-corrected NAME to mint under (rename)
+    seed_scopes = decisions.load_variety_seed_scopes()   # scope_key -> that vendor, for every vendor-level mint
     pending_confirm: list[dict] = []
 
     def _level(src_site: str, name: str, clean: str) -> str:
@@ -1228,7 +1228,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     created = {(proj.norm(v["Name"]), proj.norm(type_slug_from_key(v["Key"]).replace("_", " ")))
                for lst in result.new_variants.values() for v in lst}
     pending_spellings = {proj.norm(p["scraped"]) for p in result.pending_confirm if p.get("scraped")}
-    gaps = decision_audit.audit(rows, existing, created, decisions_store.variety_actions_all(),
+    gaps = decision_audit.audit(rows, existing, created, decisions_store.variety_actions(),
                                 decisions_store.scoped_aliases(), decisions_store.origin_decisions(),
                                 pending_spellings)
     decisions.write_decision_gaps(gaps)

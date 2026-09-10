@@ -49,48 +49,48 @@ def _norm(s: str) -> str:
 
 # -- variety decisions ---------------------------------------------------------
 
-def load_confirm_decisions() -> dict[str, str]:
+def load_confirm_decisions() -> dict[tuple[str, str], str]:
     """norm(variant) -> 'yes' | 'no' for decided varieties (mint -> yes, reject -> no). alias decisions
     are consumed separately via load_alias_decisions."""
     return decisions_store.confirm_map()
 
 
-def load_alias_decisions() -> dict[str, str]:
+def load_alias_decisions() -> dict[tuple[str, str], str]:
     """norm(spelling) -> the existing variety NAME it should alias onto."""
     return decisions_store.alias_map()
 
 
-def load_alias_types() -> dict[str, str]:
+def load_alias_types() -> dict[tuple[str, str], str]:
     """norm(spelling) -> the alias TARGET's stone type, where the operator chose one. Disambiguates a
     multi-type target name so the spelling aliases into the right stone (paired with load_alias_decisions)."""
     return decisions_store.alias_type_map()
 
 
-def load_rejected() -> set[str]:
+def load_rejected() -> set[tuple[str, str]]:
     """Varieties the operator said 'no' to before -- never propose them again."""
     return decisions_store.rejected_names()
 
 
-def load_variety_seed_colors() -> dict[str, str]:
+def load_variety_seed_colors() -> dict[tuple[str, str], str]:
     """norm(variant) -> the operator-chosen mint colour. curate seeds a minted variety with this instead
     of the generic 'Natural' fallback, so a colourless source does not leave the variety colourless."""
     return decisions_store.variety_seed_colors()
 
 
-def load_variety_seed_types() -> dict[str, str]:
+def load_variety_seed_types() -> dict[tuple[str, str], str]:
     """norm(variant) -> the operator-assigned stone type. curate mints a type-less variety with this
     instead of holding it, so a source that supplies no type does not leave the variety unmintable."""
     return decisions_store.variety_seed_types()
 
 
-def load_variety_seed_names() -> dict[str, str]:
+def load_variety_seed_names() -> dict[tuple[str, str], str]:
     """norm(scraped variant) -> the operator-corrected NAME to mint under (mint + rename). curate creates the
     variety with this display name (Name and Key) and records the scraped spelling as its alias, so the
     product binds on the next produce through the alias surface like every alias does."""
     return decisions_store.variety_seed_names()
 
 
-def load_variety_seed_scopes() -> dict[str, str]:
+def load_variety_seed_scopes() -> dict[tuple[str, str], str]:
     """norm(scraped variant) -> the vendor a mint + rename was made FOR. curate then leaves the scraped spelling
     off the renamed variety's global aliases: that vendor's scoped alias binds its products instead."""
     return decisions_store.variety_seed_scopes()

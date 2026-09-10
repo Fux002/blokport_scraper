@@ -43,7 +43,7 @@ def test_review_queue_uniformly_title_cases_display_names():
     assert item["nearest_existing"] == "Rosal"                  # F1: nearest_existing normalized too
     assert item["stone_type"] == "Semi-Precious Stone"          # canonical type intact, not title-mangled
     ds.set_variety_decision("venatto blue", "reject")           # operator can act by any casing (norm-keyed)
-    assert decisions.load_rejected() == {"venatto blue"}
+    assert decisions.load_rejected() == {("", "venatto blue")}
 
 
 def test_backbone_leaf_queue_title_cases_the_variety_name():
@@ -63,9 +63,9 @@ def test_mint_reject_alias_actions_map_correctly():
     ds.set_variety_decision("Gamma Stone", "reject")
     ds.set_variety_decision("Bianco Spelling", "alias", alias_of="Bianco Carrara")
     # confirm map is the mint/reject view (alias is NOT in it -- it is routed separately)
-    assert decisions.load_confirm_decisions() == {"alpha stone": "yes", "gamma stone": "no"}
-    assert decisions.load_rejected() == {"gamma stone"}
-    assert decisions.load_alias_decisions() == {"bianco spelling": "Bianco Carrara"}
+    assert decisions.load_confirm_decisions() == {("", "alpha stone"): "yes", ("", "gamma stone"): "no"}
+    assert decisions.load_rejected() == {("", "gamma stone")}
+    assert decisions.load_alias_decisions() == {("", "bianco spelling"): "Bianco Carrara"}
 
 
 def test_alias_carries_the_target_type_to_disambiguate_a_multitype_name():
@@ -75,18 +75,18 @@ def test_alias_carries_the_target_type_to_disambiguate_a_multitype_name():
     ds.set_variety_decision("Black Turtle", "alias", alias_of="Black Sea", seed_type="Andesite")
     ds.set_variety_decision("Karur White", "mint", seed_type="Granite")
     ds.set_variety_decision("Junk Code", "reject", seed_type="Granite")
-    assert decisions.load_alias_decisions() == {"black turtle": "Black Sea"}
-    assert decisions.load_alias_types() == {"black turtle": "Andesite"}     # the target type is kept
-    assert ds.variety_actions()["karur white"]["seed_type"] == "Granite"    # mint still carries its type
-    assert ds.variety_actions()["junk code"]["seed_type"] is None           # reject carries none
+    assert decisions.load_alias_decisions() == {("", "black turtle"): "Black Sea"}
+    assert decisions.load_alias_types() == {("", "black turtle"): "Andesite"}     # the target type is kept
+    assert ds.variety_actions()[("", "karur white")]["seed_type"] == "Granite"    # mint still carries its type
+    assert ds.variety_actions()[("", "junk code")]["seed_type"] is None           # reject carries none
 
 
 def test_re_deciding_a_variety_overwrites():
     ds.set_variety_decision("Flip Stone", "mint")
-    assert decisions.load_confirm_decisions() == {"flip stone": "yes"}
+    assert decisions.load_confirm_decisions() == {("", "flip stone"): "yes"}
     ds.set_variety_decision("Flip Stone", "reject")           # change your mind
-    assert decisions.load_confirm_decisions() == {"flip stone": "no"}
-    assert decisions.load_rejected() == {"flip stone"}
+    assert decisions.load_confirm_decisions() == {("", "flip stone"): "no"}
+    assert decisions.load_rejected() == {("", "flip stone")}
 
 
 def test_invalid_decisions_are_rejected_loudly():
@@ -102,8 +102,8 @@ def test_learn_rejects_never_overwrites_an_explicit_decision():
     ds.set_variety_decision("Keeper", "mint")                 # operator said mint
     decisions.save_rejected({"keeper", "junk code"})          # runtime tries to learn a reject
     # the explicit mint survives; only the genuinely new name is learned as a reject
-    assert decisions.load_confirm_decisions()["keeper"] == "yes"
-    assert "junk code" in decisions.load_rejected()
+    assert decisions.load_confirm_decisions()[("", "keeper")] == "yes"
+    assert ("", "junk code") in decisions.load_rejected()
 
 
 def test_pending_variety_queue_round_trips_with_current_action():

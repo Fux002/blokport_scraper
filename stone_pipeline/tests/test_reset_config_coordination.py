@@ -44,8 +44,8 @@ def test_clear_helpers_empty_queues_and_ids_but_keep_decisions(tmp_path, monkeyp
     assert decisions_store.list_pending("attribute") == []
     assert decisions_store.attribute_ids() == {}
     # durable operator intent SURVIVES
-    assert decisions_store.confirm_map() == {"black absolute": "yes"}          # mint kept
-    assert decisions_store.variety_seed_types() == {"black absolute": "Granite"}
+    assert decisions_store.confirm_map() == {("", "black absolute"): "yes"}          # mint kept
+    assert decisions_store.variety_seed_types() == {("", "black absolute"): "Granite"}
     assert store.load_retired() == {"slab_granite_x_uuid"}
 
 
@@ -76,7 +76,7 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
                                              "source_diagnostics": 0}
     assert decisions_store.list_pending("variety") == [] and decisions_store.attribute_ids() == {}
     # durable intent still survives a global reset
-    assert decisions_store.confirm_map() == {"black absolute": "yes"}
+    assert decisions_store.confirm_map() == {("", "black absolute"): "yes"}
     assert store.load_retired() == {"slab_granite_x_uuid"}
 
 
@@ -247,7 +247,7 @@ def test_pristine_reset_is_global_only(tmp_path, monkeypatch):
     out, code = lifecycle.reset(sources=["polonine"], pristine=True)
     assert code == 400 and "global-only" in out["error"]
     # nothing was touched: the durable overlay is intact
-    assert decisions_store.confirm_map() == {"black absolute": "yes"}
+    assert decisions_store.confirm_map() == {("", "black absolute"): "yes"}
     assert store.load_retired() == {"slab_granite_x_uuid"}
 
 
@@ -387,7 +387,7 @@ def test_unmint_removes_the_whole_variety_clears_decision_once_and_does_not_excl
     assert captured["reason"] == "variation_unminted"
     assert result["variety_count"] == 1 and result["unminted_count"] == 3
     assert result["mint_decisions_cleared"] == 1                                      # cleared ONCE per variety
-    assert decisions_store.confirm_map() == {"absolute black": "yes"}                 # bystander untouched
+    assert decisions_store.confirm_map() == {("", "absolute black"): "yes"}                 # bystander untouched
     assert store.load_retired() == set()                                             # NOT excluded
 
 
@@ -397,7 +397,7 @@ def test_clear_variety_decision_is_scoped_to_one_variant(tmp_path, monkeypatch):
     decisions_store.set_variety_decision("Absolute Black", "reject")
     assert decisions_store.clear_variety_decision("Crystal White") == 1
     assert decisions_store.clear_variety_decision("Crystal White") == 0   # idempotent: already gone
-    assert decisions_store.confirm_map() == {"absolute black": "no"}      # the other decision survives
+    assert decisions_store.confirm_map() == {("", "absolute black"): "no"}      # the other decision survives
 
 
 def test_bulk_unmint_collapses_siblings_to_one_variety_and_is_best_effort(tmp_path, monkeypatch):

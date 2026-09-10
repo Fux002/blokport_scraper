@@ -42,7 +42,7 @@ def _row(match_key, raw_type):
 def test_contradicting_scraped_type_binds_to_the_operator_minted_variety():
     # scraped Marble matches neither Granite nor Agate; operator minted Absolute Black as Agate -> bind Agate.
     row = _row("Absolute Black", "Marble")
-    _stage({"absolute black": "Agate"}).resolve_row(row)
+    _stage({("", "absolute black"): "Agate"}).resolve_row(row)
     assert row.variation_id == "v_agate"
     assert row.variation_key == "slab_agate_absolute_black_2"
 
@@ -51,14 +51,14 @@ def test_contradicting_type_binds_even_when_the_query_carries_the_type_token():
     # the real supplier shape: the match key still carries the type word ('absolute black marble'), so the
     # clean variety only matches via the fuzzy tier -- the fallback re-matches across ALL tiers, so it binds.
     row = _row("Absolute Black Marble", "Marble")
-    _stage({"absolute black": "Agate"}).resolve_row(row)
+    _stage({("", "absolute black"): "Agate"}).resolve_row(row)
     assert row.variation_id == "v_agate"
 
 
 def test_matching_scraped_type_is_never_overridden():
     # scraped Granite matches the existing Granite variety -> binds there; the Agate mint is NOT applied to it.
     row = _row("Absolute Black", "Granite")
-    _stage({"absolute black": "Agate"}).resolve_row(row)
+    _stage({("", "absolute black"): "Agate"}).resolve_row(row)
     assert row.variation_id == "v_granite"
 
 
@@ -73,5 +73,5 @@ def test_typeless_scrape_is_disambiguated_by_the_operator_type():
     # a type-less scrape of a name that exists under several types is ambiguous alone; the operator's mint
     # decision resolves it to the operator-minted variety.
     row = _row("Absolute Black", "")
-    _stage({"absolute black": "Agate"}).resolve_row(row)
+    _stage({("", "absolute black"): "Agate"}).resolve_row(row)
     assert row.variation_id == "v_agate"

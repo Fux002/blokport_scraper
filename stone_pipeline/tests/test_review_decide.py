@@ -46,7 +46,7 @@ def test_unknown_variety_mints_globally_and_binds_the_vendor_spelling():
     out = decisions_store.decide("marenostone", "Azul White Quartzite", "Azul White Persian", "Onyx",
                                  color="White", origin="IR", exists_as=_exists)
     assert out["result"] == "minted" and out["level"] == "global"
-    dec = decisions_store.variety_actions()[_norm("Azul White Quartzite")]
+    dec = decisions_store.variety_actions()[("", _norm("Azul White Quartzite"))]
     assert dec["action"] == "mint" and dec["seed_name"] == "Azul White Persian"
     assert dec["seed_type"] == "Onyx" and dec["seed_color"] == "White" and dec["seed_country"] == "IR"
     assert dec["source"] == "" and dec["asked_by"] == "marenostone"          # the first mint is the spelling's meaning
@@ -71,7 +71,7 @@ def test_name_that_is_an_existing_alias_binds_to_its_variety_not_a_mint(monkeypa
 
 def test_same_name_mint_is_not_a_rename():
     decisions_store.decide("varsha", "Bonsai", "Bonsai", "Quartzite", exists_as=_exists)
-    dec = decisions_store.variety_actions()[_norm("Bonsai")]
+    dec = decisions_store.variety_actions()[("", _norm("Bonsai"))]
     assert dec["action"] == "mint" and dec["seed_name"] is None
     assert decisions_store.scoped_aliases() == {}
     assert decisions_store.variety_seed_scopes() == {}
@@ -126,7 +126,7 @@ def test_clear_leaves_a_global_mint_alone():
     decisions_store.set_variety_decision("Totally New", "mint", seed_type="Granite")      # made for every vendor
     dropped = decisions_store.clear_decisions("marenostone", "Totally New")
     assert dropped["mint"] == 0
-    assert decisions_store.variety_actions()[_norm("Totally New")]["action"] == "mint"
+    assert decisions_store.variety_actions()[("", _norm("Totally New"))]["action"] == "mint"
 
 
 def test_missing_fields_store_nothing():
@@ -149,7 +149,7 @@ def test_put_decide_validates_then_stores():
                               {"source": "marenostone", "scraped": "X", "name": "Y", "type": "Onyx",
                                "origin": "Notacountry"})
     assert code == 400
-    assert _norm("X") not in decisions_store.variety_actions()
+    assert ("", _norm("X")) not in decisions_store.variety_actions()
 
 
 def test_put_decide_applies_one_statement_to_every_spelling_on_a_card():
@@ -265,8 +265,8 @@ def test_a_vendor_naming_a_different_stone_from_a_global_mint_gets_its_own_level
     decisions_store.set_variety_decision("Totally New", "mint", seed_type="Granite")          # every vendor
     out = decisions_store.decide("marenostone", "Totally New", "Totally New Stone", "Granite", exists_as=_exists)
     assert out["level"] == "vendor"
-    assert decisions_store.variety_actions()[_norm("Totally New")]["seed_name"] is None     # the global is untouched
-    assert decisions_store.variety_actions_scoped()[("marenostone", _norm("Totally New"))]["seed_name"] == "Totally New Stone"
+    assert decisions_store.variety_actions()[("", _norm("Totally New"))]["seed_name"] is None     # the global is untouched
+    assert decisions_store.variety_actions()[("marenostone", _norm("Totally New"))]["seed_name"] == "Totally New Stone"
     assert decisions_store.scoped_aliases()[("marenostone", _norm("Totally New"))] == ("Totally New Stone", "Granite")
 
 
@@ -311,41 +311,41 @@ def test_a_renamed_mint_documents_its_origin_under_the_new_name():
 def test_first_mint_on_a_spelling_is_global_and_a_same_stone_restatement_changes_nothing():
     out = decisions_store.decide("polonine", "Tropical Green", "Tropical Green Bahia", "Granite", exists_as=_exists)
     assert out["result"] == "minted" and out["level"] == "global"
-    g = decisions_store.variety_actions()[_norm("Tropical Green")]
+    g = decisions_store.variety_actions()[("", _norm("Tropical Green"))]
     assert g["source"] == "" and g["asked_by"] == "polonine" and g["seed_name"] == "Tropical Green Bahia"
-    assert decisions_store.variety_actions_scoped() == {}
+    assert decisions_store.variety_seed_scopes() == {}
     assert decisions_store.scoped_aliases() == {}                        # the rename attaches for everyone (curate)
     # zucchi states the same stone: nothing new is stored, its product binds through the global meaning
     out = decisions_store.decide("zucchi", "Tropical Green", "Tropical Green Bahia", "Granite", exists_as=_exists)
     assert out["result"] == "minted" and out["level"] == "global"
-    assert decisions_store.variety_actions_scoped() == {} and decisions_store.scoped_aliases() == {}
+    assert decisions_store.variety_seed_scopes() == {} and decisions_store.scoped_aliases() == {}
 
 
 def test_a_different_new_stone_from_the_same_spelling_is_the_vendors_own_level():
     decisions_store.decide("polonine", "Tropical Green", "Tropical Green Bahia", "Granite", exists_as=_exists)
     out = decisions_store.decide("zucchi", "Tropical Green", "Tropical Green Verde", "Granite", exists_as=_exists)
     assert out["result"] == "minted" and out["level"] == "vendor"
-    assert decisions_store.variety_actions()[_norm("Tropical Green")]["seed_name"] == "Tropical Green Bahia"   # global kept
-    v = decisions_store.variety_actions_scoped()[("zucchi", _norm("Tropical Green"))]
+    assert decisions_store.variety_actions()[("", _norm("Tropical Green"))]["seed_name"] == "Tropical Green Bahia"   # global kept
+    v = decisions_store.variety_actions()[("zucchi", _norm("Tropical Green"))]
     assert v["seed_name"] == "Tropical Green Verde" and v["source"] == "zucchi"
     assert decisions_store.scoped_aliases()[("zucchi", _norm("Tropical Green"))] == ("Tropical Green Verde", "Granite")
     assert decisions_store.variety_seed_scopes() == {("zucchi", _norm("Tropical Green")): "zucchi"}
     # both levels reach the readers: the merged map carries the global under the spelling, the vendor's under its key
-    both = decisions_store.variety_actions_all()
-    assert both[_norm("Tropical Green")]["seed_name"] == "Tropical Green Bahia"
+    both = decisions_store.variety_actions()
+    assert both[("", _norm("Tropical Green"))]["seed_name"] == "Tropical Green Bahia"
     assert both[("zucchi", _norm("Tropical Green"))]["seed_name"] == "Tropical Green Verde"
     # clearing zucchi's statement removes only zucchi's level
     assert decisions_store.clear_decisions("zucchi", "Tropical Green")["mint"] == 1
-    assert decisions_store.variety_actions_scoped() == {}
-    assert decisions_store.variety_actions()[_norm("Tropical Green")]["seed_name"] == "Tropical Green Bahia"
+    assert decisions_store.variety_seed_scopes() == {}
+    assert decisions_store.variety_actions()[("", _norm("Tropical Green"))]["seed_name"] == "Tropical Green Bahia"
 
 
 def test_a_spelling_that_already_means_an_existing_stone_makes_the_mint_vendor_level():
     # every vendor's 'Brown Granite' binds to the existing Brown Granite; marenostone says ITS one is a new stone
     out = decisions_store.decide("marenostone", "Brown Granite", "Chocolate Classic", "Granite", exists_as=_exists)
     assert out["result"] == "minted" and out["level"] == "vendor"
-    assert decisions_store.variety_actions() == {}                       # the global meaning stays Brown Granite
-    v = decisions_store.variety_actions_scoped()[("marenostone", _norm("Brown Granite"))]
+    assert ("", _norm("Brown Granite")) not in decisions_store.variety_actions()   # the global meaning stays Brown Granite
+    v = decisions_store.variety_actions()[("marenostone", _norm("Brown Granite"))]
     assert v["seed_name"] == "Chocolate Classic" and v["source"] == "marenostone"
     assert decisions_store.scoped_aliases()[("marenostone", _norm("Brown Granite"))] == ("Chocolate Classic", "Granite")
     # the same through a known alias of an existing stone, on the CLEANED form of the spelling
@@ -353,7 +353,7 @@ def test_a_spelling_that_already_means_an_existing_stone_makes_the_mint_vendor_l
     out = decisions_store.decide("marenostone", "Black Wave Marble", "Mercury Black", "Marble",
                                  exists_as=_exists, alias_target=alias)
     assert out["level"] == "vendor"
-    assert ("marenostone", _norm("Black Wave Marble")) in decisions_store.variety_actions_scoped()
+    assert ("marenostone", _norm("Black Wave Marble")) in decisions_store.variety_actions()
 
 
 def test_backfill_moves_a_global_mint_whose_spelling_means_another_stone_to_the_vendor(tmp_path, monkeypatch):
@@ -369,14 +369,15 @@ def test_backfill_moves_a_global_mint_whose_spelling_means_another_stone_to_the_
     moved = decisions_store.backfill_levels(exists_as=_exists, alias_target=alias)
     assert [(m["source"], m["scraped"], m["name"], m["spelling_means"]) for m in moved] == [
         ("marenostone", "Brown Granite", "Chocolate Classic", "Brown Granite")]
-    assert set(decisions_store.variety_actions()) == {_norm("Bianco White Marble"), _norm("Honey Onyx")}
-    assert decisions_store.variety_actions_scoped()[("marenostone", _norm("Brown Granite"))]["seed_name"] == "Chocolate Classic"
+    assert set(decisions_store.variety_actions()) == {("", _norm("Bianco White Marble")), ("", _norm("Honey Onyx")),
+                                                      ("marenostone", _norm("Brown Granite"))}
+    assert decisions_store.variety_actions()[("marenostone", _norm("Brown Granite"))]["seed_name"] == "Chocolate Classic"
     assert decisions_store.scoped_aliases() == {("marenostone", _norm("Brown Granite")): ("Chocolate Classic", "Granite")}
     assert decisions_store.backfill_levels(exists_as=_exists, alias_target=alias) is None    # applied once, never again
     decisions_store.set_variety_decision("Chocolate Granite", "mint", seed_type="Granite", seed_name="Chocolate Classic",
                                          source="", asked_by="marenostone")
     assert decisions_store.backfill_levels(exists_as=lambda n, t: True, alias_target=alias) is None
-    assert ("marenostone", _norm("Chocolate Granite")) not in decisions_store.variety_actions_scoped()
+    assert ("marenostone", _norm("Chocolate Granite")) not in decisions_store.variety_actions()
 
 
 def test_migration_makes_every_old_mint_global_and_keeps_who_asked(tmp_path, monkeypatch):
@@ -394,11 +395,11 @@ def test_migration_makes_every_old_mint_global_and_keeps_who_asked(tmp_path, mon
         "INSERT INTO variety_decision VALUES ('junk','Junk','reject',NULL,NULL,NULL,NULL,NULL,'2026-09-09T08:00:00','');")
     conn.commit(); conn.close()
     g = decisions_store.variety_actions()
-    assert g[_norm("bianco white marble")] == {"action": "mint", "alias_of": None, "seed_color": "White", "seed_type": "Marble",
+    assert g[("", _norm("bianco white marble"))] == {"action": "mint", "alias_of": None, "seed_color": "White", "seed_type": "Marble",
                                               "seed_country": "IR", "seed_name": "Bianco White", "spelling": "Bianco White Marble",
                                               "source": "", "asked_by": "marenostone"}
-    assert g["junk"]["action"] == "reject" and g["junk"]["asked_by"] == ""
-    assert decisions_store.variety_actions_scoped() == {}
+    assert g[("", "junk")]["action"] == "reject" and g[("", "junk")]["asked_by"] == ""
+    assert decisions_store.variety_seed_scopes() == {}
     conn = sqlite3.connect(db)
     assert conn.execute("select count(*) from variety_decision__pre_two_levels").fetchone()[0] == 2
     assert [r[1] for r in conn.execute("pragma table_info(variety_decision)") if r[5]] == ["source", "variant_norm"]

@@ -116,7 +116,7 @@ def test_alias_type_pick_resolves_a_multitype_hold_instead_of_reholding(tmp_path
     assert not held.alias_additions["slab"], "must not resolve onto any stone without a decision"
 
     # (b) operator picked Granite on the alias -> resolves onto Granite ONLY, no hold
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {"arabescato": "Granite"})
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {("", "arabescato"): "Granite"})
     done = curate.build_curation([_gap_row("Arabescato")], ref)
     assert not any(p["variant"].lower() == "arabescato" for p in done.pending_confirm), "must stop holding"
     on_granite = [a for a in done.alias_additions["slab"] if a["Key"] == GRANITE_KEY]
@@ -124,7 +124,7 @@ def test_alias_type_pick_resolves_a_multitype_hold_instead_of_reholding(tmp_path
     assert on_granite and not on_marble, f"must resolve onto Granite only, got {done.alias_additions['slab']}"
 
     # (c) a NON-CANONICAL picked type is dropped -> still held (never mints a garbage-slug Key)
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {"arabescato": "Wibble"})
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {("", "arabescato"): "Wibble"})
     bad = curate.build_curation([_gap_row("Arabescato")], ref)
     assert any(p["variant"].lower() == "arabescato" for p in bad.pending_confirm), "non-canonical type -> still held"
 
@@ -223,8 +223,8 @@ def test_operator_alias_decision_applies_uniformly_not_only_in_two_arms(tmp_path
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])   # Arabescato = marble + granite
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))              # no resolver -> no fuzzy arm
-    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {"monalisa": "Arabescato"})
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {"monalisa": "Granite"})
+    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {("", "monalisa"): "Arabescato"})
+    monkeypatch.setattr(decisions, "load_alias_types", lambda: {("", "monalisa"): "Granite"})
     ref = loaders.load_all()
 
     res = curate.build_curation([_gap_row("Monalisa")], ref)
@@ -246,7 +246,7 @@ def test_operator_alias_to_multitype_target_without_a_type_pick_holds_loudly(tmp
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {"monalisa": "Arabescato"})
+    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {("", "monalisa"): "Arabescato"})
     monkeypatch.setattr(decisions, "load_alias_types", lambda: {})               # no type pick
     ref = loaders.load_all()
 
@@ -324,8 +324,8 @@ def test_operator_mint_type_overrides_the_scraped_type(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(curate, "load_existing", lambda b: _empty_imports()[b])
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"lumiere": "yes"})    # operator minted it
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {"lumiere": "Agate"})  # ...as Agate
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "lumiere"): "yes"})    # operator minted it
+    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "lumiere"): "Agate"})  # ...as Agate
     ref = loaders.load_all()
 
     res = curate.build_curation([_typed_gap_row("Lumiere", "Crystal")], ref)
@@ -342,8 +342,8 @@ def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_v
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"arabescato": "yes"})
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {"arabescato": "Agate"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "arabescato"): "yes"})
+    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "arabescato"): "Agate"})
     ref = loaders.load_all()
 
     res = curate.build_curation([_typed_gap_row("Arabescato", "Marble")], ref)
@@ -375,14 +375,14 @@ def test_operator_confirmed_mint_mints_even_when_similar_to_an_existing_name(tmp
     assert "arabescato royal" not in minted(undecided), "an UNDECIDED new variety must not auto-mint"
 
     # (b) operator confirmed the mint as Granite -> it MINTS, despite the name similarity, and is NOT held
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"arabescato royal": "yes"})
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {"arabescato royal": "Granite"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "arabescato royal"): "yes"})
+    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "arabescato royal"): "Granite"})
     confirmed = curate.build_curation([_gap_row("Arabescato Royal")], ref)
     assert "arabescato royal" in minted(confirmed), "a CONFIRMED mint must mint even when similar to an existing name"
     assert not any(p.get("variant", "").lower() == "arabescato royal" for p in confirmed.pending_confirm), \
         "a confirmed mint must not also be re-held for review"
 
     # (c) operator rejected -> not minted, not held
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {"arabescato royal": "no"})
+    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "arabescato royal"): "no"})
     rejected = curate.build_curation([_gap_row("Arabescato Royal")], ref)
     assert "arabescato royal" not in minted(rejected), "a rejected variety must not mint"
