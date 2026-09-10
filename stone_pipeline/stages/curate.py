@@ -636,14 +636,22 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
 
     for row in rows:
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
-        if not gaps:
-            continue
-        gap = gaps[0]
+        gap = gaps[0] if gaps else None
         # PHASE 1 -- CANONICALISE. variety_identity() resolves the name (match key, else raw name minus
         # its format word) and the type (corrected type_name, not the raw tag), so 'Azul White Quartzite'
         # (typed Quartzite) cleans to 'Azul White' and mints as quartzite, not under the wrong 'Onyx' tag.
         name, stone_type, clean = variety_identity(row)
         if not name:
+            continue
+        # An explicit operator statement OVERRIDES the matcher's auto-bind. A row the matcher already
+        # resolved to an existing variety (no gap) still enters classification when the operator decided its
+        # scraped spelling is a mint or an alias FOR THIS vendor -- so "matched 'Brown Granite' but is really
+        # a new 'Chocolate Classic'" is applied, not silently kept as the match (the decision_gap the audit
+        # kept reporting). Such a row is always handled by the operator arms below (3c / 3c-bis), which
+        # `continue` before PHASE 4, so the null `gap` is never dereferenced. A matched row with no own
+        # decision keeps its match -- skip it, exactly as before.
+        if gap is None and (_foreign_scope(row.src_site, name, clean) or not (
+                _decided(confirm_decisions, name, clean) == "yes" or _decided(alias_decisions, name, clean))):
             continue
 
         # PHASE 2 -- DEDUP: classify each cleaned identity once (two raw names that clean to the same
@@ -970,10 +978,11 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
                 "Image": image_url(fname) if product_backed else "",
                 "Aliases": "|".join(sib_aliases),
                 "Volume per kg (m³/kg)": category(branch).volume_per_kg,
-                "_nearest_existing": gap.nearest_existing or "",
-                "_nearest_score": gap.nearest_score if gap.nearest_score is not None else "",
+                # gap diagnostics are absent for an operator-override mint (a matched row has no gap)
+                "_nearest_existing": (gap.nearest_existing or "") if gap else "",
+                "_nearest_score": (gap.nearest_score if gap.nearest_score is not None else "") if gap else "",
                 "_suggested_type": stone_type,
-                "_example_url": gap.example_src_url or "",
+                "_example_url": (gap.example_src_url or "") if gap else "",
             })
             result.backbone_new[branch].append({
                 "key": key,  # the clean, unique join between backbone and Medusa export

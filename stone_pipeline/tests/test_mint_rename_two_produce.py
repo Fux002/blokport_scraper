@@ -164,3 +164,57 @@ def test_renamed_mint_is_idempotent_while_the_pull_lags(tmp_path, monkeypatch):
     second = curate.build_curation([_typed_gap_row("Honey Onyx", "Onyx")], ref).new_variants
     assert first == second
     assert [r["Key"] for r in first["slab"]] == [r["Key"] for r in second["slab"]]
+
+
+def test_a_matched_product_is_re_pointed_by_a_scoped_mint_rename(tmp_path, monkeypatch):
+    """The override fix, end-to-end through the REAL matcher. A scrape the matcher binds to an EXISTING
+    variety (no gap) is re-pointed to a NEW variety the operator mints+renames it to, FOR ONE vendor:
+      produce 1 -- the scrape matches 'Brown Granite'; the operator states marenostone's is 'Chocolate
+                   Classic'; curate mints Chocolate Classic DESPITE the match (the fix);
+      produce 2 -- after the re-export, marenostone's product binds to Chocolate Classic via the vendor-
+                   scoped alias, while another vendor's identical spelling keeps the Brown Granite match.
+    This is exactly the prod decision_gap (brown granite -> Chocolate Classic) the audit kept reporting."""
+    from stone_pipeline.config import server, varieties
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
+    monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
+    monkeypatch.setattr(varieties, "_rows", lambda q=None: [{"name": "Brown Granite", "stone_type": "Granite"}])
+    BG_KEY = "slab_granite_brown_granite_00000000-0000-0000-0000-000000000002"
+    _write_export(paths.export_file, [{"Id": "var_bg", "Key": BG_KEY, "Name": "Brown Granite"}])
+
+    def _bg(key="p1", src="marenostone"):
+        return CanonicalRow(src_site=src, surrogate_key=key, variety_match_key="Brown Granite",
+                            raw_format="Slab", raw_color="Brown", raw_type="Granite")
+
+    # produce 1: the scrape MATCHES the existing Brown Granite (no gap) ...
+    ref1 = loaders.load_all()
+    row1 = _bg()
+    _match([row1], ref1)
+    assert row1.variation_key == BG_KEY and not row1.tree_gaps, "premise: it matches the existing variety"
+
+    # ... the operator states marenostone's 'Brown Granite' is really a NEW 'Chocolate Classic' ...
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "marenostone", "scraped": "Brown Granite",
+                                  "name": "Chocolate Classic", "type": "Granite"})
+    assert code == 200 and body["result"] == "minted", body
+
+    # ... curate mints Chocolate Classic DESPITE the match (the override fix) ...
+    res1 = curate.build_curation([_bg()], ref1)
+    minted = res1.new_variants["slab"]
+    assert [r["Name"] for r in minted] == ["Chocolate Classic"], minted
+    cc_key = minted[0]["Key"]
+    assert cc_key.startswith("slab_granite_chocolate_classic_"), cc_key
+
+    # boundary: Medusa re-exports Chocolate Classic ...
+    _write_export(paths.export_file, _read_export(paths.export_file) + [
+        {"Id": "var_cc", "Key": cc_key, "Name": "Chocolate Classic", "Aliases": minted[0].get("Aliases", "")}])
+
+    # produce 2: marenostone's product re-points to Chocolate Classic via the vendor-scoped alias;
+    # another vendor's identical spelling is NOT re-pointed (the statement was marenostone-only).
+    ref2 = loaders.load_all()
+    mine, other = _bg("p1", "marenostone"), _bg("p2", "polonine")
+    _match([mine, other], ref2)
+    assert mine.variation_key == cc_key, f"marenostone must re-point to Chocolate Classic, got {mine.variation_key}"
+    assert mine.variation_name == "Chocolate Classic"
+    assert other.variation_key == BG_KEY, f"another vendor keeps Brown Granite, got {other.variation_key}"

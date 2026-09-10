@@ -253,3 +253,35 @@ def test_unmint_without_a_type_keeps_legacy_name_only_semantics(config_db):
     decisions_store.set_variety_decision("Honey Onyx", "mint", seed_type="Onyx", seed_name="Honey")
     decisions_store.set_variety_decision("Honey Marble", "mint", seed_type="Marble", seed_name="Honey")
     assert decisions_store.clear_variety_decision("Honey") == 2
+
+
+def _matched_row(scraped: str, variety: str, stone_type: str = "Granite", **attrs) -> CanonicalRow:
+    """A scrape the matcher RESOLVED to an existing variety: it carries a variation_key and NO
+    missing_variation gap, so curate's gap loop skipped it before the operator-override fix."""
+    return CanonicalRow(src_site="marenostone", surrogate_key="m1", variety_match_key=scraped,
+                        raw_type=stone_type, variation_name=variety,
+                        variation_key=f"slab_{stone_type.lower()}_matched_x",
+                        variation_method="exact_name", tree_gaps=[], **attrs)
+
+
+def test_a_matched_row_is_overridden_by_an_operator_mint_rename(monkeypatch):
+    # The persistent decision_gap: a scraped spelling the matcher resolved to an existing variety (no gap)
+    # was skipped, so the operator's "this is really a NEW variety" never applied. An explicit mint+rename on
+    # a matched row must still mint the new variety (the scraped spelling becomes its alias, binds next run).
+    _isolate_curate(monkeypatch, {"brown granite": "yes"}, {"brown granite": "Chocolate Classic"})
+    res = curate.build_curation([_matched_row("Brown Granite", "Brown Granite", color_name="brown")],
+                                loaders.load_all())
+    for b in ("slab", "block", "tile"):
+        rows = _new(res, b)
+        assert [r["Name"] for r in rows] == ["Chocolate Classic"], (b, rows)
+        assert "_granite_chocolate_classic_" in rows[0]["Key"], rows[0]["Key"]
+        assert "Brown Granite" in rows[0]["Aliases"].split("|"), rows[0]["Aliases"]
+
+
+def test_a_matched_row_without_a_decision_keeps_its_match(monkeypatch):
+    # No regression: a matched row with NO operator decision mints nothing -- the matcher's bind stands,
+    # exactly as before the override.
+    _isolate_curate(monkeypatch, {}, {})
+    res = curate.build_curation([_matched_row("Brown Granite", "Brown Granite")], loaders.load_all())
+    for b in ("slab", "block", "tile"):
+        assert _new(res, b) == [], (b, _new(res, b))
