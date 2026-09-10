@@ -85,6 +85,19 @@ def _origin_as_card(item: dict) -> dict:
             "decided": item.get("decided", False)}
 
 
+def _gap_as_card(item: dict) -> dict:
+    """A decision the last produce did NOT honour, in the variety-card shape (kind 'decision_gap'): the
+    operator restates it (or clears it) from the same card as everything else."""
+    listings = [{"source": item["source"], "scraped": item["scraped"]}] if item.get("source") and item.get("scraped") else []
+    return {"kind": "decision_gap", "ref": item.get("ref", ""), "variant": item.get("name", ""),
+            "stone_type": item.get("stone_type", ""), "color": "", "origin": item.get("origin", ""),
+            "reason": item.get("reason", ""), "nearest_existing": "", "score": "", "model_prob": "",
+            "src": item.get("source", ""), "scraped": item.get("scraped", ""),
+            "spellings": [item["scraped"]] if item.get("scraped") else [], "listings": listings,
+            "src_url": "", "image": "", "description": "", "sources": item.get("sources"),
+            "current_action": item.get("decision"), "decided": False}
+
+
 def _country_iso(raw: str) -> str | None:
     """Resolve a country NAME or ISO2 to a canonical ISO-3166 alpha-2, or None if it is not a real country.
     Name-first (so 'UK' -> GB) then a bare valid ISO2 -- mirrors derive._to_iso. Validates the operator's
@@ -318,8 +331,10 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if len(segments) == 2 and segments[1] == "variants" and method == "GET":
             # ONE list: the variety cards plus the origin confirmations in the same card shape (kind
             # 'origin'), so the operator reviews everything in one place with one statement (/review/decide).
-            cards = decisions_store.list_pending("variety") + [
-                _origin_as_card(o) for o in decisions_store.list_pending("origin")]
+            cards = (decisions_store.list_pending("variety")
+                     + [_origin_as_card(o) for o in decisions_store.list_pending("origin")]
+                     # decisions the last produce did NOT honour (stages.decision_audit): restate or clear
+                     + [_gap_as_card(g) for g in decisions_store.list_pending("decision_gap")])
             # Decided cards sink to the END, undecided keep their order at the top, so the operator always
             # works the front of one list and never loses their place. A decided card is NOT removed: it
             # stays pending until the next produce binds it, and re-stating over it revises the decision.

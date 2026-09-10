@@ -135,6 +135,16 @@ def write_confirm_file(pending: list[dict]) -> int:
     return len(rows)
 
 
+def write_decision_gaps(gaps: list[dict]) -> int:
+    """Replace the DECISION-GAP queue with the decisions this produce did not honour (stages.decision_audit).
+    Keyed by (decision, source, scraped or variety) so a gap is one row until the next produce clears it.
+    An empty list clears the queue: every decision took effect. Returns the count."""
+    rows = [{"ref": f"{g['decision']}|{_norm(g['source'])}|{_norm(g['scraped'] or g['name'])}",
+             "payload": g, "sources": [g["source"]] if g["source"] else None} for g in gaps]
+    decisions_store.replace_pending("decision_gap", rows)
+    return len(rows)
+
+
 def write_origin_confirm_file(rows) -> int:
     """Replace the pending ORIGIN queue with this run's rows held for origin confirmation (a vendor whose
     primary_origin the per-variety map did not corroborate). ONE entry per (source, variety, type) -- keyed
