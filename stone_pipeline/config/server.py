@@ -721,6 +721,7 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     snapshot.restore(writethrough.ledger_path(), required=True)   # durable: fail loud if present-but-unfetchable
     # TWO LEVELS data backfill: needs the ledger (variety lookups), so it runs here and not in the store
     # migration, which fires on the first config.db open above, before the ledger is back.
+    from stone_pipeline.config import decisions_store
     if moved := decisions_store.backfill_levels():
         log.warning("boot: moved mint(s) to the vendor level (spelling already means another stone)",
                     extra={"extra_fields": {"moved": moved}})
