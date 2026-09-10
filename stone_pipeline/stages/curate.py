@@ -43,6 +43,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.config.decisions_store import scope_key
 from stone_pipeline.adapters.tokens import clean_variety
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, active_categories, category
@@ -282,8 +283,7 @@ def _decided(table, source: str, name: str, clean: str):
     for a decision the vendor made for itself, norm spelling for what the spelling means to everyone. Vendor
     first, then global; and at each level the SCRAPED spelling first ('bianco white marble', what a statement
     is keyed by), the cleaned identity second ('bianco white', what an older decision is keyed by)."""
-    src = proj.norm(source or "")
-    for key in ((src, proj.norm(name)), (src, proj.norm(clean)), proj.norm(name), proj.norm(clean)):
+    for key in (scope_key(source, name), scope_key(source, clean), scope_key("", name), scope_key("", clean)):
         if isinstance(table, set):
             if key in table:
                 return True

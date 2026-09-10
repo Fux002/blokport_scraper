@@ -59,7 +59,7 @@ def _row(rec: dict, scoped: dict, origins: dict, actions: dict, owiden: dict | N
     name = rec["variation_name"] or ""
     stone_type = rec["type_name"] or ""
     alias = scoped.get((_norm(source), _norm(scraped)))
-    mint = actions.get((_norm(source), _norm(scraped))) or actions.get(_norm(scraped))
+    mint = actions.get(decisions_store.scope_key(source, scraped)) or actions.get(decisions_store.scope_key("", scraped))
     decision = None
     if alias:
         decision = {"kind": "bound", "name": alias[0], "stone_type": alias[1] or None}

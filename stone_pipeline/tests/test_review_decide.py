@@ -372,7 +372,11 @@ def test_backfill_moves_a_global_mint_whose_spelling_means_another_stone_to_the_
     assert set(decisions_store.variety_actions()) == {_norm("Bianco White Marble"), _norm("Honey Onyx")}
     assert decisions_store.variety_actions_scoped()[("marenostone", _norm("Brown Granite"))]["seed_name"] == "Chocolate Classic"
     assert decisions_store.scoped_aliases() == {("marenostone", _norm("Brown Granite")): ("Chocolate Classic", "Granite")}
-    assert decisions_store.backfill_levels(exists_as=_exists, alias_target=alias) == []      # idempotent
+    assert decisions_store.backfill_levels(exists_as=_exists, alias_target=alias) is None    # applied once, never again
+    decisions_store.set_variety_decision("Chocolate Granite", "mint", seed_type="Granite", seed_name="Chocolate Classic",
+                                         source="", asked_by="marenostone")
+    assert decisions_store.backfill_levels(exists_as=lambda n, t: True, alias_target=alias) is None
+    assert ("marenostone", _norm("Chocolate Granite")) not in decisions_store.variety_actions_scoped()
 
 
 def test_migration_makes_every_old_mint_global_and_keeps_who_asked(tmp_path, monkeypatch):

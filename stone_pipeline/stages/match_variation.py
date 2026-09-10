@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
+from stone_pipeline.config.decisions_store import scope_key
 from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
@@ -276,9 +277,9 @@ class VariationStage:
         if match.cid is None and not (scraped_type and match.ambiguous):
             # a mint statement is keyed by the scraped spelling the card carries, an older mint by the
             # cleaned identity: consult both, spelling first (curate resolves decisions the same way)
-            seeds, src = self.ref.variety_seed_types, proj.norm(row.src_site or "")
-            op_type = (seeds.get((src, proj.norm(query))) or seeds.get((src, proj.norm(clean)))
-                       or seeds.get(proj.norm(query)) or seeds.get(proj.norm(clean)))
+            seeds, src = self.ref.variety_seed_types, row.src_site or ""
+            op_type = (seeds.get(scope_key(src, query)) or seeds.get(scope_key(src, clean))
+                       or seeds.get(scope_key("", query)) or seeds.get(scope_key("", clean)))
             if op_type and proj.norm(op_type) != proj.norm(scraped_type):
                 retry = engine.match(clean, block_type=op_type, block_color=block_color,
                                      overrides=scoped, block_origin=origin)

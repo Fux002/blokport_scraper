@@ -210,6 +210,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # the operator picked a country for, because the vendor's primary_origin did not corroborate the map.
     # Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Overlaid
     # onto origin_overrides at load, so derive resolves it at the supplier_override tier and never re-asks.
+    # One-off data migrations that cannot run inside _migrate (they need the ledger, restored after the
+    # first config.db open) record themselves here so they run exactly once; see decisions_store.backfill_levels.
+    conn.execute("CREATE TABLE IF NOT EXISTS migration (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS origin_decision ("
                  "source TEXT NOT NULL, variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
                  "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
@@ -297,6 +300,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "health TEXT NOT NULL, worst TEXT NOT NULL, drift TEXT NOT NULL DEFAULT '[]', "
                  "certified INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (source, run_id))")
     conn.commit()
+
+
+def migration_applied(name: str, path: str | Path | None = None) -> bool:
+    with closing(open_store(path)) as conn:
+        return conn.execute("SELECT 1 FROM migration WHERE name = ?", (name,)).fetchone() is not None
+
+
+def mark_migration(name: str, path: str | Path | None = None) -> None:
+    with closing(open_store(path)) as conn:
+        conn.execute("INSERT OR IGNORE INTO migration (name, applied_at) VALUES (?, ?)", (name, _now()))
+        conn.commit()
 
 
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
