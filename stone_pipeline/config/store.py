@@ -203,6 +203,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
                  "city TEXT NOT NULL DEFAULT '', county TEXT NOT NULL DEFAULT '', "
                  "decided_at TEXT NOT NULL, PRIMARY KEY (variant_norm, stone_type_norm))")
+    # Repair: until 2026-09-10 a widened decision WROTE the variety's documented list as that one country,
+    # replacing the map's list (Black Cosmic AR,BR,CN,IN -> IN). Widen is now a union applied at load from
+    # origin_decision.widen, so the rows it wrote (a single-country list equal to a widen decision on the
+    # same variety) are dropped; the operator's explicit list edits (any other row) are untouched. Idempotent.
+    if {r["name"] for r in conn.execute("PRAGMA table_info(origin_decision)")} >= {"widen"}:
+        conn.execute(
+            "DELETE FROM variety_origin WHERE country_iso NOT LIKE '%,%' AND EXISTS ("
+            "SELECT 1 FROM origin_decision d WHERE d.widen = 1 AND d.variant_norm = variety_origin.variant_norm "
+            "AND d.stone_type_norm = variety_origin.stone_type_norm AND d.country_iso = variety_origin.country_iso)")
     # New colour/finish/type/quality VALUES the operator created in Medusa and pasted the id for, keyed
     # by (kind, normalized value). The next produce adopts the id into the attribute vocab.
     conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("

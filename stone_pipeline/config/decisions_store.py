@@ -288,9 +288,11 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
             set_scoped_alias(src, spelling, name, stone_type)
         outcome["result"] = "minted"
     if origin:
+        # widen is recorded ON the decision; the stone's documented list gains the country at load time, as a
+        # UNION with what the map already documents (loaders.load_all). Writing the list here replaced it:
+        # one widen to India turned Black Cosmic's AR,BR,CN,IN into IN and every other vendor lost the gate.
         set_origin_decision(src, name, stone_type, origin, widen=widen)
         if widen:
-            set_variety_origin(name, stone_type, origin)
             outcome["widen"] = True
     return outcome
 

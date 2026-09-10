@@ -650,6 +650,33 @@ class OriginMap:
         self._ensure_index()
         return self._index.get((_norm(name), _norm(stone_type or "")))
 
+    def widen(self, widened: dict[tuple[str, str, str], str]) -> int:
+        """ADD a country to a variety's documented origins ((source, name, type) -> ISO2, the operator's per-
+        decision "add to documented origins"): a UNION with the rule's list, never a replacement, so a widen to
+        one country can never take a stone's other origins away. A variety with no rule yet gets one. Returns
+        the number of countries actually added."""
+        if not widened:
+            return 0
+        by_key = {(_norm(r.variety), _norm(r.stone_type)): i for i, r in enumerate(self.rules)}
+        added = 0
+        for (_source, variety, stone_type), iso in widened.items():
+            iso = (iso or "").strip().upper()
+            if not variety or not iso or not (stone_type or "").strip():
+                continue
+            idx = by_key.get((_norm(variety), _norm(stone_type)))
+            if idx is None:
+                self.rules.append(OriginRule(variety=variety, country_iso=iso, city="", county="", stone_type=stone_type))
+                by_key[(_norm(variety), _norm(stone_type))] = len(self.rules) - 1
+                added += 1
+            elif iso not in self.rules[idx].countries:
+                rule = self.rules[idx]
+                self.rules[idx] = OriginRule(variety=rule.variety, country_iso=",".join([*rule.countries, iso]),
+                                             city=rule.city, county=rule.county, stone_type=rule.stone_type)
+                added += 1
+        if added and hasattr(self, "_index"):
+            delattr(self, "_index")
+        return added
+
     def apply_origin_overlay(self, minted: dict[tuple[str, str], str]) -> int:
         """Overlay operator-minted origins ((name, type) -> ISO2): effective map = CSV + mints. A mint
         REPLACES the CSV rule for that SAME (name, type) only; a type-less mint is skipped (can't emit).
@@ -979,6 +1006,8 @@ def load_all() -> ReferenceData:
         # they set the variety's origin country LIST (the per-vendor gate then picks from it). Same overlay
         # machinery as the mint origin above, keyed by (name, type), country_iso may be a comma-list.
         ref.origin_map.apply_origin_overlay(decisions_store.variety_origins())
+        # a widened decision ADDS its country to the stone's documented list (union), after every list edit
+        ref.origin_map.widen(decisions_store.origin_widen())
         ref.origin_overrides.apply_overlay(decisions_store.origin_decisions())
         _valid_types = {_norm(t) for t in ref.attributes.canonical_names("type")}
         ref.variety_seed_types = {n: t for n, t in decisions_store.variety_seed_types().items()
