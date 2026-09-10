@@ -47,7 +47,8 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
     for r in rows:
         by_listing.setdefault((_norm(r.src_site), _norm(r.variety_match_key or r.raw_name)), []).append(r)
 
-    for spelling, dec in mints.items():
+    for key, dec in mints.items():
+        spelling = key[1] if isinstance(key, tuple) else key
         if dec["action"] == "mint":
             name = dec.get("seed_name") or dec.get("variant_display") or spelling
             target = (_norm(name), _norm(dec.get("seed_type")))

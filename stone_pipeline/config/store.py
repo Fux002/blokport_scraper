@@ -177,6 +177,35 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # rename attaches the spelling as that vendor's scoped alias, never as a global one.
     if "source" not in _variety_cols:
         conn.execute("ALTER TABLE variety_decision ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+    # TWO LEVELS (2026-09-10): a spelling means ONE variety for everyone (the global mint, source ''), and a
+    # vendor may decide otherwise for itself (a vendor mint, source = the vendor) -- so the key is (source,
+    # variant_norm), not variant_norm alone. Every mint made before this migration becomes the global meaning
+    # of its spelling (that is what the operator decided: "Tropical Green IS Tropical Green Bahia"); the vendor
+    # that asked is kept in asked_by. Rebuild once (SQLite cannot alter a primary key), row for row, verified,
+    # with the old table kept as a backup for one release. Idempotent: asked_by marks a migrated table.
+    if "asked_by" not in _variety_cols:
+        before = conn.execute("SELECT COUNT(*) FROM variety_decision").fetchone()[0]
+        conn.executescript(
+            "CREATE TABLE variety_decision__two_levels ("
+            "source TEXT NOT NULL DEFAULT '', variant_norm TEXT NOT NULL, "
+            "variant_display TEXT NOT NULL DEFAULT '', "
+            "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), "
+            "alias_of TEXT, seed_color TEXT, seed_type TEXT, seed_country TEXT, seed_name TEXT, "
+            "asked_by TEXT NOT NULL DEFAULT '', decided_at TEXT NOT NULL, "
+            "PRIMARY KEY (source, variant_norm));"
+            "INSERT INTO variety_decision__two_levels (source, variant_norm, variant_display, action, alias_of, "
+            "seed_color, seed_type, seed_country, seed_name, asked_by, decided_at) "
+            f"SELECT '', variant_norm, {'variant_display' if 'variant_display' in _variety_cols else "''"}, action, "
+            "alias_of, seed_color, seed_type, seed_country, seed_name, source, decided_at FROM variety_decision;")
+        after = conn.execute("SELECT COUNT(*) FROM variety_decision__two_levels").fetchone()[0]
+        if after != before:
+            conn.execute("DROP TABLE variety_decision__two_levels")
+            raise RuntimeError(f"variety_decision migration lost rows ({before} -> {after}); refusing to proceed")
+        conn.executescript(
+            "DROP TABLE IF EXISTS variety_decision__pre_two_levels;"
+            "ALTER TABLE variety_decision RENAME TO variety_decision__pre_two_levels;"
+            "ALTER TABLE variety_decision__two_levels RENAME TO variety_decision;")
+        conn.commit()
     # Operator-confirmed PER-VENDOR origins (the separate origin review queue): a (source, variety, type)
     # the operator picked a country for, because the vendor's primary_origin did not corroborate the map.
     # Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Overlaid
