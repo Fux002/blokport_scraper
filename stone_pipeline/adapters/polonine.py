@@ -4,8 +4,8 @@ Polonine is a clean named-variety source: the `material` column carries the
 variety name (ALPINE, ARABESCATTO EXTRA), so variety_match_key is `material`
 and rows resolve cleanly downstream. It is a slabware export, all slab bundles,
 so format is Slab. stone_type carries a trailing render tag ("Granite /") that
-is stripped here. Dimensions arrive as metres in dimension_length/height with
-the thickness as the slab width.
+is stripped here. Dimensions arrive as metres in dimension_length/height (the two faces) with
+the thickness in its own field (raw_thickness; derive lands it in canonical height).
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class PolonineAdapter(AdapterBase):
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_origin": lambda r: AdapterBase.clean(r.get("origin")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
-        # length + height both metres on polonine; width comes from thickness (kept in raw_thickness)
+        # length + height (the two faces) both metres on polonine; the thickness rides in raw_thickness
         "raw_dimensions": lambda r: AdapterBase.build_dims(
             r.get("dimension_length"), r.get("dimension_height"), unit="m"),
         "raw_weight": lambda r: AdapterBase.clean(r.get("weight")),

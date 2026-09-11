@@ -116,7 +116,8 @@ class AdapterBase:
     def build_dims(length: Any, height: Any, unit: str = "", blank_na: bool = False) -> str:
         """The canonical raw_dimensions string 'length=<l><unit>;height=<h><unit>' that derive re-parses,
         built ONCE for every adapter (was copy-pasted per source). length/height are the two FACE
-        dimensions; thickness is carried separately as raw_thickness. Returns '' when BOTH faces are
+        dimensions in the RAW vocabulary (derive lands the raw 'height', the short face, in canonical width);
+        thickness is carried separately as raw_thickness (canonical height). Returns '' when BOTH faces are
         blank. `unit` is the source's declared unit ('m', or '' when the value already carries its own,
         e.g. marenostone's cm). `blank_na=True` treats an 'N/A' sentinel as blank (via na())."""
         clean = AdapterBase.na if blank_na else AdapterBase.clean
