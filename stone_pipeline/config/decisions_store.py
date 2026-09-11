@@ -317,6 +317,10 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     # a statement REPLACES the vendor's previous one for this spelling: nothing of the old target survives
     # (its origin decision would otherwise linger on a variety the product no longer binds to)
     clear_decisions(src, spelling)
+    # ...and supersedes a REJECT on the same listing. The reject PUT keys on the card ref (the cleaned name),
+    # a statement on the scraped spelling; curate consults the reject first, so a surviving reject would
+    # silently outrank this statement (only the audit gap would show it). Last operator action wins.
+    _drop_global_reject(spelling, clean(spelling, stone_type))
     if exists_as(name, stone_type) or resolved_alias:
         set_scoped_alias(src, spelling, name, stone_type)
         outcome["result"] = "bound"
@@ -386,6 +390,18 @@ def backfill_levels(exists_as=None, alias_target=None, clean=None) -> list[dict]
                       "stone_type": dec["seed_type"], "spelling_means": existing})
     store.mark_migration(BACKFILL_LEVELS)
     return moved
+
+
+def _drop_global_reject(*spellings: str) -> int:
+    """Delete the global reject rows stored under any of these spellings (normalised). Returns rows dropped."""
+    norms = {_norm(s) for s in spellings if s and _norm(s)}
+    if not norms:
+        return 0
+    with closing(store.open_store()) as conn:
+        n = sum(conn.execute("DELETE FROM variety_decision WHERE source = '' AND action = 'reject' "
+                             "AND variant_norm = ?", (norm,)).rowcount for norm in norms)
+        conn.commit()
+    return n
 
 
 def clear_decisions(source: str, scraped: str) -> dict[str, int]:
