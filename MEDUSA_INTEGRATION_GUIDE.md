@@ -277,6 +277,7 @@ Response: `{ "acked": 3 }`.
 - `medusa_id` is required for `variations` and `products`; omit for `inventory`.
 - `status`: `created`/`updated`/`skipped` (success) or `failed` (returns the entity to
   the queue for the next pull).
+- `removed` lane acks use their own statuses: `done` (Medusa deleted it; the tombstone retires) or `blocked` (an open reservation prevents the delete; the tombstone re-serves and dead-letters after five blocks). Do not send `created`/`updated`/`skipped` on this lane.
 
 **Ack AFTER you commit.** Persist the `external_id -> entity` mapping in Medusa before
 you ack. If you ack and then crash before committing, the ledger marks it synced while

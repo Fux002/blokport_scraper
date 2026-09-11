@@ -546,10 +546,14 @@ def run_source(
     # write-through is enabled, and it never fails the run (the ledger is
     # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
     from stone_pipeline.ledger import writethrough
+    ledger_failed = False
     if writethrough.enabled():
         if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
-            # source until a successful re-run. Surface it LOUDLY on the run (do not report a clean success).
+            # source until a successful re-run. Surface it on the run and FAIL it (below, once the CSVs,
+            # diagnostics and steps are written so the operator can read why): run_all then omits this
+            # source from results and `run all` exits 1.
+            ledger_failed = True
             manifest.write_backs.append(f"LEDGER_WRITETHROUGH_FAILED:{source_cfg.source_code}")
             run_log.error("ledger write-through failed; Medusa will not receive this source until a "
                           "successful re-run", extra={"extra_fields": {"source": source_cfg.source_code}})
@@ -575,6 +579,8 @@ def run_source(
             "gates": manifest.gate_status,
         }},
     )
+    if ledger_failed:
+        raise SystemExit(2)
     return manifest
 
 

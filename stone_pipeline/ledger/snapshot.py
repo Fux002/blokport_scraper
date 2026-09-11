@@ -113,10 +113,21 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
         return False                       # a local copy already wins -- never clobber it
     key = key or snapshot_key(env)
     try:
-        _s3().head_object(Bucket=S3_BUCKET, Key=key)   # raises if there is no snapshot yet
-    except Exception:
-        log.info("no snapshot to restore; starting fresh", extra={"extra_fields": {"key": key}})
-        return False                       # genuine absence -> fresh start, never a crash-loop
+        _s3().head_object(Bucket=S3_BUCKET, Key=key)   # 404 / NoSuchKey: there is no snapshot yet
+    except Exception as exc:
+        if s3_error_is_missing(exc):
+            log.info("no snapshot to restore; starting fresh", extra={"extra_fields": {"key": key}})
+            return False                   # genuine absence -> fresh start, never a crash-loop
+        # anything else (throttle, permission, endpoint) says nothing about absence: the snapshot may exist,
+        # and a fresh store would be uploaded over it by the periodic save. Required -> fail loud (ECS
+        # restarts and retries); best-effort callers keep their non-fatal contract.
+        if required:
+            log.exception("snapshot presence check FAILED for a required store; failing loud (retry on restart)",
+                          extra={"extra_fields": {"key": key}})
+            raise
+        log.exception("snapshot presence check failed (non-fatal); starting fresh",
+                      extra={"extra_fields": {"key": key}})
+        return False
     tmp = ledger_path.with_suffix(f".restore.{os.getpid()}.tmp")   # pid-unique: both containers may boot together
     try:
         ledger_path.parent.mkdir(parents=True, exist_ok=True)

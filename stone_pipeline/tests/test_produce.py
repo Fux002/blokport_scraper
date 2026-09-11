@@ -1,10 +1,12 @@
 """produce.py orchestration: the full from-scratch produce = fetch export inputs -> LIVE scrape ->
 build. This is what the `/run` trigger runs so a produce on a fresh host (empty data/) populates from
 nothing. The order matters (scrape before build), catalog-only must NOT scrape (it re-consolidates
-existing outputs), a failed scrape must abort before build, and fetch_inputs is best-effort (a fetch
-failure never blocks the produce)."""
+existing outputs), a failed scrape must abort before build, and fetch_inputs is best-effort only in
+development (a real S3 failure aborts a production produce; an empty prefix is never a failure)."""
 
 from __future__ import annotations
+
+import pytest
 
 from stone_pipeline import produce
 
@@ -131,3 +133,21 @@ def test_gate_held_on_empty_export_cold_start_with_new_varieties(monkeypatch):
 def test_gate_stays_fatal_on_empty_export_when_nothing_new_explains_it(monkeypatch):
     # export empty but the ledger has no held new varieties -> a genuinely broken warm export -> fatal
     assert _reconcile(monkeypatch, EMPTY_EXPORT_ERROR, held=0, untyped=0) == 1
+
+
+def test_fetch_inputs_failure_is_fatal_in_production_and_best_effort_in_development(monkeypatch):
+    # An empty S3 prefix is NOT an error (fetch_inputs.main returns 0 with "no input files"), so failing loud
+    # on an exception cannot block a cold start. A real S3/credential failure in production must abort the
+    # produce: matching against a stale or absent export would hold every variety and exit 0.
+    from deploy import fetch_inputs
+    from stone_pipeline.config import settings
+
+    def _boom():
+        raise RuntimeError("s3 unreachable")
+    monkeypatch.setattr(fetch_inputs, "main", _boom)
+    monkeypatch.setattr(settings, "refresh_category_pcats", lambda: None)
+    monkeypatch.setattr(produce, "IS_PRODUCTION", True, raising=False)
+    with pytest.raises(SystemExit):
+        produce._fetch_inputs()
+    monkeypatch.setattr(produce, "IS_PRODUCTION", False, raising=False)
+    produce._fetch_inputs()                                  # a laptop without S3 keeps producing

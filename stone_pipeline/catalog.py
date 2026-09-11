@@ -63,6 +63,16 @@ def find_canonical(outputs_root: Path) -> list[Path]:
     return [d / "diagnostics" / "canonical.parquet" for d in latest_run_dirs(outputs_root)]
 
 
+def _record_catalog() -> None:
+    """Reflect the produced variations onto the ledger (flag-gated). The ledger is what Medusa pulls, so a
+    failed write-through is a failed produce: exit non-zero rather than report a clean success whose
+    variations will never sync."""
+    from stone_pipeline.ledger import writethrough
+    if writethrough.enabled() and not writethrough.record_catalog():
+        raise SystemExit("ledger catalog write-through FAILED: the produced variations are NOT in the ledger "
+                         "and will not sync to Medusa; re-run the produce")
+
+
 def run(outputs_root: Path | None = None) -> Path:
     outputs_root = Path(outputs_root or SETTINGS.paths.outputs_dir)
     parquets = find_canonical(outputs_root)
@@ -130,11 +140,7 @@ def run(outputs_root: Path | None = None) -> Path:
     # even though those variations are valid and simply awaiting their first pull. The ledger must carry
     # them regardless; the sync engine gates their products on the variation being synced, and produce
     # reconciles the gate against the ledger (held vs fatal). Inert unless write-through is enabled.
-    from stone_pipeline.ledger import writethrough
-    if writethrough.enabled():
-        if not writethrough.record_catalog():
-            log.error("ledger catalog write-through FAILED; the produced variations are NOT in the ledger "
-                      "and will not sync to Medusa until a successful re-run")
+    _record_catalog()
 
     # Deterministic consistency gate: fail loudly if the upload set is internally inconsistent
     # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check. In the
