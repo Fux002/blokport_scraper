@@ -122,7 +122,8 @@ def test_billed_megapixels_floor_and_roundup():
 def test_kontext_edit_rejects_blank_output(monkeypatch):
     # a blank/near-uniform Kontext response is a failed edit -> raises so process() HOLDS the image.
     dw = _Dewatermarker(_cfg())
-    fake_fal = type("F", (), {"upload_file": staticmethod(lambda p: "url"),
+    fake_fal = type("F", (), {"upload": staticmethod(lambda data, content_type, **kw: "url"),
+                              "upload_file": staticmethod(lambda p: "url"),
                               "subscribe": staticmethod(lambda m, arguments: {"images": [{"url": "u"}]})})
     blank = np.zeros((32, 32, 3), np.uint8)
     fake_png = cv2.imencode(".png", blank)[1].tobytes()
@@ -139,7 +140,8 @@ def test_kontext_edit_bills_every_generation(monkeypatch):
     # every SUBMITTED FAL generation is billed (success/blank/error), so retries accrue billed_mp -- the
     # cost circuit breaker must not undercount them (the old masked-Fill path counted per generation too).
     dw = _Dewatermarker(_cfg())
-    fake_fal = type("F", (), {"upload_file": staticmethod(lambda p: "url"),
+    fake_fal = type("F", (), {"upload": staticmethod(lambda data, content_type, **kw: "url"),
+                              "upload_file": staticmethod(lambda p: "url"),
                               "subscribe": staticmethod(lambda m, arguments: {"images": [{"url": "u"}]})})
     fake_png = cv2.imencode(".png", np.zeros((32, 32, 3), np.uint8))[1].tobytes()   # blank -> retried
     fake_req = type("R", (), {"get": staticmethod(
@@ -166,3 +168,44 @@ def test_process_passes_the_prompt_override(monkeypatch):
     monkeypatch.setattr(dw, "_kontext_edit", _capture)
     dw.process(_slab(), prompt="Remove the blue AcmeStone mark")
     assert seen["prompt"] == "Remove the blue AcmeStone mark"
+
+
+# --------------------------------------------------------------------------- #
+#  audit wave 1: a processing failure is a FAILURE, never a memoized success; no temp files per FAL call
+# --------------------------------------------------------------------------- #
+
+def test_unexpected_error_on_unwatermarked_is_reported_as_failed(monkeypatch):
+    # An ESRGAN OOM / CUDA error / decode error on an UN-watermarked image used to return the raw bytes as
+    # a plain success; the images stage then stored them under improved/ and memoized them for ever. The
+    # result must say it failed so the caller holds the image and the next run retries.
+    proc = ImageProcessor(_cfg())
+    monkeypatch.setattr(proc, "_process", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("cuda oom")))
+    r = proc.process(_jpeg(_slab()), watermarked=False)
+    assert r.failed is True and r.dewatermark_failed is False
+    r2 = proc.process(_jpeg(_slab()), watermarked=True)
+    assert r2.failed is True and r2.dewatermark_failed is True          # the watermarked hold still holds
+
+
+def test_kontext_edit_uploads_the_image_bytes_once_without_a_temp_file(monkeypatch, tmp_path):
+    # One upload per edit (not one per retry) and no mktemp file left on the container's disk.
+    dw = _Dewatermarker(_cfg())
+    uploads = []
+    calls = {"n": 0}
+
+    def _subscribe(m, arguments):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("transient")
+        return {"images": [{"url": "u"}]}
+    fake_fal = type("F", (), {"upload": staticmethod(lambda data, content_type, **kw: uploads.append(len(data)) or "url"),
+                              "upload_file": staticmethod(lambda p: (_ for _ in ()).throw(AssertionError("upload_file(temp path) must not be used"))),
+                              "subscribe": staticmethod(_subscribe)})
+    edited = cv2.imencode(".png", cv2.cvtColor(np.array(_slab()), cv2.COLOR_RGB2BGR))[1].tobytes()
+    fake_req = type("R", (), {"get": staticmethod(
+        lambda u, timeout=0: type("Resp", (), {"content": edited, "raise_for_status": lambda s: None})())})
+    monkeypatch.setitem(sys.modules, "fal_client", fake_fal)
+    monkeypatch.setitem(sys.modules, "requests", fake_req)
+    monkeypatch.setattr(ip.time, "sleep", lambda *_: None)
+    assert not hasattr(ip, "tempfile"), "the processor must not write temp files at all"
+    out = dw._kontext_edit(_slab())
+    assert out is not None and calls["n"] == 3 and len(uploads) == 1

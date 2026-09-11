@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import math
 import os
-import tempfile
 import time
 from dataclasses import dataclass
 from io import BytesIO
@@ -183,14 +182,16 @@ class _Dewatermarker:
 
         instruction = prompt or self.prompt
         gen_mp = self.billed_megapixels(pil_rgb.width, pil_rgb.height)   # FAL bills ~this per generation
-        ti = tempfile.mktemp(suffix=".png")
-        pil_rgb.save(ti)
+        # upload the source ONCE, from memory: no temp file on the container's disk, no re-upload per retry
+        buf = BytesIO()
+        pil_rgb.save(buf, format="PNG")
+        image_url = fal_client.upload(buf.getvalue(), "image/png")
         last = None
         for attempt in range(1, self.MAX_RETRIES + 1):
             self._billed_mp += gen_mp                                    # every submitted generation is billed
             try:
                 result = fal_client.subscribe(self.model, arguments={
-                    "image_url": fal_client.upload_file(ti),
+                    "image_url": image_url,
                     "prompt": instruction,
                     "seed": self.seed,
                     "output_format": "png",
@@ -380,6 +381,10 @@ class ProcessResult:
     # True iff de-watermarking a WATERMARKED image could not complete (FAL unavailable / failed / an
     # unexpected error). The caller MUST hold the image (no marker), never publish it watermarked.
     dewatermark_failed: bool = False
+    # True iff processing raised (ESRGAN OOM, CUDA error, undecodable bytes, any unexpected error). The data
+    # is the ORIGINAL bytes; the caller MUST hold the image (no improved/, no manifest entry) so the next run
+    # retries -- storing it would memoize a transient failure as "treated" for ever.
+    failed: bool = False
     billed_mp: int = 0             # TOTAL FAL billed megapixels across all generations (incl retries/failures)
 
     def is_complete(self, *, enhance_requested: bool) -> bool:
@@ -437,11 +442,12 @@ class ImageProcessor:
             return ProcessResult(data)
         try:
             return self._process(data, watermarked, enhance, prompt)
-        except Exception as exc:  # faithful fallback: original bytes, never crash
-            log.warning("image processing failed; keeping original",
+        except Exception as exc:  # isolated: the original bytes come back, flagged failed, never a crash
+            log.warning("image processing failed; holding the image for a retry",
                         extra={"extra_fields": {"error": str(exc)}})
-            # a failure on a WATERMARKED image must hold it (never publish the original, watermarked).
-            return ProcessResult(data, dewatermark_failed=watermarked)
+            # failed -> the stage holds it (no improved/, no manifest); a WATERMARKED source additionally
+            # keeps its de-watermark hold so it can never publish watermarked.
+            return ProcessResult(data, dewatermark_failed=watermarked, failed=True)
 
     def _process(self, data: bytes, watermarked: bool, enhance: bool = True,
                  prompt: Optional[str] = None) -> ProcessResult:
