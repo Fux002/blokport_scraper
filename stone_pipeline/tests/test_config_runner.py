@@ -103,7 +103,7 @@ def test_publish_deliverables_only_on_catalog_producing_stages(monkeypatch):
     # the unchanged ~334MB set. Best-effort: a publish failure never raises out of the finish path.
     from deploy import upload_artifacts
     calls: list[str] = []
-    monkeypatch.setattr(upload_artifacts, "main", lambda: calls.append("published") or 0)
+    monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: calls.append("published") or 0)
 
     for stage in ("all", "catalog", "republish"):
         runner._publish_deliverables(stage)
