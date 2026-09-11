@@ -108,3 +108,6 @@ def test_polonine_detail_failure_holds_the_row_imageless_never_ships_it(tmp_path
     assert not (row["dimension_height"] or row["dimension_length"])
     assert any(f["kind"] == "detail" for f in s._failures)      # failure surfaced
     assert s._detail_failed == 1                                 # counted for the delist-failure ratio
+    # the EXPLICIT hold the checklist mandates (and varsha/marenostone carry): dims are held for a retry,
+    # not defaulted -- so the row is held even if a listing image ever makes it non-imageless.
+    assert "dims" in (row.get(s.FETCH_FAILED_COL) or "").split("|")

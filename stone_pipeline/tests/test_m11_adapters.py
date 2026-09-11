@@ -366,3 +366,17 @@ def test_zucchi_semiprecious_colour_is_the_real_colour_not_semi():
     assert _color({"product_name_pt": "CIN Quartz Semi Prec Marrom Tigrado"}) == "Brown"
     assert _color({"product_name_pt": "CIN Quartz Semi Prec Branco Cristal"}) == "White"
     assert _color({"product_name_pt": "CIN Granito Preto Absoluto"}) == "Black"   # non-semiprecious unaffected
+
+
+def test_fuleistone_never_falls_back_to_thumbnails():
+    # the checklist: map FULL-size images, never a thumbnail. A product with no full image is imageless (the
+    # no_image retry path), not a 150px thumb shipped into the enhance/texture pipeline.
+    adapter = selftest.REGISTRY["fuleistone"]
+    row = adapter.adapt_record({"product_id": "p1", "name": "Nero Marquina", "material": "Marble",
+                                "image_urls": "", "image_urls_thumb": "http://t/1_150x150.jpg",
+                                "thickness": "20mm", "size": "", "finish": "", "color": ""})
+    assert row is not None and row.raw_image_urls == []
+    full = adapter.adapt_record({"product_id": "p2", "name": "Nero Marquina", "material": "Marble",
+                                 "image_urls": "http://t/1.jpg|http://t/2.jpg", "image_urls_thumb": "http://t/1_150x150.jpg",
+                                 "thickness": "20mm", "size": "", "finish": "", "color": ""})
+    assert full.raw_image_urls == ["http://t/1.jpg", "http://t/2.jpg"]
