@@ -20,7 +20,7 @@ class _FakeS3:
 
     def head_object(self, Bucket, Key):
         if (Bucket, Key) not in self.store:
-            raise KeyError("no such object")
+            raise _s3_error("404")                      # boto-shaped absence, as the real client raises
 
     def download_file(self, Bucket, Key, filename):
         Path(filename).write_bytes(self.store[(Bucket, Key)])
@@ -111,6 +111,33 @@ def test_required_restore_starts_fresh_when_snapshot_vanished_after_head(tmp_pat
     fake = _HeadOkDownloadFailsS3(_s3_error("NoSuchKey"))
     monkeypatch.setattr(snapshot, "_s3", lambda: fake)
     assert snapshot.restore(tmp_path / "development.db", env="development", required=True) is False
+
+
+class _HeadFailsS3(_FakeS3):
+    """head_object itself raises a NON-absence error (throttle, permission, endpoint): the snapshot may well
+    exist; treating this as "no snapshot" boots an empty store that the periodic save then uploads over it."""
+
+    def __init__(self, exc):
+        super().__init__()
+        self._exc = exc
+
+    def head_object(self, Bucket, Key):
+        raise self._exc
+
+
+def test_required_restore_fails_loud_when_head_object_errors_transiently(tmp_path, monkeypatch):
+    fake = _HeadFailsS3(_s3_error("SlowDown"))
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    dest = tmp_path / "development.db"
+    with pytest.raises(Exception):
+        snapshot.restore(dest, env="development", required=True)
+    assert not dest.exists()
+
+
+def test_non_required_restore_head_error_stays_best_effort(tmp_path, monkeypatch):
+    fake = _HeadFailsS3(_s3_error("SlowDown"))
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    assert snapshot.restore(tmp_path / "development.db", env="development") is False
 
 
 def test_non_required_restore_download_failure_stays_best_effort(tmp_path, monkeypatch):

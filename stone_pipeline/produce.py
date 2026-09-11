@@ -27,6 +27,7 @@ from stone_pipeline import build
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("produce")
+from stone_pipeline.config.settings import IS_PRODUCTION   # noqa: E402  (log first: settings may fail loud)
 
 
 # Stages that skip the live supplier fetch and reuse the last scrape in data/.
@@ -37,13 +38,17 @@ _CATALOG_STAGES = ("catalog", "all", "republish")
 
 def _fetch_inputs() -> None:
     """Pull the current Medusa export (variants_export + attributes) from S3 so the matcher resolves
-    existing ids. Best-effort: a missing export degrades matching (new varieties still produce), so a
-    failure -- no S3 on a laptop, an empty prefix on a fresh env -- logs and continues, never blocks
-    a first produce."""
+    existing ids. An EMPTY prefix (a fresh env, nothing published yet) is not an error: fetch_inputs.main
+    returns 0 and the cold start proceeds. An exception is a real S3 / credential failure: in production it
+    aborts the produce (matching against a stale or absent export would hold every variety and exit 0);
+    in development (a laptop without S3) it logs and continues."""
     try:
         from deploy import fetch_inputs
         fetch_inputs.main()
     except Exception:
+        if IS_PRODUCTION:
+            log.exception("fetch_inputs FAILED in production; refusing to produce against a stale or absent export")
+            raise SystemExit(2)
         log.warning("fetch_inputs skipped; matching runs against whatever export is local",
                     exc_info=True)
     # Realign the category registry with the export NOW on disk. The pcats were read once at import

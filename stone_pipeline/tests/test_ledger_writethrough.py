@@ -65,6 +65,22 @@ def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not _MAREN_DATA, reason="needs local marenostone scrape data (gitignored, absent in CI)")
+def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_path, monkeypatch):
+    """A failed record_source means Medusa never receives this source: the run must exit non-zero (run_all
+    then omits it from results and `all` returns 1), AFTER the CSVs, diagnostics and steps are written so the
+    operator can read why."""
+    from stone_pipeline.ledger import writethrough
+
+    monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: False)
+    out = tmp_path / "fail"
+    with pytest.raises(SystemExit):
+        run_source("marenostone", outputs_dir=out, state_dir=out)
+    assert glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True), "the CSVs are still written"
+    assert glob.glob(str(out / "**" / "diagnostics" / "health.json"), recursive=True), "diagnostics still written"
+
+
+@pytest.mark.skipif(not _MAREN_DATA, reason="needs local marenostone scrape data (gitignored, absent in CI)")
 def test_writethrough_gate_silent_when_disabled(tmp_path, monkeypatch):
     """With neither prefix set, enabled() is False and the gate must not touch the ledger."""
     from stone_pipeline.ledger import writethrough

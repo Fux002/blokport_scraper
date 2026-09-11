@@ -6,6 +6,7 @@ only targets products that exist in Medusa. These tests cover its set-arithmetic
 from __future__ import annotations
 
 from stone_pipeline.catalog import _consistency_errors
+import pytest
 
 
 def test_clean_set_passes():
@@ -178,3 +179,20 @@ def test_auto_queue_images_generates_when_deps_present(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog, "_generate_queued_images", lambda: generated.append(1) or [])
     catalog._auto_queue_images()
     assert generated == [1]                         # inline generation ran
+
+
+def test_catalog_write_through_failure_fails_the_produce(monkeypatch):
+    # The ledger is what Medusa pulls; a produce whose variations never reached it must not exit 0.
+    from stone_pipeline import catalog
+    from stone_pipeline.ledger import writethrough
+    calls = []
+    monkeypatch.setattr(writethrough, "enabled", lambda: True)
+    monkeypatch.setattr(writethrough, "record_catalog", lambda: calls.append(1) or False)
+    with pytest.raises(SystemExit):
+        catalog._record_catalog()
+    monkeypatch.setattr(writethrough, "record_catalog", lambda: calls.append(1) or True)
+    catalog._record_catalog()                                # success: no raise
+    monkeypatch.setattr(writethrough, "enabled", lambda: False)
+    calls.clear()
+    catalog._record_catalog()
+    assert calls == []                                       # disabled: the ledger is not touched
