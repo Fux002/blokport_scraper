@@ -118,6 +118,7 @@ def test_placeholder_blocked(local_cfg, monkeypatch):
 def test_passthrough_links_to_improved_s3(monkeypatch):
     # passthrough points product images at the IMPROVED S3 versions via the imageproc manifest,
     # never the raw source url; an image not in the manifest is DROPPED, not defaulted.
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
     monkeypatch.setattr(images, "_readonly_manifest",
                         lambda: {"http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg"})
     cfg = ImagesConfig(mode="passthrough")
@@ -130,6 +131,7 @@ def test_passthrough_links_to_improved_s3(monkeypatch):
 def test_passthrough_holds_untreated_manifest_entries(monkeypatch):
     # a manifest entry that points at a raw (non-/improved/) S3 upload is HELD, not linked -- only
     # enhanced/upscaled images ever reach the upload. The treated one links; the untreated one is held.
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {
         "http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg",   # treated
         "http://x/b.jpg": "https://s3/dev/products/zucchi/bb.jpg",       # on S3 but NOT enhanced
@@ -144,6 +146,7 @@ def test_passthrough_holds_untreated_manifest_entries(monkeypatch):
 def test_passthrough_all_untreated_holds_product_imageless(monkeypatch):
     # every image still raw on S3 -> nothing links -> the product is held imageless (no_image), not
     # shipped with untreated pictures. Re-links on a later produce once improved/ versions exist.
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {
         "http://x/a.jpg": "https://s3/dev/products/zucchi/aa.jpg"})
     cfg = ImagesConfig(mode="passthrough")
@@ -155,6 +158,7 @@ def test_passthrough_all_untreated_holds_product_imageless(monkeypatch):
 
 def test_passthrough_drops_images_when_manifest_unreachable(monkeypatch):
     # offline / no S3 -> empty manifest -> images are DROPPED, never leaked as raw source urls
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {})
     cfg = ImagesConfig(mode="passthrough")
     row = CanonicalRow(src_site="x", surrogate_key="7", is_block=False,

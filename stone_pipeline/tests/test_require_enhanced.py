@@ -234,3 +234,44 @@ def test_passthrough_gate_off_links_all_improved(monkeypatch):
                        raw_image_urls=["http://x/a.jpg", "http://x/b.jpg"])
     images.run([row], cfg=cfg)
     assert len(row.product_image_keys) == 2                                             # both linked (gate off)
+
+
+# --------------------------------------------------------------------------- #
+#  audit wave 1: a failed processing result is HELD (no improved/, no manifest), never memoized
+# --------------------------------------------------------------------------- #
+
+def test_processing_failure_holds_the_image_and_writes_no_manifest(tmp_path, monkeypatch):
+    import stone_pipeline.io.image_processing as ip
+    from stone_pipeline.io.image_processing import ProcessResult
+    monkeypatch.setattr(ip.ImageProcessor, "process",
+                        lambda self, data, **kw: ProcessResult(data, failed=True))
+    monkeypatch.setattr(images, "_enhance_sources", lambda: set())
+    monkeypatch.setattr(images, "_watermarked_sources", lambda: set())
+    monkeypatch.setattr(images, "_load_enhanced_set", lambda cfg=None: set())
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())
+    cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
+                       require_enhanced=False, processing=_proc_cfg())
+    row = CanonicalRow(src_site="zucchi", surrogate_key="9", is_block=False, raw_image_urls=["http://x/a.jpg"])
+    stats = images.run([row], fetch=_fake_fetch({"http://x/a.jpg": _jpeg()}), cfg=cfg)
+    assert stats.staged == 0 and stats.no_image == 1 and row.image_keys == []
+    improved = list((tmp_path / "s").rglob("improved/*"))
+    assert improved == [], f"a failed result must never land in improved/: {improved}"
+    assert not list((tmp_path / "s").rglob("_manifest.json")), "no manifest entry for a held image"
+
+
+def test_discard_pool_unreachable_is_unknown_and_holds_every_image(tmp_path, monkeypatch):
+    # Previously an S3 list failure returned an EMPTY set and published every previously discarded image.
+    # Unknown must fail closed (hold), the same rule as the enhanced-marker set; never a crash, never open.
+    import boto3
+
+    class _Boom:
+        def __init__(self, *a, **k): raise RuntimeError("s3 down")
+    monkeypatch.setattr(boto3, "Session", _Boom)
+    assert images._load_discard_set(ImagesConfig(mode="s3", public_base="https://cdn/x/", processing=_proc_cfg())) is None
+    assert images._load_discard_set(ImagesConfig(mode="local", public_base="https://cdn/x/", processing=_proc_cfg())) == set()
+    # the stage: discard pool unknown -> every image held, product imageless (retry next run)
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: None)
+    monkeypatch.setattr(images, "_readonly_manifest", lambda: {"http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg"})
+    row = CanonicalRow(src_site="x", surrogate_key="1", is_block=False, raw_image_urls=["http://x/a.jpg"])
+    stats = images.run([row], cfg=ImagesConfig(mode="passthrough"))
+    assert stats.no_image == 1 and row.product_image_keys == []

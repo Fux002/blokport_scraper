@@ -141,32 +141,38 @@ def _hosted_object_exists(backend, hosted_url: str) -> bool:
     return backend.exists(hosted_url[len(base):])
 
 
-def _load_discard_set(cfg=None) -> set[str]:
+def _list_shas(prefix: str) -> set[str]:
+    """The content sha256 embedded in every object key under an S3 pool prefix (discarded/, enhanced/).
+    Raises on any S3 failure: the callers decide the policy."""
+    import boto3
+
+    s3 = SETTINGS.s3
+    client = boto3.Session(profile_name=s3.credentials_profile or None,
+                           region_name=s3.region).client("s3")
+    out: set[str] = set()
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            sha = imagestore.sha_from_url(obj["Key"])
+            if sha:
+                out.add(sha)
+    return out
+
+
+def _load_discard_set(cfg=None) -> set[str] | None:
     """The content sha256 of every image the pipeline classified as non-stone (the products/discarded/
     pool written by the GPU reprocess). A linked url whose embedded sha is in this set is NEVER published;
-    a variant whose EVERY image is in it emits the terminal no_publishable_image flag. Read straight from
-    S3, read-only, best-effort: {} offline or in local mode (discards live only in the S3 pool), so a
-    fully-offline run still works and simply treats nothing as discarded."""
+    a variant whose EVERY image is in it emits the terminal no_publishable_image flag. Empty in local mode
+    (discards live only in the S3 pool). None when the pool cannot be read: UNKNOWN, and the stage then
+    HOLDS every image (fail closed, like the enhanced-marker set) rather than re-linking every discarded
+    spec sheet and logo, which is what treating "unreachable" as "nothing discarded" did."""
     if getattr(cfg, "mode", None) == "local":
         return set()
     try:
-        import boto3
-
-        s3 = SETTINGS.s3
-        client = boto3.Session(profile_name=s3.credentials_profile or None,
-                               region_name=s3.region).client("s3")
-        out: set[str] = set()
-        for page in client.get_paginator("list_objects_v2").paginate(
-                Bucket=s3.bucket, Prefix=imagestore.DISCARDED_PREFIX_ALL):
-            for obj in page.get("Contents", []):
-                sha = imagestore.sha_from_url(obj["Key"])
-                if sha:
-                    out.add(sha)
-        return out
-    except Exception as exc:  # no S3/boto3 -> treat nothing as discarded (never wrongly hide an image)
-        log.warning("discard set unreachable; nothing treated as discarded",
+        return _list_shas(imagestore.DISCARDED_PREFIX_ALL)
+    except Exception as exc:
+        log.warning("discard pool unreachable; every image is HELD this run (never publish unverified)",
                     extra={"extra_fields": {"error": str(exc)}})
-        return set()
+        return None
 
 
 def _load_enhanced_set(cfg=None) -> set[str]:
@@ -174,23 +180,11 @@ def _load_enhanced_set(cfg=None) -> set[str]:
     pool). When cfg.require_enhanced is on, ONLY these shas may be published -- an image in improved/ that
     lacks a marker is a raw re-encode (produce on :core) and is HELD, never linked. Read from S3, read-only.
     Fail CLOSED: if the set is unreachable, return an empty set so nothing is treated as enhanced (holds
-    rather than risks publishing raw). A produce already needs S3 for the manifest, so this rarely misses."""
+    rather than risks publishing raw)."""
     if getattr(cfg, "mode", None) == "local":
         return set()
     try:
-        import boto3
-
-        s3 = SETTINGS.s3
-        client = boto3.Session(profile_name=s3.credentials_profile or None,
-                               region_name=s3.region).client("s3")
-        out: set[str] = set()
-        for page in client.get_paginator("list_objects_v2").paginate(
-                Bucket=s3.bucket, Prefix=imagestore.ENHANCED_PREFIX_ALL):
-            for obj in page.get("Contents", []):
-                sha = imagestore.sha_from_url(obj["Key"])
-                if sha:
-                    out.add(sha)
-        return out
+        return _list_shas(imagestore.ENHANCED_PREFIX_ALL)
     except Exception as exc:  # fail closed: hold everything rather than risk publishing an un-enhanced image
         log.warning("enhanced-marker set unreachable; with require_enhanced ON this HOLDS all images",
                     extra={"extra_fields": {"error": str(exc)}})
@@ -301,6 +295,9 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             urls = []
             n_discarded = n_held = 0
             for u in srcs:
+                if discarded is None:
+                    n_held += 1                                  # discard pool unknown -> hold (fail closed)
+                    continue
                 mapped = manifest.get(u)
                 sha = imagestore.sha_from_url(mapped) if mapped else None
                 if sha and sha in discarded:
@@ -326,7 +323,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
             "staged": stats.staged, "no_image": stats.no_image, "no_image_source": stats.no_image_source,
             "manifest_entries": len(manifest), "held_untreated": held_untreated,
-            "discard_set": len(discarded)}})
+            "discard_set": None if discarded is None else len(discarded)}})
         return stats
 
     backend = _build_backend(cfg)
@@ -464,8 +461,9 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                 if not backend.exists(skey):
                     backend.put(skey, data)
                     stats.bytes_uploaded += len(data)
-            if pr.dewatermark_failed or (watermarked_src and not finish_on_core):
-                # HOLD this run (no improved/, no marker), leaving the image for the GPU, whenever :core did
+            if pr.failed or pr.dewatermark_failed or (watermarked_src and not finish_on_core):
+                # HOLD this run (no improved/, no marker, no manifest entry) whenever processing FAILED (a
+                # transient error must be retried next run, never memoized as treated), or :core did
                 # NOT finish it: either de-watermarking FAILED here (dewatermark_failed), OR the source is
                 # enhance=on + watermarked so it was deferred to the GPU (which de-watermarks + upscales in one
                 # pass) -- :core must never write a still-watermarked image into improved/. The raw is in
@@ -520,6 +518,9 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                                             method="download", src_url=row.src_url))
                 continue
             sha = imagestore.sha_from_url(public)
+            if discarded is None:
+                n_other += 1                                   # discard pool unknown -> HOLD (fail closed)
+                continue
             if sha and sha in discarded:
                 n_discarded += 1                               # classified non-stone -> never link
                 continue
