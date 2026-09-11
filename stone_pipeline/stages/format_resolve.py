@@ -96,8 +96,8 @@ def _thickness_branch(row: CanonicalRow, ref: ReferenceData) -> str | None:
     if meters is None:
         return None
     ranges = active_pack().dimension_ranges
-    default_hi = ranges[_DEFAULT_BRANCH]["width"][1]  # default-form thickness band top (slab: e.g. 0.03 m)
-    bulk_lo = ranges[_BULK]["width"][0]               # bulk-form thickness band floor (block: e.g. 1.5 m)
+    default_hi = ranges[_DEFAULT_BRANCH]["height"][1]  # default-form thickness band top (slab: e.g. 0.03 m)
+    bulk_lo = ranges[_BULK]["height"][0]               # bulk-form depth band floor (block: e.g. 1.5 m)
     if meters >= bulk_lo * 0.3:              # clearly bulk-scale depth
         return _BULK
     if meters <= default_hi * 3:             # clearly default-scale thickness

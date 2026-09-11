@@ -61,9 +61,11 @@ dimension_ranges:
   bag:   {weight: [0.02, 0.05], length: [0.3, 0.6], width: [0.1, 0.3], height: [0.4, 0.8]}
 
 # PLACEHOLDER fallback dimensions in METRES (applied only when a real value is missing; always flagged).
+# height is the thickness, length/width the two faces. The bag RANGE pair above (width 0.1-0.3, height
+# 0.4-0.8) still describes a bag standing up; a placeholder, left for the pack owner (nothing ships on it).
 dimension_defaults:
-  block: {length: 0.40, height: 0.20, thickness: 0.20}
-  bag:   {length: 0.50, height: 0.60, thickness: 0.20}
+  block: {length: 0.40, width: 0.20, height: 0.20}
+  bag:   {length: 0.50, width: 0.60, height: 0.20}
 
 # PLACEHOLDER finish -> surface phrase for the generated description.
 finish_phrases:

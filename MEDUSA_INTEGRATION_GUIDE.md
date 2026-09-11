@@ -164,7 +164,7 @@ Only products whose variation is synced and whose texture is live.
     "title": "Walnut Travertine Honed",
     "description": "Walnut Travertine is a brown travertine ...",
     "handle": "walnut-travertine-honed-slab-polonine-7f3a2b19",
-    "length": 2.5, "width": 0.2, "height": 2.0, "weight": 0.3,
+    "length": 2.5, "width": 2.0, "height": 0.02, "weight": 0.3,
     "origin_port": "ITMDC", "origin_country_code": "IT",
     "collection_country_code": "IT", "collection_city": "Verona",
     "bundle_size": 7,
@@ -172,6 +172,8 @@ Only products whose variation is synced and whose texture is live.
   }
 }
 ```
+
+Dimensions are metres with one meaning per column for every shape, as if the piece lies flat: `length` and `width` are the two faces (face area = length x width), `height` is the thickness (volume = length x width x height). Blocks are cuboids and read the same way.
 
 `category` and `type` are the variety's identity, OWNED by the variation -- resolve the
 product's identity from `variation_external_id` (step 1), not from these. They are ALSO sent

@@ -198,7 +198,7 @@ def test_inventory_explicit_zero_is_trusted_out_of_stock(ref, cfg):
 def test_inventory_derived_from_stock_area(ref, cfg):
     # a source publishing available stock SQM, no slab count: pieces = stock area / per-piece face area.
     row = _slab_row(raw_stock_m2="10")
-    row.length, row.height = 2.0, 1.0            # per piece = 2.0 m2 -> 5 pieces
+    row.length, row.width = 2.0, 1.0             # per piece = 2.0 m2 -> 5 pieces
     derive.derive_inventory(row)
     assert row.inventory_quantity == 5
     assert row.inventory_method == "stock_area_division"
@@ -207,14 +207,14 @@ def test_inventory_derived_from_stock_area(ref, cfg):
 def test_inventory_area_partial_piece_never_floors_to_zero(ref, cfg):
     # 5 m2 available, one piece is 6 m2: still in stock -> at least 1, never a false sold-out.
     row = _slab_row(raw_stock_m2="5")
-    row.length, row.height = 3.0, 2.0            # per piece = 6.0 m2 > 5
+    row.length, row.width = 3.0, 2.0             # per piece = 6.0 m2 > 5
     derive.derive_inventory(row)
     assert row.inventory_quantity == 1
 
 
 def test_inventory_zero_stock_area_is_trusted_out_of_stock(ref, cfg):
     row = _slab_row(raw_stock_m2="0")
-    row.length, row.height = 2.0, 1.0
+    row.length, row.width = 2.0, 1.0
     derive.derive_inventory(row)
     assert row.inventory_quantity == 0
     assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
@@ -300,7 +300,7 @@ def test_inventory_out_of_stock_flag_overrides_a_published_area(ref, cfg):
     # the marenostone contradiction: the site marks the item out-of-stock yet still publishes a Ready-Stock
     # area. The explicit unavailable flag WINS -> sold-out 0, so a stale area never lists a sold-out item.
     row = _slab_row(raw_stock_m2="100", raw_stock_status="out-of-stock")
-    row.length, row.height = 2.0, 1.0                # a real area/face that WOULD divide to 50 pieces
+    row.length, row.width = 2.0, 1.0                 # a real area/face that WOULD divide to 50 pieces
     derive.derive_inventory(row)
     assert row.inventory_quantity == 0
     assert row.inventory_method == "out_of_stock_flag"
@@ -310,7 +310,7 @@ def test_inventory_precise_count_wins_over_structured_status(ref, cfg):
     # ordering: a real area/count is ALWAYS preferred over the status fallback, so an in-stock flag never
     # downgrades a product that actually publishes a magnitude.
     row = _slab_row(raw_stock_m2="10", raw_stock_status="in-stock")
-    row.length, row.height = 2.0, 1.0                # 10 m2 / 2 m2 = 5 pieces
+    row.length, row.width = 2.0, 1.0                 # 10 m2 / 2 m2 = 5 pieces
     derive.derive_inventory(row)
     assert row.inventory_quantity == 5
     assert row.inventory_method == "stock_area_division"
@@ -384,8 +384,8 @@ def test_dimensions_prefer_parsed(ref, cfg):
     row = _slab_row(raw_dimensions="length=2.80m;height=1.97m", raw_thickness="2cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length == 2.8 and row.height == 1.97
-    assert row.width == 0.02  # thickness parsed to metres
+    assert row.length == 2.8 and row.width == 1.97
+    assert row.height == 0.02  # thickness parsed to metres
     assert "length:parsed" in row.dimension_method
 
 
@@ -395,8 +395,8 @@ def test_thickness_range_defaults_to_standard(ref, cfg):
     row = _slab_row(raw_dimensions="length=2.80m;height=1.97m", raw_thickness="2-3 cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.width == 0.02, f"range thickness should default to the 2 cm standard, got {row.width}"
-    assert any(f.code == FlagCode.dimension_defaulted and f.field == "width" for f in row.review_flags)
+    assert row.height == 0.02, f"range thickness should default to the 2 cm standard, got {row.height}"
+    assert any(f.code == FlagCode.dimension_defaulted and f.field == "height" for f in row.review_flags)
 
 
 def test_face_range_uses_maximum(ref, cfg):
@@ -412,8 +412,8 @@ def test_multi_thickness_defaults_to_standard_keeps_faces(ref, cfg):
     row = _slab_row(raw_dimensions="length=3.20m;height=1.90m", raw_thickness="MULTI")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length == 3.2 and row.height == 1.9 and row.width == 0.02
-    assert any(f.code == FlagCode.dimension_defaulted and f.field == "width" for f in row.review_flags)
+    assert row.length == 3.2 and row.width == 1.9 and row.height == 0.02
+    assert any(f.code == FlagCode.dimension_defaulted and f.field == "height" for f in row.review_flags)
 
 
 def test_dimension_unit_correction_cm_read_as_m(ref, cfg):
@@ -423,7 +423,7 @@ def test_dimension_unit_correction_cm_read_as_m(ref, cfg):
                     raw_dimensions="length=332m;height=205m", raw_thickness="3cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length == 3.32 and row.height == 2.05 and row.width == 0.03   # cm -> m
+    assert row.length == 3.32 and row.width == 2.05 and row.height == 0.03   # cm -> m
     assert row.weight is not None and row.weight < 2.0                        # a real slab, not 5512 tonnes
     assert any(f.code == FlagCode.dimension_unit_corrected for f in row.review_flags)
 
@@ -434,7 +434,7 @@ def test_dimension_valid_metres_never_touched(ref, cfg):
                     raw_dimensions="length=2.8m;height=1.97m", raw_thickness="2cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length == 2.8 and row.height == 1.97 and row.width == 0.02
+    assert row.length == 2.8 and row.width == 1.97 and row.height == 0.02
     assert not any(f.code == FlagCode.dimension_unit_corrected for f in row.review_flags)
 
 
@@ -454,7 +454,7 @@ def test_free_length_fills_only_missing_and_keeps_real_dims(ref, cfg):
     row = _slab_row(raw_format="Tile", raw_dimensions="length=Free;height=40cm", raw_thickness="1.8cm")
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.height == 0.4 and row.width == 0.018      # real values preserved
+    assert row.width == 0.4 and row.height == 0.018      # real values preserved
     assert row.length == 0.6                             # tile standard fills the 'Free' length only
     assert any(f.code == FlagCode.dimension_defaulted and f.field == "length" for f in row.review_flags)
 
@@ -487,7 +487,7 @@ def test_missing_dimensions_filled_from_pack_default(ref, cfg):
     row = _slab_row()   # no raw_dimensions / raw_thickness on the row
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert (row.length, row.height, row.width) == (3.3, 2.0, 0.02)
+    assert (row.length, row.width, row.height) == (3.3, 2.0, 0.02)
     assert {f.field for f in row.review_flags if f.code == FlagCode.dimension_defaulted} \
         == {"length", "height", "width"}
     validate.validate_row(row)
@@ -529,10 +529,10 @@ def test_fetch_failed_thickness_only_holds_width_keeps_real_faces(ref, cfg):
     row = _slab_row(raw_dimensions="length=3.2;height=2.0", fetch_failed_fields=["thickness"])
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert row.length == 3.2 and row.height == 2.0     # real faces preserved
-    assert row.width is None                            # thickness held, not defaulted
-    assert any(f.code == FlagCode.dimension_unavailable and f.field == "width" for f in row.review_flags)
-    assert not any(f.code == FlagCode.dimension_unavailable and f.field in ("length", "height")
+    assert row.length == 3.2 and row.width == 2.0      # real faces preserved
+    assert row.height is None                           # thickness held, not defaulted
+    assert any(f.code == FlagCode.dimension_unavailable and f.field == "height" for f in row.review_flags)
+    assert not any(f.code == FlagCode.dimension_unavailable and f.field in ("length", "width")
                    for f in row.review_flags)
 
 
@@ -543,7 +543,7 @@ def test_fetch_failed_dim_retries_and_emits_when_present_next_scrape(ref, cfg):
     row = _slab_row(raw_dimensions="length=2.8m;height=1.97m", raw_thickness="2cm")   # fetch succeeded
     derive.derive_category(row, ref)
     derive.derive_dimensions(row, ref)
-    assert (row.length, row.height, row.width) == (2.8, 1.97, 0.02)
+    assert (row.length, row.width, row.height) == (2.8, 1.97, 0.02)
     validate.validate_row(row)
     assert not any(r.rule in ("dimension_unavailable", "dimension_invalid") for r in row.reject_reasons)
 
