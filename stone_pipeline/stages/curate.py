@@ -256,7 +256,6 @@ class CurationResult:
     images_to_generate: list[dict] = field(default_factory=list)          # image checklist
     suspicious_names: list[dict] = field(default_factory=list)            # code-like names, NOT minted
     pending_confirm: list[dict] = field(default_factory=list)             # uncertain -> variants_to_confirm.csv
-    rejected: set = field(default_factory=set)                            # user said 'no' -> never propose again
     counts: dict[str, int] = field(default_factory=dict)
 
 
@@ -690,9 +689,6 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         if dec == "yes":
             _mint(clean, stone_type, row, gap)
             continue
-        if dec == "no":                                # honour a reject so the name stops re-appearing
-            rejected.add(proj.norm(clean))
-            continue
         # 3d. code-SHAPED names ('Rosal C', 'Trani Bianco H', 'Gs') are supplier codes/grades, not
         # varieties -> NEVER mint them. A trailing lone-letter grade whose de-coded base is a KNOWN,
         # single, NON-colour variety is auto-aliased to that variety ('Rosal C' -> 'Rosal'), so a
@@ -1050,7 +1046,6 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             p["image"] = variety_images.get(proj.norm(p.get("variant", "")), "")
     result.suspicious_names = suspicious   # written to review by write_curation
     result.pending_confirm = pending_confirm
-    result.rejected = rejected
     # Defence in depth: the mint-emission HOLD makes a type-less variety impossible here; surface it LOUD
     # if a future change ever regresses, rather than shipping a type-less (bad-Key) variety to Medusa.
     typeless = [p["variant"] for posts in result.backbone_new.values() for p in posts if not p.get("stone_type")]
@@ -1190,7 +1185,6 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     # (origin_needs_confirmation). One entry per (source, variety, type); never mixed into the variety queue
     # above. Always called (empty clears it) so a confirmed origin drops off, like the variety queue.
     decisions.write_origin_confirm_file(rows)
-    decisions.save_rejected(result.rejected)
     if result.backbone_updates:   # human-readable audit of the leaf additions (the queue below is the surface)
         _write_csv(additions / "backbone_value_updates.csv", decisions.LEAF_COLUMNS, result.backbone_updates)
     # surface the leaf additions for operator review (:4200) -> approve grows the backbone overlay next run.

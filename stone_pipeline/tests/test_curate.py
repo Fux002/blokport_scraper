@@ -159,7 +159,9 @@ def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, mon
     assert any(r["Name"] == "Nebula Quartz Prime" for r in minted.new_variants["slab"])
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in minted.pending_confirm)
 
+    # a reject is ONE store row: confirm_map says 'no' AND rejected_names carries it (the store is the memory)
     monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "nebula quartz prime"): "no"})
+    monkeypatch.setattr(decisions, "load_rejected", lambda: {("", "nebula quartz prime")})
     rejected = curate.build_curation([_row()], ref)
     assert not rejected.new_variants["slab"], "a 'no' must not mint"
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in rejected.pending_confirm), "a 'no' must not re-surface"

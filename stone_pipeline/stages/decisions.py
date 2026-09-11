@@ -96,11 +96,6 @@ def load_variety_seed_scopes() -> dict[tuple[str, str], str]:
     return decisions_store.variety_seed_scopes()
 
 
-def save_rejected(rejected: set[str]) -> None:
-    """Persist runtime-learned rejects. Never overwrites an explicit mint/alias decision."""
-    decisions_store.learn_rejects(rejected)
-
-
 def write_confirm_file(pending: list[dict]) -> int:
     """Replace the pending VARIETY queue with this run's still-undecided varieties. Returns the count.
     A decided variety is simply absent from `pending`, so it stops appearing.
