@@ -56,7 +56,8 @@ class VarshaAdapter(AdapterBase):
         "raw_quality": lambda r: AdapterBase.clean(r.get("quality")),
         "raw_format": lambda r: AdapterBase.clean(r.get("format")),
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
-        # width is the long edge on these exports -> map it to length (first arg), height to height
+        # 'width' is the long edge on these exports -> map it to length (first arg); 'height' is the short face
+        # -> the raw dims 'height' key (derive lands it in canonical width)
         "raw_dimensions": lambda r: AdapterBase.build_dims(
             AdapterBase.first_of(r.get("slab_widths_m"), "|"),
             AdapterBase.first_of(r.get("slab_heights_m"), "|"), unit="m"),

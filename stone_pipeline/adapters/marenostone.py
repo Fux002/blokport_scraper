@@ -48,7 +48,7 @@ class MarenostoneAdapter(AdapterBase):
         # explicit format tag from the source; the Format Resolver decides, with
         # the product name and structure as fallbacks (no blind default here)
         "raw_format": lambda r: AdapterBase.clean(r.get("attr_format")),
-        # the scraper puts the depth (Thickness) in dimensions_width -> our thickness/width
+        # the scraper puts the depth (Thickness) in its dimensions_width column -> raw_thickness (canonical height)
         "raw_thickness": lambda r: AdapterBase.na(r.get("dimensions_width")),
         # marenostone renders dims in cm and the value already carries no unit here -> unit="" (the
         # source's declared unit is applied at scrape time); 'N/A' -> blank via na().
