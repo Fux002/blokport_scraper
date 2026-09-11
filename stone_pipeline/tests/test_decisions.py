@@ -98,13 +98,6 @@ def test_invalid_decisions_are_rejected_loudly():
             pass
 
 
-def test_learn_rejects_never_overwrites_an_explicit_decision():
-    ds.set_variety_decision("Keeper", "mint")                 # operator said mint
-    decisions.save_rejected({"keeper", "junk code"})          # runtime tries to learn a reject
-    # the explicit mint survives; only the genuinely new name is learned as a reject
-    assert decisions.load_confirm_decisions()[("", "keeper")] == "yes"
-    assert ("", "junk code") in decisions.load_rejected()
-
 
 def test_pending_variety_queue_round_trips_with_current_action():
     ds.set_variety_decision("Alpha Stone", "mint")            # decided between runs

@@ -418,20 +418,6 @@ def clear_decisions(source: str, scraped: str) -> dict[str, int]:
     return dropped
 
 
-def learn_rejects(names: set[str]) -> None:
-    """Persist runtime-learned rejects (curate marks a code-shaped name it was told 'no' on). INSERT OR
-    IGNORE so it never overwrites an explicit mint/alias decision the operator made."""
-    if not names:
-        return
-    now = _now()
-    with closing(store.open_store()) as conn:
-        conn.executemany(
-            "INSERT OR IGNORE INTO variety_decision "
-            "(variant_norm, variant_display, action, alias_of, decided_at) VALUES (?, ?, 'reject', NULL, ?)",
-            [(_norm(n), n, now) for n in names if _norm(n)])
-        conn.commit()
-
-
 # -- per-vendor origin decisions (produce READS these; the separate origin review queue) --------------
 
 def set_origin_decision(source: str, variety: str, stone_type: str, country_iso: str,
