@@ -406,3 +406,22 @@ def test_migration_makes_every_old_mint_global_and_keeps_who_asked(tmp_path, mon
     conn.close()
     decisions_store.variety_actions()                                    # a second open: idempotent, nothing changes
     assert len(decisions_store.variety_actions()) == 2
+
+
+# --- audit wave 1: a statement supersedes a reject on the same listing -------------------------------------
+
+def test_a_statement_supersedes_a_reject_stored_under_the_card_ref():
+    # The reject PUT keys on the card ref (the CLEANED name, 'amazon green'); a statement keys on the scraped
+    # spelling ('Amazon Green Granite'). Both rows coexisted and curate consulted the reject first, so the
+    # statement never applied and only the audit gap revealed it. The last operator action must win.
+    decisions_store.set_variety_decision("amazon green", "reject")                    # what the reject PUT stores
+    out = decisions_store.decide("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite",
+                                 exists_as=_exists)
+    assert out["result"] == "bound"
+    assert decisions_store.rejected_names() == set()                                  # the reject is gone
+    assert decisions_store.confirm_map() == {}
+    # and a reject stored under the SPELLING itself is superseded the same way, for a mint
+    decisions_store.set_variety_decision("Totally New", "reject")
+    out = decisions_store.decide("zucchi", "Totally New", "Totally New", "Granite", exists_as=_exists)
+    assert out["result"] == "minted" and decisions_store.rejected_names() == set()
+    assert decisions_store.confirm_map() == {("", _norm("Totally New")): "yes"}

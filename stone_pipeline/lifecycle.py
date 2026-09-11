@@ -544,12 +544,16 @@ def remove_source(name: str) -> tuple[dict, int]:
         live = sync.live_products(lg, source_codes=codes)
         if live:
             raise _Busy(f"{name!r} still has {live} live product(s); take it offline first")
-        return sync.purge_discontinued(lg, source_codes=codes, reason="vendor_removed")
+        out = sync.purge_discontinued(lg, source_codes=codes, reason="vendor_removed")
+        # the config row goes INSIDE the slot: a produce starting between the purge and this delete would
+        # still list the source and re-scrape it
+        out["config_removed"] = store.delete_source(name)
+        return out
 
     result, code = _ledger_op("remove_source", work)
     if code != 200:
         return result, code
-    config_removed = store.delete_source(name)
+    config_removed = result.pop("config_removed")
     log.warning("source REMOVED (purge + delete config)", extra={"extra_fields": {
         "source": name, "purged": result["product"], "config_removed": config_removed}})
     _snapshot_config()
@@ -571,14 +575,14 @@ def retire_variation(key: str, force: bool = False) -> tuple[dict, int]:
         live = sync.variation_live_products(lg, key)
         if live and not force:
             raise _Busy(f"variety {key!r} has {live} live product(s); delist or move them first (or force)")
-        return sync.retire_variation(lg, key, force=force)
+        out = sync.retire_variation(lg, key, force=force)
+        # exclusion memory (never re-mint a retired variety, E8/E10), written INSIDE the slot: a produce
+        # starting between the ledger op and this write would read the old memory and re-mint the Key.
+        from stone_pipeline.stages import decisions
+        decisions.add_retired(key)
+        return out
 
-    result, code = _ledger_op("retire_variation", work)
-    if code != 200:
-        return result, code
-    from stone_pipeline.stages import decisions
-    decisions.add_retired(key)          # exclusion memory: never re-mint a retired variety (E8/E10)
-    return result, 200
+    return _ledger_op("retire_variation", work)
 
 
 def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
@@ -753,12 +757,13 @@ def un_retire(key: str) -> tuple[dict, int]:
     """Reverse a retire (mirrors source resume): clear the exclusion memory so the next produce can
     re-mint the variety, flip a still-'retiring' row back to serving, and clear its pending tombstone so
     Medusa does not delete the re-created variety (E5)."""
-    result, code = _ledger_op("un_retire", lambda lg, sync: sync.un_retire_variation(lg, key))
-    if code != 200:
-        return result, code
-    from stone_pipeline.stages import decisions
-    decisions.remove_retired(key)
-    return result, 200
+    def work(lg, sync):
+        out = sync.un_retire_variation(lg, key)
+        from stone_pipeline.stages import decisions
+        decisions.remove_retired(key)       # inside the slot, for the same reason as retire_variation
+        return out
+
+    return _ledger_op("un_retire", work)
 
 
 def not_a_duplicate(key: str) -> tuple[dict, int]:
@@ -788,11 +793,13 @@ def rebuild_curation() -> tuple[dict, int]:
     # re-derive that follows mutates the ledger; a base swap racing a live pull is the one combo to block).
     def _guard(lg, sync):
         sync._lock_and_check_in_flight(lg)              # ServeInFlight -> 409 via _ledger_op
-        return {"ok": True}
+        # the base swap happens INSIDE the slot: a produce or reset starting between the guard and the swap
+        # would read a half-written base or race the S3 publish
+        return {"reseed": _reseed_base_from_pristine()}
     guard, code = _ledger_op("rebuild_curation", _guard)
     if code != 200:
         return guard, code
-    reseed = _reseed_base_from_pristine()
+    reseed = guard["reseed"]
     if not reseed.get("reseeded"):
         # no pristine seed baked (local dev): nothing to rebuild from -- report, do not silently re-derive
         return {"rebuilt": False, "base_reseed": reseed,
