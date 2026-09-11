@@ -43,12 +43,12 @@ This is the main "make it data-driven" work. Category is universal, but its *val
 **Exact sites to make pack-driven:**
 | File:line | Current | Problem for a non-`slab/block/tile` pack |
 |---|---|---|
-| `stages/format_resolve.py:94-95` | literal `ranges["slab"]["width"]`, `ranges["block"]["width"]` | KeyError if those category names don't exist |
+| `stages/format_resolve.py:94-95` | literal `ranges["slab"]["height"]`, `ranges["block"]["height"]` (height is the thickness since the flat-dims change) | KeyError if those category names don't exist |
 | `stages/derive.py:135-140` (`_dimension_category`) | hardcodes `"block"/"tile"/"slab"` | any other category silently buckets as `slab` |
 | `stages/derive.py:219` | `dimension_defaults[category]` | KeyError if the category isn't in the map |
 | `stages/derive.py:259` | `dimension_ranges[category]` | KeyError |
 | `stages/derive.py:426` | `in_stock_fallback_qty[_dimension_category(row)]` | KeyError |
-| `stages/derive.py:132` (`_FACE_DIMS`) | `("length","height")`, width==thickness, mm-thickness clause, `is_block` short-circuit | geometry assumes slab/block/tile physical form |
+| `stages/derive.py:132` (`_FACE_DIMS`) | `("length","height")` (RAW dims keys), height==thickness (flat-dims convention), mm-thickness clause, `is_block` short-circuit | geometry assumes slab/block/tile physical form |
 | `stages/normalize.py:139-176` | `resolve_id("type", …)`, `fmt == "block"`, `.get("slab")` literals | type-correction + last-resort/block logic assume the disambiguator is literally `type` and the forms are slab/block |
 | `ledger/populate.py:67` | `("slab","block","tile")` branch tuple | a pack category loses its ledger branch |
 | `ledger/bootstrap.py:26` | `("slab","block","tile")` | same |

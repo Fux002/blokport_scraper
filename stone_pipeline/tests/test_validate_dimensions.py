@@ -20,7 +20,7 @@ def _row() -> CanonicalRow:
 def test_defaulted_dimension_lists_flagged_not_held():
     r = _row()
     r.length, r.width, r.height = 2.64, 1.76, 1.76   # a usable pack default (e.g. a block whose depth defaulted)
-    r.add_flag(ReviewFlag(field="width", code=FlagCode.dimension_defaulted,
+    r.add_flag(ReviewFlag(field="height", code=FlagCode.dimension_defaulted,
                           confidence=Confidence.low, method="pack_default"))
     validate_row(r)
     assert not any(x.rule == "dimension_defaulted" for x in r.reject_reasons), "a defaulted dim must LIST, not hold"
@@ -29,7 +29,7 @@ def test_defaulted_dimension_lists_flagged_not_held():
 
 def test_fetch_failed_dimension_still_held():
     r = _row()                                       # derive left the dims None + flagged unavailable
-    r.add_flag(ReviewFlag(field="width", code=FlagCode.dimension_unavailable,
+    r.add_flag(ReviewFlag(field="height", code=FlagCode.dimension_unavailable,
                           confidence=Confidence.none, method="fetch_failed"))
     validate_row(r)
     assert any(x.rule == "dimension_unavailable" for x in r.reject_reasons), "a fetch-failed dim still holds for retry"

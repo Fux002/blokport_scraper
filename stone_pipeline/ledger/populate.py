@@ -28,7 +28,7 @@ from stone_pipeline.stages.product_state import inventory_str
 # once, re-syncing the whole catalog with the new payload. v2: adds port_ids to the sync payload so Medusa
 # links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
 # origin_country_code (which fanned every product out to all ports in its quarry country).
-_PRODUCT_PAYLOAD_CONTRACT = "v3-collection"
+_PRODUCT_PAYLOAD_CONTRACT = "v4-flat-dims"   # height is the thickness, width the short face (every shape flat)
 
 
 def _image_models(path: str | Path | None = None) -> dict[str, str]:

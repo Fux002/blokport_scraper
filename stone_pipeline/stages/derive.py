@@ -137,6 +137,9 @@ def _derive_weight(row: CanonicalRow, ref: ReferenceData,
     return weight, "weight:derived"
 
 
+# RAW dims-string keys (build_dims emits 'length=..;height=..'): the two FACE measures, parsed with the face
+# parser. Raw vocabulary, not canonical: raw 'height' is the short face that derive_dimensions lands in
+# canonical WIDTH. Do not rename these with the canonical convention.
 _FACE_DIMS = ("length", "height")
 
 
@@ -162,7 +165,7 @@ def _parse_face(text: str, ref: ReferenceData) -> float | None:
 
 
 def _parse_thickness(text: str, ref: ReferenceData) -> float | None:
-    """The depth (canonical `width`) in metres: only a single clean measure counts. A range ('2-3cm') or a
+    """The thickness (canonical `height`) in metres: only a single clean measure counts. A range ('2-3cm') or a
     non-numeric token ('MULTI') is AMBIGUOUS -> None, so the caller fills the standard thickness (a 2-3cm
     slab is stocked as the 2cm standard, not the midpoint)."""
     if not text or _DIM_RANGE.search(text):
@@ -173,12 +176,14 @@ def _parse_thickness(text: str, ref: ReferenceData) -> float | None:
 def _dim_fetch_failed(row: CanonicalRow, field: str) -> bool:
     """True when THIS dimension's source fetch FAILED (recoverable), so it must be HELD, not defaulted. A
     scraper marks the field-group in fetch_failed_fields: a blanket "dims"/"dimensions" covers all three;
-    the canonical field name covers itself; "thickness" is the raw alias of the canonical `width` (depth)."""
+    the canonical field name covers itself; the raw aliases map to their canonical field: "thickness" is the
+    canonical `height`, raw "height" (the short face) is the canonical `width`."""
     failed = set(row.fetch_failed_fields or ())
     if not failed:
         return False
     return ("dims" in failed or "dimensions" in failed or field in failed
-            or (field == "width" and "thickness" in failed))
+            or (field == "height" and "thickness" in failed)     # raw thickness -> canonical height
+            or (field == "width" and "height" in failed))        # raw short face -> canonical width
 
 
 def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, default: float,
@@ -220,8 +225,9 @@ def _normalize_unit(value: float | None, field: str, category: str) -> tuple[flo
 
 
 def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
-    """Resolve length/width/height in metres. length+height are the two FACE dimensions (a range takes its
-    MAX); width is the depth/thickness. Each parses from the scraped strings; anything still missing or
+    """Resolve length/width/height in metres: one physical meaning per column for every shape, as if the
+    piece lies flat. length+width are the two FACE dimensions (a range takes its MAX); height is the
+    thickness. Each parses from the scraped strings; anything still missing or
     ambiguous (MULTI thickness, 'Free' length, absent) is filled from the pack's dimension_defaults for the
     row's category and provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
     validate rejects it (a wrong real size breaks area/volume pricing + freight)."""
@@ -240,14 +246,16 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
                 faces[key] = meters
 
     # thickness: the row's own field first, then a width=/thickness= entry in the dims string.
-    width = _parse_thickness(row.raw_thickness, ref) if row.raw_thickness else None
-    if width is None and not row.raw_thickness:
-        width = faces.get("width", faces.get("thickness"))
+    thickness = _parse_thickness(row.raw_thickness, ref) if row.raw_thickness else None
+    if thickness is None and not row.raw_thickness:
+        thickness = faces.get("width", faces.get("thickness"))
 
+    # raw -> canonical, once: raw 'height' is the SHORT FACE -> canonical width; the thickness -> canonical
+    # height. Every shape lying flat, so face area is length x width and thickness bands read height.
     methods: list[str] = []
     length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods)
-    height = _resolve_dimension(row, "height", faces.get("height"), defaults["height"], category, methods)
-    width = _resolve_dimension(row, "width", width, defaults["thickness"], category, methods)
+    width = _resolve_dimension(row, "width", faces.get("height"), defaults["width"], category, methods)
+    height = _resolve_dimension(row, "height", thickness, defaults["height"], category, methods)
 
     # Unit sanity BEFORE weight: a dimension stored in centimetres reads ~100x too large in metres and would
     # inflate the freight weight to thousands of tonnes. Correct it generally (every source, every dimension)
@@ -350,10 +358,10 @@ def _inventory_from_area(row: CanonicalRow) -> int | None:
         return None
     if total <= 0:
         return 0
-    length, height = row.length, row.height
-    if not length or not height or length <= 0 or height <= 0:
+    length, width = row.length, row.width
+    if not length or not width or length <= 0 or width <= 0:
         return None
-    return max(1, int(total / (length * height)))
+    return max(1, int(total / (length * width)))
 
 
 # Positive availability WORDS a supplier may publish instead of a count. Cross-source: read from the same
@@ -738,11 +746,11 @@ def derive_description(row: CanonicalRow) -> None:
     _pack = active_pack()
     phrase = _pack.finish_phrases.get(finish, _pack.finish_phrase_default)
     finish_clause = f"a {finish} {fmt}" if finish else f"a {fmt}"
-    # real thickness (slabs/tiles): width IS the parsed thickness in metres, never fabricated. Omit for
+    # real thickness (slabs/tiles): height IS the parsed thickness in metres, never fabricated. Omit for
     # blocks and when missing or outside a sane display band (a mis-scaled parse validate will reject).
     thickness_clause = ""
-    if not row.is_block and row.width is not None:
-        mm = round(row.width * 1000)
+    if not row.is_block and row.height is not None:
+        mm = round(row.height * 1000)
         if 3 <= mm <= 80:
             thickness_clause = f" at {mm} mm"
     row.description = (

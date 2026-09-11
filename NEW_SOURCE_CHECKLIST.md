@@ -101,7 +101,8 @@ Run the source once and confirm it clears, in order:
   reject, not a fabricated value.
 - **Dimensions: capture with the shared helper; fallbacks are the shared toolbox, never per-adapter.** Build
   `raw_dimensions` with `AdapterBase.build_dims(length, height, unit=...)` (never hand-roll the string);
-  declare the source's unit via the scraper's `dimension_unit`; thickness rides in `raw_thickness`;
+  declare the source's unit via the scraper's `dimension_unit`; thickness rides in `raw_thickness` and lands
+  in canonical `height`; the two faces land in `length` and `width` (every shape as if lying flat);
   `AdapterBase.na(...)` blanks an `N/A` sentinel. A dimension that is missing, unparseable, or ambiguous (a
   `MULTI` thickness, a `Free`/cut-to-size length) is filled from `dimension_defaults` in the domain pack
   (`config/domains/<pack>.yaml`) by the shared `derive_dimensions`, every fill flagged

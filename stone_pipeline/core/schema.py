@@ -235,6 +235,8 @@ class CanonicalRow(BaseModel):
     inventory_confidence: str = "none"
     inventory_method: str = ""
     weight: Optional[float] = None
+    # Metres, one physical meaning per column for every shape, as if the piece lies flat: length and width are
+    # the two faces (face area = length x width), height is the thickness (volume = length x width x height).
     length: Optional[float] = None
     width: Optional[float] = None
     height: Optional[float] = None

@@ -27,7 +27,9 @@ scraper's `dimension_unit`); `AdapterBase.na(...)` blanks an `N/A` sentinel. Thi
 `raw_thickness`. Missing / unparseable / ambiguous dimensions (a `MULTI` thickness, a `Free` cut-to-size length,
 an `A to B` range) are resolved once, for every source, by the shared `stages/derive.derive_dimensions` from the
 `dimension_defaults` toolbox in the domain pack (`config/domains/<pack>.yaml`), always provenance-flagged
-(`FlagCode.dimension_defaulted`). Tune a size or add a category THERE, never in an adapter.
+(`FlagCode.dimension_defaulted`). Tune a size or add a category THERE, never in an adapter. Canonical
+convention (derive is the only place raw becomes canonical): `length`/`width` are the two faces, `height` is
+the thickness, for every shape; the raw `height=` key in `raw_dimensions` is the short face and stays as is.
 
 **A FETCH failure holds the row; it is never defaulted.** A genuine source absence defaults (above); a value
 missing because its SUB-FETCH failed (e.g. a rate-limited detail page) is recoverable, so it must be HELD for

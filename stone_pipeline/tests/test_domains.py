@@ -34,7 +34,8 @@ def test_consumers_read_the_pack_not_hardcoded():
     assert p.fallback_color == "Natural"
     assert p.dimension_ranges["slab"]["weight"] == (0.225, 0.350)
     assert p.dimension_ranges["block"]["weight"] == (18.0, 23.0)
-    assert p.dimension_ranges["tile"]["height"] == (0.3, 0.6)
+    assert p.dimension_ranges["tile"]["width"] == (0.3, 0.6)
+    assert p.dimension_ranges["tile"]["height"] == (0.01, 0.02)     # height is the thickness
     assert p.finish_phrases["polished"] == \
         "a bright, mirror-like surface that reflects light and deepens the stone's colour"
     assert p.finish_phrase_default == "a refined natural surface"
@@ -83,7 +84,7 @@ def _valid_pack_dict():
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
         "in_stock_fallback_qty": {"x": 5},
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
-        "dimension_defaults": {"x": {"length": 1.0, "height": 1.0, "thickness": 0.02}},
+        "dimension_defaults": {"x": {"length": 1.0, "width": 1.0, "height": 0.02}},
         "finish_phrases": {"f": "p"}, "finish_phrase_default": "p", "default_density": 700})
 
 
@@ -191,7 +192,7 @@ def test_two_bulk_forms_fails_loud(tmp_path, monkeypatch):
     pack["categories"][0]["bulk_form"] = True                 # two bulk_form categories now
     pack["in_stock_fallback_qty"]["y"] = 1                    # keep V1 (per-category maps) satisfied
     pack["dimension_ranges"]["y"] = {"weight": [0.1, 0.3]}
-    pack["dimension_defaults"]["y"] = {"length": 1.0, "height": 1.0, "thickness": 0.02}
+    pack["dimension_defaults"]["y"] = {"length": 1.0, "width": 1.0, "height": 0.02}
     _write_pack(tmp_path, pack)
     with pytest.raises(ValueError, match="at most one category may set bulk_form"):
         domain.load_pack("bad")
@@ -271,8 +272,8 @@ dimension_ranges:
   shirt: {weight: [0.1, 0.3], length: [0.5, 0.8], width: [0.4, 0.6], height: [0.01, 0.02]}
   pants: {weight: [0.2, 0.5], length: [0.9, 1.2], width: [0.3, 0.5], height: [0.01, 0.02]}
 dimension_defaults:
-  shirt: {length: 0.7, height: 0.015, thickness: 0.5}
-  pants: {length: 1.0, height: 0.015, thickness: 0.4}
+  shirt: {length: 0.7, width: 0.5, height: 0.015}
+  pants: {length: 1.0, width: 0.4, height: 0.015}
 finish_phrases: {standard: "a standard finish"}
 finish_phrase_default: "a standard finish"
 """

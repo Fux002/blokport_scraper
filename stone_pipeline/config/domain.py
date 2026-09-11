@@ -117,7 +117,7 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
                     and all(isinstance(v, (int, float)) for v in vals)):
                 bad(f"dimension_ranges[{fmt!r}][{dim!r}] must be a [lo, hi] pair of numbers, got {vals!r}")
     for fmt, dims in data["dimension_defaults"].items():
-        for dim in ("length", "height", "thickness"):
+        for dim in ("length", "width", "height"):
             if not isinstance(dims.get(dim), (int, float)) or dims[dim] <= 0:
                 bad(f"dimension_defaults[{fmt!r}][{dim!r}] must be a positive number, got {dims.get(dim)!r}")
     if not isinstance(data["in_stock_fallback_qty"], dict):
