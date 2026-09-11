@@ -158,16 +158,21 @@ def _list_shas(prefix: str) -> set[str]:
     return out
 
 
-def _load_discard_set(cfg=None) -> set[str]:
+def _load_discard_set(cfg=None) -> set[str] | None:
     """The content sha256 of every image the pipeline classified as non-stone (the products/discarded/
     pool written by the GPU reprocess). A linked url whose embedded sha is in this set is NEVER published;
     a variant whose EVERY image is in it emits the terminal no_publishable_image flag. Empty in local mode
-    (discards live only in the S3 pool). In s3 mode an unreachable pool RAISES: a produce that cannot read
-    what it must not publish would otherwise re-link every discarded spec sheet and logo, and it needs S3
-    for everything else in this stage anyway."""
+    (discards live only in the S3 pool). None when the pool cannot be read: UNKNOWN, and the stage then
+    HOLDS every image (fail closed, like the enhanced-marker set) rather than re-linking every discarded
+    spec sheet and logo, which is what treating "unreachable" as "nothing discarded" did."""
     if getattr(cfg, "mode", None) == "local":
         return set()
-    return _list_shas(imagestore.DISCARDED_PREFIX_ALL)
+    try:
+        return _list_shas(imagestore.DISCARDED_PREFIX_ALL)
+    except Exception as exc:
+        log.warning("discard pool unreachable; every image is HELD this run (never publish unverified)",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return None
 
 
 def _load_enhanced_set(cfg=None) -> set[str]:
@@ -290,6 +295,9 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
             urls = []
             n_discarded = n_held = 0
             for u in srcs:
+                if discarded is None:
+                    n_held += 1                                  # discard pool unknown -> hold (fail closed)
+                    continue
                 mapped = manifest.get(u)
                 sha = imagestore.sha_from_url(mapped) if mapped else None
                 if sha and sha in discarded:
@@ -315,7 +323,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
             "staged": stats.staged, "no_image": stats.no_image, "no_image_source": stats.no_image_source,
             "manifest_entries": len(manifest), "held_untreated": held_untreated,
-            "discard_set": len(discarded)}})
+            "discard_set": None if discarded is None else len(discarded)}})
         return stats
 
     backend = _build_backend(cfg)
@@ -510,6 +518,9 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                                             method="download", src_url=row.src_url))
                 continue
             sha = imagestore.sha_from_url(public)
+            if discarded is None:
+                n_other += 1                                   # discard pool unknown -> HOLD (fail closed)
+                continue
             if sha and sha in discarded:
                 n_discarded += 1                               # classified non-stone -> never link
                 continue

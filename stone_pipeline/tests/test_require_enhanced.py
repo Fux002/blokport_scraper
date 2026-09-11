@@ -259,14 +259,19 @@ def test_processing_failure_holds_the_image_and_writes_no_manifest(tmp_path, mon
     assert not list((tmp_path / "s").rglob("_manifest.json")), "no manifest entry for a held image"
 
 
-def test_discard_set_unreachable_fails_loud_in_s3_mode(monkeypatch):
-    # Previously an S3 list failure returned an empty set and PUBLISHED every previously discarded image.
+def test_discard_pool_unreachable_is_unknown_and_holds_every_image(tmp_path, monkeypatch):
+    # Previously an S3 list failure returned an EMPTY set and published every previously discarded image.
+    # Unknown must fail closed (hold), the same rule as the enhanced-marker set; never a crash, never open.
     import boto3
+
     class _Boom:
         def __init__(self, *a, **k): raise RuntimeError("s3 down")
     monkeypatch.setattr(boto3, "Session", _Boom)
-    cfg = ImagesConfig(mode="s3", public_base="https://cdn/x/", processing=_proc_cfg())
-    with pytest.raises(Exception):
-        images._load_discard_set(cfg)
-    assert images._load_discard_set(ImagesConfig(mode="local", public_base="https://cdn/x/",
-                                                 processing=_proc_cfg())) == set()   # local: no S3 pool
+    assert images._load_discard_set(ImagesConfig(mode="s3", public_base="https://cdn/x/", processing=_proc_cfg())) is None
+    assert images._load_discard_set(ImagesConfig(mode="local", public_base="https://cdn/x/", processing=_proc_cfg())) == set()
+    # the stage: discard pool unknown -> every image held, product imageless (retry next run)
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: None)
+    monkeypatch.setattr(images, "_readonly_manifest", lambda: {"http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg"})
+    row = CanonicalRow(src_site="x", surrogate_key="1", is_block=False, raw_image_urls=["http://x/a.jpg"])
+    stats = images.run([row], cfg=ImagesConfig(mode="passthrough"))
+    assert stats.no_image == 1 and row.product_image_keys == []

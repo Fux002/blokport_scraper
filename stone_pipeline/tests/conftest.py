@@ -17,6 +17,18 @@ from stone_pipeline.config.settings import SETTINGS
 
 
 @pytest.fixture(autouse=True)
+def _no_ambient_aws(monkeypatch):
+    """Tests run without AWS credentials, exactly as CI does. A developer machine with ~/.aws would otherwise
+    let a test reach the real bucket (a call that swallows NoCredentialsError passes here and fails in CI, or
+    the reverse), so local and CI runs disagree. Every S3 client a test needs is a fake."""
+    for var in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_config_store(monkeypatch, tmp_path_factory):
     absent = tmp_path_factory.mktemp("noconfig") / "absent.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(absent))
