@@ -93,14 +93,16 @@ class PolonineScraper(ScraperBase):
         d = r.json().get("d") or {}
         return json.loads(d.get("Bundles") or "[]")
 
-    def _fetch_detail(self, bundle_id) -> dict:
+    def _fetch_detail(self, bundle_id) -> Optional[dict]:
+        """The bundle detail, or None when the fetch FAILED (recorded + counted for the delist-failure ratio):
+        the caller then HOLDS the row for a retry instead of shipping it half-formed."""
         try:
             r = self.post(DETAIL_API, headers=API_HEADERS,
                           content=json.dumps({"IdBundle": bundle_id, "IdCampanha": 0}))
         except Exception as exc:
             self.record_failure("detail", bundle_id=bundle_id, error=str(exc))
             self.note_detail(ok=False)   # A1: feed the delist gate's detail-failure ratio
-            return {}
+            return None
         self.note_detail(ok=True)
         return (r.json().get("d") or {}).get("Bundle") or {}
 
@@ -111,7 +113,8 @@ class PolonineScraper(ScraperBase):
         yield from self.paginate_offset(self._fetch_page, PAGE_SIZE)
 
     def parse_product(self, item: dict) -> Optional[dict]:
-        detail = self._fetch_detail(item.get("id")) or {}
+        fetched = self._fetch_detail(item.get("id"))
+        detail = fetched or {}
         chapas = detail.get("chapas") or item.get("chapas") or []
         first = chapas[0] if chapas else {}
         # slabs_detail in the polonine shape (the bundle resolver counts "n")
@@ -120,7 +123,7 @@ class PolonineScraper(ScraperBase):
             "h_in": _g(c, "Height"), "w_in": _g(c, "Length"),
             "sqft": _g(c, "TotalSqft"), "sqmt": _g(c, "TotalSqmt"),
         } for c in chapas], ensure_ascii=False)
-        return {
+        row = {
             "product_id": _g(item, "id"),
             "material": _g(item, "nomeMaterial"),
             "stone_type": _g(item, "nomeComposicao"),
@@ -153,6 +156,11 @@ class PolonineScraper(ScraperBase):
             "slabs_detail": slabs_detail,
             "image_urls": _photos(detail.get("fotos")),  # base keeps these as source links
         }
+        if fetched is None:
+            # dims, colour, area and photos live only in the detail: HOLD the row for a retry (the pipeline
+            # holds a fetch-failed dimension instead of defaulting it), exactly as varsha and marenostone do.
+            self.mark_fetch_failed(row, "dims", bundle_id=item.get("id"), error="detail fetch failed")
+        return row
 
 
 if __name__ == "__main__":
