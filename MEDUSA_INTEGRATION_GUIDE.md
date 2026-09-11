@@ -359,6 +359,39 @@ The pipeline still builds `2_valid_combinations.csv` for its own legacy CSV path
 this integration. (A paged `/sync/v1/combinations` pull stays a fallback only if Blokport
 ever needs the pipeline to own the table; not the path.)
 
+### Deliverables manifest (the file-import contract)
+
+Every catalog-producing produce publishes the deliverables under `<env>/scraper/to_upload/` and,
+LAST, `manifest.json` next to them:
+
+```json
+{
+  "contract": "v1",
+  "env": "production",
+  "run_id": "20260911143633034",
+  "produced_at": "2026-09-11T14:42:59Z",
+  "files": {
+    "2_valid_combinations.csv":               {"sha256": "…", "rows": 2501238, "bytes": 420208056},
+    "2_valid_combinations_products_only.csv": {"sha256": "…", "rows": 46244,   "bytes": 7769064},
+    "1_variants_full.csv":                    {"sha256": "…", "rows": 36582,   "bytes": 9763859},
+    "3_products_all.csv":                     {"sha256": "…", "rows": 2728,    "bytes": 3626025}
+  }
+}
+```
+
+- `sha256` is over the exact bytes of the S3 object (hash the stream you import and compare);
+  `rows` is data rows, header excluded, CSV-parsed. Every published file is listed.
+- A file is uploaded only when its hash differs from the manifest already on S3, so unchanged
+  content keeps its object and timestamp. The manifest is rewritten on every publish with a new
+  `run_id` / `produced_at`, so "nothing changed" is the same hashes under a newer manifest: a
+  no-op for a hash-keyed guard, never a block.
+- Ordering: files first, manifest last, one PUT. A manifest never names content that is not
+  there. A produce landing mid-import shows as a stream-hash mismatch on your side: fail loud,
+  retry. Key your "combinations changed?" guard on `files["2_valid_combinations.csv"].sha256`
+  against the hash you last loaded, never on timestamps.
+- The former `2_valid_combinations_update.csv` was the delta since the scraper's last BUILD,
+  not since your last load, and is retired; ignore it until it stops being written.
+
 ---
 
 ## 11. Endpoint reference
