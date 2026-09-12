@@ -122,7 +122,7 @@ re-running catalog with `SCRAPER_VARIANT_IMAGE_BASE=<prod-bucket>/.../variations
 (Keys carry over), downloading the prod export, copying the same images to the prod bucket.
 
 ## 6. Deployment & ops
-- **Fargate** scheduled task in the shared Medusa dev cluster; **ECR** `blokport-scraper` (`:core`, `:imageproc`).
+- **Fargate** sync service (runs the produce) + an ad-hoc task in the shared Medusa dev cluster; **ECR** `blokport-scraper` (`:core`, `:imageproc`).
 - **Terraform** `infra/`: egress-only SG, private subnets, OIDC deploy role, SSM SecureString secrets (`FAL_KEY`,
   `BLOKPORT_SCRAPER_PROXY`), encrypted+locked state. `cd infra && terraform apply`.
 - **CI/CD** `.github/workflows/`: `ci.yml` (pytest + certify), `deploy.yml` (OIDC build+push; `build_imageproc=true`).

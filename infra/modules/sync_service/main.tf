@@ -180,7 +180,6 @@ locals {
     { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
     { name = "SCRAPER_LEDGER_PATH", value = "/ledger/${var.target_env}.db" },
     { name = "SCRAPER_LEDGER_WRITETHROUGH", value = "1" },
-    { name = "SCRAPER_RUN_MODE", value = "local" },
   ]
   ledger_mount = [{ sourceVolume = "ledger", containerPath = "/ledger", readOnly = false }]
   log_options = {

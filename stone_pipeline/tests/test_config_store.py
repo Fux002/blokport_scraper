@@ -285,7 +285,7 @@ def test_run_trigger_matches_the_admin_contract(tmp_path, monkeypatch):
     runner._runs.clear(); runner._current_id = None
     try:
         rec, code = runner.start_run(launch=lambda r: None)   # launcher leaves it 'queued'
-        assert code == 202 and rec["status"] == "queued" and rec["mode"] == "local"
+        assert code == 202 and rec["status"] == "queued"
         assert rec["sources"] == ["polonine"]                 # enabled sources only
         assert set(rec) >= {"run_id", "status", "started_at", "finished_at", "sources", "progress", "error"}
         rid = rec["run_id"]

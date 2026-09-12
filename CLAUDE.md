@@ -11,7 +11,7 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 - Core libs: polars, pyarrow, pydantic v2, rapidfuzz, jellyfish, httpx, curl_cffi (Cloudflare TLS impersonation), boto3 (S3), pyyaml.
 - Image stage: opencv-python-headless, numpy, pillow (core, CPU); optional torch + spandrel (Real-ESRGAN) for enhance; FAL FLUX Fill (fal-client, hosted API) for de-watermark.
 - Persistence: SQLite — `config.db` (scraper control plane) and per-env sync ledger DB.
-- Deploy target: AWS (Fargate scheduled task + on-demand Batch GPU), image in shared ECR, infra in Terraform.
+- Deploy target: AWS (the sync service on Fargate runs the produce via /run; an ad-hoc Fargate task for the RUN_MODE tools; on-demand Batch GPU), image in shared ECR, infra in Terraform.
 
 ## Environment and dependencies
 - Virtualenv at `.venv/`. Install: `pip install -r stone_pipeline/requirements.txt`.
@@ -37,7 +37,7 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 - Container entrypoint (scrape→pipeline→catalog→upload to S3): `deploy/run_pipeline.sh` (RUN_MODE: pipeline|validate-dewatermark|reprocess)
 
 ### Docker
-- `docker build --target core -t blokport-scraper:core .` — scrape + pipeline + CPU image enhance (scheduled Fargate task).
+- `docker build --target core -t blokport-scraper:core .` — scrape + pipeline + CPU image enhance (the sync service + the ad-hoc task).
 - `docker build --target imageproc ...` — core + CPU torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark (local/CPU).
 - `docker build --target gpu ...` — CUDA torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark (AWS Batch). ESRGAN weights baked + pinned by SHA-256; de-watermark is the hosted FAL API (FAL_KEY, no baked model).
 

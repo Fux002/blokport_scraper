@@ -8,7 +8,7 @@ The scraper-side answers to the dev backend's questions before we run the first
 The `/sync/v1` server (`stone_pipeline.ledger.server`) is code-complete and proven
 (live HTTP round-trip, byte-identical equivalence, convergent sync loop). But it is
 **not deployed as a reachable service yet.** The current dev deploy (`infra/`) is a
-**scheduled EventBridge -> Fargate RunTask batch**: it runs `scrape -> run -> catalog
+**ad-hoc Fargate RunTask (RUN_MODE tools only)**; the produce itself runs in the sync service and used to run `scrape -> run -> catalog
 -> upload` and exits. The sync service (`infra/modules/sync_service`) is an `aws_ecs_service` with the ledger and config servers on ports 8723/8724 inside the VPC (no ALB), and
 the ledger it writes lives on the task's ephemeral local disk and dies with the task.
 

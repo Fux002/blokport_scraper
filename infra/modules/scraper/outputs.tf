@@ -15,10 +15,6 @@ output "log_group" {
   value = aws_cloudwatch_log_group.this.name
 }
 
-output "schedule_name" {
-  value = aws_scheduler_schedule.this.name
-}
-
 output "private_subnet_ids" {
   value = data.aws_subnets.private.ids
 }

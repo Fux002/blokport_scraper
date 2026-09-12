@@ -2,13 +2,10 @@
 
 `start_run()` kicks off `run all` for the ENABLED sources (run_all already filters by the config
 store's enabled flags), asynchronously, filling the sync ledger. Then Medusa's catalog/inventory
-import pulls that ledger into the shop. Two backends, chosen by BLOKPORT_RUN_MODE:
-
-  local (dev default)  a subprocess running the pipeline on this host; its exit code is tracked.
-  ecs   (prod)         triggers the SAME scheduled Fargate task on demand (aws ecs run-task); the
-                       task runs on the cluster and is watched in CloudWatch, not here.
-
-The nightly schedule is untouched -- this is the manual "scrape now" path alongside it. Single-run
+import pulls that ledger into the shop. ONE launcher: a produce subprocess on this host (the config
+container), streamed and watched here, with its exit code tracked. There is no second orchestrator (no
+cron task, no fire-and-forget Fargate dispatch): an unattended schedule is an EventBridge target on this
+API, so every produce goes through the same gates and the same ledger. Single-run
 guarded: a second trigger while one is in progress is refused (409). Run state is in-memory (one
 control-plane process); it resets if the server restarts, which is fine for a manual trigger.
 
@@ -26,7 +23,6 @@ import threading
 from collections import deque
 from datetime import datetime, timezone
 
-from stone_pipeline.config.settings import BLOKPORT_ENV, BRAND, S3_REGION
 from stone_pipeline.core import env
 
 from stone_pipeline.core import logfmt
@@ -58,7 +54,7 @@ STAGES = ("scrape", "catalog", "republish", "inventory", "all")
 
 def _public(rec: dict) -> dict:
     return {k: rec.get(k) for k in
-            ("run_id", "status", "mode", "started_at", "finished_at",
+            ("run_id", "status", "started_at", "finished_at",
              "sources", "scope", "stage", "counts", "progress", "error")}
 
 
@@ -115,10 +111,6 @@ def _stamp_last_run(rec: dict, status: str) -> None:
         store.record_run(rec.get("scope") or rec.get("sources") or [], status, rec.get("stage", "all"))
     except Exception:
         log.exception("last-run stamp failed (non-fatal)")
-
-
-def _mode() -> str:
-    return "ecs" if env.getenv("BLOKPORT_RUN_MODE", "").strip().lower() == "ecs" else "local"
 
 
 def _resolve_sources(requested) -> list[str]:
@@ -215,43 +207,6 @@ def _launch_local(rec: dict) -> None:
     threading.Thread(target=_watch_local, args=(rec, proc), daemon=True).start()
 
 
-def _launch_ecs(rec: dict) -> None:
-    import boto3
-    ecs = boto3.client("ecs", region_name=S3_REGION)
-    # The CANONICAL tier from settings, not the raw var: settings validates it against the closed tier set
-    # and normalises the dev/prod aliases, so the task-def / container names derived below can never be
-    # built from an unvalidated string. Named `env_name`: `env` is the env-var module here.
-    env_name = BLOKPORT_ENV
-    # scope the task the same way the local launcher does: override the container's command with the
-    # run's stage + sources. The container name must match the task definition's (SCRAPER_ECS_CONTAINER,
-    # default <brand>-scraper-<env>). Without stage/scope the taskdef's default command (full build) runs.
-    container = env.getenv("BLOKPORT_ECS_CONTAINER", f"{BRAND}-scraper-{env_name}")
-    command = ["python", "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
-    if rec.get("scope"):
-        command += ["--sources", ",".join(rec["scope"])]
-    resp = ecs.run_task(
-        cluster=env.require("BLOKPORT_ECS_CLUSTER"),
-        taskDefinition=env.getenv("BLOKPORT_ECS_TASKDEF", f"{BRAND}-scraper-{env_name}"),
-        launchType="FARGATE", count=1,
-        overrides={"containerOverrides": [{"name": container, "command": command}]},
-        networkConfiguration={"awsvpcConfiguration": {
-            "subnets": env.require("BLOKPORT_ECS_SUBNETS").split(","),
-            "securityGroups": env.require("BLOKPORT_ECS_SG").split(","),
-            "assignPublicIp": "DISABLED"}})
-    with _lock:
-        rec["task_arn"] = (resp.get("tasks") or [{}])[0].get("taskArn")
-        # ECS is fire-and-forget: nobody in THIS process watches the Fargate task, so it must NOT
-        # occupy the single-run slot forever (that would 409 every future run + reset). Mark it
-        # 'dispatched' (a terminal-for-us state the run/reset gate ignores) and free the slot; follow
-        # the actual task in CloudWatch. 'one run at a time' for ECS is enforced by the cluster.
-        rec["status"] = "dispatched"
-        rec["finished_at"] = _now()   # our terminal event (we can't watch Fargate); counts stay None
-        global _current_id
-        _current_id = None
-    _persist_run(rec)                 # so it shows as `last` (dispatched, no counts)
-
-
-_LAUNCHERS = {"local": _launch_local, "ecs": _launch_ecs}
 
 
 # -- public API ---------------------------------------------------------------
@@ -279,7 +234,7 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
         if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
             return _public(_runs[_current_id]), 409
         run_id = _now().translate({ord(c): None for c in ":-.T"})[:17]
-        rec = {"run_id": run_id, "status": "queued", "mode": _mode(),
+        rec = {"run_id": run_id, "status": "queued",
                "started_at": _now(), "finished_at": None, "error": None,
                "sources": scope if scope is not None else _resolve_sources(None),
                "stage": stage, "scope": scope, "progress": {}}
@@ -305,7 +260,7 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
         return {"error": f"a {busy} is in progress; refusing to run"}, 409
     _stamp_last_run(rec, "running")                # list shows this source as running immediately
     try:
-        (launch or _LAUNCHERS[rec["mode"]])(rec)
+        (launch or _launch_local)(rec)
     except Exception as exc:                       # a failed launch is a completed (failed) run
         with _lock:
             rec["status"] = "failed"

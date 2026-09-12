@@ -2,8 +2,7 @@
 
 Supplier inventory prefixes, trailing render tags, colour spelling variants, join-noise words, the
 colour-like attribute, and the in/out-of-stock words were stone-shaped constants inside matching/ and
-derive.py; the ECS launch names were blokport literals. Each is a pack field (or the brand) now, and the
-three packs declare them; a pack that declares none strips and recognises nothing extra.
+derive.py. Each is a pack field now, and the three packs declare them; a pack that declares none strips and recognises nothing extra.
 """
 
 from __future__ import annotations
@@ -64,28 +63,6 @@ def test_malformed_pack_fields_fail_loud_naming_the_field(field, value, needle):
     with pytest.raises(ValueError, match=needle):
         domain._validate_shape("stone", domain._pack_path("stone"), data)
 
-
-def test_ecs_launch_names_derive_from_the_brand(monkeypatch):
-    from stone_pipeline.config import runner
-    seen = {}
-
-    class _Ecs:
-        def run_task(self, **kw):
-            seen.update(kw)
-            return {"tasks": [{"taskArn": "arn:x/abc"}]}
-    import boto3
-    monkeypatch.setattr(boto3, "client", lambda *a, **k: _Ecs())
-    monkeypatch.setattr(runner, "BRAND", "wudport")
-    monkeypatch.delenv("SCRAPER_ECS_CONTAINER", raising=False)
-    monkeypatch.delenv("SCRAPER_ECS_TASKDEF", raising=False)
-    monkeypatch.delenv("BLOKPORT_ECS_CONTAINER", raising=False)
-    monkeypatch.delenv("BLOKPORT_ECS_TASKDEF", raising=False)
-    monkeypatch.setenv("SCRAPER_ECS_CLUSTER", "c")
-    monkeypatch.setenv("SCRAPER_ECS_SUBNETS", "subnet-1")
-    monkeypatch.setenv("SCRAPER_ECS_SG", "sg-1")
-    runner._launch_ecs({"run_id": "r", "stage": "all", "status": "queued"})
-    assert seen["taskDefinition"].startswith("wudport-scraper-")
-    assert seen["overrides"]["containerOverrides"][0]["name"].startswith("wudport-scraper-")
 
 
 @pytest.mark.parametrize("pack", ["stone", "wood", "lime"])

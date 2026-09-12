@@ -18,10 +18,6 @@ output "dev_cluster_name" {
   value = local.dev_enabled ? module.scraper_dev[0].cluster_name : null
 }
 
-output "dev_schedule_name" {
-  value = local.dev_enabled ? module.scraper_dev[0].schedule_name : null
-}
-
 output "dev_private_subnet_ids" {
   value       = local.dev_enabled ? module.scraper_dev[0].private_subnet_ids : null
   description = "For a manual `aws ecs run-task` of the dev task."
@@ -38,10 +34,6 @@ output "prod_task_definition_family" {
 
 output "prod_cluster_name" {
   value = local.prod_enabled ? module.scraper_prod[0].cluster_name : null
-}
-
-output "prod_schedule_name" {
-  value = local.prod_enabled ? module.scraper_prod[0].schedule_name : null
 }
 
 output "prod_private_subnet_ids" {

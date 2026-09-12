@@ -69,7 +69,7 @@ catalog → bundle to_upload/
 [separate, later, you] → import the CSV into Medusa   ← you trigger this; the task does not
 ```
 
-The scheduled task **stages** the CSV + images and stops; importing into Medusa is a
+The produce (the sync service's runner, `POST /config/v1/run`) **stages** the CSV + images and stops; importing into Medusa is a
 separate step you run afterward (and after reviewing `images/reports/processed_preview.csv`),
 so "processing completes before load" holds by construction.
 
@@ -84,7 +84,7 @@ them leak into a real upload run. The Terraform task sets both correctly
 ```bash
 # 1. Infra (one stack)
 cd infra
-terraform init && terraform apply          # schedule starts DISABLED
+terraform init && terraform apply          # creates the dev task definition + sync service
 terraform output deploy_role_arn           # copy for step 2
 
 # 2. CI auth: GitHub repo Settings → Secrets and variables → Actions →
@@ -99,7 +99,7 @@ aws ecs run-task --cluster blokport-dev --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[$(terraform output -json dev_private_subnet_ids | jq -r 'join(\",\")')],securityGroups=[$(terraform output -raw dev_security_group_id)],assignPublicIp=DISABLED}"
 
 # 5. When happy, enable the DEV cron:
-terraform apply -var dev_schedule_enabled=true
+# unattended produces: an EventBridge schedule targeting POST /config/v1/run (not a cron task)
 ```
 
 With `prod_staging_bucket` empty (the default), **only the dev task is created** — the
@@ -142,7 +142,7 @@ aws ecs run-task --cluster blokport-prod --launch-type FARGATE \
   --task-definition blokport-scraper-production \
   --network-configuration "awsvpcConfiguration={subnets=[$(terraform output -json prod_private_subnet_ids | jq -r 'join(\",\")')],securityGroups=[$(terraform output -raw prod_security_group_id)],assignPublicIp=DISABLED}"
 # enable the prod cron when proven:
-terraform apply -var prod_staging_bucket=... -var prod_schedule_enabled=true
+terraform apply -var prod_staging_bucket=...
 ```
 
 ## Enabling de-watermarking (varsha) later
@@ -188,7 +188,7 @@ through `BLOKPORT_SCRAPER_PROXY` when set; unset = direct connection (local defa
 The clean sources (marenostone, zucchi) never touch the proxy, so bandwidth cost stays tiny.
 
 ## Cost (cheapest working)
-Pay-per-run Fargate (a scheduled batch, idle otherwise) + S3 + ECR + CloudWatch
+Fargate (the sync service, always on; ad-hoc tasks pay per run) + S3 + ECR + CloudWatch
 logs ≈ **a few dollars/month**. No NAT/ALB/GPU added — reuses the platform's network.
 
 ## Where the import/export files live on S3

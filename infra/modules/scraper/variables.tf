@@ -49,17 +49,6 @@ variable "memory" {
   default = 4096
 }
 
-variable "schedule_expression" {
-  type    = string
-  default = "cron(0 3 * * ? *)" # daily 03:00 UTC
-}
-
-variable "schedule_enabled" {
-  type        = bool
-  default     = false
-  description = "Start the cron disabled - run the task manually first, enable when proven."
-}
-
 variable "keep_scraped" {
   type    = string
   default = "true"
