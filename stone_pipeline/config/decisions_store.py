@@ -897,8 +897,9 @@ def _project_decision(item: dict, scoped: dict, actions: dict, owiden: dict) -> 
         spellings.add(_norm(item["scraped"]))
     spellings |= {_norm(l.get("scraped", "")) for l in (item.get("listings") or [])
                   if isinstance(l, dict) and l.get("scraped")}
+    # a reject is keyed on the card's NAME (its ref is name|type for a typed card), so look it up by the name
     act = (next((actions[k] for k in keys if k in actions), None)               # the vendor's own level
-           or actions.get(scope_key("", item["ref"]))
+           or actions.get(scope_key("", (item.get("variant") or item.get("ref") or "").split("|")[0]))
            or next((actions[scope_key("", s)] for s in spellings if scope_key("", s) in actions), {}))
     if act.get("action") == "mint" and hit is not None and _norm(act.get("seed_name") or "") != _norm(hit[0]):
         act = {}                                                     # stale mint superseded by the newer bind

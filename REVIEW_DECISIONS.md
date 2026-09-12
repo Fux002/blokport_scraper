@@ -1,5 +1,7 @@
 # Review decisions: one statement, two lists
 
+> Card refs: a variety card's `ref` is `<normalised name>|<normalised type>` (a type-less card: the bare name); an origin card's is `<source>|<variety>|<type>`. Treat refs as opaque keys; the reject `PUT /config/v1/review/variants/<ref>` accepts a card ref or a bare name and keys the reject on the name.
+
 The operator never chooses "mint", "alias" or "set origin". They state what a vendor's product **is**:
 name, stone type, colour, origin. The backend derives the outcome from how that statement compares with
 what exists. Valid combinations, attribute ids and textures are outside this model.

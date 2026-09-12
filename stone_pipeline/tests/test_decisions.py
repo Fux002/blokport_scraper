@@ -107,13 +107,15 @@ def test_pending_is_fully_replaced_each_write():
 
 
 def test_pending_ref_collision_collapses_instead_of_crashing():
-    # two names that normalize the same (punctuation/case, or same name different type) share a ref; the
-    # name-keyed queue keeps ONE entry rather than raising on the (kind, ref) primary key mid-produce.
+    # two spellings that normalize to the SAME identity (punctuation/case, same type) share a ref; the queue
+    # keeps ONE entry rather than raising on the (kind, ref) primary key mid-produce. The same name under a
+    # DIFFERENT type is another variety: its own card (D-8), never collapsed onto the first.
     decisions.write_confirm_file([
         {"confirm": "", "variant": "Blue-Carara", "stone_type": "Marble"},
+        {"confirm": "", "variant": "Blue Carara", "stone_type": "Marble"},
         {"confirm": "", "variant": "Blue Carara", "stone_type": "Quartzite"},
     ])
-    assert len(ds.list_pending("variety")) == 1
+    assert sorted(c["ref"] for c in ds.list_pending("variety")) == ["blue carara|marble", "blue carara|quartzite"]
     # attributes collide the same way under one kind
     decisions.write_attributes_to_add([
         {"kind": "finish", "value": "Leathered"}, {"kind": "finish", "value": "leathered"}])
