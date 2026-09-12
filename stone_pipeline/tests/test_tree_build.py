@@ -179,16 +179,16 @@ def test_mirror_inherits_colour_from_variety_sold_elsewhere(tmp_path):
     assert {c[COL] for c in blk} == {"c_white", "c_grey"}  # backbone White + inherited scraped Grey
 
 
-def test_unbackboned_variation_priceable_via_type_from_name(tmp_path):
-    # no product, no backbone -> type parsed from the Name ('Everest Quartzite' -> Quartzite),
-    # colour from the catalogue default, so it's still priceable
+def test_unbackboned_variation_with_no_key_type_is_uncovered_with_its_reasons(tmp_path):
+    # no product, no backbone, no known type slug in the Key: nothing states its type, colour or quality.
+    # It used to be typed from its Name and priced under the catalogue's default colour (wave 3c).
     bb = _backbone(tmp_path, [_post("slab_marble_carrara_1", "Carrara", ["Polished"])])
     exp = _export(tmp_path, [("vs", "slab_marble_carrara_1", "Carrara"),
                              ("vq", "slab_everest_quartzite_2", "Everest Quartzite")])
     prod = _products(tmp_path, [_prow(vid="vs", col="c_grey")])
     combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
-    assert not unc
-    assert _for(combos, "vq")  # priceable via type-from-name + default colour
+    assert not _for(combos, "vq")
+    assert [(u["Id"], u["missing"]) for u in unc] == [("vq", "type+colour+quality")]
 
 
 def test_truly_unresolvable_variation_is_uncovered(tmp_path):
@@ -245,3 +245,42 @@ def test_run_missing_export_writes_empty_not_abort(tmp_path, monkeypatch):
                  "2_valid_combinations_products_only.csv"):
         rows = list(csv.reader((tmp_path / name).open(encoding="utf-8-sig")))
         assert rows == [list(tree_build.COMBINATION_COLUMNS)]    # header only, zero data rows
+
+
+# --- wave 3c: no value is guessed into a combination ---------------------------------------------------
+
+def test_a_variation_nothing_describes_is_uncovered_not_priced_under_the_common_colour(tmp_path):
+    # v1 is described (product row: White / A); v2 has NO product, NO backbone post: nothing says its colour
+    # or quality. It used to inherit the catalogue's most common colour and quality as a "last resort".
+    bb = _backbone(tmp_path, [_post("slab_marble_alpha_1", "Alpha", ["Polished"])])
+    exp = _export(tmp_path, [("v1", "slab_marble_alpha_1", "Alpha"), ("v2", "slab_marble_beta_2", "Beta")])
+    prod = _products(tmp_path, [_prow(vid="v1")])
+    combos, stats, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], prod)
+    assert _for(combos, "v1")
+    assert not _for(combos, "v2")
+    assert [u["Id"] for u in unc] == ["v2"]
+    assert unc[0]["missing"] == "colour+quality"          # the review file says what the operator must supply
+    assert stats["uncovered"] == 1
+
+
+def test_a_same_name_post_of_another_type_lends_no_colour(tmp_path):
+    # the block backbone has a QUARTZITE 'Gamma' post (Grey); the MARBLE slab 'Gamma' has no slab post and
+    # no product. A name-only join used to give the marble the quartzite's colour: a different stone. It is
+    # uncovered instead (a same-name post of the SAME type still lends, see the mirror test above).
+    bb = _backbone(tmp_path, [_post("", "Gamma", ["Raw"], category="Blocks", stone_type="Quartzite", color=["Grey"])])
+    exp = _export(tmp_path, [("v1", "slab_marble_gamma_1", "Gamma")])
+    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None)
+    assert not _for(combos, "v1")
+    assert [u["Id"] for u in unc] == ["v1"]
+
+
+def test_a_type_word_in_the_name_is_not_the_type(tmp_path):
+    # Key carries no known type slug, no post, no operator assignment: 'Everest Quartzite' used to be typed
+    # Quartzite from its NAME. Type comes from the Key, the Key-matched post or the operator, never a guess.
+    exp = _export(tmp_path, [("v1", "slab_unknownstone_everest_quartzite_1", "Everest Quartzite")])
+    prod = _products(tmp_path, [_prow(vid="v1", typ="")])
+    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [], prod)
+    assert not _for(combos, "v1")
+    assert [u["Id"] for u in unc] == ["v1"]
+    assigned = tree_build.build_combinations(exp, _attrs(tmp_path), [], prod, {"everest quartzite": "t_quartz"})[0]
+    assert {c[1] for c in _for(assigned, "v1")} == {"t_quartz"}     # the operator's assignment covers it
