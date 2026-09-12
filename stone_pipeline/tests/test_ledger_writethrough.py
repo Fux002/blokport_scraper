@@ -9,29 +9,47 @@ via env so the live pipeline is only touched when explicitly enabled.
 
 from __future__ import annotations
 
+import csv
 import glob
 
 import pytest
 
-from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
+from stone_pipeline.ledger import bootstrap
 from stone_pipeline.ledger.db import Ledger
+from stone_pipeline.reference.loaders import existing_varieties_file
 from stone_pipeline.ledger.render import render_products
 from stone_pipeline.run import run_source
 
-# marenostone scrape data is present locally (gitignored, absent in CI). Unlike the full-equivalence test
-# above, the gate tests below spy record_source, so they need only the scrape -- NOT the from_medusa export.
-_MAREN_DATA = SETTINGS.paths.data_dir.exists() and any(
-    SETTINGS.paths.data_dir.glob("marenostone/*/products.csv"))
 
 
-def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch):
+def _seed_ledger_like_the_sync_server(ledger_path, tmp_path) -> None:
+    # The sync server seeds the variation table from the Id-bearing live export. Here the ledger is seeded
+    # from the SAME file the matcher's candidate index reads (live export, else the committed base), with
+    # the loader's own id rule (Id, else Key): the emitted STN Variation Id and the ledger's medusa_id then
+    # come from one source, locally and in CI alike.
+    export = tmp_path / "variants_export.csv"
+    with existing_varieties_file().open(encoding="utf-8-sig", newline="") as src, \
+            export.open("w", encoding="utf-8", newline="") as dst:
+        reader = csv.DictReader(src)
+        writer = csv.DictWriter(dst, fieldnames=["Id"] + [c for c in reader.fieldnames if c != "Id"])
+        writer.writeheader()
+        for row in reader:
+            row["Id"] = (row.get("Id") or "").strip() or row["Key"]
+            writer.writerow(row)
+    with Ledger.open(ledger_path, env="development") as ledger:
+        bootstrap.seed_attributes(ledger)
+        bootstrap.seed_variations(ledger, path=export)
+
+
+def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch, scrape_data_dir):
     out = tmp_path / "outputs"
     ledger_path = tmp_path / "dev.ledger"
     monkeypatch.setenv("BLOKPORT_LEDGER_WRITETHROUGH", "1")
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(ledger_path))
+    _seed_ledger_like_the_sync_server(ledger_path, tmp_path)
 
-    run_source("polonine", outputs_dir=out, state_dir=out)
+    run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
 
     emitted = glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True)
     assert emitted, "the run produced no medusa_import.csv"
@@ -48,8 +66,7 @@ def test_writethrough_products_match_emitted_csv(tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.skipif(not _MAREN_DATA, reason="needs local marenostone scrape data (gitignored, absent in CI)")
-def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch):
+def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch, scrape_data_dir):
     """The run gate consults writethrough.enabled() and, when the NEUTRAL SCRAPER_ flag is set, invokes
     record_source. Verifies the env-prefix consolidation end-to-end through the real run_source gate;
     record_source is spied so the from_medusa export is not required."""
@@ -60,12 +77,11 @@ def test_writethrough_gate_fires_on_neutral_flag(tmp_path, monkeypatch):
     calls: list[int] = []
     monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: (calls.append(1), True)[1])
 
-    run_source("marenostone", outputs_dir=tmp_path / "on", state_dir=tmp_path / "on")
+    run_source("marenostone", outputs_dir=tmp_path / "on", state_dir=tmp_path / "on", data_dir=scrape_data_dir)
     assert calls == [1], "write-through enabled: the gate must call record_source exactly once"
 
 
-@pytest.mark.skipif(not _MAREN_DATA, reason="needs local marenostone scrape data (gitignored, absent in CI)")
-def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_path, monkeypatch):
+def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_path, monkeypatch, scrape_data_dir):
     """A failed record_source means Medusa never receives this source: the run must exit non-zero (run_all
     then omits it from results and `all` returns 1), AFTER the CSVs, diagnostics and steps are written so the
     operator can read why."""
@@ -75,13 +91,12 @@ def test_writethrough_failure_fails_the_source_run_after_its_bookkeeping(tmp_pat
     monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: False)
     out = tmp_path / "fail"
     with pytest.raises(SystemExit):
-        run_source("marenostone", outputs_dir=out, state_dir=out)
+        run_source("marenostone", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     assert glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True), "the CSVs are still written"
     assert glob.glob(str(out / "**" / "diagnostics" / "health.json"), recursive=True), "diagnostics still written"
 
 
-@pytest.mark.skipif(not _MAREN_DATA, reason="needs local marenostone scrape data (gitignored, absent in CI)")
-def test_writethrough_gate_silent_when_disabled(tmp_path, monkeypatch):
+def test_writethrough_gate_silent_when_disabled(tmp_path, monkeypatch, scrape_data_dir):
     """With neither prefix set, enabled() is False and the gate must not touch the ledger."""
     from stone_pipeline.ledger import writethrough
 
@@ -90,5 +105,5 @@ def test_writethrough_gate_silent_when_disabled(tmp_path, monkeypatch):
     calls: list[int] = []
     monkeypatch.setattr(writethrough, "record_source", lambda *a, **k: (calls.append(1), True)[1])
 
-    run_source("marenostone", outputs_dir=tmp_path / "off", state_dir=tmp_path / "off")
+    run_source("marenostone", outputs_dir=tmp_path / "off", state_dir=tmp_path / "off", data_dir=scrape_data_dir)
     assert calls == [], "write-through disabled: the gate must not call record_source"

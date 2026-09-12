@@ -63,10 +63,10 @@ def _known_products_export(tmp_path):
     return p
 
 
-def test_inventory_only_run_skips_images_products_and_canonical(tmp_path):
+def test_inventory_only_run_skips_images_products_and_canonical(tmp_path, scrape_data_dir):
     # the core guarantee: an inventory refresh writes NO product import and NO canonical (so it
     # neither re-imports products nor feeds the catalog), yet the run completes.
-    manifest = run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path,
+    manifest = run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
                           known_products_path=_known_products_export(tmp_path))
     run_dir = tmp_path / manifest.run_id
     assert not (run_dir / "4_products_import" / "medusa_import.csv").exists()
@@ -74,14 +74,16 @@ def test_inventory_only_run_skips_images_products_and_canonical(tmp_path):
     assert (run_dir / "diagnostics" / "manifest.json").exists()  # but it did run
 
 
-def test_inventory_only_aborts_loud_when_the_export_is_missing(tmp_path):
+def test_inventory_only_aborts_loud_when_the_export_is_missing(tmp_path, scrape_data_dir, caplog):
     # F9: no Medusa export => no delta can be computed. A silent '0 changed' would mask a failed export
     # fetch and drop real stock moves, so the refresh must fail loud instead.
     import pytest
     missing = tmp_path / "does_not_exist.csv"
-    with pytest.raises(SystemExit):
-        run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path,
+    with pytest.raises(SystemExit) as exc:
+        run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
                    known_products_path=missing)
+    assert exc.value.code == 2
+    assert any("inventory-only refresh aborted" in r.getMessage() for r in caplog.records)   # the export guard, not a health failure
 
 
 def test_drop_deleted_variants_keeps_imageless_new_but_drops_to_delete(tmp_path):

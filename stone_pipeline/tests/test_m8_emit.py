@@ -24,17 +24,17 @@ def ref():
 
 
 @pytest.fixture(scope="module")
-def emitted(tmp_path_factory):
+def emitted(tmp_path_factory, scrape_data_dir):
     out = tmp_path_factory.mktemp("outputs")
-    run_source("polonine", outputs_dir=out, state_dir=out)
+    run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     path = glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True)[0]
     with open(path, newline="", encoding="utf-8-sig") as handle:
         return list(csv.DictReader(handle))
 
 
-def test_header_matches_template_exactly(emitted, tmp_path_factory):
+def test_header_matches_template_exactly(emitted, tmp_path_factory, scrape_data_dir):
     out = tmp_path_factory.mktemp("outputs2")
-    run_source("polonine", outputs_dir=out, state_dir=out)
+    run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     path = glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True)[0]
     with open(path, newline="", encoding="utf-8-sig") as handle:
         header = next(csv.reader(handle))

@@ -18,7 +18,7 @@ def test_polonine_fixture_selftest_passes():
 
 def test_polonine_full_scrape_adapts_without_loss():
     frame = read_scrape_csv(
-        SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv"
+        SETTINGS.paths.tests_fixtures_dir / "data" / "polonine" / "20260619_214426" / "products.csv"
     )
     rows = POLONINE.adapt(frame)
     # near-complete: polonine has clean natural keys, so almost nothing drops
@@ -39,7 +39,7 @@ def test_polonine_full_scrape_adapts_without_loss():
 
 def test_adapter_isolates_bad_rows():
     frame = read_scrape_csv(
-        SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv"
+        SETTINGS.paths.tests_fixtures_dir / "data" / "polonine" / "20260619_214426" / "products.csv"
     )
     # blank the natural key on a few rows; they should drop, not crash the batch
     import polars as pl
@@ -59,7 +59,7 @@ def test_adapter_carries_fetch_failed_signal_with_zero_per_adapter_work():
     # adapter (no field_map entry), so "hold, never default a fetch-failed dimension" works everywhere.
     import polars as pl
     frame = read_scrape_csv(
-        SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv"
+        SETTINGS.paths.tests_fixtures_dir / "data" / "polonine" / "20260619_214426" / "products.csv"
     )
     assert all(r.fetch_failed_fields == [] for r in POLONINE.adapt(frame))   # absent column -> []
     marked = frame.with_columns(
@@ -106,7 +106,7 @@ def test_build_dims_and_na_contract():
 
 def test_contract_generated_from_adapter_matches_required():
     frame = read_scrape_csv(
-        SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv"
+        SETTINGS.paths.tests_fixtures_dir / "data" / "polonine" / "20260619_214426" / "products.csv"
     )
     contract = POLONINE.generate_contract(frame)
     assert contract.required_columns == POLONINE.required_columns

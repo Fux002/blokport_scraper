@@ -111,10 +111,10 @@ def test_constants_report_shape(ref):
 
 
 # --- integration: stages.json + per-stage metrics on a real run ---------------
-def test_run_writes_per_stage_diagnostics(tmp_path):
+def test_run_writes_per_stage_diagnostics(tmp_path, scrape_data_dir):
     out = tmp_path / "outputs"
     out.mkdir()
-    manifest = run_source("polonine", outputs_dir=out, state_dir=out)
+    manifest = run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     recorded = {m.stage for m in manifest.stage_metrics}
     # the four previously-silent stages + images now report, alongside the pre-existing ones
     assert {"normalize", "match_variation", "derive", "constants", "images"} <= recorded

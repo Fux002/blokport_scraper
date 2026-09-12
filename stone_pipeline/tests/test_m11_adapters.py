@@ -150,10 +150,10 @@ def test_varsha_reads_stone_type_from_composition_head_only_when_real():
     assert tag.raw_type == ""           # a classification tag leaves type empty (held / matched, not tag)
 
 
-def test_marenostone_routes_generic_to_gaps_not_guesses(tmp_path):
+def test_marenostone_routes_generic_to_gaps_not_guesses(tmp_path, scrape_data_dir):
     out = tmp_path / "out"
     out.mkdir()
-    manifest = run_source("marenostone", outputs_dir=out, state_dir=out)
+    manifest = run_source("marenostone", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     # generic descriptors must not be guessed into output: they gap
     assert manifest.gap_kind_counts.get("GapKind.missing_variation", 0) > 0
     # the spine still emits the rows that DO resolve fully
@@ -168,7 +168,7 @@ def test_marenostone_routes_generic_to_gaps_not_guesses(tmp_path):
 def test_blank_sku_mints_not_drops(tmp_path):
     # marenostone ships blank SKUs; they must mint a surrogate, never drop
     frame = read_scrape_csv(
-        SETTINGS.paths.tests_fixtures_dir / "marenostone_products_20260601_155229.csv"
+        SETTINGS.paths.tests_fixtures_dir / "data" / "marenostone" / "20260710_155335" / "products.csv"
     )
     rows = selftest.REGISTRY["marenostone"].adapt(frame)
     # adapter keeps every row (blank keys included); minting happens in Stage 2
@@ -249,25 +249,21 @@ def test_accents_preserved_in_display_folded_in_identity():
     assert title_case("Rosa Porriño") == "Rosa Porriño"
 
 
-def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch):
+def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch, scrape_data_dir):
     # a source that overrides load_frame (e.g. an API/DB) runs through the WHOLE pipeline without
     # the CSV ingest being touched; the run id uses the timestamp it hands back.
-    import pytest
 
     from stone_pipeline import adapters as reg
     from stone_pipeline import run as run_mod
     from stone_pipeline.adapters.base import read_scrape_csv
-    live = run_mod.find_scrape_file("marenostone")
-    if live is None:
-        pytest.skip("no marenostone scrape present")
-    frame = read_scrape_csv(live)                              # an in-memory frame (could be from an API)
+    frame = read_scrape_csv(run_mod.find_scrape_file("marenostone", scrape_data_dir))                              # an in-memory frame (could be from an API)
     monkeypatch.setattr(reg.REGISTRY["marenostone"], "load_frame",
                         lambda scrape_path=None: (frame, "20260101_000000", "api://marenostone"))
 
     def _boom(_source):
         raise AssertionError("CSV ingest was used - load_frame override ignored")
     monkeypatch.setattr(run_mod, "find_scrape_file", _boom)   # fails if the file path is taken
-    manifest = run_mod.run_source("marenostone", outputs_dir=tmp_path, state_dir=tmp_path)
+    manifest = run_mod.run_source("marenostone", outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir)
     assert manifest.run_id == "marenostone_20260101_000000"   # used the load_frame timestamp token
     assert manifest.totals["rows"] >= 1                        # ran the in-memory frame end to end
 

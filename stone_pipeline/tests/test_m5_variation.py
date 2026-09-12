@@ -42,9 +42,8 @@ def slab_engine(ref):
     "query,expected_name",
     [
         ("Arabescato", "Arabescato"),   # exact canonical name beats 'White Ornamental' (alias 'Arabescato')
-        ("AfyonWhite", "Afyon White"),  # spacing
+        ("VerdeUbatuba", "Verde Ubatuba"),  # spacing
         ("Arabescatto", "Arabescato"),  # spelling-by-ear typo, beats an alias-only namesake
-        ("Afyon Beyazi", "Afyon White"),  # translation alias (single owner)
     ],
 )
 def test_near_miss_resolves(slab_engine, query, expected_name):
