@@ -15,7 +15,7 @@ from stone_pipeline.stages import health
 
 def _load_polonine() -> pl.DataFrame:
     frame = pl.read_csv(
-        SETTINGS.paths.tests_fixtures_dir / "polonine_products_20260619_214426.csv",
+        SETTINGS.paths.tests_fixtures_dir / "data" / "polonine" / "20260619_214426" / "products.csv",
         infer_schema_length=0,
     )
     return frame.rename({frame.columns[0]: frame.columns[0].lstrip("﻿")})

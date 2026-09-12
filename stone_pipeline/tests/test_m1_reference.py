@@ -26,8 +26,9 @@ def ref() -> loaders.ReferenceData:
 
 
 def test_all_reference_files_load(ref):
-    assert len(ref.attributes.by_category["color"]) == 26  # +Orchid +Natural (generic last-resort colour)
-    assert len(ref.attributes.by_category["type"]) == 31   # +Dolomite Marble
+    # attributes.csv is the LIVE Medusa vocab (refreshed by produce), so the counts move: guard the floor
+    assert len(ref.attributes.by_category["color"]) >= 20
+    assert len(ref.attributes.by_category["type"]) >= 25
     assert ref.attributes.category_pcat["Slabs"] == category("slab").pcat_id
     assert ref.attributes.category_pcat["Blocks"] == category("block").pcat_id
     assert len(ref.variants["slab"].by_id) > 300

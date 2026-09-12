@@ -96,13 +96,15 @@ def _write_gap_queue(rows: list[CanonicalRow], path: Path) -> int:
     return len(gaps)
 
 
-def find_scrape_file(source: str) -> Optional[Path]:
-    """The latest USABLE live scrape for a source at data/<source>/<timestamp>/products.csv.
-    Skips a folder whose completion marker says the scrape was truncated/incomplete, so a crashed
-    or short scrape never becomes the authoritative input (legacy folders with no marker are still
+def find_scrape_file(source: str, data_dir: Optional[Path] = None) -> Optional[Path]:
+    """The latest USABLE live scrape for a source at <data_dir>/<source>/<timestamp>/products.csv
+    (data_dir defaults to the workspace data/; tests pass their committed fixture tree, which has the
+    same layout). Skips a folder whose completion marker says the scrape was truncated/incomplete, so a
+    crashed or short scrape never becomes the authoritative input (legacy folders with no marker are still
     accepted for backward compatibility). Returns None if the source has never been scraped."""
     import json
-    for products in sorted(SETTINGS.paths.data_dir.glob(f"{source}/*/products.csv"), reverse=True):
+    root = Path(data_dir or SETTINGS.paths.data_dir)
+    for products in sorted(root.glob(f"{source}/*/products.csv"), reverse=True):
         marker = products.parent / "scrape_complete.json"
         if marker.exists():
             try:
@@ -223,7 +225,7 @@ def _write_diagnostics(manifest, layout) -> None:
 def run_source(
     source: str, scrape_path: Optional[Path] = None, outputs_dir: Optional[Path] = None,
     state_dir: Optional[Path] = None, inventory_only: bool = False,
-    known_products_path: Optional[Path] = None,
+    known_products_path: Optional[Path] = None, data_dir: Optional[Path] = None,
 ) -> Manifest:
     # inventory_only: a lightweight stock refresh for EXISTING products. Runs the same scrape ->
     # match -> classify path, then emits ONLY inventory_update.csv (Variant Sku + Inventory
@@ -252,7 +254,7 @@ def run_source(
         logfmt.bind(log, source=source).info("load_frame source produced no data this run; skipping (not a failure)")
         return _skipped_manifest(source, "no data from load_frame this run")
     else:
-        scrape_path = scrape_path or find_scrape_file(source)
+        scrape_path = scrape_path or find_scrape_file(source, data_dir)
         if scrape_path is None:
             raise FileNotFoundError(f"no scrape file found for source {source}")
         frame = read_scrape_csv(scrape_path)
@@ -306,7 +308,9 @@ def run_source(
         write_steps_md(layout, source=source, run_id=run_id, health=report.status, counts={},
                        gates=manifest.gate_status)
         raise SystemExit(2)
-    health.update_baseline_if_ok(report, contract, health.now_iso())
+    # the row-count baseline is run state like the alias write-back: it lives in state_dir (the
+    # production default is the same state/ folder; a test's tmp state_dir keeps it private)
+    health.update_baseline_if_ok(report, contract, health.now_iso(), path=state_dir / "scrape_baselines.json")
     degraded = report.status == health.DEGRADED
 
     # Stage 1: ingest
@@ -651,7 +655,8 @@ def print_summary(manifest: Manifest) -> None:
 
 
 def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = None,
-            state_dir: Optional[Path] = None, inventory_only: bool = False) -> dict[str, Manifest]:
+            state_dir: Optional[Path] = None, inventory_only: bool = False,
+            data_dir: Optional[Path] = None) -> dict[str, Manifest]:
     """Multi-source run with source-level isolation (section 13A.3): one source
     failing does not affect the others."""
     sources = sources or list(adapter_registry.REGISTRY.keys())
@@ -665,7 +670,7 @@ def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = N
     results: dict[str, Manifest] = {}
     for source in sources:
         try:
-            results[source] = run_source(source, outputs_dir=outputs_dir, state_dir=state_dir,
+            results[source] = run_source(source, outputs_dir=outputs_dir, state_dir=state_dir, data_dir=data_dir,
                                          inventory_only=inventory_only)
         except SystemExit:
             log.error(f"{source} aborted on health gate; continuing other sources")

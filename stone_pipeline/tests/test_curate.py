@@ -360,10 +360,12 @@ def test_alias_decision_routes_spelling_onto_target_and_mints_nothing(ref):
 
 
 def test_curation_does_not_modify_reference_files(ref, tmp_path):
-    # build_curation only READS the immutable export; it must not write to catalog_source/from_medusa
+    # build_curation only READS the existing-variety file (the live export, else the committed base); it
+    # must not write to catalog_source/from_medusa
     import os
-    ref_path = str(curate.SETTINGS.paths.export_file)
-    before = {ref_path: os.path.getmtime(ref_path)} if os.path.exists(ref_path) else {}
+    from stone_pipeline.reference.loaders import existing_varieties_file
+    ref_path = str(existing_varieties_file())
+    before = {ref_path: os.path.getmtime(ref_path)}
     curate.build_curation([], ref)
     after = {p: os.path.getmtime(p) for p in before}
     assert before == after
