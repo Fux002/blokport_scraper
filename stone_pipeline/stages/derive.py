@@ -15,6 +15,7 @@ import functools
 import json
 import re
 
+from stone_pipeline.config import domain
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence, bulk_form_name, category, default_form_name
 from stone_pipeline.config.sources import SourceConfig
@@ -367,33 +368,23 @@ def _inventory_from_area(row: CanonicalRow) -> int | None:
 # Positive availability WORDS a supplier may publish instead of a count. Cross-source: read from the same
 # raw stock fields the numeric ladder uses, so no per-source code. NOT a fabricated number -- the supplier
 # asserts the item IS available, we just have no count, so derive_inventory seeds a made-to-order fallback.
-_IN_STOCK_WORDS = frozenset({"unlimited", "limited", "in stock", "instock", "in-stock",
-                             "available", "made to order", "made-to-order"})
-
-
 def _in_stock_word(row: CanonicalRow) -> bool:
     """True when the scrape flags availability as one of the recognized positive WORDS (not a count) -- either
     in a free-text stock field or in a source's STRUCTURED availability flag (raw_stock_status, e.g. a
     WooCommerce "in-stock"). A negative flag ("out-of-stock") is not in the set, so a sold-out item never
     matches and is never given fabricated stock."""
     for value in (row.raw_stock_m2, row.raw_inventory_quantity, row.raw_stock_status):
-        if " ".join((value or "").strip().lower().split()) in _IN_STOCK_WORDS:
+        if " ".join((value or "").strip().lower().split()) in domain.active_pack().in_stock_words:
             return True
     return False
 
 
 # Definitive NEGATIVE availability a supplier may publish (structured flag or word). Cross-source: read from
-# the same raw fields as the positive check. An explicit out-of-stock is the supplier stating the item is
-# unavailable -- a TRUSTED sold-out, exactly like a literal count of 0.
-_OUT_OF_STOCK_WORDS = frozenset({"out of stock", "outofstock", "out-of-stock",
-                                 "sold out", "soldout", "sold-out", "unavailable", "discontinued"})
-
-
 def _out_of_stock_flag(row: CanonicalRow) -> bool:
     """True when the scrape EXPLICITLY flags the item as unavailable (structured status or word). An unknown
     or missing status is NOT out of stock -- it returns False and the row falls through to the magnitude."""
     for value in (row.raw_stock_status, row.raw_stock_m2, row.raw_inventory_quantity):
-        if " ".join((value or "").strip().lower().split()) in _OUT_OF_STOCK_WORDS:
+        if " ".join((value or "").strip().lower().split()) in domain.active_pack().out_of_stock_words:
             return True
     return False
 
@@ -731,7 +722,8 @@ def derive_description(row: CanonicalRow) -> None:
         row.description = row.raw_description.strip()
         row.description_method = "passthrough"
         return
-    variety = title_case(_primary_variety_name(row.variation_name or row.raw_name or "This stone"))
+    variety = title_case(_primary_variety_name(row.variation_name or row.raw_name
+                                               or f"This {active_pack().generic_material_word}"))
     stone_type = (row.type_name or active_pack().generic_material_word).lower()  # generic material noun
     color = (row.color_name or "").lower()               # OMIT when unresolved -- never invent 'natural'
     material = f"{color} {stone_type}".strip()           # 'black marble', or just 'marble'

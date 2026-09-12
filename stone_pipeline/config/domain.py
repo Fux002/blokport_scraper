@@ -12,6 +12,7 @@ vocabulary. The active pack is cached (cleared in tests that switch packs).
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 from stone_pipeline.core import env
 from dataclasses import dataclass
@@ -82,6 +83,20 @@ class DomainPack:
     # in a scraped name matches a space here ('Cross-cut' == 'cross cut'). Every entry must be
     # collision-checked against the domain's real variety names before it is added (see stone.yaml).
     product_form_words: frozenset[str] = frozenset()
+    # Matching / availability vocabulary that used to be stone-shaped constants in code. Every pack
+    # declares its own (empty is a valid declaration): supplier inventory prefixes stripped before an exact
+    # match ('Z', 'ZB'); trailing render/finish tags stripped there too (a thickness '3cm' and 'grade X' are
+    # language-level and always stripped); spelling variants of ONE colour word (gray -> grey) so a spelling
+    # never reads as a colour conflict; wrapper words dropped when composing a compound attribute value;
+    # the attribute whose words count as colours for match blocking; the supplier words that mean in stock
+    # (a countless positive) and out of stock (a trusted sold-out).
+    inventory_prefixes: tuple[str, ...] = ()
+    trailing_render_tags: tuple[str, ...] = ()
+    spelling_variants: dict[str, str] = dataclasses.field(default_factory=dict)
+    join_noise_words: tuple[str, ...] = ()
+    color_attribute: str = "color"
+    in_stock_words: tuple[str, ...] = ()
+    out_of_stock_words: tuple[str, ...] = ()
 
 
 def _pack_path(name: str) -> Path:
@@ -89,6 +104,9 @@ def _pack_path(name: str) -> Path:
 
 
 # the keys each category dict must carry (settings.py reads these to build a Category); the rest are optional.
+_VOCABULARY_LISTS = ("inventory_prefixes", "trailing_render_tags", "join_noise_words", "in_stock_words",
+                     "out_of_stock_words")
+
 _CATEGORY_KEYS = ("name", "plural", "label", "backbone_filename", "base_image", "shares_variety_vocab", "fan_out")
 
 
@@ -143,6 +161,21 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     # V2: the disambiguator (the identity attribute that drives the Key) must be one of the attributes.
     if data["disambiguator"] not in data["attributes"]:
         bad(f"disambiguator {data['disambiguator']!r} is not in attributes {list(data['attributes'])}")
+    # V6: the fields the pipeline formats with must be well-formed here, not deep in a stage (checked when
+    # present: the required-key check runs first in load_pack; a shape test may pass a partial pack).
+    if "finish_phrases" in data and not isinstance(data["finish_phrases"], dict):
+        bad("'finish_phrases' must be a mapping of finish -> phrase")
+    if "default_finishes" in data and not data["default_finishes"]:
+        bad("'default_finishes' is empty: a minted variety needs at least one finish to be priceable")
+    if "generic_material_word" in data and not str(data["generic_material_word"]).strip():
+        bad("'generic_material_word' is empty: the title and description fall back to it")
+    for words in _VOCABULARY_LISTS:
+        if words in data and not isinstance(data[words], list):
+            bad(f"'{words}' must be a list")
+    if "spelling_variants" in data and not isinstance(data["spelling_variants"], dict):
+        bad("'spelling_variants' must be a mapping of variant -> canonical word")
+    if "color_attribute" in data and data["color_attribute"] not in data["attributes"]:
+        bad(f"'color_attribute' must name one of the attributes {list(data['attributes'])}")
     # V3: category roles. Exactly one category is the default_form (the unresolved-format + finish/dim
     # fallback, which the pipeline always needs); at most one is the bulk_form (the uncut/solid form).
     default_forms = [c.get("name") for c in data["categories"] if c.get("default_form")]
@@ -210,7 +243,20 @@ def load_pack(name: str | None = None) -> DomainPack:
         classify_texture_color=bool(data.get("classify_texture_color", True)),
         product_form_words=frozenset(str(w).strip().lower() for w in (data.get("product_form_words") or [])
                                      if str(w).strip()),
+        # optional vocabulary (a pack that declares none strips/recognises nothing extra)
+        inventory_prefixes=_words(data.get("inventory_prefixes") or []),
+        trailing_render_tags=_words(data.get("trailing_render_tags") or []),
+        spelling_variants={str(k).strip().lower(): str(v).strip().lower()
+                           for k, v in (data.get("spelling_variants") or {}).items()},
+        join_noise_words=_words(data.get("join_noise_words") or []),
+        color_attribute=data.get("color_attribute", "color"),
+        in_stock_words=_words(data.get("in_stock_words") or []),
+        out_of_stock_words=_words(data.get("out_of_stock_words") or []),
     )
+
+
+def _words(raw) -> tuple[str, ...]:
+    return tuple(str(w).strip().lower() for w in raw if str(w).strip())
 
 
 @functools.lru_cache(maxsize=1)

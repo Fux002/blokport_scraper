@@ -114,8 +114,9 @@ def build_variation_index(variant_table, backbone, origin_map=None) -> "Candidat
     documented origins, the engine's origin narrowing signal; None leaves them empty.
     """
     from stone_pipeline.adapters.tokens import known_values
+    from stone_pipeline.config import domain
 
-    color_set = {c.casefold() for c in known_values("color")}
+    color_set = {c.casefold() for c in known_values(domain.active_pack().color_attribute)}
 
     def colors_from_name(name: str) -> set[str]:
         return {tok for tok in name.split() if tok.casefold() in color_set}
