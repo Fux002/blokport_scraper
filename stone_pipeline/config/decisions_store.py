@@ -65,7 +65,7 @@ def _decision_row(r) -> dict:
 
 
 def _decision_rows() -> list:
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         # ORDER BY source: the global level ('') comes first, so where two decisions land on one variety NAME
         # (a global rename and a vendor rename to the same name) the name-keyed maps let the vendor's own
         # level win deterministically, never by rowid / insert order.
@@ -103,8 +103,6 @@ def variety_seed_types() -> dict[str, str]:
     DB) on a fresh store: load_all reads this every build, so it must NOT materialise config.db -- mirroring
     variety_seed_countries. Without the guard, ref-build creates an empty config.db that then shadows the
     sources.yaml seed for load_source."""
-    if not store.config_db_path().exists():
-        return {}
     return {n: d["seed_type"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_type"]}
 
@@ -114,8 +112,6 @@ def variety_seed_names() -> dict[str, str]:
     decision that set one. curate creates the variety with this display name (Name and Key) and records the
     scraped spelling as its alias; the decision itself stays keyed by the scraped spelling. Same fresh-store
     guard as variety_seed_types (never materialise config.db from a read)."""
-    if not store.config_db_path().exists():
-        return {}
     return {n: d["seed_name"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d.get("seed_name")}
 
@@ -124,8 +120,6 @@ def variety_seed_scopes() -> dict[tuple[str, str], str]:
     """(norm source, norm spelling) -> that vendor, for every VENDOR-level mint. A vendor-level mint attaches no
     global alias (its vendor alias binds its products); a global mint attaches the spelling for everyone.
     Same fresh-store guard as variety_seed_types."""
-    if not store.config_db_path().exists():
-        return {}
     return {n: d["source"] for n, d in variety_actions().items() if d["action"] == "mint" and d["source"]}
 
 
@@ -135,8 +129,6 @@ def variety_seed_countries() -> dict[str, str]:
     curated CSV + minted decisions), so a minted variety carries the true origin the operator picked.
     Empty (no side effect -- does not create the DB) for a fresh store: load_all reads this every build,
     so it must NOT materialise config.db, mirroring backbone_leaf_overlay."""
-    if not store.config_db_path().exists():
-        return {}
     return {_norm(d["seed_name"] or n[1]): d["seed_country"] for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_country"]}
 
@@ -149,8 +141,6 @@ def variety_seed_country_rules() -> dict[tuple[str, str], str]:
     carries different origins. A mint with no stone_type keys ('', ); apply_origin_overlay SKIPS it -- origin
     is (name, type) and a type-less origin can never emit. This is the shape apply_origin_overlay consumes
     (variety_seed_countries is the flat name->iso accessor). No side effect on a fresh store."""
-    if not store.config_db_path().exists():
-        return {}
     return {(_norm(d["seed_name"] or n[1]), _norm(d["seed_type"])): d["seed_country"]
             for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_country"]}
@@ -468,9 +458,7 @@ def origin_widen() -> dict[tuple[str, str, str], str]:
     """(normalized source, normalized variety, normalized type) -> ISO, for the origin decisions the operator
     WIDENED (ticked "add to documented origins"). Per-record, so a decided card reflects the actual checkbox,
     not whether the target variety happens to carry a documented origin. Empty on a fresh store."""
-    if not store.config_db_path().exists():
-        return {}
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {(_norm(r["source"]), r["variant_norm"], r["stone_type_norm"]): r["country_iso"]
                 for r in conn.execute(
                     "SELECT source, variant_norm, stone_type_norm, country_iso FROM origin_decision "
@@ -481,7 +469,7 @@ def origin_decisions() -> dict[tuple[str, str, str], str]:
     """(normalized source, normalized variety, normalized type) -> ISO country. Overlaid onto
     origin_overrides at load, so derive resolves a confirmed origin at the supplier_override tier. Empty for
     a fresh store (a genuine empty set)."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {(_norm(r["source"]), r["variant_norm"], r["stone_type_norm"]): r["country_iso"]
                 for r in conn.execute(
                     "SELECT source, variant_norm, stone_type_norm, country_iso FROM origin_decision")}
@@ -521,9 +509,7 @@ def scoped_aliases() -> dict[tuple[str, str], tuple[str, str]]:
     """(normalized source, normalized spelling) -> (target variety name, target type or ''). Read by load_all
     into ref.scoped_aliases for the matcher's override tier. No side effect on a fresh store (load_all must
     not materialise config.db, same rule as variety_seed_types)."""
-    if not store.config_db_path().exists():
-        return {}
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {(_norm(r["source"]), r["variant_norm"]): (r["alias_of"], r["seed_type"] or "")
                 for r in conn.execute("SELECT source, variant_norm, alias_of, seed_type FROM scoped_alias")}
 
@@ -571,14 +557,14 @@ def variety_origins() -> dict[tuple[str, str], str]:
     """(normalized variety, normalized type) -> comma-list ISO. Overlaid onto the origin map at load
     (apply_origin_overlay), AFTER the mint seed_country overlay so an explicit edit wins. Empty for a fresh
     store."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {(r["variant_norm"], r["stone_type_norm"]): r["country_iso"]
                 for r in conn.execute("SELECT variant_norm, stone_type_norm, country_iso FROM variety_origin")}
 
 
 def list_variety_origins() -> list[dict]:
     """Every variety origin edit as a display row, for the admin list."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return [{"ref": f"{r['variant_norm']}|{r['stone_type_norm']}", "variety": r["variant_display"],
                  "stone_type": r["stone_type_norm"], "countries": r["country_iso"].split(","),
                  "city": r["city"], "county": r["county"]}
@@ -589,7 +575,7 @@ def list_variety_origins() -> list[dict]:
 
 def get_variety_origin(variety: str, stone_type: str) -> dict | None:
     """The stored edit for one (variety, type), or None if unedited (the base map applies)."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         r = conn.execute("SELECT variant_display, country_iso, city, county FROM variety_origin "
                          "WHERE variant_norm = ? AND stone_type_norm = ?",
                          (_norm(variety), _norm(stone_type))).fetchone()
@@ -613,7 +599,7 @@ def clear_variety_origins() -> int:
 def attribute_ids() -> dict[tuple[str, str], tuple[str, str]]:
     """(kind, norm(value)) -> (ORIGINAL value, medusa_id) for the ids the operator pasted. The original
     value (operator casing) becomes the canonical attribute name, not its normalization."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {(r["kind"], r["value_norm"]): (r["value_display"], r["medusa_id"])
                 for r in conn.execute(
                     "SELECT kind, value_norm, value_display, medusa_id FROM attribute_decision")}
@@ -704,7 +690,7 @@ def protected_keys() -> set[str]:
     """Variation Keys the operator marked 'not a duplicate'. The reconcile dedup must never drop these,
     so a false-positive collapse (two genuinely distinct varieties) cannot re-tombstone them. Empty set
     for a fresh store."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {r["key"] for r in conn.execute("SELECT key FROM protected_variation")}
 
 
@@ -732,10 +718,8 @@ def backbone_leaf_overlay() -> dict[tuple[str, str], dict[str, list[str]]]:
     This is the load-time overlay the backbone is grown with (loaders.Backbone.apply_leaf_overlay); the
     committed seed JSON is never touched. Empty for a fresh store (no side effect: does not create the DB),
     and rejected rows are absent (a reject is just 'do not add')."""
-    if not store.config_db_path().exists():
-        return {}
     out: dict[tuple[str, str], dict[str, list[str]]] = {}
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         for r in conn.execute("SELECT variety_norm, stone_type_norm, attribute, value_display "
                               "FROM backbone_leaf_decision WHERE action = 'approve'"):
             key = (r["variety_norm"], r["stone_type_norm"])
@@ -746,9 +730,7 @@ def backbone_leaf_overlay() -> dict[tuple[str, str], dict[str, list[str]]]:
 def leaf_decided() -> set[tuple[str, str, str, str]]:
     """(variety_norm, stone_type_norm, attribute, value_norm) for every DECIDED leaf suggestion (approve
     OR reject), so the produce drops them from the pending queue -- a decided item stops reappearing."""
-    if not store.config_db_path().exists():
-        return set()
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {(r["variety_norm"], r["stone_type_norm"], r["attribute"], r["value_norm"])
                 for r in conn.execute("SELECT variety_norm, stone_type_norm, attribute, value_norm "
                                       "FROM backbone_leaf_decision")}
@@ -757,7 +739,7 @@ def leaf_decided() -> set[tuple[str, str, str, str]]:
 def _leaf_actions_by_ref() -> dict[str, str]:
     """ref ('variety_norm|stone_type_norm|attribute|value_norm') -> action, for the UI to reflect a
     between-runs decision on a still-pending row (mirrors variety `current_action`)."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         return {"|".join((r["variety_norm"], r["stone_type_norm"], r["attribute"], r["value_norm"])): r["action"]
                 for r in conn.execute("SELECT variety_norm, stone_type_norm, attribute, value_norm, action "
                                       "FROM backbone_leaf_decision")}
@@ -823,9 +805,7 @@ def list_decided_leaves() -> list[dict]:
     review PUT takes -- so an operator can find and revise a past decision (e.g. undo a spurious approval a
     prior run already grew into the overlay). Empty for a fresh store, with no side effect (does not create
     the DB)."""
-    if not store.config_db_path().exists():
-        return []
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         rows = conn.execute(
             "SELECT variety_norm, stone_type_norm, attribute, value_norm, value_display, action, decided_at "
             "FROM backbone_leaf_decision ORDER BY decided_at DESC, value_display").fetchall()
@@ -849,10 +829,10 @@ def revise_leaf_decision(ref: str, action: str) -> bool:
     if action not in ("approve", "reject", "clear"):
         raise InvalidDecision(f"leaf revision must be approve|reject|clear, got {action!r}")
     parts = ref.split("|")
-    if len(parts) != 4 or not store.config_db_path().exists():
+    if len(parts) != 4:
         return False
     where = "WHERE variety_norm = ? AND stone_type_norm = ? AND attribute = ? AND value_norm = ?"
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         if action == "clear":
             cur = conn.execute(f"DELETE FROM backbone_leaf_decision {where}", tuple(parts))
         else:
@@ -905,7 +885,7 @@ def clear_review_pending(kinds: tuple[str, ...] = _PENDING_KINDS) -> int:
 def pending_payload(kind: str, ref: str) -> dict | None:
     """The stored payload for one pending item, or None. Lets the API act on a queued suggestion by its
     ref without the client resending the display fields."""
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         r = conn.execute("SELECT payload FROM review_pending WHERE kind = ? AND ref = ?",
                          (kind, ref)).fetchone()
     return json.loads(r["payload"]) if r else None
@@ -989,7 +969,7 @@ def list_pending(kind: str) -> list[dict]:
     # between runs shows as current_country until the next produce regenerates the queue (and drops it).
     origin_actions = ({f"{s}|{v}|{t}": iso for (s, v, t), iso in origin_decisions().items()}
                       if kind == "origin" else {})
-    with closing(store.open_store()) as conn:
+    with closing(store.read_store()) as conn:
         rows = conn.execute(
             "SELECT ref, payload, sources FROM review_pending WHERE kind = ? ORDER BY ref", (kind,)
         ).fetchall()

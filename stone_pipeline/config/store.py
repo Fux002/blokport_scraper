@@ -64,23 +64,36 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
+# new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
+SCHEMA_VERSION = 2
+
+
+def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
+    """Per-connection setup: row access + pragmas every time, the schema work ONCE per database. A database
+    below SCHEMA_VERSION gets the base DDL (if brand new) and every migration step, then the stamp; a stamped
+    one runs nothing but the pragmas (the admin API connects per request, decisions_store per call)."""
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")   # many readers + one writer, no contention
+    conn.execute("PRAGMA busy_timeout=5000")  # ThreadingHTTPServer: two concurrent admin writes wait, not 500
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < SCHEMA_VERSION:
+        if version < 1:
+            conn.executescript(_SCHEMA)
+        _migrate(conn)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
+    return conn
+
+
 def _connect(path: Path) -> sqlite3.Connection:
     # the SQLite substrate seam (Phase 4 RDS-readiness): a Postgres migration branches HERE, gating the
-    # PRAGMAs below. require_sqlite fails loud if a not-yet-wired dialect is configured. See
+    # PRAGMAs in _prepare. require_sqlite fails loud if a not-yet-wired dialect is configured. See
     # MIGRATION_TO_POSTGRES.md.
     from stone_pipeline.core.dbdialect import require_sqlite
     require_sqlite("config store")
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")   # many readers + one writer, no contention
-    conn.execute("PRAGMA busy_timeout=5000")  # ThreadingHTTPServer: two concurrent admin writes wait, not 500
-    # apply the DDL once per database, not on every connect (the admin API connects per request)
-    if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
-        conn.executescript(_SCHEMA)
-        conn.execute("PRAGMA user_version = 1")
-    _migrate(conn)
-    return conn
+    return _prepare(sqlite3.connect(str(path)))
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -315,7 +328,21 @@ def mark_migration(name: str, path: str | Path | None = None) -> None:
 
 
 def open_store(path: str | Path | None = None) -> sqlite3.Connection:
+    """A connection for WRITING (creates the store when absent)."""
     return _connect(Path(path or config_db_path()))
+
+
+def read_store(path: str | Path | None = None) -> sqlite3.Connection:
+    """A connection for READING: the store when it exists, else an EMPTY in-memory schema. A read on a host
+    without config.db (a produce on a fresh task, load_all on a laptop) must never materialise one: an empty
+    file would shadow the sources.yaml seed for load_source. Every read-only accessor goes through here, so
+    no reader needs its own exists() guard."""
+    p = Path(path or config_db_path())
+    if p.exists():
+        return _connect(p)
+    from stone_pipeline.core.dbdialect import require_sqlite
+    require_sqlite("config store")
+    return _prepare(sqlite3.connect(":memory:"))
 
 
 def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:

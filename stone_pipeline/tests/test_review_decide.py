@@ -101,7 +101,10 @@ def test_store_repairs_the_lists_an_old_widen_rewrote():
     decisions_store.set_variety_origin("Black Cosmic", "Granite", "IN")            # what the old widen wrote
     decisions_store.set_variety_origin("Volakas", "Marble", "GR,TR")                  # an operator list edit
     decisions_store.set_variety_origin("Porto Branco", "Granite", "PT")               # an edit, no widen on it
-    conn = store.open_store(); conn.close()                                          # the migration runs on open
+    import sqlite3
+    with sqlite3.connect(str(store.config_db_path())) as raw:
+        raw.execute("PRAGMA user_version = 1")               # a database from before the repair: migrates on open
+    conn = store.open_store(); conn.close()
     assert decisions_store.variety_origins() == {("volakas", "marble"): "GR,TR", ("porto branco", "granite"): "PT"}
 
 
@@ -392,6 +395,7 @@ def test_migration_makes_every_old_mint_global_and_keeps_who_asked(tmp_path, mon
         "seed_type TEXT, seed_country TEXT, seed_name TEXT, decided_at TEXT NOT NULL, source TEXT NOT NULL DEFAULT '');"
         "INSERT INTO variety_decision VALUES ('bianco white marble','Bianco White Marble','mint',NULL,'White','Marble','IR','Bianco White','2026-09-09T07:20:56','marenostone');"
         "INSERT INTO variety_decision VALUES ('junk','Junk','reject',NULL,NULL,NULL,NULL,NULL,'2026-09-09T08:00:00','');")
+    conn.execute("PRAGMA user_version = 1")                    # pre two-levels: migrates on open
     conn.commit(); conn.close()
     g = decisions_store.variety_actions()
     assert g[("", _norm("bianco white marble"))] == {"action": "mint", "alias_of": None, "seed_color": "White", "seed_type": "Marble",
