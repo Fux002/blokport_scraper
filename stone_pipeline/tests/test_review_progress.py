@@ -80,7 +80,7 @@ def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
     class _Conn:
         def execute(self, *a, **k): return _Cur()
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     out = {i["ref"]: i for i in ds.list_pending("variety")}
@@ -118,7 +118,7 @@ def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
     class _Conn:
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("variety")[0]
@@ -152,7 +152,7 @@ def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
     class _Conn:
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("variety")[0]
@@ -184,7 +184,7 @@ def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
     class _Conn:
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("variety")[0]
@@ -215,7 +215,7 @@ def test_origin_card_decided_when_its_listing_is_bound(monkeypatch):
     class _Conn:
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("origin")[0]
@@ -245,7 +245,7 @@ def test_every_decided_card_names_its_action(monkeypatch):
     class _Conn:
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("origin")[0]
@@ -275,7 +275,7 @@ def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
     class _Conn:
         def execute(self, *a, **k): return _Cur(rows)
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
 
     card = ds.list_pending("variety")[0]
     assert card["current_action"] == "alias" and card["current_alias_of"] == "Silver Stream"
@@ -302,7 +302,7 @@ def _one_card(monkeypatch, actions, aliases, payload, ref="foo"):
     class _Conn:
         def execute(self, *a, **k): return _Cur()
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     return ds.list_pending("variety")[0]
 
 
@@ -388,7 +388,7 @@ def test_an_origin_card_has_variety_field_parity_so_it_is_editable(monkeypatch):
     class _Conn:
         def execute(self, *a, **k): return _Cur()
         def close(self): pass
-    monkeypatch.setattr(ds.store, "open_store", lambda: _Conn())
+    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
 
     raw = ds.list_pending("origin")[0]
     card = server._origin_as_card(raw)
