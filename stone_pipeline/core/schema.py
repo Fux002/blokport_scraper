@@ -276,7 +276,6 @@ class CanonicalRow(BaseModel):
     reject_reasons: list[RejectReason] = Field(default_factory=list)
     tree_gaps: list[TreeGap] = Field(default_factory=list)
     row_fingerprint: Optional[str] = None
-    degraded: bool = False
     # whether this product already exists in Medusa (by SKU) and whether it changed
     product_status: str = ""   # "new" | "existing" | ""
     product_changed: Optional[bool] = None

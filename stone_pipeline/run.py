@@ -327,12 +327,9 @@ def run_source(
     # the row-count baseline is run state like the alias write-back: it lives in state_dir (the
     # production default is the same state/ folder; a test's tmp state_dir keeps it private)
     health.update_baseline_if_ok(report, contract, health.now_iso(), path=state_dir / "scrape_baselines.json")
-    degraded = report.status == health.DEGRADED
 
     # Stage 1: ingest
     rows = adapter.adapt(frame)
-    for row in rows:
-        row.degraded = degraded
     manifest.add_stage(StageMetric(stage="ingest", rows_in=frame.height, rows_out=len(rows)))
 
     # guard: a new/changed adapter that mis-maps a required field silently drops the rows missing
