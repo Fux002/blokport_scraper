@@ -48,7 +48,7 @@ def _monalisa_row() -> CanonicalRow:
 
 
 def _seed_granite(monkeypatch, imports):
-    monkeypatch.setattr(curate, "load_existing", lambda b: imports[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     # the operator assigned Granite to the type-less multi-surface name
     monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "monalisa"): "Granite"})

@@ -51,7 +51,7 @@ def _row(name: str, key: str, stone_type: str = "Onyx", **attrs) -> CanonicalRow
 
 
 def _isolate_curate(monkeypatch, confirm: dict, seed_names: dict, seed_colors: dict | None = None) -> None:
-    monkeypatch.setattr(curate, "load_existing", lambda b, *a, **k: _empty_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _empty_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
     monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: confirm)
     monkeypatch.setattr(decisions, "load_variety_seed_names", lambda: seed_names)
