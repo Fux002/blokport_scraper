@@ -92,28 +92,27 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_int(name: str, default: int) -> int:
-    """Read an integer env var; fall back to default when unset or non-numeric (fail soft to the default,
-    never crash config import on a bad override). Parse with int() itself, not an isdigit() pre-check:
-    isdigit() is True for a double sign ('--3', once dashes are stripped) and for Unicode digits ('3', '²'),
-    both of which int() then REJECTS -- so the heuristic let malformed values through to a crash at import."""
+    """Read an integer env var: the default ONLY when unset. A set-but-malformed override fails loud at
+    config import, naming the variable: an operator who typed FAL_MAX_USD=abc meant a value, and silently
+    running on the default is the no_image incident class (a run proceeding on a value nobody set)."""
     raw = env.getenv(name)
     if raw is None:
         return default
     try:
         return int(raw.strip())
     except ValueError:
-        return default
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from None
 
 
 def _env_float(name: str, default: float) -> float:
-    """Read a float env var; fall back to default when unset or non-numeric (fail soft, never crash)."""
+    """Read a float env var: the default ONLY when unset; a malformed override fails loud (see _env_int)."""
     raw = env.getenv(name)
     if raw is None:
         return default
     try:
         return float(raw.strip())
     except ValueError:
-        return default
+        raise ValueError(f"{name} must be a number, got {raw!r}") from None
 
 
 # Brand identity (multi-brand). Each brand (blokport/wudport/calcport/...) is its OWN deployment: own
@@ -547,6 +546,9 @@ class ImageProcessingConfig:
     )
 
 
+IMAGE_MODES = ("passthrough", "local", "s3")
+
+
 @dataclass(frozen=True)
 class ImagesConfig:
     """Image staging (section 7 Stage 7). mode selects the storage backend:
@@ -593,6 +595,11 @@ class ImagesConfig:
     # reflects everything already upgraded, else an enabled run re-does images that are already best.
     upgrade_batch: int = _env_int("BLOKPORT_IMAGE_UPGRADE_BATCH", 0)
     processing: ImageProcessingConfig = field(default_factory=ImageProcessingConfig)
+
+    def __post_init__(self):
+        # a typo'd mode used to fall through to passthrough silently (every product held no_image)
+        if self.mode not in IMAGE_MODES:
+            raise ValueError(f"image mode must be one of {IMAGE_MODES}, got {self.mode!r} (BLOKPORT_IMAGE_MODE)")
 
 
 @dataclass(frozen=True)

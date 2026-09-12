@@ -19,16 +19,25 @@ from stone_pipeline.config.server import ConfigHandler, _MAX_BODY_BYTES
 # ---- _env_int ---------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("value,expected", [
-    ("--3", 7),      # double sign: lstrip('-').isdigit() was True, int() then raised
-    ("²", 7),   # superscript two: isdigit() True, int() raises
-    ("3.5", 7),      # not an int
-    ("", 7),         # blank
+    ("", 7),         # blank = unset (env.getenv treats an empty value as absent)
     ("-3", -3),      # a real negative parses
     (" 5 ", 5),      # whitespace tolerated
 ])
-def test_env_int_falls_soft_never_crashes(monkeypatch, value, expected):
+def test_env_int_parses_or_defaults(monkeypatch, value, expected):
     monkeypatch.setenv("BLOKPORT_TEST_INT", value)
     assert settings_mod._env_int("BLOKPORT_TEST_INT", 7) == expected
+
+
+@pytest.mark.parametrize("value", [
+    "--3",           # double sign: lstrip('-').isdigit() was True, int() then raised
+    "²",             # superscript two: isdigit() True, int() raises
+    "3.5",           # not an int
+])
+def test_env_int_malformed_override_fails_loud(monkeypatch, value):
+    # a SET but malformed override is an operator mistake, never silently the default (wave 3a)
+    monkeypatch.setenv("BLOKPORT_TEST_INT", value)
+    with pytest.raises(ValueError, match="BLOKPORT_TEST_INT"):
+        settings_mod._env_int("BLOKPORT_TEST_INT", 7)
 
 
 def test_env_int_unset_returns_default(monkeypatch):
