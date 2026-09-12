@@ -101,7 +101,6 @@ def test_store_repairs_the_lists_an_old_widen_rewrote():
     decisions_store.set_variety_origin("Black Cosmic", "Granite", "IN")            # what the old widen wrote
     decisions_store.set_variety_origin("Volakas", "Marble", "GR,TR")                  # an operator list edit
     decisions_store.set_variety_origin("Porto Branco", "Granite", "PT")               # an edit, no widen on it
-    import sqlite3
     conn = store.open_store(); conn.close()                                          # the migration runs on open
     assert decisions_store.variety_origins() == {("volakas", "marble"): "GR,TR", ("porto branco", "granite"): "PT"}
 

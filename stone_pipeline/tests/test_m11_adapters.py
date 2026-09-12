@@ -265,7 +265,7 @@ def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch):
                         lambda scrape_path=None: (frame, "20260101_000000", "api://marenostone"))
 
     def _boom(_source):
-        raise AssertionError("CSV ingest was used — load_frame override ignored")
+        raise AssertionError("CSV ingest was used - load_frame override ignored")
     monkeypatch.setattr(run_mod, "find_scrape_file", _boom)   # fails if the file path is taken
     manifest = run_mod.run_source("marenostone", outputs_dir=tmp_path, state_dir=tmp_path)
     assert manifest.run_id == "marenostone_20260101_000000"   # used the load_frame timestamp token

@@ -105,7 +105,7 @@ def main() -> int:
             print(f"   {name}")
             n += 1
     if n == 0:
-        print("   (no input files found — matcher will treat everything as new)")
+        print("   (no input files found - matcher will treat everything as new)")
     print(f"==> fetched {n} file(s)")
     return 0
 

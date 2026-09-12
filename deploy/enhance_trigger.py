@@ -15,8 +15,6 @@ Shared with deploy/reprocess_source: `done_shas()` is the incremental "already p
 
 from __future__ import annotations
 
-import os
-
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore

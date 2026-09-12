@@ -28,6 +28,8 @@ ESRGAN's stack is absent enhancement is skipped with a warning (no fallback).
 
 from __future__ import annotations
 
+import importlib
+
 import math
 import os
 import time
@@ -135,7 +137,7 @@ class _Dewatermarker:
         if self._ok is not None:
             return self._ok
         try:
-            import fal_client  # noqa: F401
+            importlib.import_module("fal_client")
             self._ok = bool(os.environ.get("FAL_KEY"))
             if not self._ok:
                 log.error("de-watermark unavailable: FAL_KEY not set (watermarked images will be HELD)")

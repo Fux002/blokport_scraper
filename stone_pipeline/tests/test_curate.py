@@ -424,7 +424,6 @@ def _ocean_blue(raw_type):
 def test_new_type_on_existing_multitype_name_holds_not_mint(ref, monkeypatch):
     # BUG6 / HOLD-never-guess: 'Ocean Blue' exists as Granite + Marble but NOT Onyx. A scrape typed 'Onyx' (a
     # NEW type for the name) must HOLD for the operator to confirm, never silently mint 'Ocean Blue Onyx'.
-    from stone_pipeline.config import decisions_store
     _inject_existing(monkeypatch, ("Ocean Blue", "Granite"), ("Ocean Blue", "Marble"))
     res = curate.build_curation([_ocean_blue("Onyx")], ref)
     assert any(p["variant"] == "Ocean Blue" for p in res.pending_confirm)         # held for confirmation

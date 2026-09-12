@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import glob
 
-from stone_pipeline.config.settings import SETTINGS, category
+from stone_pipeline.config.settings import category
 from stone_pipeline.io import staging
 from stone_pipeline.run import run_source
 

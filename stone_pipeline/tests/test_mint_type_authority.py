@@ -13,9 +13,7 @@ same name scraped as stone B. These tests pin the fix at its two load-bearing po
 from __future__ import annotations
 
 import csv
-from types import SimpleNamespace
 
-import pytest
 
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.reference import loaders

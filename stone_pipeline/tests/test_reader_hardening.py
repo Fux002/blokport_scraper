@@ -22,7 +22,6 @@ def test_read_template_columns_fails_loud_when_a_mapped_column_is_missing(tmp_pa
     # tracks the actual emit schema.
     from stone_pipeline.stages import emit
     keys = list(emit.COLUMN_MAP)
-    dropped = keys[0]
     tpl = tmp_path / "template.csv"
     tpl.write_text(",".join(keys[1:]) + "\n", encoding="utf-8")     # every mapped column EXCEPT the first
     with pytest.raises(ValueError, match="missing"):

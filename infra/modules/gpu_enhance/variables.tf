@@ -1,5 +1,5 @@
 variable "target_env" {
-  description = "development | production — the env this Batch enhancer belongs to (fixes BLOKPORT_ENV + bucket)."
+  description = "development | production - the env this Batch enhancer belongs to (fixes BLOKPORT_ENV + bucket)."
   type        = string
 }
 

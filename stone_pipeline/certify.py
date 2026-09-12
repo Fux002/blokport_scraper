@@ -125,13 +125,13 @@ def certify_source(source: str) -> CertResult:
     has_adapter = source in ADAPTERS
     res.checks.append(Check(
         "adapter", has_adapter,
-        "registered" if has_adapter else "missing — add stone_pipeline/adapters/<source>.py"))
+        "registered" if has_adapter else "missing - add stone_pipeline/adapters/<source>.py"))
 
     if has_adapter:
         try:
             ok, msg = run_fixture(source)
         except Exception as exc:  # missing/broken fixture
-            ok, msg = False, f"error: {exc} — regenerate the golden fixture"
+            ok, msg = False, f"error: {exc} - regenerate the golden fixture"
         res.checks.append(Check("selftest", ok, msg))
         # the self-test only proves the adapter is STABLE (the golden file is made by the same
         # adapter); the vocab check proves it is CORRECT -- a swapped attribute column is caught here.
@@ -142,7 +142,7 @@ def certify_source(source: str) -> CertResult:
 
     res.checks.append(Check(
         "contract", load_contract(source) is not None,
-        "defined" if load_contract(source) is not None else "missing — generate from a sample"))
+        "defined" if load_contract(source) is not None else "missing - generate from a sample"))
 
     return res
 
@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     print("-" * 56)
     failed = [r.source for r in results if not r.passed]
     if failed:
-        print(f"CERTIFICATION FAILED: {', '.join(failed)} — fix the XX checks above")
+        print(f"CERTIFICATION FAILED: {', '.join(failed)} - fix the XX checks above")
         return 1
     print(f"ALL CERTIFIED ({len(results)} source(s))")
     return 0

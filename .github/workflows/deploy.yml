@@ -3,15 +3,19 @@ name: Deploy
 # Build the scraper image and push it to the SHARED ECR repo (blokport-scraper).
 # One image, two deployments: the dev + prod Fargate tasks both pull this repo.
 # Pushes both ":core" (dev tracks this for fast iteration) and ":<git-sha>" (the
-# immutable tag you PROMOTE to prod via `-var prod_image_tag=<sha>` — never point
+# immutable tag you PROMOTE to prod via `-var prod_image_tag=<sha>` - never point
 # prod at the mutable :core, or a dev push would move prod too). Dev's task def
 # references :core, so its next run picks up the new image with no re-register.
 #
 # Requires the repo secret AWS_DEPLOY_ROLE_ARN = the scraper stack's
 # `deploy_role_arn` Terraform output.
 
+# Gated on CI: this runs when the CI workflow on main COMPLETES, and every step is skipped unless CI
+# succeeded, so a red suite can never build and roll an image. The checked-out ref is CI's head sha.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -39,10 +43,15 @@ env:
 jobs:
   build-push:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.SHA }}
 
-      # No-op (green) until AWS_DEPLOY_ROLE_ARN is set — see DEPLOY.md.
+      # No-op (green) until AWS_DEPLOY_ROLE_ARN is set - see DEPLOY.md.
       - name: Check deploy is configured
         id: gate
         run: echo "ready=${{ secrets.AWS_DEPLOY_ROLE_ARN != '' }}" >> "$GITHUB_OUTPUT"
@@ -59,14 +68,25 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
 
-      - name: Build and push image
+      # The import smoke: every entrypoint module the container can run (the two servers, produce, the
+      # RUN_MODE scripts) must IMPORT inside the built image before it is pushed. A boot-time NameError
+      # (a missing import in serve()) used to reach dev as a crash-looping task; now it fails the build.
+      - name: Build image and smoke-import its entrypoints
         if: steps.gate.outputs.ready == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-          SHA: ${{ github.sha }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target core -t "$REPO:core" -t "$REPO:$SHA" .
+          docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts, deploy.validate_dewatermark, deploy.reprocess_source"
+          echo "Entrypoint imports OK in $REPO:core"
+
+      - name: Push image
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          REPO="$REGISTRY/blokport-scraper"
           docker push "$REPO:core"
           docker push "$REPO:$SHA"
           echo "Pushed $REPO:core and :$SHA"
@@ -74,10 +94,10 @@ jobs:
       # The mutable-tag gotcha: pushing a new :core does not change the task def, so ECS never rolls the
       # running service on its own -- the new image would sit in ECR, never live. Force a new deployment so
       # it re-pulls :core, and WAIT for stable so a green Deploy means the task ACTUALLY rolled, not just
-      # that the image was pushed. Only on the main push (the dev deploy); a manual imageproc/gpu dispatch
-      # must not roll the app service. Prod is a separate task, promoted explicitly.
+      # that the image was pushed. Only on the CI-gated main run (the dev deploy); a manual imageproc/gpu
+      # dispatch must not roll the app service. Prod is a separate task, promoted explicitly.
       - name: Roll dev service (re-pull :core) and wait for stable
-        if: steps.gate.outputs.ready == 'true' && github.event_name == 'push'
+        if: steps.gate.outputs.ready == 'true' && github.event_name == 'workflow_run'
         run: |
           aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
             --force-new-deployment >/dev/null
@@ -124,7 +144,6 @@ jobs:
         if: steps.gate.outputs.ready == 'true' && inputs.build_gpu
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
-          SHA: ${{ github.sha }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target gpu -t "$REPO:gpu" -t "$REPO:gpu-$SHA" .

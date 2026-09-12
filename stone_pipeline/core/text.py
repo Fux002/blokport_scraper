@@ -155,7 +155,7 @@ def slugify(text: str) -> str:
 
 
 # strip stray edge punctuation, but NOT brackets -- a balanced '(Sunset Gold)' is meaningful
-_EDGE_PUNCT = re.compile(r"^[\s\-–—_/.,:;#*|]+|[\s\-–—_/.,:;#*|]+$")
+_EDGE_PUNCT = re.compile(r"^[\s\-\u2013\u2014_/.,:;#*|]+|[\s\-\u2013\u2014_/.,:;#*|]+$")
 
 
 def _kept_code_match(tok: str) -> bool:
@@ -171,7 +171,7 @@ def _is_number_code(tok: str) -> bool:
     """A token carrying a number that does NOT belong in a variety name of this domain -> drop it. The one
     exception is the pack's real-code pattern (stone: a granite code 'G682'/'G032'). EVERYTHING else with a
     digit ('3D', '2cm', '1.08', '426', '883') or a 'No.' series marker is a code/measurement to strip."""
-    t = tok.strip("().[]{}-–—,")
+    t = tok.strip("().[]{}-\u2013\u2014,")
     if not t:
         return False
     if _kept_code_match(t):                              # a domain-declared real code (granite 'G682') -> keep
@@ -194,7 +194,7 @@ def looks_codey(tok: str) -> bool:
     that is neither a vowel-bearing word ('El', 'La', 'Di') nor a known short lead word ('St', 'Mt', 'Ft').
     A 2-char lead with a vowel or a real abbreviation is a NAME word ('El Dorado', 'St Laurent'), not a
     code, so it is never stripped."""
-    t = tok.strip("().[]{}-–—,.")
+    t = tok.strip("().[]{}-\u2013\u2014,.")
     if not t:
         return False
     if any(c.isdigit() for c in t):
@@ -256,7 +256,7 @@ def clean_variety_name(name: str, code_prefixes: tuple[str, ...] = (),
             m = re.search(r"-([A-Za-z])$", toks[-1])
             if m and m.group(1).upper() != "I":
                 toks[-1] = toks[-1][:m.start()] or toks[-1]               # 'Wendeng-z' -> 'Wendeng'
-    toks = [t for t in toks if t.strip("-–—_/|")]                         # drop dangling separators
+    toks = [t for t in toks if t.strip("-\u2013\u2014_/|")]                         # drop dangling separators
     return _EDGE_PUNCT.sub("", " ".join(toks)).strip() or n or (name or "").strip()
 
 

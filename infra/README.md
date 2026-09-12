@@ -1,6 +1,6 @@
 # Scraper infrastructure (Terraform)
 
-**TWO deployments from one image** — a dedicated **dev** task (runs in the Medusa
+**TWO deployments from one image** - a dedicated **dev** task (runs in the Medusa
 `blokport-dev` VPC/cluster, writes only the dev staging bucket) and a dedicated
 **prod** task (runs in `blokport-prod`, writes only the prod bucket). Each task is
 hard-wired to its environment (`BLOKPORT_ENV` fixed, no runtime toggle) and its IAM
@@ -8,7 +8,7 @@ role is **scoped to its own bucket only**, so the two environments cannot mix. T
 prod task is **count-gated**: it is created only once `prod_staging_bucket` is set.
 
 This is a **sibling stack** to the Medusa platform (`blokport_backend/terraform`):
-it does **not** modify it — it reads each env's cluster name from that env's remote
+it does **not** modify it - it reads each env's cluster name from that env's remote
 state and looks up the VPC/subnets/OIDC provider by name/tag, then creates only the
 scraper's own resources.
 
@@ -39,7 +39,7 @@ the account GitHub OIDC provider, and the state bucket/lock (this stack's state 
 `prod_staging_bucket` defaults to empty → `module.scraper_prod` has `count = 0`, so a
 `terraform apply` today creates **only the dev task** (plus the shared ECR + CI role).
 Stand prod up later by setting `prod_staging_bucket` (and ensuring the `blokport-prod`
-platform stack exists) — see `DEPLOY.md`.
+platform stack exists) - see `DEPLOY.md`.
 
 ## Apply (dev)
 ```bash

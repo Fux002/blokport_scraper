@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
 # Two build targets:
-#   core       — scrape + pipeline + faithful image enhancement/upscale (CPU,
+#   core       - scrape + pipeline + faithful image enhancement/upscale (CPU,
 #                no torch). This is what the scheduled Fargate task runs.
-#   imageproc  — core + the Real-ESRGAN enhance + CLIP classify stack on CPU torch
+#   imageproc  - core + the Real-ESRGAN enhance + CLIP classify stack on CPU torch
 #                (fp32). Same local models as `gpu` but far slower; for local/CPU use.
-#   gpu        — same stack on CUDA torch (fp16). What the on-demand AWS Batch GPU runs.
+#   gpu        - same stack on CUDA torch (fp16). What the on-demand AWS Batch GPU runs.
 #                (De-watermarking on both is FAL FLUX Fill -- hosted, no local model.)
 #
 #   docker build --target core      -t blokport-scraper:core .
@@ -32,7 +32,7 @@ RUN apt-get update \
 # Patch build tooling first: setuptools < 78.1.1 is vulnerable to PYSEC-2025-49.
 RUN pip install --upgrade "pip" "setuptools>=78.1.1"
 
-# Install deps first (layer cache) — both requirement files live in stone_pipeline/.
+# Install deps first (layer cache) - both requirement files live in stone_pipeline/.
 COPY stone_pipeline/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
@@ -47,7 +47,7 @@ ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 
 # --- imageproc variant (optional, CPU torch) --------------------------------
 # Same enhancement + classify stack as the GPU target, but CPU torch (fp32). Far slower
-# than the GPU batch — kept for local runs / CPU-only environments. For a full catalogue
+# than the GPU batch - kept for local runs / CPU-only environments. For a full catalogue
 # use the `gpu` target. (De-watermarking is FAL FLUX Fill, hosted -- no torch, no bake.)
 FROM core AS imageproc
 RUN apt-get update \
@@ -99,7 +99,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 # git: pip installs ben2 (BEN2 background-remover) from a pinned git SHA -- the PyPI package was pulled.
 RUN pip install --upgrade "pip" "setuptools>=78.1.1"
-# torch/torchvision are ALREADY in the CUDA base — install ONLY the app deps (pillow>=10
+# torch/torchvision are ALREADY in the CUDA base - install ONLY the app deps (pillow>=10
 # first so nothing backtracks to an uncompilable old pillow), never re-touch torch.
 COPY stone_pipeline/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt \

@@ -1,5 +1,5 @@
 # =============================================================================
-# Scraper — TWO deployments from ONE image: a dev task (runs in blokport-dev) and
+# Scraper - TWO deployments from ONE image: a dev task (runs in blokport-dev) and
 # a prod task (runs in blokport-prod). Shared here: the ECR repo + the CI deploy
 # role (build once, promote the SAME tag dev -> prod). Per-env (in modules/scraper):
 # the task def, IAM (scoped to that env's bucket ONLY), schedule, log group.

@@ -4,7 +4,6 @@ catalogs -- so the produce trigger can update one scraper without touching the r
 
 from __future__ import annotations
 
-import pytest
 
 from stone_pipeline import build
 

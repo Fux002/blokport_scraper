@@ -305,6 +305,14 @@ resource "aws_ecs_service" "this" {
   # is never on by accident; the task role below gains the ssmmessages channel actions only when set.
   enable_execute_command = var.enable_execute_command
 
+  # A task that dies at boot (an import error in serve(), a required restore that fails) must not take the
+  # service down: ECS marks the deployment failed and rolls back to the last stable task set instead of
+  # retrying the broken image forever. The ledger/config volume is unaffected (the old task keeps it).
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     subnets          = var.private_subnet_ids
     security_groups  = [aws_security_group.this.id]

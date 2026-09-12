@@ -9,7 +9,7 @@ httpx>=0.27
 curl_cffi>=0.7          # Cloudflare-fronted SlabWare scrapers (chrome TLS impersonation)
 boto3>=1.34             # S3 image staging backend (images.mode = s3)
 
-# Image stage — faithful enhancement + Lanczos upscale (CPU, always available).
+# Image stage - faithful enhancement + Lanczos upscale (CPU, always available).
 opencv-python-headless>=4.9
 numpy>=1.26
 pillow>=10.0

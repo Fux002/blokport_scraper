@@ -9,17 +9,17 @@ which stacks actually stand up; `create_ecr` decides repo ownership.
 
 Every knob a new brand needs is a variable, so onboarding never touches a `.tf` resource:
 
-1. **`brands/<brand>.tfvars`** — `brand`, `domain_pack`, `create_ecr = false` (references the shared
+1. **`brands/<brand>.tfvars`** - `brand`, `domain_pack`, `create_ecr = false` (references the shared
    image repo instead of creating it), `dev_enabled = false` (prod-only) or `true`, the prod owner ids +
    bucket + SSM names. Copy an existing file and fill it.
-2. **`brands/<brand>.backend.hcl`** — the brand's own state bucket/key/lock (a backend block can't take a
+2. **`brands/<brand>.backend.hcl`** - the brand's own state bucket/key/lock (a backend block can't take a
    variable, so state is separated at `init` time, not in code).
 3. **`terraform init -reconfigure -backend-config=brands/<brand>.backend.hcl`** then
    **`terraform plan/apply -var-file=brands/<brand>.tfvars`**.
 
 That's the whole infra story. What is NOT declarative (because it is genuine product work, not config):
 the brand's **domain pack** (`config/domains/<pack>.yaml`), its **source scrapers + adapters**, and a
-**smoke run** to prove the material — see `MULTI_BRAND_LAUNCH.md`. The platform (VPC/cluster/state bucket)
+**smoke run** to prove the material - see `MULTI_BRAND_LAUNCH.md`. The platform (VPC/cluster/state bucket)
 must also exist first. But the scraper stack itself is pure tfvars.
 
 ## AWS footprint (intended steady state)
@@ -35,7 +35,7 @@ ready but consume **zero** AWS until their `*.tfvars` are filled and applied.
 
 ## Standing a brand up
 
-> **Two different state locations — do not conflate them.**
+> **Two different state locations - do not conflate them.**
 > - **This stack's own state** is per brand (`brands/<brand>.backend.hcl`), passed at init.
 > - **The PLATFORM's state**, which this stack only *reads* (`platform_state_bucket`), is NOT per brand:
 >   every brand's platform state lives in the single `blokport-tfstate` bucket, separated by key

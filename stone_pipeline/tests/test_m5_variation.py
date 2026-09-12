@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex, build_variation_index

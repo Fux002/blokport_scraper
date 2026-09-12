@@ -8,13 +8,13 @@ terraform {
 }
 
 # =============================================================================
-# Scraper — ONE environment per module instance (dev OR prod). The root stack
+# Scraper - ONE environment per module instance (dev OR prod). The root stack
 # instantiates this twice. Each instance:
 #   * runs in its OWN platform VPC/cluster (home_env: dev runs in blokport-dev,
 #     prod in blokport-prod),
 #   * is HARD-WIRED to a single target env (BLOKPORT_ENV = target_env, no runtime
 #     toggle / no default fallback),
-#   * has an IAM task role scoped to ONLY its own staging bucket — so even a
+#   * has an IAM task role scoped to ONLY its own staging bucket - so even a
 #     misconfigured env var physically cannot write the other environment's bucket.
 # The ECR repo + CI deploy role are SHARED and live in the root (one image, built
 # once and promoted dev -> prod), passed in as image_repo_url.

@@ -110,7 +110,6 @@ def test_product_images_fill_up_to_cap_then_blank():
     from stone_pipeline.config.settings import SETTINGS
     from stone_pipeline.config.sources import load_source
     from stone_pipeline.core.schema import CanonicalRow
-    from stone_pipeline.stages import images
     from stone_pipeline.stages.emit import COLUMN_MAP
     slots = SETTINGS.images.product_image_slots
     cfg = load_source("polonine")
