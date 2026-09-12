@@ -45,7 +45,6 @@ class FlagCode(str, Enum):
     # variation-authoritative (name-derived / fallback), so a homonym could not resolve the wrong stone's
     # origin; the row fell to the supplier default and needs its variety type verified.
     origin_type_unverified = "origin_type_unverified"
-    image_placeholder = "image_placeholder"
     image_download_failed = "image_download_failed"
     near_duplicate = "near_duplicate"
     format_inferred = "format_inferred"
@@ -72,7 +71,6 @@ class FlagCode(str, Enum):
     no_publishable_image = "no_publishable_image"
     ports_default = "ports_default"
     surrogate_minted = "surrogate_minted"
-    degraded_batch = "degraded_batch"
     # a per-row stage body raised an UNEXPECTED exception (not a handled data condition): the row is
     # dead-lettered -- a stage_error RejectReason makes it non-emittable, this flag surfaces it for review,
     # and the stage continues. Upholds fail-loud-and-ISOLATED: one bad row flags itself, never crashes the
@@ -83,10 +81,9 @@ class FlagCode(str, Enum):
 class GapKind(str, Enum):
     missing_variation = "missing_variation"
     missing_leaf_child = "missing_leaf_child"
-    missing_attribute = "missing_attribute"
-    # the row's format (tile) has no variation reference loaded yet; the tile_
-    # variants export must be supplied before these can resolve
-    missing_tile_reference = "missing_tile_reference"
+    # the row's category mirrors another (tile mirrors slab) and is not activated yet (no reference, no
+    # pcat): held until the category is activated, never resolved against another category's ids
+    missing_mirror_reference = "missing_mirror_reference"
     # the row's category does not share the stone-variety vocabulary (e.g.
     # accessories); its own matching vertical is not built yet, so it is held
     # rather than mismatched to a stone variety.

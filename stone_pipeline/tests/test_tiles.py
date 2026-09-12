@@ -29,7 +29,6 @@ def _clear_tile_reference(ref):
     """The live export now contains tile variants; clear them to exercise the
     'no tile reference supplied yet' path (the function-scoped ref isolates this)."""
     ref.variants["tile"].by_id.clear()
-    ref.variants["tile"].surface_to_id.clear()
 
 
 def test_tile_with_no_reference_is_held_not_given_slab_id(ref, monkeypatch):
@@ -43,7 +42,7 @@ def test_tile_with_no_reference_is_held_not_given_slab_id(ref, monkeypatch):
     stage.resolve_row(row)
     assert row.variation_id is None  # never borrows a slab id
     assert row.variation_method == "category_not_activated"
-    assert any(g.gap_kind == GapKind.missing_tile_reference for g in row.tree_gaps)
+    assert any(g.gap_kind == GapKind.missing_mirror_reference for g in row.tree_gaps)
 
 
 def test_tile_does_not_double_gap_in_reconcile(ref, monkeypatch):
@@ -57,7 +56,7 @@ def test_tile_does_not_double_gap_in_reconcile(ref, monkeypatch):
     stats = reconcile_tree.ReconcileStats()
     reconcile_tree.reconcile_row(row, ref, stats)
     kinds = [g.gap_kind for g in row.tree_gaps]
-    assert GapKind.missing_tile_reference in kinds
+    assert GapKind.missing_mirror_reference in kinds
     assert GapKind.missing_variation not in kinds  # not double-gapped
 
 

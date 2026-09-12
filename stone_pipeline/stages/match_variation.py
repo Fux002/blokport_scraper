@@ -211,7 +211,7 @@ class VariationStage:
                 raw_name=row.raw_name or "",
                 normalized_name=proj.norm(row.variety_match_key or row.raw_name or ""),
                 suggested_type=row.raw_type, suggested_color=row.color_name or row.raw_color,
-                gap_kind=GapKind.missing_tile_reference,
+                gap_kind=GapKind.missing_mirror_reference,
                 nearest_existing="(tile variation export not supplied)",
                 example_src_url=row.src_url,
             ))
