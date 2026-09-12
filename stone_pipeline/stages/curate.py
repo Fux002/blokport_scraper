@@ -140,7 +140,7 @@ def _review_card(kind: str, variant: str, reason: str, evidence: dict, *, stone_
                  nearest_existing: str = "", score="", model_prob="") -> dict:
     """One shape for every review-queue card (variants_to_confirm) so the operator queue is uniform no
     matter which hold path built it, and no arm can silently omit a column. `kind` names WHY the card exists
-    (new, similar, collision, no_type, new_type, alias_target, code, retired; the origin queue adds origin):
+    (new, similar, collision, no_type, new_type, code, retired; the origin queue adds origin):
     it explains, it never limits what the operator may state. `evidence` is _review_evidence()
     (src/scraped/src_url/image/description); its keys never collide with the card fields, so the spread is
     additive."""
@@ -330,8 +330,6 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
     # human decisions read back from the ledger (variants_to_confirm.csv) + the persistent reject memory
     from stone_pipeline.stages import decisions
     confirm_decisions = decisions.load_confirm_decisions()
-    alias_decisions = decisions.load_alias_decisions()   # scope_key -> existing variety NAME to alias onto
-    alias_types = decisions.load_alias_types()            # scope_key -> operator-chosen TARGET type (multi-type)
     rejected = decisions.load_rejected()
     seed_colors = decisions.load_variety_seed_colors()   # scope_key -> operator mint colour (over 'Natural')
     seed_types = decisions.load_variety_seed_types()     # scope_key -> operator-assigned stone type (fills a void)
@@ -390,15 +388,15 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # correctly and the seed lookup key norm(clean) + the Key uuid stay byte-stable run to run -- the
         # operator's type below changes only the final IDENTITY type, never the name/clean/Key.
         clean = clean_variety(name, scrape_type)
-        # OPERATOR AUTHORITY: a MINT decision's chosen type overrides the scraper's suggestion. Absent a
-        # mint type, the scrape type stands; absent both, an ALIAS decision's target type fills a type-less
-        # row (which lets a 'pick the type' answer on an aliased multi-type target resolve the row instead
-        # of re-holding forever). Non-canonical operator types are dropped, same as the scrape gate above.
+        # OPERATOR AUTHORITY: a MINT decision's chosen type overrides the scraper's suggestion; absent a
+        # mint type, the scrape type stands (a vendor statement with a type binds through the matcher's
+        # scoped-alias tier, so it never reaches here as a type-less gap). Non-canonical operator types are
+        # dropped, same as the scrape gate above.
         op_mint_type = _decided(seed_types, row.src_site, name, clean) or ""
         if op_mint_type and proj.norm(op_mint_type) in valid_type_norms:
             stone_type = op_mint_type
         else:
-            stone_type = scrape_type or _decided(alias_types, row.src_site, name, clean) or ""
+            stone_type = scrape_type or ""
             if stone_type and proj.norm(stone_type) not in valid_type_norms:
                 stone_type = ""
         return name, stone_type, clean
@@ -609,32 +607,6 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             _review_evidence(row), name, row.src_site or "",
         ))
 
-    def _apply_operator_alias(clean: str, name: str, row, stone_type: str) -> bool:
-        """Route an operator ALIAS decision for `clean` onto its target variety, disambiguated by the
-        operator's chosen TARGET type (else the scraped row's own type). Returns True if it aliased OR held
-        the row (caller should `continue`), False if there is NO alias decision (caller proceeds). A target
-        NAME that exists under several types with no type to pick by is HELD LOUDLY -- naming the types and
-        asking which -- never a silent no-op onto an arbitrary same-name stone (the bug an alias to a
-        multi-type target like 'Black Sea' = andesite + soapstone otherwise causes)."""
-        alias_to = _decided(alias_decisions, row.src_site, name, clean)
-        if not alias_to:
-            return False
-        target_type = _decided(alias_types, row.src_site, name, clean) or stone_type
-        if own := _by_name_owner(proj.norm(alias_to), target_type):
-            alias_new.setdefault(own, set()).add(name)
-            return True
-        owner_types = sorted({o[1] for o in existing_surface.get(proj.norm(alias_to), set())})
-        if owner_types:
-            reason = (f"Alias target '{title_case(alias_to)}' exists as "
-                      f"{_human_join([title_case(t) for t in owner_types])}. Choose which type to alias "
-                      f"'{title_case(clean)}' into (one name can exist under several stone types).")
-        else:
-            reason = (f"Alias target '{title_case(alias_to)}' is not an existing variety here. "
-                      f"Reject '{title_case(clean)}' or choose a real target.")
-        pending_confirm.append(_review_card("alias_target", 
-            clean, reason, _review_evidence(row), nearest_existing=_named_with_types(alias_to)))
-        return True
-
     for row in rows:
         gaps = [g for g in row.tree_gaps if g.gap_kind == GapKind.missing_variation]
         gap = gaps[0] if gaps else None
@@ -646,13 +618,12 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
             continue
         # An explicit operator statement OVERRIDES the matcher's auto-bind. A row the matcher already
         # resolved to an existing variety (no gap) still enters classification when the operator decided its
-        # scraped spelling is a mint or an alias FOR THIS vendor -- so "matched 'Brown Granite' but is really
-        # a new 'Chocolate Classic'" is applied, not silently kept as the match (the decision_gap the audit
-        # kept reporting). Such a row is always handled by the operator arms below (3c / 3c-bis), which
-        # `continue` before PHASE 4, so the null `gap` is never dereferenced. A matched row with no own
-        # decision keeps its match -- skip it, exactly as before.
-        if gap is None and not (_decided(confirm_decisions, row.src_site, name, clean) == "yes"
-                                or _decided(alias_decisions, row.src_site, name, clean)):
+        # scraped spelling is a mint FOR THIS vendor -- so "matched 'Brown Granite' but is really a new
+        # 'Chocolate Classic'" is applied, not silently kept as the match (the decision_gap the audit kept
+        # reporting). Such a row is always handled by the operator mint arm below (3c-bis), which `continue`s
+        # before PHASE 4, so the null `gap` is never dereferenced. A matched row with no own decision keeps
+        # its match -- skip it, exactly as before.
+        if gap is None and _decided(confirm_decisions, row.src_site, name, clean) != "yes":
             continue
 
         # PHASE 2 -- DEDUP: classify each cleaned identity once (two raw names that clean to the same
@@ -680,8 +651,6 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
         # otherwise the decision was silently dropped and the row fell through to a spurious "new variety,
         # no close match" hold. Disambiguated by the operator's chosen target type (else the row's own
         # type); a multi-type target with no type to pick by is HELD, never a silent no-op onto one stone.
-        if _apply_operator_alias(clean, name, row, stone_type):
-            continue
         # 3c-bis. OPERATOR MINT / REJECT -- authoritative, consulted UNIFORMLY (the same fix 3c made for the
         # ALIAS decision, now for mint/reject). A confirmed mint (dec="yes") MINTS as its operator-chosen
         # type HERE, before ANY reuse / nearest / similarity arm can alias or re-review it away -- so

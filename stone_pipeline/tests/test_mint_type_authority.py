@@ -96,35 +96,6 @@ def _gap_row(name: str) -> CanonicalRow:
                         variation_method="exact_name_ambiguous", tree_gaps=[g])
 
 
-def test_alias_type_pick_resolves_a_multitype_hold_instead_of_reholding(tmp_path, monkeypatch):
-    # THE alias asymmetry fix: a type-less scrape of a name that exists as SEVERAL stones holds for a type.
-    # Once the operator answers that hold by picking a type ON AN ALIAS decision, variety_identity must read
-    # that chosen type (as it already does for a mint's seed_type) so the row RESOLVES onto that type next
-    # produce -- not re-hold forever (the Monalisa-stuck bug).
-    from stone_pipeline.stages import decisions
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))   # isolate: all other decisions empty
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
-    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    ref = loaders.load_all()
-
-    # (a) no decision -> HOLD for a type (unchanged behaviour), never an arbitrary stone
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {})
-    held = curate.build_curation([_gap_row("Arabescato")], ref)
-    assert any(p["variant"].lower() == "arabescato" for p in held.pending_confirm), "must hold for a type"
-    assert not held.alias_additions["slab"], "must not resolve onto any stone without a decision"
-
-    # (b) operator picked Granite on the alias -> resolves onto Granite ONLY, no hold
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {("", "arabescato"): "Granite"})
-    done = curate.build_curation([_gap_row("Arabescato")], ref)
-    assert not any(p["variant"].lower() == "arabescato" for p in done.pending_confirm), "must stop holding"
-    on_granite = [a for a in done.alias_additions["slab"] if a["Key"] == GRANITE_KEY]
-    on_marble = [a for a in done.alias_additions["slab"] if a["Key"] == MARBLE_KEY]
-    assert on_granite and not on_marble, f"must resolve onto Granite only, got {done.alias_additions['slab']}"
-
-    # (c) a NON-CANONICAL picked type is dropped -> still held (never mints a garbage-slug Key)
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {("", "arabescato"): "Wibble"})
-    bad = curate.build_curation([_gap_row("Arabescato")], ref)
-    assert any(p["variant"].lower() == "arabescato" for p in bad.pending_confirm), "non-canonical type -> still held"
 
 
 def test_typeless_scrape_holds_for_type_even_when_name_has_one_existing_type(tmp_path, monkeypatch):
@@ -211,49 +182,8 @@ def _minted_any(res) -> bool:
     return any(res.new_variants[b] for b in ("slab", "block", "tile"))
 
 
-def test_operator_alias_decision_applies_uniformly_not_only_in_two_arms(tmp_path, monkeypatch):
-    # THE alias-dropped bug: an operator ALIAS decision (spelling -> target NAME) was consulted ONLY in the
-    # code-shaped and fuzzy-review arms. A spelling that is neither code-shaped nor fuzzy-near its target
-    # (no resolver, no nearest_existing) reached NEITHER arm, so the decision was silently dropped and the
-    # row fell through to a spurious "new variety (no close existing match)" hold. The uniform 3c consult
-    # honors the decision for every row: 'Monalisa' aliases onto its chosen-type target ('Arabescato' Granite).
-    from stone_pipeline.stages import decisions
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())   # Arabescato = marble + granite
-    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))              # no resolver -> no fuzzy arm
-    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {("", "monalisa"): "Arabescato"})
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {("", "monalisa"): "Granite"})
-    ref = loaders.load_all()
-
-    res = curate.build_curation([_gap_row("Monalisa")], ref)
-    on_granite = [a for a in res.alias_additions["slab"]
-                  if a["Key"] == GRANITE_KEY and "Monalisa" in (a.get("_added") or "")]
-    on_marble = [a for a in res.alias_additions["slab"] if a["Key"] == MARBLE_KEY]
-    assert on_granite, f"operator alias must land on the Granite Arabescato, got {res.alias_additions['slab']}"
-    assert not on_marble, "must not touch the same-name Marble variety"
-    assert not _minted_any(res), "an aliased spelling must not also mint a new variety"
-    assert not any(p["variant"].lower() == "monalisa" for p in res.pending_confirm), \
-        "must not fall through to a 'new variety' hold"
 
 
-def test_operator_alias_to_multitype_target_without_a_type_pick_holds_loudly(tmp_path, monkeypatch):
-    # Same alias decision, but NO chosen target type: 'Arabescato' exists as several stones with nothing to
-    # pick by. The uniform consult must HOLD LOUDLY (name the types, ask which), never silently no-op onto one
-    # arbitrary stone and never mint. Proves the fix keeps the ambiguity guard, not just the happy path.
-    from stone_pipeline.stages import decisions
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
-    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {("", "monalisa"): "Arabescato"})
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {})               # no type pick
-    ref = loaders.load_all()
-
-    res = curate.build_curation([_gap_row("Monalisa")], ref)
-    assert not res.alias_additions["slab"], "ambiguous multi-type target must not silently alias onto one stone"
-    assert not _minted_any(res), "must not mint"
-    held = [p for p in res.pending_confirm if p["variant"].lower() == "monalisa"]
-    assert held, "must hold loudly asking which type to alias into"
-    assert "Marble" in held[0]["reason"] and "Granite" in held[0]["reason"], "the hold must name the candidate types"
 
 
 VERDE_SCURO_KEY = "slab_onyx_verde_scuro_A"
@@ -360,7 +290,6 @@ def test_operator_confirmed_mint_mints_even_when_similar_to_an_existing_name(tmp
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())   # existing 'Arabescato'
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_alias_types", lambda: {})
     ref = loaders.load_all()
 
     def minted(res):

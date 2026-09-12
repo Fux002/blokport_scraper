@@ -31,7 +31,7 @@ from stone_pipeline.config import store
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.matching import projections as proj
 
-_ACTIONS = ("mint", "reject", "alias")
+_ACTIONS = ("mint", "reject")
 _PENDING_KINDS = ("variety", "attribute", "backbone_leaf", "origin", "decision_gap")
 # The vocabularies a backbone variety carries an allowed SET of; each maps to a leaf-decision `attribute`.
 # Value additions to these are what the backbone-leaf loop grows (all already in Medusa). Declared by the
@@ -59,7 +59,7 @@ class InvalidDecision(ValueError):
 # -- variety decisions (produce READS these) -----------------------------------
 
 def _decision_row(r) -> dict:
-    return {"action": r["action"], "alias_of": r["alias_of"], "seed_color": r["seed_color"],
+    return {"action": r["action"], "seed_color": r["seed_color"],
             "seed_type": r["seed_type"], "seed_country": r["seed_country"], "seed_name": r["seed_name"],
             "spelling": r["variant_display"], "source": r["source"], "asked_by": r["asked_by"]}
 
@@ -69,7 +69,7 @@ def _decision_rows() -> list:
         # ORDER BY source: the global level ('') comes first, so where two decisions land on one variety NAME
         # (a global rename and a vendor rename to the same name) the name-keyed maps let the vendor's own
         # level win deterministically, never by rowid / insert order.
-        return conn.execute("SELECT source, variant_norm, variant_display, action, alias_of, seed_color, seed_type, "
+        return conn.execute("SELECT source, variant_norm, variant_display, action, seed_color, seed_type, "
                             "seed_country, seed_name, asked_by FROM variety_decision "
                             "ORDER BY source, variant_norm").fetchall()
 
@@ -84,7 +84,7 @@ def scope_key(source: str, spelling: str) -> tuple[str, str]:
 
 
 def variety_actions() -> dict[tuple[str, str], dict]:
-    """Every decision, keyed by scope_key: {'action': mint|reject|alias, 'alias_of', 'seed_*', 'spelling',
+    """Every decision, keyed by scope_key: {'action': mint|reject, 'seed_*', 'spelling',
     'source', 'asked_by'}. Empty for a fresh store."""
     return {scope_key(r["source"], r["variant_norm"]): _decision_row(r) for r in _decision_rows()}
 
@@ -147,8 +147,7 @@ def variety_seed_country_rules() -> dict[tuple[str, str], str]:
 
 
 def confirm_map() -> dict[str, str]:
-    """scope_key -> 'yes'|'no' -- the mint/reject view the legacy confirm-file reader expects.
-    alias decisions are NOT in this map; the alias router consumes them separately (`alias_map`)."""
+    """scope_key -> 'yes'|'no' -- the mint/reject view the legacy confirm-file reader expects."""
     out: dict[str, str] = {}
     for name, dec in variety_actions().items():
         if dec["action"] == "mint":
@@ -163,24 +162,7 @@ def rejected_names() -> set[str]:
     return {n for n, d in variety_actions().items() if d["action"] == "reject"}
 
 
-def alias_map() -> dict[str, str]:
-    """scope_key -> alias_of (the target variety NAME) for every alias decision. The router adds
-    the spelling to the target variety's alias set so the product resolves onto it."""
-    return {n: d["alias_of"] for n, d in variety_actions().items()
-            if d["action"] == "alias" and d["alias_of"]}
-
-
-def alias_type_map() -> dict[str, str]:
-    """scope_key -> the alias TARGET's stone type, for alias decisions where the operator picked one.
-    Disambiguates a multi-type target name (Black Sea = andesite + soapstone): the spelling aliases into
-    the target variety of THIS type, not an arbitrary same-name one. Absent (no entry) when the operator
-    did not choose a type; the router then falls back to the scraped row's own type, and holds if neither
-    disambiguates."""
-    return {n: d["seed_type"] for n, d in variety_actions().items()
-            if d["action"] == "alias" and d.get("seed_type")}
-
-
-def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
+def set_variety_decision(variant: str, action: str,
                          seed_color: str | None = None, seed_type: str | None = None,
                          seed_country: str | None = None, seed_name: str | None = None,
                          source: str = "", asked_by: str = "") -> None:
@@ -196,22 +178,12 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
     action = (action or "").strip().lower()
     if action not in _ACTIONS:
         raise InvalidDecision(f"action must be one of {_ACTIONS}, got {action!r}")
-    alias_of = (alias_of or "").strip() or None
-    if action == "alias" and not alias_of:
-        raise InvalidDecision("alias decision requires alias_of (an existing variety name)")
-    if action != "alias":
-        alias_of = None                      # only alias carries a target; keep the row unambiguous
     seed_color = (seed_color or "").strip() or None
     seed_type = (seed_type or "").strip() or None
     seed_country = (seed_country or "").strip().upper() or None
     seed_name = (seed_name or "").strip() or None
-    # mint carries colour + type + country to create the variety with. alias ALSO carries seed_type, but
-    # meaning the TARGET's stone type: a target NAME can exist under several types (Black Sea = andesite +
-    # soapstone), so the operator picks WHICH one to alias into, else the alias cannot resolve. reject
-    # carries nothing.
-    if action == "alias":
-        seed_color = seed_country = seed_name = None
-    elif action != "mint":
+    # mint carries colour + type + country to create the variety with; reject carries nothing.
+    if action != "mint":
         seed_color = seed_type = seed_country = seed_name = None
     source = (source or "").strip() if action == "mint" else ""
     norm = _norm(variant)
@@ -222,14 +194,14 @@ def set_variety_decision(variant: str, action: str, alias_of: str | None = None,
         seed_name = None
     with closing(store.open_store()) as conn:
         conn.execute(
-            "INSERT INTO variety_decision (source, variant_norm, variant_display, action, alias_of, seed_color, "
-            "seed_type, seed_country, seed_name, asked_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO variety_decision (source, variant_norm, variant_display, action, seed_color, "
+            "seed_type, seed_country, seed_name, asked_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(source, variant_norm) DO UPDATE SET "
             "variant_display = excluded.variant_display, action = excluded.action, "
-            "alias_of = excluded.alias_of, seed_color = excluded.seed_color, "
+            "seed_color = excluded.seed_color, "
             "seed_type = excluded.seed_type, seed_country = excluded.seed_country, "
             "seed_name = excluded.seed_name, asked_by = excluded.asked_by, decided_at = excluded.decided_at",
-            (source, norm, variant.strip(), action, alias_of, seed_color, seed_type, seed_country, seed_name,
+            (source, norm, variant.strip(), action, seed_color, seed_type, seed_country, seed_name,
              (asked_by or source or "").strip(), _now()))
         conn.commit()
 

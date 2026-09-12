@@ -66,7 +66,7 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -160,7 +160,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # what used to be two ephemeral CSVs (variants_to_confirm.csv `confirm` + rejected_varieties.csv):
     #   mint  -> the variety IS real; the next produce mints it
     #   reject-> never propose it again (the learned 'no' memory)
-    #   alias -> it is really a spelling of `alias_of` (an existing variety); route the product there
     # In config.db so it is snapshotted + restored (durable on ECS), never a CSV under ephemeral /app.
     # seed_color: an operator-chosen colour to mint a NEW variety with, instead of the generic 'Natural'
     # fallback, when its source supplies no colour (a colourless source would otherwise leave the variety
@@ -227,6 +226,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # One-off data migrations that cannot run inside _migrate (they need the ledger, restored after the
     # first config.db open) record themselves here so they run exactly once; see decisions_store.backfill_levels.
     conn.execute("CREATE TABLE IF NOT EXISTS migration (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
+    # The legacy `alias` decision (action='alias') has had no writer since the review statement replaced it
+    # (decide -> scoped_alias). A database that still holds one is refused, naming the rows: silently
+    # ignoring an operator decision is worse than a restart with a clear instruction (re-state it via
+    # /review/decide, which binds the vendor's spelling with its type).
+    legacy = [r["variant_display"] or r["variant_norm"] for r in conn.execute(
+        "SELECT variant_norm, variant_display FROM variety_decision WHERE action = 'alias'")]
+    if legacy:
+        raise RuntimeError(f"config.db holds {len(legacy)} legacy alias decision(s) the store no longer reads: "
+                           f"{legacy[:10]}; re-state them as vendor statements (/review/decide), then restart")
     conn.execute("CREATE TABLE IF NOT EXISTS origin_decision ("
                  "source TEXT NOT NULL, variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
                  "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
