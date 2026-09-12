@@ -96,22 +96,35 @@ def _write_gap_queue(rows: list[CanonicalRow], path: Path) -> int:
     return len(gaps)
 
 
+def _read_marker(products: Path) -> Optional[dict]:
+    """The scrape's completion marker (scrape_complete.json beside products.csv): None when absent (a legacy
+    folder), the parsed dict otherwise. A marker that is present but unreadable ABORTS: it is the one record
+    of whether the scrape was complete and how many detail fetches failed, and reading garbage as "complete,
+    no failures" is exactly the state that delists real products."""
+    import json
+    marker = products.parent / "scrape_complete.json"
+    if not marker.exists():
+        return None
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"corrupt scrape completion marker {marker}: {exc}") from None
+    if not isinstance(data, dict):
+        raise SystemExit(f"corrupt scrape completion marker {marker}: not a JSON object")
+    return data
+
+
 def find_scrape_file(source: str, data_dir: Optional[Path] = None) -> Optional[Path]:
     """The latest USABLE live scrape for a source at <data_dir>/<source>/<timestamp>/products.csv
     (data_dir defaults to the workspace data/; tests pass their committed fixture tree, which has the
     same layout). Skips a folder whose completion marker says the scrape was truncated/incomplete, so a
     crashed or short scrape never becomes the authoritative input (legacy folders with no marker are still
     accepted for backward compatibility). Returns None if the source has never been scraped."""
-    import json
     root = Path(data_dir or SETTINGS.paths.data_dir)
     for products in sorted(root.glob(f"{source}/*/products.csv"), reverse=True):
-        marker = products.parent / "scrape_complete.json"
-        if marker.exists():
-            try:
-                if not json.loads(marker.read_text(encoding="utf-8")).get("complete", True):
-                    continue  # marker present and says incomplete -> skip this truncated run
-            except (ValueError, OSError):
-                pass
+        marker = _read_marker(products)
+        if marker is not None and not marker.get("complete", True):
+            continue  # marker says incomplete -> skip this truncated run
         return products
     return None
 
@@ -126,16 +139,19 @@ def _isolated_fraction(rows) -> float:
 def _scrape_detail_failure_ratio(scrape_path: Optional[Path]) -> float:
     """A1: the fraction of per-product DETAIL fetches that failed on the scrape behind `scrape_path`, read
     from its completion marker (the scraper records it via ScraperBase.note_detail). 0.0 when there is no
-    scrape file, no marker, or the scraper does not fetch details -- so the delist gate is a strict no-op
-    for those. Never raises: a malformed/absent marker reads as 0.0 (the delist gate then behaves as before)."""
+    scrape file, no marker (legacy folder), or the scraper does not fetch details -- so the delist gate is a
+    strict no-op for those. A corrupt marker aborts (see _read_marker), never reads as 0.0."""
     if scrape_path is None:
         return 0.0
-    import json
-    marker = scrape_path.parent / "scrape_complete.json"
-    try:
-        return float(json.loads(marker.read_text(encoding="utf-8")).get("detail_failure_ratio", 0.0) or 0.0)
-    except (ValueError, OSError, TypeError):
+    marker = _read_marker(scrape_path)
+    if marker is None:
         return 0.0
+    raw = marker.get("detail_failure_ratio", 0.0) or 0.0
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        raise SystemExit(f"corrupt scrape completion marker {scrape_path.parent / 'scrape_complete.json'}: "
+                         f"detail_failure_ratio={raw!r}") from None
 
 
 def _apply_gate(rows, contract, manifest, run_log):

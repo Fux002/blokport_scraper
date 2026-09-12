@@ -68,14 +68,16 @@ def test_run_reads_the_ratio_from_the_scrape_marker(tmp_path):
     assert run_mod._scrape_detail_failure_ratio(products_csv) == 0.75
 
 
-def test_run_ratio_is_zero_when_marker_absent_or_malformed(tmp_path):
+def test_run_ratio_is_zero_when_marker_absent_and_aborts_when_malformed(tmp_path):
+    import pytest
     assert run_mod._scrape_detail_failure_ratio(None) == 0.0
-    # a products.csv whose sibling marker is missing -> 0.0 (never raises)
+    # a products.csv whose sibling marker is missing (legacy folder) -> 0.0
     (tmp_path / "products.csv").write_text("product_id\n1\n", encoding="utf-8")
     assert run_mod._scrape_detail_failure_ratio(tmp_path / "products.csv") == 0.0
-    # a malformed marker -> 0.0
+    # a malformed marker is NOT "no failures": reading it as 0.0 is the state that delists real products
     (tmp_path / "scrape_complete.json").write_text("{not json", encoding="utf-8")
-    assert run_mod._scrape_detail_failure_ratio(tmp_path / "products.csv") == 0.0
+    with pytest.raises(SystemExit, match="scrape_complete.json"):
+        run_mod._scrape_detail_failure_ratio(tmp_path / "products.csv")
 
 
 def test_ratio_crosses_the_configured_floor(tmp_path):
