@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import csv
 import json
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
@@ -74,12 +74,13 @@ def _read_backbone(paths: list[Path]):
 
 
 def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict, dict]:
-    """Three lookups: by Key (primary join) + two NAME indexes to recover variations
-    whose Key isn't in the backbone (the block backbone is ~99% keyless, tiles mirror
-    slabs). by_cat_name keeps category-correct combos."""
+    """Three lookups: by Key (primary join), by (category, name) and by (type, name), to recover variations
+    whose Key isn't in the backbone (the block backbone is ~99% keyless, tiles mirror slabs). A variety's
+    identity is (type, name): a same-name post of another category lends its colours ONLY when its type is
+    the variation's own, so a same-name post of a different stone never does."""
     by_key: dict[str, dict] = {}
     by_cat_name: dict[tuple, dict] = {}
-    by_name: dict[str, dict] = {}
+    by_type_name: dict[tuple, dict] = {}
     for post in _read_backbone(paths):
         if post.get("key"):
             by_key[post["key"]] = post
@@ -87,8 +88,8 @@ def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict, dict]:
         cat = (post.get("category") or "").strip().lower()
         if name:
             by_cat_name.setdefault((cat, name), post)
-            by_name.setdefault(name, post)
-    return by_key, by_cat_name, by_name
+            by_type_name.setdefault((match_key(post.get("stone_type") or ""), name), post)
+    return by_key, by_cat_name, by_type_name
 
 
 def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[str, list[str]]:
@@ -175,7 +176,8 @@ def _write_uncovered(uncovered: list[dict], path: Path) -> None:
                 nm = match_key(r.get("variant") or "")
                 if nm:
                     prior[nm] = {"assign_type": (r.get("assign_type") or "").strip(),
-                                 "variant": (r.get("variant") or "").strip(), "key": (r.get("key") or "").strip()}
+                                 "variant": (r.get("variant") or "").strip(), "key": (r.get("key") or "").strip(),
+                                 "missing": (r.get("missing") or "").strip()}
     rows: list[dict] = []
     seen: set = set()
     for nm, r in prior.items():                          # keep every persisted assignment (type sticks)
@@ -188,29 +190,23 @@ def _write_uncovered(uncovered: list[dict], path: Path) -> None:
             continue
         seen.add(nm)
         rows.append({"assign_type": prior.get(nm, {}).get("assign_type", ""),
-                     "variant": u["Name"], "key": u["Key"]})
+                     "variant": u["Name"], "key": u["Key"], "missing": u.get("missing", "")})
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as h:
-        w = csv.DictWriter(h, fieldnames=["assign_type", "variant", "key"])
+        w = csv.DictWriter(h, fieldnames=["assign_type", "variant", "key", "missing"])
         w.writeheader()
         w.writerows(rows)
 
 
-def _resolve_type(key: str, name: str, attr: dict) -> str | None:
-    """Find the stone type for an un-backboned variation: longest match of the Key's
-    type slug (branch_<type>_<name>_<uuid>), else a type word in the Name (e.g.
-    'Everest Quartzite' -> Quartzite)."""
+def _key_type(key: str, attr: dict) -> str | None:
+    """The type id carried by the Key itself (branch_<type>_<name>_<uuid>, longest slug match), the same
+    authority reconcile pins the product's type to. None when the Key carries no known type: a type is then
+    the Key-matched backbone post's or the operator's, never a word guessed out of the Name."""
     parts = key.split("_")[1:-1]  # drop branch prefix and trailing uuid
     for i in range(len(parts), 0, -1):
         tid = attr["type"].get(match_key(" ".join(parts[:i])))
         if tid:
             return tid
-    words = match_key(name).split()   # match_key folds hyphens/dashes, so no manual replace needed
-    for n in (2, 1):  # a 2- or 1-word type name appearing anywhere in the Name
-        for j in range(len(words) - n + 1):
-            tid = attr["type"].get(" ".join(words[j:j + n]))
-            if tid:
-                return tid
     return None
 
 
@@ -232,10 +228,11 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     assigned_types = assigned_types or {}
     exclude_ids = exclude_ids or set()
     retired_keys = retired_keys or set()
-    by_key, by_cat_name, by_name = _load_backbone(backbone_paths)
+    by_key, by_cat_name, by_type_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
     cat_pcat = {p: attr["category"].get(match_key(c)) for p, c in _PREFIX_CATEGORY.items()}
+    type_key = {tid: k for k, tid in attr["type"].items()}              # type id -> the post's type key
 
     def combo(post) -> tuple:  # (type, colours, quals) from a backbone post, as ids
         return (attr["type"].get(match_key(post.get("stone_type") or "")),
@@ -267,18 +264,13 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         log.warning("export rows missing Id/Key were skipped from combinations",
                     extra={"extra_fields": {"count": malformed, "export": str(export_csv)}})
     variety: dict[str, dict] = {}
-    color_freq, qual_freq = Counter(), Counter()
     for vid, p in products.items():
-        color_freq.update(p["colors"])
-        qual_freq.update(p["quals"])
         nm = name_of.get(vid)
         if nm:
             d = variety.setdefault(nm, {"type": "", "colors": set(), "quals": set()})
             d["type"] = p["type"] or d["type"]
             d["colors"] |= p["colors"]
             d["quals"] |= p["quals"]
-    default_color = color_freq.most_common(1)[0][0] if color_freq else None
-    default_qual = qual_freq.most_common(1)[0][0] if qual_freq else None
 
     combinations: set = set()
 
@@ -300,7 +292,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     uncovered: list[dict] = []
     for key, vid, name in export_rows:
         prefix = key.split("_", 1)[0]
-        nl = match_key(name)   # canonical: joins by_name/by_cat_name/variety/assigned_types keyed the same
+        nl = match_key(name)   # canonical: joins by_cat_name/variety/assigned_types keyed the same
         # UNION every source's colours/qualities for the widest valid set (max match):
         # the variety's backbone, the scraped product, and a same-variety product in
         # another category. Finishes = every finish the category supports. The PRODUCT's
@@ -316,24 +308,28 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             colors |= prod["colors"]
             quals |= prod["quals"]
         kpost = by_key.get(key)                                          # the variation's OWN backbone post
-        post = kpost or by_cat_name.get((prefix + "s", nl)) or by_name.get(nl)
+        # TYPE authority: the variation's own Key type (longest slug match), else its OWN backbone post's
+        # type (KEY match only -- a name-only post can be a different stone), else a user-assigned type.
+        typ = _key_type(key, attr) or (combo(kpost)[0] if kpost else None) or assigned_types.get(nl)
+        # colour/quality sources, all the SAME variety: its own post, the same-category post of its name, or
+        # a same-name post of another category with its own type (the union model's identity is (type, name))
+        post = kpost or by_cat_name.get((prefix + "s", nl)) or (by_type_name.get((type_key.get(typ, ""), nl)) if typ else None)
         if post:
             _t, c, q = combo(post)
-            colors |= c                                                 # colour/quality safe to union by name
+            colors |= c
             quals |= q
         if inh := variety.get(nl):
             colors |= inh["colors"]
             quals |= inh["quals"]
-        # TYPE authority: the variation's own Key type (longest slug match), else its OWN backbone post's
-        # type (KEY match only -- a name-only post can be a different stone), else a user-assigned type.
-        typ = _resolve_type(key, name, attr) or (combo(kpost)[0] if kpost else None) or assigned_types.get(nl)
-        colors = colors or {default_color}                 # last resort: catalogue defaults
-        quals = quals or {default_qual}
+        # No colour/quality default: a variation nothing describes is UNCOVERED (the review file asks the
+        # operator), never priced under the catalogue's most common colour.
         finishes = cat_finishes.get(prefix, []) or ([_raw_finish] if _raw_finish else [])
         if add(cat_pcat.get(prefix), typ, vid, finishes, colors, quals):
             covered += 1
         else:
-            uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix})
+            missing = [n for n, v in (("type", typ), ("finish", finishes), ("colour", colors), ("quality", quals))
+                       if not v]
+            uncovered.append({"Key": key, "Id": vid, "Name": name, "category": prefix, "missing": "+".join(missing)})
 
     stats = {"covered": covered, "uncovered": len(uncovered),
              "combination_rows": len(combinations),
