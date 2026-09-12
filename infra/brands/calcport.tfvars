@@ -34,5 +34,5 @@ platform_state_bucket = "calcport-tfstate" # VERIFY BEFORE USE: must match where
 # PLATFORM writes its state. The convention for the existing brands is a single shared bucket
 # (blokport-tfstate) separated by key "<brand>/<env>/terraform.tfstate", NOT a bucket per brand -
 # see wudport.tfvars. calcport has no platform stack yet, so this value is unverified.
-region                = "eu-west-1"
-alert_email           = ""
+region      = "eu-west-1"
+alert_email = ""

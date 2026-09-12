@@ -186,13 +186,14 @@ module "scraper_dev" {
   home_env       = "dev"
   staging_bucket = var.dev_staging_bucket
   image_repo_url = local.ecr_repo_url
+  state_bucket   = var.platform_state_bucket # the platform state this brand reads its cluster name from
 
-  region              = var.region
-  image_tag           = var.image_tag
-  keep_scraped        = var.keep_scraped
-  ssm_secret_arns     = local.dev_ssm_secrets
-  cpu                 = var.cpu
-  memory              = var.memory
+  region          = var.region
+  image_tag       = var.image_tag
+  keep_scraped    = var.keep_scraped
+  ssm_secret_arns = local.dev_ssm_secrets
+  cpu             = var.cpu
+  memory          = var.memory
 
   # Auto-enhance: the ad-hoc task submits the dev GPU reprocess for newly-staged images. ON in dev
   # (dev_auto_enhance defaults true). Prod stays unwired until its own GPU module is active.
@@ -219,6 +220,7 @@ module "scraper_prod" {
   home_env       = var.prod_home_env
   staging_bucket = var.prod_staging_bucket
   image_repo_url = local.ecr_repo_url
+  state_bucket   = var.platform_state_bucket # the platform state this brand reads its cluster name from
 
   region              = var.region
   image_tag           = var.prod_image_tag

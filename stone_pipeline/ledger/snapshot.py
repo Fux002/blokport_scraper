@@ -234,7 +234,7 @@ def restore_tree(dir_path: str | Path, key: str) -> bool:
         _s3().download_file(S3_BUCKET, key, str(tmp))
         dir_path.mkdir(parents=True, exist_ok=True)
         with tarfile.open(tmp, "r:gz") as tar:
-            tar.extractall(dir_path)         # our own snapshot (trusted content)
+            tar.extractall(dir_path, filter="data")   # our own snapshot; the filter still refuses paths outside dir_path
         log.info("artifact tree restored from snapshot", extra={"extra_fields": {"key": key}})
         return True
     except Exception:

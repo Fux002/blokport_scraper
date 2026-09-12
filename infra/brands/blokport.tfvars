@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag = "a10a1772c4266bee2c8ae272470b3b851513d8e3" # :core w/ the four audit follow-ups (docs naming, degraded flag, pack identity contract, review cards keyed by name+type)
+prod_image_tag     = "a10a1772c4266bee2c8ae272470b3b851513d8e3"     # :core w/ the four audit follow-ups (docs naming, degraded flag, pack identity contract, review cards keyed by name+type)
 prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :gpu (reads SCRAPER_ env, prod bucket); was gpu-f9d828e0 (Aug18, pre-rename -> hit dev bucket)
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
@@ -43,7 +43,7 @@ prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :g
 # Dev only, on purpose: prod has no equivalent and its reset stays a UI/API action behind the run lock.
 dev_enable_execute_command = true
 
-dev_image_upgrade_batch  = 1000
+dev_image_upgrade_batch = 1000
 
 prod_image_upgrade_batch = 1000
 
@@ -52,8 +52,8 @@ prod_auto_texture     = true
 prod_require_enhanced = true
 
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
-fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                 # de-watermark
-scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY"  # residential proxy
+fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                # de-watermark
+scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY" # residential proxy
 
 # --- shared / ops -----------------------------------------------------------
 platform_state_bucket = "blokport-tfstate"
