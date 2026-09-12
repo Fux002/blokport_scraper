@@ -24,7 +24,7 @@ from __future__ import annotations
 import sys
 
 from stone_pipeline import build
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import env, logfmt
 
 log = logfmt.get_logger("produce")
 from stone_pipeline.config.settings import IS_PRODUCTION   # noqa: E402  (log first: settings may fail loud)
@@ -214,8 +214,29 @@ def main(argv: list[str] | None = None) -> int:
             # A catalog-gate failure that is purely new-this-run varieties is the expected two-pass
             # checkpoint, not an error -- reconcile against the ledger so pass-1 exits 0.
             if rc != 0:
-                return _reconcile_gate(rc)
-    return rc
+                rc = _reconcile_gate(rc)
+    return _persist_and_publish(stage, rc)
+
+
+def _persist_and_publish(stage: str, rc: int) -> int:
+    """The last two steps of a SUCCESSFUL produce, owned here so every caller (the config runner's /run,
+    the batch task) gets them: snapshot the scrape-artifact trees (outputs/ + data/) so a fresh task restores
+    the last scrape instead of finding nothing to consolidate; then, for a catalog-producing stage, publish
+    the deliverables (to_upload/ + review/, with the manifest) to S3 so Blokport's importer sees THIS
+    produce's fixed keys. A publish failure FAILS the produce: the build completed, but a produce whose
+    deliverables never reached S3 is not a success (Blokport would pull the previous set as this one)."""
+    if rc != 0:
+        return rc
+    from stone_pipeline.ledger import snapshot
+    snapshot.save_artifacts()
+    if stage in _CATALOG_STAGES:
+        from deploy import upload_artifacts
+        try:
+            upload_artifacts.main(env.getenv("BLOKPORT_RUN_ID"))
+        except Exception:
+            log.exception("produce FAILED: deliverables not published to S3 (the build itself completed)")
+            return 1
+    return 0
 
 
 if __name__ == "__main__":

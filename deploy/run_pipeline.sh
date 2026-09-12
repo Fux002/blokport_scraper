@@ -39,20 +39,9 @@ esac
 ENV_NAME="${BLOKPORT_ENV:-development}"
 echo "==> blokport scraper run | env=${ENV_NAME} image_mode=${BLOKPORT_IMAGE_MODE:-passthrough} processing=${BLOKPORT_IMAGE_PROCESSING:-false}"
 
-echo "==> [1/5] fetch Medusa export inputs from S3 (<env>/scraper/from_medusa/)"
-python -m deploy.fetch_inputs
-
-echo "==> [2/5] scrape all sources"
-python -m scrapers.run all
-
-echo "==> [3/5] pipeline (validate, match, derive, stage images to S3)"
-python -m stone_pipeline.run all
-
-echo "==> [4/5] build catalog (to_upload/*.csv)"
-python -m stone_pipeline.catalog
-
-echo "==> [5/5] push produced artifacts to S3 (<env>/scraper/to_upload/)"
-python -m deploy.upload_artifacts
+# ONE orchestrator: produce owns fetch -> live scrape -> build -> persist -> publish (with every gate and
+# the control-plane bookkeeping the config runner's /run gets). Never re-implement those steps here.
+exec python -m stone_pipeline.produce
 
 echo "==> done. Review the staged output in S3, then upload variants + refresh"
 echo "    the Medusa export and run 'python -m stone_pipeline.tree' before import."
