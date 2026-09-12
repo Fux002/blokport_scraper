@@ -144,23 +144,25 @@ _RUN_TIMEOUT = int(env.getenv("BLOKPORT_RUN_TIMEOUT_SECONDS", "7200"))   # 2h: k
 _PUBLISH_STAGES = ("all", "catalog", "republish")
 
 
-def _publish_deliverables(stage: str, run_id: str | None = None) -> None:
+def _publish_deliverables(stage: str, run_id: str | None = None) -> str | None:
     """After a catalog-producing produce, mirror to_upload/ (+ review/) to the env's scraper home on S3,
     so Blokport's one-click import streams the CURRENT valid-combination set (the full ~2M file, the
     incremental _update delta, and the small _products_only file), plus the variants/products.
 
     Why here: the ECS /run produce is the path an operator triggers, but only the batch run_pipeline.sh
     published these before -- so between batch runs the fixed keys went stale (a produce rebuilt them
-    locally but never uploaded). Best-effort: a publish failure must not fail an otherwise-good produce
-    (the files are on disk and the scrape is snapshotted); it logs loudly instead."""
+    locally but never uploaded). Returns None on success, else the failure as text: the caller FAILS the
+    run on it. A produce whose deliverables never reached S3 is not a success (Blokport would pull the
+    previous set as if it were this one); it used to log a warning and report "succeeded"."""
     if stage not in _PUBLISH_STAGES:
-        return
+        return None
     try:
         from deploy import upload_artifacts
         upload_artifacts.main(run_id)
-    except Exception:
-        log.warning("artifact publish to S3 skipped; deliverables are local only (fixed keys may be stale)",
-                    exc_info=True)
+        return None
+    except Exception as exc:
+        log.error("artifact publish to S3 failed; deliverables are local only", exc_info=True)
+        return f"{type(exc).__name__}: {exc}"
 
 
 _TAIL_LINES = 40
@@ -210,7 +212,11 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         from stone_pipeline.ledger import snapshot
         snapshot.save_artifacts()
         # ...and publish the deliverables to S3 so Blokport's importer sees this produce's fixed keys.
-        _publish_deliverables(rec.get("stage", "all"), rec.get("run_id"))
+        publish_error = _publish_deliverables(rec.get("stage", "all"), rec.get("run_id"))
+        if publish_error:
+            with _lock:
+                rec["status"] = "failed"
+                rec["error"] = f"deliverables not published to S3 (the produce itself completed): {publish_error}"
     _stamp_last_run(rec, rec["status"])
     _persist_run(rec)                                   # durable `last` across a restart
     # An inventory run is a stock refresh, NOT a validated produce, so it must not advance the admission

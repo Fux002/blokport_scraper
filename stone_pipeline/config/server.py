@@ -590,6 +590,9 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
     return 405, {"error": f"method {method} not allowed on a source"}
 
 
+_SOURCE_INT_FIELDS = ("default_bundle_size", "min_expected_rows")
+
+
 def _validate_source_put(name: str, body: dict) -> tuple[int, dict] | None:
     """Guard the admin 'add/edit source' PUT so it can only create a RUNNABLE, non-colliding source.
     A source with no coded adapter can neither run nor be scoped (ISS-3), so it must never become a
@@ -613,6 +616,16 @@ def _validate_source_put(name: str, body: dict) -> tuple[int, dict] | None:
         return 400, {"error": f"source {name!r} requires at least one shipping port: set 'ports' to a "
                      "non-empty list of the supplier's port names / LOCODEs (Medusa derives a product's "
                      "ports from these)."}
+    # the integer fields are validated HERE, so a malformed value is the client's 400 (it used to reach
+    # int() in the store and answer 500)
+    for field in _SOURCE_INT_FIELDS:
+        raw = body.get(field)
+        if raw is None:
+            continue
+        try:
+            int(str(raw).strip())
+        except ValueError:
+            return 400, {"error": f"{field} must be an integer, got {raw!r}"}
     return None
 
 
