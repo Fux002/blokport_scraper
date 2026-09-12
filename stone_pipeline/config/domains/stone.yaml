@@ -561,3 +561,19 @@ trailing_grade_letters: true
 # (variety_color.classify). A material whose tones that palette cannot read sets this false and takes the
 # fallback/Medusa colour instead; stone relies on it (varsha/zucchi have no colour column).
 classify_texture_color: true
+
+# --- matching / availability vocabulary (moved out of matching/ and derive.py; stone's values) ------------
+# supplier inventory prefixes stripped before an exact match ('Z Rosal', 'ZB Rosal', 'Z B Rosal')
+inventory_prefixes: [z, zb, z b]
+# trailing render/finish tags stripped there too (a thickness '3cm' and 'grade X' are always stripped)
+trailing_render_tags: [polished, honed, leather, leathered, brushed, matt, matte]
+# spelling variants of ONE colour word, so 'Pietra Gray' and 'Pietra Grey' never read as a colour conflict
+spelling_variants: {gray: grey, golden: gold}
+# wrapper words dropped when composing a compound attribute value ('Dual finish: Polished + Honed')
+join_noise_words: [dual, combination, combo, mixed, finish, finishes]
+# the attribute whose words count as colours for match blocking
+color_attribute: color
+# supplier words that mean in stock without a count (a flagged made-to-order quantity applies)
+in_stock_words: [unlimited, limited, in stock, instock, in-stock, available, made to order, made-to-order]
+# supplier words that are a TRUSTED sold-out (like a literal count of 0)
+out_of_stock_words: [out of stock, outofstock, out-of-stock, sold out, soldout, sold-out, unavailable, discontinued]

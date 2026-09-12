@@ -18,6 +18,7 @@ from rapidfuzz import fuzz
 
 from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core.schema import Resolution
+from stone_pipeline.config import domain
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.matching.index import CandidateIndex
 
@@ -29,16 +30,14 @@ def _fuzzy_score(query: str, candidate: str) -> float:
     return max(fuzz.ratio(a, b), fuzz.token_sort_ratio(a, b))
 
 
-# spelling/form variants of the SAME colour -- without canonicalizing these, 'Pietra Grey' and
-# 'Pietra Gray' read as a colour CONFLICT and the same stone is wrongly split into two varieties.
-_COLOUR_CANON = {"gray": "grey", "golden": "gold"}
-
-
 def _colour_words(text: str) -> set[str]:
-    from stone_pipeline.adapters.tokens import known_values
-
-    cset = {c.casefold() for c in known_values("color")}
-    return {_COLOUR_CANON.get(t.casefold(), t.casefold())
+    # spelling/form variants of the SAME colour (the pack's spelling_variants: gray -> grey) -- without
+    # canonicalizing these, 'Pietra Grey' and 'Pietra Gray' read as a colour CONFLICT and the same stone is
+    # wrongly split into two varieties. The colour-like attribute is the pack's too.
+    from stone_pipeline.adapters import tokens
+    pack = domain.active_pack()
+    cset = {c.casefold() for c in tokens.known_values(pack.color_attribute)}
+    return {pack.spelling_variants.get(t.casefold(), t.casefold())
             for t in proj.norm(text).split() if t.casefold() in cset}
 
 
@@ -58,7 +57,12 @@ _COMBINE_SEP = r"\+|&|/|\band\b"
 _LIST_SEP = r"\||,"
 _JOIN_SPLIT = re.compile(rf"\s*(?:{_COMBINE_SEP}|{_LIST_SEP})\s*", re.IGNORECASE)
 _COMBINE = re.compile(_COMBINE_SEP, re.IGNORECASE)
-_JOIN_NOISE = re.compile(r"\b(?:dual|combination|combo|mixed|finish|finishes)\b|[-–]", re.IGNORECASE)
+
+
+def _join_noise() -> re.Pattern:
+    # descriptive wrappers dropped around a compound value ('Dual finish: Polished + Honed'), from the pack
+    words = "|".join(re.escape(w) for w in domain.active_pack().join_noise_words) or "(?!)"
+    return re.compile(rf"\b(?:{words})\b|[-\u2013]", re.IGNORECASE)
 
 
 @dataclass
@@ -124,7 +128,7 @@ class VocabResolver:
         (returned as `compound` if it exists, else suggested as `compound_suggest` when the vocab has the
         pattern); a list join is alternatives, so the primary is kept (`multi_value`). Compounds are only
         composed for a vocab that already has 'X and Y' values, so a compound colour is never invented."""
-        stripped = _JOIN_NOISE.sub(" ", raw_value or "")
+        stripped = _join_noise().sub(" ", raw_value or "")
         parts = [p.strip() for p in _JOIN_SPLIT.split(stripped) if p.strip()]
         if len(parts) < 2:
             return Resolution(value=None, confidence=Confidence.none, method="unresolved")

@@ -96,3 +96,12 @@ trailing_grade_letters: false
 # The stone-tuned CV colour palette cannot read wood tones, so texture-colour classification is OFF: colour
 # comes from the source/Medusa value and the fallback_color. (Flip to true only with a wood-tuned palette.)
 classify_texture_color: false
+
+# --- matching / availability vocabulary (each pack declares its own; empty lists are declarations) -------
+inventory_prefixes: []
+trailing_render_tags: [oiled, lacquered, waxed, brushed, sanded]
+spelling_variants: {gray: grey}
+join_noise_words: [dual, combination, combo, mixed, finish, finishes]
+color_attribute: color
+in_stock_words: [in stock, instock, in-stock, available, made to order, made-to-order]
+out_of_stock_words: [out of stock, outofstock, out-of-stock, sold out, soldout, sold-out, unavailable, discontinued]

@@ -18,17 +18,26 @@ import re
 
 import jellyfish
 
+from stone_pipeline.config import domain
 from stone_pipeline.core.text import ascii_fold, match_key
 
-# inventory prefixes seen on supplier exports (Z, ZB, "Z B")
-_INV_PREFIX = re.compile(r"^(z\s?b|z)\s+", flags=re.IGNORECASE)
-# trailing render tags only: a trailing slash render/thickness tag or an explicit 'grade X'. A bare
-# trailing letter (a/b/c/d) is NOT stripped here -- this projection feeds a HIGH-confidence EXACT
-# match, and stripping a grade letter would auto-merge distinct siblings ('Marfil A' == 'Marfil B')
-# with no review. Grade-letter handling lives in clean_variety_name (curate), with an alias/review
-# gate. The slash arm only strips a thickness/render tag, not an arbitrary compound second name.
-_TRAIL_TAG = re.compile(r"\s*(/\s*(\d+\s?cm|polished|honed|leather(ed)?|brushed|matt?e?)\b.*|"
-                        r"\b\d+\s?cm\b|\bgrade\s+\w+)\s*$", flags=re.IGNORECASE)
+def _inv_prefix() -> re.Pattern:
+    # supplier inventory prefixes ('Z', 'ZB', 'Z B' for stone), declared by the active pack
+    words = sorted(domain.active_pack().inventory_prefixes, key=len, reverse=True)
+    alt = "|".join(re.escape(w) for w in words) or "(?!)"
+    return re.compile(rf"^(?:{alt})\s+", flags=re.IGNORECASE)
+
+
+def _trail_tag() -> re.Pattern:
+    # trailing render tags only: a trailing slash render/thickness tag or an explicit 'grade X'. A bare
+    # trailing letter (a/b/c/d) is NOT stripped here -- this projection feeds a HIGH-confidence EXACT match,
+    # and stripping a grade letter would auto-merge distinct siblings ('Marfil A' == 'Marfil B') with no
+    # review. Grade-letter handling lives in clean_variety_name (curate), with an alias/review gate. The
+    # slash arm only strips a thickness/render tag, not an arbitrary compound second name. The render words
+    # come from the pack; the thickness and grade forms are language-level.
+    tags = "|".join(re.escape(w) for w in sorted(domain.active_pack().trailing_render_tags, key=len, reverse=True))
+    render = rf"\d+\s?cm{'|' + tags if tags else ''}"
+    return re.compile(rf"\s*(/\s*({render})\b.*|\b\d+\s?cm\b|\bgrade\s+\w+)\s*$", flags=re.IGNORECASE)
 
 
 def norm(value: str) -> str:
@@ -51,8 +60,8 @@ def tokenset(value: str) -> tuple[str, ...]:
 
 def deprefixed(value: str) -> str:
     text = (value or "").strip()
-    text = _INV_PREFIX.sub("", text)
-    text = _TRAIL_TAG.sub("", text)
+    text = _inv_prefix().sub("", text)
+    text = _trail_tag().sub("", text)
     return norm(text)
 
 
