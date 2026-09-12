@@ -125,9 +125,10 @@ class VariationStage:
         )
 
     def _engine(self, branch: str) -> VariationEngine:
-        # branches reaching here always have their own engine (each registry vocab
-        # category is loaded); the fallback is a defensive default, registry-agnostic.
-        return self.engines.get(branch) or next(iter(self.engines.values()))
+        # every registry category has its own engine; a branch without one is a programming error and the
+        # KeyError is isolated per row by the run's row guard. It must NEVER fall back to another category's
+        # engine: that bound a block row to a slab variant at high confidence, unflagged.
+        return self.engines[branch]
 
     def _scoped_overrides(self, engine: VariationEngine, branch: str, source: str) -> dict[str, str]:
         """norm(spelling) -> cid for the operator's VENDOR-SCOPED alias decisions of `source` ('for this
@@ -168,12 +169,9 @@ class VariationStage:
         return None
 
     def resolve_row(self, row: CanonicalRow) -> None:
-        # branch comes from the Format Resolver (run before this stage). Fall back
-        # to the raw tag only when the format stage has not run (unit tests).
+        # the branch comes from the Format Resolver (run before this stage); this stage never derives it
         from stone_pipeline.stages.format_resolve import branch_of
 
-        if not row.format_value and row.raw_format:
-            row.format_value = row.raw_format.strip().title()
         branch = branch_of(row)
         row.is_block = branch == bulk_form_name()
         cat = category(branch)
