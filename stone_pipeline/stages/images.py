@@ -268,249 +268,266 @@ def _readonly_manifest() -> dict[str, str]:
 
 
 def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> ImageStats:
+    """Stage 7. passthrough links products to their TREATED S3 images through the read-only imageproc
+    manifest; local/s3 fetch NEW source images, process them (when enabled) and host them, then link.
+    Either way a row ends in _finish_row: linked, held (transient, retried next produce) or terminal."""
     cfg = cfg or SETTINGS.images
-    placeholders = _load_placeholder_hashes()
     stats = ImageStats()
-
     if cfg.mode == "passthrough":
-        # Link product images ONLY to their TREATED (improved) S3 version via the imageproc manifest.
-        # Two things are HELD, never linked: a source url the manifest doesn't know, AND a manifest
-        # entry that still points at an UNtreated upload (a source staged to S3 before enhancement ran).
-        # So the upload only ever carries enhanced/upscaled/compressed images -- and a later produce
-        # re-links each held image the moment its improved/ version lands in the manifest.
-        manifest = _readonly_manifest()
-        if not manifest:
-            log.warning("passthrough: imageproc manifest empty/unreachable -- product images are HELD, "
-                        "never linked to raw source urls. Run the image stage in s3 mode or restore S3 "
-                        "access to populate the manifest.")
-        discarded = _load_discard_set(cfg)
-        # HARD gate: when require_enhanced is on, publish ONLY images the GPU actually enhanced (marker
-        # present). improved/ presence is NOT proof -- produce on :core writes raw re-encodes there. None
-        # disables the gate (current behaviour). See _load_enhanced_set.
-        enhanced = _load_enhanced_set(cfg) if getattr(cfg, "require_enhanced", False) else None
-        improved_marker = imagestore.IMPROVED_MARKER              # a treated image lives under improved/
-        held_untreated = 0
-        for row in rows:
-            srcs = [u for u in dict.fromkeys(row.raw_image_urls or []) if u and u.strip()]
-            urls = []
-            n_discarded = n_held = 0
-            for u in srcs:
-                if discarded is None:
-                    n_held += 1                                  # discard pool unknown -> hold (fail closed)
-                    continue
-                mapped = manifest.get(u)
-                sha = imagestore.sha_from_url(mapped) if mapped else None
-                if sha and sha in discarded:
-                    n_discarded += 1                             # classified non-stone -> never link
-                    continue
-                # link only if it is under improved/ AND (gate off OR proven-enhanced by a marker)
-                if mapped and improved_marker in mapped and (enhanced is None or (sha and sha in enhanced)):
-                    urls.append(mapped)                          # enhanced -> link it
-                elif mapped:
-                    held_untreated += 1                          # on S3 but not enhanced yet -> hold
-                    n_held += 1
-                else:
-                    n_held += 1                                  # unknown url -> hold (retry next produce)
-            # terminal only when EVERY scraped image is discarded (none survived, none merely held)
-            terminal = bool(srcs) and not urls and n_discarded > 0 and n_held == 0
-            _slot_row(row, urls, terminal_discard=terminal)
-            if urls:
-                stats.staged += 1
+        _link_from_manifest(rows, cfg, stats)
+    else:
+        _stage_and_link(rows, fetch, cfg, stats)
+    return stats
+
+
+def _finish_row(row: CanonicalRow, urls: list[str], srcs: int, n_discarded: int, n_held: int,
+                stats: ImageStats) -> None:
+    """Slot a row's linked images and count it. Terminal (no_publishable_image, never retried) ONLY when
+    every scraped image was discarded: none survived and none is merely held."""
+    terminal = srcs > 0 and not urls and n_discarded > 0 and n_held == 0
+    _slot_row(row, urls, terminal_discard=terminal)
+    if urls:
+        stats.staged += 1
+    else:
+        stats.no_image += 1
+        if srcs == 0:                             # no usable source url -> permanent, not republishable
+            stats.no_image_source += 1
+
+
+def _source_urls(row: CanonicalRow) -> list[str]:
+    return [u for u in dict.fromkeys(row.raw_image_urls or []) if u and u.strip()]
+
+
+# --- passthrough: link to the treated images the imageproc manifest knows -----------------------------------
+def _link_from_manifest(rows: list[CanonicalRow], cfg, stats: ImageStats) -> None:
+    # Link product images ONLY to their TREATED (improved) S3 version via the imageproc manifest. Two things
+    # are HELD, never linked: a source url the manifest doesn't know, AND a manifest entry that still points
+    # at an UNtreated upload (a source staged to S3 before enhancement ran). So the upload only ever carries
+    # enhanced/upscaled/compressed images -- and a later produce re-links each held image the moment its
+    # improved/ version lands in the manifest.
+    manifest = _readonly_manifest()
+    if not manifest:
+        log.warning("passthrough: imageproc manifest empty/unreachable -- product images are HELD, "
+                    "never linked to raw source urls. Run the image stage in s3 mode or restore S3 "
+                    "access to populate the manifest.")
+    discarded = _load_discard_set(cfg)
+    # HARD gate: when require_enhanced is on, publish ONLY images the GPU actually enhanced (marker present).
+    # improved/ presence is NOT proof -- produce on :core writes raw re-encodes there. None disables the gate.
+    enhanced = _load_enhanced_set(cfg) if getattr(cfg, "require_enhanced", False) else None
+    improved_marker = imagestore.IMPROVED_MARKER              # a treated image lives under improved/
+    held_untreated = 0
+    for row in rows:
+        srcs = _source_urls(row)
+        urls: list[str] = []
+        n_discarded = n_held = 0
+        for u in srcs:
+            if discarded is None:
+                n_held += 1                                  # discard pool unknown -> hold (fail closed)
+                continue
+            mapped = manifest.get(u)
+            sha = imagestore.sha_from_url(mapped) if mapped else None
+            if sha and sha in discarded:
+                n_discarded += 1                             # classified non-stone -> never link
+                continue
+            # link only if it is under improved/ AND (gate off OR proven-enhanced by a marker)
+            if mapped and improved_marker in mapped and (enhanced is None or (sha and sha in enhanced)):
+                urls.append(mapped)                          # enhanced -> link it
+            elif mapped:
+                held_untreated += 1                          # on S3 but not enhanced yet -> hold
+                n_held += 1
             else:
-                stats.no_image += 1
-                if not srcs:                      # no usable source url -> permanent, not republishable
-                    stats.no_image_source += 1
-        log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
-            "staged": stats.staged, "no_image": stats.no_image, "no_image_source": stats.no_image_source,
-            "manifest_entries": len(manifest), "held_untreated": held_untreated,
-            "discard_set": None if discarded is None else len(discarded)}})
-        return stats
+                n_held += 1                                  # unknown url -> hold (retry next produce)
+        _finish_row(row, urls, len(srcs), n_discarded, n_held, stats)
+    log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
+        "staged": stats.staged, "no_image": stats.no_image, "no_image_source": stats.no_image_source,
+        "manifest_entries": len(manifest), "held_untreated": held_untreated,
+        "discard_set": None if discarded is None else len(discarded)}})
 
-    backend = _build_backend(cfg)
-    fetch = fetch or dl.httpx_fetcher(timeout=cfg.timeout, retries=cfg.retries)
 
-    # optional faithful enhancement / de-watermark before re-host (off by default)
-    processor = None
-    watermarked_sources: set[str] = set()
-    enhance_sources: set[str] = set()
-    source_prompts: dict[str, str] = {}
-    if getattr(cfg, "processing", None) and cfg.processing.enabled:
+# --- local / s3: fetch, process, host, link --------------------------------------------------------------
+class _Processing:
+    """The optional faithful enhancement / de-watermark step and its per-source routing (off by default)."""
+
+    def __init__(self, cfg):
         from stone_pipeline.io.image_processing import ImageProcessor
-
-        processor = ImageProcessor(cfg.processing)
-        watermarked_sources = _watermarked_sources()
-        enhance_sources = _enhance_sources()
-        # one processor serves every source, so pass each watermarked source's OWN de-watermark prompt
-        # per image (empty -> the processor's generic fallback). Same prompt the GPU reprocess uses.
         from stone_pipeline.config.sources import load_sources
+        self.processor = ImageProcessor(cfg.processing)
+        self.watermarked_sources = _watermarked_sources()
+        self.enhance_sources = _enhance_sources()
+        # one processor serves every source, so pass each watermarked source's OWN de-watermark prompt per
+        # image (empty -> the processor's generic fallback). Same prompt the GPU reprocess uses.
         _all = load_sources()
-        source_prompts = {s: p for s in watermarked_sources
-                          if (c := _all.get(s)) and (p := (c.fal_prompt or "").strip())}
-    preview: list[dict] = []
+        self.source_prompts = {s: p for s in self.watermarked_sources
+                               if (c := _all.get(s)) and (p := (c.fal_prompt or "").strip())}
 
-    # cross-run idempotency on the SOURCE URL: a URL processed in a prior scrape is
-    # reused from the manifest and skipped entirely (no re-download, no re-process,
-    # no re-upload), so repeated scrapes of the same products can never duplicate an
-    # already-processed image. Content-hash dedup (below) still applies to NEW urls.
-    manifest = _load_manifest(backend)
-    manifest_dirty = False
+    @staticmethod
+    def build(cfg) -> "Optional[_Processing]":
+        return _Processing(cfg) if getattr(cfg, "processing", None) and cfg.processing.enabled else None
 
-    # gather all distinct urls + url->site in one pass (O(1) lookups in the loop)
-    all_urls: list[str] = []
+
+def _url_sites(rows: list[CanonicalRow]) -> dict[str, str]:
+    """Every distinct source url -> the site that scraped it (first wins), in one pass."""
     url_to_site: dict[str, str] = {}
     for row in rows:
         for u in (row.raw_image_urls or []):
             if u and u.strip():
-                all_urls.append(u)
                 url_to_site.setdefault(u, row.src_site)
+    return url_to_site
 
-    # known urls reuse their stored public url; only NEW urls are fetched. A manifest hit is authoritative
-    # ONLY if its object still exists: an external delete (a Blokport clear) removes the object but not this
-    # manifest, so a blind reuse would re-link a product to a dead URL and never re-upload. Drop a stale
-    # entry so the source URL re-fetches + re-hosts, and self-heals the manifest.
+
+def _reuse_hosted(manifest: dict, backend, urls) -> tuple[dict[str, Optional[str]], list[str], int]:
+    """Cross-run idempotency on the SOURCE URL: a url processed in a prior scrape reuses its hosted public
+    url and is skipped entirely (no re-download, no re-process, no re-upload). A manifest hit is
+    authoritative ONLY if its object still exists: an external delete (a Blokport clear) removes the object
+    but not the manifest, so a blind reuse would re-link a product to a dead URL and never re-upload. A stale
+    entry is dropped (the url re-fetches + re-hosts) and the manifest self-heals. Returns (url -> public for
+    the reused ones, the NEW urls, stale entries pruned)."""
     url_to_public: dict[str, Optional[str]] = {}
     new_urls: list[str] = []
     stale_pruned = 0
-    for u in dict.fromkeys(all_urls):
+    for u in urls:
         hosted = manifest.get(u)
         if hosted and _hosted_object_exists(backend, hosted):
             url_to_public[u] = hosted
         else:
             if u in manifest:                      # entry points at a since-deleted object -> drop + re-host
                 del manifest[u]
-                manifest_dirty = True
                 stale_pruned += 1
             new_urls.append(u)
-    # validation cap: process only N new images per run, so de-watermark/enhance
-    # output can be eyeballed on a sample before a full run. 0 = no cap.
+    return url_to_public, new_urls, stale_pruned
+
+
+def _sample(new_urls: list[str]) -> list[str]:
+    # validation cap: process only N new images per run, so de-watermark/enhance output can be eyeballed on a
+    # sample before a full run. 0 = no cap.
     sample_limit = int(env.getenv("BLOKPORT_IMAGE_SAMPLE_LIMIT", "0") or 0)
-    if sample_limit > 0:
-        new_urls = new_urls[:sample_limit]
-    fetched = dl.fetch_many(new_urls, fetch, concurrency=cfg.concurrency)
+    return new_urls[:sample_limit] if sample_limit > 0 else new_urls
 
-    # content-address: bytes hash -> public url (so identical bytes upload once)
-    hash_to_public: dict[str, str] = {}
-    # F13: bound the FAL de-watermark spend on THIS :core run. Each de-watermarked image bills FAL, and a
-    # large produce would otherwise call FAL unbounded (no ceiling on this path). Once the accrued cost
-    # reaches fal_max_usd, watermarked images stop being de-watermarked here and are HELD for the GPU (the
-    # existing deferred path) -- so a runaway can never silently overspend. <=0 disables the ceiling.
-    fal_cost = 0.0
-    fal_ceiling = cfg.processing.fal_max_usd if processor is not None else 0.0
-    fal_budget_logged = False
-    for url, data in fetched.items():
+
+class _Stager:
+    """Hosts one NEW source image per call: content-addressed dedup, placeholder drop, reuse of an already
+    treated object, else raw put or the page-routed processing (de-watermark on :core only for a source it
+    completes, FAL spend bounded, raw original kept for the GPU, publish marker when :core finished the whole
+    job). Returns the public url, or None for a placeholder/held image."""
+
+    def __init__(self, cfg, backend, processing: Optional[_Processing], manifest: dict,
+                 url_to_site: dict[str, str], stats: ImageStats):
+        self.cfg, self.backend, self.processing, self.manifest = cfg, backend, processing, manifest
+        self.url_to_site, self.stats = url_to_site, stats
+        self.placeholders = _load_placeholder_hashes()
+        self.hash_to_public: dict[str, str] = {}      # content-address: bytes hash -> public url (upload once)
+        self.manifest_dirty = False
+        self.preview: list[dict] = []
+        # F13: bound the FAL de-watermark spend on THIS :core run. Once the accrued cost reaches fal_max_usd,
+        # watermarked images stop being de-watermarked here and are HELD for the GPU (the deferred path), so
+        # a runaway can never silently overspend. <=0 disables the ceiling.
+        self.fal_cost = 0.0
+        self.fal_ceiling = cfg.processing.fal_max_usd if processing is not None else 0.0
+        self.fal_budget_logged = False
+
+    def stage(self, url: str, data: Optional[bytes]) -> Optional[str]:
         if data is None:
-            url_to_public[url] = None
-            stats.download_failed += 1
-            continue
-        # hash the SOURCE bytes: keys/dedup/placeholder checks stay stable on the
-        # source even though the stored bytes are processed (so re-runs are no-ops).
+            self.stats.download_failed += 1
+            return None
+        # hash the SOURCE bytes: keys/dedup/placeholder checks stay stable on the source even though the
+        # stored bytes are processed (so re-runs are no-ops).
         digest = hashlib.sha256(data).hexdigest()
-        if digest in placeholders:
-            url_to_public[url] = None
-            stats.placeholders += 1
-            continue
-        if digest in hash_to_public:
-            url_to_public[url] = hash_to_public[digest]
-            manifest[url] = hash_to_public[digest]
-            manifest_dirty = True
-            continue
-        src_site = url_to_site.get(url, "unknown")
+        if digest in self.placeholders:
+            self.stats.placeholders += 1
+            return None
+        if digest in self.hash_to_public:
+            return self._remember(url, self.hash_to_public[digest])
+        src_site = self.url_to_site.get(url, "unknown")
         ck = storage.content_key(src_site, digest)
-        # When processing runs, the improved image lives in its own subfolder and
-        # the raw scraped copy in a sibling folder; Medusa points at the improved
-        # one (the URL we return). Without processing, the image stays at the root.
-        dest_key = f"{imagestore.IMPROVED_SUBDIR}/{ck}" if processor is not None else ck
-        # store via backend (idempotent; re-run re-derives same key, no re-upload).
-        # If it already exists, reuse the URL and skip processing entirely -- each
-        # source image is only ever enhanced/de-watermarked once.
-        if backend.exists(dest_key):
+        # When processing runs, the improved image lives in its own subfolder and the raw scraped copy in a
+        # sibling folder; Medusa points at the improved one. Without processing, the image stays at the root.
+        dest_key = f"{imagestore.IMPROVED_SUBDIR}/{ck}" if self.processing is not None else ck
+        if self.backend.exists(dest_key):
             # already treated (this run or a prior one) -> reuse, never re-process
-            public = backend.url_for(dest_key)
-        elif processor is None:
-            # no processing -> store the raw bytes at the root content key
-            public = backend.put(dest_key, data)
-            stats.bytes_uploaded += len(data)
+            public = self.backend.url_for(dest_key)
+        elif self.processing is None:
+            public = self.backend.put(dest_key, data)          # no processing -> raw bytes at the content key
+            self.stats.bytes_uploaded += len(data)
         else:
-            # ROUTE BY THE PAGE FLAGS. The GPU is needed ONLY for the ESRGAN upscale (enhance=on); de-watermark
-            # is a hosted FAL call (no GPU) and resize is CPU, so :core FINISHES every enhance=off source here,
-            # de-watermarking it too when the page marks it watermarked. :core must NOT de-watermark an
-            # enhance=on source: the GPU de-watermarks + upscales it in one pass, and doing FAL here as well
-            # would bill it twice -- so request de-wm on :core only for a source we complete on :core.
-            watermarked_src = src_site in watermarked_sources
-            # de-watermark on :core only when we complete the source here AND the run's FAL budget remains;
-            # once spent, a watermarked image is deferred to the GPU (held) rather than billed unbounded.
-            fal_budget_ok = fal_ceiling <= 0 or fal_cost < fal_ceiling
-            finish_on_core = (src_site not in enhance_sources) and fal_budget_ok
-            if watermarked_src and not fal_budget_ok and not fal_budget_logged:
-                log.warning("FAL de-watermark budget reached on :core; deferring remaining watermarked "
-                            "images to the GPU", extra={"extra_fields": {"fal_cost": round(fal_cost, 2),
-                                                                         "ceiling": fal_ceiling}})
-                fal_budget_logged = True
-            pr = processor.process(data, watermarked=finish_on_core and watermarked_src,
-                                   enhance=src_site in enhance_sources,
-                                   prompt=source_prompts.get(src_site))   # this source's own de-watermark prompt
-            stats.processed += 1
-            fal_cost += pr.billed_mp * cfg.processing.fal_price_per_mp   # every billed generation (F5)
-            # Persist the raw original UNCONDITIONALLY (keep_scraped): it is the GPU reprocess's INPUT.
-            # A watermarked source cannot de-watermark on the torch/FAL-free :core, so :core leaves the
-            # image for the GPU -- which reads scraped/. Writing scraped/ only when :core changed the
-            # bytes stranded every watermarked image: scraped/ stayed empty, the GPU delta never saw it,
-            # and the product HELD forever. Idempotent: skip if already present.
-            if cfg.processing.keep_scraped:
-                skey = f"{imagestore.SCRAPED_SUBDIR}/{ck}"
-                if not backend.exists(skey):
-                    backend.put(skey, data)
-                    stats.bytes_uploaded += len(data)
-            if pr.failed or pr.dewatermark_failed or (watermarked_src and not finish_on_core):
-                # HOLD this run (no improved/, no marker, no manifest entry) whenever processing FAILED (a
-                # transient error must be retried next run, never memoized as treated), or :core did
-                # NOT finish it: either de-watermarking FAILED here (dewatermark_failed), OR the source is
-                # enhance=on + watermarked so it was deferred to the GPU (which de-watermarks + upscales in one
-                # pass) -- :core must never write a still-watermarked image into improved/. The raw is in
-                # scraped/ for the GPU; the manifest is not written, so the next produce re-derives it and it
-                # links only once the GPU has written the treated improved/ + the marker. Held regardless of
-                # the require_enhanced gate, so a watermarked image can never publish before it is cleaned.
-                continue
-            if cfg.processing.write_preview:
-                preview.append({
-                    "src_site": src_site, "source_url": url,
-                    "processed_url": backend.url_for(dest_key),
-                    "watermarked": src_site in watermarked_sources,
-                    "dewatermarked": pr.dewatermarked, "enhanced": pr.enhanced,
-                    "upscaled": pr.upscaled})
-            public = backend.put(dest_key, pr.data)
-            stats.bytes_uploaded += len(pr.data)
-            # PUBLISH MARKER (the require_enhanced unlock), PAGE-DRIVEN: write it here on :core ONLY when
-            # this source's configured pipeline is COMPLETE on :core -- i.e. the CPU size-reduce IS the whole
-            # job because the page has enhance=off AND watermarked=off (is_complete reads the per-source
-            # enhance flag). Then a resize-only source publishes straight from :core in this same run, with no
-            # GPU trip -- exactly what the scraper page dictates. A source the page marks enhance=on (needs the
-            # GPU upscale) or watermarked=on (needs FAL) is NOT complete here, so :core writes no marker and
-            # the GPU reprocess stamps it after doing that work. So the publish gate follows the page settings,
-            # never a blanket env override, and auto-enhance skips resize-only sources (they are already "done").
-            if pr.is_complete(enhance_requested=src_site in enhance_sources):
-                mkey = f"{imagestore.ENHANCED_SUBDIR}/{src_site}/{digest}.txt"
-                if not backend.exists(mkey):
-                    backend.put(mkey, b"", content_type="text/plain")
-        hash_to_public[digest] = public
-        url_to_public[url] = public
-        manifest[url] = public
-        manifest_dirty = True
+            public = self._process_and_host(url, data, digest, src_site, ck, dest_key)
+            if public is None:
+                return None
+        self.hash_to_public[digest] = public
+        return self._remember(url, public)
 
+    def _remember(self, url: str, public: str) -> str:
+        self.manifest[url] = public
+        self.manifest_dirty = True
+        return public
+
+    def _process_and_host(self, url, data, digest, src_site, ck, dest_key) -> Optional[str]:
+        cfg, pz, backend = self.cfg, self.processing, self.backend
+        # ROUTE BY THE PAGE FLAGS. The GPU is needed ONLY for the ESRGAN upscale (enhance=on); de-watermark is
+        # a hosted FAL call (no GPU) and resize is CPU, so :core FINISHES every enhance=off source here,
+        # de-watermarking it too when the page marks it watermarked. :core must NOT de-watermark an enhance=on
+        # source: the GPU de-watermarks + upscales it in one pass, and doing FAL here as well would bill it
+        # twice -- so request de-wm on :core only for a source we complete on :core, and only while the run's
+        # FAL budget remains (once spent, a watermarked image is deferred to the GPU rather than billed unbounded).
+        watermarked_src = src_site in pz.watermarked_sources
+        fal_budget_ok = self.fal_ceiling <= 0 or self.fal_cost < self.fal_ceiling
+        finish_on_core = (src_site not in pz.enhance_sources) and fal_budget_ok
+        if watermarked_src and not fal_budget_ok and not self.fal_budget_logged:
+            log.warning("FAL de-watermark budget reached on :core; deferring remaining watermarked images to "
+                        "the GPU", extra={"extra_fields": {"fal_cost": round(self.fal_cost, 2),
+                                                           "ceiling": self.fal_ceiling}})
+            self.fal_budget_logged = True
+        pr = pz.processor.process(data, watermarked=finish_on_core and watermarked_src,
+                                  enhance=src_site in pz.enhance_sources,
+                                  prompt=pz.source_prompts.get(src_site))   # this source's own de-watermark prompt
+        self.stats.processed += 1
+        self.fal_cost += pr.billed_mp * cfg.processing.fal_price_per_mp   # every billed generation (F5)
+        # Persist the raw original UNCONDITIONALLY (keep_scraped): it is the GPU reprocess's INPUT. Writing
+        # scraped/ only when :core changed the bytes stranded every watermarked image (the GPU delta never saw
+        # it and the product HELD forever). Idempotent: skip if already present.
+        if cfg.processing.keep_scraped:
+            skey = f"{imagestore.SCRAPED_SUBDIR}/{ck}"
+            if not backend.exists(skey):
+                backend.put(skey, data)
+                self.stats.bytes_uploaded += len(data)
+        if pr.failed or pr.dewatermark_failed or (watermarked_src and not finish_on_core):
+            # HOLD this run (no improved/, no marker, no manifest entry) whenever processing FAILED (a transient
+            # error is retried next run, never memoized as treated), de-watermarking FAILED here, or the source
+            # is enhance=on + watermarked and so deferred to the GPU: :core must never write a still-watermarked
+            # image into improved/. The raw is in scraped/ for the GPU; the next produce re-derives it and it
+            # links only once the GPU has written the treated improved/ + the marker.
+            return None
+        if cfg.processing.write_preview:
+            self.preview.append({
+                "src_site": src_site, "source_url": url, "processed_url": backend.url_for(dest_key),
+                "watermarked": watermarked_src, "dewatermarked": pr.dewatermarked, "enhanced": pr.enhanced,
+                "upscaled": pr.upscaled})
+        public = backend.put(dest_key, pr.data)
+        self.stats.bytes_uploaded += len(pr.data)
+        # PUBLISH MARKER (the require_enhanced unlock), PAGE-DRIVEN: written on :core ONLY when this source's
+        # configured pipeline is COMPLETE here (enhance=off AND watermarked=off: the CPU size-reduce IS the
+        # whole job). A source that needs the GPU upscale or FAL gets its marker from the GPU reprocess.
+        if pr.is_complete(enhance_requested=src_site in pz.enhance_sources):
+            mkey = f"{imagestore.ENHANCED_SUBDIR}/{src_site}/{digest}.txt"
+            if not backend.exists(mkey):
+                backend.put(mkey, b"", content_type="text/plain")
+        return public
+
+
+def _link_hosted(rows: list[CanonicalRow], url_to_public: dict[str, Optional[str]], fetched: dict,
+                 cfg, stats: ImageStats) -> None:
     discarded = _load_discard_set(cfg)
     # HARD gate (same as passthrough): with require_enhanced on, link ONLY images the GPU actually enhanced.
     enhanced = _load_enhanced_set(cfg) if getattr(cfg, "require_enhanced", False) else None
     for row in rows:
         public_urls: list[str] = []
-        srcs = 0
-        n_discarded = n_other = 0
+        srcs = n_discarded = n_other = 0
         for url in (row.raw_image_urls or []):
             if not url or not url.strip():
                 continue
             srcs += 1
             public = url_to_public.get(url)
             if public is None:
-                # download failed / placeholder-blocked -> transient, retry (never turns the row terminal)
+                # download failed / placeholder-blocked / held -> transient, retry (never turns the row terminal)
                 n_other += 1
                 if url in fetched and fetched[url] is None:
                     row.add_flag(ReviewFlag(field="images", code=FlagCode.image_download_failed,
@@ -529,25 +546,28 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
                 continue
             if public not in public_urls:
                 public_urls.append(public)
-        # terminal only when EVERY scraped image is discarded (none survived, none merely failed)
-        terminal = srcs > 0 and not public_urls and n_discarded > 0 and n_other == 0
-        _slot_row(row, public_urls, terminal_discard=terminal)
-        if public_urls:
-            stats.staged += 1
-        else:
-            stats.no_image += 1
-            if srcs == 0:                         # no usable source url -> permanent, not republishable
-                stats.no_image_source += 1
+        _finish_row(row, public_urls, srcs, n_discarded, n_other, stats)
 
-    if manifest_dirty:
+
+def _stage_and_link(rows: list[CanonicalRow], fetch: Optional[Fetcher], cfg, stats: ImageStats) -> None:
+    backend = _build_backend(cfg)
+    fetch = fetch or dl.httpx_fetcher(timeout=cfg.timeout, retries=cfg.retries)
+    processing = _Processing.build(cfg)
+    manifest = _load_manifest(backend)
+    url_to_site = _url_sites(rows)
+    url_to_public, new_urls, stale_pruned = _reuse_hosted(manifest, backend, url_to_site)
+    fetched = dl.fetch_many(_sample(new_urls), fetch, concurrency=cfg.concurrency)
+    stager = _Stager(cfg, backend, processing, manifest, url_to_site, stats)
+    for url, data in fetched.items():
+        url_to_public[url] = stager.stage(url, data)
+    _link_hosted(rows, url_to_public, fetched, cfg, stats)
+    if stager.manifest_dirty or stale_pruned:
         _save_manifest(backend, manifest)
-    if processor is not None and cfg.processing.write_preview:
-        _write_preview(preview)
-
+    if processing is not None and cfg.processing.write_preview:
+        _write_preview(stager.preview)
     log.info("images done", extra={"extra_fields": {
         "mode": cfg.mode, "staged": stats.staged, "no_image": stats.no_image,
         "no_image_source": stats.no_image_source,
         "download_failed": stats.download_failed, "placeholders": stats.placeholders,
         "bytes_uploaded": stats.bytes_uploaded, "processed": stats.processed,
         "stale_manifest_pruned": stale_pruned}})
-    return stats
