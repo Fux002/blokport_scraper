@@ -265,9 +265,6 @@ class Variant:
 class VariantTable:
     branch: str  # 'slab' or 'block'
     by_id: dict[str, Variant] = field(default_factory=dict)
-    # normalized name/alias -> variation_id (built here for exact lookups; the
-    # full projection index is built in matching/index.py for M5).
-    surface_to_id: dict[str, str] = field(default_factory=dict)
 
     def all_ids(self) -> list[str]:
         return list(self.by_id.keys())
@@ -389,9 +386,6 @@ def _fill_tables(records: list[dict], table_for) -> None:
             variation_id=vid, key=key, name=name,
             image=(record.get("Image") or "").strip(), aliases=aliases,
         )
-        # NOTE: surface_to_id is intentionally NOT populated here -- production matching builds its own
-        # exact index in matching/index.py; this per-row normalize+insert over ~24k variants was pure
-        # wasted work (the field stays for the test that clears it).
 
 
 # --- backbone.json ------------------------------------------------------------
@@ -526,9 +520,6 @@ class Ports:
     iso_by_port: dict[str, str] = field(default_factory=dict)        # port_id -> iso2
     by_name: dict[str, str] = field(default_factory=dict)            # norm(name) -> port_id
     by_locode: dict[str, str] = field(default_factory=dict)          # UN/LOCODE -> port_id
-
-    def for_country(self, iso2: str, limit: int = 2) -> list[str]:
-        return self.by_country.get((iso2 or "").strip().upper(), [])[:limit]
 
     def country_of(self, port_id: str | None) -> str | None:
         return self.iso_by_port.get((port_id or "").strip())

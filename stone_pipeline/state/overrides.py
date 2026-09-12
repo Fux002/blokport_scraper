@@ -28,9 +28,6 @@ class Overrides:
     def get(self, src_site: str, surrogate_key: str, field: str):
         return self.by_key.get((src_site, surrogate_key), {}).get(field)
 
-    def has_any(self, src_site: str, surrogate_key: str) -> bool:
-        return bool(self.by_key.get((src_site, surrogate_key)))
-
     def __len__(self) -> int:
         return sum(len(v) for v in self.by_key.values())
 

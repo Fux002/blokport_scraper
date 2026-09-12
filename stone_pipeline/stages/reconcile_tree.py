@@ -88,7 +88,7 @@ def reconcile_row(row: CanonicalRow, ref: ReferenceData, stats: ReconcileStats) 
     if not row.variation_id:
         # rows already held distinctly in Stage 4 (no category reference yet, or a
         # standalone category) must not also raise a generic missing_variation
-        _held = (GapKind.missing_tile_reference, GapKind.unsupported_category)
+        _held = (GapKind.missing_mirror_reference, GapKind.unsupported_category)
         if any(g.gap_kind in _held for g in row.tree_gaps):
             return
         stats.missing_variation += 1
