@@ -292,12 +292,25 @@ def restore_combinations_baseline() -> bool:
                    key=combinations_baseline_key())
 
 
+class PeriodicSnapshot(threading.Event):
+    """The stop handle of a periodic snapshot thread: an Event (set it to stop) that can also JOIN the
+    thread, so a shutdown waits for an in-flight save to finish instead of racing interpreter teardown
+    ('cannot schedule new futures after interpreter shutdown')."""
+
+    thread: threading.Thread | None = None
+
+    def stop(self, timeout: float = 60.0) -> None:
+        self.set()
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join(timeout)
+
+
 def start_periodic(ledger_path: str | Path, env: str = ENV_NAME,
-                   interval: int | None = None, key: str | None = None) -> threading.Event:
+                   interval: int | None = None, key: str | None = None) -> PeriodicSnapshot:
     """Start a daemon thread that snapshots a db (the ledger by default; `key` targets another, e.g.
-    config.db) every `interval` seconds until the returned Event is set. The shared local volume means a
-    ledger snapshot captures both containers' writes (serve leases, acks, and produce write-through)."""
-    stop = threading.Event()
+    config.db) every `interval` seconds until the returned handle is set / stopped. The shared local volume
+    means a ledger snapshot captures both containers' writes (serve leases, acks, and produce write-through)."""
+    stop = PeriodicSnapshot()
     every = interval or _SNAPSHOT_INTERVAL
     label = "config" if key == config_key(env) else "ledger"
 
@@ -305,7 +318,8 @@ def start_periodic(ledger_path: str | Path, env: str = ENV_NAME,
         while not stop.wait(every):
             save(ledger_path, env, key=key)
 
-    threading.Thread(target=_loop, name=f"{label}-snapshot", daemon=True).start()
+    stop.thread = threading.Thread(target=_loop, name=f"{label}-snapshot", daemon=True)
+    stop.thread.start()
     log.info(f"{label} periodic snapshot started", extra={"extra_fields": {"interval_s": every}})
     return stop
 

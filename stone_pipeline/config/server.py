@@ -15,7 +15,6 @@ em dashes (design principle 2).
 
 from __future__ import annotations
 
-import atexit
 import hmac
 import json
 from stone_pipeline.core import env
@@ -694,15 +693,16 @@ class ConfigHandler(BaseHTTPRequestHandler):
             "status": str(args[1]) if len(args) > 1 else ""}})
 
 
-def serve(host: str | None = None, port: int = 8724) -> None:
-    # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so peer tasks
-    # (Medusa, over the VPC) can reach it. The bearer token still gates every request.
-    host = host or env.getenv("BLOKPORT_BIND_HOST", "127.0.0.1")
-    from stone_pipeline.ledger import snapshot, writethrough
+def boot(config_db, ledger_path) -> None:
+    """The boot sequence, in this ORDER, before anything serves (pure of the HTTP server, so it is tested):
+    restore config.db -> seed sources -> reconcile interrupted runs -> restore the ledger -> the two-level
+    backfill (needs the ledger) -> artifact trees -> combinations baseline -> attribute vocab. A required
+    restore that fails RAISES here, so the task exits non-zero and ECS retries: serving on a fresh store
+    would let the periodic save overwrite the real snapshot."""
+    from stone_pipeline.ledger import snapshot
     # E14: restore config.db (the durable source lifecycle: pause/delist/enabled) from its S3 snapshot
     # BEFORE seeding, so a redeploy does not lose it and re-seed every source back to active. Restore is a
     # no-op when a local config.db already exists; the seed then only fills a genuinely first-ever run.
-    config_db = store.config_db_path()
     snapshot.restore_config(config_db, required=True)   # durable: fail loud if a present snapshot won't fetch
     # RECONCILE the source list from yaml on EVERY boot (INSERT OR IGNORE, minus removed sources), not only
     # when config.db is absent. A restored partial/stale snapshot must NOT leave configured sources missing
@@ -718,7 +718,7 @@ def serve(host: str | None = None, port: int = 8724) -> None:
                     extra={"extra_fields": {"sources": interrupted}})
     # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
     # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
-    snapshot.restore(writethrough.ledger_path(), required=True)   # durable: fail loud if present-but-unfetchable
+    snapshot.restore(ledger_path, required=True)   # durable: fail loud if present-but-unfetchable
     # TWO LEVELS data backfill, once: needs the ledger (variety lookups), so it runs here and not in the store
     # migration, which fires on the first config.db open above, before the ledger is back.
     from stone_pipeline.config import decisions_store
@@ -737,20 +737,36 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # just-added colour is rejected at mint until the next full produce. Best-effort: a fetch failure keeps
     # the committed vocab (a fresh/offline host still validates against a real seed), and a REPUBLISH does
     # not fetch inputs, so without this boot fetch a redeploy leaves the vocab stale.
-    from deploy.fetch_inputs import fetch_attributes
-    if fetch_attributes():
+    from deploy import fetch_inputs
+    if fetch_inputs.fetch_attributes():
         log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
-    # keep config.db durable: a periodic snapshot backstop + a best-effort snapshot on clean shutdown
+
+
+def shutdown(config_db, periodic) -> None:
+    """SIGTERM path (ECS stops a task with SIGTERM, which never runs atexit): STOP the periodic snapshot
+    thread and wait for an in-flight save, THEN save config.db once, then exit 0. Ordered this way so the
+    final save never races interpreter teardown (the 'cannot schedule new futures after interpreter
+    shutdown' error every roll used to log). No atexit backstop: a second save at teardown was the race."""
+    from stone_pipeline.ledger import snapshot
+    if hasattr(periodic, "stop"):
+        periodic.stop()
+    else:
+        periodic.set()
+    snapshot.save_config(config_db)
+    raise SystemExit(0)
+
+
+def serve(host: str | None = None, port: int = 8724) -> None:
+    # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so peer tasks
+    # (Medusa, over the VPC) can reach it. The bearer token still gates every request.
+    host = host or env.getenv("BLOKPORT_BIND_HOST", "127.0.0.1")
+    from stone_pipeline.ledger import snapshot, writethrough
+    config_db = store.config_db_path()
+    boot(config_db, writethrough.ledger_path())
+    # keep config.db durable: a periodic snapshot backstop, stopped and flushed by the SIGTERM handler
     # (the lifecycle verbs also snapshot immediately after a pause/delist so a crash never loses one).
-    snapshot.start_periodic(config_db, key=snapshot.config_key())
-    # snapshot config.db on stop. ECS stops a task with SIGTERM, which by default terminates WITHOUT
-    # running atexit -- so a SIGTERM handler is REQUIRED (mirrors the sync server), or a pause/delist set
-    # in the last snapshot window is lost on redeploy. atexit is kept as the clean-exit backstop.
-    def _snapshot_on_term(*_):
-        snapshot.save_config(config_db)
-        raise SystemExit(0)
-    signal.signal(signal.SIGTERM, _snapshot_on_term)
-    atexit.register(lambda: snapshot.save_config(config_db))
+    periodic = snapshot.start_periodic(config_db, key=snapshot.config_key())
+    signal.signal(signal.SIGTERM, lambda *_: shutdown(config_db, periodic))
     from stone_pipeline import lifecycle
     lifecycle.enable_config_snapshots()   # now a pause/delist also snapshots immediately (server context only)
     httpd = ThreadingHTTPServer((host, port), ConfigHandler)
