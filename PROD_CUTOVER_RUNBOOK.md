@@ -82,7 +82,7 @@ Config lives in `infra/brands/blokport.tfvars` (+ `infra/brands/blokport.backend
   - `fal_key_ssm_name` / `scraper_proxy_ssm_name` (from Phase 0).
   - `prod_image_tag = "<the :core-<sha> currently deployed AND soaked in dev at this moment>"` — record the exact sha + digest here; pin it, never `core`.
   - `prod_gpu_image_tag = "gpu-<sha>"` (the dev-proven GPU build).
-  - `prod_schedule_enabled = false`, `prod_auto_enhance = false`, `prod_auto_texture = false`, `prod_require_enhanced = false` (quiet start).
+  - `prod_auto_enhance = false`, `prod_auto_texture = false`, `prod_require_enhanced = false` (quiet start).
   - `alert_email = "<ops email>"` — **required before a full apply**, else the apply removes the dev SNS alert the earlier targeted apply created.
 - [ ] `terraform plan` — with the platform state present it should CREATE the prod services (`scraper_prod`, `gpu_enhance_prod`, `sync_service_prod`, prod data sources, Batch queue/jobdef). Confirm **0 destroy** and no unexpected ECR churn (see the drift reconcile in Phase 0).
 - [ ] `terraform apply` → confirm the prod ECS services (incl. `sync_service_prod`) + the Batch queue/jobdef come up. Confirm the revision-agnostic `batch:SubmitJob` IAM (`:*`) is on the prod roles (mirrors the dev fix).

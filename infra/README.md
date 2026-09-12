@@ -15,7 +15,7 @@ scraper's own resources.
 ```
 infra/
 ├── *.tf                 root: shared ECR + GitHub OIDC deploy role + two module instances
-└── modules/scraper/     ONE env: scheduled Fargate task, IAM (its bucket only), SG, schedule
+└── modules/scraper/     ONE env: the ad-hoc Fargate task definition (RUN_MODE tools), IAM (its bucket only), SG
 ```
 
 ## Creates
@@ -25,7 +25,6 @@ infra/
   `module.scraper_prod`:
   - a Fargate **task definition** (`blokport-scraper-<env>`) running `deploy/run_pipeline.sh`,
     with `SCRAPER_ENV` fixed to that env;
-  - an **EventBridge Scheduler** cron (starts **disabled**);
   - IAM **task role scoped to that env's staging bucket ONLY** + an execution role;
   - a security group (egress only) in that env's VPC.
 
@@ -45,7 +44,7 @@ platform stack exists) - see `DEPLOY.md`.
 ```bash
 cd infra
 terraform init
-terraform apply                        # only dev is created; schedule starts DISABLED
+terraform apply                        # only dev is created
 terraform output deploy_role_arn       # -> repo secret AWS_DEPLOY_ROLE_ARN
 ```
 

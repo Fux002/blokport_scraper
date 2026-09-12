@@ -110,9 +110,7 @@ def test_run_refused_while_a_lifecycle_op_is_active(monkeypatch):
 def test_dispatch_passes_sources_and_stage_through(monkeypatch):
     # the button posts {sources, stage}; dispatch must thread both into the run record. Stub the
     # launcher so nothing actually scrapes (the local launcher would Popen a build subprocess).
-    monkeypatch.setattr(runner, "_LAUNCHERS",
-                        {"local": lambda rec: rec.update(status="succeeded"),
-                         "ecs": lambda rec: rec.update(status="succeeded")})
+    monkeypatch.setattr(runner, "_launch_local", lambda rec: rec.update(status="succeeded"))
     code, body = dispatch("POST", ["run"], {"sources": ["polonine"], "stage": "scrape"})
     assert code == 202 and body["stage"] == "scrape" and body["sources"] == ["polonine"]
 

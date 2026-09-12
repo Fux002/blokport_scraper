@@ -33,7 +33,7 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
       Setting it flips `local.prod_enabled` and creates ALL prod resources at once (`scraper_prod`,
       `gpu_enhance_prod`, `sync_service_prod` + prod data sources). ONLY set it AFTER the platform apply exists,
       else the count-gated `platform_prod` remote-state + `/blokport-prod/` token data sources fail.
-- [ ] Set the prod flags as desired: `prod_image_tag`, `prod_gpu_image_tag`, `prod_schedule_enabled`,
+- [ ] Set the prod flags as desired: `prod_image_tag`, `prod_gpu_image_tag`,
       `prod_auto_enhance` / `prod_auto_texture` / `prod_require_enhanced` (all default OFF for a quiet start).
 - [ ] `alert_email` in `terraform.tfvars` (also makes the DEV alert persistent -- a full apply otherwise
       removes the dev SNS alert created by the earlier targeted apply).

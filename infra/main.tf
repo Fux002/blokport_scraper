@@ -2,7 +2,7 @@
 # Scraper - TWO deployments from ONE image: a dev task (runs in blokport-dev) and
 # a prod task (runs in blokport-prod). Shared here: the ECR repo + the CI deploy
 # role (build once, promote the SAME tag dev -> prod). Per-env (in modules/scraper):
-# the task def, IAM (scoped to that env's bucket ONLY), schedule, log group.
+# the task def, IAM (scoped to that env's bucket ONLY), log group.
 # The prod instance is created once `prod_staging_bucket` is set.
 # =============================================================================
 
@@ -189,14 +189,12 @@ module "scraper_dev" {
 
   region              = var.region
   image_tag           = var.image_tag
-  schedule_enabled    = var.dev_schedule_enabled
-  schedule_expression = var.schedule_expression
   keep_scraped        = var.keep_scraped
   ssm_secret_arns     = local.dev_ssm_secrets
   cpu                 = var.cpu
   memory              = var.memory
 
-  # Auto-enhance: the scheduled scrape submits the dev GPU reprocess for newly-staged images. ON in dev
+  # Auto-enhance: the ad-hoc task submits the dev GPU reprocess for newly-staged images. ON in dev
   # (dev_auto_enhance defaults true). Prod stays unwired until its own GPU module is active.
   gpu_job_queue_name       = module.gpu_enhance_dev[0].job_queue
   gpu_job_definition_name  = module.gpu_enhance_dev[0].job_definition
@@ -224,8 +222,6 @@ module "scraper_prod" {
 
   region              = var.region
   image_tag           = var.prod_image_tag
-  schedule_enabled    = var.prod_schedule_enabled
-  schedule_expression = var.schedule_expression
   keep_scraped        = var.keep_scraped
   ssm_secret_arns     = local.prod_ssm_secrets
   secrets_kms_key_arn = local.prod_secrets_kms_key_arn

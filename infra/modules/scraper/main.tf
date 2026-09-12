@@ -8,8 +8,11 @@ terraform {
 }
 
 # =============================================================================
-# Scraper - ONE environment per module instance (dev OR prod). The root stack
-# instantiates this twice. Each instance:
+# Scraper task definition - ONE environment per module instance (dev OR prod). The root stack
+# instantiates this twice. It is the AD-HOC task (aws ecs run-task with RUN_MODE=validate-dewatermark |
+# reprocess); the produce runs only in the sync service (modules/sync_service), which owns the ledger.
+# There is no cron here: an unattended schedule is an EventBridge target on that service's /run API.
+# Each instance:
 #   * runs in its OWN platform VPC/cluster (home_env: dev runs in blokport-dev,
 #     prod in blokport-prod),
 #   * is HARD-WIRED to a single target env (BLOKPORT_ENV = target_env, no runtime
@@ -226,68 +229,4 @@ resource "aws_ecs_task_definition" "this" {
       }
     }
   }])
-}
-
-# --- EventBridge Scheduler -> RunTask ----------------------------------------
-data "aws_iam_policy_document" "scheduler_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["scheduler.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_role" "scheduler" {
-  name               = "${local.name}-scheduler"
-  assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
-}
-
-data "aws_iam_policy_document" "scheduler" {
-  statement {
-    sid       = "RunTask"
-    actions   = ["ecs:RunTask"]
-    resources = ["${aws_ecs_task_definition.this.arn_without_revision}:*", aws_ecs_task_definition.this.arn]
-  }
-  statement {
-    sid       = "PassRoles"
-    actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.execution.arn, aws_iam_role.task.arn]
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PassedToService"
-      values   = ["ecs-tasks.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_role_policy" "scheduler" {
-  name   = "${local.name}-scheduler"
-  role   = aws_iam_role.scheduler.id
-  policy = data.aws_iam_policy_document.scheduler.json
-}
-
-resource "aws_scheduler_schedule" "this" {
-  name  = "${local.name}-schedule"
-  state = var.schedule_enabled ? "ENABLED" : "DISABLED"
-  flexible_time_window {
-    mode = "OFF"
-  }
-  schedule_expression          = var.schedule_expression
-  schedule_expression_timezone = "UTC"
-
-  target {
-    arn      = data.aws_ecs_cluster.platform.arn
-    role_arn = aws_iam_role.scheduler.arn
-    ecs_parameters {
-      task_definition_arn = aws_ecs_task_definition.this.arn
-      launch_type         = "FARGATE"
-      network_configuration {
-        subnets          = data.aws_subnets.private.ids
-        security_groups  = [aws_security_group.this.id]
-        assign_public_ip = false
-      }
-    }
-  }
 }

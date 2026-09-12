@@ -52,22 +52,6 @@ variable "prod_gpu_image_tag" {
   description = "ECR tag the PROD GPU Batch enhancer runs. Promote the dev-proven :gpu-<sha> here."
 }
 
-# --- Schedules (per env; both start disabled - enable when proven) ------------
-variable "dev_schedule_enabled" {
-  type    = bool
-  default = false
-}
-
-variable "prod_schedule_enabled" {
-  type    = bool
-  default = false
-}
-
-variable "schedule_expression" {
-  type    = string
-  default = "cron(0 3 * * ? *)" # daily 03:00 UTC
-}
-
 # --- Sizing ------------------------------------------------------------------
 variable "cpu" {
   type    = number
