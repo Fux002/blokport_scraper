@@ -18,6 +18,7 @@ import sqlite3
 import tarfile
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, S3_REGION
@@ -28,6 +29,10 @@ log = logfmt.get_logger("ledger.snapshot")
 
 # Snapshot cadence (seconds). A crash loses at most this window of acks, which re-sync harmlessly.
 _SNAPSHOT_INTERVAL = int(env.getenv("BLOKPORT_LEDGER_SNAPSHOT_SECONDS", "300"))
+# How long the config container waits for the sync server (the ledger's ONE restorer) to put the ledger in
+# place before failing loud. A cold restore takes seconds; minutes means the sync container did not come up.
+_LEDGER_AWAIT_SECONDS = int(env.getenv("BLOKPORT_LEDGER_AWAIT_SECONDS", "120"))
+_LEDGER_AWAIT_POLL_SECONDS = 0.5
 
 
 def _s3():
@@ -128,11 +133,12 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
         log.exception("snapshot presence check failed (non-fatal); starting fresh",
                       extra={"extra_fields": {"key": key}})
         return False
-    tmp = ledger_path.with_suffix(f".restore.{os.getpid()}.tmp")   # pid-unique: both containers may boot together
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f"{ledger_path.name}.restore.", dir=ledger_path.parent)
+    os.close(fd)
     try:
-        ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        _s3().download_file(S3_BUCKET, key, str(tmp))
-        os.replace(tmp, ledger_path)       # atomic rename into place (last writer wins, same content)
+        _s3().download_file(S3_BUCKET, key, tmp)
+        os.replace(tmp, ledger_path)       # atomic rename: the file only ever appears complete
         log.info("restored from snapshot", extra={"extra_fields": {"key": key}})
         return True
     except Exception as exc:
@@ -143,6 +149,20 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
             raise
         log.exception("snapshot restore failed (non-fatal); starting fresh")
         return False
+
+
+def await_file(path: str | Path, timeout: float = _LEDGER_AWAIT_SECONDS,
+               poll: float = _LEDGER_AWAIT_POLL_SECONDS) -> None:
+    """Block until `path` exists. The ledger has ONE restorer, the sync server (restore or bootstrap, each an
+    atomic rename), so the config container waits for the file instead of racing a second download over a
+    ledger that may already be serving. Raises TimeoutError (a non-zero boot; ECS restarts the task)."""
+    path = Path(path)
+    deadline = time.monotonic() + timeout
+    while not path.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"{path} not present after {timeout:g}s: the sync server restores or "
+                               "bootstraps the ledger; start it first")
+        time.sleep(poll)
 
 
 def save_config(config_path: str | Path, env: str = ENV_NAME) -> bool:

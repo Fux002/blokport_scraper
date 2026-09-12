@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 from stone_pipeline.core import env
 import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -157,17 +158,22 @@ def bootstrap_ledger_if_missing(path) -> None:
     """Create (and best-effort seed) the ledger when it does not exist, so the sync server is
     self-sufficient on a fresh host (e.g. ECS on a new EFS volume) instead of refusing to start.
     Seeds the id foundation when the exports are present; otherwise leaves an empty ledger that the
-    first produce populates. Idempotent: a no-op once the ledger exists."""
+    first produce populates. Idempotent: a no-op once the ledger exists. Built beside the path and
+    renamed into place: the config container awaits the path, so it must only ever appear complete."""
     if path.exists():
         return
     log.info("no ledger yet; bootstrapping", extra={"extra_fields": {"ledger": str(path)}})
     path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.bootstrap.tmp")
+    tmp.unlink(missing_ok=True)   # a bootstrap the previous task died in
     try:
-        with writethrough.open_ledger():   # create schema + seed; __exit__ commits
+        with writethrough.open_ledger(tmp):   # create schema + seed; __exit__ commits
             pass
     except Exception:
         log.exception("ledger seed skipped; starting empty (a produce will populate it)")
-        Ledger.open(path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()).close()   # ensure the file exists to serve
+        tmp.unlink(missing_ok=True)
+        Ledger.open(tmp, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()).close()
+    os.replace(tmp, path)
 
 
 def shutdown(path, periodic) -> None:
