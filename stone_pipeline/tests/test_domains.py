@@ -250,9 +250,9 @@ def test_texture_colour_classification_is_pack_gated(monkeypatch):
 
 _TOY_APPAREL_PACK = """
 name: apparel
-attributes: [material, color, size]
-disambiguator: material
-leaf_attributes: [color, size]
+attributes: [type, color, finish]
+disambiguator: type
+leaf_attributes: [color, finish]
 categories:
   - {name: shirt, plural: shirts, label: Shirts, backbone_filename: backbone_shirts.json,
      base_image: "", shares_variety_vocab: true, fan_out: true, mirror_of: null, volume_per_kg: "", pcat_env_var: null, default_form: true}
@@ -280,15 +280,17 @@ finish_phrase_default: "a standard finish"
 
 
 def test_a_completely_different_product_pack_loads(tmp_path, monkeypatch):
-    # proof of agnosticism: a NON-stone product type (apparel: material/color/size, shirts/pants) loads
-    # through the SAME pack mechanism with no stone assumptions -- this is what "spin it up for a different
-    # product type" means (select it with BLOKPORT_DOMAIN_PACK at startup).
+    # proof of agnosticism: a NON-stone product type (apparel: shirts/pants) loads through the SAME pack
+    # mechanism with no stone assumptions -- its category model, vocabulary and density are its own. What a
+    # pack CANNOT change is the attribute set and the identity attribute: the row schema carries fields for
+    # exactly type/color/finish/quality and the Key builder implements type by name (F-5; a new attribute set
+    # is a row-schema change, refused loudly by the loader: test_pack_identity_contract).
     monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
     (tmp_path / "apparel.yaml").write_text(_TOY_APPAREL_PACK, encoding="utf-8")
     p = domain.load_pack("apparel")
-    assert p.attributes == ("material", "color", "size")      # a different attribute set
-    assert p.disambiguator == "material"
-    assert p.leaf_attributes == ("color", "size")
+    assert p.attributes == ("type", "color", "finish")        # a subset of the row's attributes, its order
+    assert p.disambiguator == "type"
+    assert p.leaf_attributes == ("color", "finish")
     assert [c["name"] for c in p.categories] == ["shirt", "pants"]   # a different category model
     assert "crystal" not in p.ambiguous_type_words             # no stone vocabulary leaked in
     assert p.default_density == 300.0                          # material density is a pack field, not hardcoded 2700

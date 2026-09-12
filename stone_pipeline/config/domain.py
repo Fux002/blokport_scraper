@@ -103,6 +103,14 @@ def _pack_path(name: str) -> Path:
     return _DOMAINS_DIR / f"{name}.yaml"
 
 
+# The attributes the ROW SCHEMA carries (CanonicalRow has <attribute>_name / <attribute>_id for exactly
+# these) and the identity attribute the Key builder, reconcile and curate implement by name. A pack may use a
+# subset, in any order, but cannot declare an attribute the row has no field for, nor another identity
+# attribute: that is a row-schema change, not a pack change, and the loader says so instead of accepting a
+# declaration the pipeline would silently ignore. A test ties this list to the row model.
+ROW_ATTRIBUTES = ("type", "color", "finish", "quality")
+IDENTITY_ATTRIBUTE = "type"
+
 # the keys each category dict must carry (settings.py reads these to build a Category); the rest are optional.
 _VOCABULARY_LISTS = ("inventory_prefixes", "trailing_render_tags", "join_noise_words", "in_stock_words",
                      "out_of_stock_words")
@@ -198,6 +206,16 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         mo = cat.get("mirror_of")
         if mo is not None and mo not in cat_names:
             bad(f"category {cat['name']!r} mirror_of {mo!r} is not a declared category {sorted(cat_names)}")
+    # V7 (F-5): the attributes must be ones the ROW SCHEMA carries, and the identity attribute must be the
+    # one the pipeline implements by name. A declaration outside that is a row-schema change, refused here
+    # instead of being silently ignored downstream.
+    unknown = [a for a in data["attributes"] if a not in ROW_ATTRIBUTES]
+    if unknown:
+        bad(f"attributes {unknown} are not in the row schema {list(ROW_ATTRIBUTES)}: CanonicalRow carries "
+            f"<attribute>_name/_id fields for exactly those, so a new attribute is a row-schema change")
+    if data["disambiguator"] != IDENTITY_ATTRIBUTE:
+        bad(f"disambiguator must be {IDENTITY_ATTRIBUTE!r} (the identity attribute the Key builder, reconcile "
+            f"and curate implement by name), got {data['disambiguator']!r}")
 
 
 def load_pack(name: str | None = None) -> DomainPack:

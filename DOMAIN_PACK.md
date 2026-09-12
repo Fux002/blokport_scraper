@@ -10,7 +10,7 @@ loud at load (`_validate_shape`), and read by every stage.
 
 Vocabulary and defaults (see `config/domains/stone.yaml` for the canonical, fully-commented example):
 
-- `attributes` / `disambiguator` / `leaf_attributes` - the Medusa attribute set, the identity
+- `attributes` / `disambiguator` / `leaf_attributes` - the Medusa attribute set (a subset of the row schema's `type`, `color`, `finish`, `quality`: `CanonicalRow` carries fields for exactly those, so a NEW attribute is a row-schema change, refused by the loader), the identity (must be `type`: the Key builder, reconcile and curate implement it by name)
   attribute that drives the Key, and the leaf-growing attributes.
 - `categories` - the category model (one FORM of the product). Each carries behavioural role flags:
   - `default_form: true` (exactly one) - the branch a row falls back to when its format is
