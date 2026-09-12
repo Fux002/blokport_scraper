@@ -36,5 +36,5 @@ platform_state_bucket = "blokport-tfstate" # NOT a per-brand bucket: the PLATFOR
 # .../wudport/prod/. A "wudport-tfstate" bucket does not exist, so the platform_prod remote-state read
 # would fail at plan time. This is only about where the PLATFORM's state is read from; this stack's
 # OWN state still goes wherever brands/wudport.backend.hcl says.
-region                = "eu-west-1"
-alert_email           = ""
+region      = "eu-west-1"
+alert_email = ""

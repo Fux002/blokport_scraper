@@ -41,3 +41,19 @@ jobs:
           python-version: "3.11"
       - name: Compile on the declared floor
         run: python -m compileall -q stone_pipeline scrapers deploy
+
+  terraform:
+    # The infra is code too: formatting drift and a configuration that no longer validates (a removed
+    # variable still referenced, a bad attribute) must fail here, not at the next apply.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_wrapper: false
+      - name: Format check
+        run: terraform -chdir=infra fmt -check -recursive
+      - name: Validate (no backend, no state)
+        run: |
+          terraform -chdir=infra init -backend=false -input=false
+          terraform -chdir=infra validate -no-color

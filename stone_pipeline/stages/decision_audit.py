@@ -60,21 +60,22 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
                              "Reject not applied: the spelling still has a pending card."))
 
     for (source, spelling), (target, target_type) in scoped.items():
-        listings = [r for r in rows if _norm(r.src_site) == source and _norm(r.variety_match_key or r.raw_name) == spelling]
+        listings = by_listing.get((source, spelling), [])
         if not listings:
             continue                                                  # no listing this produce: nothing to judge
         ttype = _norm(target_type) or _norm(listings[0].type_name)
         if (_norm(target), ttype) in created:
             continue                                                  # minted this run; binds on the next produce
-        bound = {(_norm(r.variation_name), _norm(r.type_name)) for r in listings}
-        if bound != {(_norm(target), ttype)} and not all(_norm(r.variation_name) == _norm(target) for r in listings):
+        if any(_norm(r.variation_name) != _norm(target) for r in listings):
             observed = ", ".join(sorted({r.variation_name or r.variation_method or "unbound" for r in listings}))
             gaps.append(_gap("alias", source, spelling, target, target_type or "", "",
                              f"Alias not applied: {len(listings)} listing(s) resolved to {observed}, not '{target}'."))
 
+    by_product: dict[tuple[str, str, str], list[CanonicalRow]] = {}
+    for r in rows:
+        by_product.setdefault((_norm(r.src_site), _norm(r.variation_name), _norm(r.type_name)), []).append(r)
     for (source, variety, stone_type), iso in origins.items():
-        products = [r for r in rows if _norm(r.src_site) == source
-                    and _norm(r.variation_name) == variety and _norm(r.type_name) == stone_type]
+        products = by_product.get((source, variety, stone_type), [])
         if not products or (variety, stone_type) in created:
             continue
         off = [r for r in products if (r.origin_country_code or "") != iso or r.origin_source != OPERATOR_ORIGIN_RUNG]

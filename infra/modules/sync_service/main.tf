@@ -123,7 +123,7 @@ data "aws_iam_policy_document" "task" {
   dynamic "statement" {
     for_each = var.enable_execute_command ? [1] : []
     content {
-      sid     = "EcsExecChannel"
+      sid = "EcsExecChannel"
       actions = [
         "ssmmessages:CreateControlChannel",
         "ssmmessages:CreateDataChannel",
@@ -184,7 +184,7 @@ locals {
   ledger_mount = [{ sourceVolume = "ledger", containerPath = "/ledger", readOnly = false }]
   log_options = {
     "awslogs-group"         = aws_cloudwatch_log_group.this.name
-    "awslogs-region"        = data.aws_region.current.name
+    "awslogs-region"        = data.aws_region.current.region
     "awslogs-stream-prefix" = "svc"
   }
 }

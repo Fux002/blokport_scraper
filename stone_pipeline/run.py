@@ -101,7 +101,6 @@ def _read_marker(products: Path) -> Optional[dict]:
     folder), the parsed dict otherwise. A marker that is present but unreadable ABORTS: it is the one record
     of whether the scrape was complete and how many detail fetches failed, and reading garbage as "complete,
     no failures" is exactly the state that delists real products."""
-    import json
     marker = products.parent / "scrape_complete.json"
     if not marker.exists():
         return None
@@ -299,7 +298,8 @@ def run_source(
     # HERE. Proceeding would feed the discontinuation lane and stock-0 every product the scrape
     # failed to fetch. The per-source floor is >=1 (so 0 rows always fails) and is the catastrophic
     # threshold, NOT a tight bound on normal supplier inventory variation.
-    _floor = max(1, load_source(source).min_expected_rows)
+    source_cfg = load_source(source)   # once: the floor here, the vendor origin at Stage 4, the write-through
+    _floor = max(1, source_cfg.min_expected_rows)
     if frame.height < _floor:
         run_log.error("scrape below floor -- failed/empty scrape; aborting (NO delist)",
                       extra={"extra_fields": {"rows": frame.height, "min_expected": _floor}})
@@ -377,7 +377,6 @@ def run_source(
     # Stage 4: variation (collects alias write-back for persistence at run end). The source config carries
     # the vendor's declared origin, the matcher's origin evidence when a listing states none.
     writeback = WriteBack()
-    source_cfg = load_source(source)
     _record(manifest, run_log, match_variation.run(rows, ref, writeback=writeback, writeback_path=writeback_path,
                                                    generic_descriptor=adapter.generic_descriptor,
                                                    source_cfg=source_cfg))
@@ -579,7 +578,6 @@ def run_source(
     if written:
         manifest.write_backs.append(f"alias_writeback:{written}")
     _write_diagnostics(manifest, layout)
-    report.write(layout.diagnostics / "health.json")
     # the per-source product checklist
     write_steps_md(layout, source=source, run_id=run_id, health=report.status,
                    counts=manifest.totals, gates=manifest.gate_status)
