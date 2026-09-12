@@ -339,7 +339,7 @@ def run_source(
     # it and would still "succeed" on the survivors. The ingest gate only sees rows that survived
     # adapt, so catch a large adapt-time loss here -- almost always a wiring bug, not real data.
     dropped = frame.height - len(rows)
-    if frame.height and dropped > 0.5 * frame.height:
+    if frame.height and dropped > SETTINGS.thresholds.adapt_drop_abort_fraction * frame.height:
         run_log.error("ingest: adapter dropped >50% of rows -- likely a mis-mapped required field; aborting",
                       extra={"extra_fields": {"rows_in": frame.height, "rows_out": len(rows), "dropped": dropped}})
         # health passed (else we aborted above), so health_status is OK/DEGRADED here -- a >50% adapt drop is
@@ -528,7 +528,7 @@ def run_source(
     # it loudly -- almost certainly an incomplete scrape, not a real bulk discontinuation.
     _src_prefix = f"{source_cfg.source_code}-".upper()
     _src_known = sum(1 for sku in known.by_sku if sku.startswith(_src_prefix)) if known else 0
-    if _src_known and len(discontinued) > 0.30 * _src_known:
+    if _src_known and len(discontinued) > SETTINGS.thresholds.delist_max_fraction * _src_known:
         run_log.warning("delist refused: a single run would discontinue too much of the catalog "
                         "(likely a partial scrape) -- keeping products listed",
                         extra={"extra_fields": {"would_delist": len(discontinued), "source_known": _src_known,

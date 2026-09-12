@@ -758,10 +758,8 @@ def load_country_codes(path: Path | None = None) -> dict[str, str]:
 
 
 def load_origin_map(path: Path | None = None) -> OriginMap:
-    # hand-maintained in catalog_source/; fall back to the reference stub only if it actually exists.
+    # hand-maintained in catalog_source/
     path = Path(path) if path else SETTINGS.paths.origin_map_csv
-    if not path.exists() and SETTINGS.paths.origin_map_csv_fallback.exists():
-        path = SETTINGS.paths.origin_map_csv_fallback
     origin = OriginMap()
     if not path.exists():
         # NOT silent: a missing map degrades EVERY origin to supplier-default/unresolved -- loud so it
@@ -1022,9 +1020,7 @@ def load_all() -> ReferenceData:
                 else (paths.ports_csv if IS_PRODUCTION else paths.ports_csv_fallback)
             ),
             "units": content_hash(paths.units_csv),
-            "origin_map": content_hash(
-                paths.origin_map_csv if paths.origin_map_csv.exists() else paths.origin_map_csv_fallback
-            ),
+            "origin_map": content_hash(paths.origin_map_csv),
         },
     )
     # The effective origin map = the curated CSV grown by operator-minted origins (variety_decision

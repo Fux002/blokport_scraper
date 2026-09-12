@@ -16,7 +16,7 @@ from typing import Optional
 
 from rapidfuzz import fuzz
 
-from stone_pipeline.config.settings import Confidence
+from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core.schema import Resolution
 from stone_pipeline.config import domain
 from stone_pipeline.matching import projections as proj
@@ -169,7 +169,6 @@ class VariationMatch:
 # the phonetic exact tier so a phonetic collision does not over-merge across dissimilar spellings. A pure
 # NAME-similarity threshold: independent of product domain and brand (a matcher tuning value, not a per-pack
 # or per-source setting), so it lives here with the engine, alongside the alias_resolver's _CHAR_* floors.
-_PHONETIC_CHAR_FLOOR = 85.0
 
 
 class VariationEngine:
@@ -373,7 +372,7 @@ class VariationEngine:
                 continue
             if _colour_conflict(query, cand.canonical):
                 continue
-            if proj.char_similarity(query, cand.canonical) >= _PHONETIC_CHAR_FLOOR:
+            if proj.char_similarity(query, cand.canonical) >= SETTINGS.thresholds.phonetic_char_floor:
                 guarded.append(cid)
         match = self._resolve_single(set(guarded), "phonetic", Confidence.medium,
                                      block_type, block_color, block_origin=block_origin)

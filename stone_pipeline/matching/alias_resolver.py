@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from rapidfuzz import distance
 
 from stone_pipeline.core import logfmt
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core.text import match_key
 
 log = logfmt.get_logger("alias_resolver")
@@ -36,8 +37,6 @@ log = logfmt.get_logger("alias_resolver")
 # De-spaced char similarity above which two names are the SAME variety (a typo/spelling variant); and above
 # which an uncertain near-match is REVIEWED rather than minted. A distinct sibling ('Cristallo Divine' vs
 # 'Cristallo Bianco') shares a prefix but stays below the alias floor, so it is never auto-merged.
-_CHAR_ALIAS_FLOOR = 0.94
-_CHAR_REVIEW_FLOOR = 0.88
 
 
 def _norm(s: str) -> str:
@@ -101,11 +100,11 @@ class AliasResolver:
                     only_generic = True
                 else:
                     meaningful_diff = True
-        if only_generic or best_char >= _CHAR_ALIAS_FLOOR:
+        if only_generic or best_char >= SETTINGS.curation.alias_char_floor:
             verdict = "alias"                       # generic-only difference, or a near-identical spelling
         elif meaningful_diff:
             verdict = "mint"                        # shares a core but a real word differs -> distinct variety
-        elif best_char >= _CHAR_REVIEW_FLOOR:
+        elif best_char >= SETTINGS.curation.alias_char_review_floor:
             verdict = "review"                      # an ambiguous near-match with no clear token signal
         else:
             verdict = "mint"                        # no name evidence -> a genuinely new variety
@@ -138,5 +137,5 @@ def from_backbones():
                 meta[proj.norm(v.variant)] = (v.stone_type, v.colors, v.aliases)
     log.info("alias resolver ready (deterministic name-identity)",
              extra={"extra_fields": {"varieties": len(meta),
-                                     "alias_floor": _CHAR_ALIAS_FLOOR, "review_floor": _CHAR_REVIEW_FLOOR}})
+                                     "alias_floor": SETTINGS.curation.alias_char_floor, "review_floor": SETTINGS.curation.alias_char_review_floor}})
     return AliasResolver(), meta

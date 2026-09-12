@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from rapidfuzz import fuzz
 
 from stone_pipeline.core import logfmt
-from stone_pipeline.config.settings import Confidence
+from stone_pipeline.config.settings import SETTINGS, Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.matching import projections as proj
@@ -229,7 +229,7 @@ def _reconcile_attribute(
 
     if snappable and allowed:
         nearest, score = _nearest_allowed(chosen, allowed)
-        if nearest and score >= 80:
+        if nearest and score >= SETTINGS.thresholds.leaf_snap_floor:
             stats.snapped += 1
             setattr(row, f"{vocab}_name", nearest)
             setattr(row, f"{vocab}_method", f"snapped({score:.0f})")
