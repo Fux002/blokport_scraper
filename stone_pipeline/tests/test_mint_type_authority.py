@@ -68,7 +68,7 @@ def test_load_existing_keys_same_name_different_type_separately(tmp_path, monkey
 def test_non_exact_match_aliases_onto_the_matched_type_never_the_same_name_other_type(monkeypatch):
     # A scrape fuzzy-matched to the GRANITE Arabescato (variation_key carries its type) must attach its
     # spelling to the Granite variety, never bleed onto the same-name Marble one.
-    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -103,7 +103,7 @@ def test_alias_type_pick_resolves_a_multitype_hold_instead_of_reholding(tmp_path
     # produce -- not re-hold forever (the Monalisa-stuck bug).
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))   # isolate: all other decisions empty
-    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -142,7 +142,7 @@ def test_typeless_scrape_holds_for_type_even_when_name_has_one_existing_type(tmp
             imp.by_name[curate.proj.norm(nm)] = v
         branches[b] = imp
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_existing", lambda b: branches[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: branches)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -173,7 +173,7 @@ def test_alias_family_surfaces_to_review_not_a_hidden_side_file(tmp_path, monkey
                 imp.by_name[curate.proj.norm(nm)] = v
         branches[b] = imp
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_existing", lambda b: branches[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: branches)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -193,7 +193,7 @@ def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(
     # A match that carries NO stable Key (keyless -- e.g. a forced override at a stale id, or an operator
     # alias-by-name) on a name that exists as SEVERAL stones must NOT silently attach to an arbitrary one.
     # _by_name_owner refuses the ambiguous name, so no alias is emitted on either variety (the caller HOLDs).
-    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -219,7 +219,7 @@ def test_operator_alias_decision_applies_uniformly_not_only_in_two_arms(tmp_path
     # honors the decision for every row: 'Monalisa' aliases onto its chosen-type target ('Arabescato' Granite).
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])   # Arabescato = marble + granite
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())   # Arabescato = marble + granite
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))              # no resolver -> no fuzzy arm
     monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {("", "monalisa"): "Arabescato"})
     monkeypatch.setattr(decisions, "load_alias_types", lambda: {("", "monalisa"): "Granite"})
@@ -242,7 +242,7 @@ def test_operator_alias_to_multitype_target_without_a_type_pick_holds_loudly(tmp
     # arbitrary stone and never mint. Proves the fix keeps the ambiguity guard, not just the happy path.
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_alias_decisions", lambda: {("", "monalisa"): "Arabescato"})
     monkeypatch.setattr(decisions, "load_alias_types", lambda: {})               # no type pick
@@ -283,7 +283,7 @@ def test_same_type_alias_prefers_exact_name_owner_over_an_alias_owner(monkeypatc
     # scuro', so a typed-onyx 'Verde Scuro' scrape would alias onto 'Verde Onyx Scuro' (which merely lists
     # 'Verde Scuro' as a spelling) instead of the variety literally named 'Verde Scuro'. Prefer the exact-
     # name owner.
-    monkeypatch.setattr(curate, "load_existing", lambda b: _verde_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _verde_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
@@ -320,7 +320,7 @@ def test_operator_mint_type_overrides_the_scraped_type(tmp_path, monkeypatch):
     # is Agate, never Crystal. (The bug: seed_type only filled a BLANK type, so the scrape's Crystal won.)
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_existing", lambda b: _empty_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _empty_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "lumiere"): "yes"})    # operator minted it
     monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "lumiere"): "Agate"})  # ...as Agate
@@ -338,7 +338,7 @@ def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_v
     # variety; it does NOT silently alias onto the Marble one (which is what happened when the scrape type won).
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "arabescato"): "yes"})
     monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "arabescato"): "Agate"})
@@ -358,7 +358,7 @@ def test_operator_confirmed_mint_mints_even_when_similar_to_an_existing_name(tmp
     # mint is honoured ONCE at the top (3c-bis), before any heuristic can override it.
     from stone_pipeline.stages import decisions
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    monkeypatch.setattr(curate, "load_existing", lambda b: _slab_imports()[b])   # existing 'Arabescato'
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())   # existing 'Arabescato'
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_alias_types", lambda: {})
     ref = loaders.load_all()

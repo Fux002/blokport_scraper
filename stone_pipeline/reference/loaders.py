@@ -17,6 +17,8 @@ against the live set at run start (the fingerprint check below).
 from __future__ import annotations
 
 import csv
+import hashlib
+import io
 import json
 import re
 from dataclasses import dataclass, field
@@ -282,11 +284,55 @@ def _delete_keys() -> set[str]:
             if (r.get("Key") or "").strip()}
 
 
+@dataclass
+class ExistingVariants:
+    """The existing-variety file read ONCE: one table per branch (split by Key prefix), the file it came
+    from and the content hash of the bytes actually read (the provenance the manifest records)."""
+    tables: dict[str, VariantTable]
+    source: Path
+    content_hash: str
+
+
+def _read_variant_records(path: Path) -> tuple[list[dict], str]:
+    """One read of the file: the parsed rows and the same digest content_hash() would give."""
+    data = path.read_bytes()
+    records = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline="")))
+    return records, hashlib.sha256(data).hexdigest()[:16]
+
+
+def load_existing_variants(path: Path, branches: list[str]) -> ExistingVariants:
+    """Every branch's variants table from ONE read of the combined file: a row goes to the table whose
+    branch is its Key's leading token. Retired/deleted/bare-code/dup-loser exclusion is computed once over
+    the whole file, so every branch applies the same survivor rule."""
+    path = Path(path)
+    if not path.exists():
+        log.warning(f"variants file absent: {path}")
+        return ExistingVariants({b: VariantTable(branch=b) for b in branches}, path, "absent")
+    records, sha = _read_variant_records(path)
+    tables = {b: VariantTable(branch=b) for b in branches}
+
+    def _table_for(key: str) -> VariantTable | None:
+        return tables.get(key.split("_", 1)[0].casefold())
+    _fill_tables(records, _table_for)
+    return ExistingVariants(tables, path, sha)
+
+
 def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> VariantTable:
-    """Load a variants table. key_prefix filters rows by their Key's leading token
-    (slab/block), so a single combined export can feed both branches: slab-keyed
-    rows go to the slab table, block-keyed rows to the block table."""
+    """One branch's variants table. key_prefix filters rows by their Key's leading token; None takes every
+    row (a single-branch file). load_all uses load_existing_variants (one read for every branch)."""
     table = VariantTable(branch=branch)
+    path = Path(path)
+    if not path.exists():
+        log.warning(f"variants file absent for branch {branch}: {path}")
+        return table
+    records, _ = _read_variant_records(path)
+    prefix = (key_prefix or "").casefold()
+    _fill_tables(records, lambda key: table if key.casefold().startswith(prefix) else None)
+    return table
+
+
+def _fill_tables(records: list[dict], table_for) -> None:
+    """Index each eligible record into the table `table_for(key)` picks (None = not this table)."""
     # CRITICAL: a RETIRED variety must not be a resolution target here either. The matcher stamps a
     # product's variation_key from THIS reference (built off the lagging Medusa export, which still lists a
     # retired-but-not-yet-deleted variety), and the catalog-side surface exclusion runs too late to undo
@@ -294,11 +340,6 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
     # re-linking onto a retiring Key (which would FK-fail the eventual ack-done). One durable source: config.db.
     from stone_pipeline.stages import decisions
     delete_keys = _delete_keys() | decisions.load_retired()
-    path = Path(path)
-    if not path.exists():
-        log.warning(f"variants file absent for branch {branch}: {path}")
-        return table
-    records = list(csv.DictReader(path.open(newline="", encoding="utf-8-sig")))
     # DEDUP the reference to survivors only: the live Medusa export can still list a re-key OLD SIDE that
     # is being deleted. If the matcher can stamp that Key onto a product, the product re-links onto a
     # variety emit will have collapsed away (an orphan / FK-fail on ack). Exclude every non-survivor of a
@@ -339,7 +380,8 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
         # the name here: a variety is matchable by its assigned type, never hidden on a name-vs-type guess.
         if looks_code_shaped(name) == "bare_code" or key in delete_keys:
             continue
-        if key_prefix and not key.casefold().startswith(key_prefix.casefold()):
+        table = table_for(key)
+        if table is None:
             continue
         aliases_raw = (record.get("Aliases") or "").strip()
         aliases = [a.strip() for a in aliases_raw.split("|") if a.strip()] if aliases_raw else []
@@ -350,7 +392,6 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
         # NOTE: surface_to_id is intentionally NOT populated here -- production matching builds its own
         # exact index in matching/index.py; this per-row normalize+insert over ~24k variants was pure
         # wasted work (the field stays for the test that clears it).
-    return table
 
 
 # --- backbone.json ------------------------------------------------------------
@@ -953,14 +994,13 @@ def load_all() -> ReferenceData:
         backbone.apply_leaf_overlay(decisions_store.backbone_leaf_overlay())
     # products link by Key, not id, so the matcher's candidate index may come from the Id-free base while the
     # live export is absent; the real Medusa id fills in on the pull.
-    matcher_export = existing_varieties_file()
+    # ONE combined export for every category, read ONCE and split by Key prefix into a per-category index,
+    # one per registry entry that shares the stone-variety vocabulary.
+    existing = load_existing_variants(existing_varieties_file(),
+                                      [c.name for c in CATEGORIES if c.shares_variety_vocab])
     ref = ReferenceData(
         attributes=load_attributes(),
-        # ONE combined export for every category; the category is the Key prefix, so
-        # the same file is split into a per-category index, one per registry entry
-        # that shares the stone-variety vocabulary.
-        variants={c.name: load_variants(matcher_export, c.name, key_prefix=c.name)
-                  for c in CATEGORIES if c.shares_variety_vocab},
+        variants=existing.tables,
         backbone=backbone,
         ports=load_ports(),
         units=load_units(),
@@ -971,7 +1011,9 @@ def load_all() -> ReferenceData:
         overrides=load_overrides(),
         versions={
             "attributes": content_hash(paths.attributes_csv),
-            "variants_export": content_hash(paths.export_file),
+            # the file the matcher ACTUALLY read (the live export, else the committed base) and its hash
+            "variants_source": existing.source.name,
+            "variants_export": existing.content_hash,
             "backbone": content_hash(paths.backbone_json),
             "ports": content_hash(
                 paths.ports_csv if paths.ports_csv.exists()

@@ -177,20 +177,20 @@ class ImportFile:
     by_name: dict[str, dict] = field(default_factory=dict)           # norm name -> variety (name-only lookup)
 
 
-def load_existing(branch: str) -> ImportFile:
-    """The EXISTING variants of one category, read from the same file the matcher's candidate index is built
-    from (`existing_varieties_file`: the live Medusa export, else the committed base) and indexed by
+def load_all_existing() -> dict[str, ImportFile]:
+    """The EXISTING variants of every category from ONE read of the file the matcher's candidate index is
+    built from (`existing_varieties_file`: the live Medusa export, else the committed base), each indexed by
     (normalized Name, normalized stone TYPE). Used to decide alias-vs-new and to dedup. Neither file is written
     by the pipeline, so the catalog is a pure function of (export + scrapes) -- re-running yields the identical
     output. A missing file raises: an empty existing index would mint every known variety again."""
     path = existing_varieties_file()
-    imp = ImportFile(branch=branch, path=path)
+    imports = {b: ImportFile(branch=b, path=path) for b in BRANCHES}
     with path.open(newline="", encoding="utf-8-sig") as handle:
         for r in csv.DictReader(handle):
             name = (r.get("Name") or "").strip()
             key = (r.get("Key") or "").strip()
-            # one combined export file; keep only this branch's rows (Key prefix)
-            if name and key.casefold().startswith(branch.casefold()):
+            imp = imports.get(key.split("_", 1)[0].casefold())     # one combined file; the branch is the Key prefix
+            if name and imp is not None:
                 v = {
                     "Key": key,
                     "Name": name,
@@ -202,7 +202,12 @@ def load_existing(branch: str) -> ImportFile:
                 imp.varieties.append(v)
                 imp.by_name_type[(proj.norm(name), v["type"])] = v
                 imp.by_name[proj.norm(name)] = v   # name-only lookup (a review suggestion has no type)
-    return imp
+    return imports
+
+
+def load_existing(branch: str) -> ImportFile:
+    """One branch's view of load_all_existing (single-branch callers)."""
+    return load_all_existing()[branch]
 
 
 def _alias_list(raw: str) -> list[str]:
@@ -292,7 +297,7 @@ def _decided(table, source: str, name: str, clean: str):
 
 
 def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
-    imports = {b: load_existing(b) for b in BRANCHES}
+    imports = load_all_existing()
     resolver, near_meta = _alias_model() if SETTINGS.curation.enable_alias_model else (None, {})
     # every known SURFACE (canonical name + each alias) of an existing variety -> the set of
     # canonical varieties that carry it. A scrape whose cleaned name is already a surface must
@@ -1218,7 +1223,7 @@ def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     # decision the pipeline ignores is visible on the FIRST produce after it, never a day later.
     from stone_pipeline.config import decisions_store
     from stone_pipeline.stages import decision_audit
-    existing = {owner for b in BRANCHES for owner in load_existing(b).by_name_type}
+    existing = {owner for imp in load_all_existing().values() for owner in imp.by_name_type}
     created = {(proj.norm(v["Name"]), proj.norm(type_slug_from_key(v["Key"]).replace("_", " ")))
                for lst in result.new_variants.values() for v in lst}
     pending_spellings = {proj.norm(p["scraped"]) for p in result.pending_confirm if p.get("scraped")}

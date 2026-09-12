@@ -50,7 +50,7 @@ def _card(res):
 
 
 def test_matcher_collision_holds_with_the_owners_it_named(monkeypatch):
-    monkeypatch.setattr(curate, "load_existing", lambda b: _imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
     res = curate.build_curation([_row("exact_collision", "Amazon Blue, Amazonia, Verde Ubatuba")], ref)
@@ -65,7 +65,7 @@ def test_matcher_collision_holds_with_the_owners_it_named(monkeypatch):
 def test_a_typed_gap_with_several_same_type_owners_and_no_canonical_also_holds(monkeypatch):
     # the pre-existing curate path (no matcher verdict): the cleaned surface is owned by three same-type
     # varieties, none named that -> the same card, not sorted(owners)[0]
-    monkeypatch.setattr(curate, "load_existing", lambda b: _imports()[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
     res = curate.build_curation([_row("no_candidate", None)], ref)
@@ -81,7 +81,7 @@ def test_a_single_same_type_owner_still_aliases(monkeypatch):
     imports["slab"].varieties[0]["Aliases"] = "Amazon Green"   # the full spelling is NEW -> an alias addition
     imports["slab"].by_name_type = {k: v for k, v in imports["slab"].by_name_type.items() if v["Name"] == "Amazon Blue"}
     imports["slab"].by_name = {k: v for k, v in imports["slab"].by_name.items() if v["Name"] == "Amazon Blue"}
-    monkeypatch.setattr(curate, "load_existing", lambda b: imports[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
     res = curate.build_curation([_row("no_candidate", None)], ref)

@@ -413,7 +413,7 @@ def _inject_existing(monkeypatch, *entries):
             imp.by_name_type[(proj.norm(name), proj.norm(typ))] = v
             imp.by_name[proj.norm(name)] = v
         return imp
-    monkeypatch.setattr(curate, "load_existing", load)
+    monkeypatch.setattr(curate, "load_all_existing", lambda: {b: load(b) for b in curate.BRANCHES})
 
 
 def _ocean_blue(raw_type):

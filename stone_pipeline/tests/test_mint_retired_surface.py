@@ -37,7 +37,7 @@ def _empty_imports() -> dict[str, ImportFile]:
 
 def _seed(monkeypatch, tmp_path, imports, retired_ref: set):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))     # isolate durable decisions
-    monkeypatch.setattr(curate, "load_existing", lambda b: imports[b])
+    monkeypatch.setattr(curate, "load_all_existing", lambda: imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "retired stone"): "Granite"})
     monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "retired stone"): "yes"})   # confirmed mint
