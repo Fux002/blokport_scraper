@@ -102,11 +102,17 @@ def write_confirm_file(pending: list[dict]) -> int:
     # ONE statement on the card is applied to each listing under ITS vendor (decisions are keyed by vendor +
     # spelling; a card shared by two vendors must never decide the second vendor's listings as the first's).
     # `spellings` is the flat display list of the same.
+    # one card per IDENTITY (name, type): the same name under two stone types is two varieties, so two
+    # cards, each carrying only its own listings (a statement on one must never re-type the other's vendor).
+    # The ref is `<norm name>|<norm type>` for a typed card and the bare name for a type-less one; the
+    # reject PUT keys the reject on the name part, so a card ref and a bare name both work there.
     by_ref: dict[str, dict] = {}
     for row in pending:
-        ref = _norm(row.get("variant", ""))
-        if not ref:
+        name = _norm(row.get("variant", ""))
+        if not name:
             continue
+        stone_type = _norm(row.get("stone_type", "") or "")
+        ref = f"{name}|{stone_type}" if stone_type else name
         card = by_ref.setdefault(ref, {"ref": ref, "payload": _payload(row), "sources": row.get("sources")})
         if row.get("scraped") and row.get("src"):
             listing = {"source": row["src"], "scraped": row["scraped"]}

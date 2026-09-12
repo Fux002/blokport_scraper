@@ -363,7 +363,9 @@ def _put_review_variant(params, body, query):
     # percent-encoded ('Alpine%20Luxe'), and norm keeps the literal '%20' ('alpine 20luxe'), so a raw
     # segment would store the decision under a key that never matches the pending ref and the UI reads
     # back current_action=null. unquote first, so ref == variant_norm holds by construction.
-    variant = unquote(params["variant"])
+    # a card ref is `<name>|<type>` for a typed card (stages.decisions.write_confirm_file); the reject is
+    # keyed on the NAME (a rejected spelling is rejected for every type), so both the ref and a bare name work
+    variant = unquote(params["variant"]).split("|")[0]
     if body.get("action", "") != "reject":
         return 400, {"error": "action must be 'reject'; anything else is a statement: PUT /review/decide"}
     try:
