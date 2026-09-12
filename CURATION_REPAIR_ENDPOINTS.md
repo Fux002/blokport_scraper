@@ -4,7 +4,7 @@ Three incremental, prod-safe repair endpoints that fix the last scraper-side sta
 required a full factory reset. All are **idempotent** and return a **scoped summary** of what they acted on.
 
 **Two planes** (matching the existing split): A and B are **config plane** (`/config/v1/*`, bearer
-`BLOKPORT_CONFIG_TOKEN`, via `configFetch`). C is **sync plane** (`/sync/v1/*`, bearer `BLOKPORT_SYNC_TOKEN`,
+`SCRAPER_CONFIG_TOKEN`, via `configFetch`). C is **sync plane** (`/sync/v1/*`, bearer `SCRAPER_SYNC_TOKEN`,
 via the scraper-sync module client) — it sits next to `requeue` and reads from the same `/sync/v1/failures`
 list, because it is the exact opposite of requeue on the same dead-letter object.
 
@@ -81,7 +81,7 @@ protection.
 
 ## C. Abandon a dead-letter — `POST /sync/v1/abandon` (SYNC plane)
 
-**Plane: sync** (`BLOKPORT_SYNC_TOKEN`, the scraper-sync module client — add an `abandon()` method to
+**Plane: sync** (`SCRAPER_SYNC_TOKEN`, the scraper-sync module client — add an `abandon()` method to
 `ScraperSyncClient` next to `requeue`). It is the **exact opposite of `requeue`** and keys off the **same
 `{type, external_id}`** a `GET /sync/v1/failures` row already carries — so a per-row "Abandon" button passes
 the row's identifier straight through. **Same object, same plane, no id threading needed.**

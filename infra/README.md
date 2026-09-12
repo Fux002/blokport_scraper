@@ -3,7 +3,7 @@
 **TWO deployments from one image** - a dedicated **dev** task (runs in the Medusa
 `blokport-dev` VPC/cluster, writes only the dev staging bucket) and a dedicated
 **prod** task (runs in `blokport-prod`, writes only the prod bucket). Each task is
-hard-wired to its environment (`BLOKPORT_ENV` fixed, no runtime toggle) and its IAM
+hard-wired to its environment (`SCRAPER_ENV` fixed, no runtime toggle) and its IAM
 role is **scoped to its own bucket only**, so the two environments cannot mix. The
 prod task is **count-gated**: it is created only once `prod_staging_bucket` is set.
 
@@ -24,7 +24,7 @@ infra/
 - **Per env** (`-development` / `-production` suffix), via `module.scraper_dev` and
   `module.scraper_prod`:
   - a Fargate **task definition** (`blokport-scraper-<env>`) running `deploy/run_pipeline.sh`,
-    with `BLOKPORT_ENV` fixed to that env;
+    with `SCRAPER_ENV` fixed to that env;
   - an **EventBridge Scheduler** cron (starts **disabled**);
   - IAM **task role scoped to that env's staging bucket ONLY** + an execution role;
   - a security group (egress only) in that env's VPC.

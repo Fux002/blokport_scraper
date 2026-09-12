@@ -37,7 +37,7 @@ that flow; do not start until it proves out.
 ## 2. Architecture decisions (agree before building)
 
 - **Persist decision state on EFS.** Env-drive `state_dir` / `review_dir` / `backbone_additions` to
-  `/ledger/...` (same pattern as `BLOKPORT_LEDGER_PATH`). Single-host task -> the config server and the
+  `/ledger/...` (same pattern as `SCRAPER_LEDGER_PATH`). Single-host task -> the config server and the
   produce subprocess share the files safely; `decisions.py` already writes atomically.
 - **Expose the decision files through the config server API**, edited in the :4200 admin. The UI
   already talks to that server over internal DNS.
@@ -58,7 +58,7 @@ that flow; do not start until it proves out.
   (local disk + `snapshot.save/restore`), NOT EFS. This is now folded into the shared persistence fix in
   PART III / Phase 0, because config.db (pause/lifecycle) has the identical problem. Do that first.
 - Env-drive `SETTINGS.paths.state_dir`, `review_dir`, and `catalog_source/backbone_additions` to the
-  persistent `/ledger` root (e.g. `BLOKPORT_STATE_ROOT=/ledger`), defaulting to the repo root on a laptop.
+  persistent `/ledger` root (e.g. `SCRAPER_STATE_ROOT=/ledger`), defaulting to the repo root on a laptop.
 - Create the dirs on boot (config + produce both).
 - Verify: write a decision, restart the task, decision still there.
 - Note: the produce reads decisions ONCE at curate start; an edit made during a run applies to the
@@ -244,7 +244,7 @@ no lifecycle op fragments the review logic (see [[source-isolation-invariant]]).
 
 Confirmed finding (cited to code, 2026-07-05):
 - `config.db` resolves to `SETTINGS.paths.workspace_root / "config.db"` = **`/app/config.db`** on ECS
-  (`config/store.py:51-54`, `config/settings.py:24-25`); `BLOKPORT_CONFIG_DB` is NOT set in infra.
+  (`config/store.py:51-54`, `config/settings.py:24-25`); `SCRAPER_CONFIG_DB` is NOT set in infra.
 - `state_dir` / `review_dir` / `catalog_source/backbone_additions` also resolve under **`/app`**
   (`config/settings.py`), the ephemeral image filesystem.
 - `snapshot.py` snapshots ONLY the ledger; `config.server.serve()` merely `seed_from_yaml()` if config.db
@@ -261,7 +261,7 @@ rejects/aliases). So today:
 
 The fix (one mechanism, serves both features):
 - Point config.db and the decision/review/backbone dirs at the persistent `/ledger` volume
-  (`BLOKPORT_CONFIG_DB=/ledger/config.db`, `BLOKPORT_STATE_ROOT=/ledger`).
+  (`SCRAPER_CONFIG_DB=/ledger/config.db`, `SCRAPER_STATE_ROOT=/ledger`).
 - Extend the existing snapshot lane to include them: `snapshot.save/restore` already take a path arg and
   `start_periodic` already runs a snapshot thread the sync server owns — add config.db and the decision
   dir to the same save/restore/periodic set (S3 keys `{env}/scraper/config/...`, `.../review/...`). No

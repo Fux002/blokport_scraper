@@ -84,7 +84,7 @@ For each brand X (wood→Wudport, lime→Calcport):
 
 **D. Infra (its own root stack)**
 8. Stand up the brand platform stack → publishes `<brand>/prod/terraform.tfstate` + creates
-   `<brand>-prod-staging` + `/<brand>-prod/{BLOKPORT_SYNC_TOKEN,BLOKPORT_CONFIG_TOKEN}`.
+   `<brand>-prod-staging` + `/<brand>-prod/{SCRAPER_SYNC_TOKEN,SCRAPER_CONFIG_TOKEN}`.
 9. Create `/<brand>-prod/{FAL_KEY,BLOKPORT_SCRAPER_PROXY}`.
 10. Instantiate `scraper` + `sync_service` + `gpu_enhance` for the brand-prod with
     `brand=<brand>`, `domain_pack=<pack>`, `sales_channel_id=<its channel>`,
@@ -96,7 +96,7 @@ For each brand X (wood→Wudport, lime→Calcport):
     `SCRAPER_BRAND=<brand>`, `SCRAPER_DOMAIN_PACK=<pack>`, `SCRAPER_SALES_CHANNEL_ID=<channel>`, `FAL_KEY`.
 13. `python -m stone_pipeline.config.store seed`; bootstrap the ledger from `from_medusa/production/*`;
     `python -m stone_pipeline.reference.seed verify` → `fixed_point: True`.
-14. Dry-run produce (`BLOKPORT_S3_DRY_RUN=true`) → inspect → real produce → verify company/channel/categories/
+14. Dry-run produce (`SCRAPER_S3_DRY_RUN=true`) → inspect → real produce → verify company/channel/categories/
     density/images → pull round-trip mints ids.
 
 ## Blokport (stone) prod

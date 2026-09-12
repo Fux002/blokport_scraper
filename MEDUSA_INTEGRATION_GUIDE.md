@@ -33,7 +33,7 @@ idempotent, and convergent**.
 
 - **Per environment.** Dev and prod are fully separate (ledger, ids, base URL, token).
 - **Transport.** Inbound HTTPS to the scraper sync service. JSON in, JSON out.
-- **Auth.** Bearer token per env: `Authorization: Bearer <token>` (`BLOKPORT_SYNC_TOKEN`,
+- **Auth.** Bearer token per env: `Authorization: Bearer <token>` (`SCRAPER_SYNC_TOKEN`,
   from SSM). Missing or wrong -> `401`.
 - **Versioned routes.** Everything is under `/sync/v1/` so the two systems can evolve
   behind a boundary:

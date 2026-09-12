@@ -22,7 +22,7 @@ python -m stone_pipeline.build --verify   # re-run ONLY the consistency gate on 
 # then follow to_upload/<env>/SYNC_STEPS.md to upload
 
 # <env> is development by default. For the production set, prefix the command:
-#   BLOKPORT_ENV=production python -m stone_pipeline.build
+#   SCRAPER_ENV=production python -m stone_pipeline.build
 # The scrape (data/) is shared across envs, so the second env just re-runs build.
 ```
 
@@ -42,14 +42,14 @@ eyeball it. The stages still exist individually for debugging (`run all`, `catal
 SHARED across environments (the "core"):
   data/              <- the raw scrape (env-independent)
   catalog_source/    <- the data you MAINTAIN by hand (backbones; names, not Medusa ids)
-PER ENVIRONMENT — development/ and production/, selected by BLOKPORT_ENV
+PER ENVIRONMENT — development/ and production/, selected by SCRAPER_ENV
 (the Medusa pcat / attribute / variation ids differ per env, so each has its own set):
   from_medusa/<env>/ <- SAVE that env's Medusa downloads here (variants_export, attributes); READ-only
   to_upload/<env>/   <- PRODUCED by the pipeline; UPLOAD these to that env's Medusa (numbered order)
   review/<env>/      <- look before uploading; never uploaded
 ```
 You scrape ONCE (shared), then build the catalog/combinations per env:
-`BLOKPORT_ENV=development` (default) and `BLOKPORT_ENV=production` each read/write their own
+`SCRAPER_ENV=development` (default) and `SCRAPER_ENV=production` each read/write their own
 `from_medusa/<env>/` + `to_upload/<env>/`. Everything below shows paths relative to one `<env>/`.
 
 ### `to_upload/`  — everything you push to Medusa, in number order
@@ -177,18 +177,18 @@ consistent — you do not have to verify it by hand.
 
 ## Production (development -> production)
 
-The whole pipeline runs in two environments selected by `BLOKPORT_ENV` (`development` default, or
+The whole pipeline runs in two environments selected by `SCRAPER_ENV` (`development` default, or
 `production`). Everything env-specific derives from it, so promotion is a CONFIG change, never code.
 For a production run set these (a prod run FAILS FAST if the required ones are missing, so it can
 never emit unowned products or write into the dev bucket):
 
 ```
-BLOKPORT_ENV=production
-BLOKPORT_S3_BUCKET=<prod staging bucket>        # required — no dev fallback
-BLOKPORT_SALES_CHANNEL_ID=<prod sales channel>  # required — products would be channel-less otherwise
-BLOKPORT_COMPANY_ID=<prod company>              # required — products would be unowned otherwise
-BLOKPORT_IMAGE_MODE=s3                           # stage images to S3 (see below)
-BLOKPORT_S3_DRY_RUN=false                        # actually upload images
+SCRAPER_ENV=production
+SCRAPER_S3_BUCKET=<prod staging bucket>        # required — no dev fallback
+SCRAPER_SALES_CHANNEL_ID=<prod sales channel>  # required — products would be channel-less otherwise
+SCRAPER_COMPANY_ID=<prod company>              # required — products would be unowned otherwise
+SCRAPER_IMAGE_MODE=s3                           # stage images to S3 (see below)
+SCRAPER_S3_DRY_RUN=false                        # actually upload images
 ```
 
 Dev and prod keep SEPARATE `from_medusa/<env>/` and `to_upload/<env>/` (Medusa ids differ per env);
@@ -198,7 +198,7 @@ Dev and prod keep SEPARATE `from_medusa/<env>/` and `to_upload/<env>/` (Medusa i
 
 Image links in the upload files are ALWAYS S3 staging-bucket URLs, never raw supplier URLs, for both
 dev and prod. Scraping does NOT stage images — it only records the supplier URLs. The image stage
-(`BLOKPORT_IMAGE_MODE=s3`) downloads each source image, de-watermarks/upscales it, uploads it to
+(`SCRAPER_IMAGE_MODE=s3`) downloads each source image, de-watermarks/upscales it, uploads it to
 `<env>/products/improved/<source>/`, and records the source->improved mapping in
 `<env>/products/_manifest.json`. A `build` maps product images through that manifest; an image the
 imageproc hasn't processed yet is DROPPED (left blank), never defaulted to its scrape URL. So a

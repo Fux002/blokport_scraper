@@ -2,7 +2,7 @@
 
 Pairs with `IMAGE_DISCARD_CONTRACT.md` (the consumer side, already live). That doc pins the flag Stage 7
 must emit; this documents how the image pipeline PRODUCES it. Nothing here changes the consumer side.
-Off by default: `BLOKPORT_IMAGE_CLASSIFY=false` until the margin is validated on a real sample (see below).
+Off by default: `SCRAPER_IMAGE_CLASSIFY=false` until the margin is validated on a real sample (see below).
 No em dashes anywhere (design principle 2).
 
 ## Architecture
@@ -69,7 +69,7 @@ The margin cannot be guessed. Run `deploy/calibrate_classifier.py` (SRC=<source>
 imageproc/gpu image: it samples real `scraped/` images, prints `P(non-stone)` + reason sorted by
 borderline-ness, and shows how many would be discarded at the current margin. Set `classify_margin` so the
 split cleanly separates spec sheets / logos from slabs (including slabs-with-sizes, which must stay LOW).
-Only then flip `BLOKPORT_IMAGE_CLASSIFY=true`.
+Only then flip `SCRAPER_IMAGE_CLASSIFY=true`.
 
 ## Invariants
 Deterministic + idempotent (same discard set -> same emit; re-run byte-identical). Provenance on every

@@ -3,8 +3,8 @@
 The pipeline runs on SQLite today (the task's local disk, snapshotted to S3). The design keeps the SQL
 portable so the substrate is one swap. This document is the verified map: exactly what is SQLite-specific,
 what is already portable, and the recipe to add Postgres. The dialect is a single config knob
-(`BLOKPORT_DB_DIALECT`, default `sqlite`) in `stone_pipeline/core/dbdialect.py`; `require_sqlite()` fails
-loud at each connect until Postgres is wired, so a premature `BLOKPORT_DB_DIALECT=postgres` gives a clear
+(`SCRAPER_DB_DIALECT`, default `sqlite`) in `stone_pipeline/core/dbdialect.py`; `require_sqlite()` fails
+loud at each connect until Postgres is wired, so a premature `SCRAPER_DB_DIALECT=postgres` gives a clear
 error, not a cryptic driver failure.
 
 ## What is SQLite-specific (the whole surface, verified)
@@ -40,7 +40,7 @@ Everything else is portable.
 
 1. Add the driver: `psycopg[binary]` to `stone_pipeline/requirements.txt`.
 2. In `core/dbdialect.py`, add a `postgres` branch and a `connect(dsn)` factory (DSN from
-   `BLOKPORT_DB_DSN`); replace the `require_sqlite()` guards in the two `_connect`s with a dialect switch.
+   `SCRAPER_DB_DSN`); replace the `require_sqlite()` guards in the two `_connect`s with a dialect switch.
 3. Gate the PRAGMAs: apply them only for `sqlite`. Postgres needs none of them
    (`foreign_keys` are always on; WAL/`synchronous`/`busy_timeout` are SQLite-only; MVCC handles the
    reader/writer concurrency WAL was giving us).

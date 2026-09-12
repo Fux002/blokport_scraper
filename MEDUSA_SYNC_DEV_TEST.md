@@ -31,15 +31,15 @@ Recommendation: **A now to prove the loop, B to make it permanent.**
 ## Precondition checklist
 
 ### Scraper side (mine)
-- [ ] Populate the dev ledger with the real catalog: `BLOKPORT_LEDGER_WRITETHROUGH=1`
+- [ ] Populate the dev ledger with the real catalog: `SCRAPER_LEDGER_WRITETHROUGH=1`
       run so `ledger/development.db` holds products + combinations + inventory (today it
       has only the id foundation: 24,749 variations, 115 attributes, 0 products).
-- [ ] Start `stone_pipeline.ledger.server` (needs `BLOKPORT_SYNC_TOKEN`) against it.
+- [ ] Start `stone_pipeline.ledger.server` (needs `SCRAPER_SYNC_TOKEN`) against it.
 - [ ] Expose it (A or B) and hand over the URL.
 
 ### Dev backend side (theirs)
-- [ ] `SCRAPER_SYNC_ENABLED=true`, `SCRAPER_SYNC_URL=<the URL>/sync/v1`, `BLOKPORT_SYNC_TOKEN`.
-- [ ] `SCRAPER_CONFIG_URL=<config URL>/config/v1`, `BLOKPORT_CONFIG_TOKEN` (for the :4200 admin).
+- [ ] `SCRAPER_SYNC_ENABLED=true`, `SCRAPER_SYNC_URL=<the URL>/sync/v1`, `SCRAPER_SYNC_TOKEN`.
+- [ ] `SCRAPER_CONFIG_URL=<config URL>/config/v1`, `SCRAPER_CONFIG_TOKEN` (for the :4200 admin).
 - [ ] Seed the vendors + ports below (attributes already resolve, see the manifest note).
 - [ ] Read access to the product images for ingestion (see "Images" below).
 
@@ -53,12 +53,12 @@ making that prefix public-read. Product data (sizes, attributes, vendors) does N
 only image ingestion does, so it need not block the first size-correction dry-run.
 
 ### Secrets
-Both `BLOKPORT_SYNC_TOKEN` and `BLOKPORT_CONFIG_TOKEN` are shared secrets: generate once,
+Both `SCRAPER_SYNC_TOKEN` and `SCRAPER_CONFIG_TOKEN` are shared secrets: generate once,
 store as dev SSM SecureStrings, reference from BOTH the scraper server and the dev backend.
 ```
 python -c "import secrets; print(secrets.token_urlsafe(32))"   # generate each
-aws ssm put-parameter --name /blokport-dev/BLOKPORT_SYNC_TOKEN   --type SecureString --value '<token>'
-aws ssm put-parameter --name /blokport-dev/BLOKPORT_CONFIG_TOKEN --type SecureString --value '<token>'
+aws ssm put-parameter --name /blokport-dev/SCRAPER_SYNC_TOKEN   --type SecureString --value '<token>'
+aws ssm put-parameter --name /blokport-dev/SCRAPER_CONFIG_TOKEN --type SecureString --value '<token>'
 ```
 The token must be byte-identical on both sides or every pull returns 401.
 

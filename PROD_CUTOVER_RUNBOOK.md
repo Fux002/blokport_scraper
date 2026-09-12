@@ -35,7 +35,7 @@ fresh and mints its own. The base is Id-free; owner ids + attributes come from p
 |---|---|---|
 | Prod platform state | publishes to `blokport/prod/terraform.tfstate` (bucket `blokport-tfstate`) with `vpc_id`, `private_subnet_ids`, `ecs_cluster_arn`, `service_sg_id`, `internal_namespace_id` (+ `ecs_cluster_name`). VPC tagged `blokport-prod-vpc`; private subnets tagged `Tier=private`. **Not applied yet.** | Blokport |
 | Prod staging bucket | **`blokport-prod-staging`** (deterministic; media = `blokport-prod-media`). Created by the **platform** `modules/s3` (same controls as dev). Do NOT create it on the scraper side. | Blokport |
-| `/blokport-prod/BLOKPORT_SYNC_TOKEN`, `/blokport-prod/BLOKPORT_CONFIG_TOKEN` | Created by the **platform apply**. | Blokport |
+| `/blokport-prod/SCRAPER_SYNC_TOKEN`, `/blokport-prod/SCRAPER_CONFIG_TOKEN` | Created by the **platform apply**. | Blokport |
 | `/blokport-prod/FAL_KEY`, `/blokport-prod/BLOKPORT_SCRAPER_PROXY` | **DONE 2026-08-24** — created as SecureStrings, **same values as dev** (FAL is one hosted-account key; same proxy). Wired via `fal_key_ssm_name` / `scraper_proxy_ssm_name`. | Scraper (us) |
 | Prod Medusa ids (`sales_channel_id`, pcat ids, per-source `company_id`s) | Do NOT exist until prod DB is up. Order: platform apply → backend deploy → admin user → `bootstrap.ts` creates sales channel + publishable key → then categories/pcat + per-source company ids in prod admin. Blokport sends the ids after bootstrap. | Blokport → us |
 | `from_medusa/production/attributes.csv` | **Auto-publishes** to S3 on any vocab change when `SCRAPER_SYNC_ENABLED=true` (set on prod's first backend task def) — no manual export. `variants_export.csv` follows once products exist. | Blokport (automatic) |
@@ -58,13 +58,13 @@ fresh and mints its own. The base is Id-free; owner ids + attributes come from p
 
 **Scraper (us):**
 - [x] `/blokport-prod/FAL_KEY` + `/blokport-prod/BLOKPORT_SCRAPER_PROXY` created (same as dev, 2026-08-24).
-- [ ] **Merge `fix/env-tier-validation` → `main`** if you want the `BLOKPORT_ENV` allowlist guard (closed-set, raises at import, 13 tests) in the prod image. It is defense-in-depth: our terraform sets `BLOKPORT_ENV=production` deterministically on the prod task def, so the typo risk is already near-zero — but the guard is cheap. If merged, its sha becomes a candidate to pin (after a dev soak). If not merged, ship a soaked pre-guard sha and add the guard in a later routine promotion.
+- [ ] **Merge `fix/env-tier-validation` → `main`** if you want the `SCRAPER_ENV` allowlist guard (closed-set, raises at import, 13 tests) in the prod image. It is defense-in-depth: our terraform sets `SCRAPER_ENV=production` deterministically on the prod task def, so the typo risk is already near-zero — but the guard is cheap. If merged, its sha becomes a candidate to pin (after a dev soak). If not merged, ship a soaked pre-guard sha and add the guard in a later routine promotion.
 - [x] **ECR drift — RESOLVED (PR #219).** `create_ecr` (default true) count-gates the repo + lifecycle behind a `moved{}` block, and every consumer reads `local.ecr_repo_url/arn`. blokport keeps the existing repo (create_ecr=true); a second brand sets false and references it. No pre-apply cleanup needed; the apply is a pure add.
 - [ ] Pre-stage the tfvars values (do NOT set `prod_staging_bucket` yet — that flips `prod_enabled` and the count-gated `platform_prod`/`/blokport-prod/` data sources fail until the platform exists): `fal_key_ssm_name = "/blokport-prod/FAL_KEY"`, `scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY"`, and note the bucket name `blokport-prod-staging`.
 
 ### Phase 1 — Blokport platform apply (BLOCKING)
 - [ ] Blokport applies the platform stack → creates the prod VPC/cluster, the `blokport-prod-staging` bucket, the sync/config SSM tokens, and publishes `blokport/prod/terraform.tfstate` with the five outputs. **Blocked on the EIP quota + secret values (Phase 0), not on code.**
-- Gate: `blokport/prod/terraform.tfstate` present with the outputs, and `/blokport-prod/BLOKPORT_SYNC_TOKEN` + `_CONFIG_TOKEN` exist.
+- Gate: `blokport/prod/terraform.tfstate` present with the outputs, and `/blokport-prod/SCRAPER_SYNC_TOKEN` + `_CONFIG_TOKEN` exist.
 
 ### Phase 2 — Blokport backend deploy
 - [ ] `develop → main` merge → prod backend deploys, bringing the `/sync/v1` consumer (port_ids), the review UI, and the first task def (`SCRAPER_SYNC_ENABLED=true` + URLs + tokens).
@@ -107,13 +107,13 @@ never a Medusa id. So they transplant 1:1 and prod skips the entire GPU pipeline
   differs). A value present in dev but missing in prod Medusa gaps to review, never guesses.
 
 ### Phase 5 — Prod runtime config
-- [ ] Prod task-def env is set by our terraform: verify `BLOKPORT_ENV=production` (⚠️ must be exactly `production`/`prod`), `BLOKPORT_S3_BUCKET=blokport-prod-staging`, `BLOKPORT_SALES_CHANNEL_ID=<from Phase 3>`, `FAL_KEY` (SSM), `S3_DRY_RUN` (defaults false in prod).
+- [ ] Prod task-def env is set by our terraform: verify `SCRAPER_ENV=production` (⚠️ must be exactly `production`/`prod`), `SCRAPER_S3_BUCKET=blokport-prod-staging`, `SCRAPER_SALES_CHANNEL_ID=<from Phase 3>`, `FAL_KEY` (SSM), `S3_DRY_RUN` (defaults false in prod).
 - [ ] In the prod `:4200` config admin: set each source's `company_id` (per-source; a blank one resolves by vendor name on Medusa's side), and add the prod `category,<Cat>,<prod_pcat>` rows (a category is active once its prod pcat is set).
 - [ ] `from_medusa/production/attributes.csv` arrives automatically (SCRAPER_SYNC_ENABLED). Bootstrap the prod ledger from `from_medusa/production/*` so ids resolve against the prod backend.
 
 ### Phase 6 — Go-live verify (before real traffic)
 - [ ] `python -m stone_pipeline.reference.seed verify` → `fixed_point: True` (CI-green on main is the source of truth; the committed seed is a proven fixed point).
-- [ ] **Prod dry-run produce** (`BLOKPORT_S3_DRY_RUN=true`): inspect the staged output, and **confirm the variants import matches on live variant SKU and UPDATES rather than minting new Keys** — verify this from the dry-run, not from code reading (Keys carry over dev→prod; do NOT let prod mint new Keys).
+- [ ] **Prod dry-run produce** (`SCRAPER_S3_DRY_RUN=true`): inspect the staged output, and **confirm the variants import matches on live variant SKU and UPDATES rather than minting new Keys** — verify this from the dry-run, not from code reading (Keys carry over dev→prod; do NOT let prod mint new Keys).
 - [ ] Real prod produce → products import with the right **company (per source), sales channel, categories, ports, images**.
 - [ ] Pull round-trip: `/sync/v1` mints ids and products become visible in prod Medusa.
 
@@ -123,7 +123,7 @@ never a Medusa id. So they transplant 1:1 and prod skips the entire GPU pipeline
 - **Ordering:** setting `prod_staging_bucket` creates the count-gated `platform_prod` remote-state + `/blokport-prod/` data sources; they FAIL if the platform (Phase 1) isn't applied. Platform first, always.
 - **ECR drift** — RESOLVED (PR #219, `create_ecr` + `moved{}`); the apply is a pure add, no ECR churn.
 - **`alert_email`** must be in tfvars before the full apply, or it removes the dev SNS alert.
-- **`BLOKPORT_ENV`** must be exactly `production`/`prod` — a typo runs prod-intended config in the dev namespace *unless* the env-tier guard is merged (Phase 0). Verify the resolved task-def env.
+- **`SCRAPER_ENV`** must be exactly `production`/`prod` — a typo runs prod-intended config in the dev namespace *unless* the env-tier guard is merged (Phase 0). Verify the resolved task-def env.
 - **Pin a soaked sha**, never the mutable `core`/`gpu` tag — record the exact sha + digest in Phase 4.
 - **Same FAL account key** across envs (done); switch to a prod-isolated key only if you want separate FAL billing.
 

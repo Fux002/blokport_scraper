@@ -21,7 +21,7 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
       `ecs_cluster_arn`, `service_sg_id`, `internal_namespace_id`). `sync_service_prod` reads these via
       `data.terraform_remote_state.platform_prod` once prod is enabled.
 - [x] **Prod SSM params — split ownership (RESOLVED 2026-08-24):**
-      - `/blokport-prod/BLOKPORT_SYNC_TOKEN`, `/blokport-prod/BLOKPORT_CONFIG_TOKEN` — created by the **Blokport
+      - `/blokport-prod/SCRAPER_SYNC_TOKEN`, `/blokport-prod/SCRAPER_CONFIG_TOKEN` — created by the **Blokport
         platform apply** (read by name when prod is enabled). Not ours.
       - `/blokport-prod/FAL_KEY`, `/blokport-prod/BLOKPORT_SCRAPER_PROXY` — **OURS; DONE 2026-08-24** (SecureStrings,
         same values as dev: FAL is one hosted-account key, same proxy). Platform deliberately does not create these
@@ -45,17 +45,17 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
       `apply` and confirm the prod ECS services (incl. `sync_service_prod`) + Batch queue/jobdef come up.
 
 ## 2. Prod environment variables (on the prod ECS task defs)
-- [ ] `BLOKPORT_ENV=production` (selects prod bucket/keys/ids). **Enforced:** prod refuses to fall back
+- [ ] `SCRAPER_ENV=production` (selects prod bucket/keys/ids). **Enforced:** prod refuses to fall back
       to the dev bucket.
-- [ ] `BLOKPORT_S3_BUCKET=<prod bucket>`. **Enforced:** prod raises at config-load if unset (never
+- [ ] `SCRAPER_S3_BUCKET=<prod bucket>`. **Enforced:** prod raises at config-load if unset (never
       defaults to the dev bucket).
-- [ ] `BLOKPORT_SALES_CHANNEL_ID=<prod sales channel>`. **Single id per env, no fallback.** **Enforced:**
+- [ ] `SCRAPER_SALES_CHANNEL_ID=<prod sales channel>`. **Single id per env, no fallback.** **Enforced:**
       a prod run refuses to proceed if unset (would emit channel-less = invisible products). Dev uses its
       committed dev default; prod MUST set this.
-- [ ] `BLOKPORT_S3_DRY_RUN` -- **defaults to `false` in prod now** (dev defaults `true`). Only set it
+- [ ] `SCRAPER_S3_DRY_RUN` -- **defaults to `false` in prod now** (dev defaults `true`). Only set it
       explicitly if you deliberately want a dry prod run.
 - [ ] `FAL_KEY` on the prod produce/GPU tasks (SSM secret), for FLUX texture gen + FAL de-watermark.
-- [ ] `BLOKPORT_AUTO_TEXTURE=true` / `BLOKPORT_AUTO_ENHANCE=true` for prod if you want the automated
+- [ ] `SCRAPER_AUTO_TEXTURE=true` / `SCRAPER_AUTO_ENHANCE=true` for prod if you want the automated
       texture + enhance loops (default off for prod).
 
 ## 3. Per-scraper config (in the :4200 config admin, per env)
@@ -68,7 +68,7 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
       `sales_channel_id`, pcat ids, and per-source `company_id`s CANNOT exist until the prod DB is up --
       Blokport sends them AFTER `bootstrap.ts` runs (platform apply -> backend deploy -> admin user ->
       bootstrap creates sales channel + publishable key -> then categories/pcat + company ids). The runtime
-      fail-loud on `BLOKPORT_SALES_CHANNEL_ID` + the validate-gate company/channel reject exist for exactly
+      fail-loud on `SCRAPER_SALES_CHANNEL_ID` + the validate-gate company/channel reject exist for exactly
       this window (nothing ships until the ids are set).
 - [ ] Confirm each enabled source's prod origin/ports/vendor config is correct for prod.
 
@@ -80,9 +80,9 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
       when `SCRAPER_SYNC_ENABLED=true` (set on prod's first backend task def) -- no manual export needed;
       `variants_export.csv` follows once products exist.
 - [ ] Image tag: pin `prod_image_tag` to the **then-current soaked dev `:core-<sha>`** at cutover (never the
-      mutable `core` tag). If you want the `BLOKPORT_ENV` allowlist guard in the prod image, merge
+      mutable `core` tag). If you want the `SCRAPER_ENV` allowlist guard in the prod image, merge
       `fix/env-tier-validation` to `main` first and pin that (post-soak) sha; else the guard lands in a later
-      promotion (it is defense-in-depth -- terraform sets `BLOKPORT_ENV=production` deterministically). The
+      promotion (it is defense-in-depth -- terraform sets `SCRAPER_ENV=production` deterministically). The
       committed seed is a proven fixed point on CI-green `main` (a local Py3.14/unpinned-deps run can false-fail;
       trust CI).
 
@@ -94,7 +94,7 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
 
 ## 6. Verify before going live
 - [ ] `python -m stone_pipeline.reference.seed verify` -> `fixed_point: True`.
-- [ ] A prod dry-run produce (temporarily `BLOKPORT_S3_DRY_RUN=true`) -> inspect the staged output.
+- [ ] A prod dry-run produce (temporarily `SCRAPER_S3_DRY_RUN=true`) -> inspect the staged output.
 - [ ] Then a real prod produce; confirm products import with the right company (per scraper), sales
       channel, categories, ports, and images.
 - [ ] Confirm the pull round-trip mints ids and products become visible.

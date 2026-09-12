@@ -76,7 +76,7 @@ variation **Id**, which only exists after variants are imported → the round-tr
 ## 2. Scraped-photo lane (`stone_pipeline/io/image_processing.py`) — Stage 7
 
 Real photos of the actual slabs, shot in storage units. **Faithful, classical (OpenCV) — no invented detail.**
-Enabled by `BLOKPORT_IMAGE_MODE=s3` + `BLOKPORT_IMAGE_PROCESSING=true`. Per image:
+Enabled by `SCRAPER_IMAGE_MODE=s3` + `SCRAPER_IMAGE_PROCESSING=true`. Per image:
 1. **De-watermark** (flagged sources, e.g. varsha): locate the fixed logo by its **pink/magenta hue** (a colour
    natural stone never has), then **FAL FLUX Kontext** re-renders the slab from an instruction (a faithful whole-image edit, not a masked inpaint).
 2. **Enhance**: gray-world white-balance (±15% clamp), CLAHE on L-channel, light NLM denoise, unsharp mask.
@@ -118,7 +118,7 @@ Because products/combinations need the variation **Id** that Medusa mints on imp
 
 ## 5. Dev → prod
 Same Keys + same `{Key}.png` images in both envs; **only Medusa Ids and the S3 bucket base differ**. Promote by
-re-running catalog with `BLOKPORT_VARIANT_IMAGE_BASE=<prod-bucket>/.../variations/`, importing into prod Medusa
+re-running catalog with `SCRAPER_VARIANT_IMAGE_BASE=<prod-bucket>/.../variations/`, importing into prod Medusa
 (Keys carry over), downloading the prod export, copying the same images to the prod bucket.
 
 ## 6. Deployment & ops
