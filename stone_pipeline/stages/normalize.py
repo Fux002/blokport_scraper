@@ -85,8 +85,15 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
             looked = ref.attributes.resolve_id(vocab, forced)
             setattr(row, f"{vocab}_id", looked[1] if looked else None)
             setattr(row, f"{vocab}_name", forced)
-            setattr(row, f"{vocab}_confidence", _confidence_name(Confidence.high))
             setattr(row, f"{vocab}_method", "override")
+            if looked:
+                setattr(row, f"{vocab}_confidence", _confidence_name(Confidence.high))
+            else:
+                # an override naming a value the vocab does not carry is an operator typo, not a resolved
+                # attribute: no id, no confidence, and a review flag (it used to ship id=None at high)
+                setattr(row, f"{vocab}_confidence", _confidence_name(Confidence.none))
+                row.add_flag(ReviewFlag(field=vocab, code=FlagCode.attr_unresolved, raw_value=forced,
+                                        confidence=Confidence.none, method="override", src_url=row.src_url))
             continue
         raw_value = getattr(row, f"raw_{vocab}", "") or ""
         resolver = resolvers.resolvers[vocab]
