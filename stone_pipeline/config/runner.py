@@ -20,11 +20,13 @@ Contract (matches the :4200 admin's expectations):
 from __future__ import annotations
 
 import os
-from stone_pipeline.core import env
 import subprocess
 import sys
 import threading
+from collections import deque
 from datetime import datetime, timezone
+
+from stone_pipeline.core import env
 
 from stone_pipeline.core import logfmt
 
@@ -161,34 +163,46 @@ def _publish_deliverables(stage: str, run_id: str | None = None) -> None:
                     exc_info=True)
 
 
+_TAIL_LINES = 40
+
+
 def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     with _lock:
         rec["status"] = "running"
+    # STREAM the produce's stderr (its structured logs + any traceback) line by line onto THIS process's
+    # stderr, so every line reaches the task's CloudWatch stream AS IT HAPPENS (a running produce is
+    # visible, not a black box until exit), and keep the tail on the run record so the /run API shows WHY
+    # a produce failed. A hung produce is killed at the timeout so it never holds the run slot forever.
+    tail: deque[str] = deque(maxlen=_TAIL_LINES)
+    timed_out = threading.Event()
+
+    def _kill_on_timeout():
+        timed_out.set()
+        proc.kill()
+    timer = threading.Timer(_RUN_TIMEOUT, _kill_on_timeout)
+    timer.daemon = True
+    timer.start()
     try:
-        _, stderr = proc.communicate(timeout=_RUN_TIMEOUT)   # drains the stderr pipe AND waits
-        rc = proc.returncode
-    except subprocess.TimeoutExpired:
-        proc.kill()                                     # a hung produce must not hold the run slot forever
-        _, stderr = proc.communicate()
+        for line in proc.stderr:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            tail.append(line.rstrip("\n"))
+        rc = proc.wait()
+    finally:
+        timer.cancel()
+    if timed_out.is_set():
         rc = -1
         log.error("produce run exceeded timeout; killed", extra={"extra_fields": {
             "run_id": rec["run_id"], "timeout_s": _RUN_TIMEOUT}})
-    # The produce subprocess's stderr (its structured logs + any traceback) would otherwise be discarded,
-    # leaving a failed run as a bare rc:1 with no cause. Surface it verbatim on THIS process's stderr (so
-    # it reaches the task's CloudWatch stream) and keep the tail on the run record, so the :4200 /run API
-    # shows WHY a produce failed. Never a silent black hole.
-    tail = ""
-    if stderr:
-        sys.stderr.write(stderr)
-        sys.stderr.flush()
-        tail = "\n".join(stderr.strip().splitlines()[-40:])
+        tail.append(f"produce run exceeded timeout ({_RUN_TIMEOUT}s); killed")
+    tail_text = "\n".join(tail)
     counts = _capture_counts()                          # ledger totals after the run
     with _lock:
         rec["status"] = "succeeded" if rc == 0 else "failed"
         rec["finished_at"] = _now()
         rec["counts"] = counts
         if rc != 0:
-            rec["error"] = f"pipeline exited {rc}" + (f":\n{tail}" if tail else "")
+            rec["error"] = f"pipeline exited {rc}" + (f":\n{tail_text}" if tail_text else "")
     if rc == 0:
         # Persist the scrape-artifact trees (outputs_dir + data/) this produce just wrote, so the next
         # (cold) task restores the last scrape instead of finding nothing to consolidate -- this is what

@@ -170,6 +170,18 @@ def bootstrap_ledger_if_missing(path) -> None:
         Ledger.open(path, env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()).close()   # ensure the file exists to serve
 
 
+def shutdown(path, periodic) -> None:
+    """SIGTERM path (ECS sends SIGTERM before stopping the task): stop the periodic snapshot thread and
+    wait for an in-flight save, THEN save the ledger once, then exit 0. Same order as the config server,
+    so the final save never races interpreter teardown."""
+    if hasattr(periodic, "stop"):
+        periodic.stop()
+    else:
+        periodic.set()
+    snapshot.save(path)
+    raise SystemExit(0)
+
+
 def serve(host: str | None = None, port: int = 8723) -> None:
     # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so Medusa (over the
     # VPC) can reach it. The bearer token still gates every request.
@@ -180,11 +192,8 @@ def serve(host: str | None = None, port: int = 8723) -> None:
     # absent. This server owns the periodic + on-stop snapshot (it shares the local volume with config).
     snapshot.restore(path, required=True)   # durable system-of-record: fail loud if a present snapshot won't fetch
     bootstrap_ledger_if_missing(path)
-    snapshot.start_periodic(path)
-    def _snapshot_on_term(*_):                  # ECS sends SIGTERM before stopping the task
-        snapshot.save(path)
-        raise SystemExit(0)
-    signal.signal(signal.SIGTERM, _snapshot_on_term)
+    periodic = snapshot.start_periodic(path)
+    signal.signal(signal.SIGTERM, lambda *_: shutdown(path, periodic))
     httpd = ThreadingHTTPServer((host, port), SyncHandler)
     httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
     httpd.ledger_path = path                   # type: ignore[attr-defined]
