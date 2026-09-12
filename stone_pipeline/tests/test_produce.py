@@ -17,6 +17,11 @@ def _stub(monkeypatch):
     monkeypatch.setattr(produce, "_fetch_inputs", lambda: calls.append(("fetch", None)))
     monkeypatch.setattr(produce, "_live_scrape", lambda s: calls.append(("scrape", s)) or 0)
     monkeypatch.setattr(produce.build, "main", lambda argv: calls.append(("build", argv)) or 0)
+    # persist + publish belong to produce now (wave 4g); off for these step-order tests
+    from stone_pipeline.ledger import snapshot
+    from deploy import upload_artifacts
+    monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
+    monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: 0)
     return calls
 
 

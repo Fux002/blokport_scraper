@@ -1,7 +1,6 @@
 """Wave 3d: three silent outcomes in the control plane.
 
-A produce whose deliverables never reached S3 reported "succeeded" (Blokport then pulls stale keys); a
-malformed integer on the admin source PUT reached int() and answered 500; and two pending varieties with the
+A malformed integer on the admin source PUT reached int() and answered 500; and two pending varieties with the
 same name but different stone types were collapsed into one review card (a decision on the card would type
 the second vendor's listing as the first's).
 """
@@ -10,46 +9,11 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import decisions_store, runner, server
+from stone_pipeline.config import decisions_store, server
 
 
-class _Proc:
-    stderr = iter(())
-
-    def wait(self):
-        return 0
-
-    def kill(self):
-        pass
 
 
-def _quiet_runner(monkeypatch):
-    for name in ("_capture_counts", "_stamp_last_run", "_persist_run", "_persist_diagnostics", "_evaluate_admission"):
-        monkeypatch.setattr(runner, name, lambda *a, **k: {} if name == "_capture_counts" else None)
-    from stone_pipeline.ledger import snapshot
-    monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
-
-
-def test_a_publish_failure_fails_the_run_instead_of_reporting_success(monkeypatch):
-    _quiet_runner(monkeypatch)
-    from deploy import upload_artifacts
-
-    def _boom(run_id=None):
-        raise RuntimeError("S3 unreachable")
-    monkeypatch.setattr(upload_artifacts, "main", _boom)
-    rec = {"run_id": "r1", "stage": "all", "status": "queued"}
-    runner._watch_local(rec, _Proc())
-    assert rec["status"] == "failed"
-    assert "publish" in rec["error"] and "S3 unreachable" in rec["error"]
-
-
-def test_a_successful_publish_keeps_the_run_succeeded(monkeypatch):
-    _quiet_runner(monkeypatch)
-    from deploy import upload_artifacts
-    monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: None)
-    rec = {"run_id": "r2", "stage": "all", "status": "queued"}
-    runner._watch_local(rec, _Proc())
-    assert rec["status"] == "succeeded"
 
 
 @pytest.mark.parametrize("field", ["default_bundle_size", "min_expected_rows"])

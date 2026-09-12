@@ -36,7 +36,6 @@ def _quiet(monkeypatch):
     """Stub every side effect of _watch_local except the record + the stderr stream."""
     for name in ("_capture_counts", "_stamp_last_run", "_persist_run", "_persist_diagnostics", "_evaluate_admission"):
         monkeypatch.setattr(runner, name, lambda *a, **k: {} if name == "_capture_counts" else None)
-    monkeypatch.setattr(runner, "_publish_deliverables", lambda *a, **k: None)
     from stone_pipeline.ledger import snapshot
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
 

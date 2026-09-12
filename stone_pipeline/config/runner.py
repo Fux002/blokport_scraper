@@ -139,32 +139,6 @@ _RUN_TIMEOUT = int(env.getenv("BLOKPORT_RUN_TIMEOUT_SECONDS", "7200"))   # 2h: k
                                                                             # control plane (409s all runs/ops)
 
 
-# Stages that regenerate the to_upload/ deliverables (tree_build + catalog); an inventory/scrape run
-# does not, so it must not re-publish the (unchanged, ~334MB) combination set. Mirrors produce._CATALOG_STAGES.
-_PUBLISH_STAGES = ("all", "catalog", "republish")
-
-
-def _publish_deliverables(stage: str, run_id: str | None = None) -> str | None:
-    """After a catalog-producing produce, mirror to_upload/ (+ review/) to the env's scraper home on S3,
-    so Blokport's one-click import streams the CURRENT valid-combination set (the full ~2M file, the
-    incremental _update delta, and the small _products_only file), plus the variants/products.
-
-    Why here: the ECS /run produce is the path an operator triggers, but only the batch run_pipeline.sh
-    published these before -- so between batch runs the fixed keys went stale (a produce rebuilt them
-    locally but never uploaded). Returns None on success, else the failure as text: the caller FAILS the
-    run on it. A produce whose deliverables never reached S3 is not a success (Blokport would pull the
-    previous set as if it were this one); it used to log a warning and report "succeeded"."""
-    if stage not in _PUBLISH_STAGES:
-        return None
-    try:
-        from deploy import upload_artifacts
-        upload_artifacts.main(run_id)
-        return None
-    except Exception as exc:
-        log.error("artifact publish to S3 failed; deliverables are local only", exc_info=True)
-        return f"{type(exc).__name__}: {exc}"
-
-
 _TAIL_LINES = 40
 
 
@@ -205,18 +179,8 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         rec["counts"] = counts
         if rc != 0:
             rec["error"] = f"pipeline exited {rc}" + (f":\n{tail_text}" if tail_text else "")
-    if rc == 0:
-        # Persist the scrape-artifact trees (outputs_dir + data/) this produce just wrote, so the next
-        # (cold) task restores the last scrape instead of finding nothing to consolidate -- this is what
-        # lets catalog/republish (and so the backbone approve->republish->pull loop) survive a redeploy.
-        from stone_pipeline.ledger import snapshot
-        snapshot.save_artifacts()
-        # ...and publish the deliverables to S3 so Blokport's importer sees this produce's fixed keys.
-        publish_error = _publish_deliverables(rec.get("stage", "all"), rec.get("run_id"))
-        if publish_error:
-            with _lock:
-                rec["status"] = "failed"
-                rec["error"] = f"deliverables not published to S3 (the produce itself completed): {publish_error}"
+    # the produce subprocess owns persisting the scrape trees and publishing the deliverables (its exit
+    # code carries a publish failure, with the cause in the streamed tail above)
     _stamp_last_run(rec, rec["status"])
     _persist_run(rec)                                   # durable `last` across a restart
     # An inventory run is a stock refresh, NOT a validated produce, so it must not advance the admission
@@ -242,7 +206,8 @@ def _build_command(rec: dict) -> list[str]:
 def _launch_local(rec: dict) -> None:
     proc = subprocess.Popen(
         _build_command(rec),
-        env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1"},
+        # the run id reaches the deliverables manifest produce publishes
+        env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1", "SCRAPER_RUN_ID": rec["run_id"]},
         # stdout is the image-progress print() noise (drop it); stderr carries the structured logfmt logs
         # + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's cause.
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
