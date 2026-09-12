@@ -398,7 +398,7 @@ def test_migration_makes_every_old_mint_global_and_keeps_who_asked(tmp_path, mon
     conn.execute("PRAGMA user_version = 1")                    # pre two-levels: migrates on open
     conn.commit(); conn.close()
     g = decisions_store.variety_actions()
-    assert g[("", _norm("bianco white marble"))] == {"action": "mint", "alias_of": None, "seed_color": "White", "seed_type": "Marble",
+    assert g[("", _norm("bianco white marble"))] == {"action": "mint", "seed_color": "White", "seed_type": "Marble",
                                               "seed_country": "IR", "seed_name": "Bianco White", "spelling": "Bianco White Marble",
                                               "source": "", "asked_by": "marenostone"}
     assert g[("", "junk")]["action"] == "reject" and g[("", "junk")]["asked_by"] == ""

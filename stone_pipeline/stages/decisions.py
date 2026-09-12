@@ -51,19 +51,8 @@ def _norm(s: str) -> str:
 
 def load_confirm_decisions() -> dict[tuple[str, str], str]:
     """norm(variant) -> 'yes' | 'no' for decided varieties (mint -> yes, reject -> no). alias decisions
-    are consumed separately via load_alias_decisions."""
+    have no confirm-file view: a spelling binds through the vendor's scoped alias (decisions_store.scoped_aliases)."""
     return decisions_store.confirm_map()
-
-
-def load_alias_decisions() -> dict[tuple[str, str], str]:
-    """norm(spelling) -> the existing variety NAME it should alias onto."""
-    return decisions_store.alias_map()
-
-
-def load_alias_types() -> dict[tuple[str, str], str]:
-    """norm(spelling) -> the alias TARGET's stone type, where the operator chose one. Disambiguates a
-    multi-type target name so the spelling aliases into the right stone (paired with load_alias_decisions)."""
-    return decisions_store.alias_type_map()
 
 
 def load_rejected() -> set[tuple[str, str]]:
