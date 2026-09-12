@@ -98,12 +98,12 @@ on, with no silent default.
 - The deployment is already split per env: dev and prod run as separate ECS
   deployments (not one runtime-toggled task, per the infra split), so each running
   stack is pinned to one environment by its infrastructure. The residual footgun
-  is that `BLOKPORT_ENV` still defaults to `development` in `config/settings.py`.
+  is that `SCRAPER_ENV` still defaults to `development` in `config/settings.py`.
   That default is removed and environment becomes a required input, so a
   misconfigured task aborts before any work rather than silently acting as dev.
 - Environment resolves once into a `RunContext` object that is the single source
   for everything env-specific. Every stage and the sync service reads from it.
-  Nothing reads `BLOKPORT_ENV` ad hoc anywhere else.
+  Nothing reads `SCRAPER_ENV` ad hoc anywhere else.
 
 `RunContext` carries, per environment:
 

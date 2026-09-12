@@ -17,7 +17,7 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 - Virtualenv at `.venv/`. Install: `pip install -r stone_pipeline/requirements.txt`.
 - Optional GPU/de-watermark extras: `pip install -r stone_pipeline/requirements-imageproc.txt` (needs the pytorch CPU index; see Dockerfile).
 - No lockfile / package manager beyond pip + `pyproject.toml` (name `stone-pipeline`).
-- Behavior is env-var driven. `BLOKPORT_ENV` (development|production) selects S3 bucket, key namespace, dry-run, image mode. Prod refuses to fall back to dev bucket / dev owner ids — it fails loud. Other keys: `BLOKPORT_S3_BUCKET`, `BLOKPORT_S3_REGION`, `BLOKPORT_SALES_CHANNEL_ID`, `BLOKPORT_COMPANY_ID`, `BLOKPORT_IMAGE_MODE`, `BLOKPORT_IMAGE_PROCESSING`, `BLOKPORT_SYNC_TOKEN`, `BLOKPORT_CONFIG_TOKEN`, `BLOKPORT_CONFIG_DB`.
+- Behavior is env-var driven (neutral `SCRAPER_` prefix; the legacy `BLOKPORT_` prefix is still read, `SCRAPER_` wins). `SCRAPER_ENV` (development|production) selects S3 bucket, key namespace, dry-run, image mode. Prod refuses to fall back to dev bucket / dev owner ids — it fails loud. Other keys: `SCRAPER_S3_BUCKET`, `SCRAPER_S3_REGION`, `SCRAPER_SALES_CHANNEL_ID`, `SCRAPER_COMPANY_ID`, `SCRAPER_IMAGE_MODE`, `SCRAPER_IMAGE_PROCESSING`, `SCRAPER_SYNC_TOKEN`, `SCRAPER_CONFIG_TOKEN`, `SCRAPER_CONFIG_DB`.
 
 ## Commands
 - Test: `pytest -q` (config in `pyproject.toml`: `testpaths=stone_pipeline/tests`, `pythonpath=["."]`).
@@ -32,8 +32,8 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 - Housekeeping (drop superseded working data): `python -m stone_pipeline.clean`
 - Variant-image management: `python -m stone_pipeline.images`
 - Scraper config store: `python -m stone_pipeline.config.store seed|list`
-- Config admin API (UI): `BLOKPORT_CONFIG_TOKEN=<t> python -m stone_pipeline.config.server`
-- Sync ledger server: `BLOKPORT_SYNC_TOKEN=<t> python -m stone_pipeline.ledger.server` (routes `/sync/v1/*`)
+- Config admin API (UI): `SCRAPER_CONFIG_TOKEN=<t> python -m stone_pipeline.config.server`
+- Sync ledger server: `SCRAPER_SYNC_TOKEN=<t> python -m stone_pipeline.ledger.server` (routes `/sync/v1/*`)
 - Container entrypoint (scrape→pipeline→catalog→upload to S3): `deploy/run_pipeline.sh` (RUN_MODE: pipeline|validate-dewatermark|reprocess)
 
 ### Docker
@@ -50,6 +50,6 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 - **One image per variant**: one `{Key}.png` per variant, replaced in place; never new names or `_2` suffixes.
 - **Layout**: `scrapers/` (site fetchers), `stone_pipeline/` (config, core schema, io, matching, resolvers, adapters, stages, ledger, gates), `deploy/` (S3 fetch/upload + container ops), `image_pipeline/` (texture generation), `infra/` (Terraform), `catalog_source/` (supplied ground truth), `from_medusa/<env>/` (Medusa export inputs), `to_upload/<env>/` (emitted artifacts).
 - **Generated / not source** (gitignored — do not edit or commit): `/outputs/`, `/state/`, `/data/`, `/to_upload/`, `/review/`, `/images/`, `/ledger/` (data), `config.db`, `*.parquet`, `from_medusa/**/variants_export.csv`. NOTE: the code packages `stone_pipeline/state/` and `stone_pipeline/ledger/` ARE source (only their runtime `*.csv/*.json/*.db` are ignored). `catalog_source/` and `from_medusa/**/attributes.csv` ARE committed source of truth.
-- **Dev vs prod**: scrape once (shared `data/` + `catalog_source/` names, no ids); run catalog/tree per `BLOKPORT_ENV` because Medusa ids differ per environment. Promotion dev→prod is a config/env change, never a code edit.
+- **Dev vs prod**: scrape once (shared `data/` + `catalog_source/` names, no ids); run catalog/tree per `SCRAPER_ENV` because Medusa ids differ per environment. Promotion dev→prod is a config/env change, never a code edit.
 - **Categories**: slab / block / tile registry is the `CATEGORIES` tuple in `settings.py`; a category is active once its Medusa `pcat_id` is set (no code change). Tiles mirror slabs (`tile_` Keys built deterministically).
 - Extensive design docs live at repo root (`*.md`, e.g. HOW_THE_SCRAPER_WORKS, PIPELINE_OVERVIEW, SYNC_LEDGER_DESIGN, DEPLOY, SCRAPER_REQUIREMENTS); superseded ones are under `docs/superseded/` (index there). Consult before changing a subsystem.

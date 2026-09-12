@@ -1,7 +1,7 @@
 # Domain packs: running the pipeline for a different product
 
 The pipeline logic is product-agnostic. Everything stone-specific lives in a **domain pack**
-(`stone_pipeline/config/domains/<name>.yaml`), selected at startup by `BLOKPORT_DOMAIN_PACK`
+(`stone_pipeline/config/domains/<name>.yaml`), selected at startup by `SCRAPER_DOMAIN_PACK`
 (default `stone`). A different product type is a sibling pack plus its own data and deployment,
 never a code edit. The pack is loaded once and cached (`config/domain.active_pack()`), validated
 loud at load (`_validate_shape`), and read by every stage.
@@ -41,21 +41,21 @@ Two materials in one environment would collide on every one of those paths.
 
 So the real onboarding unit is **one deployment per material**: a wood build is its own DEPLOYMENT
 (its own S3 bucket + namespace, `config.db`, ledger and ECS task) running with
-`BLOKPORT_DOMAIN_PACK=wood`. Stone and wood never share a store. (Co-tenanting several materials in one
+`SCRAPER_DOMAIN_PACK=wood`. Stone and wood never share a store. (Co-tenanting several materials in one
 deployment would require namespacing all of the above by material - a larger change, deliberately not
 done.)
 
-> **`BLOKPORT_ENV` is NOT the isolation mechanism - do not invent a value for it.** It is the
+> **`SCRAPER_ENV` is NOT the isolation mechanism - do not invent a value for it.** It is the
 > deployment TIER and nothing else: `development` or `production` (plus the `dev`/`prod` aliases).
 > Every production guard keys off it, so a brand- or material-prefixed value like
 > `wudport-production` used to read as "not production" and silently downgrade the whole run to
-> development semantics: dev S3 prefix, `BLOKPORT_S3_DRY_RUN` defaulting true, and the bucket +
+> development semantics: dev S3 prefix, `SCRAPER_S3_DRY_RUN` defaulting true, and the bucket +
 > sales-channel guards disabled. `config/settings.py` now validates the value against that closed
 > set and **raises at import** on anything else (`stone_pipeline/tests/test_env_tier.py` pins it),
 > so the mistake fails loudly rather than quietly - but the rule still stands:
 >
 > **Isolation comes from the separate bucket, task, `config.db` and ledger. The tier stays real.**
-> A wood PRODUCTION deployment sets `BLOKPORT_ENV=production`, exactly like the stone one.
+> A wood PRODUCTION deployment sets `SCRAPER_ENV=production`, exactly like the stone one.
 
 ## Onboarding a new material
 

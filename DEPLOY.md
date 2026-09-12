@@ -1,10 +1,12 @@
 # Deploying the scraper on AWS
 
+Environment variables use the neutral `SCRAPER_` prefix (infra sets these); the legacy `BLOKPORT_` prefix is still read as a fallback, `SCRAPER_` winning when both are set (`stone_pipeline/core/env.py`).
+
 **TWO deployments from ONE image** — a dedicated **dev** task and a dedicated
 **prod** task. The dev task runs in the Medusa **dev** VPC/cluster (`blokport-dev`)
 and writes only the **dev** staging bucket; the prod task runs in the **prod**
 VPC/cluster (`blokport-prod`) and writes only the **prod** staging bucket. Each
-task is **hard-wired** to its environment (`BLOKPORT_ENV` is fixed, no runtime
+task is **hard-wired** to its environment (`SCRAPER_ENV` is fixed, no runtime
 toggle), and each task's IAM role is **scoped to its own bucket only** — so a dev
 run physically cannot write prod, and vice versa. The scraper is decoupled from
 Medusa: it writes cleaned/enhanced product images to that env's private staging
@@ -13,7 +15,7 @@ bucket and pushes the CSVs to S3; Medusa's own import then reads the staging lin
 **Why the two can't get mixed up** (the guarantees, strongest first):
 1. **Per-bucket IAM** — `scraper-dev`'s task role can write *only* the dev bucket,
    `scraper-prod`'s *only* the prod bucket. A misconfigured env var can't cross over.
-2. **No runtime toggle** — `BLOKPORT_ENV` is fixed per task (prod can never default
+2. **No runtime toggle** — `SCRAPER_ENV` is fixed per task (prod can never default
    to dev). S3 keys are namespaced `dev/…` vs `prod/…`, Medusa ids are per-env.
 3. **Separate VPC/cluster** — the prod task runs in the prod platform, not dev.
 4. **Promote the SAME image** — both tasks pull from one ECR repo. Use an immutable
@@ -46,9 +48,9 @@ EventBridge (cron) ─▶ Fargate task: scrape ─▶ pipeline (Stage 7 stages i
 
 ## Config is env-driven (fixed per task)
 Each task has its environment **baked in** by Terraform — `scraper-dev` runs
-`BLOKPORT_ENV=development` + the dev bucket, `scraper-prod` runs
-`BLOKPORT_ENV=production` + the prod bucket (both with `BLOKPORT_IMAGE_MODE=s3`,
-`BLOKPORT_IMAGE_PROCESSING=true`). There is **no runtime flip** anymore: the two are
+`SCRAPER_ENV=development` + the dev bucket, `scraper-prod` runs
+`SCRAPER_ENV=production` + the prod bucket (both with `SCRAPER_IMAGE_MODE=s3`,
+`SCRAPER_IMAGE_PROCESSING=true`). There is **no runtime flip** anymore: the two are
 separate task definitions in separate clusters, each scoped by IAM to its own
 bucket. Images land at `s3://<staging>/<env>/products/improved/<source>/<hash>.jpg`
 and the product CSV links to that full https URL. See `config/settings.py` +
@@ -72,7 +74,7 @@ separate step you run afterward (and after reviewing `images/reports/processed_p
 so "processing completes before load" holds by construction.
 
 **INVARIANT — do not break:** this only holds when the real run has
-`BLOKPORT_S3_DRY_RUN=false` **and** `BLOKPORT_IMAGE_MODE=s3`. With `dry_run=true` or
+`SCRAPER_S3_DRY_RUN=false` **and** `SCRAPER_IMAGE_MODE=s3`. With `dry_run=true` or
 `mode=passthrough`, Stage 7 *derives* image URLs **without uploading**, so the CSV would
 link to objects that don't exist. Those are the safe DEV/no-network defaults — never let
 them leak into a real upload run. The Terraform task sets both correctly

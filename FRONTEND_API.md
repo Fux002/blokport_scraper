@@ -8,8 +8,8 @@ not served -- remove it from the frontend.** Grouped by the three pages: Scraper
 
 | Backend | Default | Base path | Auth header | Token |
 |---|---|---|---|---|
-| Config server | `:8724` | `/config/v1/...` | `Authorization: Bearer <token>` | `BLOKPORT_CONFIG_TOKEN` |
-| Sync ledger server | `:8723` | `/sync/v1/...` | `Authorization: Bearer <token>` | `BLOKPORT_SYNC_TOKEN` |
+| Config server | `:8724` | `/config/v1/...` | `Authorization: Bearer <token>` | `SCRAPER_CONFIG_TOKEN` |
+| Sync ledger server | `:8723` | `/sync/v1/...` | `Authorization: Bearer <token>` | `SCRAPER_SYNC_TOKEN` |
 
 Call both from the `:4200` **server-side** with the token; never ship a token to the browser. Put a real
 base URL behind your proxy. Every request is bearer-gated; a bad/absent token returns `401`.
