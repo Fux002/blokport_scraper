@@ -12,6 +12,7 @@ source. Add a scraper to REGISTRY as it is migrated onto ScraperBase.
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 from typing import Type
 
@@ -79,15 +80,50 @@ def _enabled_order() -> list[str]:
     return [s for s in order if s in enabled]
 
 
+class _LiveStderr(logging.StreamHandler):
+    """A stderr handler that resolves sys.stderr at WRITE time, not at construction: the module is imported
+    once, so a handler bound then would keep writing to whatever stderr was at import (a test harness's
+    capture, a since-replaced stream) instead of the process's current stderr."""
+
+    def __init__(self) -> None:
+        super().__init__(sys.stderr)
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, _value) -> None:       # StreamHandler.__init__ assigns it; the live property wins
+        pass
+
+
+def _stderr_logger() -> logging.Logger:
+    """The runner's own logger, on STDERR with the per-scraper line format (ScraperBase._make_logger). The
+    produce runner streams only the subprocess's stderr to CloudWatch, so a failure printed to stdout never
+    reached the operator: a live scrape aborted with 'live scrape failed' and no cause anywhere in the logs.
+    Everything about a source's outcome goes through here so the cause lands next to the scraper's own lines."""
+    logger = logging.getLogger("scraper.run")
+    if not logger.handlers:
+        handler = _LiveStderr()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    return logger
+
+
+log = _stderr_logger()
+
+
 def run_many(order: list[str]) -> dict[str, str]:
     results: dict[str, str] = {}
     for source in order:
         try:
             results[source] = str(run_one(source))
         except SystemExit as exc:
-            print(exc)
+            log.error("%s exited: %s", source, exc)
         except Exception as exc:  # one site failing never stops the others
-            print(f"{source} failed: {exc}")
+            log.error("%s failed: %s", source, exc, exc_info=True)   # the traceback names the real cause
     return results
 
 
@@ -99,9 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     order = _enabled_order() if argv == ["all"] else argv
     results = run_many(order)
-    print(f"\nscraped {len(results)} source(s):")
-    for src, path in results.items():
-        print(f"  {src}: {path}")
+    log.info("scraped %d source(s): %s", len(results),
+             ", ".join(f"{src} -> {path}" for src, path in results.items()) or "none")
     # A source that was REQUESTED (in order) but produced no result FAILED. Surface it as a non-zero rc:
     # produce._live_scrape and run_pipeline.sh (set -euo pipefail) both rely on this exit code to abort
     # before building against stale/absent data (the docstring at produce._live_scrape). The old always-0
@@ -110,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     # the failures. An empty `order` (every source disabled) is not a failure.
     failed = [s for s in order if s not in results]
     if failed:
-        print(f"\nFAILED to scrape {len(failed)} source(s): {failed}")
+        log.error("FAILED to scrape %d source(s): %s", len(failed), failed)
         return 1
     return 0
 
