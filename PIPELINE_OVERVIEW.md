@@ -78,7 +78,7 @@ variation **Id**, which only exists after variants are imported → the round-tr
 Real photos of the actual slabs, shot in storage units. **Faithful, classical (OpenCV) — no invented detail.**
 Enabled by `BLOKPORT_IMAGE_MODE=s3` + `BLOKPORT_IMAGE_PROCESSING=true`. Per image:
 1. **De-watermark** (flagged sources, e.g. varsha): locate the fixed logo by its **pink/magenta hue** (a colour
-   natural stone never has) + a fixed-central fallback, then **LaMa inpaint**. (Replaced unreliable Florence-2.)
+   natural stone never has), then **FAL FLUX Kontext** re-renders the slab from an instruction (a faithful whole-image edit, not a masked inpaint).
 2. **Enhance**: gray-world white-balance (±15% clamp), CLAHE on L-channel, light NLM denoise, unsharp mask.
 3. **Resize**: **downscale-only**, cap long edge 1600, q85 JPEG.
 
@@ -111,7 +111,7 @@ Because products/combinations need the variation **Id** that Medusa mints on imp
 6. Repeat until `SYNC_STEPS.md` shows nothing new. **Inventory-only**: just push `4_inventory_update.csv`.
 
 **Freeze rule:** don't introduce new variants between steps 2–3, or their Id is missing when combinations build
-(they wait in the gap queue for the next loop). **Planned automation** (`MEDUSA_SYNC_PLAN.md`): one atomic
+(they wait in the gap queue for the next loop). **Sync** (the pull-based ledger, `SYNC_LEDGER_DESIGN.md`): one atomic
 **upsert-by-Key** Admin-API push (Medusa stores Key as `external_id`, resolves Key→Id server-side) kills the round-trip.
 
 ---
@@ -126,7 +126,7 @@ re-running catalog with `BLOKPORT_VARIANT_IMAGE_BASE=<prod-bucket>/.../variation
 - **Terraform** `infra/`: egress-only SG, private subnets, OIDC deploy role, SSM SecureString secrets (`FAL_KEY`,
   `BLOKPORT_SCRAPER_PROXY`), encrypted+locked state. `cd infra && terraform apply`.
 - **CI/CD** `.github/workflows/`: `ci.yml` (pytest + certify), `deploy.yml` (OIDC build+push; `build_imageproc=true`).
-- **Entry** `deploy/run_pipeline.sh` via **`RUN_MODE`**: `pipeline` (default) · `validate-dewatermark` · `reprocess`.
+- **Entry** `deploy/run_pipeline.sh` via **`RUN_MODE`**: `pipeline` (default, runs `stone_pipeline.produce`) · `validate-dewatermark` · `reprocess` · `generate-textures`.
 - **Trust/state**: `certify.py` (config/adapter/selftest/contract gate, CI), `state/` alias writeback (learning loop),
   `mode: review|auto` per source, the consistency gate, the >30% delist guard.
 - **Module gates** (`gates/`) — per-boundary contracts (ingest/clean/process; images/upgrade planned) that run inside
@@ -142,11 +142,11 @@ Product CSV: 798/870 linked, 0 broken; 72 imageless = supplier never photographe
 1. **Publish current CSVs to S3** `to_upload/` (S3 copies stale) — scraper chat.
 2. **Medusa re-import** products from `improved/`-linked CSV → user applies the **Blokport watermark** in Medusa
    media (`d1xcekdxyhabdd.cloudfront.net`, a SEPARATE system from our `improved/`).
-3. **Medusa sync automation** (upsert-by-Key) — designed in `MEDUSA_SYNC_PLAN.md`, not built.
+3. **Medusa sync** is the pull-based ledger (`SYNC_LEDGER_DESIGN.md`, built and live).
 4. zucchi gate, variant sync (lot-number aliasing), passthrough unit test (non-hermetic) — scraper chat.
 
 ## 9. Security (reviewed + hardened, no critical/high)
-SSRF guard (`io/ssrf.py`), setuptools≥78.1.1, all GitHub Actions SHA-pinned, LaMa weights checksum-baked, Florence/
+SSRF guard (`io/ssrf.py`), setuptools≥78.1.1, all GitHub Actions SHA-pinned, ESRGAN weights checksum-baked, 
 `trust_remote_code` removed, `ben2` pinned/flagged. Secrets via SSM/KMS, least-privilege IAM, egress-only network.
 
 ## 10. Commands & gotchas
@@ -160,5 +160,5 @@ aws ecs run-task ... --no-cli-pager            # run-task can HANG without --no-
 - `scraped/` originals let you reprocess without re-downloading. · The two image lanes (variations/ vs products/) are distinct.
 - Variant set must be frozen mid-sync; combos before products; Keys are the cross-env identity.
 
-**Key docs:** `RUNBOOK.md` (the sync loop), `DEV_PROD_PIPELINE.md`, `MEDUSA_SYNC_PLAN.md`, `DEPLOY.md`,
+**Key docs:** `RUNBOOK.md` (the sync loop), `DEV_PROD_PIPELINE.md`, `SYNC_LEDGER_DESIGN.md`, `DEPLOY.md`,
 `image_pipeline/IMAGE_FLOW.md`, `stone_pipeline_plan_v3_1.md` (full design), `stone_pipeline/README.md`.

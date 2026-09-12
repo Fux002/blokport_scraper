@@ -1,7 +1,7 @@
 # Sync ledger and pull-based Medusa integration: target design
 
-Status: design only, not yet built. This document supersedes the sketch in
-`MEDUSA_SYNC_PLAN.md` and is the build contract for the layer that replaces the
+Status: built and live (dev and prod); this is the design it was built to. This document supersedes the sketch in
+`docs/superseded/MEDUSA_SYNC_PLAN.md` and is the build contract for the layer that replaces the
 manual CSV import and export round-trip with a durable, env-aware sync between
 the ingest pipeline and Medusa.
 
@@ -955,7 +955,7 @@ in the design body; this section is kept as the audit trail and rationale.
 - H1 (texture promotion) -> sections 4 (`image`), 6, 8.4.
 - H2 (generation failure) -> sections 4 (state enum, `gap`), 6A, 15 decision 9.
 - M1 (bootstrap seeding) -> section 5B. M2 (fingerprint read) -> sections 1.4, 8.2, 9.
-  M3 (`payload_hash` inputs) -> section 4. M4 (SQLite on EFS) -> section 12.
+  M3 (`payload_hash` inputs) -> section 4. M4 (SQLite on the task's local volume, snapshotted to S3 every five minutes and on shutdown, restored on boot.
 - L1 (autonomy boundary) -> section 5. L2 (cursor) -> section 8.2. L3 (per-source
   delist guard) -> section 7.
 

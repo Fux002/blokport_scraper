@@ -31,7 +31,7 @@ Status key: TODO / INVESTIGATING / IN-PR (#) / MERGED / DEPLOYED / DEFERRED
 - [~] **F8 — cross-process shared-state** — atomic_write unique-temp MERGED #129. REMAINING under verification: S3 manifest CAS, config.db UNIQUE, baselines lock, upsert txn (only fix the PROVEN-concurrent ones).
 - [~] **F9 — audit every `except Exception` vs fail-loud** — certify.py:84 + writethrough:110 MERGED #128. REMAINING under verification: run.py:422 inventory-export, S3 AccessDenied helpers, schema extra=forbid.
 - [ ] **F10 — one scrape-completeness contract + completeness recheck at catalog** — TODO.
-- [ ] **F11 — gate-abort contract (clean/process FAILED should abort or fix doc)** — TODO.
+- [x] **F11 gate-abort contract** resolved: `gates/__init__.py` defines it; `gates/requirements.py` carries the gate requirements.
 
 ## TIER 3 — Correctness mediums (sequence by exposure)
 - [ ] Fuzzy match auto-written-back → permanent EXACT/HIGH alias (match_variation.py:209)

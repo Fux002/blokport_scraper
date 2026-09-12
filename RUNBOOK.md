@@ -8,7 +8,9 @@ the files live, and what you do after a scrape.
 The scraper turns messy supplier scrapes into a Medusa product import. Before the
 products can be imported, Medusa's catalog (variants, aliases, the allowed-combo
 tree) must contain everything the products reference. The pipeline produces every
-file you upload in ONE folder — `to_upload/` — with a checklist (`SYNC_STEPS.md`).
+deliverable in ONE folder (`to_upload/`) and publishes it to S3 with a manifest; Blokport PULLS it
+through the sync ledger (`/sync/v1/*`, SYNC_LEDGER_DESIGN.md). The manual upload checklist below is
+the laptop-only path.
 
 ## Run it
 

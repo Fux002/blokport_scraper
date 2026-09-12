@@ -24,11 +24,11 @@ actually does today (deployed), field by field.
 | Canonical field | Disposition | If the source does not provide it |
 | --- | --- | --- |
 | **length / width / height** | **REQUIRED** | Product is **REJECTED**. Sizes are never fabricated: a stone with no real size breaks area/volume pricing and freight. (~99-100% of scraped rows carry dims, so this drops only the genuinely sizeless.) |
-| **weight** | **DERIVABLE** | Derived from real dims x per-type density: `weight_kg = length x width x height x density[type]` (`reference/type_density.csv`, kg/m3). A real physical weight, not a synthetic. Unlisted type falls back to Marble; every derived weight is flagged `weight_derived`. |
+| **weight** | **DERIVABLE** | Derived from real dims x per-type density: `weight_kg = length x width x height x density[type]` (`reference/<pack>/type_density.csv`, kg/m3; else the pack's `default_density`). A real physical weight, not a synthetic. Unlisted type falls back to Marble; every derived weight is flagged `weight_derived`. |
 | **type** | **REQUIRED (resolve)** | Resolved against the closed vocabulary; an explicit type word in the variety name overrides a wrong supplier tag. Unresolvable -> **REJECTED**. |
 | **color** | **REQUIRED (resolve)** | Resolved, else inherited from the matched variety (whose color is classified from its texture; `Natural` floor). A brand-new colourless variety with no texture yet can still reject until the variety is coloured. |
-| **finish** | **RESOLVE then DEFAULTED** | Resolved; else a configured, flagged last-resort default: block -> `Raw`, slab -> `Polished`, tile -> `Honed` (`settings.LAST_RESORT_FINISH`). Never rejects for a missing finish. |
-| **quality** | **RESOLVE then DEFAULTED** | Resolved; else the configured, flagged last-resort default `A` (`settings.LAST_RESORT_QUALITY`). Never rejects for a missing quality. |
+| **finish** | **RESOLVE then DEFAULTED** | Resolved; else a configured, flagged last-resort default: block -> `Raw`, slab -> `Polished`, tile -> `Honed` (the pack's `last_resort_finishes`). Never rejects for a missing finish. |
+| **quality** | **RESOLVE then DEFAULTED** | Resolved; else the configured, flagged last-resort default `A` (the pack's `last_resort_quality`). Never rejects for a missing quality. |
 | **origin (country/city/county)** | **DEFAULTED** | `origin_map` (variety -> country, exact or geographic pattern, flagged) -> supplier `origin_default` (flagged) -> **REJECTED** only if a source set no `origin_default`. |
 | **images (thumbnail / gallery / oriented)** | **HOLD-GATE** | The product is **held** (not shipped) until at least one image and the variety texture exist. Not rejected, held. |
 | **bundle size** | **DEFAULTED** | Ladder: explicit count -> slab-array -> area division -> standard area -> source `default_bundle_size` (flagged). Always filled. Blocks are not bundled. |
@@ -69,7 +69,7 @@ wins over a derived one).
 
 The finish/quality blanks (a few products per source) no longer drop: an
 unresolvable finish or quality now gets a configured, flagged last-resort default
-(`settings.LAST_RESORT_FINISH` / `LAST_RESORT_QUALITY`), so the product ships and is
+(the domain pack's `last_resort_finishes` / `last_resort_quality`), so the product ships and is
 queued for correction rather than being rejected.
 
 ---

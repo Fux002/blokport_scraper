@@ -5,7 +5,7 @@ One ordered sequence both chats (scraper + Blokport platform/Medusa) work from. 
 fallback, so a missed step errors rather than shipping silently. See `TODO_PROD.md` for the checklist form
 and `DEV_PROD_PIPELINE.md` for the data-flow story.
 
-**Status (2026-08-25):** prod is NOT provisioned. Nothing exists in prod AWS yet (no state, VPC, cluster,
+**Status (2026-09-02):** prod is provisioned and live (svc + GPU queue + IAM); the steps below are the record of how it was stood up. (Originally: nothing existed in prod AWS: no state, VPC, cluster,
 bucket). The scraper prod stack is fully defined and count-gated on `prod_staging_bucket`; a dev apply never
 reads prod state or `/blokport-prod/` params. Launch is gated on the Blokport platform apply (blocked on an
 Elastic IP quota increase + real secret values) and then a short scraper apply + texture transplant + verify.

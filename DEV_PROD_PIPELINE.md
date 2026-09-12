@@ -1,3 +1,6 @@
+> Note: the manual upload / export loop below is the laptop path; on AWS the deliverables are published
+> to S3 and Blokport pulls them through the sync ledger (SYNC_LEDGER_DESIGN.md).
+
 # Catalog & tree pipeline — dev/prod parity
 
 The variant catalog and Medusa combinations are built so the **dev and prod catalogs
@@ -36,7 +39,7 @@ reproduce dev-staging, so an unset environment behaves exactly as before.
 | `BLOKPORT_S3_BUCKET` | dev bucket | The bucket; **must be set in prod** (a prod run on the dev bucket warns) |
 | `BLOKPORT_S3_REGION` | `eu-west-1` | AWS region |
 | `BLOKPORT_AWS_PROFILE` | `default` | Credentials profile (use the task IAM role on AWS) |
-| `BLOKPORT_S3_DRY_RUN` | `true` | `false` to actually upload to S3 |
+| `BLOKPORT_S3_DRY_RUN` | `true` in development, `false` in production | the ECS task sets `false`; a laptop never writes the bucket by default |
 | `BLOKPORT_IMAGE_MODE` | `passthrough` | `s3` to download → process → re-host product photos |
 | `BLOKPORT_IMAGE_PROCESSING` | `false` | `true` to enhance/de-watermark before re-host |
 | `BLOKPORT_KEEP_SCRAPED` | `false` | `true` to also keep the raw download in the sibling `scraped/` folder |

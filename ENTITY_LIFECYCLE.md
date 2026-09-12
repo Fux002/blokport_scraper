@@ -2,7 +2,7 @@
 
 The one model for adding and removing both kinds of entity the scraper owns: **sources** (scrapers) and
 **variations** (varieties). It supersedes the source-lifecycle notes and the removal half of
-VENDOR_REMOVAL.md, and is the contract both the scraper and Medusa build against. Companion to
+docs/superseded/VENDOR_REMOVAL.md, and is the contract both the scraper and Medusa build against. Companion to
 SYNC_LEDGER_DESIGN.md. No em dashes (design principle 2).
 
 ## Principle
@@ -83,4 +83,4 @@ can drive drift to zero. Counts are raw histograms, NOT servable counts.
 - Base variations are never auto-deleted; removal (source or variation) is always explicit.
 - Combinations are not served or retired by the scraper: Medusa rebuilds priceable tuples and orphan-cleans them.
 - The lifecycle state in config.db + the retire memory in state/ must be snapshotted to survive an ECS
-  restart (durability lane); until then, treat lifecycle as non-durable across a scraper redeploy.
+  restart: config.db is snapshotted to S3 every five minutes and on shutdown, and restored on boot, so a lifecycle change survives a redeploy.
