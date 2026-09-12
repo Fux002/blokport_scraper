@@ -836,10 +836,10 @@ class ConfigHandler(BaseHTTPRequestHandler):
 
 def boot(config_db, ledger_path) -> None:
     """The boot sequence, in this ORDER, before anything serves (pure of the HTTP server, so it is tested):
-    restore config.db -> seed sources -> reconcile interrupted runs -> restore the ledger -> the two-level
-    backfill (needs the ledger) -> artifact trees -> combinations baseline -> attribute vocab. A required
-    restore that fails RAISES here, so the task exits non-zero and ECS retries: serving on a fresh store
-    would let the periodic save overwrite the real snapshot."""
+    restore config.db -> seed sources -> reconcile interrupted runs -> await the ledger (the sync server is
+    its one restorer) -> the two-level backfill (needs the ledger) -> artifact trees -> combinations baseline
+    -> attribute vocab. A required restore that fails RAISES here, so the task exits non-zero and ECS
+    retries: serving on a fresh store would let the periodic save overwrite the real snapshot."""
     from stone_pipeline.ledger import snapshot
     # E14: restore config.db (the durable source lifecycle: pause/delist/enabled) from its S3 snapshot
     # BEFORE seeding, so a redeploy does not lose it and re-seed every source back to active. Restore is a
@@ -857,9 +857,10 @@ def boot(config_db, ledger_path) -> None:
     if interrupted := store.reconcile_interrupted_runs(config_db):
         log.warning("reconciled interrupted run(s) from a prior restart",
                     extra={"extra_fields": {"sources": interrupted}})
-    # C1: restore the LOCAL-disk ledger from its S3 snapshot before any produce/reset could create a
-    # fresh empty one over it. Idempotent + shared-volume-safe (skips if the sync server already did it).
-    snapshot.restore(ledger_path, required=True)   # durable: fail loud if present-but-unfetchable
+    # C1: the ledger lives on the LOCAL volume both containers share; the sync server is its ONE restorer
+    # (S3 snapshot, else bootstrap; each an atomic rename). Wait for it before a produce/reset could create
+    # a fresh empty one, and never download a second copy over a ledger that may already be serving.
+    snapshot.await_file(ledger_path)
     # TWO LEVELS data backfill, once: needs the ledger (variety lookups), so it runs here and not in the store
     # migration, which fires on the first config.db open above, before the ledger is back.
     from stone_pipeline.config import decisions_store

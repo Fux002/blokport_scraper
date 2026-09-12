@@ -276,3 +276,18 @@ def test_wipe_artifacts_tolerates_a_missing_s3_snapshot(tmp_path, monkeypatch):
     res = snapshot.wipe_artifacts(env="development",
                                   outputs_dir=tmp_path / "nope_out", data_dir=tmp_path / "nope_data")
     assert res["s3"] == []   # nothing recorded as deleted, but no exception escaped
+
+
+def test_await_file_releases_when_the_one_restorer_puts_the_ledger_in_place(tmp_path):
+    # the config container never restores the ledger itself; it waits for the sync server to put it in
+    # place (restore or bootstrap, both atomic renames) and then proceeds.
+    import threading
+    path = tmp_path / "development.db"
+    threading.Timer(0.3, lambda: path.write_bytes(b"")).start()
+    snapshot.await_file(path, timeout=5, poll=0.05)
+    assert path.exists()
+
+
+def test_await_file_times_out_loud(tmp_path):
+    with pytest.raises(TimeoutError, match="sync server"):
+        snapshot.await_file(tmp_path / "development.db", timeout=0.2, poll=0.05)

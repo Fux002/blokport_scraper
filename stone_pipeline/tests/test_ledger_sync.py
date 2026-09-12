@@ -622,6 +622,9 @@ def test_server_self_seeds_a_missing_ledger(tmp_path, monkeypatch):
     assert not path.exists()
     server.bootstrap_ledger_if_missing(path)
     assert path.exists()
+    # built beside the path and renamed into place: the config container awaits the path, so the file
+    # must only ever appear complete (a half-built schema would fail its first open). No leftovers.
+    assert [p.name for p in tmp_path.iterdir()] == ["development.db"]
     with Ledger.open(path, env="development") as lg:
         assert "variation" in status(lg)          # a real, servable ledger
     server.bootstrap_ledger_if_missing(path)       # idempotent: a no-op second time
