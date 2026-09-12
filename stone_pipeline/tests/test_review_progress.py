@@ -4,7 +4,22 @@ It cannot leave the list on decision -- only the next produce binds it -- so the
 while the operator works. Without the flag, the order and the count there is no way to tell a settled card
 from an untouched one, nor a finished review from an untouched one."""
 
+import json
+
 from stone_pipeline.config import server
+
+
+def _seed_many(kind: str, cards: list[tuple[str, str]]) -> None:
+    """Put cards in the pending queue of the per-test config store (the conftest points BLOKPORT_CONFIG_DB at
+    a private path) through the same writer the produce uses, so the readers run their real queries. Each
+    card is (ref, the JSON text the produce would have stored)."""
+    from stone_pipeline.config import decisions_store
+    decisions_store.replace_pending(kind, [{"ref": ref, "payload": json.loads(payload), "sources": None}
+                                           for ref, payload in cards])
+
+
+def _seed(kind: str, ref: str, payload: str) -> None:
+    _seed_many(kind, [(ref, payload)])
 
 
 def _cards(monkeypatch, variety, origin=()):
@@ -64,23 +79,13 @@ def test_a_vendor_scoped_alias_counts_as_decided(monkeypatch, tmp_path):
     monkeypatch.setattr(ds, "scoped_aliases",
                         lambda: {("zucchi", "agata dark blue"): ("Agata Blue", "Agate")})
 
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
-    rows = [_Row(ref="agata dark blue",
-                 payload=('{"variant": "Agata Dark Blue", "src": "zucchi", "scraped": "Agata Dark Blue",'
-                          ' "listings": [{"source": "zucchi", "scraped": "Agata Dark Blue"}]}'),
-                 sources=None),
-            _Row(ref="untouched name",
-                 payload='{"variant": "Untouched", "src": "zucchi", "scraped": "Untouched"}', sources=None)]
+    _seed_many("variety", [
+        ("agata dark blue", '{"variant": "Agata Dark Blue", "src": "zucchi", "scraped": "Agata Dark Blue",'
+                            ' "listings": [{"source": "zucchi", "scraped": "Agata Dark Blue"}]}'),
+        ("untouched name", '{"variant": "Untouched", "src": "zucchi", "scraped": "Untouched"}')])
 
-    class _Cur:
-        def fetchall(self): return rows
 
-    class _Conn:
-        def execute(self, *a, **k): return _Cur()
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     out = {i["ref"]: i for i in ds.list_pending("variety")}
@@ -103,22 +108,12 @@ def test_decided_matches_scraped_spelling_not_the_cleaned_ref(monkeypatch):
     monkeypatch.setattr(ds, "scoped_aliases",
                         lambda: {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")})
 
-    class _Cur:
-        def __init__(self, rows): self._rows = rows
-        def fetchall(self): return self._rows
-
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
     payload = ('{"variant": "Amazon Green", "src": "marenostone", "scraped": "Amazon Green Granite",'
                ' "spellings": ["Amazon Green Granite"],'
                ' "listings": [{"source": "marenostone", "scraped": "Amazon Green Granite"}]}')
-    rows = [_Row(ref="amazon green", payload=payload, sources=None)]
+    _seed("variety", "amazon green", payload)
 
-    class _Conn:
-        def execute(self, *a, **k): return _Cur(rows)
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("variety")[0]
@@ -138,21 +133,11 @@ def test_a_mint_keyed_on_the_scraped_spelling_is_found(monkeypatch):
                                                           "seed_country": "BR", "seed_name": None}})
     monkeypatch.setattr(ds, "scoped_aliases", lambda: {})
 
-    class _Cur:
-        def __init__(self, rows): self._rows = rows
-        def fetchall(self): return self._rows
-
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
     payload = ('{"variant": "Blue Dunes", "src": "zucchi", "scraped": "Blue Dunes Quartzite",'
                ' "spellings": ["Blue Dunes Quartzite"]}')
-    rows = [_Row(ref="blue dunes", payload=payload, sources=None)]
+    _seed("variety", "blue dunes", payload)
 
-    class _Conn:
-        def execute(self, *a, **k): return _Cur(rows)
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("variety")[0]
@@ -172,19 +157,10 @@ def test_renamed_global_mint_keyed_on_a_listing_spelling_is_found(monkeypatch):
                                  "seed_name": "Chocolate Brown"}})
     monkeypatch.setattr(ds, "scoped_aliases", lambda: {})   # global mint: no scoped alias
 
-    class _Cur:
-        def __init__(self, rows): self._rows = rows
-        def fetchall(self): return self._rows
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
     payload = ('{"variant": "Brown", "spellings": ["Brown Granite"],'          # display spelling differs
                ' "listings": [{"source": "marenostone", "scraped": "Brown Granite Slab 2cm"}]}')  # real key
-    rows = [_Row(ref="brown", payload=payload, sources=None)]
-    class _Conn:
-        def execute(self, *a, **k): return _Cur(rows)
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
+    _seed("variety", "brown", payload)
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("variety")[0]
@@ -203,19 +179,10 @@ def test_origin_card_decided_when_its_listing_is_bound(monkeypatch):
     monkeypatch.setattr(ds, "scoped_aliases",
                         lambda: {("marenostone", "amazon marble"): ("Silver Stream", "Marble")})  # listing bound
 
-    class _Cur:
-        def __init__(self, rows): self._rows = rows
-        def fetchall(self): return self._rows
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
     payload = ('{"source": "marenostone", "variety": "Amazon White", "stone_type": "Marble",'
                ' "scraped": "Amazon Marble"}')
-    rows = [_Row(ref="marenostone|amazon white|marble", payload=payload, sources=None)]
-    class _Conn:
-        def execute(self, *a, **k): return _Cur(rows)
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
+    _seed("origin", "marenostone|amazon white|marble", payload)
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("origin")[0]
@@ -233,19 +200,10 @@ def test_every_decided_card_names_its_action(monkeypatch):
     monkeypatch.setattr(ds, "origin_decisions",
                         lambda: {("marenostone", "amazon white", "marble"): "IR"})   # country only, no bind
 
-    class _Cur:
-        def __init__(self, rows): self._rows = rows
-        def fetchall(self): return self._rows
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
     payload = ('{"source": "marenostone", "variety": "Amazon White", "stone_type": "Marble",'
                ' "scraped": "Amazon Marble"}')
-    rows = [_Row(ref="marenostone|amazon white|marble", payload=payload, sources=None)]
-    class _Conn:
-        def execute(self, *a, **k): return _Cur(rows)
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
+    _seed("origin", "marenostone|amazon white|marble", payload)
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
     card = ds.list_pending("origin")[0]
@@ -263,19 +221,10 @@ def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
     monkeypatch.setattr(ds, "origin_decisions", lambda: {})
     monkeypatch.setattr(ds, "origin_widen", lambda: {("zucchi", "silver stream", "marble"): "IR"})
 
-    class _Cur:
-        def __init__(self, rows): self._rows = rows
-        def fetchall(self): return self._rows
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
     payload = ('{"variant": "Amazon Marble", "src": "zucchi", "scraped": "Amazon Marble",'
                ' "listings": [{"source": "zucchi", "scraped": "Amazon Marble"}]}')
-    rows = [_Row(ref="amazon marble", payload=payload, sources=None)]
-    class _Conn:
-        def execute(self, *a, **k): return _Cur(rows)
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
+    _seed("variety", "amazon marble", payload)
 
     card = ds.list_pending("variety")[0]
     assert card["current_action"] == "alias" and card["current_alias_of"] == "Silver Stream"
@@ -287,22 +236,13 @@ def test_widen_documented_origin_is_surfaced_on_the_card(monkeypatch):
 
 
 def _one_card(monkeypatch, actions, aliases, payload, ref="foo"):
-    """Drive list_pending('variety') for a single hand-built card with the given decision stores."""
+    """Drive list_pending('variety') for a single card in the real (temporary) store with the given
+    decision maps."""
     from stone_pipeline.config import decisions_store as ds
     monkeypatch.setattr(ds, "variety_actions", lambda: actions)
     monkeypatch.setattr(ds, "scoped_aliases", lambda: aliases)
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
-
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
-
-    class _Cur:
-        def fetchall(self): return [_Row(ref=ref, payload=payload, sources=None)]
-
-    class _Conn:
-        def execute(self, *a, **k): return _Cur()
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
+    _seed("variety", ref, payload)
     return ds.list_pending("variety")[0]
 
 
@@ -376,20 +316,12 @@ def test_an_origin_card_has_variety_field_parity_so_it_is_editable(monkeypatch):
     monkeypatch.setattr(ds, "origin_decisions", lambda: {("polonine", "andes", "quartzite"): "BR"})
     monkeypatch.setattr(ds, "origin_widen", lambda: {})
 
-    class _Row(dict):
-        def __getitem__(self, k): return dict.__getitem__(self, k)
 
     payload = ('{"variety": "Andes", "stone_type": "Quartzite", "source": "polonine", "scraped": "ARTEMIS",'
                ' "variant": "Andes", "listings": [{"source": "polonine", "scraped": "ARTEMIS"}]}')
 
-    class _Cur:
-        def fetchall(self): return [_Row(ref="polonine|andes|quartzite", payload=payload, sources=None)]
 
-    class _Conn:
-        def execute(self, *a, **k): return _Cur()
-        def close(self): pass
-    monkeypatch.setattr(ds.store, "read_store", lambda: _Conn())
-
+    _seed("origin", "polonine|andes|quartzite", payload)
     raw = ds.list_pending("origin")[0]
     card = server._origin_as_card(raw)
     assert card["decided"] is True and card["current_action"] == "alias"
