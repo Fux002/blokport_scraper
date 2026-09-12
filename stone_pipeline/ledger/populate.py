@@ -114,7 +114,12 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "state = CASE WHEN variation.state = 'retiring' THEN 'dirty' "
                 "WHEN variation.payload_hash != excluded.payload_hash THEN 'dirty' "
                 "ELSE variation.state END, "
-                "updated_at = excluded.updated_at",
+                # updated_at is the syncing-lease clock (reap_stale_syncing): it moves with the row's
+                # content or state, never on an unchanged re-run, or every produce would renew a lease
+                # Medusa never acked and the row would stay in-flight instead of re-serving.
+                "updated_at = CASE WHEN variation.state = 'retiring' "
+                "OR variation.payload_hash != excluded.payload_hash THEN excluded.updated_at "
+                "ELSE variation.updated_at END",
                 (key, branch, "", name, json.dumps(aliases), image_url, image_sha256,
                  models.get(key), volume,
                  None, ph, "pending", now, None, now, now),
@@ -255,11 +260,16 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         # -> untouched. CRITICAL: preserve a synced product's medusa_id + state on re-run. The old
         # code hardcoded state='pending', medusa_id=None, so every write-through run reset the whole
         # catalog to pending and wiped the acked Medusa ids -> Medusa re-ingested everything nightly.
+        # updated_at is the syncing-lease clock (reap_stale_syncing): it moves only with the content, so
+        # an unchanged re-run never renews a lease Medusa did not ack. The row is still written (vendor
+        # and thumbnail_key are served but outside the hash), only the timestamp is carried over.
         if prev is None:                                     # `prev` fetched above (variation_key fallback)
             record.update(medusa_id=None, state="pending", last_synced=None)
+        elif prev["payload_hash"] != ph:
+            record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"], state="dirty")
         else:
             record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"],
-                          state="dirty" if prev["payload_hash"] != ph else prev["state"])
+                          state=prev["state"], updated_at=prev["updated_at"])
         ledger.upsert("product", record, pk=("sku",), keep_on_update=("created_at", "first_seen"))
         n += 1
     # A re-created SKU must not carry a stale tombstone: a re-added vendor reuses deterministic SKUs, so
