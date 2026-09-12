@@ -432,7 +432,7 @@ def test_dispatch_routes_variation_retire_and_un_retire(monkeypatch):
     assert code == 200 and seen["retire"] == ("slab_marble_x_1", True)
     code, _ = dispatch("POST", ["variations", "slab_marble_x_1", "un_retire"], None)
     assert code == 200 and seen["un_retire"] == "slab_marble_x_1"
-    assert dispatch("GET", ["variations", "x", "retire"], None)[0] == 404      # wrong method
+    assert dispatch("GET", ["variations", "x", "retire"], None)[0] == 405      # wrong method
 
 
 def test_second_trigger_while_running_is_refused_409():
