@@ -38,7 +38,7 @@ EventBridge (cron) ─▶ Fargate task: scrape ─▶ pipeline (Stage 7 stages i
 
 ## Pieces (all in this repo)
 - `Dockerfile` — `core` (scrape+pipeline+CPU image enhancement) and `imageproc`
-  (adds de-watermark torch stack) targets.
+  (adds the CPU torch enhance stack) and `gpu` (CUDA torch, the AWS Batch enhancer) targets.
 - `deploy/run_pipeline.sh` — container entrypoint (`scrape → run → catalog → upload`).
 - `infra/` — Terraform: one stack, shared ECR + CI role, and `modules/scraper`
   instantiated twice (`scraper_dev`, `scraper_prod`); see `infra/README.md`.
@@ -101,7 +101,7 @@ terraform apply -var dev_schedule_enabled=true
 ```
 
 With `prod_staging_bucket` empty (the default), **only the dev task is created** — the
-prod instance is count-gated to zero, so nothing prod-side exists yet.
+prod instance is live (stood up 2026-09-02; pinned by `prod_image_tag` in `infra/brands/blokport.tfvars`).
 
 ## Rolling a dev deploy (the mutable `:core` gotcha -- now automatic)
 Dev tracks the **mutable** `:core` tag, and the running service's task def points at `:core`. So a merge

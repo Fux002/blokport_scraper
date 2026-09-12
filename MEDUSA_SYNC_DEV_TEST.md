@@ -9,7 +9,7 @@ The `/sync/v1` server (`stone_pipeline.ledger.server`) is code-complete and prov
 (live HTTP round-trip, byte-identical equivalence, convergent sync loop). But it is
 **not deployed as a reachable service yet.** The current dev deploy (`infra/`) is a
 **scheduled EventBridge -> Fargate RunTask batch**: it runs `scrape -> run -> catalog
--> upload` and exits. There is no `aws_ecs_service`, no ALB, no published port, and
+-> upload` and exits. The sync service (`infra/modules/sync_service`) is an `aws_ecs_service` with the ledger and config servers on ports 8723/8724 inside the VPC (no ALB), and
 the ledger it writes lives on the task's ephemeral local disk and dies with the task.
 
 So "confirm the pipeline's `/sync/v1` API is live and serving dev's catalog" cannot be

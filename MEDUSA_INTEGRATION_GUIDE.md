@@ -1,3 +1,6 @@
+> Note: the pull lanes are variants, products, inventory and `removed` (tombstones for deleted varieties /
+> products; see `ledger/server.py` and MEDUSA_INTEGRATION_GUIDE below for the ack statuses).
+
 # Medusa integration guide: how to sync with the stone pipeline
 
 Audience: the Medusa backend team. This is the contract for how Medusa connects to

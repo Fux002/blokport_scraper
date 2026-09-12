@@ -102,5 +102,5 @@ For each brand X (wood→Wudport, lime→Calcport):
 ## Blokport (stone) prod
 
 Code-ready; its only blocker is external (the Blokport prod platform stack + `/blokport-prod` SSM tokens per
-`TODO_PROD.md`). Once those exist, flip `prod_staging_bucket` in tfvars, set `SCRAPER_BRAND=blokport`, and
+`TODO_PROD.md`). For blokport this is done (`prod_staging_bucket` is set; prod stood up 2026-09-02). For a new brand, set `prod_staging_bucket` in its tfvars, set `SCRAPER_BRAND=<brand>`, and
 follow steps C–E with `domain_pack=stone`.

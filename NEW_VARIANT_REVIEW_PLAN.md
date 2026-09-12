@@ -1,3 +1,7 @@
+> Superseded model: this plan describes the mint / reject / alias actions. The shipped review is ONE statement per
+> listing (`PUT /review/decide`, REVIEW_DECISIONS.md); decisions persist in config.db, snapshotted to S3
+> (no EFS). Kept as the design record.
+
 # New Variant Review & Approval — Implementation Plan
 
 Goal: an operator reviews the new variants a produce surfaces and decides **Mint / Reject /

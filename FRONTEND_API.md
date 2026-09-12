@@ -1,4 +1,4 @@
-# :4200 frontend API reference (authoritative, current)
+# :4200 frontend API reference (the review routes are documented in REVIEW_DECISIONS.md; this file is the older overview)
 
 Every endpoint the Blokport admin (:4200) can call, taken directly from the two dispatchers
 (`stone_pipeline/config/server.py`, `stone_pipeline/ledger/server.py`). **Anything not in this document is
@@ -57,7 +57,7 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/config/v1/review/variants` | pending varieties (+ current_action) |
-| `PUT` | `/config/v1/review/variants/<variant>` | `{ "action":"mint"\|"reject"\|"alias", "alias_of"?, "color"?, "type"? }` |
+| `PUT` | `/config/v1/review/variants/<variant>` | `{ "action":"reject" }` only; everything else is a statement: `PUT /config/v1/review/decide` (see REVIEW_DECISIONS.md; also `GET /review/resolved`, `POST /purge`, `POST /curation/rebuild`, `POST /variations/<key>/not_a_duplicate`) |
 | `GET` | `/config/v1/review/attributes` | pending attribute values (need a Medusa id) |
 | `PUT` | `/config/v1/review/attributes/<value>` | `{ "kind":..., "medusa_id":... }` |
 | `GET` | `/config/v1/review/backbone` | pending leaf additions |

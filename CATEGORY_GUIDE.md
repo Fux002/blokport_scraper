@@ -1,3 +1,6 @@
+> Note: categories come from the domain pack (`stone_pipeline/config/domains/<pack>.yaml`, `categories:`);
+> `settings.CATEGORIES` is built from it at import. A category activates once its Medusa pcat is set.
+
 # Adding a category
 
 Categories live in ONE place — `CATEGORIES` in `stone_pipeline/config/settings.py`.
