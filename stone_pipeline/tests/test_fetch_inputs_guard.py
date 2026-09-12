@@ -3,7 +3,6 @@ thin/empty Medusa export (mid-reset), or nothing resolves. Guards _would_clobber
 
 from __future__ import annotations
 
-import pytest
 
 from deploy import fetch_inputs
 

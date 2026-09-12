@@ -18,11 +18,10 @@ import csv
 import json
 from pathlib import Path
 
-# CATEGORIES is imported but deliberately unused in code: it is the frozen-tuple TRAP that
-# test_categories.py patches to prove union-fill reads the runtime registry (active_categories),
-# never the import-time snapshot (the slab-only-mint regression). Keep it as the guard's anchor.
-from stone_pipeline.config.settings import (  # noqa: F401
-    CATEGORIES, SETTINGS, active_categories, category_for_key)
+# Never import the frozen CATEGORIES tuple here: union-fill must read the runtime registry
+# (active_categories), never an import-time snapshot (the slab-only-mint regression; test_categories
+# guards that this module has no such attribute).
+from stone_pipeline.config.settings import SETTINGS, active_categories, category_for_key
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
     clean_alias_list,

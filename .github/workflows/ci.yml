@@ -14,7 +14,17 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install deps
-        run: pip install -r stone_pipeline/requirements.txt
+        run: pip install -r stone_pipeline/requirements.txt pyflakes
+      # Static gates before the suite: an unused/undefined name (pyflakes catches the NameError class of
+      # boot crash) and the no-em-dash invariant (plan section 0) over every code file. image_pipeline/ and
+      # the design docs are outside the gate for now.
+      - name: Lint (pyflakes)
+        run: python -m pyflakes stone_pipeline scrapers deploy
+      - name: No em dashes in code
+        run: |
+          if grep -rnP "\x{2014}" stone_pipeline scrapers deploy infra .github Dockerfile; then
+            echo "em dash found in code (plan section 0: none anywhere)"; exit 1
+          fi
       - name: Run tests
         run: pytest -q
       - name: Certify sources (per-source trust gate)

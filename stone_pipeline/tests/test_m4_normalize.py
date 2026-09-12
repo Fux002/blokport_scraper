@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode
 from stone_pipeline.matching.engine import VocabResolver
 from stone_pipeline.reference import loaders

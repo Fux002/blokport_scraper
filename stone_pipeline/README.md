@@ -90,7 +90,7 @@ run.py       the orchestrator
 ## Categories (slab / block / tile)
 
 Categories live in one registry: the `CATEGORIES` tuple in `config/settings.py`.
-A category is ACTIVE once its Medusa `pcat_id` is set there — no code change (see
+A category is ACTIVE once its Medusa `pcat_id` is set there - no code change (see
 `CATEGORY_GUIDE.md`). Slabs, blocks and **tiles are all active**. Each variety has
 a different variation id per format; the category is the Key prefix
 (`slab_`/`block_`/`tile_`).

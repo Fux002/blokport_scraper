@@ -19,7 +19,7 @@ _SAME = [
     "semi precious stone",
     "SEMI-PRECIOUS  STONE",
     "Semi–Precious Stone",   # en dash
-    "Semi—Precious/Stone",   # em dash + slash
+    "Semi\u2014Precious/Stone",   # em dash + slash
     "semi\tprecious\nstone",
 ]
 

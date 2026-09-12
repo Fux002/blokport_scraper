@@ -49,7 +49,7 @@ def main() -> int:
             if len(keys) >= n:
                 break
     if not keys:
-        print(f"no originals at s3://{S3_BUCKET}/{src} — run the pipeline with keep_scraped first")
+        print(f"no originals at s3://{S3_BUCKET}/{src} - run the pipeline with keep_scraped first")
         return 1
 
     from stone_pipeline.config.sources import load_source   # the source's own de-watermark prompt (else fallback)

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import types
 
-import pytest
 
 from stone_pipeline.config.settings import AutoEnhanceConfig
 from deploy import enhance_trigger as et

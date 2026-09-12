@@ -5,7 +5,6 @@ persists and is re-applied on the next run.
 
 from __future__ import annotations
 
-import csv
 
 import pytest
 

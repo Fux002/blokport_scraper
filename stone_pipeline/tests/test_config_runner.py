@@ -458,7 +458,6 @@ def test_remove_config_only_source_is_deletable(tmp_path, monkeypatch):
 
 
 def test_remove_unknown_source_is_404(tmp_path, monkeypatch):
-    from stone_pipeline.config import store  # noqa: F401  (ensures the isolated config db is used)
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "dev.ledger"))
     body, code = lifecycle.remove_source("does_not_exist")

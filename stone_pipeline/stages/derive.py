@@ -24,7 +24,7 @@ from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
-from stone_pipeline.core.text import match_key, slugify, title_case
+from stone_pipeline.core.text import slugify, title_case
 from stone_pipeline.reference.loaders import ReferenceData, resolve_iso
 
 log = logfmt.get_logger("derive")
@@ -33,11 +33,11 @@ _NUM_UNIT = re.compile(r"(-?\d[\d.,]*\d|-?\d)\s*([a-zµ\"'″′’”]+)?", fla
 # a range 'lo - hi [unit]' ('2-3 cm', '2 - 3 cm', '20–30 mm'): the unit trails the WHOLE range, so
 # the old first-number-only parse read '2-3 cm' as 2 (then metres). Average the endpoints and take
 # the trailing unit. Requires a digit before the dash, so a lone negative '-3' is NOT a range.
-_RANGE = re.compile(r"(\d[\d.,]*)\s*[-–—]\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
+_RANGE = re.compile(r"(\d[\d.,]*)\s*[-\u2013\u2014]\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
 # a DIMENSION range 'lo to hi [unit]' / 'lo-hi [unit]' ('105 to 145cm', '2-3 cm'): the unit trails the whole
 # range. Face dimensions take the MAX endpoint ("cut smaller later"); thickness never uses a range. Kept
 # separate from _RANGE (which midpoints, for weight/generic callers) so their behaviour is unchanged.
-_DIM_RANGE = re.compile(r"(\d[\d.,]*)\s*(?:to|[-–—])\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
+_DIM_RANGE = re.compile(r"(\d[\d.,]*)\s*(?:to|[-\u2013\u2014])\s*(\d[\d.,]*)\s*([a-zµ\"'″′’”]+)?", flags=re.IGNORECASE)
 # per-slab key in a scraped slabs-array, case/space/quote-insensitive ('"n":', "'N' :", '"Numero":')
 _SLAB_KEY = re.compile(r"""["']\s*(?:n|numero)\s*["']\s*:""", flags=re.IGNORECASE)
 

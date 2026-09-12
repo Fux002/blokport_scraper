@@ -1,5 +1,5 @@
 # =============================================================================
-# GPU image enhancer — AWS Batch, on-demand, scales to ZERO.
+# GPU image enhancer - AWS Batch, on-demand, scales to ZERO.
 # A managed EC2 compute env (min_vcpus=0, so $0 when idle) launches a g4dn GPU only
 # while a job runs, then terminates. The job runs the SAME container image as the
 # scraper (:gpu target), reading <env>/products/scraped/ and writing improved/ via
@@ -125,7 +125,7 @@ resource "aws_iam_role_policy" "execution_secrets" {
   policy = data.aws_iam_policy_document.execution_secrets[0].json
 }
 
-# --- IAM: job role (the CONTAINER's app permissions — S3 to THIS bucket only) -
+# --- IAM: job role (the CONTAINER's app permissions - S3 to THIS bucket only) -
 resource "aws_iam_role" "job" {
   name               = "${local.name}-job"
   assume_role_policy = data.aws_iam_policy_document.task_assume.json
@@ -175,7 +175,7 @@ resource "aws_batch_compute_environment" "this" {
   # name_prefix + create_before_destroy: a compute env referenced by a job queue can't be
   # deleted-then-recreated under the same name (the queue relationship blocks the delete and
   # the name collides). Unique names let Terraform stand up the new env, re-point the queue,
-  # then retire the old one — so config changes (e.g. the launch template) don't deadlock.
+  # then retire the old one - so config changes (e.g. the launch template) don't deadlock.
   name_prefix = "${local.name}-"
   type        = "MANAGED"
   # service_role omitted -> Batch uses the account service-linked role (AWSServiceRoleForBatch).
@@ -195,7 +195,7 @@ resource "aws_batch_compute_environment" "this" {
     subnets             = data.aws_subnets.private.ids
 
     # The GPU-optimised ECS AMI (NVIDIA drivers + nvidia-container-runtime). REQUIRED
-    # for GPU jobs — without it the container can't see the GPU. AL2023, not AL2:
+    # for GPU jobs - without it the container can't see the GPU. AL2023, not AL2:
     # AWS Batch rejects the end-of-life Amazon Linux 2 NVIDIA AMI at CreateComputeEnvironment.
     ec2_configuration {
       image_type = "ECS_AL2023_NVIDIA"

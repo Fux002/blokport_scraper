@@ -52,7 +52,7 @@ variable "prod_gpu_image_tag" {
   description = "ECR tag the PROD GPU Batch enhancer runs. Promote the dev-proven :gpu-<sha> here."
 }
 
-# --- Schedules (per env; both start disabled — enable when proven) ------------
+# --- Schedules (per env; both start disabled - enable when proven) ------------
 variable "dev_schedule_enabled" {
   type    = bool
   default = false

@@ -676,7 +676,6 @@ def test_product_payload_sends_supplier_port_ids_not_derived_from_country(tmp_pa
 
 def test_product_payload_empty_ports_is_empty_list_not_missing(tmp_path):
     # a product with no ports sends [] (Medusa links no port), never absent -> Medusa must not re-derive.
-    import json
     from stone_pipeline.ledger.sync import ready
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="synced", medusa_id="V1")

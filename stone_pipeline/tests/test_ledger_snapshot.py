@@ -66,7 +66,7 @@ def test_snapshot_round_trip_preserves_acked_ids(tmp_path, monkeypatch):
     _seed(src, "slab_marble_test_1")
 
     assert snapshot.save(src, env="development") is True
-    assert (S3_BUCKET_KEY := snapshot.snapshot_key("development")) in {k for _, k in fake.store}
+    assert snapshot.snapshot_key("development") in {k for _, k in fake.store}
 
     # a fresh, EMPTY task volume: restore brings the ledger (and its acked medusa_id) back
     dest = tmp_path / "restored" / "development.db"

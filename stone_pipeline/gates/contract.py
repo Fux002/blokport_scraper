@@ -6,7 +6,7 @@ fields and invariants a module guarantees on its output. The runner applies it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from stone_pipeline.core.schema import CanonicalRow, FlagCode

@@ -57,7 +57,7 @@ variable "schedule_expression" {
 variable "schedule_enabled" {
   type        = bool
   default     = false
-  description = "Start the cron disabled — run the task manually first, enable when proven."
+  description = "Start the cron disabled - run the task manually first, enable when proven."
 }
 
 variable "keep_scraped" {

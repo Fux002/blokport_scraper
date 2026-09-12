@@ -153,7 +153,8 @@ def test_uniform_fill_follows_the_runtime_registry_not_the_frozen_tuple(monkeypa
     active = {c.name: replace(c, pcat_id=f"pcat_{c.name}") for c in cats}
     frozen_stale = tuple(replace(c, pcat_id=("pcat_slab" if c.name == "slab" else "")) for c in cats)
     monkeypatch.setattr(settings, "_BY_NAME", active)
-    monkeypatch.setattr(emit_catalog, "CATEGORIES", frozen_stale)  # the never-rebuilt import snapshot
+    monkeypatch.setattr(settings, "CATEGORIES", frozen_stale)     # the never-rebuilt import snapshot
+    assert not hasattr(emit_catalog, "CATEGORIES"), "emit_catalog must never hold the frozen tuple"
 
     slab_only = {"slab_granite_novum_abc12345-0000-5000-8000-000000000000":
                  {"Key": "slab_granite_novum_abc12345-0000-5000-8000-000000000000", "Name": "Novum",

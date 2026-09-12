@@ -101,6 +101,6 @@ class MedusaApiSink:
         # upserting on handle. Left unwired until backend credentials exist.
         sent = 0
         for row in rows:
-            payload = self._payload(row, cfg)  # noqa: F841 (would be posted here)
+            self._payload(row, cfg)   # the payload that would be posted here
             sent += 1
         return sent
