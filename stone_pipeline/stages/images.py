@@ -416,6 +416,10 @@ class _Stager:
         self.url_to_site, self.stats = url_to_site, stats
         self.placeholders = _load_placeholder_hashes()
         self.hash_to_public: dict[str, str] = {}      # content-address: bytes hash -> public url (upload once)
+        # digests held THIS run (processing failed / deferred to the GPU): a second url carrying the same bytes
+        # gets the same outcome without re-running the processing (a second FAL bill for a known hold). The memo
+        # lives only in this run, so the next produce retries the hold as before.
+        self.held: set[str] = set()
         self.manifest_dirty = False
         self.preview: list[dict] = []
         # F13: bound the FAL de-watermark spend on THIS :core run. Once the accrued cost reaches fal_max_usd,
@@ -437,6 +441,8 @@ class _Stager:
             return None
         if digest in self.hash_to_public:
             return self._remember(url, self.hash_to_public[digest])
+        if digest in self.held:
+            return None
         src_site = self.url_to_site.get(url, "unknown")
         ck = storage.content_key(src_site, digest)
         # When processing runs, the improved image lives in its own subfolder and the raw scraped copy in a
@@ -451,6 +457,7 @@ class _Stager:
         else:
             public = self._process_and_host(url, data, digest, src_site, ck, dest_key)
             if public is None:
+                self.held.add(digest)
                 return None
         self.hash_to_public[digest] = public
         return self._remember(url, public)

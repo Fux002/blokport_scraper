@@ -259,6 +259,28 @@ def test_processing_failure_holds_the_image_and_writes_no_manifest(tmp_path, mon
     assert not list((tmp_path / "s").rglob("_manifest.json")), "no manifest entry for a held image"
 
 
+def test_held_bytes_are_processed_once_per_run(tmp_path, monkeypatch):
+    # Two urls carrying the SAME bytes: a hosted result is memoized by digest, and so must a hold be. Without
+    # the memo the second url re-ran the processing (a second FAL bill, a second failure) for a known outcome.
+    import stone_pipeline.io.image_processing as ip
+    from stone_pipeline.io.image_processing import ProcessResult
+    calls: list[bytes] = []
+    monkeypatch.setattr(ip.ImageProcessor, "process",
+                        lambda self, data, **kw: calls.append(data) or ProcessResult(data, failed=True))
+    monkeypatch.setattr(images, "_enhance_sources", lambda: set())
+    monkeypatch.setattr(images, "_watermarked_sources", lambda: set())
+    monkeypatch.setattr(images, "_load_enhanced_set", lambda cfg=None: set())
+    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())
+    cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
+                       require_enhanced=False, processing=_proc_cfg())
+    same = _jpeg()
+    row = CanonicalRow(src_site="zucchi", surrogate_key="9", is_block=False,
+                       raw_image_urls=["http://x/a.jpg", "http://x/b.jpg"])
+    stats = images.run([row], fetch=_fake_fetch({"http://x/a.jpg": same, "http://x/b.jpg": same}), cfg=cfg)
+    assert len(calls) == 1, "identical bytes were processed again after a hold"
+    assert stats.staged == 0 and stats.no_image == 1 and row.image_keys == []
+
+
 def test_discard_pool_unreachable_is_unknown_and_holds_every_image(tmp_path, monkeypatch):
     # Previously an S3 list failure returned an EMPTY set and published every previously discarded image.
     # Unknown must fail closed (hold), the same rule as the enhanced-marker set; never a crash, never open.
