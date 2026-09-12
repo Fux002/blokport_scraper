@@ -19,3 +19,15 @@ jobs:
         run: pytest -q
       - name: Certify sources (per-source trust gate)
         run: python -m stone_pipeline.certify all
+
+  syntax-floor:
+    # The declared Python floor is 3.11 (pyproject). Tests run on 3.12, so a 3.12-only construct (PEP 701
+    # nested f-string quotes) would ship unnoticed; compiling every package on 3.11 catches it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Compile on the declared floor
+        run: python -m compileall -q stone_pipeline scrapers deploy

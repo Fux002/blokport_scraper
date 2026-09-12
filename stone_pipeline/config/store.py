@@ -185,6 +185,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # with the old table kept as a backup for one release. Idempotent: asked_by marks a migrated table.
     if "asked_by" not in _variety_cols:
         before = conn.execute("SELECT COUNT(*) FROM variety_decision").fetchone()[0]
+        display_src = "variant_display" if "variant_display" in _variety_cols else "''"
         conn.executescript(
             "CREATE TABLE variety_decision__two_levels ("
             "source TEXT NOT NULL DEFAULT '', variant_norm TEXT NOT NULL, "
@@ -195,7 +196,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "PRIMARY KEY (source, variant_norm));"
             "INSERT INTO variety_decision__two_levels (source, variant_norm, variant_display, action, alias_of, "
             "seed_color, seed_type, seed_country, seed_name, asked_by, decided_at) "
-            f"SELECT '', variant_norm, {'variant_display' if 'variant_display' in _variety_cols else "''"}, action, "
+            f"SELECT '', variant_norm, {display_src}, action, "
             "alias_of, seed_color, seed_type, seed_country, seed_name, source, decided_at FROM variety_decision;")
         after = conn.execute("SELECT COUNT(*) FROM variety_decision__two_levels").fetchone()[0]
         if after != before:

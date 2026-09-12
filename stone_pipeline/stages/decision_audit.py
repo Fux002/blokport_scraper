@@ -49,7 +49,7 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
 
     for (_, spelling), dec in mints.items():
         if dec["action"] == "mint":
-            name = dec.get("seed_name") or dec.get("variant_display") or spelling
+            name = dec.get("seed_name") or dec.get("spelling") or spelling
             target = (_norm(name), _norm(dec.get("seed_type")))
             if target not in existing and target not in created:
                 gaps.append(_gap("mint", dec.get("source") or "", spelling, name, dec.get("seed_type") or "",

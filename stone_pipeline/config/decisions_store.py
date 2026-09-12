@@ -66,8 +66,12 @@ def _decision_row(r) -> dict:
 
 def _decision_rows() -> list:
     with closing(store.open_store()) as conn:
+        # ORDER BY source: the global level ('') comes first, so where two decisions land on one variety NAME
+        # (a global rename and a vendor rename to the same name) the name-keyed maps let the vendor's own
+        # level win deterministically, never by rowid / insert order.
         return conn.execute("SELECT source, variant_norm, variant_display, action, alias_of, seed_color, seed_type, "
-                            "seed_country, seed_name, asked_by FROM variety_decision").fetchall()
+                            "seed_country, seed_name, asked_by FROM variety_decision "
+                            "ORDER BY source, variant_norm").fetchall()
 
 
 # THE SCOPE KEY. Every decision map is keyed (norm vendor, norm spelling): vendor '' is the GLOBAL level (what
