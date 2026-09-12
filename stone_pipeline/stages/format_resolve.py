@@ -28,7 +28,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, Confidence, bulk_form_name, category, default_form_name
+from stone_pipeline.config.settings import CATEGORIES, Confidence, bulk_form_name, category, default_form_name, SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.reference.loaders import ReferenceData
@@ -98,9 +98,9 @@ def _thickness_branch(row: CanonicalRow, ref: ReferenceData) -> str | None:
     ranges = active_pack().dimension_ranges
     default_hi = ranges[_DEFAULT_BRANCH]["height"][1]  # default-form thickness band top (slab: e.g. 0.03 m)
     bulk_lo = ranges[_BULK]["height"][0]               # bulk-form depth band floor (block: e.g. 1.5 m)
-    if meters >= bulk_lo * 0.3:              # clearly bulk-scale depth
+    if meters >= bulk_lo * SETTINGS.thresholds.bulk_depth_fraction:          # clearly bulk-scale depth
         return _BULK
-    if meters <= default_hi * 3:             # clearly default-scale thickness
+    if meters <= default_hi * SETTINGS.thresholds.default_depth_multiple:    # clearly default-scale thickness
         return _DEFAULT_BRANCH
     return None                              # ambiguous middle -> decline, leave it to review
 

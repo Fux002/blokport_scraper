@@ -37,13 +37,10 @@ log = logfmt.get_logger("magnitude_drift")
 # The canonical physical quantities every adapter normalizes to (core/schema.py CanonicalRow). Fixed and
 # source-agnostic: adding a feed adds nothing here. Prices/ages/ids are deliberately absent.
 MAGNITUDE_FIELDS = ("weight", "length", "width", "height")
-_WARN_FACTOR = 4.0
-_FAIL_FACTOR = 10.0
 # Medians are bucketed by product FORMAT (slab/block/tile): weight/dims span orders of magnitude across
 # formats (a tile ~0.01t, a slab ~0.3t, a block ~20t), so an aggregate median would move with the product
 # MIX (a source like marenostone mixes all three). Per-format, a bucket's median is mix-invariant -- only
 # a genuine unit/normalization drift moves it. A format with too few rows for a stable median is skipped.
-_MIN_SAMPLE = 8
 
 
 @dataclass
@@ -90,7 +87,7 @@ def _fmt(row: CanonicalRow) -> str:
 
 def medians(rows: list[CanonicalRow]) -> dict[str, dict[str, float]]:
     """{format: {field: median}} for each canonical magnitude field, bucketed by product format. Only
-    positive values count; a format with fewer than _MIN_SAMPLE rows is skipped (too small a sample for a
+    positive values count; a format with fewer than SETTINGS.thresholds.magnitude_min_sample rows is skipped (too small a sample for a
     stable median), and a field/format with no positive value is simply absent."""
     from collections import defaultdict
     by_format: dict[str, list[CanonicalRow]] = defaultdict(list)
@@ -98,7 +95,7 @@ def medians(rows: list[CanonicalRow]) -> dict[str, dict[str, float]]:
         by_format[_fmt(r)].append(r)
     out: dict[str, dict[str, float]] = {}
     for fmt, frows in by_format.items():
-        if len(frows) < _MIN_SAMPLE:
+        if len(frows) < SETTINGS.thresholds.magnitude_min_sample:
             continue
         fields: dict[str, float] = {}
         for f in MAGNITUDE_FIELDS:
@@ -126,9 +123,9 @@ def check(rows: list[CanonicalRow], source: str, path: Path | None = None) -> tu
                 if now_med is None or base_med <= 0:   # format/field absent this run -> nothing to compare
                     continue
                 factor = max(now_med / base_med, base_med / now_med)
-                if factor >= _FAIL_FACTOR:
+                if factor >= SETTINGS.thresholds.magnitude_fail_factor:
                     status = worse(status, FAILED)
-                elif factor >= _WARN_FACTOR:
+                elif factor >= SETTINGS.thresholds.magnitude_warn_factor:
                     status = worse(status, DEGRADED)
                 else:
                     continue
@@ -136,7 +133,7 @@ def check(rows: list[CanonicalRow], source: str, path: Path | None = None) -> tu
                               "baseline": base_med, "now": now_med})
     report = {"source": source, "status": status, "medians": current, "drift": drift}
     if status == OK:
-        # MERGE per FIELD, do not replace: a format transiently below _MIN_SAMPLE (a short scrape, a
+        # MERGE per FIELD, do not replace: a format transiently below SETTINGS.thresholds.magnitude_min_sample (a short scrape, a
         # category briefly out of stock) is absent from `current`, AND a single field can be absent within a
         # present format (all weights null this run). Both must carry their last-good median forward, or that
         # field silently loses its drift guard -- a later 1000x unit rescale on it would ship uncaught. A

@@ -223,7 +223,6 @@ class Confidence(IntEnum):
 
 @dataclass(frozen=True)
 class Paths:
-    repo_root: Path = REPO_ROOT
     workspace_root: Path = WORKSPACE_ROOT
     synonyms_dir: Path = REPO_ROOT / "reference" / "synonyms"
     state_dir: Path = REPO_ROOT / "state"
@@ -304,7 +303,6 @@ class Paths:
     units_csv: Path = REPO_ROOT / "reference" / "units.csv"
     # origin_map + origin_overrides are HAND-MAINTAINED material-specific catalog_source files -> now
     # PACK-NAMESPACED properties (below), so a non-stone pack reads its own or gaps loudly, never stone's.
-    origin_map_csv_fallback: Path = REPO_ROOT / "reference" / "origin_map.csv"
     country_codes_csv: Path = REPO_ROOT / "reference" / "country_codes.csv"
     placeholder_hashes_csv: Path = REPO_ROOT / "reference" / "placeholder_hashes.csv"
     # type_density_csv + standard_slab_area_csv are PACK-NAMESPACED properties (below), not shared files, so a
@@ -343,6 +341,26 @@ class Thresholds:
     variation_auto_accept: float = 92.0
     variation_review_floor: float = 84.0  # band 84..92 routes to review
     attribute_fuzzy_floor: float = 90.0
+    # matching tiers: the character-similarity floor under the phonetic tier (so a metaphone hit never
+    # merges names that barely share letters); the leaf snap floor (a chosen attribute value snaps onto the
+    # nearest allowed one at or above this fuzzy score, flagged)
+    phonetic_char_floor: float = 85.0
+    leaf_snap_floor: float = 80.0
+    # format resolution from a stated depth: at or above bulk_depth_fraction x the bulk form's depth floor
+    # it is the bulk form; at or below default_depth_multiple x the default form's thickness top it is the
+    # default form; the middle is ambiguous and declines
+    bulk_depth_fraction: float = 0.3
+    default_depth_multiple: float = 3.0
+    # magnitude drift (stages/magnitude_drift): a per-format median moving by warn x is a warning, by fail x
+    # aborts before emit (a unit/normalisation slip); a format needs min_sample rows for a stable median
+    magnitude_warn_factor: float = 4.0
+    magnitude_fail_factor: float = 10.0
+    magnitude_min_sample: int = 8
+    # run gates: an adapter that drops more than this share of rows at adapt is a mis-mapped required field
+    # (abort); a single run that would discontinue more than this share of a source's known products is a
+    # partial scrape (delist refused)
+    adapt_drop_abort_fraction: float = 0.5
+    delist_max_fraction: float = 0.30
     # (The in-stock made-to-order fallback COUNT moved to the domain pack as `in_stock_fallback_qty`, a
     # per-category value -- a block is 1 piece, a slab/tile a modest quantity -- replacing the old single 999.)
     health_fill_drop_warn: float = 0.15
@@ -476,13 +494,8 @@ class ImageProcessingConfig:
     levels_hi_pct: float = 99.6       # exposure lift: white-point percentile
     vibrance: float = 0.20            # restore colour muted by bad light (0 = off)
     # --- de-watermark (flagged sources only; needs the GPU imageproc extras) ---
-    # The mark is LOCATED by its (stone-absent) pink/magenta ink (_footprint), then only the logo
-    # region is sent to FAL FLUX Fill (a hosted inpainter) to reconstruct it, and the result is
-    # composited back through the logo mask so everything outside the logo is byte-identical. FAL is
-    # billed per megapixel ($0.05, 1 MP floor, rounds up), so we send ONLY the padded logo crop of the
-    # RAW image (before the ESRGAN upscale) -- that keeps every slab at the floor. Removing SDXL-inpaint
-    # (which regenerated a whole square footprint and left a visible box on veined stone) also drops the
-    # heavy diffusers stack. Runs in the GPU reprocess (needs network + FAL_KEY, not a local model).
+    # De-watermark runs in the GPU reprocess (needs network + FAL_KEY, not a local model); FAL is billed
+    # per megapixel ($0.05, 1 MP floor, rounds up) on the RAW image (before the ESRGAN upscale).
     dewatermark: bool = True
     # De-watermark is an INSTRUCTION edit (FAL FLUX Kontext), not a masked inpaint: Kontext edits the whole
     # image from the prompt and reconstructs the stone under the logo without the mask-fill's hallucinations.
@@ -503,9 +516,6 @@ class ImageProcessingConfig:
     # discarded pool as a terminal HELD state, so every scraped image ends ready-or-held and the pipeline
     # always converges (ready + held == total) -- an unprocessable image never spins the indicator forever.
     enhance_max_attempts: int = 2
-    crop_pad: int = 64                # context stone around the logo sent to FAL (px)
-    crop_min_side: int = 512          # pad the crop up to this short side for fill quality (still < 1 MP)
-    crop_snap: int = 16               # FLUX prefers dims divisible by 16
     # --- output / audit ---
     jpeg_quality: int = 85  # 85 is visually identical to 92 for photos at ~30-40% smaller files
     write_preview: bool = True        # images/reports/processed_preview.csv (source -> processed)
@@ -609,7 +619,6 @@ class MatchingConfig:
     fills the tier-7 role.)"""
 
     enable_semantic: bool = False  # tier 8, embedding nearest-neighbour suggestion
-    semantic_review_floor: float = 60.0  # below this a semantic hit is not even suggested
     semantic_model: str = "all-MiniLM-L6-v2"
 
 
@@ -638,13 +647,13 @@ class CurationConfig:
     # an ALIAS of that variety rather than a new variant, to avoid creating
     # near-duplicate variants for what suppliers just renamed.
     alias_suggest_floor: float = 70.0
-    # Tier-7 alias model (matching.alias_resolver): a trained entity-resolution model replaces the
-    # flat alias_suggest_floor for the alias-vs-new decision. P>=hi -> confirmed alias, P<=lo ->
-    # mint new, the uncertain middle -> review. The hi/lo gap is the automation dial: wider = less
-    # review, more risk. Falls back to alias_suggest_floor when the model can't train.
+    # Tier-7 alias judge (matching.alias_resolver): character similarity of the cleaned names decides
+    # alias-vs-new. At or above alias_char_floor (or a generic-only difference) it is a confirmed alias;
+    # between the two floors it is a review; below, a new variety. A sibling ('Cristallo Divine' vs
+    # 'Cristallo Bianco') shares a prefix but stays below the alias floor, so it is never auto-merged.
     enable_alias_model: bool = True
-    alias_model_hi: float = 0.90
-    alias_model_lo: float = 0.20
+    alias_char_floor: float = 0.94
+    alias_char_review_floor: float = 0.88
 
 
 # --- Category registry: the SINGLE source of truth for categories --------------
@@ -737,7 +746,6 @@ def _build_categories() -> "tuple[Category, ...]":
 CATEGORIES: tuple[Category, ...] = _build_categories()
 
 _BY_NAME = {c.name: c for c in CATEGORIES}
-_BY_LABEL = {c.label: c for c in CATEGORIES}
 _BY_LABEL_CF = {c.label.casefold(): c for c in CATEGORIES}  # plural label, casefolded
 
 
@@ -747,10 +755,6 @@ def category(name: str) -> "Category | None":
     # silently falling through to the slab default.
     key = (name or "").strip().casefold()
     return _BY_NAME.get(key) or _BY_LABEL_CF.get(key)
-
-
-def category_by_label(label: str) -> "Category | None":
-    return _BY_LABEL.get((label or "").strip())
 
 
 def category_for_key(key: str) -> "Category | None":
@@ -794,11 +798,10 @@ def refresh_category_pcats() -> None:
     export is on disk so the registry reflects the live pcats. Each category's pcat_id is re-derived the
     SAME way construction did (_pcat honours its env override), so the refresh is a faithful recompute,
     not a second code path. Idempotent: a no-op when the export is unchanged."""
-    global _ENV_PCATS, _BY_NAME, _BY_LABEL, _BY_LABEL_CF
+    global _ENV_PCATS, _BY_NAME, _BY_LABEL_CF
     _ENV_PCATS = _env_category_pcats()
     rebuilt = tuple(replace(c, pcat_id=_pcat(c.label, c.pcat_env_var)) for c in _BY_NAME.values())
     _BY_NAME = {c.name: c for c in rebuilt}
-    _BY_LABEL = {c.label: c for c in rebuilt}
     _BY_LABEL_CF = {c.label.casefold(): c for c in rebuilt}
 
 

@@ -97,7 +97,7 @@ def test_refresh_picks_up_a_post_import_export_change(tmp_path, monkeypatch):
     # every row is category_invalid and new-variety fan-out is silently disabled off the stale snapshot.
     from stone_pipeline.config import settings
 
-    saved = (settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF)
+    saved = (settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL_CF)
     monkeypatch.setattr(settings, "_FROM_MEDUSA", tmp_path)
     monkeypatch.delenv("BLOKPORT_CAT_TILES_PCAT", raising=False)  # exercise the file, not the override
     attrs = tmp_path / "attributes.csv"
@@ -117,7 +117,7 @@ def test_refresh_picks_up_a_post_import_export_change(tmp_path, monkeypatch):
         assert settings.category("slab").pcat_id == "pcat_slab"   # re-derived from the fresh export
         assert {c.label for c in settings.active_categories()} == {"Slabs", "Blocks", "Tiles"}
     finally:
-        settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF = saved
+        settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL_CF = saved
 
 
 def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
@@ -125,7 +125,7 @@ def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
     # did (override wins over the file), not silently drop it back to the export value.
     from stone_pipeline.config import settings
 
-    saved = (settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF)
+    saved = (settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL_CF)
     monkeypatch.setattr(settings, "_FROM_MEDUSA", tmp_path)
     monkeypatch.setenv("BLOKPORT_CAT_TILES_PCAT", "pcat_TILE_OVERRIDE")
     (tmp_path / "attributes.csv").write_text(
@@ -134,7 +134,7 @@ def test_refresh_preserves_the_tile_env_override(tmp_path, monkeypatch):
         settings.refresh_category_pcats()
         assert settings.category("tile").pcat_id == "pcat_TILE_OVERRIDE"  # override, not the file value
     finally:
-        settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL, settings._BY_LABEL_CF = saved
+        settings._ENV_PCATS, settings._BY_NAME, settings._BY_LABEL_CF = saved
 
 
 def test_uniform_fill_follows_the_runtime_registry_not_the_frozen_tuple(monkeypatch):
