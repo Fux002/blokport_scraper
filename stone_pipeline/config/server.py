@@ -154,440 +154,566 @@ def _attach_image_progress(rows: list[dict]) -> None:
             row["images"] = block
 
 
-def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[int, object]:
-    """Route one request. `segments` is the path under /config/v1 (e.g. ['sources']
-    or ['sources', 'polonine']); `query` is the raw URL query string (e.g. 'q=carr&limit=20').
-    Pure: returns (status_code, json body)."""
-    if segments and segments[0] == "run":
-        # the 'produce' trigger: kick a scrape/catalog into the ledger. Body (all optional):
-        #   {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"}
-        # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate).
-        from stone_pipeline.config import runner
-        if len(segments) == 1:
-            if method == "POST":
-                srcs = body.get("sources") if isinstance(body, dict) else None
-                stage = body.get("stage") if isinstance(body, dict) else None
-                rec, code = runner.start_run(srcs, stage or "all")   # (record, status)
-                return code, rec                                     # dispatch returns (status, body)
-            if method == "GET":
-                return 200, runner.current()
-            return 405, {"error": "POST /config/v1/run to trigger, GET for the current run"}
-        if len(segments) == 2 and method == "GET":     # /run/<run_id>
-            rec = runner.get_run(segments[1])
-            return (200, rec) if rec else (404, {"error": f"no run {segments[1]!r}"})
-        return 404, {"error": "expected /config/v1/run or /config/v1/run/<run_id>"}
-    if segments and segments[0] == "diagnostics":
-        # per-source pipeline diagnostics for the admin UI (read-only): which layer degraded + what
-        # drifted in the source, so a silent format change is visible.
-        #   GET /config/v1/diagnostics            -> [{source, run_id, health, gates, stages, images, ...}, ...]
-        #   GET /config/v1/diagnostics/<source>   -> that source's latest summary (404 if it never produced)
-        from stone_pipeline.config import diagnostics
-        if method != "GET":
-            return 405, {"error": "GET /config/v1/diagnostics[/<source>]"}
-        if len(segments) == 1:
-            rows = diagnostics.read_all()
-            _attach_image_progress(rows)
-            return 200, {"diagnostics": rows}
-        if len(segments) == 2:
-            summary = diagnostics.read_source(segments[1])
-            if summary:
-                _attach_image_progress([summary])
-            return (200, summary) if summary else (404, {"error": f"no diagnostics for {segments[1]!r}"})
-        return 404, {"error": "expected /config/v1/diagnostics or /config/v1/diagnostics/<source>"}
-    if segments and segments[0] == "reset":
-        # clean-start the ledger sync state (the coordinated ①②③ reset, our ① half). Body (optional):
-        #   {"hard": true, "sources": ["zucchi", ...]}   hard also drops scraped products; sources scopes.
-        #     Hard and soft resets never touch the hosted product images.
-        #   {"pristine": true}                           factory cold start: global hard reset + wipe the
-        #     durable operator overlay (variety/leaf/retired decisions) so the next produce is seed-only,
-        #     AND the only image wipe in the system (hosted product images + enhanced markers + manifest).
-        #   {"pristine": true, "keep_images": true}      same, but KEEP the hosted product images + enhanced
-        #     markers (a re-scrape reuses them, no GPU/FAL rebuild) -- the test-reset path.
-        #   {"pristine": true, "keep_scrape": true}      same, but KEEP the cached scrape (data/ + outputs/)
-        #     so the catalog is rebuilt with a Republish All instead of a re-scrape.
-        # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted. A GLOBAL
-        # reset also clears the config.db review queue + operator-pasted attribute ids (response.config),
-        # so the clean start is coherent across both stores; a scoped reset leaves config.db alone.
-        from stone_pipeline import lifecycle
-        if method == "POST":
-            srcs = body.get("sources") if isinstance(body, dict) else None
-            hard = bool(body.get("hard")) if isinstance(body, dict) else False
-            pristine = bool(body.get("pristine")) if isinstance(body, dict) else False
-            keep_images = bool(body.get("keep_images")) if isinstance(body, dict) else False
-            keep_scrape = bool(body.get("keep_scrape")) if isinstance(body, dict) else False
-            result, code = lifecycle.reset(srcs, hard, pristine=pristine, keep_images=keep_images,
-                                           keep_scrape=keep_scrape)
-            return code, result
-        return 405, {"error": "POST /config/v1/reset to reset the ledger"}
-    if segments and segments[0] == "curation":
-        # global incremental curation rebuild (curation state 1 repair): reseed the base FILE from the
-        # committed pristine seed + kick a catalog re-derive, WITHOUT a factory reset's ledger/image wipe or
-        # re-scrape. Curation is global (a variety belongs to the canonical catalog, not a source), so this
-        # is not per-source. 409 if a produce/reset/pull is in flight; returns a summary (base_reseed +
-        # rederive run to watch). Blokport also gates the button on 'no pull running'.
-        from stone_pipeline import lifecycle
-        if len(segments) == 2 and segments[1] == "rebuild" and method == "POST":
-            result, code = lifecycle.rebuild_curation()
-            return code, result
-        return 405, {"error": "POST /config/v1/curation/rebuild to reseed the base + re-derive the catalog"}
-    if segments and segments[0] == "purge":
-        # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
-        # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
-        from stone_pipeline import lifecycle
-        if method == "POST":
-            srcs = body.get("sources") if isinstance(body, dict) else None
-            result, code = lifecycle.purge(srcs)
-            return code, result
-        return 405, {"error": "POST /config/v1/purge to hard-delete qty-0 products"}
-    if segments and segments[0] == "clean":
-        # housekeeping for the admin: POST {} prunes superseded scrapes/runs; POST {"sources":[...]}
-        # DELETES those sources' raw scraped data (fresh re-scrape). Base config + ledger untouched.
-        from stone_pipeline import lifecycle
-        if method == "POST":
-            srcs = body.get("sources") if isinstance(body, dict) else None
-            result, code = lifecycle.clean(srcs)
-            return code, result
-        return 405, {"error": "POST /config/v1/clean to prune (or delete a source's scraped data)"}
-    if segments and segments[0] == "delist":
-        # stage 1 of a vendor removal ('Take offline'): {"sources": ["zucchi", ...]} sets those sources'
-        # products to qty 0 (Medusa pulls them out of sale) AND disables them so a scrape never re-stocks
-        # an offline vendor. Reversible: re-enable + re-scrape. Guarded (409 if a run/pull is active).
-        from stone_pipeline import lifecycle
-        if method == "POST":
-            srcs = body.get("sources") if isinstance(body, dict) else None
-            result, code = lifecycle.delist(srcs)
-            return code, result
-        return 405, {"error": "POST /config/v1/delist to take sources offline (qty 0 + disable)"}
-    if segments and segments[0] in ("pause", "resume"):
-        # freeze / unfreeze a source WITHOUT touching its stock: {"sources": ["zucchi", ...]}. Pause stops
-        # scraping (lifecycle=paused, disabled) but leaves products live & buyable at their last values;
-        # resume re-enables (lifecycle=active) so the next run scrapes again. Config-only, no ledger work.
-        from stone_pipeline import lifecycle
-        if method == "POST":
-            srcs = body.get("sources") if isinstance(body, dict) else None
-            verb = lifecycle.pause if segments[0] == "pause" else lifecycle.resume
-            result, code = verb(srcs)
-            return code, result
-        return 405, {"error": f"POST /config/v1/{segments[0]} with a sources list"}
-    if segments and segments[0] == "variations":
-        # variation lifecycle (the variety half): explicit removal + undo.
-        #   POST /config/v1/variations/<key>/retire     {"force": true?}   remove a variety (E11 re-key old side)
-        #   POST /config/v1/variations/<key>/unmint     {"force": true?}   remove it AND clear its mint decision
-        #     so the next produce re-surfaces it in the mint queue UNDECIDED (correct a minting mistake).
-        #     Contrast retire (permanent, excluded) and reject (never mint); unmint = remove and reconsider.
-        #   POST /config/v1/variations/<key>/un_retire                     reverse it (mirrors source resume)
-        #   POST /config/v1/variations/<key>/not_a_duplicate               cancel a false-positive dup tombstone
-        #     (curation state 2): keep the variety + record a durable 'protected' verdict so a future
-        #     seed-reconcile never re-drops it. Idempotent + scoped result.
-        from stone_pipeline import lifecycle
-        # GET /config/v1/variations/minted -- the KEY-BEARING list of varieties minted since the committed
-        # base (each grouped with its category Keys), so the UI can offer checkbox-select unmint. Needed
-        # because unmint is keyed by the variation Key while the mint-review queue is name-keyed candidates.
-        if len(segments) == 2 and segments[1] == "minted" and method == "GET":
-            result, code = lifecycle.list_minted_variations()
-            return code, result
-        # BULK unmint: POST /config/v1/variations/unmint -- two modes:
-        #   {"keys": [...], "force"?}       unmint the pasted Keys (each block/slab/tile is its own Key)
-        #   {"all_minted": true, "force"?}  unmint EVERY variety not in the committed base (scraper finds the
-        #                                   Keys itself -- no paste needed; refuses 503 if no base is available)
-        if len(segments) == 2 and segments[1] == "unmint" and method == "POST":
-            force = bool(body.get("force")) if isinstance(body, dict) else False
-            if isinstance(body, dict) and body.get("all_minted"):
-                result, code = lifecycle.unmint_all_minted(force=force)
-            else:
-                keys = body.get("keys") if isinstance(body, dict) else None
-                result, code = lifecycle.unmint_variations(keys, force=force)
-            return code, result
-        if len(segments) == 3 and method == "POST" and segments[2] in ("retire", "unmint", "un_retire", "not_a_duplicate"):
-            key = segments[1]
-            if segments[2] in ("retire", "unmint"):
-                force = bool(body.get("force")) if isinstance(body, dict) else False
-                op = lifecycle.retire_variation if segments[2] == "retire" else lifecycle.unmint_variation
-                result, code = op(key, force=force)
-            elif segments[2] == "un_retire":
-                result, code = lifecycle.un_retire(key)
-            else:
-                result, code = lifecycle.not_a_duplicate(key)
-            return code, result
+# --- the route table -----------------------------------------------------------------------------------
+# One handler per (method, path pattern). A pattern is a tuple of path segments under /config/v1; a segment
+# written "{name}" captures that position into the handler's `params`. Matching is first hit per method, so
+# a literal pattern must precede a capturing one of the same length. A known path with another method is
+# 405 (naming the allowed methods); an unknown path is 404. Every handler is pure: (params, body, query) ->
+# (status, json body). Adding a route = one handler + one table row, never a new branch in a dispatcher.
+
+
+def _dict(body) -> dict:
+    return body if isinstance(body, dict) else {}
+
+
+def _sources_of(body):
+    return body.get("sources") if isinstance(body, dict) else None
+
+
+# -- run: the produce trigger ------------------------------------------------------------------------------
+def _post_run(params, body, query):
+    # Body (all optional): {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"}
+    # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate).
+    from stone_pipeline.config import runner
+    rec, code = runner.start_run(_sources_of(body), _dict(body).get("stage") or "all")   # (record, status)
+    return code, rec
+
+
+def _get_run(params, body, query):
+    from stone_pipeline.config import runner
+    return 200, runner.current()
+
+
+def _get_run_by_id(params, body, query):
+    from stone_pipeline.config import runner
+    rec = runner.get_run(params["run_id"])
+    return (200, rec) if rec else (404, {"error": f"no run {params['run_id']!r}"})
+
+
+# -- diagnostics: per-source pipeline diagnostics for the admin UI (read-only) -----------------------------
+def _get_diagnostics(params, body, query):
+    from stone_pipeline.config import diagnostics
+    rows = diagnostics.read_all()
+    _attach_image_progress(rows)
+    return 200, {"diagnostics": rows}
+
+
+def _get_diagnostics_source(params, body, query):
+    from stone_pipeline.config import diagnostics
+    summary = diagnostics.read_source(params["source"])
+    if summary:
+        _attach_image_progress([summary])
+    return (200, summary) if summary else (404, {"error": f"no diagnostics for {params['source']!r}"})
+
+
+# -- lifecycle verbs --------------------------------------------------------------------------------------
+def _post_reset(params, body, query):
+    # clean-start the ledger sync state (the coordinated (1)(2)(3) reset, our (1) half). Body (optional):
+    #   {"hard": true, "sources": ["zucchi", ...]}   hard also drops scraped products; sources scopes.
+    #     Hard and soft resets never touch the hosted product images.
+    #   {"pristine": true}                           factory cold start: global hard reset + wipe the
+    #     durable operator overlay (variety/leaf/retired decisions) so the next produce is seed-only,
+    #     AND the only image wipe in the system (hosted product images + enhanced markers + manifest).
+    #   {"pristine": true, "keep_images": true}      same, but KEEP the hosted product images + enhanced
+    #     markers (a re-scrape reuses them, no GPU/FAL rebuild) -- the test-reset path.
+    #   {"pristine": true, "keep_scrape": true}      same, but KEEP the cached scrape (data/ + outputs/)
+    #     so the catalog is rebuilt with a Republish All instead of a re-scrape.
+    # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted. A GLOBAL
+    # reset also clears the config.db review queue + operator-pasted attribute ids (response.config),
+    # so the clean start is coherent across both stores; a scoped reset leaves config.db alone.
+    from stone_pipeline import lifecycle
+    b = _dict(body)
+    result, code = lifecycle.reset(_sources_of(body), bool(b.get("hard")), pristine=bool(b.get("pristine")),
+                                   keep_images=bool(b.get("keep_images")), keep_scrape=bool(b.get("keep_scrape")))
+    return code, result
+
+
+def _post_curation_rebuild(params, body, query):
+    # global incremental curation rebuild (curation state 1 repair): reseed the base FILE from the
+    # committed pristine seed + kick a catalog re-derive, WITHOUT a factory reset's ledger/image wipe or
+    # re-scrape. Curation is global (a variety belongs to the canonical catalog, not a source), so this
+    # is not per-source. 409 if a produce/reset/pull is in flight; returns a summary (base_reseed +
+    # rederive run to watch). Blokport also gates the button on 'no pull running'.
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.rebuild_curation()
+    return code, result
+
+
+def _post_purge(params, body, query):
+    # dead-stock purge: hard-delete the qty-0 (delisted) products. Returns external_ids so Medusa
+    # deletes the same set (product + scraper_sync_ref). Guarded; base variations untouched.
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.purge(_sources_of(body))
+    return code, result
+
+
+def _post_clean(params, body, query):
+    # housekeeping for the admin: POST {} prunes superseded scrapes/runs; POST {"sources":[...]}
+    # DELETES those sources' raw scraped data (fresh re-scrape). Base config + ledger untouched.
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.clean(_sources_of(body))
+    return code, result
+
+
+def _post_delist(params, body, query):
+    # stage 1 of a vendor removal ('Take offline'): {"sources": ["zucchi", ...]} sets those sources'
+    # products to qty 0 (Medusa pulls them out of sale) AND disables them so a scrape never re-stocks
+    # an offline vendor. Reversible: re-enable + re-scrape. Guarded (409 if a run/pull is active).
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.delist(_sources_of(body))
+    return code, result
+
+
+def _post_pause(params, body, query):
+    # freeze a source WITHOUT touching its stock: {"sources": ["zucchi", ...]}. Pause stops scraping
+    # (lifecycle=paused, disabled) but leaves products live & buyable at their last values.
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.pause(_sources_of(body))
+    return code, result
+
+
+def _post_resume(params, body, query):
+    # unfreeze: re-enables (lifecycle=active) so the next run scrapes again. Config-only, no ledger work.
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.resume(_sources_of(body))
+    return code, result
+
+
+# -- variations: the variety half of the lifecycle (explicit removal + undo) ------------------------------
+def _get_variations_minted(params, body, query):
+    # the KEY-BEARING list of varieties minted since the committed base (each grouped with its category
+    # Keys), so the UI can offer checkbox-select unmint. Needed because unmint is keyed by the variation
+    # Key while the mint-review queue is name-keyed candidates.
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.list_minted_variations()
+    return code, result
+
+
+def _post_variations_unmint(params, body, query):
+    # BULK unmint, two modes:
+    #   {"keys": [...], "force"?}       unmint the pasted Keys (each block/slab/tile is its own Key)
+    #   {"all_minted": true, "force"?}  unmint EVERY variety not in the committed base (scraper finds the
+    #                                   Keys itself -- no paste needed; refuses 503 if no base is available)
+    from stone_pipeline import lifecycle
+    b = _dict(body)
+    force = bool(b.get("force"))
+    if b.get("all_minted"):
+        result, code = lifecycle.unmint_all_minted(force=force)
+    else:
+        result, code = lifecycle.unmint_variations(b.get("keys"), force=force)
+    return code, result
+
+
+def _post_variation_verb(params, body, query):
+    #   POST /variations/<key>/retire     {"force": true?}   remove a variety (E11 re-key old side)
+    #   POST /variations/<key>/unmint     {"force": true?}   remove it AND clear its mint decision so the
+    #     next produce re-surfaces it in the mint queue UNDECIDED (correct a minting mistake). Contrast
+    #     retire (permanent, excluded) and reject (never mint); unmint = remove and reconsider.
+    #   POST /variations/<key>/un_retire                     reverse it (mirrors source resume)
+    #   POST /variations/<key>/not_a_duplicate               cancel a false-positive dup tombstone
+    #     (curation state 2): keep the variety + record a durable 'protected' verdict so a future
+    #     seed-reconcile never re-drops it. Idempotent + scoped result.
+    from stone_pipeline import lifecycle
+    key, verb = params["key"], params["verb"]
+    if verb in ("retire", "unmint"):
+        force = bool(_dict(body).get("force"))
+        op = lifecycle.retire_variation if verb == "retire" else lifecycle.unmint_variation
+        result, code = op(key, force=force)
+    elif verb == "un_retire":
+        result, code = lifecycle.un_retire(key)
+    elif verb == "not_a_duplicate":
+        result, code = lifecycle.not_a_duplicate(key)
+    else:
         return 404, {"error": "expected POST /config/v1/variations/unmint (bulk) or "
                               "/config/v1/variations/<key>/{retire,unmint,un_retire,not_a_duplicate}"}
-    if segments and segments[0] == "review":
-        # the new-variant review queue for the :4200 admin. The produce SURFACES uncertain items; the
-        # operator decides here; the NEXT produce APPLIES it (decisions are read once at curate start, so
-        # an edit takes effect on the following run -- same "applies next run" contract as the run guard).
-        #   GET /config/v1/review/variants               the ONE pending list: variety cards + origin cards
-        #   PUT /config/v1/review/variants/<variant>     {"action":"reject"}   the one explicit action: "not a
-        #                                                variety" is not a statement about fields. Everything
-        #                                                else is a statement (PUT /review/decide, below).
-        #   GET /config/v1/review/attributes             pending attribute values (need a Medusa id)
-        #   PUT /config/v1/review/attributes/<value>     {"kind":..., "medusa_id":...}
-        #   GET  /config/v1/review/backbone              pending leaf additions (value not yet on a variety)
-        #   GET  /config/v1/review/backbone/decided      already-decided leaves (+ ref), to revise a verdict
-        #   POST /config/v1/review/backbone/approve_all  {"verdict"?: "likely_real"}  bulk-approve
-        #   PUT  /config/v1/review/backbone/<ref>        {"action":"approve"|"reject"|"clear"}  one verdict
-        #                                                (approve/reject also un-approve a DECIDED leaf; clear undoes it)
-        from stone_pipeline.config import decisions_store
-        if len(segments) == 2 and segments[1] == "variants" and method == "GET":
-            # ONE list: the variety cards plus the origin confirmations in the same card shape (kind
-            # 'origin'), so the operator reviews everything in one place with one statement (/review/decide).
-            cards = (decisions_store.list_pending("variety")
-                     + [_origin_as_card(o) for o in decisions_store.list_pending("origin")]
-                     # decisions the last produce did NOT honour (stages.decision_audit): restate or clear
-                     + [_gap_as_card(g) for g in decisions_store.list_pending("decision_gap")])
-            # Decided cards sink to the END, undecided keep their order at the top, so the operator always
-            # works the front of one list and never loses their place. A decided card is NOT removed: it
-            # stays pending until the next produce binds it, and re-stating over it revises the decision.
-            # Stable sort, so the deterministic order within each group is preserved.
-            cards.sort(key=lambda c: bool(c.get("decided")))
-            decided = sum(1 for c in cards if c.get("decided"))
-            return 200, {"variants": cards,
-                         # progress signal: the list length cannot move while reviewing, so without a count
-                         # there is no way to tell a finished review from an untouched one.
-                         "counts": {"total": len(cards), "decided": decided,
-                                    "undecided": len(cards) - decided}}
-        if len(segments) == 3 and segments[1] == "variants" and method == "PUT":
-            if not isinstance(body, dict):
-                return 400, {"error": "body must be a JSON object {action, alias_of?}"}
-            # DECODE the path segment before it becomes the decision key. The variety was SURFACED with
-            # review_pending.ref = norm(real name) (e.g. 'alpine luxe'); a multi-word name arrives here
-            # percent-encoded ('Alpine%20Luxe'), and norm keeps the literal '%20' ('alpine 20luxe'), so a
-            # raw segment would store the decision under a key that never matches the pending ref and the
-            # UI reads back current_action=null. unquote first, so ref == variant_norm holds by construction
-            # (mirrors the backbone PUT).
-            variant = unquote(segments[2])
-            action = body.get("action", "")
-            if action != "reject":
-                return 400, {"error": "action must be 'reject'; anything else is a statement: PUT /review/decide"}
-            try:
-                decisions_store.set_variety_decision(variant, "reject")
-            except decisions_store.InvalidDecision as e:
-                return 400, {"error": str(e)}
-            return 200, {"variant": variant, "action": "reject"}
-        if len(segments) == 2 and segments[1] == "attributes" and method == "GET":
-            return 200, {"attributes": decisions_store.list_pending("attribute")}
-        if len(segments) == 3 and segments[1] == "attributes" and method == "PUT":
-            if not isinstance(body, dict):
-                return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
-            value = unquote(segments[2])   # same decode-before-key rule as the variety PUT (see above)
-            try:
-                decisions_store.set_attribute_id(body.get("kind", ""), value, body.get("medusa_id", ""))
-            except decisions_store.InvalidDecision as e:
-                return 400, {"error": str(e)}
-            return 200, {"value": value, "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
-        # ONE statement, whatever list it comes from (pending card or resolved row): "for vendor <source>, the
-        # product scraped as <scraped> is <name>, a <type>, <color>, from <origin>". The backend derives the
-        # outcome (bind to the existing variety / mint it / the vendor's origin), see decisions_store.decide.
-        #   PUT    /config/v1/review/decide   {source, scraped, name, type, color?, origin?, widen?}
-        #   DELETE /config/v1/review/decide   {source, scraped}     clear that vendor's decisions for the spelling
-        #   GET    /config/v1/review/resolved[?source=&decided=true|false]   the last produce's resolution per
-        #                                      product, with the standing decision overlaid (no approval needed)
-        if len(segments) == 2 and segments[1] == "decide" and method in ("PUT", "DELETE"):
-            if not isinstance(body, dict):
-                return 400, {"error": "body must be a JSON object {source, scraped, name, type, ...}"}
-            # the listings a statement applies to: the card's `listings` ([{source, scraped}], a card shared
-            # by several vendors), or one `source` with `scraped` as a spelling or a list of spellings
-            source = (body.get("source") or "").strip()
-            raw_scraped = body.get("scraped") or ""
-            listings = [(str(l.get("source") or "").strip(), str(l.get("scraped") or "").strip())
-                        for l in (body.get("listings") or []) if isinstance(l, dict)]
-            listings += [(source, s.strip()) for s in (raw_scraped if isinstance(raw_scraped, list) else [raw_scraped])
-                         if isinstance(s, str) and s.strip() and source]
-            listings = list(dict.fromkeys(l for l in listings if l[0] and l[1]))
-            if not listings:
-                return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
-            if method == "DELETE":
-                return 200, {"listings": [{"source": s, "scraped": sp} for s, sp in listings],
-                             "cleared": [decisions_store.clear_decisions(s, sp) for s, sp in listings]}
-            from stone_pipeline.matching import projections as proj
-            name = (body.get("name") or "").strip()
-            raw_type = (body.get("type") or "").strip()
-            if not name or not raw_type:
-                return 400, {"error": "name and type are required"}
-            vocab = _type_vocab()
-            if proj.norm(raw_type) not in vocab:
-                return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
-            stone_type = vocab[proj.norm(raw_type)]
-            # a colour, when given, must be a real Medusa colour attribute (a minted variety is seeded with
-            # it; a value Medusa lacks would null-id every product), stored in its canonical casing
-            color = ""
-            if (raw_color := (body.get("color") or "").strip()):
-                colors = _color_vocab()
-                if proj.norm(raw_color) not in colors:
-                    return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
-                color = colors[proj.norm(raw_color)]
-            raw_origin = (body.get("origin") or "").strip()
-            origin = _country_iso(raw_origin) if raw_origin else ""
-            if raw_origin and not origin:
-                return 400, {"error": f"origin {raw_origin!r} is not a real ISO-3166 country"}
-            from stone_pipeline.stages.curate import active_branches, gen_key
-            from stone_pipeline.stages import decisions as _decisions
-            retired = _decisions.load_retired()
-            if any(gen_key(b, stone_type, name) in retired for b in active_branches()):
-                return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
-                             "retired": True}
-            try:
-                outcomes = [decisions_store.decide(s, sp, name, stone_type, color, origin, bool(body.get("widen")))
-                            for s, sp in listings]
-            except decisions_store.InvalidDecision as e:
-                return 400, {"error": str(e)}
-            return 200, {**outcomes[0], "listings": [{"source": s, "scraped": sp, "result": o["result"]}
-                                                     for (s, sp), o in zip(listings, outcomes)],
-                         "decided": len(outcomes)}
-        if len(segments) == 2 and segments[1] == "resolved" and method == "GET":
-            from stone_pipeline.config import resolved
-            params = parse_qs(query)
-            decided = (params.get("decided") or [None])[0]
-            return 200, {"resolved": resolved.list_resolved(
-                source=(params.get("source") or [None])[0] or None,
-                decided=None if decided is None else decided.lower() == "true")}
-        if len(segments) == 2 and segments[1] == "backbone" and method == "GET":
-            return 200, {"backbone": decisions_store.list_pending("backbone_leaf")}
-        if len(segments) == 3 and segments[1] == "backbone" and segments[2] == "decided" and method == "GET":
-            # already-decided leaves (with their refs), so a past verdict can be revised -- e.g. un-approve
-            # a spurious approval that a prior run grew into the overlay.
-            return 200, {"decided": decisions_store.list_decided_leaves()}
-        if len(segments) == 3 and segments[1] == "backbone" and segments[2] == "approve_all" and method == "POST":
-            # the primary UX: approve every pending leaf suggestion (or only one verdict, e.g. likely_real).
-            verdict = body.get("verdict") if isinstance(body, dict) else None
-            return 200, {"approved": decisions_store.approve_leaf_pending(verdict)}
-        if len(segments) == 3 and segments[1] == "backbone" and method == "PUT":
-            if not isinstance(body, dict):
-                return 400, {"error": "body must be a JSON object {action}"}
-            ref, action = unquote(segments[2]), body.get("action", "")
-            try:
-                # a still-pending suggestion decides through the queue; a leaf a prior run already decided
-                # (e.g. a spurious approval to undo) has dropped off that queue, so revise it in place by
-                # ref. 'clear' only applies to a decided leaf, so it skips the pending path.
-                ok = (action != "clear" and decisions_store.decide_leaf_pending(ref, action)) \
-                    or decisions_store.revise_leaf_decision(ref, action)
-            except decisions_store.InvalidDecision as e:
-                return 400, {"error": str(e)}
-            if not ok:
-                return 404, {"error": f"no pending or decided backbone-leaf for ref {ref!r}"}
-            return 200, {"ref": ref, "action": action}
-        return 404, {"error": "expected GET/PUT/POST /config/v1/review/{variants,attributes,backbone}[/<ref>]"}
-    if segments and segments[0] == "origins":
-        # PER-VARIETY origin EDITS (the "edit origins" admin action) -- the same channel a mint uses for its
-        # origin (seed_country), but for ANY variety and holding a country LIST. Overlaid onto the origin map
-        # on the next produce; the per-vendor gate then picks each vendor's country from that list. This is
-        # DISTINCT from /review/origins, which is the per-VENDOR confirmation QUEUE for held products.
-        #   GET    /config/v1/origins                                 -> every variety that has an edit
-        #   GET    /config/v1/origins/lookup?variety=&stone_type=     -> base + edited + effective for one
-        #   PUT    /config/v1/origins/<ref>  {variety, stone_type, countries:[...], city?, county?}
-        #   DELETE /config/v1/origins/<ref>                           -> revert that variety to the base map
-        from stone_pipeline.config import decisions_store
-        if len(segments) == 1 and method == "GET":
-            return 200, {"origins": decisions_store.list_variety_origins()}
-        if len(segments) == 2 and segments[1] == "lookup" and method == "GET":
-            params = parse_qs(query)
-            variety = (params.get("variety", [""])[0] or "").strip()
-            stone_type = (params.get("stone_type", [""])[0] or "").strip()
-            if not (variety and stone_type):
-                return 400, {"error": "lookup needs ?variety=&stone_type="}
-            from stone_pipeline.reference import loaders
-            rule = loaders.load_origin_map().exact(variety, stone_type)
-            base = list(rule.countries) if rule else []
-            edit = decisions_store.get_variety_origin(variety, stone_type)
-            return 200, {"variety": variety, "stone_type": stone_type, "base_countries": base,
-                         "edited_countries": (edit["countries"] if edit else None),
-                         "effective_countries": (edit["countries"] if edit else base)}
-        if len(segments) == 2 and method == "PUT":
-            if not isinstance(body, dict):
-                return 400, {"error": "body must be {variety, stone_type, countries:[...]}"}
-            variety = (body.get("variety") or "").strip()
-            stone_type = (body.get("stone_type") or "").strip()
-            raw = body.get("countries") or []
-            if not (variety and stone_type and raw):
-                return 400, {"error": "variety, stone_type and a non-empty countries list are required"}
-            isos = []
-            for c in raw:
-                if not (iso := _country_iso((c or "").strip())):
-                    return 400, {"error": f"country {c!r} is not a real ISO-3166 country"}
-                isos.append(iso)
-            try:
-                decisions_store.set_variety_origin(variety, stone_type, ",".join(isos),
-                                                   (body.get("city") or "").strip(),
-                                                   (body.get("county") or "").strip())
-            except decisions_store.InvalidDecision as e:
-                return 400, {"error": str(e)}
-            return 200, {"variety": variety, "stone_type": stone_type, "countries": isos}
-        if len(segments) == 2 and method == "DELETE":
-            parts = unquote(segments[1]).split("|")
-            if len(parts) != 2:
-                return 400, {"error": "ref must be <variety_norm>|<stone_type_norm>"}
-            removed = decisions_store.delete_variety_origin(parts[0], parts[1])
-            return (200, {"ref": unquote(segments[1]), "removed": True}) if removed \
-                else (404, {"error": f"no origin edit {unquote(segments[1])!r}"})
-        return 404, {"error": "expected GET/PUT/DELETE /config/v1/origins[/<ref>|/lookup]"}
-    if segments and segments[0] == "varieties":
-        # existing variety names (+ stone_type) for the review alias-to dropdown, from the durable ledger.
-        # Optional ?q=<substring> + ?limit=<n> back a type-ahead: the full set is ~25k, so a client can
-        # narrow it instead of pulling ~1 MB on every open.
-        if method == "GET":
-            from stone_pipeline.config import varieties
-            params = parse_qs(query)
-            q = (params.get("q", [""])[0] or "").strip() or None
-            raw_limit = (params.get("limit", [""])[0] or "").strip()
-            limit = int(raw_limit) if raw_limit.isdigit() else None
-            return 200, {"varieties": varieties.list_all(q=q, limit=limit)}
-        return 405, {"error": "GET /config/v1/varieties[?q=&limit=]"}
-    if segments and segments[0] == "adapters":
-        # the coded adapters available to run (the auto-discovered REGISTRY). The :4200 admin turns the
-        # source "adapter" field into a validated dropdown from this, so it can proactively block adding a
-        # source with no coded adapter (ISS-3) instead of relying on the PUT 400. Agnostic: just the list.
-        if method == "GET":
-            from stone_pipeline import adapters
-            return 200, {"adapters": sorted(adapters.REGISTRY)}
-        return 405, {"error": "GET /config/v1/adapters"}
-    if segments and segments[0] == "colors":
-        # the colour vocabulary for the new-variety mint colour picker: seed a colourless variety with a
-        # real Medusa colour instead of the generic 'Natural'. Agnostic: just the canonical names.
-        if method == "GET":
-            return 200, {"colors": sorted(_color_vocab().values())}
-        return 405, {"error": "GET /config/v1/colors"}
-    if segments and segments[0] == "types":
-        # the stone-type vocabulary for the new-variety mint type picker: assign a type to a type-less
-        # variety (held until it has one). Agnostic: just the canonical names.
-        if method == "GET":
-            return 200, {"types": sorted(_type_vocab().values())}
-        return 405, {"error": "GET /config/v1/types"}
-    if not segments or segments[0] != "sources":
-        return 404, {"error": "not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, "
-                     "/delist, /pause, /resume, /clean, /review/<kind>, /varieties, /adapters, /colors, "
-                     "/types or /variations/<key>/{retire,un_retire}"}
-    if len(segments) == 1:
-        if method == "GET":
-            # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows)
-            # and how many products reached the ledger (ledger_products) -- so :4200 shows what's there
-            # and how old, not just the last run.
-            from stone_pipeline.config import scrape_status
-            return 200, {"sources": scrape_status.enrich(store.list_rows())}
-        return 405, {"error": "use PUT /config/v1/sources/<name> to create"}
-    name = segments[1]
-    if method == "GET":
-        row = store.get_row(name)
-        return (200, row) if row else (404, {"error": f"no source {name!r}"})
-    if method == "PUT":
-        if not isinstance(body, dict):
-            return 400, {"error": "body must be a JSON object of source settings"}
-        body = {**body, "source": name}   # the path name is authoritative
-        err = _validate_source_put(name, body)
-        if err:
-            return err
-        try:
-            store.upsert_row(body)
-        except sqlite3.IntegrityError:
-            # the DB's UNIQUE(source_code) backstop tripped: a concurrent PUT claimed the same code between
-            # the app-level check and this write. Report a clean 400, not a 500.
-            return 400, {"error": f"source_code {body.get('source_code', '')!r} is already in use by another source"}
-        return 200, store.get_row(name)
-    if method == "DELETE":
-        # stage 2 of a vendor removal ('Remove permanently'): purge the source's qty-0 products and drop
-        # its config row. 409 if the source still has LIVE products (take it offline via /delist first).
-        from stone_pipeline import lifecycle
-        result, code = lifecycle.remove_source(name)
-        return code, result
-    return 405, {"error": f"method {method} not allowed on a source"}
+    return code, result
+
+
+# -- review: the new-variant review queue for the :4200 admin ---------------------------------------------
+# The produce SURFACES uncertain items; the operator decides here; the NEXT produce APPLIES it (decisions
+# are read once at curate start, so an edit takes effect on the following run -- same "applies next run"
+# contract as the run guard).
+def _get_review_variants(params, body, query):
+    # ONE list: the variety cards plus the origin confirmations in the same card shape (kind 'origin'), so
+    # the operator reviews everything in one place with one statement (/review/decide).
+    from stone_pipeline.config import decisions_store
+    cards = (decisions_store.list_pending("variety")
+             + [_origin_as_card(o) for o in decisions_store.list_pending("origin")]
+             # decisions the last produce did NOT honour (stages.decision_audit): restate or clear
+             + [_gap_as_card(g) for g in decisions_store.list_pending("decision_gap")])
+    # Decided cards sink to the END, undecided keep their order at the top, so the operator always works
+    # the front of one list and never loses their place. A decided card is NOT removed: it stays pending
+    # until the next produce binds it, and re-stating over it revises the decision. Stable sort.
+    cards.sort(key=lambda c: bool(c.get("decided")))
+    decided = sum(1 for c in cards if c.get("decided"))
+    return 200, {"variants": cards,
+                 # progress signal: the list length cannot move while reviewing, so without a count
+                 # there is no way to tell a finished review from an untouched one.
+                 "counts": {"total": len(cards), "decided": decided, "undecided": len(cards) - decided}}
+
+
+def _put_review_variant(params, body, query):
+    # {"action":"reject"} is the one explicit action: "not a variety" is not a statement about fields.
+    # Everything else is a statement (PUT /review/decide).
+    from stone_pipeline.config import decisions_store
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be a JSON object {action, alias_of?}"}
+    # DECODE the path segment before it becomes the decision key. The variety was SURFACED with
+    # review_pending.ref = norm(real name) (e.g. 'alpine luxe'); a multi-word name arrives here
+    # percent-encoded ('Alpine%20Luxe'), and norm keeps the literal '%20' ('alpine 20luxe'), so a raw
+    # segment would store the decision under a key that never matches the pending ref and the UI reads
+    # back current_action=null. unquote first, so ref == variant_norm holds by construction.
+    variant = unquote(params["variant"])
+    if body.get("action", "") != "reject":
+        return 400, {"error": "action must be 'reject'; anything else is a statement: PUT /review/decide"}
+    try:
+        decisions_store.set_variety_decision(variant, "reject")
+    except decisions_store.InvalidDecision as e:
+        return 400, {"error": str(e)}
+    return 200, {"variant": variant, "action": "reject"}
+
+
+def _get_review_attributes(params, body, query):
+    from stone_pipeline.config import decisions_store
+    return 200, {"attributes": decisions_store.list_pending("attribute")}
+
+
+def _put_review_attribute(params, body, query):
+    # {"kind":..., "medusa_id":...} for a pending attribute value (needs a Medusa id)
+    from stone_pipeline.config import decisions_store
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
+    value = unquote(params["value"])   # same decode-before-key rule as the variety PUT
+    try:
+        decisions_store.set_attribute_id(body.get("kind", ""), value, body.get("medusa_id", ""))
+    except decisions_store.InvalidDecision as e:
+        return 400, {"error": str(e)}
+    return 200, {"value": value, "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
+
+
+def _decide_listings(body) -> list[tuple[str, str]]:
+    # the listings a statement applies to: the card's `listings` ([{source, scraped}], a card shared by
+    # several vendors), or one `source` with `scraped` as a spelling or a list of spellings
+    source = (body.get("source") or "").strip()
+    raw_scraped = body.get("scraped") or ""
+    listings = [(str(l.get("source") or "").strip(), str(l.get("scraped") or "").strip())
+                for l in (body.get("listings") or []) if isinstance(l, dict)]
+    listings += [(source, s.strip()) for s in (raw_scraped if isinstance(raw_scraped, list) else [raw_scraped])
+                 if isinstance(s, str) and s.strip() and source]
+    return list(dict.fromkeys(l for l in listings if l[0] and l[1]))
+
+
+def _delete_review_decide(params, body, query):
+    # DELETE {source, scraped}: clear that vendor's decisions for the spelling
+    from stone_pipeline.config import decisions_store
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be a JSON object {source, scraped, name, type, ...}"}
+    listings = _decide_listings(body)
+    if not listings:
+        return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
+    return 200, {"listings": [{"source": s, "scraped": sp} for s, sp in listings],
+                 "cleared": [decisions_store.clear_decisions(s, sp) for s, sp in listings]}
+
+
+def _put_review_decide(params, body, query):
+    # ONE statement, whatever list it comes from (pending card or resolved row): "for vendor <source>, the
+    # product scraped as <scraped> is <name>, a <type>, <color>, from <origin>". The backend derives the
+    # outcome (bind to the existing variety / mint it / the vendor's origin), see decisions_store.decide.
+    #   PUT {source, scraped, name, type, color?, origin?, widen?}
+    from stone_pipeline.config import decisions_store
+    from stone_pipeline.matching import projections as proj
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be a JSON object {source, scraped, name, type, ...}"}
+    listings = _decide_listings(body)
+    if not listings:
+        return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
+    name = (body.get("name") or "").strip()
+    raw_type = (body.get("type") or "").strip()
+    if not name or not raw_type:
+        return 400, {"error": "name and type are required"}
+    vocab = _type_vocab()
+    if proj.norm(raw_type) not in vocab:
+        return 400, {"error": f"type {raw_type!r} is not a known Medusa stone-type attribute"}
+    stone_type = vocab[proj.norm(raw_type)]
+    # a colour, when given, must be a real Medusa colour attribute (a minted variety is seeded with it; a
+    # value Medusa lacks would null-id every product), stored in its canonical casing
+    color = ""
+    if (raw_color := (body.get("color") or "").strip()):
+        colors = _color_vocab()
+        if proj.norm(raw_color) not in colors:
+            return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
+        color = colors[proj.norm(raw_color)]
+    raw_origin = (body.get("origin") or "").strip()
+    origin = _country_iso(raw_origin) if raw_origin else ""
+    if raw_origin and not origin:
+        return 400, {"error": f"origin {raw_origin!r} is not a real ISO-3166 country"}
+    from stone_pipeline.stages.curate import active_branches, gen_key
+    from stone_pipeline.stages import decisions as _decisions
+    retired = _decisions.load_retired()
+    if any(gen_key(b, stone_type, name) in retired for b in active_branches()):
+        return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
+                     "retired": True}
+    try:
+        outcomes = [decisions_store.decide(s, sp, name, stone_type, color, origin, bool(body.get("widen")))
+                    for s, sp in listings]
+    except decisions_store.InvalidDecision as e:
+        return 400, {"error": str(e)}
+    return 200, {**outcomes[0], "listings": [{"source": s, "scraped": sp, "result": o["result"]}
+                                             for (s, sp), o in zip(listings, outcomes)],
+                 "decided": len(outcomes)}
+
+
+def _get_review_resolved(params, body, query):
+    # GET /review/resolved[?source=&decided=true|false]: the last produce's resolution per product, with
+    # the standing decision overlaid (no approval needed)
+    from stone_pipeline.config import resolved
+    qs = parse_qs(query)
+    decided = (qs.get("decided") or [None])[0]
+    return 200, {"resolved": resolved.list_resolved(
+        source=(qs.get("source") or [None])[0] or None,
+        decided=None if decided is None else decided.lower() == "true")}
+
+
+def _get_review_backbone(params, body, query):
+    # pending leaf additions (value not yet on a variety)
+    from stone_pipeline.config import decisions_store
+    return 200, {"backbone": decisions_store.list_pending("backbone_leaf")}
+
+
+def _get_review_backbone_decided(params, body, query):
+    # already-decided leaves (with their refs), so a past verdict can be revised -- e.g. un-approve a
+    # spurious approval that a prior run grew into the overlay.
+    from stone_pipeline.config import decisions_store
+    return 200, {"decided": decisions_store.list_decided_leaves()}
+
+
+def _post_review_backbone_approve_all(params, body, query):
+    # the primary UX: approve every pending leaf suggestion (or only one verdict, e.g. likely_real).
+    from stone_pipeline.config import decisions_store
+    return 200, {"approved": decisions_store.approve_leaf_pending(_dict(body).get("verdict"))}
+
+
+def _put_review_backbone_leaf(params, body, query):
+    # {"action":"approve"|"reject"|"clear"}: one verdict (approve/reject also un-approve a DECIDED leaf;
+    # clear undoes it)
+    from stone_pipeline.config import decisions_store
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be a JSON object {action}"}
+    ref, action = unquote(params["ref"]), body.get("action", "")
+    try:
+        # a still-pending suggestion decides through the queue; a leaf a prior run already decided (e.g. a
+        # spurious approval to undo) has dropped off that queue, so revise it in place by ref. 'clear' only
+        # applies to a decided leaf, so it skips the pending path.
+        ok = (action != "clear" and decisions_store.decide_leaf_pending(ref, action)) \
+            or decisions_store.revise_leaf_decision(ref, action)
+    except decisions_store.InvalidDecision as e:
+        return 400, {"error": str(e)}
+    if not ok:
+        return 404, {"error": f"no pending or decided backbone-leaf for ref {ref!r}"}
+    return 200, {"ref": ref, "action": action}
+
+
+# -- origins: PER-VARIETY origin EDITS (the "edit origins" admin action) ----------------------------------
+# The same channel a mint uses for its origin (seed_country), but for ANY variety and holding a country
+# LIST. Overlaid onto the origin map on the next produce; the per-vendor gate then picks each vendor's
+# country from that list.
+def _get_origins(params, body, query):
+    from stone_pipeline.config import decisions_store
+    return 200, {"origins": decisions_store.list_variety_origins()}
+
+
+def _get_origins_lookup(params, body, query):
+    # ?variety=&stone_type= -> base + edited + effective for one variety
+    from stone_pipeline.config import decisions_store
+    qs = parse_qs(query)
+    variety = (qs.get("variety", [""])[0] or "").strip()
+    stone_type = (qs.get("stone_type", [""])[0] or "").strip()
+    if not (variety and stone_type):
+        return 400, {"error": "lookup needs ?variety=&stone_type="}
+    from stone_pipeline.reference import loaders
+    rule = loaders.load_origin_map().exact(variety, stone_type)
+    base = list(rule.countries) if rule else []
+    edit = decisions_store.get_variety_origin(variety, stone_type)
+    return 200, {"variety": variety, "stone_type": stone_type, "base_countries": base,
+                 "edited_countries": (edit["countries"] if edit else None),
+                 "effective_countries": (edit["countries"] if edit else base)}
+
+
+def _put_origin(params, body, query):
+    # {variety, stone_type, countries:[...], city?, county?}
+    from stone_pipeline.config import decisions_store
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be {variety, stone_type, countries:[...]}"}
+    variety = (body.get("variety") or "").strip()
+    stone_type = (body.get("stone_type") or "").strip()
+    raw = body.get("countries") or []
+    if not (variety and stone_type and raw):
+        return 400, {"error": "variety, stone_type and a non-empty countries list are required"}
+    isos = []
+    for c in raw:
+        if not (iso := _country_iso((c or "").strip())):
+            return 400, {"error": f"country {c!r} is not a real ISO-3166 country"}
+        isos.append(iso)
+    try:
+        decisions_store.set_variety_origin(variety, stone_type, ",".join(isos),
+                                           (body.get("city") or "").strip(), (body.get("county") or "").strip())
+    except decisions_store.InvalidDecision as e:
+        return 400, {"error": str(e)}
+    return 200, {"variety": variety, "stone_type": stone_type, "countries": isos}
+
+
+def _delete_origin(params, body, query):
+    # revert that variety to the base map
+    from stone_pipeline.config import decisions_store
+    ref = unquote(params["ref"])
+    parts = ref.split("|")
+    if len(parts) != 2:
+        return 400, {"error": "ref must be <variety_norm>|<stone_type_norm>"}
+    removed = decisions_store.delete_variety_origin(parts[0], parts[1])
+    return (200, {"ref": ref, "removed": True}) if removed else (404, {"error": f"no origin edit {ref!r}"})
+
+
+# -- vocabularies for the admin pickers (agnostic: just the lists) -----------------------------------------
+def _get_varieties(params, body, query):
+    # existing variety names (+ stone_type) from the durable ledger. Optional ?q=<substring> + ?limit=<n>
+    # back a type-ahead: the full set is ~25k, so a client can narrow it instead of pulling ~1 MB per open.
+    from stone_pipeline.config import varieties
+    qs = parse_qs(query)
+    q = (qs.get("q", [""])[0] or "").strip() or None
+    raw_limit = (qs.get("limit", [""])[0] or "").strip()
+    limit = int(raw_limit) if raw_limit.isdigit() else None
+    return 200, {"varieties": varieties.list_all(q=q, limit=limit)}
+
+
+def _get_adapters(params, body, query):
+    # the coded adapters available to run (the auto-discovered REGISTRY): the :4200 admin turns the source
+    # "adapter" field into a validated dropdown, so it blocks adding a source with no coded adapter (ISS-3).
+    from stone_pipeline import adapters
+    return 200, {"adapters": sorted(adapters.REGISTRY)}
+
+
+def _get_colors(params, body, query):
+    # the colour vocabulary for the mint colour picker (a colourless variety seeded with a real colour)
+    return 200, {"colors": sorted(_color_vocab().values())}
+
+
+def _get_types(params, body, query):
+    # the stone-type vocabulary for the mint type picker (a type-less variety is held until it has one)
+    return 200, {"types": sorted(_type_vocab().values())}
+
+
+# -- sources: the scraper control plane --------------------------------------------------------------------
+def _get_sources(params, body, query):
+    # enrich each source with what's IN the scraper: the raw scrape (scrape_at + scrape_rows) and how many
+    # products reached the ledger (ledger_products) -- so :4200 shows what's there and how old.
+    from stone_pipeline.config import scrape_status
+    return 200, {"sources": scrape_status.enrich(store.list_rows())}
+
+
+def _get_source(params, body, query):
+    row = store.get_row(params["name"])
+    return (200, row) if row else (404, {"error": f"no source {params['name']!r}"})
+
+
+def _put_source(params, body, query):
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be a JSON object of source settings"}
+    name = params["name"]
+    body = {**body, "source": name}   # the path name is authoritative
+    err = _validate_source_put(name, body)
+    if err:
+        return err
+    try:
+        store.upsert_row(body)
+    except sqlite3.IntegrityError:
+        # the DB's UNIQUE(source_code) backstop tripped: a concurrent PUT claimed the same code between the
+        # app-level check and this write. Report a clean 400, not a 500.
+        return 400, {"error": f"source_code {body.get('source_code', '')!r} is already in use by another source"}
+    return 200, store.get_row(name)
+
+
+def _delete_source(params, body, query):
+    # stage 2 of a vendor removal ('Remove permanently'): purge the source's qty-0 products and drop its
+    # config row. 409 if the source still has LIVE products (take it offline via /delist first).
+    from stone_pipeline import lifecycle
+    result, code = lifecycle.remove_source(params["name"])
+    return code, result
+
+
+_ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
+    ("POST", ("run",), _post_run),
+    ("GET", ("run",), _get_run),
+    ("GET", ("run", "{run_id}"), _get_run_by_id),
+    ("GET", ("diagnostics",), _get_diagnostics),
+    ("GET", ("diagnostics", "{source}"), _get_diagnostics_source),
+    ("POST", ("reset",), _post_reset),
+    ("POST", ("curation", "rebuild"), _post_curation_rebuild),
+    ("POST", ("purge",), _post_purge),
+    ("POST", ("clean",), _post_clean),
+    ("POST", ("delist",), _post_delist),
+    ("POST", ("pause",), _post_pause),
+    ("POST", ("resume",), _post_resume),
+    ("GET", ("variations", "minted"), _get_variations_minted),
+    ("POST", ("variations", "unmint"), _post_variations_unmint),
+    ("POST", ("variations", "{key}", "{verb}"), _post_variation_verb),
+    ("GET", ("review", "variants"), _get_review_variants),
+    ("PUT", ("review", "variants", "{variant}"), _put_review_variant),
+    ("GET", ("review", "attributes"), _get_review_attributes),
+    ("PUT", ("review", "attributes", "{value}"), _put_review_attribute),
+    ("PUT", ("review", "decide"), _put_review_decide),
+    ("DELETE", ("review", "decide"), _delete_review_decide),
+    ("GET", ("review", "resolved"), _get_review_resolved),
+    ("GET", ("review", "backbone"), _get_review_backbone),
+    ("GET", ("review", "backbone", "decided"), _get_review_backbone_decided),
+    ("POST", ("review", "backbone", "approve_all"), _post_review_backbone_approve_all),
+    ("PUT", ("review", "backbone", "{ref}"), _put_review_backbone_leaf),
+    ("GET", ("origins",), _get_origins),
+    ("GET", ("origins", "lookup"), _get_origins_lookup),
+    ("PUT", ("origins", "{ref}"), _put_origin),
+    ("DELETE", ("origins", "{ref}"), _delete_origin),
+    ("GET", ("varieties",), _get_varieties),
+    ("GET", ("adapters",), _get_adapters),
+    ("GET", ("colors",), _get_colors),
+    ("GET", ("types",), _get_types),
+    ("GET", ("sources",), _get_sources),
+    ("GET", ("sources", "{name}"), _get_source),
+    ("PUT", ("sources", "{name}"), _put_source),
+    ("DELETE", ("sources", "{name}"), _delete_source),
+)
+
+_NOT_FOUND = ("not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, /delist, /pause, "
+              "/resume, /clean, /review/<kind>, /varieties, /adapters, /colors, /types or "
+              "/variations/<key>/{retire,un_retire}")
+
+
+def _match(pattern: tuple[str, ...], segments: list[str]) -> dict | None:
+    if len(pattern) != len(segments):
+        return None
+    params: dict = {}
+    for token, seg in zip(pattern, segments):
+        if token.startswith("{"):
+            params[token[1:-1]] = seg
+        elif token != seg:
+            return None
+    return params
+
+
+def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[int, object]:
+    """Route one request through the table. `segments` is the path under /config/v1 (e.g. ['sources'] or
+    ['sources', 'polonine']); `query` is the raw URL query string (e.g. 'q=carr&limit=20').
+    Pure: returns (status_code, json body)."""
+    allowed: list[str] = []
+    for route_method, pattern, handler in _ROUTES:
+        params = _match(pattern, segments)
+        if params is None:
+            continue
+        if route_method == method:
+            return handler(params, body, query)
+        allowed.append(route_method)
+    if allowed:
+        return 405, {"error": f"{method} is not allowed on /config/v1/{'/'.join(segments)}; "
+                              f"use {', '.join(dict.fromkeys(allowed))}"}
+    return 404, {"error": _NOT_FOUND}
 
 
 _SOURCE_INT_FIELDS = ("default_bundle_size", "min_expected_rows")
