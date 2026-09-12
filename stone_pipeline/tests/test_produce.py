@@ -92,7 +92,7 @@ def _reconcile(monkeypatch, errors, held, untyped):
     from stone_pipeline import catalog as catalog_mod
     monkeypatch.setattr(catalog_mod, "verify_consistency", lambda: (errors, []))
     monkeypatch.setattr(produce, "_ledger_gate_state", lambda: (held, untyped))
-    return produce._reconcile_gate(1)
+    return produce._reconcile_gate(catalog_mod.CONSISTENCY_GATE_RC)   # the gate's own failure code
 
 
 def test_gate_held_when_only_new_varieties(monkeypatch):
@@ -107,17 +107,17 @@ def test_gate_held_even_with_untyped_new_varieties(monkeypatch):
 
 def test_gate_stays_fatal_when_no_new_varieties_explain_it(monkeypatch):
     # gate failed but the ledger has no held new varieties -> not the two-pass checkpoint -> fatal
-    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=0, untyped=0) == 1
+    assert _reconcile(monkeypatch, NEW_VARIETY_ERRORS, held=0, untyped=0) != 0
 
 
 def test_gate_stays_fatal_on_error_outside_the_new_variety_class(monkeypatch):
     errs = NEW_VARIETY_ERRORS + ["12 inventory SKUs are NOT in the Medusa product export ..."]
-    assert _reconcile(monkeypatch, errs, held=225, untyped=0) == 1
+    assert _reconcile(monkeypatch, errs, held=225, untyped=0) != 0
 
 
 def test_gate_keeps_failure_if_no_errors_surface(monkeypatch):
     # build failed for some non-gate reason (verify_consistency clean) -> keep the original failure
-    assert _reconcile(monkeypatch, [], held=225, untyped=0) == 1
+    assert _reconcile(monkeypatch, [], held=225, untyped=0) != 0
 
 
 # empty-export cold start: verify_consistency returns ONLY the "cannot verify" error (nothing to check
@@ -132,7 +132,7 @@ def test_gate_held_on_empty_export_cold_start_with_new_varieties(monkeypatch):
 
 def test_gate_stays_fatal_on_empty_export_when_nothing_new_explains_it(monkeypatch):
     # export empty but the ledger has no held new varieties -> a genuinely broken warm export -> fatal
-    assert _reconcile(monkeypatch, EMPTY_EXPORT_ERROR, held=0, untyped=0) == 1
+    assert _reconcile(monkeypatch, EMPTY_EXPORT_ERROR, held=0, untyped=0) != 0
 
 
 def test_fetch_inputs_failure_is_fatal_in_production_and_best_effort_in_development(monkeypatch):
@@ -151,3 +151,25 @@ def test_fetch_inputs_failure_is_fatal_in_production_and_best_effort_in_developm
         produce._fetch_inputs()
     monkeypatch.setattr(produce, "IS_PRODUCTION", False, raising=False)
     produce._fetch_inputs()                                  # a laptop without S3 keeps producing
+
+
+def test_only_a_consistency_gate_failure_is_reconciled(monkeypatch):
+    # A write-through abort, a scrape-floor abort or any other non-gate failure must stay fatal even when the
+    # consistency errors happen to be the cold-start class and new varieties are held: those two facts are
+    # the normal state of a new-variety produce, so they must never excuse an unrelated failure.
+    from stone_pipeline import catalog as catalog_mod
+    monkeypatch.setattr(catalog_mod, "verify_consistency", lambda: (NEW_VARIETY_ERRORS, []))
+    monkeypatch.setattr(produce, "_ledger_gate_state", lambda: (225, 0))
+    assert produce._reconcile_gate(1) == 1                                   # generic failure: fatal
+    assert produce._reconcile_gate(2) == 2                                   # a run/write-through abort: fatal
+    assert produce._reconcile_gate(catalog_mod.CONSISTENCY_GATE_RC) == 0    # the gate itself: reconciled
+
+
+def test_consistency_gate_failure_exits_with_its_own_code(monkeypatch):
+    from stone_pipeline import catalog as catalog_mod
+    monkeypatch.setattr(catalog_mod, "verify_consistency", lambda: (["x is NOT in the current export"], []))
+    with pytest.raises(SystemExit) as exc:
+        catalog_mod._consistency_gate()
+    assert exc.value.code == catalog_mod.CONSISTENCY_GATE_RC
+    monkeypatch.setattr(catalog_mod, "verify_consistency", lambda: ([], ["a warning"]))
+    catalog_mod._consistency_gate()                                          # warnings never abort

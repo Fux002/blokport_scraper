@@ -55,7 +55,7 @@ block_finish: Raw
 # ~500, limestone block ~2500); set Calcport's actual figure and supply reference/type_density.lime.csv.
 default_density: 1600
 
-# PLACEHOLDER fallback dimension/weight ranges per category, metres/tonnes [lo, hi]. width == thickness.
+# PLACEHOLDER fallback dimension/weight ranges per category, metres/tonnes [lo, hi]. height == thickness, length/width the faces.
 dimension_ranges:
   block: {weight: [0.01, 0.05], length: [0.2, 0.6], width: [0.1, 0.3], height: [0.1, 0.3]}
   bag:   {weight: [0.02, 0.05], length: [0.3, 0.6], width: [0.1, 0.3], height: [0.4, 0.8]}

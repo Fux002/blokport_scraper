@@ -69,3 +69,12 @@ def test_gaps_surface_in_the_one_list_and_clear_when_applied(tmp_path, monkeypat
     assert card["current_action"] == "mint" and card["reason"] == "Mint not applied"
     assert decisions.write_decision_gaps([]) == 0
     assert [c for c in server.dispatch("GET", ["review", "variants"], None)[1]["variants"] if c["kind"] == "decision_gap"] == []
+
+
+def test_mint_gap_message_names_the_scraped_spelling_as_written():
+    # the decision row exposes the display form as "spelling"; the gap must show 'Bianco White Marble', not
+    # the normalised 'bianco white marble'
+    mints = {("", "bianco white marble"): {"action": "mint", "seed_name": None, "seed_type": "Marble",
+                                          "seed_country": "IR", "source": "", "spelling": "Bianco White Marble"}}
+    gaps = decision_audit.audit([], EXISTING, set(), mints, {}, {}, set())
+    assert gaps and gaps[0]["name"] == "Bianco White Marble"

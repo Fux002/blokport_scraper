@@ -29,6 +29,16 @@ def _no_ambient_aws(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_magnitude_baselines(monkeypatch, tmp_path_factory):
+    """The drift gate's baseline lives in the developer's gitignored state/ (absent in CI). A stale one there
+    (e.g. from before a convention change) makes a run abort before emit and fails tests that never assert on
+    drift. Every test gets an empty, private baseline file, so local runs behave like CI."""
+    from stone_pipeline.stages import magnitude_drift
+    path = tmp_path_factory.mktemp("magnitude") / "magnitude_baselines.json"
+    monkeypatch.setattr(magnitude_drift, "_path", lambda: path)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_config_store(monkeypatch, tmp_path_factory):
     absent = tmp_path_factory.mktemp("noconfig") / "absent.db"
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(absent))

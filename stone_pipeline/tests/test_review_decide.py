@@ -425,3 +425,14 @@ def test_a_statement_supersedes_a_reject_stored_under_the_card_ref():
     out = decisions_store.decide("zucchi", "Totally New", "Totally New", "Granite", exists_as=_exists)
     assert out["result"] == "minted" and decisions_store.rejected_names() == set()
     assert decisions_store.confirm_map() == {("", _norm("Totally New")): "yes"}
+
+
+def test_vendor_rename_to_the_same_name_wins_the_origin_regardless_of_insert_order():
+    # two decisions can land on one variety NAME: a global mint renamed to "Bar" (IN) and a vendor rename to
+    # "Bar" (BR). The name-keyed origin maps must resolve that collision deterministically (the vendor's own
+    # level wins), not by SQLite rowid / insert order.
+    decisions_store.set_variety_decision("Foo", "mint", seed_type="Granite", seed_name="Bar", seed_country="BR",
+                                         source="zucchi", asked_by="zucchi")
+    decisions_store.set_variety_decision("Baz", "mint", seed_type="Granite", seed_name="Bar", seed_country="IN",
+                                         source="", asked_by="polonine")
+    assert decisions_store.variety_seed_country_rules()[("bar", "granite")] == "BR"

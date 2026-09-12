@@ -63,6 +63,24 @@ def find_canonical(outputs_root: Path) -> list[Path]:
     return [d / "diagnostics" / "canonical.parquet" for d in latest_run_dirs(outputs_root)]
 
 
+# The consistency gate's OWN exit code. produce reconciles a failure to exit 0 only when it carries this code
+# AND the ledger explains it (new varieties held for their first pull); any other non-zero rc (a write-through
+# abort, a scrape floor, a stall) stays fatal no matter what the consistency errors look like.
+CONSISTENCY_GATE_RC = 4
+
+
+def _consistency_gate() -> None:
+    """Deterministic consistency gate: abort with CONSISTENCY_GATE_RC when the upload set is internally
+    inconsistent (stale/out-of-order combinations or products vs the current export). Warnings never abort."""
+    errors, warnings = verify_consistency()
+    for w in warnings:
+        log.warning("consistency warning", extra={"extra_fields": {"warning": w}})
+    if errors:
+        for e in errors:
+            log.error("consistency gate FAILED", extra={"extra_fields": {"error": e}})
+        raise SystemExit(CONSISTENCY_GATE_RC)
+
+
 def _record_catalog() -> None:
     """Reflect the produced variations onto the ledger (flag-gated). The ledger is what Medusa pulls, so a
     failed write-through is a failed produce: exit non-zero rather than report a clean success whose
@@ -146,14 +164,7 @@ def run(outputs_root: Path | None = None) -> Path:
     # (stale/out-of-order combinations or products vs the current export) -- no manual/AI check. In the
     # pull model produce reconciles this against the ledger: new-variety failures are the expected
     # two-pass checkpoint (held), a genuine structural fault stays fatal.
-    errors, warnings = verify_consistency()
-    for w in warnings:
-        log.warning("consistency warning", extra={"extra_fields": {"warning": w}})
-    if errors:
-        for e in errors:
-            log.error("consistency gate FAILED", extra={"extra_fields": {"error": e}})
-        raise SystemExit("catalog consistency gate FAILED -- inconsistent upload set:\n  - "
-                         + "\n  - ".join(errors))
+    _consistency_gate()
 
     return sync
 
@@ -165,7 +176,6 @@ def _auto_queue_images() -> int:
     The variant Image URL already points at dev/variations/{Key}.png, so generation overwrites that
     exact object (one image per variant)."""
     import json
-    import os
 
     from stone_pipeline.stages import image_prompts
     from stone_pipeline import refresh_images

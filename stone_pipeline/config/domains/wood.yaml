@@ -63,7 +63,7 @@ block_finish: Raw
 # source omits it.
 default_density: 700
 
-# PLACEHOLDER fallback dimension/weight ranges per category, metres/tonnes [lo, hi]. width == thickness
+# PLACEHOLDER fallback dimension/weight ranges per category, metres/tonnes [lo, hi]. height == thickness, length/width the faces
 # (depth); length/height are the two faces. Replace with real Wudport measurements.
 dimension_ranges:
   plank: {weight: [0.005, 0.05], length: [1.0, 4.0], width: [0.10, 0.40],  height: [0.015, 0.05]}

@@ -131,8 +131,13 @@ def _reconcile_gate(rc: int) -> int:
     the sync engine already gates each product on its variation being synced (_ELIGIBLE_PRODUCT), and
     the pull ack IS the round-trip that mints the id -- so this is the expected pass-1 checkpoint, not a
     real fault. When the gate's ONLY failures are that class and new varieties explain them (held > 0),
-    exit 0 reporting the held count; else stay fatal."""
+    exit 0 reporting the held count; else stay fatal. ONLY the gate's own exit code is ever reconciled: a
+    write-through abort, a scrape floor or a stall carries another code and stays fatal even when the
+    consistency errors are the cold-start class and new varieties are held (the normal state of any
+    new-variety produce, so never an excuse for an unrelated failure)."""
     from stone_pipeline import catalog as catalog_mod
+    if rc != catalog_mod.CONSISTENCY_GATE_RC:
+        return rc
     errors, _ = catalog_mod.verify_consistency()
     if not errors:
         return rc                                   # gate isn't why build failed -- keep the failure
