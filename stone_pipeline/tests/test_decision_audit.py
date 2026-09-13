@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from stone_pipeline.config import server, store
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.stages import decision_audit, decisions
 
 
@@ -19,41 +20,41 @@ EXISTING = {("golden lightning", "granite"), ("azul white", "onyx")}
 def test_mint_is_a_gap_until_its_variety_exists():
     mints = {("", "bianco white marble"): {"action": "mint", "seed_name": "Bianco White", "seed_type": "Marble",
                                      "seed_country": "IR", "source": "marenostone", "variant_display": "Bianco White Marble"}}
-    gaps = decision_audit.audit([], EXISTING, set(), mints, {}, {}, set())
+    gaps = decision_audit.audit([], EXISTING, set(), Decisions.from_legacy(mints, {}, {}), set())
     assert [g["decision"] for g in gaps] == ["mint"] and "Bianco White" in gaps[0]["reason"]
-    assert decision_audit.audit([], EXISTING, {("bianco white", "marble")}, mints, {}, {}, set()) == []
-    assert decision_audit.audit([], EXISTING | {("bianco white", "marble")}, set(), mints, {}, {}, set()) == []
+    assert decision_audit.audit([], EXISTING, {("bianco white", "marble")}, Decisions.from_legacy(mints, {}, {}), set()) == []
+    assert decision_audit.audit([], EXISTING | {("bianco white", "marble")}, set(), Decisions.from_legacy(mints, {}, {}), set()) == []
 
 
 def test_reject_is_a_gap_while_its_card_remains():
     mints = {("", "junk code"): {"action": "reject", "seed_name": None, "seed_type": None, "source": ""}}
-    assert decision_audit.audit([], EXISTING, set(), mints, {}, {}, {"junk code"})[0]["decision"] == "reject"
-    assert decision_audit.audit([], EXISTING, set(), mints, {}, {}, set()) == []
+    assert decision_audit.audit([], EXISTING, set(), Decisions.from_legacy(mints, {}, {}), {"junk code"})[0]["decision"] == "reject"
+    assert decision_audit.audit([], EXISTING, set(), Decisions.from_legacy(mints, {}, {}), set()) == []
 
 
 def test_alias_is_a_gap_when_the_listing_bound_elsewhere_but_not_for_a_new_target_or_no_listing():
     scoped = {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")}
     bound_right = [_row("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite")]
-    assert decision_audit.audit(bound_right, EXISTING, set(), {}, scoped, {}, set()) == []
+    assert decision_audit.audit(bound_right, EXISTING, set(), Decisions.from_legacy({}, scoped, {}), set()) == []
     bound_wrong = [_row("marenostone", "Amazon Green Granite", "Amazonia", "Granite")]
-    gaps = decision_audit.audit(bound_wrong, EXISTING, set(), {}, scoped, {}, set())
+    gaps = decision_audit.audit(bound_wrong, EXISTING, set(), Decisions.from_legacy({}, scoped, {}), set())
     assert [g["decision"] for g in gaps] == ["alias"] and "Amazonia" in gaps[0]["reason"]
     unbound = [_row("marenostone", "Amazon Green Granite", "", "Granite")]
-    assert decision_audit.audit(unbound, EXISTING, set(), {}, scoped, {}, set())[0]["decision"] == "alias"
+    assert decision_audit.audit(unbound, EXISTING, set(), Decisions.from_legacy({}, scoped, {}), set())[0]["decision"] == "alias"
     # the target was minted THIS produce: the listing binds next run, not a gap
-    assert decision_audit.audit(unbound, EXISTING, {("golden lightning", "granite")}, {}, scoped, {}, set()) == []
+    assert decision_audit.audit(unbound, EXISTING, {("golden lightning", "granite")}, Decisions.from_legacy({}, scoped, {}), set()) == []
     # no listing of that spelling this produce: nothing to judge
-    assert decision_audit.audit([_row("zucchi", "Other", "X", "Granite")], EXISTING, set(), {}, scoped, {}, set()) == []
+    assert decision_audit.audit([_row("zucchi", "Other", "X", "Granite")], EXISTING, set(), Decisions.from_legacy({}, scoped, {}), set()) == []
 
 
 def test_origin_is_a_gap_when_a_bound_product_does_not_carry_it_at_the_operator_rung():
     origins = {("marenostone", "golden lightning", "granite"): "IR"}
     ok = [_row("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite", "IR", "supplier_override")]
-    assert decision_audit.audit(ok, EXISTING, set(), {}, {}, origins, set()) == []
+    assert decision_audit.audit(ok, EXISTING, set(), Decisions.from_legacy({}, {}, origins), set()) == []
     off = [_row("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite", "BR", "vendor_origin")]
-    gaps = decision_audit.audit(off, EXISTING, set(), {}, {}, origins, set())
+    gaps = decision_audit.audit(off, EXISTING, set(), Decisions.from_legacy({}, {}, origins), set())
     assert [g["decision"] for g in gaps] == ["origin"] and "BR/vendor_origin" in gaps[0]["reason"]
-    assert decision_audit.audit([], EXISTING, set(), {}, {}, origins, set()) == []      # no product bound yet
+    assert decision_audit.audit([], EXISTING, set(), Decisions.from_legacy({}, {}, origins), set()) == []      # no product bound yet
 
 
 def test_gaps_surface_in_the_one_list_and_clear_when_applied(tmp_path, monkeypatch):
@@ -76,5 +77,5 @@ def test_mint_gap_message_names_the_scraped_spelling_as_written():
     # the normalised 'bianco white marble'
     mints = {("", "bianco white marble"): {"action": "mint", "seed_name": None, "seed_type": "Marble",
                                           "seed_country": "IR", "source": "", "spelling": "Bianco White Marble"}}
-    gaps = decision_audit.audit([], EXISTING, set(), mints, {}, {}, set())
+    gaps = decision_audit.audit([], EXISTING, set(), Decisions.from_legacy(mints, {}, {}), set())
     assert gaps and gaps[0]["name"] == "Bianco White Marble"

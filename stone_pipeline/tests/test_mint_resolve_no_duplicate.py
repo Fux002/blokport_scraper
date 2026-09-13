@@ -15,7 +15,7 @@ import pytest
 
 from stone_pipeline.core.schema import CanonicalRow, GapKind, TreeGap
 from stone_pipeline.reference import loaders
-from stone_pipeline.stages import curate, decisions
+from stone_pipeline.stages import curate
 from stone_pipeline.stages.curate import ImportFile
 
 
@@ -41,7 +41,9 @@ def _imports_with_mona_lisa(branches: set[str]) -> dict[str, ImportFile]:
 
 def _monalisa_row() -> CanonicalRow:
     # a type-less 'Monalisa' scrape surfaced as a missing_variation gap (product-backed)
-    row = CanonicalRow(src_site="varsha", surrogate_key="m1", variety_match_key="Monalisa", raw_type="")
+    # a Granite-typed 'Monalisa' scrape: the type is the scrape's own (a type can only otherwise come from a
+    # MINT statement, which would mint rather than resolve), and 'Monalisa' is an alias of the existing owner
+    row = CanonicalRow(src_site="varsha", surrogate_key="m1", variety_match_key="Monalisa", raw_type="Granite")
     row.add_gap(TreeGap(src_site="varsha", surrogate_key="m1", raw_name="Monalisa",
                         gap_kind=GapKind.missing_variation, nearest_existing="Mona Lisa"))
     return row
@@ -50,8 +52,6 @@ def _monalisa_row() -> CanonicalRow:
 def _seed_granite(monkeypatch, imports):
     monkeypatch.setattr(curate, "load_all_existing", lambda: imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    # the operator assigned Granite to the type-less multi-surface name
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "monalisa"): "Granite"})
 
 
 def test_resolve_to_existing_alias_never_mints_the_scraped_spelling(ref, monkeypatch):

@@ -146,6 +146,15 @@ def variety_seed_country_rules() -> dict[tuple[str, str], str]:
             if d["action"] == "mint" and d["seed_country"]}
 
 
+def load_decisions() -> "Decisions":
+    """EVERY operator decision as one object (config.decisions_model.Decisions), read once per produce. Empty
+    on a fresh store (never materialises config.db from a read, the same rule as the accessors it replaces)."""
+    from stone_pipeline.config.decisions_model import Decisions
+    if not store.config_db_path().exists():
+        return Decisions.empty()
+    return Decisions.from_legacy(variety_actions(), scoped_aliases(), origin_decisions(), origin_widen())
+
+
 def confirm_map() -> dict[str, str]:
     """scope_key -> 'yes'|'no' -- the mint/reject view the legacy confirm-file reader expects."""
     out: dict[str, str] = {}

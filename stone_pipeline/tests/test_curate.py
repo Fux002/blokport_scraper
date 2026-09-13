@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFlag, TreeGap
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
 
@@ -73,13 +74,14 @@ def test_new_variant_emitted_for_active_categories(ref, monkeypatch):
         return r
 
     # 'every new variety is reviewed': a genuinely-new TYPED variety HOLDS for review, never auto-minted.
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
+    monkeypatch.setattr(decisions, "load_decisions", Decisions.empty)
     held = curate.build_curation([_row()], ref)
     assert any(p["variant"] == "Totally Novel Xyz" for p in held.pending_confirm), "new variety must hold"
     assert not held.new_variants["slab"], "must not auto-mint before confirmation"
 
     # once the operator confirms it, the NEXT produce mints it into every active category (emit unchanged).
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "totally novel xyz"): "yes"})
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "totally novel xyz"): {"action": "mint"}}))
     result = curate.build_curation([_row()], ref)
     # variant created in EVERY active category (uniform catalog): slab, block, tile.
     keys = {}
@@ -148,20 +150,21 @@ def test_new_typed_variety_holds_unconfirmed_mints_on_yes_rejects_on_no(ref, mon
                           gap_kind=GapKind.missing_variation, nearest_score=20.0))
         return r
 
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
+    monkeypatch.setattr(decisions, "load_decisions", Decisions.empty)
     held = curate.build_curation([_row()], ref)
     p = next(p for p in held.pending_confirm if p["variant"] == "Nebula Quartz Prime")
     assert p["stone_type"] == "Quartzite" and "New variety" in p["reason"]
     assert not held.new_variants["slab"]
 
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "nebula quartz prime"): "yes"})
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "nebula quartz prime"): {"action": "mint"}}))
     minted = curate.build_curation([_row()], ref)
     assert any(r["Name"] == "Nebula Quartz Prime" for r in minted.new_variants["slab"])
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in minted.pending_confirm)
 
-    # a reject is ONE store row: confirm_map says 'no' AND rejected_names carries it (the store is the memory)
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "nebula quartz prime"): "no"})
-    monkeypatch.setattr(decisions, "load_rejected", lambda: {("", "nebula quartz prime")})
+    # a reject is ONE statement: it answers 'no' and it is the never-propose-again memory
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "nebula quartz prime"): {"action": "reject"}}))
     rejected = curate.build_curation([_row()], ref)
     assert not rejected.new_variants["slab"], "a 'no' must not mint"
     assert not any(p["variant"] == "Nebula Quartz Prime" for p in rejected.pending_confirm), "a 'no' must not re-surface"
@@ -172,7 +175,7 @@ def test_review_card_image_falls_back_to_a_sibling_row_of_the_same_variety(ref, 
     # variety does, the card must fall back to the sibling's image (not go blank). A variety with no photo
     # anywhere stays empty. Cosmetic evidence only -- must never affect the mint/hold decision.
     from stone_pipeline.stages import decisions
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
+    monkeypatch.setattr(decisions, "load_decisions", Decisions.empty)
 
     def _gap(sk, name, imgs):
         r = CanonicalRow(src_site="varsha", surrogate_key=sk, variety_match_key=name, raw_type="Quartzite",
@@ -206,7 +209,8 @@ def test_new_variant_emits_backbone_entry_per_active_category(ref, monkeypatch):
         return r
 
     # unconfirmed new variety holds; once confirmed it mints its per-category backbone entry (below).
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "brand new stone"): "yes"})
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "brand new stone"): {"action": "mint"}}))
     result = curate.build_curation([_row()], ref)
     for branch, cat in (("slab", "Slabs"), ("block", "Blocks"), ("tile", "Tiles")):
         post = next(p for p in result.backbone_new[branch] if p["variant"] == "Brand New Stone")

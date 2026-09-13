@@ -10,8 +10,7 @@ from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
 from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
-from stone_pipeline.stages.curate.context import (Curation, CurationResult, decided, spelling_of,
-                                                  variety_identity)
+from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
 from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, core, gen_key, image_filename, image_url
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, named_with_types, review_card,
                                                  review_evidence)
@@ -28,10 +27,10 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
     its alias, so the product binds on the next produce through the alias surface exactly like every alias
     does. Two different spellings renamed to ONE name mint one variety: the second only adds its spelling."""
     name = spelling_of(row)
-    renamed = decided(c.seed_names, row.src_site, name, clean) or ""
+    renamed = c.decisions.seed_name(row.src_site, name, clean) or ""
     display = title_case(renamed) if renamed and proj.norm(renamed) != proj.norm(clean) else title_case(clean)
     owner = (proj.norm(display), proj.norm(stone_type))
-    if proj.norm(display) != proj.norm(clean) and not decided(c.seed_scopes, row.src_site, name, clean):
+    if proj.norm(display) != proj.norm(clean) and not c.decisions.scope(row.src_site, name, clean):
         # the scraped spelling rides onto the mint row via sib_aliases (owner[0] == norm(title)); for a
         # variety that does not exist yet emit_alias_rows finds no import row and skips it, as intended.
         # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its products.
@@ -114,7 +113,7 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
         # mint colour WINS over the observed/fallback chain (by the scraped spelling, then the cleaned identity;
         # never a colour another vendor's statement chose), else the pack's fallback colour so the variety and
         # its products are always priceable.
-        seeded = decided(c.seed_colors, src, spelling, name)
+        seeded = c.decisions.seed_color(src, spelling, name)
         colors = ([seeded] if seeded
                   else sorted(u["colors"]) or ([obs_color] if obs_color else []) or [pack.fallback_color])
         qualities = sorted(u["qualities"]) or [obs_quality]

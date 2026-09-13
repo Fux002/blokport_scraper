@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core.manifest import content_hash
 from stone_pipeline.reference.loaders.attributes import VOCAB_CATEGORIES, Attributes, load_attributes
@@ -45,6 +46,9 @@ class ReferenceData:
     # VENDOR-SCOPED alias decisions ('for marenostone, Amazon Green Granite is Golden Lightning'). Applied by
     # the matcher's override tier for that vendor only; a global alias goes the ordinary alias route.
     scoped_aliases: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
+    # EVERY operator decision as one object (config.decisions_model): the two fields above are its views for
+    # the matcher; the origin overlays below are applied from it. Empty when no config store exists.
+    decisions: Decisions = field(default_factory=Decisions.empty)
     # norm(variety name) -> the stone types it exists under, built once on first use from the variant tables
     name_types: dict[str, set[str]] | None = None
 
@@ -194,21 +198,19 @@ def load_all() -> ReferenceData:
     #   * operator MINT types (canonical-gated, keyed by norm(clean variety name) exactly as decisions_store +
     #     curate key them) let the matcher bind a product to an operator-minted (name, type) whose type the
     #     scrape did not carry -- the mint decision reaching the product, not only the variety.
-    ref.variety_seed_types = {}
-    ref.scoped_aliases = {}
+    ref.decisions = decisions_store.load_decisions()        # empty on a fresh store (no config.db is created)
+    ref.scoped_aliases = ref.decisions.bindings
+    ref.origin_map.apply_origin_overlay(ref.decisions.mint_origin_rules())
     if _have_config_db:
-        ref.scoped_aliases = decisions_store.scoped_aliases()
-        ref.origin_map.apply_origin_overlay(decisions_store.variety_seed_country_rules())
         # Operator "edit origins" edits win over both the CSV base and a mint's seed_country: applied LAST,
         # they set the variety's origin country LIST (the per-vendor gate then picks from it). Same overlay
         # machinery as the mint origin above, keyed by (name, type), country_iso may be a comma-list.
         ref.origin_map.apply_origin_overlay(decisions_store.variety_origins())
-        # a widened decision ADDS its country to the stone's documented list (union), after every list edit
-        ref.origin_map.widen(decisions_store.origin_widen())
-        ref.origin_overrides.apply_overlay(decisions_store.origin_decisions())
-        _valid_types = {norm(t) for t in ref.attributes.canonical_names("type")}
-        ref.variety_seed_types = {n: t for n, t in decisions_store.variety_seed_types().items()
-                                  if norm(t) in _valid_types}
+    # a widened decision ADDS its country to the stone's documented list (union), after every list edit
+    ref.origin_map.widen(ref.decisions.widened)
+    ref.origin_overrides.apply_overlay(ref.decisions.vendor_origins)
+    _valid_types = {norm(t) for t in ref.attributes.canonical_names("type")}
+    ref.variety_seed_types = {n: t for n, t in ref.decisions.seed_types().items() if norm(t) in _valid_types}
     env()._assert_pack_defaults_resolve(ref)   # a pack default value not in Medusa's vocabulary fails loud here
     log.info(
         "reference loaded",

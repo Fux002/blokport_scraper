@@ -16,6 +16,7 @@ import csv
 
 
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
 from stone_pipeline.stages.curate import ImportFile
@@ -252,8 +253,8 @@ def test_operator_mint_type_overrides_the_scraped_type(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(curate, "load_all_existing", lambda: _empty_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "lumiere"): "yes"})    # operator minted it
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "lumiere"): "Agate"})  # ...as Agate
+    monkeypatch.setattr(decisions, "load_decisions",            # operator minted it ... as Agate
+                        lambda: Decisions.from_legacy({("", "lumiere"): {"action": "mint", "seed_type": "Agate"}}))
     ref = loaders.load_all()
 
     res = curate.build_curation([_typed_gap_row("Lumiere", "Crystal")], ref)
@@ -270,8 +271,8 @@ def test_operator_mint_type_wins_even_when_the_scrape_type_matches_an_existing_v
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(curate, "load_all_existing", lambda: _slab_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "arabescato"): "yes"})
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "arabescato"): "Agate"})
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "arabescato"): {"action": "mint", "seed_type": "Agate"}}))
     ref = loaders.load_all()
 
     res = curate.build_curation([_typed_gap_row("Arabescato", "Marble")], ref)
@@ -296,20 +297,20 @@ def test_operator_confirmed_mint_mints_even_when_similar_to_an_existing_name(tmp
         return {(p.get("Name") or "").lower() for posts in res.new_variants.values() for p in posts}
 
     # (a) UNDECIDED 'Arabescato Royal' (near existing 'Arabescato') -> HELD for review, never auto-minted
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {})
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {})
+    monkeypatch.setattr(decisions, "load_decisions", Decisions.empty)
     undecided = curate.build_curation([_gap_row("Arabescato Royal")], ref)
     assert "arabescato royal" not in minted(undecided), "an UNDECIDED new variety must not auto-mint"
 
     # (b) operator confirmed the mint as Granite -> it MINTS, despite the name similarity, and is NOT held
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "arabescato royal"): "yes"})
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "arabescato royal"): "Granite"})
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "arabescato royal"): {"action": "mint", "seed_type": "Granite"}}))
     confirmed = curate.build_curation([_gap_row("Arabescato Royal")], ref)
     assert "arabescato royal" in minted(confirmed), "a CONFIRMED mint must mint even when similar to an existing name"
     assert not any(p.get("variant", "").lower() == "arabescato royal" for p in confirmed.pending_confirm), \
         "a confirmed mint must not also be re-held for review"
 
     # (c) operator rejected -> not minted, not held
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "arabescato royal"): "no"})
+    monkeypatch.setattr(decisions, "load_decisions",
+                        lambda: Decisions.from_legacy({("", "arabescato royal"): {"action": "reject"}}))
     rejected = curate.build_curation([_gap_row("Arabescato Royal")], ref)
     assert "arabescato royal" not in minted(rejected), "a rejected variety must not mint"

@@ -8,6 +8,7 @@ import pytest
 
 from stone_pipeline.config import decisions_store, server, varieties
 from stone_pipeline.stages import decisions
+from stone_pipeline.tests import _decision_views as views
 
 
 @pytest.fixture
@@ -103,7 +104,7 @@ def test_get_types_returns_the_medusa_vocab():
 def test_put_reject_stores_and_reflects(seeded_queue):
     code, body = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], {"action": "reject"})
     assert code == 200 and body["action"] == "reject"
-    assert decisions.load_rejected() == {("", "zucchi blue x")}
+    assert views.rejected() == {("", "zucchi blue x")}
     v = server.dispatch("GET", ["review", "variants"], None)[1]["variants"][0]
     assert v["current_action"] == "reject"
 
@@ -119,7 +120,7 @@ def test_put_mint_or_alias_bodies_are_gone(seeded_queue):
     for body in ({"action": "mint"}, {"action": "alias", "alias_of": "X"}, {"action": "mint", "color": "beige"}):
         code, out = server.dispatch("PUT", ["review", "variants", "Zucchi Blue X"], body)
         assert code == 400 and "decide" in out["error"]
-    assert decisions.load_confirm_decisions() == {}
+    assert views.confirm() == {}
 
 
 def test_origins_routes_are_gone():
@@ -134,10 +135,10 @@ def test_decide_colour_must_be_a_real_attribute(monkeypatch):
                                  {"source": "zucchi", "scraped": "Zucchi Blue X", "name": "Zucchi Blue X",
                                   "type": "Granite", "color": "definitely-not-a-colour"})
     assert code == 400 and "colour" in body["error"]
-    assert decisions.load_variety_seed_colors() == {}
+    assert views.seed_colors() == {}
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": "Zucchi Blue X", "name": "Zucchi Blue X",
                                   "type": "Granite", "color": "beige", "origin": "brazil"})
     assert code == 200 and body["color"] == "Beige" and body["origin"] == "BR"
-    assert decisions.load_variety_seed_colors() == {("", "zucchi blue x"): "Beige"}
+    assert views.seed_colors() == {("", "zucchi blue x"): "Beige"}
     assert decisions_store.variety_seed_countries() == {"zucchi blue x": "BR"}

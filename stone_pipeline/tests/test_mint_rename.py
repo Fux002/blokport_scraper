@@ -18,6 +18,8 @@ from types import SimpleNamespace
 import pytest
 
 from stone_pipeline.config import decisions_store, server, varieties
+from stone_pipeline.config.decisions_model import Decisions
+from stone_pipeline.tests import _decision_views as views
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate, decisions
@@ -53,10 +55,10 @@ def _row(name: str, key: str, stone_type: str = "Onyx", **attrs) -> CanonicalRow
 def _isolate_curate(monkeypatch, confirm: dict, seed_names: dict, seed_colors: dict | None = None) -> None:
     monkeypatch.setattr(curate, "load_all_existing", lambda: _empty_imports())
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: confirm)
-    monkeypatch.setattr(decisions, "load_variety_seed_names", lambda: seed_names)
-    if seed_colors is not None:
-        monkeypatch.setattr(decisions, "load_variety_seed_colors", lambda: seed_colors)
+    # the legacy per-aspect maps, folded into the one decisions object exactly as production builds it
+    actions = {k: {"action": "mint" if v == "yes" else "reject", "seed_name": seed_names.get(k),
+                   "seed_color": (seed_colors or {}).get(k)} for k, v in confirm.items()}
+    monkeypatch.setattr(decisions, "load_decisions", lambda: Decisions.from_legacy(actions))
 
 
 def _new(res, branch: str) -> list[dict]:
@@ -151,7 +153,7 @@ def test_statement_with_a_corrected_name_is_a_mint_plus_rename(config_db, monkey
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
     assert code == 200 and body["result"] == "minted" and body["level"] == "global"
-    assert decisions.load_variety_seed_names() == {("", "honey onyx"): RENAMED}       # the spelling's meaning for everyone
+    assert views.seed_names() == {("", "honey onyx"): RENAMED}       # the spelling's meaning for everyone
     assert decisions_store.scoped_aliases() == {}                                # curate attaches the alias globally
 
 
@@ -160,7 +162,7 @@ def test_statement_naming_an_existing_type_name_pair_binds_instead_of_minting(co
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
     assert code == 200 and body["result"] == "bound"
-    assert decisions.load_variety_seed_names() == {}
+    assert views.seed_names() == {}
     assert decisions_store.confirm_map() == {}                 # bound = nothing minted, not a half-mint
 
 
@@ -176,7 +178,7 @@ def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": SCRAPED, "name": "honey  ONYX", "type": "Onyx"})
     assert code == 200 and body["result"] == "minted"
-    assert decisions.load_variety_seed_names() == {}
+    assert views.seed_names() == {}
     assert decisions_store.confirm_map() == {("", "honey onyx"): "yes"}
     assert decisions_store.scoped_aliases() == {}
 
