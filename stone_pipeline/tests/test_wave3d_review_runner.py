@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from stone_pipeline.config import decisions_store, server
+from stone_pipeline.tests import _decision_views as views
 
 
 
@@ -46,6 +47,6 @@ def test_a_reject_sent_with_a_type_qualified_ref_is_keyed_on_the_name():
     # stays keyed on the name (a rejected spelling is rejected for every type), so both forms work
     code, body = server.dispatch("PUT", ["review", "variants", "imperial%20white%7Cgranite"], {"action": "reject"})
     assert code == 200 and body["variant"] == "imperial white"
-    assert decisions_store.variety_actions()[("", "imperial white")]["action"] == "reject"
+    assert views.actions()[("", "imperial white")]["action"] == "reject"
     code, body = server.dispatch("PUT", ["review", "variants", "Alpine%20Luxe"], {"action": "reject"})
     assert code == 200 and body["variant"] == "Alpine Luxe"

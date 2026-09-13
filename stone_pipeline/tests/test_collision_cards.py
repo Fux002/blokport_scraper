@@ -11,6 +11,7 @@ from stone_pipeline.core.schema import CanonicalRow, GapKind, TreeGap
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
 from stone_pipeline.stages.curate import ImportFile
+from stone_pipeline.tests import _decision_views as views
 
 OWNERS = (("slab_granite_amazon_blue_A", "Amazon Blue"), ("slab_granite_amazonia_B", "Amazonia"),
           ("slab_granite_verde_ubatuba_C", "Verde Ubatuba"))
@@ -92,7 +93,7 @@ def test_a_single_same_type_owner_still_aliases(monkeypatch):
 
 
 def test_a_statement_binds_the_spelling_for_that_vendor_only(tmp_path, monkeypatch):
-    from stone_pipeline.config import decisions_store, server, varieties
+    from stone_pipeline.config import server, varieties
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     monkeypatch.setattr(varieties, "exists_as", lambda n, t: (n, t) == ("Golden Lightning", "Granite"))
     monkeypatch.setattr(varieties, "alias_target", lambda n, t: None)
@@ -100,5 +101,5 @@ def test_a_statement_binds_the_spelling_for_that_vendor_only(tmp_path, monkeypat
                                  {"source": "marenostone", "scraped": "Amazon Green Granite",
                                   "name": "Golden Lightning", "type": "Granite"})
     assert code == 200 and body["result"] == "bound"
-    assert decisions_store.scoped_aliases() == {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")}
-    assert decisions_store.variety_actions() == {}          # scoped: NOT a global decision
+    assert views.scoped() == {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")}
+    assert views.actions() == {}          # scoped: NOT a global decision

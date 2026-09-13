@@ -14,6 +14,7 @@ from contextlib import closing
 import pytest
 
 from stone_pipeline.config import decisions_store, store
+from stone_pipeline.tests import _decision_views as views
 
 
 def _statements(conn: sqlite3.Connection) -> list[str]:
@@ -46,10 +47,10 @@ def test_an_older_database_is_migrated_then_stamped(tmp_path):
 
 
 @pytest.mark.parametrize("reader,empty", [
-    (lambda: decisions_store.origin_decisions(), {}),
+    (lambda: views.origins(), {}),
     (lambda: decisions_store.protected_keys(), set()),
     (lambda: decisions_store.list_pending("variety"), []),
-    (lambda: decisions_store.variety_actions(), {}),
+    (lambda: views.actions(), {}),
     (lambda: decisions_store.attribute_ids(), {}),
     (lambda: decisions_store.get_variety_origin("x", "marble"), None),
 ])

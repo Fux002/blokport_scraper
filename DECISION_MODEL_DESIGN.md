@@ -1,6 +1,12 @@
 # Decision model: one statement table, one read
 
-Status: DESIGN, awaiting approval. No code yet.
+Status: approved 2026-09-13 (section 8: reject per listing with the global legacy form; origin-queue
+confirmations migrate as "vendor's name is name"; Blokport switches the reject button to a statement).
+PR A (#392) shipped: one `Decisions` object, one read. PR B (#394): the `statement` table, the writers, the
+boot-time migration (`SCHEMA_VERSION` 4, mark `statements_v1`), `load_decisions()` reads statements. The
+prod-snapshot dual read passed before the pin: 96 bindings, 110 vendor origins, 7 widened identical; the only
+statement differences were four vendor-level mints whose targets now exist in the ledger, read as binds by
+design. PR C (deletion list, section 5) pending Blokport's reject-button switch.
 
 ## 1. Where we are
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from stone_pipeline.config import decisions_store, server, varieties
+from stone_pipeline.config import server, varieties
 from stone_pipeline.stages import decisions
 from stone_pipeline.tests import _decision_views as views
 
@@ -141,4 +141,4 @@ def test_decide_colour_must_be_a_real_attribute(monkeypatch):
                                   "type": "Granite", "color": "beige", "origin": "brazil"})
     assert code == 200 and body["color"] == "Beige" and body["origin"] == "BR"
     assert views.seed_colors() == {("", "zucchi blue x"): "Beige"}
-    assert decisions_store.variety_seed_countries() == {"zucchi blue x": "BR"}
+    assert views.countries() == {"zucchi blue x": "BR"}

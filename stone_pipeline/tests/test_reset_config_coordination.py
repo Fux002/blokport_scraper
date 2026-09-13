@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from stone_pipeline.config import decisions_store, store
+from stone_pipeline.tests import _decision_views as views
 
 
 def _fake_ledger_op(name, work):
@@ -23,6 +24,9 @@ def _fake_ledger_op(name, work):
     return work(None, _Sync()), 200
 
 
+_all, _none = (lambda n, t: True), (lambda n, t: None)   # the seeded statements bind existing varieties
+
+
 def _seed_config(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     # a review queue (2 kinds), a pasted attribute id, a mint+seed decision, a retired key, an approved leaf
@@ -31,7 +35,8 @@ def _seed_config(tmp_path, monkeypatch):
     decisions_store.set_attribute_id("finish", "Leathered", "pcol_9")
     decisions_store.set_variety_decision("Black Absolute", "mint", seed_type="Granite")
     decisions_store.set_backbone_leaf_decision("Black Absolute", "Granite", "color", "Gold", "approve")
-    decisions_store.set_origin_decision("marenostone", "Crystal White", "Granite", "IR")   # a confirmed origin
+    decisions_store.decide("marenostone", "Crystal White", "Crystal White", "Granite", origin="IR",
+                           exists_as=_all, alias_target=_none)                       # a confirmed origin
     decisions_store.set_variety_origin("Crystal White", "Granite", "IN,IR")                # a variety origin edit
     store.add_retired("slab_granite_x_uuid")
 
@@ -44,8 +49,8 @@ def test_clear_helpers_empty_queues_and_ids_but_keep_decisions(tmp_path, monkeyp
     assert decisions_store.list_pending("attribute") == []
     assert decisions_store.attribute_ids() == {}
     # durable operator intent SURVIVES
-    assert decisions_store.confirm_map() == {("", "black absolute"): "yes"}          # mint kept
-    assert decisions_store.variety_seed_types() == {("", "black absolute"): "Granite"}
+    assert views.confirm(exists_as=_all, alias_target=_none) == {("", "black absolute"): "yes"}          # mint kept
+    assert views.seed_types(exists_as=_all, alias_target=_none) == {("", "black absolute"): "Granite"}
     assert store.load_retired() == {"slab_granite_x_uuid"}
 
 
@@ -76,7 +81,7 @@ def test_global_reset_clears_config_but_scoped_leaves_it(tmp_path, monkeypatch):
                                              "source_diagnostics": 0}
     assert decisions_store.list_pending("variety") == [] and decisions_store.attribute_ids() == {}
     # durable intent still survives a global reset
-    assert decisions_store.confirm_map() == {("", "black absolute"): "yes"}
+    assert views.confirm(exists_as=_all, alias_target=_none) == {("", "black absolute"): "yes"}
     assert store.load_retired() == {"slab_granite_x_uuid"}
 
 
@@ -125,11 +130,11 @@ def test_pristine_reset_wipes_the_durable_operator_overlay(tmp_path, monkeypatch
     assert code == 200 and out["mode"] == "pristine"
     # every clearable store reported in the response.config
     assert out["config"] == {"review_pending": 2, "attribute_ids": 1, "source_diagnostics": 0,
-                             "variety_decisions": 1, "origin_decisions": 1, "scoped_aliases": 0,
+                             "statements": 2,          # the Black Absolute mint + marenostone's Crystal White origin
                              "variety_origins": 1, "leaf_decisions": 1, "retired_keys": 1}
     # the durable overlay is GONE (unlike a normal reset), so the catalog is seed-only next produce
-    assert decisions_store.confirm_map() == {}
-    assert decisions_store.variety_seed_types() == {}
+    assert views.confirm(exists_as=_all, alias_target=_none) == {}
+    assert views.seed_types(exists_as=_all, alias_target=_none) == {}
     assert decisions_store.backbone_leaf_overlay() == {}
     assert store.load_retired() == set()
     # the registered source survives -- scraping still works
@@ -161,7 +166,7 @@ def test_pristine_keep_images_skips_the_product_image_wipe(tmp_path, monkeypatch
     assert wipe_calls == []                       # the expensive product-image wipe never ran
     assert "kept" in out["images_wiped"]          # images explicitly preserved
     # the rest of the factory reset still happened -- the durable overlay is gone
-    assert decisions_store.variety_seed_types() == {}
+    assert views.seed_types(exists_as=_all, alias_target=_none) == {}
 
 
 def test_pristine_keep_scrape_skips_the_scrape_cache_wipe(tmp_path, monkeypatch):
@@ -184,7 +189,7 @@ def test_pristine_keep_scrape_skips_the_scrape_cache_wipe(tmp_path, monkeypatch)
     out, code = lifecycle.reset(sources=None, pristine=True, keep_scrape=True)
     assert code == 200 and out["mode"] == "pristine"
     assert "kept" in out["artifacts_wiped"]       # scrape cache explicitly preserved
-    assert decisions_store.variety_seed_types() == {}   # the overlay wipe still happened
+    assert views.seed_types(exists_as=_all, alias_target=_none) == {}   # the overlay wipe still happened
 
 
 def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch):
@@ -247,7 +252,7 @@ def test_pristine_reset_is_global_only(tmp_path, monkeypatch):
     out, code = lifecycle.reset(sources=["polonine"], pristine=True)
     assert code == 400 and "global-only" in out["error"]
     # nothing was touched: the durable overlay is intact
-    assert decisions_store.confirm_map() == {("", "black absolute"): "yes"}
+    assert views.confirm(exists_as=_all, alias_target=_none) == {("", "black absolute"): "yes"}
     assert store.load_retired() == {"slab_granite_x_uuid"}
 
 
@@ -387,7 +392,7 @@ def test_unmint_removes_the_whole_variety_clears_decision_once_and_does_not_excl
     assert captured["reason"] == "variation_unminted"
     assert result["variety_count"] == 1 and result["unminted_count"] == 3
     assert result["mint_decisions_cleared"] == 1                                      # cleared ONCE per variety
-    assert decisions_store.confirm_map() == {("", "absolute black"): "yes"}                 # bystander untouched
+    assert views.confirm(exists_as=_all, alias_target=_none) == {("", "absolute black"): "yes"}                 # bystander untouched
     assert store.load_retired() == set()                                             # NOT excluded
 
 
@@ -397,7 +402,7 @@ def test_clear_variety_decision_is_scoped_to_one_variant(tmp_path, monkeypatch):
     decisions_store.set_variety_decision("Absolute Black", "reject")
     assert decisions_store.clear_variety_decision("Crystal White") == 1
     assert decisions_store.clear_variety_decision("Crystal White") == 0   # idempotent: already gone
-    assert decisions_store.confirm_map() == {("", "absolute black"): "no"}      # the other decision survives
+    assert views.confirm(exists_as=_all, alias_target=_none) == {("", "absolute black"): "no"}      # the other decision survives
 
 
 def test_bulk_unmint_collapses_siblings_to_one_variety_and_is_best_effort(tmp_path, monkeypatch):
@@ -563,5 +568,5 @@ def test_unmint_against_a_real_ledger_tombstones_every_sibling_and_keeps_the_key
         for k in sibs:
             assert ledger.get("variation", "key", k)["state"] == "retiring"        # held until Medusa acks
         assert ledger.get("variation", "key", other)["state"] == "synced"          # bystander untouched
-    assert decisions_store.confirm_map() == {}                                     # mint decision cleared
+    assert views.confirm(exists_as=_all, alias_target=_none) == {}                                     # mint decision cleared
     assert store.load_retired() == set()                                           # NOT excluded -> resurfaces

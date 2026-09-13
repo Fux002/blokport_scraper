@@ -11,23 +11,33 @@ from stone_pipeline.config.settings import Confidence
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.reference.loaders import OriginOverrides, _norm
 from stone_pipeline.stages import decisions
+from stone_pipeline.tests import _decision_views as views
 
 
 def _ref(source, variety, stype):
     return f"{_norm(source)}|{_norm(variety)}|{_norm(stype)}"
 
 
+# the varieties exist as named: the statement "<vendor>'s X is X, from <iso>" is a vendor origin on X
+_EXISTS = dict(exists_as=lambda n, t: True, alias_target=lambda n, t: None)
+
+
+def _origin(source, variety, stype, iso):
+    return ds.decide(source, variety, variety, stype, origin=iso, **_EXISTS)
+
+
 # -- store round-trip ----------------------------------------------------------
 def test_set_and_read_origin_decision_roundtrip():
-    ds.set_origin_decision("marenostone", "Crystal White", "Granite", "ir")   # any casing
-    assert ds.origin_decisions()[(_norm("marenostone"), _norm("Crystal White"), _norm("Granite"))] == "IR"
+    _origin("marenostone", "Crystal White", "Granite", "ir")                  # any casing
+    assert views.origins(**_EXISTS)[(_norm("marenostone"), _norm("Crystal White"), _norm("Granite"))] == "IR"
 
 
 def test_origin_decision_is_scoped_per_vendor_and_per_type():
-    ds.set_origin_decision("marenostone", "Crystal White", "Granite", "IR")
-    ds.set_origin_decision("zucchi", "Crystal White", "Granite", "CN")
-    ds.set_origin_decision("marenostone", "Crystal White", "Marble", "IT")
-    d = ds.origin_decisions()
+    _origin("marenostone", "Crystal White", "Granite", "IR")
+    _origin("zucchi", "Crystal White", "Granite", "CN")
+    # a vendor spelling means ONE thing: the marble is a different listing spelling of the same vendor
+    ds.decide("marenostone", "Crystal White Marble", "Crystal White", "Marble", origin="IT", **_EXISTS)
+    d = views.origins(**_EXISTS)
     assert d[(_norm("marenostone"), _norm("Crystal White"), _norm("Granite"))] == "IR"
     assert d[(_norm("zucchi"), _norm("Crystal White"), _norm("Granite"))] == "CN"
     assert d[(_norm("marenostone"), _norm("Crystal White"), _norm("Marble"))] == "IT"
@@ -35,25 +45,25 @@ def test_origin_decision_is_scoped_per_vendor_and_per_type():
 
 def test_invalid_origin_decision_raises():
     with pytest.raises(ds.InvalidDecision):
-        ds.set_origin_decision("marenostone", "Crystal White", "Granite", "")   # no country
+        _origin("marenostone", "Crystal White", "", "IR")                     # no type
     with pytest.raises(ds.InvalidDecision):
-        ds.set_origin_decision("", "Crystal White", "Granite", "IR")            # no source
+        _origin("", "Crystal White", "Granite", "IR")                         # no source
 
 
 # -- overlay into the derive lookup --------------------------------------------
 def test_overlay_feeds_origin_overrides_lookup():
-    ds.set_origin_decision("marenostone", "Crystal White", "Granite", "IR")
+    _origin("marenostone", "Crystal White", "Granite", "IR")
     ov = OriginOverrides()
-    ov.apply_overlay(ds.origin_decisions())
+    ov.apply_overlay(views.origins(**_EXISTS))
     assert ov.lookup("marenostone", "Crystal White", "Granite") == "IR"
     assert ov.lookup("zucchi", "Crystal White", "Granite") is None            # scoped to the vendor
 
 
 def test_clear_origin_decisions_wipes_the_overlay():
-    ds.set_origin_decision("marenostone", "Crystal White", "Granite", "IR")
-    assert ds.origin_decisions()
-    assert ds.clear_origin_decisions() == 1
-    assert ds.origin_decisions() == {}
+    _origin("marenostone", "Crystal White", "Granite", "IR")
+    assert views.origins(**_EXISTS)
+    assert ds.clear_all_statements() == 1
+    assert views.origins(**_EXISTS) == {}
 
 
 # -- produce-side queue population ---------------------------------------------
@@ -87,7 +97,7 @@ def test_write_origin_confirm_file_ignores_resolved_rows():
 
 def test_decided_country_surfaces_in_queue_listing():
     decisions.write_origin_confirm_file([_held()])
-    ds.set_origin_decision("marenostone", "Crystal White", "Granite", "IR")
+    _origin("marenostone", "Crystal White", "Granite", "IR")
     item = ds.list_pending("origin")[0]
     assert item["current_country"] == "IR"
 

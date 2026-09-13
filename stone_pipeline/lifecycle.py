@@ -447,9 +447,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                       # column starts blank after a reset; each source refills it on its next produce.
                       "source_diagnostics": store.clear_source_diagnostics()}
             if pristine:                           # factory reset: also forget the durable operator overlay
-                config["variety_decisions"] = decisions_store.clear_variety_decisions()
-                config["origin_decisions"] = decisions_store.clear_origin_decisions()
-                config["scoped_aliases"] = decisions_store.clear_scoped_aliases()
+                config["statements"] = decisions_store.clear_all_statements()
                 config["variety_origins"] = decisions_store.clear_variety_origins()
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()
@@ -636,7 +634,7 @@ def _unmint_varieties(keys: list[str], force: bool = False) -> tuple[dict, int]:
             targets.append(siblings)
         # Clear the mint decisions FIRST (config.db), then tombstone (ledger) -- see the docstring ordering.
         # by (type, name): the type-slug from the variety's Key keeps a same-name variety of another type intact
-        out["mint_decisions_cleared"] = sum(decisions_store.clear_variety_decision(sibs[0][1], ident_of[sibs[0][0]][0])
+        out["mint_decisions_cleared"] = sum(decisions_store.clear_for_variety(sibs[0][1], ident_of[sibs[0][0]][0])
                                             for sibs in targets)
         for sibs in targets:
             for sk, _ in sibs:

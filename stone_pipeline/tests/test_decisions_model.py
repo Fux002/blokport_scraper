@@ -1,7 +1,9 @@
-"""Decisions: the one object every stage reads. Two contracts:
-  * PARITY: built from a real store by load_decisions(), its views equal the legacy accessors they replace;
+"""Decisions: the one object every stage reads. Three contracts:
+  * DERIVATION: built from statement rows, a global 'is' is a mint, a vendor 'is' is that vendor's binding and
+    a mint only while its variety does not exist (or is not a known alias); origins ride on the binding;
   * ORDER: one resolution rule (vendor then global, spelling then cleaned identity), per aspect, so a vendor
-    statement without a colour still lets the global one answer the colour question."""
+    statement without a colour still lets the global one answer the colour question;
+  * a fresh store is empty and no file is created by a read."""
 
 from __future__ import annotations
 
@@ -17,34 +19,33 @@ def _none(*_a, **_k):
     return None
 
 
-def _populate() -> None:
-    # a global mint with every seed, a vendor-level mint (the spelling already means Andes for everyone), a
-    # global reject, a vendor binding and a widened vendor origin
+def test_derivation_from_statements(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    exists = lambda n, t: (n, t) == ("Andes", "Quartzite")
+    alias = lambda n, t: "Andes" if (n, t) == ("Artemis", "Quartzite") else None
+    # a global mint with every seed, asked by zucchi; a vendor's own stone beside a spelling that means Andes;
+    # a vendor binding through a known alias with a widened origin; a global reject
     decisions_store.decide("zucchi", "Honey Onyx", "Honey", "Onyx", color="Gold", origin="IR", widen=True,
                            exists_as=_no, alias_target=_none, clean=lambda s, t: s)
-    decisions_store.decide("polonine", "Artemis", "Andes", "Quartzite",
-                           exists_as=lambda n, t: n == "Andes", alias_target=_none, clean=lambda s, t: s)
-    decisions_store.decide("varsha", "Brown Granite", "Brown Stone", "Granite",
-                           exists_as=_no, alias_target=lambda n, t: "Brown Granite" if n == "Brown Granite" else None,
-                           clean=lambda s, t: s)
+    decisions_store.decide("polonine", "Artemis", "Artemis", "Quartzite", origin="BR", widen=True,
+                           exists_as=exists, alias_target=alias, clean=lambda s, t: s)
+    decisions_store.decide("varsha", "Andes", "Andes Verde", "Quartzite",
+                           exists_as=exists, alias_target=alias, clean=lambda s, t: s)
     decisions_store.set_variety_decision("Junk Code", "reject")
-
-
-def test_views_equal_the_legacy_accessors(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    _populate()
-    dec = decisions_store.load_decisions()
-    assert dec.seed_types() == decisions_store.variety_seed_types()
-    assert dec.mint_origin_rules() == decisions_store.variety_seed_country_rules()
-    assert dec.bindings == decisions_store.scoped_aliases()
-    assert dec.vendor_origins == decisions_store.origin_decisions()
-    assert dec.widened == decisions_store.origin_widen()
-    confirm = decisions_store.confirm_map()
-    assert {k for k, s in dec.statements.items() if s.is_mint} == {k for k, v in confirm.items() if v == "yes"}
-    assert {k for k, s in dec.statements.items() if not s.is_mint} == decisions_store.rejected_names()
-    assert {k: s.color for k, s in dec.statements.items() if s.is_mint and s.color} == decisions_store.variety_seed_colors()
-    assert {k: s.name for k, s in dec.statements.items() if s.is_mint and s.name} == decisions_store.variety_seed_names()
-    assert {k: s.source for k, s in dec.statements.items() if s.is_mint and s.source} == decisions_store.variety_seed_scopes()
+    dec = decisions_store.load_decisions(exists_as=exists, alias_target=alias)
+    assert {k: s.verdict for k, s in dec.statements.items()} == {
+        ("", "honey onyx"): "is", ("varsha", "andes"): "is", ("", "junk code"): "reject"}
+    honey = dec.statements[("", "honey onyx")]
+    assert (honey.name, honey.stone_type, honey.color, honey.origin_iso, honey.asked_by) == ("Honey", "Onyx", "Gold", "IR", "zucchi")
+    assert dec.bindings == {("polonine", "artemis"): ("Andes", "Quartzite"), ("varsha", "andes"): ("Andes Verde", "Quartzite")}
+    assert dec.vendor_origins == {("polonine", "andes", "quartzite"): "BR", ("zucchi", "honey", "onyx"): "IR"}
+    assert dec.widened == dec.vendor_origins
+    assert dec.seed_types() == {("", "honey onyx"): "Onyx", ("varsha", "andes"): "Quartzite"}
+    assert dec.mint_origin_rules() == {("honey", "onyx"): "IR"}
+    # once the vendor's own stone exists, its statement is a binding only: nothing left to mint
+    later = decisions_store.load_decisions(exists_as=lambda n, t: (n, t) in {("Andes", "Quartzite"), ("Andes Verde", "Quartzite")},
+                                           alias_target=alias)
+    assert ("varsha", "andes") not in later.statements and later.bindings[("varsha", "andes")] == ("Andes Verde", "Quartzite")
 
 
 def test_fresh_store_is_empty_and_creates_no_file(tmp_path, monkeypatch):
