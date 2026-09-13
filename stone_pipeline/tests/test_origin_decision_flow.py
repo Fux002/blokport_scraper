@@ -113,7 +113,7 @@ def test_write_curation_threads_rows_to_origin_queue(tmp_path, monkeypatch):
         d.mkdir(parents=True, exist_ok=True)
         dirs[attr] = d
     new = dataclasses.replace(SETTINGS, paths=dataclasses.replace(SETTINGS.paths, **dirs))
-    monkeypatch.setattr(curate, "SETTINGS", new)                    # curate writes into tmp, not the repo
+    monkeypatch.setattr(curate.output, "SETTINGS", new)             # curate writes into tmp, not the repo
     ds.set_variety_decision("Junk Code X", "reject")   # a stored reject must never break write_curation
     monkeypatch.setattr(decisions, "write_backbone_leaf_pending", lambda *a, **k: 0)
     result = CurationResult(alias_additions={b: [] for b in BRANCHES},

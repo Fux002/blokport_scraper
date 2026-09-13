@@ -54,7 +54,7 @@ not of a person following a list.
 
 1. **The Key is identity.** Every variety has a deterministic, Medusa
    independent `Key` (`{branch}_{slug(type)}_{slug(name)}_{uuid5("branch:name")}`,
-   `core/ids.py` and `stages/curate.py`). The Key is stable for a fixed (branch,
+   `core/ids.py` and `stages/curate/keys.py`). The Key is stable for a fixed (branch,
    type, name) across runs and across dev and prod, and Medusa stores it as
    `external_id`. Because the type and name slugs are part of the Key, correcting
    either is intentionally a NEW identity (a re-key), handled explicitly as a
@@ -880,7 +880,7 @@ the Phase 1 equivalence test for that artifact. Nothing is deleted on faith.
 
 Kept:
 
-- the deterministic Key scheme (`core/ids.py`, `stages/curate.py`)
+- the deterministic Key scheme (`core/ids.py`, `stages/curate/keys.py`)
 - the per-run `canonical.parquet` checkpoint and provenance
 - the resolvers and the matching engine
 - the gates (`gates/`), `certify.py`, the health gate, the trust ladder
@@ -936,7 +936,7 @@ Retired, in the phase order above:
 ## 16. Review (correctness pass against the actual pipeline)
 
 This section was added by a review of the design against the code that produces the
-data it syncs (`stages/curate.py` `gen_key`, `stages/tree_build.py`,
+data it syncs (`stages/curate/keys.py` `gen_key`, `stages/tree_build.py`,
 `stages/product_state.py`, the `to_upload/<env>/*.csv` shapes, and the
 gate/review flow). The goal is that the link works autonomously without faulty
 listings, so each finding states what the doc says, what the code actually does,
@@ -981,7 +981,7 @@ type names (Medusa resolves them), not just variation plus color/finish/quality.
 Principle 1 and section 5B state the Key is stable, Medusa stores it as
 `external_id` and never changes it, and a backward correction recomputes
 `payload_hash` and re-pushes "as an update through the same upsert-by-Key path."
-But `gen_key` (curate.py) builds
+But `gen_key` (stages/curate/keys.py) builds
 `key = {branch}_{slug(type)}_{slug(name)}_{uuid5("branch:name")}`. The TYPE and the
 NAME are part of the Key string, and the uuid5 is over `branch:name`. So correcting
 a variety's type changes the Key (this happened this session: re-typing Agata from

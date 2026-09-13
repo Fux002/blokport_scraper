@@ -54,7 +54,7 @@ def test_load_existing_keys_same_name_different_type_separately(tmp_path, monkey
         w.writeheader()
         w.writerow({"Id": "1", "Key": MARBLE_KEY, "Name": "Arabescato"})
         w.writerow({"Id": "2", "Key": GRANITE_KEY, "Name": "Arabescato"})
-    monkeypatch.setattr(curate, "existing_varieties_file", lambda: exp)
+    monkeypatch.setattr(curate.existing, "existing_varieties_file", lambda: exp)
 
     imp = curate.load_existing("slab")
     # both stones survive under one name, addressed by (name, TYPE) -- not collapsed to a single variety
