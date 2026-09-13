@@ -74,8 +74,8 @@ def test_clear_by_the_renamed_name_drops_the_scraped_row(config_db):
     decisions_store.set_variety_decision(SCRAPED, "mint", seed_type="Onyx", seed_name=RENAMED)
     # un-mint arrives with the variety NAME Medusa knows (the renamed one), not the scraped spelling
     assert decisions_store.clear_variety_decision(RENAMED) == 1
-    assert decisions_store.confirm_map() == {}
-    assert decisions_store.variety_seed_names() == {}
+    assert views.confirm() == {}
+    assert views.seed_names() == {}
 
 
 def test_old_schema_gains_the_seed_name_column(config_db):
@@ -83,7 +83,7 @@ def test_old_schema_gains_the_seed_name_column(config_db):
         conn.execute("CREATE TABLE variety_decision (variant_norm TEXT PRIMARY KEY, variant TEXT NOT NULL, "
                      "action TEXT NOT NULL, alias_of TEXT, seed_color TEXT, seed_type TEXT, seed_country TEXT, "
                      "decided_at TEXT NOT NULL)")
-    decisions_store.variety_actions()                          # open_store -> _migrate
+    views.actions()                          # open_store -> _migrate
     with sqlite3.connect(config_db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(variety_decision)")}
     assert "seed_name" in cols
@@ -154,7 +154,7 @@ def test_statement_with_a_corrected_name_is_a_mint_plus_rename(config_db, monkey
                                  {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
     assert code == 200 and body["result"] == "minted" and body["level"] == "global"
     assert views.seed_names() == {("", "honey onyx"): RENAMED}       # the spelling's meaning for everyone
-    assert decisions_store.scoped_aliases() == {}                                # curate attaches the alias globally
+    assert views.scoped() == {}                                # curate attaches the alias globally
 
 
 def test_statement_naming_an_existing_type_name_pair_binds_instead_of_minting(config_db, monkeypatch):
@@ -163,7 +163,7 @@ def test_statement_naming_an_existing_type_name_pair_binds_instead_of_minting(co
                                  {"source": "zucchi", "scraped": SCRAPED, "name": RENAMED, "type": "Onyx"})
     assert code == 200 and body["result"] == "bound"
     assert views.seed_names() == {}
-    assert decisions_store.confirm_map() == {}                 # bound = nothing minted, not a half-mint
+    assert views.confirm() == {}                 # bound = nothing minted, not a half-mint
 
 
 def test_statement_naming_the_pair_under_a_different_type_mints(config_db, monkeypatch):
@@ -179,8 +179,8 @@ def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch
                                  {"source": "zucchi", "scraped": SCRAPED, "name": "honey  ONYX", "type": "Onyx"})
     assert code == 200 and body["result"] == "minted"
     assert views.seed_names() == {}
-    assert decisions_store.confirm_map() == {("", "honey onyx"): "yes"}
-    assert decisions_store.scoped_aliases() == {}
+    assert views.confirm() == {("", "honey onyx"): "yes"}
+    assert views.scoped() == {}
 
 
 # -- a statement keyed on a spelling that carries a type word must still fire in curate ----------------
@@ -226,7 +226,7 @@ def test_the_first_mint_on_a_spelling_decides_every_vendor_and_a_vendor_may_stil
     res = curate.build_curation([zucchi, polonine], ref)
     names = sorted(r["Name"] for r in res.new_variants["slab"])
     assert names == ["Honey", "Honey Polonia"], names
-    assert decisions_store.scoped_aliases()[("polonine", "honey onyx")] == ("Honey Polonia", "Onyx")
+    assert views.scoped()[("polonine", "honey onyx")] == ("Honey Polonia", "Onyx")
     bb = {r["variant"]: r["color"] for r in res.backbone_new["slab"]}
     assert bb["Honey"] == ["Yellow"] and bb["Honey Polonia"] == ["Beige"]   # each level keeps its own colour
 
@@ -246,10 +246,10 @@ def test_unmint_clears_by_type_and_name(config_db):
     decisions_store.set_variety_decision("Honey Marble", "mint", seed_type="Marble", seed_name="Honey")
     decisions_store.set_variety_decision("Honey", "mint", seed_type="Marble")            # plain mint, Marble
     assert decisions_store.clear_variety_decision("Honey", "onyx") == 1                # the Key type-slug form
-    assert decisions_store.variety_seed_names() == {("", "honey marble"): "Honey"}
-    assert decisions_store.confirm_map() == {("", "honey marble"): "yes", ("", "honey"): "yes"}
+    assert views.seed_names() == {("", "honey marble"): "Honey"}
+    assert views.confirm() == {("", "honey marble"): "yes", ("", "honey"): "yes"}
     assert decisions_store.clear_variety_decision("Honey", "Marble") == 2               # canonical form
-    assert decisions_store.confirm_map() == {}
+    assert views.confirm() == {}
 
 
 def test_unmint_without_a_type_keeps_legacy_name_only_semantics(config_db):

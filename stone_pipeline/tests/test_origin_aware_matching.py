@@ -18,6 +18,7 @@ from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.stages import match_variation
 from stone_pipeline.state.overrides import Overrides
 from stone_pipeline.state.writeback import WriteBack
+from stone_pipeline.tests import _decision_views as views
 
 
 def _engine():
@@ -150,15 +151,17 @@ def test_scoped_alias_whose_target_is_not_one_variety_is_ignored_loudly():
 def test_scoped_alias_store_roundtrip_and_pristine_clear(tmp_path, monkeypatch):
     from stone_pipeline.config import decisions_store
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    assert decisions_store.scoped_aliases() == {}            # absent store -> empty, and NOT created
-    decisions_store.set_scoped_alias("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite")
-    assert decisions_store.scoped_aliases() == {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")}
-    decisions_store.set_scoped_alias("marenostone", "Amazon Green Granite", "Amazonia")      # idempotent upsert
-    assert decisions_store.scoped_aliases()[("marenostone", "amazon green granite")] == ("Amazonia", "")
+    yes, none = (lambda n, t: True), (lambda n, t: None)
+    assert views.scoped() == {}            # absent store -> empty, and NOT created
+    decisions_store.decide("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite",
+                           exists_as=yes, alias_target=none)
+    assert views.scoped(exists_as=yes, alias_target=none) == {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")}
+    decisions_store.decide("marenostone", "Amazon Green Granite", "Amazonia", "Granite",
+                           exists_as=yes, alias_target=none)                              # idempotent upsert
+    assert views.scoped(exists_as=yes, alias_target=none)[("marenostone", "amazon green granite")] == ("Amazonia", "Granite")
     with pytest.raises(decisions_store.InvalidDecision):
-        decisions_store.set_scoped_alias("", "x", "y")
-    assert decisions_store.clear_scoped_aliases() == 1 and decisions_store.scoped_aliases() == {}
-
+        decisions_store.decide("", "x", "y", "Granite", exists_as=yes, alias_target=none)
+    assert decisions_store.clear_all_statements() == 1 and views.scoped() == {}
 
 def test_origin_card_carries_the_scraped_spelling(tmp_path, monkeypatch):
     from stone_pipeline.config import decisions_store

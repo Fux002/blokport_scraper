@@ -66,7 +66,7 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4     # 4: the decision `statement` table + the one-time migration from the legacy tables
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -226,6 +226,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # One-off data migrations that cannot run inside _migrate (they need the ledger, restored after the
     # first config.db open) record themselves here so they run exactly once; see decisions_store.backfill_levels.
     conn.execute("CREATE TABLE IF NOT EXISTS migration (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
+    # THE decision table (DECISION_MODEL_DESIGN.md section 2.1): one STATEMENT per (vendor, spelling) -- what the
+    # listing IS (name, type, colour, origin, widen) or 'reject'. Vendor '' is the spelling's global meaning.
+    # Whether a statement mints or binds is derived at read time (config.decisions_model), never stored.
+    conn.execute("CREATE TABLE IF NOT EXISTS statement ("
+                 "source TEXT NOT NULL, spelling_norm TEXT NOT NULL, spelling TEXT NOT NULL, "
+                 "verdict TEXT NOT NULL CHECK (verdict IN ('is', 'reject')), "
+                 "name TEXT, stone_type TEXT, color TEXT, origin_iso TEXT, "
+                 "widen INTEGER NOT NULL DEFAULT 0, asked_by TEXT NOT NULL DEFAULT '', "
+                 "decided_at TEXT NOT NULL, PRIMARY KEY (source, spelling_norm))")
+    _migrate_statements(conn)
     # The legacy `alias` decision (action='alias') has had no writer since the review statement replaced it
     # (decide -> scoped_alias). A database that still holds one is refused, naming the rows: silently
     # ignoring an operator decision is worse than a restart with a clear instruction (re-state it via
@@ -322,6 +332,76 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "health TEXT NOT NULL, worst TEXT NOT NULL, drift TEXT NOT NULL DEFAULT '[]', "
                  "certified INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (source, run_id))")
     conn.commit()
+
+
+STATEMENTS_MIGRATION = "statements_v1"
+
+
+def _migrate_statements(conn: sqlite3.Connection) -> None:
+    """The legacy decision tables -> `statement`, ONCE (recorded in `migration`; DECISION_MODEL_DESIGN.md
+    section 4). Structural, no variety lookups, so it runs here on the first open. A mint row is an 'is'
+    statement (its corrected name, type, colour, country); a reject row a 'reject' statement; a vendor binding
+    with no statement yet is an 'is' statement naming its target; a vendor origin lands on the statement whose
+    target it names, else becomes the statement "this vendor's <name> is <name>, from <origin>" (the origin-queue
+    confirmation it was). Row-for-row: every legacy row is accounted for or the migration refuses.
+    The legacy tables are left in place for one release (dropped by the follow-up); nothing reads them."""
+    if conn.execute("SELECT 1 FROM migration WHERE name = ?", (STATEMENTS_MIGRATION,)).fetchone():
+        return
+    tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if not {"variety_decision", "scoped_alias", "origin_decision"} <= tables:
+        conn.execute("INSERT OR IGNORE INTO migration (name, applied_at) VALUES (?, ?)",
+                     (STATEMENTS_MIGRATION, _now()))
+        return                                                   # a brand-new store: nothing to migrate
+    now = _now()
+    moved = {"mint": 0, "reject": 0, "binding": 0, "origin": 0}
+    for r in conn.execute("SELECT source, variant_norm, variant_display, action, seed_color, seed_type, "
+                          "seed_country, seed_name, asked_by FROM variety_decision").fetchall():
+        if r["action"] == "reject":
+            conn.execute("INSERT OR REPLACE INTO statement (source, spelling_norm, spelling, verdict, asked_by, "
+                         "decided_at) VALUES (?, ?, ?, 'reject', ?, ?)",
+                         (r["source"] or "", r["variant_norm"], r["variant_display"] or r["variant_norm"],
+                          r["asked_by"] or "", now))
+            moved["reject"] += 1
+        elif r["action"] == "mint":
+            conn.execute("INSERT OR REPLACE INTO statement (source, spelling_norm, spelling, verdict, name, "
+                         "stone_type, color, origin_iso, asked_by, decided_at) VALUES (?, ?, ?, 'is', ?, ?, ?, ?, ?, ?)",
+                         (r["source"] or "", r["variant_norm"], r["variant_display"] or r["variant_norm"],
+                          r["seed_name"], r["seed_type"], r["seed_color"], r["seed_country"],
+                          r["asked_by"] or r["source"] or "", now))
+            moved["mint"] += 1
+    for r in conn.execute("SELECT source, variant_norm, variant_display, alias_of, seed_type FROM scoped_alias").fetchall():
+        if conn.execute("SELECT 1 FROM statement WHERE source = ? AND spelling_norm = ?",
+                        (r["source"], r["variant_norm"])).fetchone():
+            continue                                             # the vendor mint already implies the binding
+        conn.execute("INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, asked_by, "
+                     "decided_at) VALUES (?, ?, ?, 'is', ?, ?, ?, ?)",
+                     (r["source"], r["variant_norm"], r["variant_display"] or r["variant_norm"],
+                      r["alias_of"], r["seed_type"], r["source"], now))
+        moved["binding"] += 1
+    from stone_pipeline.matching import projections as proj     # the SAME normalization the legacy keys used
+    for r in conn.execute("SELECT source, variant_norm, stone_type_norm, variant_display, country_iso, widen "
+                          "FROM origin_decision").fetchall():
+        # the vendor's own statement, or the global one its card produced (decide() wrote the origin row
+        # next to a global mint keyed by the asking vendor): whichever names this (name, type) as its target
+        hit = next((s for s in conn.execute(
+            "SELECT source, spelling_norm, spelling, name, stone_type FROM statement "
+            "WHERE verdict = 'is' AND (source = ? OR (source = '' AND asked_by = ?))",
+            (r["source"], r["source"])).fetchall()
+            if proj.norm(s["name"] or s["spelling"]) == r["variant_norm"]
+            and proj.norm(s["stone_type"] or "") == r["stone_type_norm"]), None)
+        if hit:
+            conn.execute("UPDATE statement SET origin_iso = ?, widen = ? WHERE source = ? AND spelling_norm = ?",
+                         (r["country_iso"], r["widen"], hit["source"], hit["spelling_norm"]))
+        else:
+            conn.execute("INSERT OR REPLACE INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, "
+                         "origin_iso, widen, asked_by, decided_at) VALUES (?, ?, ?, 'is', ?, ?, ?, ?, ?, ?)",
+                         (r["source"], r["variant_norm"], r["variant_display"] or r["variant_norm"],
+                          r["variant_display"] or r["variant_norm"], r["stone_type_norm"], r["country_iso"],
+                          r["widen"], r["source"], now))
+        moved["origin"] += 1
+    conn.execute("INSERT OR IGNORE INTO migration (name, applied_at) VALUES (?, ?)", (STATEMENTS_MIGRATION, now))
+    conn.commit()
+    log.warning("decision statements migrated from the legacy tables", extra={"extra_fields": moved})
 
 
 def migration_applied(name: str, path: str | Path | None = None) -> bool:

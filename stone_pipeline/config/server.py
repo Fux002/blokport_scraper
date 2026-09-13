@@ -369,7 +369,7 @@ def _put_review_variant(params, body, query):
     if body.get("action", "") != "reject":
         return 400, {"error": "action must be 'reject'; anything else is a statement: PUT /review/decide"}
     try:
-        decisions_store.set_variety_decision(variant, "reject")
+        decisions_store.reject("", variant)              # the legacy card-level reject: global, keyed by the ref
     except decisions_store.InvalidDecision as e:
         return 400, {"error": str(e)}
     return 200, {"variant": variant, "action": "reject"}
@@ -861,11 +861,6 @@ def boot(config_db, ledger_path) -> None:
     # (S3 snapshot, else bootstrap; each an atomic rename). Wait for it before a produce/reset could create
     # a fresh empty one, and never download a second copy over a ledger that may already be serving.
     snapshot.await_file(ledger_path)
-    # TWO LEVELS data backfill, once: needs the ledger (variety lookups), so it runs here and not in the store
-    # migration, which fires on the first config.db open above, before the ledger is back.
-    from stone_pipeline.config import decisions_store
-    if (moved := decisions_store.backfill_levels()) is not None:
-        log.warning("boot: two-level backfill applied", extra={"extra_fields": {"moved": moved}})
     # Restore the last scrape's artifact trees (outputs_dir + data/) too: catalog/republish consume them
     # off the ephemeral disk, so without this a redeploy wipes the last scrape and they abort with "no
     # source runs". No-op when a local scrape already exists or none has been snapshotted yet.

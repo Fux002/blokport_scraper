@@ -1,14 +1,22 @@
 """The operator's decisions as ONE object every consumer reads.
 
-A decision is about a LISTING: for vendor S the spelling X is variety N of type T (a `Statement` with verdict
-'is'), or X is not a variety (verdict 'reject'). Vendor '' is the GLOBAL level: what the spelling means for
-every vendor. A vendor-scoped BINDING ("for S, X is the existing variety N") and a vendor ORIGIN ("for S, N
-of type T comes from ISO") ride alongside.
+A decision is a STATEMENT about a listing: for vendor S the spelling X is variety N of type T (verdict 'is',
+optionally with a colour, an origin and the widen flag), or X is not a variety (verdict 'reject'). Vendor ''
+is the GLOBAL level: what the spelling means for every vendor.
 
-`Decisions` is loaded once (decisions_store.load_decisions) and answers every question the stages used to ask
-six separate maps: the resolution order is ONE rule, here, vendor first then global and at each level the
-scraped spelling first then the cleaned identity. Pure: no store, no settings, so it can be built in a test
-from the legacy dict shapes (`from_legacy`) exactly as production builds it."""
+Whether an 'is' statement MINTS a new variety or BINDS the listing to an existing one is not stored: it is
+derived when the object is built (`from_statements`) from what exists at that moment, so a statement stays
+correct as the catalog changes under it (a stated name that later exists binds instead of minting twice).
+  * a global 'is' statement is the spelling's meaning for everyone: a mint statement (curate creates the
+    variety; the existing-variety guard makes a repeat a no-op);
+  * a vendor 'is' statement always yields that vendor's binding (the matcher's override tier, which skips a
+    target that does not resolve), and a vendor-level mint statement while its variety does not exist yet;
+  * an origin on a statement is that vendor's origin for the variety (a global statement's for the vendor
+    that asked); a mint's origin also documents the variety's origin (mint_origin_rules).
+
+`Decisions` answers every question the stages used to ask six separate maps: the resolution order is ONE
+rule, here, vendor first then global and at each level the scraped spelling first then the cleaned identity.
+Pure: no store, no settings, so a test builds it from the same row shapes production does."""
 
 from __future__ import annotations
 
@@ -34,6 +42,7 @@ class Statement:
     stone_type: str | None = None
     color: str | None = None
     origin_iso: str | None = None
+    widen: bool = False
     asked_by: str = ""          # the vendor whose card produced a global statement
 
     @property
@@ -47,7 +56,7 @@ class Statement:
 
 @dataclass(frozen=True)
 class Decisions:
-    statements: dict[Key, Statement] = field(default_factory=dict)
+    statements: dict[Key, Statement] = field(default_factory=dict)          # mint and reject statements
     bindings: dict[Key, tuple[str, str]] = field(default_factory=dict)      # (vendor, spelling) -> (name, type or '')
     vendor_origins: dict[tuple[str, str, str], str] = field(default_factory=dict)  # (vendor, name, type) -> ISO
     widened: dict[tuple[str, str, str], str] = field(default_factory=dict)         # the ones the operator widened
@@ -56,12 +65,56 @@ class Decisions:
     def empty(cls) -> "Decisions":
         return cls()
 
+    # -- builders ------------------------------------------------------------------------------------------
+    @classmethod
+    def from_statements(cls, rows: Iterable[dict], exists_as: Callable[[str, str], bool],
+                        alias_target: Callable[[str, str], str | None]) -> "Decisions":
+        """Build from `statement` rows ({source, spelling_norm, spelling, verdict, name, stone_type, color,
+        origin_iso, widen, asked_by}) and the two variety lookups the derivation needs (config.varieties on
+        the ledger; injected so the rule is testable without one)."""
+        statements: dict[Key, Statement] = {}
+        bindings: dict[Key, tuple[str, str]] = {}
+        origins: dict[tuple[str, str, str], str] = {}
+        widened: dict[tuple[str, str, str], str] = {}
+        for r in rows:
+            src, sp = _norm(r["source"]), _norm(r["spelling_norm"])
+            display = r.get("spelling") or r["spelling_norm"]
+            if r["verdict"] == "reject":
+                statements[(src, sp)] = Statement(source=src, spelling=sp, display=display, verdict="reject",
+                                                  asked_by=r.get("asked_by") or "")
+                continue
+            name, stone_type = r.get("name") or display, r.get("stone_type") or ""
+            # a stated name that is an existing variety's alias resolves to that variety, so the listing binds
+            # to it rather than minting a duplicate of a known alias
+            canonical = None
+            if src and not exists_as(name, stone_type):
+                canonical = alias_target(name, stone_type)
+            target = canonical or name
+            iso, widen = (r.get("origin_iso") or None), bool(r.get("widen"))
+            if src:
+                bindings[(src, sp)] = (target, stone_type)
+                if iso:
+                    origins[(src, _norm(target), _norm(stone_type))] = iso
+                    if widen:
+                        widened[(src, _norm(target), _norm(stone_type))] = iso
+                if exists_as(target, stone_type) or canonical:
+                    continue                                  # the vendor's listing binds; nothing to mint
+            elif iso and r.get("asked_by"):
+                origins[(_norm(r["asked_by"]), _norm(name), _norm(stone_type))] = iso
+                if widen:
+                    widened[(_norm(r["asked_by"]), _norm(name), _norm(stone_type))] = iso
+            statements[(src, sp)] = Statement(
+                source=src, spelling=sp, display=display, verdict="is",
+                name=(r.get("name") or None), stone_type=stone_type or None, color=r.get("color") or None,
+                origin_iso=iso, widen=widen, asked_by=r.get("asked_by") or "")
+        return cls(statements=statements, bindings=bindings, vendor_origins=origins, widened=widened)
+
     @classmethod
     def from_legacy(cls, actions: dict, scoped: dict | None = None, origins: dict | None = None,
                     widen: dict | None = None) -> "Decisions":
-        """Build from the legacy accessor shapes: `actions` = decisions_store.variety_actions() ({(source,
-        spelling): {'action', 'seed_*', 'spelling', 'source', 'asked_by'}}), `scoped` = scoped_aliases(),
-        `origins` = origin_decisions(), `widen` = origin_widen(). Missing seed fields are None."""
+        """Build from the legacy accessor shapes (variety_actions / scoped_aliases / origin_decisions /
+        origin_widen): the projection the legacy tables carried, used by tests and by the migration's
+        dual-read check. Missing seed fields are None."""
         statements: dict[Key, Statement] = {}
         for (source, spelling), d in (actions or {}).items():
             key = (_norm(source), _norm(spelling))
