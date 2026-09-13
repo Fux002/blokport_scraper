@@ -96,21 +96,6 @@ def test_widen_is_recorded_on_the_decision_and_never_rewrites_the_stones_list():
     assert m.widen(views.widen(exists_as=_exists)) == 1 and m.exact("Andes", "Quartzite").countries == ["BR"]
 
 
-def test_store_repairs_the_lists_an_old_widen_rewrote():
-    # before the union: widen WROTE the variety's list as its one country. Such a row (single country equal to
-    # a widen decision on the same variety) is dropped on open; an explicit list edit (any other row) stays.
-    decisions_store.set_variety_origin("Black Cosmic", "Granite", "IN")            # what the old widen wrote
-    decisions_store.set_variety_origin("Volakas", "Marble", "GR,TR")                  # an operator list edit
-    decisions_store.set_variety_origin("Porto Branco", "Granite", "PT")               # an edit, no widen on it
-    import sqlite3
-    with sqlite3.connect(str(store.config_db_path())) as raw:
-        raw.execute("INSERT INTO origin_decision (source, variant_norm, stone_type_norm, variant_display, "
-                    "country_iso, widen, decided_at) VALUES ('varsha', 'black cosmic', 'granite', 'Black Cosmic', 'IN', 1, 't')")
-        raw.execute("PRAGMA user_version = 1")               # a database from before the repair: migrates on open
-    conn = store.open_store(); conn.close()
-    assert decisions_store.variety_origins() == {("volakas", "marble"): "GR,TR", ("porto branco", "granite"): "PT"}
-
-
 def test_redeciding_overwrites_and_clearing_removes_exactly_that_vendors_decisions():
     decisions_store.decide("marenostone", "Azul White Quartzite", "Azul White", "Quartzite", origin="BR",
                            exists_as=_exists)
@@ -120,7 +105,7 @@ def test_redeciding_overwrites_and_clearing_removes_exactly_that_vendors_decisio
     # another vendor's decision on the same spelling is independent
     decisions_store.decide("zucchi", "Azul White Quartzite", "Azul White", "Quartzite", origin="BR",
                            exists_as=_exists)
-    dropped = decisions_store.clear_decisions("marenostone", "Azul White Quartzite")
+    dropped = {"statements": decisions_store.clear("marenostone", "Azul White Quartzite")}
     assert dropped == {"statements": 1}
     assert ("marenostone", _norm("Azul White Quartzite")) not in views.scoped(exists_as=_exists)
     assert views.scoped(exists_as=_exists)[("zucchi", _norm("Azul White Quartzite"))] == ("Azul White", "Quartzite")
@@ -128,8 +113,8 @@ def test_redeciding_overwrites_and_clearing_removes_exactly_that_vendors_decisio
 
 
 def test_clear_leaves_a_global_mint_alone():
-    decisions_store.set_variety_decision("Totally New", "mint", seed_type="Granite")      # made for every vendor
-    dropped = decisions_store.clear_decisions("marenostone", "Totally New")
+    views.mint("Totally New", stone_type="Granite")      # made for every vendor
+    dropped = {"statements": decisions_store.clear("marenostone", "Totally New")}
     assert dropped["statements"] == 0
     assert views.actions(exists_as=_exists)[("", _norm("Totally New"))]["action"] == "mint"
 
@@ -267,7 +252,7 @@ def test_variants_list_includes_origin_confirmations_as_origin_cards():
 # --- edge cases: a global mint is never narrowed; a card shared by two vendors decides each under its own ---
 
 def test_a_vendor_naming_a_different_stone_from_a_global_mint_gets_its_own_level():
-    decisions_store.set_variety_decision("Totally New", "mint", seed_type="Granite")          # every vendor
+    views.mint("Totally New", stone_type="Granite")          # every vendor
     out = decisions_store.decide("marenostone", "Totally New", "Totally New Stone", "Granite", exists_as=_exists)
     assert out["level"] == "vendor"
     assert views.actions(exists_as=_exists)[("", _norm("Totally New"))]["seed_name"] is None     # the global is untouched
@@ -340,7 +325,7 @@ def test_a_different_new_stone_from_the_same_spelling_is_the_vendors_own_level()
     assert both[("", _norm("Tropical Green"))]["seed_name"] == "Tropical Green Bahia"
     assert both[("zucchi", _norm("Tropical Green"))]["seed_name"] == "Tropical Green Verde"
     # clearing zucchi's statement removes only zucchi's level
-    assert decisions_store.clear_decisions("zucchi", "Tropical Green")["statements"] == 1
+    assert {"statements": decisions_store.clear("zucchi", "Tropical Green")}["statements"] == 1
     assert views.seed_scopes(exists_as=_exists) == {}
     assert views.actions(exists_as=_exists)[("", _norm("Tropical Green"))]["seed_name"] == "Tropical Green Bahia"
 
@@ -361,50 +346,20 @@ def test_a_spelling_that_already_means_an_existing_stone_makes_the_mint_vendor_l
     assert ("marenostone", _norm("Black Wave Marble")) in views.actions(exists_as=_exists)
 
 
-def test_migration_makes_every_old_mint_global_and_keeps_who_asked(tmp_path, monkeypatch):
-    import sqlite3
-    db = tmp_path / "old.db"
-    monkeypatch.setattr(store, "config_db_path", lambda: db)
-    store.open_store().close()                                           # the real schema, then the OLD mint table
-    conn = sqlite3.connect(db)
-    conn.executescript(
-        "DROP TABLE variety_decision;"
-        "CREATE TABLE variety_decision (variant_norm TEXT PRIMARY KEY, variant_display TEXT NOT NULL DEFAULT '', "
-        "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), alias_of TEXT, seed_color TEXT, "
-        "seed_type TEXT, seed_country TEXT, seed_name TEXT, decided_at TEXT NOT NULL, source TEXT NOT NULL DEFAULT '');"
-        "INSERT INTO variety_decision VALUES ('bianco white marble','Bianco White Marble','mint',NULL,'White','Marble','IR','Bianco White','2026-09-09T07:20:56','marenostone');"
-        "INSERT INTO variety_decision VALUES ('junk','Junk','reject',NULL,NULL,NULL,NULL,NULL,'2026-09-09T08:00:00','');")
-    conn.execute("PRAGMA user_version = 1")                    # pre two-levels: migrates on open
-    conn.execute("DELETE FROM migration WHERE name = 'statements_v1'")   # ...and pre statements
-    conn.commit(); conn.close()
-    g = views.actions(exists_as=_exists)
-    assert g[("", _norm("bianco white marble"))] == {"action": "mint", "seed_color": "White", "seed_type": "Marble",
-                                              "seed_country": "IR", "seed_name": "Bianco White", "spelling": "Bianco White Marble",
-                                              "source": "", "asked_by": "marenostone"}
-    assert g[("", "junk")]["action"] == "reject" and g[("", "junk")]["asked_by"] == ""
-    assert views.seed_scopes(exists_as=_exists) == {}
-    conn = sqlite3.connect(db)
-    assert conn.execute("select count(*) from variety_decision__pre_two_levels").fetchone()[0] == 2
-    assert [r[1] for r in conn.execute("pragma table_info(variety_decision)") if r[5]] == ["source", "variant_norm"]
-    conn.close()
-    views.actions(exists_as=_exists)                                    # a second open: idempotent, nothing changes
-    assert len(views.actions(exists_as=_exists)) == 2
-
-
 # --- audit wave 1: a statement supersedes a reject on the same listing -------------------------------------
 
 def test_a_statement_supersedes_a_reject_stored_under_the_card_ref():
     # The reject PUT keys on the card ref (the CLEANED name, 'amazon green'); a statement keys on the scraped
     # spelling ('Amazon Green Granite'). Both rows coexisted and curate consulted the reject first, so the
     # statement never applied and only the audit gap revealed it. The last operator action must win.
-    decisions_store.set_variety_decision("amazon green", "reject")                    # what the reject PUT stores
+    decisions_store.reject("", "amazon green")                    # what the reject PUT stores
     out = decisions_store.decide("marenostone", "Amazon Green Granite", "Golden Lightning", "Granite",
                                  exists_as=_exists)
     assert out["result"] == "bound"
     assert views.rejected(exists_as=_exists) == set()                                  # the reject is gone
     assert views.confirm(exists_as=_exists) == {}
     # and a reject stored under the SPELLING itself is superseded the same way, for a mint
-    decisions_store.set_variety_decision("Totally New", "reject")
+    decisions_store.reject("", "Totally New")
     out = decisions_store.decide("zucchi", "Totally New", "Totally New", "Granite", exists_as=_exists)
     assert out["result"] == "minted" and views.rejected(exists_as=_exists) == set()
     assert views.confirm(exists_as=_exists) == {("", _norm("Totally New")): "yes"}
@@ -414,8 +369,6 @@ def test_vendor_rename_to_the_same_name_wins_the_origin_regardless_of_insert_ord
     # two decisions can land on one variety NAME: a global mint renamed to "Bar" (IN) and a vendor rename to
     # "Bar" (BR). The name-keyed origin maps must resolve that collision deterministically (the vendor's own
     # level wins), not by SQLite rowid / insert order.
-    decisions_store.set_variety_decision("Foo", "mint", seed_type="Granite", seed_name="Bar", seed_country="BR",
-                                         source="zucchi", asked_by="zucchi")
-    decisions_store.set_variety_decision("Baz", "mint", seed_type="Granite", seed_name="Bar", seed_country="IN",
-                                         source="", asked_by="polonine")
+    views.mint("Foo", stone_type="Granite", name="Bar", origin="BR", source="zucchi", asked_by="zucchi")
+    views.mint("Baz", stone_type="Granite", name="Bar", origin="IN", source="", asked_by="polonine")
     assert views.country_rules(exists_as=_exists)[("bar", "granite")] == "BR"

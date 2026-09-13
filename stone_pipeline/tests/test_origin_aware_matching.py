@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from stone_pipeline.core.schema import CanonicalRow, GapKind
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.stages import match_variation
@@ -92,8 +93,7 @@ def _ref(scoped=None):
             "v_star": SimpleNamespace(key="slab_granite_star_black_4"),
             "v_azul_onyx": SimpleNamespace(key="slab_onyx_azul_white_5"),
             "v_azul_qtz": SimpleNamespace(key="slab_quartzite_azul_white_6")})},
-        variety_seed_types={},
-        scoped_aliases=scoped or {},
+        decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in ({}).items()}, scoped or {}),
         country_codes={"iran": "IR", "brazil": "BR"},
         valid_iso_codes=frozenset({"IR", "BR", "IN", "TR"}),
         to_iso=lambda v: {"iran": "IR", "brazil": "BR", "ir": "IR", "br": "BR"}.get((v or "").strip().lower()),

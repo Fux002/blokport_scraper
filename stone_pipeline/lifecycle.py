@@ -375,7 +375,7 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
     reset leaves config.db alone, matching how it leaves the ledger's shared base layer alone.
 
     `pristine` (factory reset) is the TRUE cold start: on top of a global hard reset it ALSO (a) wipes the
-    durable operator overlay (variety_decision + backbone_leaf_decision + retired_variation), so the next
+    durable operator overlay (statement + backbone_leaf_decision + retired_variation), so the next
     produce derives the catalog PURELY from the committed seed (variants_export_base + backbone_*), with no
     accumulated mint/alias/approve/retire re-applying, and (b) PRUNES stale variations (in_full=0, no
     products) -- tombstoning re-key old sides and dropped varieties so MEDUSA converges to the seed too,

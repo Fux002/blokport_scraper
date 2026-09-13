@@ -11,6 +11,7 @@ from stone_pipeline.core.schema import CanonicalRow, FlagCode, GapKind, ReviewFl
 from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
+from stone_pipeline.tests import _decision_views as views
 
 
 @pytest.fixture(scope="module")
@@ -343,7 +344,6 @@ def test_curation_does_not_modify_reference_files(ref, tmp_path):
 def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
     # a variety with no resolvable stone type is HELD (never shipped type-less); the operator assigns a
     # type via the review (seed_type), and the next produce mints it with that type + a typed Key.
-    from stone_pipeline.config import decisions_store
 
     def typeless():
         r = CanonicalRow(src_site="varsha", surrogate_key="n1", variety_match_key="Karur Special White",
@@ -358,7 +358,7 @@ def test_typeless_variety_is_held_then_mints_with_a_seed_type(ref):
                               "A variety cannot exist without a type.")
     assert not any(r["Name"] == "Karur Special White" for b in res.new_variants.values() for r in b)
 
-    decisions_store.set_variety_decision("Karur Special White", "mint", seed_type="Granite")
+    views.mint("Karur Special White", stone_type="Granite")
     res2 = curate.build_curation([typeless()], ref)
     posts = [p for b in ("slab", "block", "tile")
              for p in res2.backbone_new[b] if p["variant"] == "Karur Special White"]
@@ -407,9 +407,8 @@ def test_confirmed_new_type_mints_not_absorbed_into_a_same_name_sibling(ref, mon
     # multi-type name fell through to the fuzzy aliaser, which (nearest = the same name under a different
     # type) aliased it onto that sibling instead of minting ('Jasper Green Dolomite' -> 'Jasper Green
     # Marble'). With the operator's mint decision it must MINT the new type in every category instead.
-    from stone_pipeline.config import decisions_store
     _inject_existing(monkeypatch, ("Ocean Blue", "Granite"), ("Ocean Blue", "Marble"))
-    decisions_store.set_variety_decision("Ocean Blue", "mint")
+    views.mint("Ocean Blue")
     res = curate.build_curation([_ocean_blue("Onyx")], ref)
     minted = {rw["Key"].split("_", 1)[0] for b in res.new_variants.values() for rw in b
               if rw["Name"] == "Ocean Blue" and "onyx" in rw["Key"]}

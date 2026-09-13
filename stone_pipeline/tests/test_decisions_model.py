@@ -31,7 +31,7 @@ def test_derivation_from_statements(tmp_path, monkeypatch):
                            exists_as=exists, alias_target=alias, clean=lambda s, t: s)
     decisions_store.decide("varsha", "Andes", "Andes Verde", "Quartzite",
                            exists_as=exists, alias_target=alias, clean=lambda s, t: s)
-    decisions_store.set_variety_decision("Junk Code", "reject")
+    decisions_store.reject("", "Junk Code")
     dec = decisions_store.load_decisions(exists_as=exists, alias_target=alias)
     assert {k: s.verdict for k, s in dec.statements.items()} == {
         ("", "honey onyx"): "is", ("varsha", "andes"): "is", ("", "junk code"): "reject"}

@@ -6,7 +6,10 @@ PR A (#392) shipped: one `Decisions` object, one read. PR B (#394): the `stateme
 boot-time migration (`SCHEMA_VERSION` 4, mark `statements_v1`), `load_decisions()` reads statements. The
 prod-snapshot dual read passed before the pin: 96 bindings, 110 vendor origins, 7 widened identical; the only
 statement differences were four vendor-level mints whose targets now exist in the ledger, read as binds by
-design. PR C (deletion list, section 5) pending Blokport's reject-button switch.
+design. PR C: the three legacy tables are dropped on open (`SCHEMA_VERSION` 5, after the recorded
+migration), the compatibility writers and the matcher's two view fields are gone; a pre-two-levels store is
+refused with the upgrade path. Still open: the legacy reject route (`PUT /review/variants/<name>
+{action: reject}`) delegates to `reject()` until Blokport's reject button sends a statement.
 
 ## 1. Where we are
 

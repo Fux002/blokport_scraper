@@ -23,6 +23,7 @@ import pytest
 from stone_pipeline.core.schema import CanonicalRow, GapKind, TreeGap
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate
+from stone_pipeline.tests import _decision_views as views
 
 
 @pytest.fixture(scope="module")
@@ -53,12 +54,11 @@ def test_new_variety_with_a_canonical_type_holds_then_mints_when_confirmed(ref):
     # The confirm-gate: a genuinely-new name + canonical type does NOT auto-mint -- it HOLDS for one operator
     # confirmation (nothing is silently minted). Once CONFIRMED it mints, fanned out to slab+block+tile, each
     # Key carrying the type slug. This is the baseline definition of a correct mint under the review queue.
-    from stone_pipeline.config import decisions_store
     held = curate.build_curation([_scrape("Novum Test Stone", raw_type="Granite")], ref)
     assert _is_held(held, "Novum Test Stone")                                    # new variety -> held, not minted
     assert not _minted_keys(held, "novum_test_stone")
 
-    decisions_store.set_variety_decision("Novum Test Stone", "mint", seed_type="Granite")  # operator confirms
+    views.mint("Novum Test Stone", stone_type="Granite")  # operator confirms
     res = curate.build_curation([_scrape("Novum Test Stone", raw_type="Granite")], ref)
     keys = _minted_keys(res, "novum_test_stone")
     assert sorted(k.split("_")[0] for k in keys) == ["block", "slab", "tile"]   # one per active category
@@ -84,8 +84,7 @@ def test_noncanonical_type_holds_and_never_mints(ref):
 def test_operator_seed_type_must_also_be_canonical(ref):
     # the operator resolves a type-less hold by assigning a seed_type; a NON-canonical seed value is rejected
     # the same way (defense in depth -- the :4200 API validates it too), so it stays held, never mints.
-    from stone_pipeline.config import decisions_store
-    decisions_store.set_variety_decision("Karur Novel White", "mint", seed_type="Notarealtype")
+    views.mint("Karur Novel White", stone_type="Notarealtype")
     res = curate.build_curation([_scrape("Karur Novel White", raw_type="")], ref)
     assert _is_held(res, "Karur Novel White")
     assert not _minted_keys(res, "karur_novel_white")
@@ -93,8 +92,7 @@ def test_operator_seed_type_must_also_be_canonical(ref):
 
 def test_two_scrapes_of_the_same_identity_mint_once(ref):
     # two rows cleaning to the SAME (type, name), once CONFIRMED, must not mint two Keys in a branch (dedup).
-    from stone_pipeline.config import decisions_store
-    decisions_store.set_variety_decision("Dupe Novel Stone", "mint", seed_type="Granite")
+    views.mint("Dupe Novel Stone", stone_type="Granite")
     rows = [_scrape("Dupe Novel Stone", raw_type="Granite", sk="a"),
             _scrape("Dupe Novel Stone", raw_type="Granite", sk="b")]
     res = curate.build_curation(rows, ref)
