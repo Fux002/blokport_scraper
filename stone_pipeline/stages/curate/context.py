@@ -149,17 +149,11 @@ def variety_identity(c: Curation, row: CanonicalRow) -> tuple[str, str, str]:
     # correctly and the seed lookup key norm(clean) + the Key uuid stay byte-stable run to run -- the
     # operator's type below changes only the final IDENTITY type, never the name/clean/Key.
     clean = clean_variety(name, scrape_type)
-    # OPERATOR AUTHORITY: a MINT decision's chosen type overrides the scraper's suggestion; absent a mint
-    # type, the scrape type stands (a vendor statement with a type binds through the matcher's scoped-alias
-    # tier, so it never reaches here as a type-less gap). Non-canonical operator types are dropped.
-    op_mint_type = c.decisions.seed_type(row.src_site, name, clean) or ""
-    if op_mint_type and proj.norm(op_mint_type) in c.valid_type_norms:
-        stone_type = op_mint_type
-    else:
-        stone_type = scrape_type or ""
-        if stone_type and proj.norm(stone_type) not in c.valid_type_norms:
-            stone_type = ""
-    return name, stone_type, clean
+    # OPERATOR AUTHORITY: a MINT decision's chosen (canonical) type overrides the scraper's suggestion; absent
+    # one, the scrape type stands (already canonical-or-empty from above). seed_type gates on the vocabulary,
+    # so a non-canonical mint type is dropped there -- the SAME resolver the matcher's fallback uses.
+    op_mint_type = c.decisions.seed_type(row.src_site, name, clean, c.valid_type_norms)
+    return name, op_mint_type or scrape_type, clean
 
 
 def is_generic(c: Curation, clean: str) -> bool:

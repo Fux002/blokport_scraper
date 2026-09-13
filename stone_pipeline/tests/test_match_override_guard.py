@@ -30,6 +30,7 @@ def _stage(override_id):
         overrides=Overrides(by_key={("polonine", "620"): {"variation_id": override_id}}),
         variants={"slab": SimpleNamespace(by_id={"v_real": SimpleNamespace(key="slab_marble_carrara_1")})},
         decisions=Decisions.empty(),   # a real ReferenceData always carries this; the stub must too
+        attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx", "Quartzite"]),
     )
     return match_variation.VariationStage(ref=ref, engines={"slab": eng}, writeback=WriteBack())
 

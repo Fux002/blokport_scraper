@@ -165,8 +165,14 @@ class Decisions:
     def is_rejected(self, source: str, spelling: str, clean: str) -> bool:
         return self._first(source, spelling, clean, lambda s: s.verdict == "reject") is not None
 
-    def seed_type(self, source: str, spelling: str, clean: str) -> str | None:
-        st = self._first(source, spelling, clean, lambda s: s.is_mint and bool(s.stone_type))
+    def seed_type(self, source: str, spelling: str, clean: str, valid: set | None = None) -> str | None:
+        """The operator's minted stone type for this listing, or None. `valid` (the canonical type vocabulary,
+        normalized) gates it: a mint type that is not a real Medusa type is NOT an identity, so it is skipped
+        and the scan falls through to the next level -- the ONE place this rule lives, so every caller (curate's
+        variety_identity, the matcher's operator-type fallback) resolves the same type from the same statement."""
+        st = self._first(source, spelling, clean,
+                         lambda s: s.is_mint and bool(s.stone_type)
+                         and (valid is None or _norm(s.stone_type) in valid))
         return st.stone_type if st else None
 
     def seed_color(self, source: str, spelling: str, clean: str) -> str | None:

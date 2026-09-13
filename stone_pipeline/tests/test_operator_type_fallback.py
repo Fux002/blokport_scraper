@@ -30,6 +30,8 @@ def _stage(seed_types):
             "v_granite": SimpleNamespace(key="slab_granite_absolute_black_1"),
             "v_agate": SimpleNamespace(key="slab_agate_absolute_black_2")})},
         decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in (seed_types).items()}, {}),
+        # the matcher gates an operator mint type on the canonical vocabulary, exactly as curate does
+        attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx"]),
     )
     return match_variation.VariationStage(ref=ref, engines={"slab": eng}, writeback=WriteBack())
 
@@ -66,6 +68,15 @@ def test_no_operator_decision_still_gaps():
     # no mint decision for this name -> no fallback -> the contradicting-type product gaps (unchanged).
     row = _row("Absolute Black", "Marble")
     _stage({}).resolve_row(row)
+    assert row.variation_id is None
+
+
+def test_a_non_canonical_operator_type_never_drives_a_rebind():
+    # a mint whose type is not in the Medusa vocabulary is not an identity: curate would hold the variety
+    # type-less, so the matcher must NOT rebind under it either (it would only ever hit the engine's own
+    # empty-type no-op, but the two must agree by construction, not by luck). The product gaps.
+    row = _row("Absolute Black", "Marble")
+    _stage({("", "absolute black"): "Notarealtype"}).resolve_row(row)
     assert row.variation_id is None
 
 

@@ -94,6 +94,7 @@ def _ref(scoped=None):
             "v_azul_onyx": SimpleNamespace(key="slab_onyx_azul_white_5"),
             "v_azul_qtz": SimpleNamespace(key="slab_quartzite_azul_white_6")})},
         decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in ({}).items()}, scoped or {}),
+        attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx", "Quartzite"]),
         country_codes={"iran": "IR", "brazil": "BR"},
         valid_iso_codes=frozenset({"IR", "BR", "IN", "TR"}),
         to_iso=lambda v: {"iran": "IR", "brazil": "BR", "ir": "IR", "br": "BR"}.get((v or "").strip().lower()),
