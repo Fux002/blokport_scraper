@@ -66,7 +66,7 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 4     # 4: the decision `statement` table + the one-time migration from the legacy tables
+SCHEMA_VERSION = 5     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -93,16 +93,20 @@ def _connect(path: Path) -> sqlite3.Connection:
     from stone_pipeline.core.dbdialect import require_sqlite
     require_sqlite("config store")
     path.parent.mkdir(parents=True, exist_ok=True)
-    return _prepare(sqlite3.connect(str(path)))
+    conn = sqlite3.connect(str(path))
+    try:
+        return _prepare(conn)
+    except Exception:
+        # a refused migration leaves NOTHING behind: its partial writes roll back and the lock is released,
+        # so the next open (after the operator's fix) starts from the untouched legacy rows
+        conn.rollback()
+        conn.close()
+        raise
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Idempotent column adds for config DBs created before a field existed (the dev
     config.db predates company_id). Cheap PRAGMA check per connect, ALTER only once."""
-    ocols = {r["name"] for r in conn.execute("PRAGMA table_info(origin_decision)")}
-    if ocols and "widen" not in ocols:   # per-decision "add to documented origins" checkbox, added later
-        conn.execute("ALTER TABLE origin_decision ADD COLUMN widen INTEGER NOT NULL DEFAULT 0")
-        conn.commit()
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(source)")}
     if "company_id" not in cols:
         conn.execute("ALTER TABLE source ADD COLUMN company_id TEXT NOT NULL DEFAULT ''")
@@ -155,80 +159,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # is re-added via PUT. Without this, reconcile-seeding a partial config.db would resurrect a removal.
     conn.execute("CREATE TABLE IF NOT EXISTS removed_source ("
                  "source TEXT PRIMARY KEY, removed_at TEXT NOT NULL)")
-    # -- new-variant review decisions (the durable decision ledger; see config/decisions_store.py) -------
-    # One operator decision per uncertain variety spelling, keyed by its NORMALIZED name. `action` unifies
-    # what used to be two ephemeral CSVs (variants_to_confirm.csv `confirm` + rejected_varieties.csv):
-    #   mint  -> the variety IS real; the next produce mints it
-    #   reject-> never propose it again (the learned 'no' memory)
-    # In config.db so it is snapshotted + restored (durable on ECS), never a CSV under ephemeral /app.
-    # seed_color: an operator-chosen colour to mint a NEW variety with, instead of the generic 'Natural'
-    # fallback, when its source supplies no colour (a colourless source would otherwise leave the variety
-    # 'Natural' forever, since no scraped product ever carries a colour for the leaf review to surface).
-    # seed_type: an operator-assigned stone TYPE to mint a type-less variety with. Type has NO fallback
-    # (it drives the Key, so a wrong type is a wrong identity); a variety with no resolvable type is HELD
-    # until the operator assigns one here, never guessed.
-    # seed_country: the operator-chosen ISO-3166 country of ORIGIN, captured at mint. Origin cannot be
-    # inferred from a stone's (marketing) name -- a look-alike is quarried in a new country -- so the true
-    # origin is set here at approval and overlaid onto origin_map as a confirmed per-variety rule.
-    conn.execute("CREATE TABLE IF NOT EXISTS variety_decision ("
-                 "variant_norm TEXT PRIMARY KEY, variant_display TEXT NOT NULL DEFAULT '', "
-                 "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), "
-                 "alias_of TEXT, seed_color TEXT, seed_type TEXT, seed_country TEXT, seed_name TEXT, "
-                 "decided_at TEXT NOT NULL)")
-    _variety_cols = {r["name"] for r in conn.execute("PRAGMA table_info(variety_decision)")}
-    if "seed_color" not in _variety_cols:
-        conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_color TEXT")   # DBs created before it
-    if "seed_type" not in _variety_cols:
-        conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_type TEXT")    # DBs created before it
-    if "seed_country" not in _variety_cols:
-        conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_country TEXT")  # DBs created before it
-    if "seed_name" not in _variety_cols:
-        conn.execute("ALTER TABLE variety_decision ADD COLUMN seed_name TEXT")     # mint + rename (DBs before it)
-    # source: the vendor a decision was made FOR ('' = every vendor). A variety is global by nature, so a
-    # mint always creates it for all; the vendor only scopes how the scraped SPELLING binds: a vendor-made
-    # rename attaches the spelling as that vendor's scoped alias, never as a global one.
-    if "source" not in _variety_cols:
-        conn.execute("ALTER TABLE variety_decision ADD COLUMN source TEXT NOT NULL DEFAULT ''")
-    # TWO LEVELS (2026-09-10): a spelling means ONE variety for everyone (the global mint, source ''), and a
-    # vendor may decide otherwise for itself (a vendor mint, source = the vendor) -- so the key is (source,
-    # variant_norm), not variant_norm alone. Every mint made before this migration becomes the global meaning
-    # of its spelling (that is what the operator decided: "Tropical Green IS Tropical Green Bahia"); the vendor
-    # that asked is kept in asked_by. Rebuild once (SQLite cannot alter a primary key), row for row, verified,
-    # with the old table kept as a backup for one release. Idempotent: asked_by marks a migrated table.
-    if "asked_by" not in _variety_cols:
-        before = conn.execute("SELECT COUNT(*) FROM variety_decision").fetchone()[0]
-        display_src = "variant_display" if "variant_display" in _variety_cols else "''"
-        conn.executescript(
-            "CREATE TABLE variety_decision__two_levels ("
-            "source TEXT NOT NULL DEFAULT '', variant_norm TEXT NOT NULL, "
-            "variant_display TEXT NOT NULL DEFAULT '', "
-            "action TEXT NOT NULL CHECK (action IN ('mint','reject','alias')), "
-            "alias_of TEXT, seed_color TEXT, seed_type TEXT, seed_country TEXT, seed_name TEXT, "
-            "asked_by TEXT NOT NULL DEFAULT '', decided_at TEXT NOT NULL, "
-            "PRIMARY KEY (source, variant_norm));"
-            "INSERT INTO variety_decision__two_levels (source, variant_norm, variant_display, action, alias_of, "
-            "seed_color, seed_type, seed_country, seed_name, asked_by, decided_at) "
-            f"SELECT '', variant_norm, {display_src}, action, "
-            "alias_of, seed_color, seed_type, seed_country, seed_name, source, decided_at FROM variety_decision;")
-        after = conn.execute("SELECT COUNT(*) FROM variety_decision__two_levels").fetchone()[0]
-        if after != before:
-            conn.execute("DROP TABLE variety_decision__two_levels")
-            raise RuntimeError(f"variety_decision migration lost rows ({before} -> {after}); refusing to proceed")
-        conn.executescript(
-            "DROP TABLE IF EXISTS variety_decision__pre_two_levels;"
-            "ALTER TABLE variety_decision RENAME TO variety_decision__pre_two_levels;"
-            "ALTER TABLE variety_decision__two_levels RENAME TO variety_decision;")
-        conn.commit()
-    # Operator-confirmed PER-VENDOR origins (the separate origin review queue): a (source, variety, type)
-    # the operator picked a country for, because the vendor's primary_origin did not corroborate the map.
-    # Keyed by (source, normalized variety, normalized type) so it is per-vendor and per-identity. Overlaid
-    # onto origin_overrides at load, so derive resolves it at the supplier_override tier and never re-asks.
-    # One-off data migrations that cannot run inside _migrate (they need the ledger, restored after the
-    # first config.db open) record themselves here so they run exactly once; see decisions_store.backfill_levels.
+    # One-off data migrations record themselves here so they run exactly once (see _migrate_statements).
     conn.execute("CREATE TABLE IF NOT EXISTS migration (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
     # THE decision table (DECISION_MODEL_DESIGN.md section 2.1): one STATEMENT per (vendor, spelling) -- what the
     # listing IS (name, type, colour, origin, widen) or 'reject'. Vendor '' is the spelling's global meaning.
     # Whether a statement mints or binds is derived at read time (config.decisions_model), never stored.
+    # KEY CONTRACT: `spelling_norm` is ALWAYS the normalized SCRAPED spelling of a listing (what the vendor
+    # wrote), never a variety name; `name` is the variety it means. The one statement whose spelling equals
+    # a variety name is "vendor's X is X" (an origin confirmation on a listing already spelled X).
     conn.execute("CREATE TABLE IF NOT EXISTS statement ("
                  "source TEXT NOT NULL, spelling_norm TEXT NOT NULL, spelling TEXT NOT NULL, "
                  "verdict TEXT NOT NULL CHECK (verdict IN ('is', 'reject')), "
@@ -236,28 +174,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "widen INTEGER NOT NULL DEFAULT 0, asked_by TEXT NOT NULL DEFAULT '', "
                  "decided_at TEXT NOT NULL, PRIMARY KEY (source, spelling_norm))")
     _migrate_statements(conn)
-    # The legacy `alias` decision (action='alias') has had no writer since the review statement replaced it
-    # (decide -> scoped_alias). A database that still holds one is refused, naming the rows: silently
-    # ignoring an operator decision is worse than a restart with a clear instruction (re-state it via
-    # /review/decide, which binds the vendor's spelling with its type).
-    legacy = [r["variant_display"] or r["variant_norm"] for r in conn.execute(
-        "SELECT variant_norm, variant_display FROM variety_decision WHERE action = 'alias'")]
-    if legacy:
-        raise RuntimeError(f"config.db holds {len(legacy)} legacy alias decision(s) the store no longer reads: "
-                           f"{legacy[:10]}; re-state them as vendor statements (/review/decide), then restart")
-    conn.execute("CREATE TABLE IF NOT EXISTS origin_decision ("
-                 "source TEXT NOT NULL, variant_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL, "
-                 "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
-                 "widen INTEGER NOT NULL DEFAULT 0, "   # the operator's "add to documented origins" checkbox
-                 "decided_at TEXT NOT NULL, PRIMARY KEY (source, variant_norm, stone_type_norm))")
-    # Operator VENDOR-SCOPED aliases (the re-bind action on an origin card): for THIS source, the scraped
-    # spelling is THAT variety. Keyed by (source, normalized spelling) so a trade name that means one stone
-    # to a Brazilian seller and another to an Iranian one gets one answer per vendor, never a global alias
-    # that breaks the other. seed_type picks the target among same-name varieties (nullable = by name).
-    conn.execute("CREATE TABLE IF NOT EXISTS scoped_alias ("
-                 "source TEXT NOT NULL, variant_norm TEXT NOT NULL, variant_display TEXT NOT NULL DEFAULT '', "
-                 "alias_of TEXT NOT NULL, seed_type TEXT, decided_at TEXT NOT NULL, "
-                 "PRIMARY KEY (source, variant_norm))")
+    _drop_legacy_decision_tables(conn)
     # Operator-edited PER-VARIETY origins (the "edit origins" admin action, same channel as a mint's
     # seed_country but for any variety and holding a LIST of countries). Keyed by (normalized variety,
     # normalized type). country_iso is a comma-list ("IN,IR"). Overlaid onto the origin MAP at load, so
@@ -267,15 +184,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "variant_display TEXT NOT NULL DEFAULT '', country_iso TEXT NOT NULL, "
                  "city TEXT NOT NULL DEFAULT '', county TEXT NOT NULL DEFAULT '', "
                  "decided_at TEXT NOT NULL, PRIMARY KEY (variant_norm, stone_type_norm))")
-    # Repair: until 2026-09-10 a widened decision WROTE the variety's documented list as that one country,
-    # replacing the map's list (Black Cosmic AR,BR,CN,IN -> IN). Widen is now a union applied at load from
-    # origin_decision.widen, so the rows it wrote (a single-country list equal to a widen decision on the
-    # same variety) are dropped; the operator's explicit list edits (any other row) are untouched. Idempotent.
-    if {r["name"] for r in conn.execute("PRAGMA table_info(origin_decision)")} >= {"widen"}:
-        conn.execute(
-            "DELETE FROM variety_origin WHERE country_iso NOT LIKE '%,%' AND EXISTS ("
-            "SELECT 1 FROM origin_decision d WHERE d.widen = 1 AND d.variant_norm = variety_origin.variant_norm "
-            "AND d.stone_type_norm = variety_origin.stone_type_norm AND d.country_iso = variety_origin.country_iso)")
     # New colour/finish/type/quality VALUES the operator created in Medusa and pasted the id for, keyed
     # by (kind, normalized value). The next produce adopts the id into the attribute vocab.
     conn.execute("CREATE TABLE IF NOT EXISTS attribute_decision ("
@@ -344,7 +252,7 @@ def _migrate_statements(conn: sqlite3.Connection) -> None:
     with no statement yet is an 'is' statement naming its target; a vendor origin lands on the statement whose
     target it names, else becomes the statement "this vendor's <name> is <name>, from <origin>" (the origin-queue
     confirmation it was). Row-for-row: every legacy row is accounted for or the migration refuses.
-    The legacy tables are left in place for one release (dropped by the follow-up); nothing reads them."""
+    The legacy tables are dropped right after (_drop_legacy_decision_tables); nothing reads them."""
     if conn.execute("SELECT 1 FROM migration WHERE name = ?", (STATEMENTS_MIGRATION,)).fetchone():
         return
     tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -352,8 +260,13 @@ def _migrate_statements(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT OR IGNORE INTO migration (name, applied_at) VALUES (?, ?)",
                      (STATEMENTS_MIGRATION, _now()))
         return                                                   # a brand-new store: nothing to migrate
+    # the legacy tables in their LAST shape only (two levels: source + asked_by); an older config.db must be
+    # opened by a release that still carried those column migrations (any before the statement table)
+    if "asked_by" not in {r["name"] for r in conn.execute("PRAGMA table_info(variety_decision)")}:
+        raise RuntimeError("config.db holds a pre-two-levels variety_decision table this release cannot migrate; "
+                           "open it once with a release before 48672a6, then upgrade")
     now = _now()
-    moved = {"mint": 0, "reject": 0, "binding": 0, "origin": 0}
+    moved = {"mint": 0, "reject": 0, "binding": 0, "implied": 0, "origin": 0}
     for r in conn.execute("SELECT source, variant_norm, variant_display, action, seed_color, seed_type, "
                           "seed_country, seed_name, asked_by FROM variety_decision").fetchall():
         if r["action"] == "reject":
@@ -372,7 +285,8 @@ def _migrate_statements(conn: sqlite3.Connection) -> None:
     for r in conn.execute("SELECT source, variant_norm, variant_display, alias_of, seed_type FROM scoped_alias").fetchall():
         if conn.execute("SELECT 1 FROM statement WHERE source = ? AND spelling_norm = ?",
                         (r["source"], r["variant_norm"])).fetchone():
-            continue                                             # the vendor mint already implies the binding
+            moved["implied"] += 1                                # the vendor mint already implies the binding
+            continue
         conn.execute("INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, asked_by, "
                      "decided_at) VALUES (?, ?, ?, 'is', ?, ?, ?, ?)",
                      (r["source"], r["variant_norm"], r["variant_display"] or r["variant_norm"],
@@ -393,15 +307,46 @@ def _migrate_statements(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE statement SET origin_iso = ?, widen = ? WHERE source = ? AND spelling_norm = ?",
                          (r["country_iso"], r["widen"], hit["source"], hit["spelling_norm"]))
         else:
-            conn.execute("INSERT OR REPLACE INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, "
+            # the statement "this vendor's <name> is <name>": its spelling IS the variety name. That slot must
+            # be free: a vendor statement already there means the same spelling was decided as ANOTHER stone,
+            # and replacing it would silently drop that decision. Refuse and name the rows.
+            taken = conn.execute("SELECT name, stone_type FROM statement WHERE source = ? AND spelling_norm = ?",
+                                 (r["source"], r["variant_norm"])).fetchone()
+            if taken:
+                raise RuntimeError(
+                    f"statement migration: {r['source']}'s origin decision on {r['variant_display'] or r['variant_norm']} "
+                    f"({r['stone_type_norm']}) collides with that vendor's statement on the same spelling "
+                    f"({taken['name']}, {taken['stone_type']}); resolve it in config.db, then restart")
+            conn.execute("INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, "
                          "origin_iso, widen, asked_by, decided_at) VALUES (?, ?, ?, 'is', ?, ?, ?, ?, ?, ?)",
                          (r["source"], r["variant_norm"], r["variant_display"] or r["variant_norm"],
                           r["variant_display"] or r["variant_norm"], r["stone_type_norm"], r["country_iso"],
                           r["widen"], r["source"], now))
         moved["origin"] += 1
+    # row for row: every legacy row is a statement, an update on one, or a binding a vendor mint implies
+    legacy_counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                     for t in ("variety_decision", "scoped_alias", "origin_decision")}
+    accounted = {"variety_decision": moved["mint"] + moved["reject"],
+                 "scoped_alias": moved["binding"] + moved["implied"], "origin_decision": moved["origin"]}
+    if accounted != legacy_counts:
+        raise RuntimeError(f"statement migration did not account for every legacy row: moved {accounted}, "
+                           f"legacy {legacy_counts}; refusing to record it")
     conn.execute("INSERT OR IGNORE INTO migration (name, applied_at) VALUES (?, ?)", (STATEMENTS_MIGRATION, now))
     conn.commit()
     log.warning("decision statements migrated from the legacy tables", extra={"extra_fields": moved})
+
+
+_LEGACY_DECISION_TABLES = ("variety_decision", "scoped_alias", "origin_decision", "variety_decision__pre_two_levels")
+
+
+def _drop_legacy_decision_tables(conn: sqlite3.Connection) -> None:
+    """Remove the tables the statement migration replaced, once it is recorded (schema version 5). A store
+    migrated by the previous release still carries them; a fresh store never had them."""
+    if not conn.execute("SELECT 1 FROM migration WHERE name = ?", (STATEMENTS_MIGRATION,)).fetchone():
+        raise RuntimeError("the legacy decision tables outlive an unrecorded statement migration; refusing")
+    for table in _LEGACY_DECISION_TABLES:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+    conn.commit()
 
 
 def migration_applied(name: str, path: str | Path | None = None) -> bool:

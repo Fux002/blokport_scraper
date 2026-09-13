@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from stone_pipeline.core.schema import CanonicalRow
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.matching.engine import VariationEngine
 from stone_pipeline.matching.index import CandidateIndex
 from stone_pipeline.stages import match_variation
@@ -28,8 +29,7 @@ def _stage(seed_types):
         variants={"slab": SimpleNamespace(by_id={
             "v_granite": SimpleNamespace(key="slab_granite_absolute_black_1"),
             "v_agate": SimpleNamespace(key="slab_agate_absolute_black_2")})},
-        variety_seed_types=seed_types,
-        scoped_aliases={},
+        decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in (seed_types).items()}, {}),
     )
     return match_variation.VariationStage(ref=ref, engines={"slab": eng}, writeback=WriteBack())
 

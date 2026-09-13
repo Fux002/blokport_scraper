@@ -414,7 +414,7 @@ def _delete_review_decide(params, body, query):
     if not listings:
         return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
     return 200, {"listings": [{"source": s, "scraped": sp} for s, sp in listings],
-                 "cleared": [decisions_store.clear_decisions(s, sp) for s, sp in listings]}
+                 "cleared": [{"statements": decisions_store.clear(s, sp)} for s, sp in listings]}
 
 
 def _put_review_decide(params, body, query):
@@ -837,7 +837,7 @@ class ConfigHandler(BaseHTTPRequestHandler):
 def boot(config_db, ledger_path) -> None:
     """The boot sequence, in this ORDER, before anything serves (pure of the HTTP server, so it is tested):
     restore config.db -> seed sources -> reconcile interrupted runs -> await the ledger (the sync server is
-    its one restorer) -> the two-level backfill (needs the ledger) -> artifact trees -> combinations baseline
+    its one restorer) -> artifact trees -> combinations baseline
     -> attribute vocab. A required restore that fails RAISES here, so the task exits non-zero and ECS
     retries: serving on a fresh store would let the periodic save overwrite the real snapshot."""
     from stone_pipeline.ledger import snapshot

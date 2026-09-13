@@ -21,7 +21,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
-from stone_pipeline.config.decisions_store import scope_key
 from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
@@ -141,7 +140,7 @@ class VariationStage:
         if key in self._scoped:
             return self._scoped[key]
         out: dict[str, str] = {}
-        for (src, spelling), (target, target_type) in self.ref.scoped_aliases.items():
+        for (src, spelling), (target, target_type) in self.ref.decisions.bindings.items():
             if src != proj.norm(source):
                 continue
             hits = [cid for cid, c in engine.index.candidates.items()
@@ -273,11 +272,9 @@ class VariationStage:
         # the variety; from here the bound row flows through the SAME reconcile/derive/texture path a
         # suggested variant uses. A scraped type that DID match a variety is never overridden.
         if match.cid is None and not (scraped_type and match.ambiguous):
-            # a mint statement is keyed by the scraped spelling the card carries, an older mint by the
-            # cleaned identity: consult both, spelling first (curate resolves decisions the same way)
-            seeds, src = self.ref.variety_seed_types, row.src_site or ""
-            op_type = (seeds.get(scope_key(src, query)) or seeds.get(scope_key(src, clean))
-                       or seeds.get(scope_key("", query)) or seeds.get(scope_key("", clean)))
+            # the mint statement for this listing: vendor level first, then global; the scraped spelling
+            # first, then the cleaned identity (curate resolves decisions the same way)
+            op_type = self.ref.decisions.seed_type(row.src_site or "", query, clean)
             if op_type and proj.norm(op_type) != proj.norm(scraped_type):
                 retry = engine.match(clean, block_type=op_type, block_color=block_color,
                                      overrides=scoped, block_origin=origin)

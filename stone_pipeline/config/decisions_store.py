@@ -282,46 +282,6 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     return outcome
 
 
-# -- compatibility writers (the shapes the server and older tests use; see DECISION_MODEL_DESIGN.md PR C) ---
-
-def set_variety_decision(variant: str, action: str,
-                         seed_color: str | None = None, seed_type: str | None = None,
-                         seed_country: str | None = None, seed_name: str | None = None,
-                         source: str = "", asked_by: str = "") -> None:
-    """A mint or reject statement in the legacy argument shape. mint -> 'is' at `source`'s level ('' = every
-    vendor) with the seeds; reject -> 'reject' at the global level. A rename to the same spelling is no rename."""
-    action = (action or "").strip().lower()
-    if action not in _ACTIONS:
-        raise InvalidDecision(f"action must be one of {_ACTIONS}, got {action!r}")
-    if not _norm(variant):
-        raise InvalidDecision("variant name is empty")
-    if action == "reject":
-        reject("", variant)
-        return
-    seed_name = (seed_name or "").strip() or None
-    if seed_name and _norm(seed_name) == _norm(variant):
-        seed_name = None
-    _upsert_statement(source, variant, "is", name=seed_name, stone_type=seed_type, color=seed_color,
-                      origin_iso=seed_country, asked_by=asked_by or source)
-
-
-def clear_decisions(source: str, scraped: str) -> dict[str, int]:
-    """Undo ONE vendor's statement on a spelling (the DELETE /review/decide body). Returns rows dropped."""
-    if not (source or "").strip() or not _norm(scraped):
-        raise InvalidDecision("clearing a decision requires source and scraped spelling")
-    return {"statements": clear(source, scraped)}
-
-
-def clear_variety_decision(variant: str, stone_type: str = "") -> int:
-    """Unmint: forget every statement whose result is the variety (name, type). See clear_for_variety."""
-    return clear_for_variety(variant, stone_type)
-
-
-def clear_variety_decisions() -> int:
-    """Pristine reset: forget every statement. See clear_all_statements."""
-    return clear_all_statements()
-
-
 # -- per-variety origin edits (the "edit origins" admin action; same channel as a mint's seed_country) ----
 
 def set_variety_origin(variety: str, stone_type: str, country_iso: str, city: str = "", county: str = "") -> None:

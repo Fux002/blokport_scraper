@@ -42,7 +42,7 @@ def test_review_queue_uniformly_title_cases_display_names():
     assert item["variant"] == "Venatto Blue" and item["color"] == "Dark Blue"
     assert item["nearest_existing"] == "Rosal"                  # F1: nearest_existing normalized too
     assert item["stone_type"] == "Semi-Precious Stone"          # canonical type intact, not title-mangled
-    ds.set_variety_decision("venatto blue", "reject")           # operator can act by any casing (norm-keyed)
+    ds.reject("", "venatto blue")           # operator can act by any casing (norm-keyed)
     assert views.rejected() == {("", "venatto blue")}
 
 
@@ -59,8 +59,8 @@ def test_backbone_leaf_queue_title_cases_the_variety_name():
 
 
 def test_mint_and_reject_actions_map_correctly():
-    ds.set_variety_decision("Alpha Stone", "mint")
-    ds.set_variety_decision("Gamma Stone", "reject")
+    views.mint("Alpha Stone")
+    ds.reject("", "Gamma Stone")
     assert views.confirm() == {("", "alpha stone"): "yes", ("", "gamma stone"): "no"}
     assert views.rejected() == {("", "gamma stone")}
 
@@ -68,25 +68,25 @@ def test_mint_and_reject_actions_map_correctly():
 
 
 def test_re_deciding_a_variety_overwrites():
-    ds.set_variety_decision("Flip Stone", "mint")
+    views.mint("Flip Stone")
     assert views.confirm() == {("", "flip stone"): "yes"}
-    ds.set_variety_decision("Flip Stone", "reject")           # change your mind
+    ds.reject("", "Flip Stone")           # change your mind
     assert views.confirm() == {("", "flip stone"): "no"}
     assert views.rejected() == {("", "flip stone")}
 
 
 def test_invalid_decisions_are_rejected_loudly():
-    for bad in [("X", "frobnicate"), ("Y", "alias"), ("", "mint")]:
+    for source, spelling in [("", ""), ("zucchi", "   ")]:
         try:
-            ds.set_variety_decision(*bad)
-            assert False, f"expected InvalidDecision for {bad}"
+            ds.reject(source, spelling)
+            assert False, f"expected InvalidDecision for {(source, spelling)}"
         except ds.InvalidDecision:
             pass
 
 
 
 def test_pending_variety_queue_round_trips_with_current_action():
-    ds.set_variety_decision("Alpha Stone", "mint")            # decided between runs
+    views.mint("Alpha Stone")            # decided between runs
     decisions.write_confirm_file([
         {"confirm": "", "variant": "Delta Stone", "stone_type": "Marble", "color": "white",
          "nearest_existing": "Delta", "score": 0.7, "model_prob": 0.6},

@@ -33,7 +33,7 @@ def _seed_config(tmp_path, monkeypatch):
     decisions_store.replace_pending("variety", [{"ref": "black absolute", "payload": {"variant": "Black Absolute"}}])
     decisions_store.replace_pending("attribute", [{"ref": "finish:leathered", "payload": {"value": "Leathered"}}])
     decisions_store.set_attribute_id("finish", "Leathered", "pcol_9")
-    decisions_store.set_variety_decision("Black Absolute", "mint", seed_type="Granite")
+    views.mint("Black Absolute", stone_type="Granite")
     decisions_store.set_backbone_leaf_decision("Black Absolute", "Granite", "color", "Gold", "approve")
     decisions_store.decide("marenostone", "Crystal White", "Crystal White", "Granite", origin="IR",
                            exists_as=_all, alias_target=_none)                       # a confirmed origin
@@ -380,8 +380,8 @@ def test_unmint_removes_the_whole_variety_clears_decision_once_and_does_not_excl
     reject = never mint). A single Key can no longer half-remove a variety."""
     from stone_pipeline import lifecycle
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
-    decisions_store.set_variety_decision("Absolute Black", "mint", seed_type="Granite")   # bystander
+    views.mint("Crystal White", stone_type="Granite")
+    views.mint("Absolute Black", stone_type="Granite")   # bystander
     captured = {}
     _stub_ledger_and_sync(monkeypatch, captured)
 
@@ -396,12 +396,12 @@ def test_unmint_removes_the_whole_variety_clears_decision_once_and_does_not_excl
     assert store.load_retired() == set()                                             # NOT excluded
 
 
-def test_clear_variety_decision_is_scoped_to_one_variant(tmp_path, monkeypatch):
+def test_clear_for_variety_is_scoped_to_one_variant(tmp_path, monkeypatch):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
-    decisions_store.set_variety_decision("Absolute Black", "reject")
-    assert decisions_store.clear_variety_decision("Crystal White") == 1
-    assert decisions_store.clear_variety_decision("Crystal White") == 0   # idempotent: already gone
+    views.mint("Crystal White", stone_type="Granite")
+    decisions_store.reject("", "Absolute Black")
+    assert decisions_store.clear_for_variety("Crystal White") == 1
+    assert decisions_store.clear_for_variety("Crystal White") == 0   # idempotent: already gone
     assert views.confirm(exists_as=_all, alias_target=_none) == {("", "absolute black"): "no"}      # the other decision survives
 
 
@@ -534,7 +534,7 @@ def test_unmint_against_a_real_ledger_tombstones_every_sibling_and_keeps_the_key
     from stone_pipeline.ledger import sync
     from stone_pipeline.ledger.db import Ledger, now_iso
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    decisions_store.set_variety_decision("Crystal White", "mint", seed_type="Granite")
+    views.mint("Crystal White", stone_type="Granite")
     p, now = tmp_path / "dev.ledger", now_iso()
 
     def _var(ledger, key, name):

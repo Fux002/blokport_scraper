@@ -37,17 +37,11 @@ class ReferenceData:
     versions: dict[str, str]
     origin_overrides: OriginOverrides = field(default_factory=OriginOverrides)  # per-supplier origin picks
     overrides: object = None  # state.overrides.Overrides; lazy import to avoid cycle
-    # norm(cleaned variety name) -> operator-chosen canonical stone type, for MINT decisions (config.db).
-    # The matcher consults this so a product whose scraped type matches no existing variety of its name binds
-    # to the operator-minted (name, type) instead of gapping -- the operator's authority reaching the PRODUCT,
-    # not just the variety. Folded in at load (below), mirroring the seed_country origin overlay.
-    variety_seed_types: dict[tuple[str, str], str] = field(default_factory=dict)   # scope_key -> type
-    # (norm source, norm scraped spelling) -> (target variety name, target stone type or ''): the operator's
-    # VENDOR-SCOPED alias decisions ('for marenostone, Amazon Green Granite is Golden Lightning'). Applied by
-    # the matcher's override tier for that vendor only; a global alias goes the ordinary alias route.
-    scoped_aliases: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
-    # EVERY operator decision as one object (config.decisions_model): the two fields above are its views for
-    # the matcher; the origin overlays below are applied from it. Empty when no config store exists.
+    # EVERY operator decision as one object (config.decisions_model). The matcher reads its bindings (a
+    # vendor's spelling IS that variety, applied at the override tier for that vendor only) and its mint
+    # types (a product whose scraped type matches no existing variety of its name binds to the
+    # operator-minted (name, type) instead of gapping); the origin overlays below are applied from it.
+    # Empty when no config store exists.
     decisions: Decisions = field(default_factory=Decisions.empty)
     # norm(variety name) -> the stone types it exists under, built once on first use from the variant tables
     name_types: dict[str, set[str]] | None = None
@@ -186,20 +180,13 @@ def load_all() -> ReferenceData:
             "origin_map": content_hash(paths.origin_map_csv),
         },
     )
-    # The effective origin map = the curated CSV grown by operator-minted origins (variety_decision
-    # seed_type + seed_country), overlaid in memory here -- the one place ref is built, mirroring the leaf
-    # overlay. Type-scoped, so a mint under one type never clobbers a homonym's origin under another.
-    # Operator overlays from config.db (guarded on the store already existing -- see the note in load_all):
-    #   * seed_country grows the per-variety origin MAP (type-scoped, so a mint under one type never clobbers
-    #     a homonym's origin under another);
-    #   * origin CONFIRMATIONS from the separate origin review queue grow the per-vendor origin OVERRIDES, so a
-    #     confirmed (source, variety, type) origin resolves at derive's supplier_override tier and is never
-    #     re-asked;
-    #   * operator MINT types (canonical-gated, keyed by norm(clean variety name) exactly as decisions_store +
-    #     curate key them) let the matcher bind a product to an operator-minted (name, type) whose type the
-    #     scrape did not carry -- the mint decision reaching the product, not only the variety.
+    # Operator overlays from the decision statements (guarded on the store already existing -- see the note
+    # in load_all), applied in memory here, the one place ref is built, mirroring the leaf overlay:
+    #   * a mint's origin grows the per-variety origin MAP (type-scoped, so a mint under one type never
+    #     clobbers a homonym's origin under another);
+    #   * a vendor's origin statement grows the per-vendor origin OVERRIDES, so a confirmed (source, variety,
+    #     type) origin resolves at derive's supplier_override tier and is never re-asked.
     ref.decisions = decisions_store.load_decisions()        # empty on a fresh store (no config.db is created)
-    ref.scoped_aliases = ref.decisions.bindings
     ref.origin_map.apply_origin_overlay(ref.decisions.mint_origin_rules())
     if _have_config_db:
         # Operator "edit origins" edits win over both the CSV base and a mint's seed_country: applied LAST,

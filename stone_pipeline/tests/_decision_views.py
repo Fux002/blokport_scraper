@@ -18,6 +18,16 @@ def load(**lookups) -> Decisions:
     return decisions_store.load_decisions(**lookups)
 
 
+def mint(spelling: str, stone_type: str | None = None, name: str | None = None, color: str | None = None,
+         origin: str | None = None, source: str = "", asked_by: str = "") -> None:
+    """A stored 'is' statement in the legacy mint shape (the seeds, at `source`'s level, '' = every vendor),
+    without the lookups decide() needs. A rename to the same spelling is no rename."""
+    if name and _norm(name) == _norm(spelling):
+        name = None
+    decisions_store._upsert_statement(source, spelling, "is", name=name, stone_type=stone_type, color=color,
+                                      origin_iso=origin, asked_by=asked_by or source)
+
+
 def actions(**lookups) -> dict[tuple[str, str], dict]:
     """variety_actions(): {(vendor, spelling): {action, seed_*, spelling, source, asked_by}} (mint + reject)."""
     return {k: {"action": "mint" if s.is_mint else "reject", "seed_color": s.color, "seed_type": s.stone_type,

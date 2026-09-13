@@ -43,7 +43,8 @@ def test_an_older_database_is_migrated_then_stamped(tmp_path):
     with closing(store.open_store(path)) as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert {"variety_decision", "origin_decision", "scoped_alias", "review_pending"} <= tables
+        assert {"statement", "migration", "review_pending"} <= tables
+        assert not set(store._LEGACY_DECISION_TABLES) & tables
 
 
 @pytest.mark.parametrize("reader,empty", [
