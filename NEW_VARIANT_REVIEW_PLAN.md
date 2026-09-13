@@ -16,7 +16,7 @@ that flow; do not start until it proves out.
 
 ## 1. Where we are today (what already exists)
 
-- `curate.py` classifies every gapped scraped name in strict order: REJECT junk -> RESOLVE to an
+- `stages/curate/classify.py` classifies every gapped scraped name in strict order: REJECT junk -> RESOLVE to an
   existing variety (auto-alias, confident) -> MINT a new variety -> or HOLD the uncertain ones.
 - `review/variants_to_confirm.csv` is the decision ledger: `confirm` = true (mint) / false (reject) /
   blank (pending). Read back at the START of every produce (`decisions.load_confirm_decisions`).
@@ -69,7 +69,7 @@ that flow; do not start until it proves out.
   backward compat (`confirm` true/false still maps to mint/reject).
 - `decisions.py`: `load_confirm_decisions()` returns `{variant: {action, alias_of}}`. Add a durable,
   name-keyed `state/confirmed_aliases.csv` (`variety_name, alias_spelling`).
-- `curate.py`: when `action == alias`, add the spelling to `confirmed_aliases[alias_of]` and SKIP the
+- `stages/curate/aliasing.py`: when `action == alias`, add the spelling to `confirmed_aliases[alias_of]` and SKIP the
   mint. Next produce: the spelling is an exact surface hit on X -> the product resolves to X's
   variation; X's variation payload gains the alias -> flips dirty -> re-serves.
 - Wire `confirmed_aliases` into BOTH `curate.existing_surface` (resolution) AND `emit_catalog`'s
@@ -272,7 +272,7 @@ The fix (one mechanism, serves both features):
 
 ## 15. Add a source <-> review (the biggest producer)
 
-- A new source's FIRST scrape floods the review queue with its whole variety set. `curate.py`'s
+- A new source's FIRST scrape floods the review queue with its whole variety set. `stages/curate/`'s
   auto-RESOLVE already auto-aliases confident cross-vendor duplicates; only the uncertain ones surface
   for review, and genuinely novel varieties mint. So **alias-to-existing (Phase 2) IS the cross-vendor
   unification** that stops adding a source from duplicating shared varieties (vendor B's "Carrara" ->
