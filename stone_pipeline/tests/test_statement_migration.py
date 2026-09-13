@@ -126,6 +126,47 @@ def test_a_store_migrated_by_the_previous_release_drops_the_legacy_tables_and_ke
         [("", "junk code", "reject")]                             # NOT re-migrated from the stale legacy rows
 
 
+def test_an_origin_row_colliding_with_a_vendor_statement_refuses_instead_of_replacing_it(tmp_path, monkeypatch):
+    # vendor v decided its spelling 'rosso' IS Rosso Levanto (Marble) and ALSO holds an origin confirmation on a
+    # variety named Rosso (granite): the origin fallback would land on the same (v, 'rosso') slot. Refuse,
+    # naming both, rather than overwrite the mint; nothing is recorded, so the next open retries.
+    db = tmp_path / "config.db"
+    monkeypatch.setattr(store, "config_db_path", lambda: db)
+    store.open_store(db).close()
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "PRAGMA user_version = 3;"
+        "DELETE FROM migration WHERE name = 'statements_v1';" + _LEGACY_DDL +
+        "INSERT INTO variety_decision (source, variant_norm, variant_display, action, seed_type, seed_name, asked_by, decided_at) "
+        "VALUES ('v', 'rosso', 'Rosso', 'mint', 'Marble', 'Rosso Levanto', 'v', 't');"
+        "INSERT INTO origin_decision (source, variant_norm, stone_type_norm, variant_display, country_iso, widen, decided_at) "
+        "VALUES ('v', 'rosso', 'granite', 'Rosso', 'IT', 0, 't');")
+    conn.commit(); conn.close()
+    with pytest.raises(RuntimeError, match="Rosso Levanto"):
+        store.open_store()
+    with sqlite3.connect(db) as raw:                              # rolled back: no mark, no partial statements
+        assert raw.execute("SELECT count(*) FROM migration WHERE name = 'statements_v1'").fetchone()[0] == 0
+        assert raw.execute("SELECT count(*) FROM statement").fetchone()[0] == 0
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
+def test_a_legacy_row_the_migration_cannot_place_is_refused_not_dropped(tmp_path, monkeypatch):
+    # an action the migration does not know (nothing writes one, but a hand-edited row could) is neither a
+    # mint nor a reject: the row-for-row reconciliation refuses to record the migration
+    db = tmp_path / "config.db"
+    monkeypatch.setattr(store, "config_db_path", lambda: db)
+    store.open_store(db).close()
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "PRAGMA user_version = 3;"
+        "DELETE FROM migration WHERE name = 'statements_v1';" + _LEGACY_DDL +
+        "INSERT INTO variety_decision (source, variant_norm, variant_display, action, asked_by, decided_at) "
+        "VALUES ('', 'odd row', 'Odd Row', 'frobnicate', '', 't');")
+    conn.commit(); conn.close()
+    with pytest.raises(RuntimeError, match="did not account"):
+        store.open_store()
+
+
 def test_a_pre_two_levels_store_is_refused_with_the_upgrade_path(tmp_path, monkeypatch):
     db = tmp_path / "config.db"
     monkeypatch.setattr(store, "config_db_path", lambda: db)

@@ -93,7 +93,15 @@ def _connect(path: Path) -> sqlite3.Connection:
     from stone_pipeline.core.dbdialect import require_sqlite
     require_sqlite("config store")
     path.parent.mkdir(parents=True, exist_ok=True)
-    return _prepare(sqlite3.connect(str(path)))
+    conn = sqlite3.connect(str(path))
+    try:
+        return _prepare(conn)
+    except Exception:
+        # a refused migration leaves NOTHING behind: its partial writes roll back and the lock is released,
+        # so the next open (after the operator's fix) starts from the untouched legacy rows
+        conn.rollback()
+        conn.close()
+        raise
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -156,6 +164,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # THE decision table (DECISION_MODEL_DESIGN.md section 2.1): one STATEMENT per (vendor, spelling) -- what the
     # listing IS (name, type, colour, origin, widen) or 'reject'. Vendor '' is the spelling's global meaning.
     # Whether a statement mints or binds is derived at read time (config.decisions_model), never stored.
+    # KEY CONTRACT: `spelling_norm` is ALWAYS the normalized SCRAPED spelling of a listing (what the vendor
+    # wrote), never a variety name; `name` is the variety it means. The one statement whose spelling equals
+    # a variety name is "vendor's X is X" (an origin confirmation on a listing already spelled X).
     conn.execute("CREATE TABLE IF NOT EXISTS statement ("
                  "source TEXT NOT NULL, spelling_norm TEXT NOT NULL, spelling TEXT NOT NULL, "
                  "verdict TEXT NOT NULL CHECK (verdict IN ('is', 'reject')), "
@@ -255,7 +266,7 @@ def _migrate_statements(conn: sqlite3.Connection) -> None:
         raise RuntimeError("config.db holds a pre-two-levels variety_decision table this release cannot migrate; "
                            "open it once with a release before 48672a6, then upgrade")
     now = _now()
-    moved = {"mint": 0, "reject": 0, "binding": 0, "origin": 0}
+    moved = {"mint": 0, "reject": 0, "binding": 0, "implied": 0, "origin": 0}
     for r in conn.execute("SELECT source, variant_norm, variant_display, action, seed_color, seed_type, "
                           "seed_country, seed_name, asked_by FROM variety_decision").fetchall():
         if r["action"] == "reject":
@@ -274,7 +285,8 @@ def _migrate_statements(conn: sqlite3.Connection) -> None:
     for r in conn.execute("SELECT source, variant_norm, variant_display, alias_of, seed_type FROM scoped_alias").fetchall():
         if conn.execute("SELECT 1 FROM statement WHERE source = ? AND spelling_norm = ?",
                         (r["source"], r["variant_norm"])).fetchone():
-            continue                                             # the vendor mint already implies the binding
+            moved["implied"] += 1                                # the vendor mint already implies the binding
+            continue
         conn.execute("INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, asked_by, "
                      "decided_at) VALUES (?, ?, ?, 'is', ?, ?, ?, ?)",
                      (r["source"], r["variant_norm"], r["variant_display"] or r["variant_norm"],
@@ -295,12 +307,30 @@ def _migrate_statements(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE statement SET origin_iso = ?, widen = ? WHERE source = ? AND spelling_norm = ?",
                          (r["country_iso"], r["widen"], hit["source"], hit["spelling_norm"]))
         else:
-            conn.execute("INSERT OR REPLACE INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, "
+            # the statement "this vendor's <name> is <name>": its spelling IS the variety name. That slot must
+            # be free: a vendor statement already there means the same spelling was decided as ANOTHER stone,
+            # and replacing it would silently drop that decision. Refuse and name the rows.
+            taken = conn.execute("SELECT name, stone_type FROM statement WHERE source = ? AND spelling_norm = ?",
+                                 (r["source"], r["variant_norm"])).fetchone()
+            if taken:
+                raise RuntimeError(
+                    f"statement migration: {r['source']}'s origin decision on {r['variant_display'] or r['variant_norm']} "
+                    f"({r['stone_type_norm']}) collides with that vendor's statement on the same spelling "
+                    f"({taken['name']}, {taken['stone_type']}); resolve it in config.db, then restart")
+            conn.execute("INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, "
                          "origin_iso, widen, asked_by, decided_at) VALUES (?, ?, ?, 'is', ?, ?, ?, ?, ?, ?)",
                          (r["source"], r["variant_norm"], r["variant_display"] or r["variant_norm"],
                           r["variant_display"] or r["variant_norm"], r["stone_type_norm"], r["country_iso"],
                           r["widen"], r["source"], now))
         moved["origin"] += 1
+    # row for row: every legacy row is a statement, an update on one, or a binding a vendor mint implies
+    legacy_counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                     for t in ("variety_decision", "scoped_alias", "origin_decision")}
+    accounted = {"variety_decision": moved["mint"] + moved["reject"],
+                 "scoped_alias": moved["binding"] + moved["implied"], "origin_decision": moved["origin"]}
+    if accounted != legacy_counts:
+        raise RuntimeError(f"statement migration did not account for every legacy row: moved {accounted}, "
+                           f"legacy {legacy_counts}; refusing to record it")
     conn.execute("INSERT OR IGNORE INTO migration (name, applied_at) VALUES (?, ?)", (STATEMENTS_MIGRATION, now))
     conn.commit()
     log.warning("decision statements migrated from the legacy tables", extra={"extra_fields": moved})
