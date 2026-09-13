@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "974f5521b54b6a8f62728ca546ee0746f6f2f749"     # :core w/ the six verified open items (one produce path, honest lease clock, one ledger restorer, held-digest memo, sync input hardening, pure wins)
+prod_image_tag     = "f973a5a235300aa0565d46973882971346800904"     # :core w/ curate + loaders packages (#389, pure moves) on top of the six verified open items (#380-#386) and scraper failures on stderr (#385)
 prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :gpu (reads SCRAPER_ env, prod bucket); was gpu-f9d828e0 (Aug18, pre-rename -> hit dev bucket)
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
