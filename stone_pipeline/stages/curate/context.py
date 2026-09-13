@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from stone_pipeline.adapters.tokens import clean_variety, strip_format
-from stone_pipeline.config.decisions_store import scope_key
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core.schema import CanonicalRow, GapKind
@@ -37,20 +37,6 @@ def alias_model():
     return from_backbones()
 
 
-def decided(table, source: str, name: str, clean: str):
-    """The operator's decision for a row, from a map or set keyed by scope_key: (vendor, spelling) for a
-    decision the vendor made for itself, ('', spelling) for what the spelling means to everyone. Vendor first,
-    then global; and at each level the SCRAPED spelling first ('bianco white marble', what a statement is keyed
-    by), the cleaned identity second ('bianco white', what an older decision is keyed by)."""
-    for key in (scope_key(source, name), scope_key(source, clean), scope_key("", name), scope_key("", clean)):
-        if isinstance(table, set):
-            if key in table:
-                return True
-        elif key in table:
-            return table[key]
-    return False if isinstance(table, set) else None
-
-
 @dataclass
 class Curation:
     """Everything the curation phases share: the inputs read once, the operator's decision maps, and the
@@ -61,12 +47,7 @@ class Curation:
     existing_surface: dict          # norm(surface) -> {(owner norm-name, owner norm-type)}
     generic_words: set
     retired_keys: set
-    confirm_decisions: dict
-    rejected: set
-    seed_colors: dict
-    seed_types: dict
-    seed_names: dict
-    seed_scopes: dict
+    decisions: Decisions            # every operator decision, ONE object; each phase asks it one question
     resolver: object
     near_meta: dict
     alias_floor: float
@@ -83,7 +64,7 @@ class Curation:
     variety_images: dict = field(default_factory=dict)     # norm(clean) -> first evidence image
 
 
-def new_curation(rows: list[CanonicalRow], ref: ReferenceData) -> Curation:
+def new_curation(rows: list[CanonicalRow], ref: ReferenceData, operator: Decisions | None = None) -> Curation:
     # The two inputs a curation is built from -- the existing-variety index and the alias model -- are
     # resolved through the PACKAGE at call time: the package facade is the one seam an operator harness or a
     # test replaces (`curate.load_all_existing`, `curate._alias_model`), so the replacement reaches here.
@@ -119,13 +100,9 @@ def new_curation(rows: list[CanonicalRow], ref: ReferenceData) -> Curation:
     return Curation(
         rows=rows, ref=ref, imports=imports, existing_surface=existing_surface, generic_words=generic_words,
         retired_keys=retired_keys,
-        # human decisions (the durable decision ledger) + the persistent reject memory
-        confirm_decisions=decisions.load_confirm_decisions(),
-        rejected=decisions.load_rejected(),
-        seed_colors=decisions.load_variety_seed_colors(),   # scope_key -> operator mint colour (over 'Natural')
-        seed_types=decisions.load_variety_seed_types(),     # scope_key -> operator-assigned stone type
-        seed_names=decisions.load_variety_seed_names(),     # scope_key -> operator-corrected NAME (rename)
-        seed_scopes=decisions.load_variety_seed_scopes(),   # scope_key -> that vendor, for a vendor-level mint
+        # the operator's decisions (the durable decision ledger, incl. the reject memory), ONE object: the
+        # stage entry passes the one it loaded for the whole produce; a direct caller loads it here
+        decisions=operator if operator is not None else decisions.load_decisions(),
         resolver=resolver, near_meta=near_meta,
         alias_floor=SETTINGS.curation.alias_suggest_floor,
         # The canonical Medusa stone types. A scraped type that is not one of these is not a real type (an
@@ -147,7 +124,7 @@ def level(c: Curation, src_site: str, name: str, clean: str) -> str:
     own for this spelling (a vendor-level mint, keyed (source, spelling) so another vendor never sees it),
     else '' for the global meaning of the spelling. Two vendors on the global level are ONE identity; a
     vendor on its own level is a separate identity that mints its own variety beside the global one."""
-    return proj.norm(decided(c.seed_scopes, src_site, name, clean) or "")
+    return c.decisions.scope(src_site, name, clean)
 
 
 def variety_identity(c: Curation, row: CanonicalRow) -> tuple[str, str, str]:
@@ -175,7 +152,7 @@ def variety_identity(c: Curation, row: CanonicalRow) -> tuple[str, str, str]:
     # OPERATOR AUTHORITY: a MINT decision's chosen type overrides the scraper's suggestion; absent a mint
     # type, the scrape type stands (a vendor statement with a type binds through the matcher's scoped-alias
     # tier, so it never reaches here as a type-less gap). Non-canonical operator types are dropped.
-    op_mint_type = decided(c.seed_types, row.src_site, name, clean) or ""
+    op_mint_type = c.decisions.seed_type(row.src_site, name, clean) or ""
     if op_mint_type and proj.norm(op_mint_type) in c.valid_type_norms:
         stone_type = op_mint_type
     else:

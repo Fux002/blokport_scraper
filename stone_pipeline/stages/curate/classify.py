@@ -13,7 +13,7 @@ from stone_pipeline.core.schema import GapKind
 from stone_pipeline.core.text import looks_code_shaped, looks_like_artifact
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.stages.curate.aliasing import alias_and_backfill, collision_owners
-from stone_pipeline.stages.curate.context import (Curation, decided, is_generic, is_token_subset, level,
+from stone_pipeline.stages.curate.context import (Curation, is_generic, is_token_subset, level,
                                                   variety_identity)
 from stone_pipeline.stages.curate.minting import mint
 from stone_pipeline.stages.curate.review import (hold_code, hold_collision, hold_for_type, hold_new,
@@ -55,7 +55,7 @@ def classify(c: Curation) -> None:
         # gap) still enters classification when the operator decided its scraped spelling is a mint FOR
         # THIS vendor. The mint arm `continue`s before any gap dereference; a matched row with no own
         # decision keeps its match.
-        if gap is None and decided(c.confirm_decisions, row.src_site, name, clean) != "yes":
+        if gap is None and c.decisions.confirm(row.src_site, name, clean) != "yes":
             continue
         # DEDUP: one decision per cleaned identity, keyed on (RESOLVED type, cleaned name, decision level)
         # -- the SAME identity gen_key uses, so two same-named varieties of DIFFERENT types are EACH minted,
@@ -85,9 +85,9 @@ def _reject_or_decide(c: Curation, row, gap, name: str, stone_type: str, clean: 
     if looks_like_artifact(clean):            # not a variety name at all (code artifact)
         c.suspicious.append({"src_site": row.src_site, "raw_name": name, "cleaned_name": clean})
         return True
-    if decided(c.rejected, row.src_site, name, clean):        # a human said 'no' on a past run
+    if c.decisions.is_rejected(row.src_site, name, clean):    # a human said 'no' on a past run
         return True
-    if decided(c.confirm_decisions, row.src_site, name, clean) == "yes":
+    if c.decisions.confirm(row.src_site, name, clean) == "yes":
         # every mint edge (type-less, already-exists, retired) is handled at the single enforcement point
         # in emit_new_variants, so mint is safe to call directly
         mint(c, clean, stone_type, row, gap)

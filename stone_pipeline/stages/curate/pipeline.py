@@ -11,6 +11,7 @@ from stone_pipeline.stages.curate.aliasing import (collect_matched_aliases, drop
                                                    emit_alias_rows)
 from stone_pipeline.stages.curate.attributes import build_attribute_curation
 from stone_pipeline.stages.curate.classify import classify, observe_branches_and_images
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.stages.curate.context import CurationResult, new_curation
 from stone_pipeline.stages.curate.existing import load_all_existing
 from stone_pipeline.stages.curate.keys import BRANCHES
@@ -20,11 +21,13 @@ from stone_pipeline.stages.curate.output import write_curation
 log = logfmt.get_logger("curate")
 
 
-def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
+def build_curation(rows: list[CanonicalRow], ref: ReferenceData,
+                   operator: Decisions | None = None) -> CurationResult:
     """The curation of one produce: what the operator must decide (pending cards), which scraped spellings
     attach to existing varieties (alias additions), and which genuinely new varieties are minted (import
-    rows + backbone posts + images to generate). Phases in order; see each function."""
-    c = new_curation(rows, ref)
+    rows + backbone posts + images to generate). Phases in order; see each function. `operator` is the
+    decisions object the stage entry loaded once for the produce; a direct caller may omit it."""
+    c = new_curation(rows, ref, operator)
     collect_matched_aliases(c)
     observe_branches_and_images(c)
     classify(c)
@@ -43,7 +46,8 @@ def build_curation(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResu
 
 def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     from stone_pipeline.stages import decisions
-    result = build_curation(rows, ref)
+    operator = decisions.load_decisions()          # read ONCE: the same object curates and audits this produce
+    result = build_curation(rows, ref, operator)
     write_curation(result, rows)
     attr = build_attribute_curation(rows, ref)
     # ONE attribute decision file: adopt any Medusa ids you filled in last run -> attributes.csv,
@@ -62,15 +66,12 @@ def run(rows: list[CanonicalRow], ref: ReferenceData) -> CurationResult:
     result.counts["attributes_adopted"] = adopted
     # Did this produce honour every stored decision? The gaps become cards in the one review list, so a
     # decision the pipeline ignores is visible on the FIRST produce after it, never a day later.
-    from stone_pipeline.config import decisions_store
     from stone_pipeline.stages import decision_audit
     existing = {owner for imp in load_all_existing().values() for owner in imp.by_name_type}
     created = {(proj.norm(v["Name"]), proj.norm(type_slug_from_key(v["Key"]).replace("_", " ")))
                for lst in result.new_variants.values() for v in lst}
     pending_spellings = {proj.norm(p["scraped"]) for p in result.pending_confirm if p.get("scraped")}
-    gaps = decision_audit.audit(rows, existing, created, decisions_store.variety_actions(),
-                                decisions_store.scoped_aliases(), decisions_store.origin_decisions(),
-                                pending_spellings)
+    gaps = decision_audit.audit(rows, existing, created, operator, pending_spellings)
     decisions.write_decision_gaps(gaps)
     result.counts["decision_gaps"] = len(gaps)
     if gaps:

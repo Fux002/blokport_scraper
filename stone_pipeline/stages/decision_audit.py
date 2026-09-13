@@ -20,6 +20,7 @@ Pure: takes the rows and the decision maps, returns the gaps. curate.run writes 
 
 from __future__ import annotations
 
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.matching import projections as proj
 
@@ -36,30 +37,28 @@ def _gap(kind: str, source: str, scraped: str, name: str, stone_type: str, origi
 
 
 def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set[tuple[str, str]],
-          mints: dict[str, dict], scoped: dict[tuple[str, str], tuple[str, str]],
-          origins: dict[tuple[str, str, str], str], pending_spellings: set[str]) -> list[dict]:
+          decisions: Decisions, pending_spellings: set[str]) -> list[dict]:
     """The decisions this produce did NOT honour. `existing` and `created` are (norm name, norm type) sets of
-    the varieties in the reference and the ones minted this run; `mints` is decisions_store.variety_actions();
-    `scoped` / `origins` are the vendor alias and origin maps; `pending_spellings` are the norm scraped spellings
-    still carried by a pending variety card."""
+    the varieties in the reference and the ones minted this run; `decisions` is the one operator-decisions
+    object the produce ran with; `pending_spellings` are the norm scraped spellings still carried by a pending
+    variety card."""
     gaps: list[dict] = []
     by_listing: dict[tuple[str, str], list[CanonicalRow]] = {}
     for r in rows:
         by_listing.setdefault((_norm(r.src_site), _norm(r.variety_match_key or r.raw_name)), []).append(r)
 
-    for (_, spelling), dec in mints.items():
-        if dec["action"] == "mint":
-            name = dec.get("seed_name") or dec.get("spelling") or spelling
-            target = (_norm(name), _norm(dec.get("seed_type")))
+    for (_, spelling), st in decisions.statements.items():
+        if st.is_mint:
+            name = st.name or st.display or spelling
+            target = (_norm(name), _norm(st.stone_type))
             if target not in existing and target not in created:
-                gaps.append(_gap("mint", dec.get("source") or "", spelling, name, dec.get("seed_type") or "",
-                                 dec.get("seed_country") or "",
-                                 f"Mint not applied: no variety '{name}' ({dec.get('seed_type')}) exists after this produce."))
-        elif dec["action"] == "reject" and spelling in pending_spellings:
+                gaps.append(_gap("mint", st.source, spelling, name, st.stone_type or "", st.origin_iso or "",
+                                 f"Mint not applied: no variety '{name}' ({st.stone_type}) exists after this produce."))
+        elif spelling in pending_spellings:
             gaps.append(_gap("reject", "", spelling, spelling, "", "",
                              "Reject not applied: the spelling still has a pending card."))
 
-    for (source, spelling), (target, target_type) in scoped.items():
+    for (source, spelling), (target, target_type) in decisions.bindings.items():
         listings = by_listing.get((source, spelling), [])
         if not listings:
             continue                                                  # no listing this produce: nothing to judge
@@ -74,7 +73,7 @@ def audit(rows: list[CanonicalRow], existing: set[tuple[str, str]], created: set
     by_product: dict[tuple[str, str, str], list[CanonicalRow]] = {}
     for r in rows:
         by_product.setdefault((_norm(r.src_site), _norm(r.variation_name), _norm(r.type_name)), []).append(r)
-    for (source, variety, stone_type), iso in origins.items():
+    for (source, variety, stone_type), iso in decisions.vendor_origins.items():
         products = by_product.get((source, variety, stone_type), [])
         if not products or (variety, stone_type) in created:
             continue

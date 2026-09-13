@@ -3,6 +3,7 @@ resolved cards depended entirely on a Medusa SKU fallback; when it stopped match
 parquet stores the image lists as JSON strings, so the extraction must parse them."""
 
 from stone_pipeline.config import resolved
+from stone_pipeline.config.decisions_model import Decisions
 
 
 def test_first_image_parses_json_list_prefers_supplier_photo():
@@ -35,9 +36,9 @@ def test_resolved_row_carries_widen_keyed_on_the_decided_target(monkeypatch):
            "origin_country_code": "", "origin_source": "", "src_url": "", "raw_image_urls": "", "image_keys": ""}
     scoped = {("zucchi", "amazon marble"): ("Silver Stream", "Marble")}   # bound to Silver Stream
     owiden = {("zucchi", "silver stream", "marble"): "IR"}               # widened, per (src,variety,type)
-    row = resolved._row(rec, scoped, {}, {}, owiden)
+    row = resolved._row(rec, Decisions.from_legacy({}, scoped, {}, owiden))
     assert row["decision"]["name"] == "Silver Stream"
     assert row["widen"] is True and row["documented_origin"] == "IR"
     # not widened -> False
-    row2 = resolved._row(rec, scoped, {}, {}, {})
+    row2 = resolved._row(rec, Decisions.from_legacy({}, scoped))
     assert row2["widen"] is False and row2["documented_origin"] is None

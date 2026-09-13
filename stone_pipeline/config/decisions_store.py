@@ -28,6 +28,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 
 from stone_pipeline.config import store
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.matching import projections as proj
 
@@ -144,6 +145,14 @@ def variety_seed_country_rules() -> dict[tuple[str, str], str]:
     return {(_norm(d["seed_name"] or n[1]), _norm(d["seed_type"])): d["seed_country"]
             for n, d in variety_actions().items()
             if d["action"] == "mint" and d["seed_country"]}
+
+
+def load_decisions() -> Decisions:
+    """EVERY operator decision as one object (config.decisions_model.Decisions), read once per produce. Empty
+    on a fresh store (never materialises config.db from a read, the same rule as the accessors it replaces)."""
+    if not store.config_db_path().exists():
+        return Decisions.empty()
+    return Decisions.from_legacy(variety_actions(), scoped_aliases(), origin_decisions(), origin_widen())
 
 
 def confirm_map() -> dict[str, str]:

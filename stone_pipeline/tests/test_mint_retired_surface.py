@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from stone_pipeline.core.schema import CanonicalRow, GapKind, TreeGap
+from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.reference import loaders
 from stone_pipeline.stages import curate, decisions
 from stone_pipeline.stages.curate import ImportFile
@@ -39,8 +40,8 @@ def _seed(monkeypatch, tmp_path, imports, retired_ref: set):
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))     # isolate durable decisions
     monkeypatch.setattr(curate, "load_all_existing", lambda: imports)
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
-    monkeypatch.setattr(decisions, "load_variety_seed_types", lambda: {("", "retired stone"): "Granite"})
-    monkeypatch.setattr(decisions, "load_confirm_decisions", lambda: {("", "retired stone"): "yes"})   # confirmed mint
+    monkeypatch.setattr(decisions, "load_decisions",           # a confirmed mint, as Granite
+                        lambda: Decisions.from_legacy({("", "retired stone"): {"action": "mint", "seed_type": "Granite"}}))
     monkeypatch.setattr(decisions, "load_retired", lambda: set(retired_ref))   # mutable: baseline empty, then set
 
 

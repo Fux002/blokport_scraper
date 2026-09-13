@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from stone_pipeline.config import decisions_store as ds
 from stone_pipeline.stages import decisions
+from stone_pipeline.tests import _decision_views as views
 
 
 def test_fresh_store_is_empty_never_raises():
-    assert decisions.load_confirm_decisions() == {}
-    assert decisions.load_rejected() == set()
+    assert views.confirm() == {}
+    assert views.rejected() == set()
     assert decisions.load_attribute_ids() == {}
     assert ds.list_pending("variety") == []
 
@@ -42,7 +43,7 @@ def test_review_queue_uniformly_title_cases_display_names():
     assert item["nearest_existing"] == "Rosal"                  # F1: nearest_existing normalized too
     assert item["stone_type"] == "Semi-Precious Stone"          # canonical type intact, not title-mangled
     ds.set_variety_decision("venatto blue", "reject")           # operator can act by any casing (norm-keyed)
-    assert decisions.load_rejected() == {("", "venatto blue")}
+    assert views.rejected() == {("", "venatto blue")}
 
 
 def test_backbone_leaf_queue_title_cases_the_variety_name():
@@ -60,18 +61,18 @@ def test_backbone_leaf_queue_title_cases_the_variety_name():
 def test_mint_and_reject_actions_map_correctly():
     ds.set_variety_decision("Alpha Stone", "mint")
     ds.set_variety_decision("Gamma Stone", "reject")
-    assert decisions.load_confirm_decisions() == {("", "alpha stone"): "yes", ("", "gamma stone"): "no"}
-    assert decisions.load_rejected() == {("", "gamma stone")}
+    assert views.confirm() == {("", "alpha stone"): "yes", ("", "gamma stone"): "no"}
+    assert views.rejected() == {("", "gamma stone")}
 
 
 
 
 def test_re_deciding_a_variety_overwrites():
     ds.set_variety_decision("Flip Stone", "mint")
-    assert decisions.load_confirm_decisions() == {("", "flip stone"): "yes"}
+    assert views.confirm() == {("", "flip stone"): "yes"}
     ds.set_variety_decision("Flip Stone", "reject")           # change your mind
-    assert decisions.load_confirm_decisions() == {("", "flip stone"): "no"}
-    assert decisions.load_rejected() == {("", "flip stone")}
+    assert views.confirm() == {("", "flip stone"): "no"}
+    assert views.rejected() == {("", "flip stone")}
 
 
 def test_invalid_decisions_are_rejected_loudly():

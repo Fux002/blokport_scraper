@@ -17,6 +17,7 @@ import polars as pl
 
 from stone_pipeline.catalog import find_canonical
 from stone_pipeline.config import decisions_store
+from stone_pipeline.config.decisions_model import Decisions
 import json
 
 from stone_pipeline.config.settings import SETTINGS
@@ -53,32 +54,32 @@ def _first_image(rec: dict) -> str:
     return ""
 
 
-def _row(rec: dict, scoped: dict, origins: dict, actions: dict, owiden: dict | None = None) -> dict:
+def _row(rec: dict, dec: Decisions) -> dict:
     source = rec["src_site"] or ""
     scraped = rec["variety_match_key"] or rec["raw_name"] or ""
     name = rec["variation_name"] or ""
     stone_type = rec["type_name"] or ""
-    alias = scoped.get((_norm(source), _norm(scraped)))
-    mint = actions.get(decisions_store.scope_key(source, scraped)) or actions.get(decisions_store.scope_key("", scraped))
+    alias = dec.bindings.get((_norm(source), _norm(scraped)))
+    statement = dec.for_listing(source, scraped)          # the vendor's own statement, else the global one
     decision = None
     if alias:
         decision = {"kind": "bound", "name": alias[0], "stone_type": alias[1] or None}
-    elif mint and mint["action"] == "mint":
-        decision = {"kind": "minted", "name": mint.get("seed_name") or scraped,
-                    "stone_type": mint.get("seed_type"), "color": mint.get("seed_color"),
-                    "origin": mint.get("seed_country")}
-    elif mint and mint["action"] == "reject":
+    elif statement and statement.is_mint:
+        decision = {"kind": "minted", "name": statement.name or scraped,
+                    "stone_type": statement.stone_type, "color": statement.color,
+                    "origin": statement.origin_iso}
+    elif statement:
         decision = {"kind": "rejected"}
     # the vendor's origin is keyed by the variety the product WILL bind to: the decided target when there is
     # one, else the one the last produce bound
     target = (decision or {}).get("name") or name, (decision or {}).get("stone_type") or stone_type
-    origin = origins.get((_norm(source), _norm(target[0]), _norm(target[1])))
+    origin = dec.vendor_origins.get((_norm(source), _norm(target[0]), _norm(target[1])))
     if origin:
         decision = {**(decision or {"kind": "origin"}), "origin": origin}
     # WIDEN ("added to the stone's documented origins"): the OPERATOR's checkbox on THIS decision, per-record
     # from origin_widen, keyed on (source, decided target, type). NOT variety-level membership (which would
     # show widen on every sibling decision that binds the same variety).
-    doc_iso = (owiden or {}).get((_norm(source), _norm(target[0]), _norm(target[1])))
+    doc_iso = dec.widened.get((_norm(source), _norm(target[0]), _norm(target[1])))
     return {
         "ref": f"{_norm(source)}|{_norm(scraped)}",
         "source": source, "scraped": scraped, "surrogate_key": rec["surrogate_key"] or "",
@@ -124,11 +125,8 @@ def list_resolved(source: str | None = None, decided: bool | None = None,
     frame = frame.filter(pl.col("variation_key").is_not_null() & (pl.col("variation_key") != ""))
     if source:
         frame = frame.filter(pl.col("src_site") == source)
-    scoped = decisions_store.scoped_aliases()
-    origins = decisions_store.origin_decisions()
-    actions = decisions_store.variety_actions()
-    owiden = decisions_store.origin_widen()   # PER-DECISION widen: {(nsrc, vnorm, tnorm): iso}
-    rows = [_row(rec, scoped, origins, actions, owiden) for rec in frame.to_dicts()]
+    dec = decisions_store.load_decisions()        # every standing decision, read once
+    rows = [_row(rec, dec) for rec in frame.to_dicts()]
     if decided is not None:
         rows = [r for r in rows if (r["decision"] is not None) == decided]
     rows.sort(key=lambda r: (r["source"], _norm(r["scraped"]), r["surrogate_key"]))
