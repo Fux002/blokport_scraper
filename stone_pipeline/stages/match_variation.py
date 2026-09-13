@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from functools import cached_property
 
 from stone_pipeline.config.settings import SETTINGS, Confidence, bulk_form_name, category
 from stone_pipeline.core import logfmt
@@ -101,6 +102,12 @@ class VariationStage:
     generic_descriptor: bool = False
     source_cfg: object = None             # the run's SourceConfig (its declared origin feeds origin_evidence)
     _scoped: dict = field(default_factory=dict)   # (branch, source) -> norm(spelling) -> cid, built once
+
+    @cached_property
+    def _valid_type_norms(self) -> set:
+        # the canonical stone types, built once: an operator mint type is authority only if it is one of
+        # them (identical to curate.variety_identity, so the matcher and curate resolve a mint type the same).
+        return {proj.norm(t) for t in self.ref.attributes.canonical_names("type")}
 
     @classmethod
     def build(cls, ref: ReferenceData, writeback: WriteBack | None = None,
@@ -272,9 +279,10 @@ class VariationStage:
         # the variety; from here the bound row flows through the SAME reconcile/derive/texture path a
         # suggested variant uses. A scraped type that DID match a variety is never overridden.
         if match.cid is None and not (scraped_type and match.ambiguous):
-            # the mint statement for this listing: vendor level first, then global; the scraped spelling
-            # first, then the cleaned identity (curate resolves decisions the same way)
-            op_type = self.ref.decisions.seed_type(row.src_site or "", query, clean)
+            # the mint statement for this listing, resolved the SAME way curate.variety_identity resolves it:
+            # vendor level first then global, scraped spelling then cleaned identity, canonical types only (a
+            # non-canonical mint type is not an identity). One resolver, so the matcher and curate never diverge.
+            op_type = self.ref.decisions.seed_type(row.src_site or "", query, clean, self._valid_type_norms)
             if op_type and proj.norm(op_type) != proj.norm(scraped_type):
                 retry = engine.match(clean, block_type=op_type, block_color=block_color,
                                      overrides=scoped, block_origin=origin)

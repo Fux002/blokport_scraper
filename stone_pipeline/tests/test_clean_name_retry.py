@@ -53,6 +53,7 @@ def _stage(seed_types=None):
             "v_pw": SimpleNamespace(key="slab_onyx_pure_white_7"),
             "v_wo": SimpleNamespace(key="slab_onyx_white_onyx_8")})},
         decisions=Decisions.from_legacy({k: {"action": "mint", "seed_type": t} for k, t in (seed_types or {}).items()}, {}),
+        attributes=SimpleNamespace(canonical_names=lambda cat: ["Granite", "Agate", "Marble", "Onyx", "Quartzite"]),
     )
     return match_variation.VariationStage(ref=ref, engines={"slab": eng}, writeback=WriteBack())
 

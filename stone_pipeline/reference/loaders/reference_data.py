@@ -196,8 +196,6 @@ def load_all() -> ReferenceData:
     # a widened decision ADDS its country to the stone's documented list (union), after every list edit
     ref.origin_map.widen(ref.decisions.widened)
     ref.origin_overrides.apply_overlay(ref.decisions.vendor_origins)
-    _valid_types = {norm(t) for t in ref.attributes.canonical_names("type")}
-    ref.variety_seed_types = {n: t for n, t in ref.decisions.seed_types().items() if norm(t) in _valid_types}
     env()._assert_pack_defaults_resolve(ref)   # a pack default value not in Medusa's vocabulary fails loud here
     log.info(
         "reference loaded",
