@@ -186,14 +186,16 @@ fixture snapshot), one end-to-end statement -> produce -> bind test per level.
 
 ## 7. Sequence
 
-Three PRs, each green on the full suite and deployed dev then prod before the next:
+Three PRs, each green on the full suite and deployed dev then prod before the next. Read side first: it
+carries zero data risk and removes the six maps and the four-key lookup immediately; the table follows.
 
-- **A. Add.** `statement` table, `Decisions`, `load_decisions()`, the migration, the dual-read test. No
-  consumer changes. Deployed; the migration runs at boot on dev, then prod; the dual-read test passes on the
-  prod snapshot.
-- **B. Switch.** Consumers read `Decisions`; `decide()`/`reject()` write the statement table only; the
-  legacy reject route delegates. Behaviour tests unchanged and green. One produce on dev, then prod, with
-  the audit showing zero decision gaps.
+- **A. One read.** `Decisions` and `load_decisions()`, built from the EXISTING tables (a pure projection),
+  carried on `ReferenceData`; every consumer (curate, matcher, loaders overlays, resolved view, audit) reads
+  it and nothing else. `decided()`, `_foreign_scope()`, `level()` and the six context maps go. Behaviour
+  tests unchanged and green; one produce on dev, then prod, with zero decision gaps.
+- **B. One table.** `statement`, the writers (`decide()`, `reject()`, `clear*`), the boot-time migration and
+  the dual-read test (legacy projection == statement projection on the prod snapshot); `load_decisions()`
+  switches source. The legacy reject route delegates.
 - **C. Delete.** Legacy tables renamed, dead accessors and compensations removed, route removed once
   Blokport has switched.
 
