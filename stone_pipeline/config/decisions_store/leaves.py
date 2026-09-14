@@ -1,7 +1,11 @@
 """Backbone leaf-growth decisions: the operator's verdict on adding a colour/finish/quality value (one Medusa
 already has) onto a variety's allowed set. approve grows the tree via the load-time overlay
 (loaders.Backbone.apply_leaf_overlay); the committed backbone seed is never touched. Produce READS the overlay
-and the decided set; the config server records the verdicts."""
+and the decided set; the config server records the verdicts.
+
+A pure table module: it depends on nothing else in the package. The "act on a PENDING leaf" workflows
+(approve_leaf_pending / decide_leaf_pending) are queue consumers and live in queue.py, so the dependency runs
+one way (queue -> leaves), never a cycle."""
 
 from __future__ import annotations
 
@@ -82,40 +86,6 @@ def set_backbone_leaf_decision(variety: str, stone_type: str, attribute: str, va
             "value_display = excluded.value_display, action = excluded.action, decided_at = excluded.decided_at",
             (_norm(variety), _norm(stone_type), attribute, _norm(value), value.strip(), action, _now()))
         conn.commit()
-
-
-def _decide_leaf_from_payload(payload: dict, action: str) -> None:
-    set_backbone_leaf_decision(payload.get("variety", ""), payload.get("stone_type", ""),
-                               payload.get("attribute", ""), payload.get("add_value", ""), action)
-
-
-def approve_leaf_pending(verdict: str | None = None) -> int:
-    """Bulk-approve the still-UNDECIDED pending backbone-leaf suggestions, optionally only those with
-    `verdict` (e.g. 'likely_real'). Never re-flips a row the operator already decided (approve or reject).
-    Returns the count approved. The approvals apply to the tree on the next produce (the standard
-    'applies next produce' contract), and the decided rows drop off the queue on that run."""
-    from . import queue                                          # sibling module; imported here to avoid a cycle
-    n = 0
-    for item in queue.list_pending("backbone_leaf"):
-        if item.get("current_action") is not None:      # already decided; do not re-flip
-            continue
-        if verdict and item.get("verdict") != verdict:
-            continue
-        _decide_leaf_from_payload(item, "approve")
-        n += 1
-    return n
-
-
-def decide_leaf_pending(ref: str, action: str) -> bool:
-    """Record one operator verdict (approve|reject) on the pending backbone-leaf suggestion identified by
-    `ref`. Reads the queued payload so the client need not resend the display fields. Returns False if no
-    such pending item (already decided or unknown ref)."""
-    from . import queue                                          # sibling module; imported here to avoid a cycle
-    payload = queue.pending_payload("backbone_leaf", ref)
-    if payload is None:
-        return False
-    _decide_leaf_from_payload(payload, action)
-    return True
 
 
 def list_decided_leaves() -> list[dict]:

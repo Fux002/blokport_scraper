@@ -11,6 +11,7 @@ from contextlib import closing
 from stone_pipeline.config import store
 from stone_pipeline.config.decisions_model import Decisions
 
+from . import leaves
 from ._common import InvalidDecision, _norm, _now
 from .statements import scope_key
 
@@ -139,8 +140,7 @@ def list_pending(kind: str) -> list[dict]:
     # comes back undecided even though the bind is stored (the Gold-card bug). Reject is the exception: it
     # is keyed on the ref, so ref is kept as a candidate too.
     from stone_pipeline.config import decisions_store          # the facade, so a test that patches
-    from . import leaves                                       # load_decisions is honored; leaves lazily (cycle)
-    dec = decisions_store.load_decisions() if kind in ("variety", "origin") else Decisions.empty()
+    dec = decisions_store.load_decisions() if kind in ("variety", "origin") else Decisions.empty()  # is honored
     leaf_actions = leaves._leaf_actions_by_ref() if kind == "backbone_leaf" else {}
     # for origin, key the confirmed country by the SAME composite ref the queue uses, so a decision made
     # between runs shows as current_country until the next produce regenerates the queue (and drops it).
@@ -176,3 +176,37 @@ def list_pending(kind: str) -> list[dict]:
             item["decided"] = leaf_actions.get(r["ref"]) is not None
         out.append(item)
     return out
+
+
+# -- acting on a pending backbone-leaf item (a queue consumer that records a leaf verdict) ------------------
+
+def _decide_leaf_from_payload(payload: dict, action: str) -> None:
+    leaves.set_backbone_leaf_decision(payload.get("variety", ""), payload.get("stone_type", ""),
+                                      payload.get("attribute", ""), payload.get("add_value", ""), action)
+
+
+def approve_leaf_pending(verdict: str | None = None) -> int:
+    """Bulk-approve the still-UNDECIDED pending backbone-leaf suggestions, optionally only those with
+    `verdict` (e.g. 'likely_real'). Never re-flips a row the operator already decided (approve or reject).
+    Returns the count approved. The approvals apply to the tree on the next produce (the standard
+    'applies next produce' contract), and the decided rows drop off the queue on that run."""
+    n = 0
+    for item in list_pending("backbone_leaf"):
+        if item.get("current_action") is not None:      # already decided; do not re-flip
+            continue
+        if verdict and item.get("verdict") != verdict:
+            continue
+        _decide_leaf_from_payload(item, "approve")
+        n += 1
+    return n
+
+
+def decide_leaf_pending(ref: str, action: str) -> bool:
+    """Record one operator verdict (approve|reject) on the pending backbone-leaf suggestion identified by
+    `ref`. Reads the queued payload so the client need not resend the display fields. Returns False if no
+    such pending item (already decided or unknown ref)."""
+    payload = pending_payload("backbone_leaf", ref)
+    if payload is None:
+        return False
+    _decide_leaf_from_payload(payload, action)
+    return True

@@ -21,13 +21,13 @@ from __future__ import annotations
 
 from ._common import InvalidDecision
 from .attributes import attribute_ids, clear_attribute_ids, set_attribute_id
-from .leaves import (_LEAF_ATTRIBUTES, approve_leaf_pending, backbone_leaf_overlay, clear_leaf_decisions,
-                     decide_leaf_pending, leaf_decided, list_decided_leaves, revise_leaf_decision,
-                     set_backbone_leaf_decision)
+from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, leaf_decided,
+                     list_decided_leaves, revise_leaf_decision, set_backbone_leaf_decision)
 from .origins import (clear_variety_origins, delete_variety_origin, get_variety_origin, list_variety_origins,
                       set_variety_origin, variety_origins)
 from .protected import add_protected, clear_protected, protected_keys
-from .queue import clear_review_pending, list_pending, pending_payload, replace_pending
+from .queue import (approve_leaf_pending, clear_review_pending, decide_leaf_pending, list_pending,
+                    pending_payload, replace_pending)
 from .statements import (_statement_rows, _upsert_statement, clear, clear_all_statements, clear_for_variety,
                          decide, load_decisions, reject, scope_key)
 
