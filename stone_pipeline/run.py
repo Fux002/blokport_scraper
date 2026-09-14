@@ -227,6 +227,7 @@ def _write_diagnostics(manifest, layout) -> None:
         "magnitude": manifest.magnitude_status,
         "gates": manifest.gate_status,
         "funnel": _funnel(manifest.stage_metrics),
+        "held": manifest.held,          # the "what was skipped and why" worklist (grouped by reject rule)
         "stages": [
             {"stage": m.stage, "status": m.status, "rows_in": m.rows_in, "rows_out": m.rows_out,
              "rejected": m.rejected, "reviewed": m.reviewed, "gapped": m.gapped, "extra": m.extra}
@@ -466,6 +467,8 @@ def run_source(
     manifest.add_stage(StageMetric(stage="validate", status=_val_status, rows_in=len(rows),
                                    rows_out=len(validation.emit), rejected=len(validation.rejects),
                                    reviewed=len(validation.review_only), extra={"images_staged": img_stats.staged}))
+    # the operator-facing worklist for the diagnostics panel: why each held row was skipped + how it clears
+    manifest.held = validate.held_breakdown(validation.rejects)
 
     # metrics
     manifest.match_method_distribution = dict(Counter(r.variation_method for r in rows))

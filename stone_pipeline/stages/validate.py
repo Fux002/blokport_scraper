@@ -18,8 +18,46 @@ from dataclasses import dataclass, field
 from stone_pipeline.config.settings import active_categories
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
+from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS
 
 log = logfmt.get_logger("validate")
+
+# the operator-facing worklist metadata per hard-reject rule (pinned in gates/requirements.py)
+_REQ_BY_RULE = {r.rule: r for r in MEDUSA_REQUIREMENTS}
+_KIND_ORDER = {"decision": 0, "config": 1, "transient": 2}   # actionable first, self-healing last
+_MAX_EXAMPLES = 6
+
+
+def _row_label(row: CanonicalRow) -> str:
+    return (row.variation_name or row.raw_name or "").strip() or row.surrogate_key
+
+
+def held_breakdown(rejects: list[CanonicalRow]) -> list[dict]:
+    """The 'what was skipped and why' worklist for the diagnostics panel: the rejected rows grouped by the
+    requirement rule they failed, each with the operator-facing title / kind / recovery from the pinned
+    registry, a count, and up to a few example products. A row failing several rules appears under each, so
+    the per-group counts can sum above the distinct rejected total. Sorted actionable-first."""
+    groups: dict[str, dict] = {}
+    for row in rejects:
+        for rule in dict.fromkeys(rr.rule for rr in row.reject_reasons):     # once per rule per row
+            g = groups.setdefault(rule, {"count": 0, "examples": []})
+            g["count"] += 1
+            if len(g["examples"]) < _MAX_EXAMPLES:
+                detail = next((rr.detail for rr in row.reject_reasons if rr.rule == rule and rr.detail), "")
+                g["examples"].append({"name": _row_label(row), "detail": detail})
+    out = []
+    for rule, g in groups.items():
+        req = _REQ_BY_RULE.get(rule)
+        out.append({
+            "rule": rule, "count": g["count"],
+            "kind": req.kind if req else "decision",
+            "title": req.title if req else rule,
+            "recovery": req.recovery if req else "",
+            "self_heals": bool(req and req.kind == "transient"),
+            "examples": g["examples"],
+        })
+    out.sort(key=lambda d: (_KIND_ORDER.get(d["kind"], 9), -d["count"]))
+    return out
 
 # required attribute ids for a row to be importable (section 7 Stage 9, 6A)
 REQUIRED_ID_FIELDS = ("type_id", "color_id", "finish_id", "quality_id", "variation_id")
