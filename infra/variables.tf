@@ -193,6 +193,12 @@ variable "prod_image_upgrade_batch" {
   default     = 0
 }
 
+variable "run_timeout_seconds" {
+  description = "Ceiling on one produce run (seconds) before the runner kills it as wedged. One value for dev and prod: the runs are the same shape in both."
+  type        = number
+  default     = 14400
+}
+
 variable "dev_enable_execute_command" {
   description = "Allow ECS Exec into the dev sync service (operator access to the live ledger). Prod deliberately has no equivalent."
   type        = bool

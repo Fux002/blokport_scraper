@@ -332,6 +332,7 @@ module "sync_service_dev" {
   # DEV tracks :core (= what's on main); the branch is merged. :core = bbf35a2 (WAL + local-disk ledger).
   image_tag              = var.image_tag
   image_upgrade_batch    = var.dev_image_upgrade_batch
+  run_timeout_seconds    = var.run_timeout_seconds
   enable_execute_command = var.dev_enable_execute_command
   region                 = var.region
   staging_bucket         = var.dev_staging_bucket
@@ -423,6 +424,7 @@ module "sync_service_prod" {
   staging_bucket      = var.prod_staging_bucket
   memory              = 8192 # same catalog RAM peak as dev (produce ~1.5 GB + servers ~0.5 GB)
   image_upgrade_batch = var.prod_image_upgrade_batch
+  run_timeout_seconds = var.run_timeout_seconds
 
   vpc_id                = data.terraform_remote_state.platform_prod[0].outputs.vpc_id
   private_subnet_ids    = data.terraform_remote_state.platform_prod[0].outputs.private_subnet_ids
