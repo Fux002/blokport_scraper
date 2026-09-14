@@ -47,6 +47,10 @@ dev_image_upgrade_batch = 1000
 
 prod_image_upgrade_batch = 1000
 
+# Produce ceiling, both envs (the runner kills a run past it). 4 h: a full live scrape with fresh images
+# passed 2 h on 2026-09-14 and was killed as wedged.
+run_timeout_seconds = 14400
+
 prod_auto_enhance     = true
 prod_auto_texture     = true
 prod_require_enhanced = true

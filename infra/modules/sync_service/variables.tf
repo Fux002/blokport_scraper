@@ -156,6 +156,12 @@ variable "image_upgrade_batch" {
   default     = 0
 }
 
+variable "run_timeout_seconds" {
+  description = "Ceiling on one produce run before the runner kills it as wedged. A healthy full run (live scrape, fresh images, catalog, certify) takes about an hour; 4 h leaves room for a slow day without letting a stuck run hold the lock forever."
+  type        = number
+  default     = 14400
+}
+
 variable "enable_execute_command" {
   description = "Allow ECS Exec (aws ecs execute-command) into the running task. Off by default: it opens an interactive shell into a task that holds the live ledger, so it is enabled per environment, deliberately."
   type        = bool
