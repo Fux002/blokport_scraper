@@ -56,7 +56,10 @@ def _lookups(exists_as, alias_target, clean=None) -> tuple:
     """The variety lookups a statement is judged against, injected by tests and resolved here otherwise:
     exists_as / alias_target read the ledger (config.varieties), clean is the matcher's cleaner (adapters.tokens).
     Resolved per call, not at import, so this store stays free of the pipeline's settings and adapter packages.
-    The two ledger lookups are memoised per call: a load asks them once per distinct (name, type)."""
+
+    The default ledger lookups (config.varieties) read a per-ledger cached index, so a load asking them once
+    per statement does ONE ledger scan, not one per name (the O(statements x scan) hang this replaces).
+    Injected lookups (tests) are memoised per (name, type)."""
     if exists_as is None or alias_target is None:
         from stone_pipeline.config import varieties
         exists_as, alias_target = exists_as or varieties.exists_as, alias_target or varieties.alias_target

@@ -17,12 +17,22 @@ the file went stale.
 If no produce has ever run on this host (no ledger yet), the vocab is empty and every alias is refused --
 a safe, explicit failure, not a fallback that accepts an alias that would resolve to nothing.
 
-Read per call (admin traffic is low-QPS); no caching layer, to keep this simple and never stale.
+The ledger scan is cached behind a fingerprint of the ledger (+ its WAL) and config.db, so the many name
+lookups of one load_decisions do ONE scan, not one per name (the O(names x ledger) hang otherwise). The
+fingerprint keeps it from ever serving stale data: any produce (ledger) or decision/reset (config.db)
+changes it and the next read rebuilds.
 """
 
 from __future__ import annotations
 
+import json
+import threading
+from pathlib import Path
+
 from stone_pipeline.matching import projections as proj
+
+_CACHE_LOCK = threading.Lock()
+_CACHE: dict = {"fp": object(), "rows": [], "alias": {}}   # rows: deduped varieties; alias: (na, nt) -> name|None
 
 
 def _like_escape(s: str) -> str:
@@ -30,38 +40,82 @@ def _like_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _rows(q: str | None = None) -> list[dict]:
-    """Existing, non-retired varieties from the ledger variation table: [{'name', 'stone_type'}], deduped
-    by normalized name (a variety shared across branches is ONE alias target) and sorted by name. Optional
-    `q` filters by name substring in SQL, so a type-ahead never materialises the full ~25k set. Empty (no
-    side effect) when no ledger exists yet."""
+def _fingerprint():
+    """A cheap fingerprint of everything the index depends on: the ledger db + its WAL (the variety rows) and
+    config.db (the retired set). Any write changes a size/mtime, so the cache never serves stale data."""
+    from stone_pipeline.config import store
+    from stone_pipeline.ledger import writethrough
+
+    def _stat(p) -> tuple | None:
+        try:
+            s = Path(p).stat()
+            return (s.st_size, s.st_mtime_ns)
+        except OSError:
+            return None
+    lp = str(writethrough.ledger_path())
+    return (_stat(lp), _stat(lp + "-wal"), _stat(store.config_db_path()))
+
+
+def _index() -> tuple[list[dict], dict]:
+    """(deduped variety rows, alias map) from ONE ledger scan, cached until the fingerprint changes. rows are
+    [{'name','stone_type'}] deduped by (norm name, norm type); alias maps (norm alias, norm type) -> canonical
+    NAME, or None where an alias sits on two distinct same-type varieties (ambiguous, never guessed). Empty
+    when no ledger exists yet."""
+    fp = _fingerprint()
+    with _CACHE_LOCK:
+        if _CACHE["fp"] == fp:
+            return _CACHE["rows"], _CACHE["alias"]
+    rows, alias = _build_index()
+    with _CACHE_LOCK:
+        _CACHE.update(fp=fp, rows=rows, alias=alias)
+    return rows, alias
+
+
+def _build_index() -> tuple[list[dict], dict]:
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.stages import decisions
     if not writethrough.ledger_path().exists():
-        return []                                     # no produce yet -> empty, every alias refused
+        return [], {}                                 # no produce yet -> empty, every alias refused
     retired = decisions.load_retired()
-    sql = "SELECT key, name, type FROM variation WHERE name IS NOT NULL AND name != ''"
-    params: tuple = ()
-    if q:
-        sql += " AND name LIKE ? ESCAPE '\\'"
-        params = (f"%{_like_escape(q)}%",)
-    sql += " ORDER BY name COLLATE NOCASE"
     seen: set[tuple[str, str]] = set()
-    out: list[dict] = []
+    rows: list[dict] = []
+    alias_hits: dict[tuple[str, str], set[str]] = {}
     with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
-        for r in lg.execute(sql, params):
-            if r["key"] in retired:                   # retired varieties are not valid alias targets
+        for r in lg.execute("SELECT key, name, type, aliases FROM variation "
+                            "WHERE name IS NOT NULL AND name != '' ORDER BY name COLLATE NOCASE"):
+            if r["key"] in retired:                   # retired varieties are not valid targets
                 continue
-            # Dedup on (name, TYPE), not name alone: the slab/block/tile copies of ONE variety share both
-            # and collapse to a single alias target, but a legitimately multi-type name ('Coffee' = Marble
-            # AND Onyx) keeps BOTH as distinct targets -- else one stone is hidden from the alias dropdown.
-            key = (proj.norm(r["name"]), proj.norm(r["type"] or ""))
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append({"name": r["name"], "stone_type": r["type"] or ""})
-    return out
+            nt = proj.norm(r["type"] or "")
+            # Dedup on (name, TYPE), not name alone: the slab/block/tile copies of ONE variety share both and
+            # collapse to a single target, but a legitimately multi-type name ('Coffee' = Marble AND Onyx)
+            # keeps BOTH as distinct targets -- else one stone is hidden from the alias dropdown.
+            key = (proj.norm(r["name"]), nt)
+            if key not in seen:
+                seen.add(key)
+                rows.append({"name": r["name"], "stone_type": r["type"] or ""})
+            if r["aliases"]:
+                try:
+                    aliases = json.loads(r["aliases"])
+                except (ValueError, TypeError):
+                    aliases = []
+                for a in aliases:
+                    na = proj.norm(a)
+                    if na:
+                        alias_hits.setdefault((na, nt), set()).add(r["name"])
+    alias = {k: (next(iter(v)) if len(v) == 1 else None) for k, v in alias_hits.items()}
+    return rows, alias
+
+
+def _rows(q: str | None = None) -> list[dict]:
+    """Existing, non-retired varieties from the ledger variation table: [{'name', 'stone_type'}], deduped by
+    normalized name and sorted. `q` filters by name substring (a type-ahead). Empty when no ledger exists yet.
+    Backed by the cached ledger index, so calling it many times in one pass does not re-scan the ledger."""
+    rows, _ = _index()
+    if q:
+        ql = q.lower()
+        rows = [r for r in rows if ql in (r["name"] or "").lower()]
+    return rows
 
 
 def list_all(q: str | None = None, limit: int | None = None) -> list[dict]:
@@ -93,27 +147,9 @@ def alias_target(name: str, stone_type: str) -> str | None:
     resolves to, never mint a duplicate of it (e.g. 'Artemis' is an alias of 'Andes' Quartzite, so a mint of
     'Artemis' Quartzite is really a bind to 'Andes'). Match is normalized equality ONLY -- never fuzzy or
     phonetic -- and type-scoped, so the atomic (type, name) identity is preserved. Ambiguous (the alias sits
-    on two distinct same-type varieties) -> None, never a guess. Same ledger source as exists_as; None when
-    no ledger exists yet."""
-    import json
-
-    from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger
-    from stone_pipeline.stages import decisions
+    on two distinct same-type varieties) -> None, never a guess. Reads the cached ledger index."""
     n, t = proj.norm(name or ""), proj.norm(stone_type or "")
-    if not n or not t or not writethrough.ledger_path().exists():
+    if not n or not t:
         return None
-    retired = decisions.load_retired()
-    hits: set[str] = set()
-    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME) as lg:
-        for r in lg.execute("SELECT key, name, type, aliases FROM variation "
-                            "WHERE name IS NOT NULL AND name != '' AND aliases IS NOT NULL AND aliases != ''"):
-            if r["key"] in retired or proj.norm(r["type"] or "") != t:
-                continue
-            try:
-                aliases = json.loads(r["aliases"])
-            except (ValueError, TypeError):
-                continue
-            if any(proj.norm(a) == n for a in aliases):
-                hits.add(r["name"])
-    return next(iter(hits)) if len(hits) == 1 else None    # never guess across an ambiguous alias
+    _, alias = _index()
+    return alias.get((n, t))
