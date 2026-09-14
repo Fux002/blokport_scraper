@@ -25,7 +25,7 @@ case "$RUN_MODE" in
     echo "==> reprocess a source's scraped/ originals -> improved/ (no scrape)"
     exec python -m deploy.reprocess_source ;;
   generate-textures)
-    echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> dev/variations/), no scrape"
+    echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> the env's variations/ prefix), no scrape"
     exec python -m stone_pipeline.prepare_variant_images ;;
   *)
     echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: validate-dewatermark | reprocess | generate-textures)" >&2
