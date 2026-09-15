@@ -95,7 +95,8 @@ def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
     overwritten every produce (a variety no longer minted this run drops out of it), but the overlay this
     feeds carries the membership forever, and apply_leaf_overlay CREATES the record for a variety absent from
     every backbone file. `rows` are (variety, stone_type, attribute, value); a bad attribute/empty value is
-    skipped (never a guessed row). One transaction; idempotent (ON CONFLICT). Returns rows written."""
+    skipped (never a guessed row). One transaction; idempotent (ON CONFLICT). Returns the count of valid
+    rows written (each inserted OR updated in place -- a re-run rewrites the same rows, changing nothing)."""
     written = 0
     with closing(store.open_store()) as conn:
         for variety, stone_type, attribute, value in rows:
@@ -112,17 +113,6 @@ def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
             written += 1
         conn.commit()
     return written
-
-
-def drop_backbone_membership(variety: str, stone_type: str) -> int:
-    """Remove a variety's leaf decisions (its overlay membership). unmint deletes the mint statement and, in
-    the same transaction, drops this membership (see statements.clear_for_variety); this standalone form is
-    for any caller that needs the drop alone. Returns rows deleted."""
-    with closing(store.open_store()) as conn:
-        n = conn.execute("DELETE FROM backbone_leaf_decision WHERE variety_norm = ? AND stone_type_norm = ?",
-                         (_norm(variety), _norm(stone_type))).rowcount
-        conn.commit()
-    return n
 
 
 def list_decided_leaves() -> list[dict]:

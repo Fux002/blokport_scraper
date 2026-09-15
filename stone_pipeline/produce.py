@@ -229,6 +229,7 @@ def _persist_and_publish(stage: str, rc: int) -> int:
         return rc
     from stone_pipeline.ledger import snapshot
     snapshot.save_artifacts()
+    snapshot.save_state()       # persist the learned-alias write-back so a roll does not re-review spellings
     if stage in _CATALOG_STAGES:
         from deploy import upload_artifacts
         try:

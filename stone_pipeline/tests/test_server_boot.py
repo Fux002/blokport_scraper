@@ -27,6 +27,7 @@ def _record_all(monkeypatch, calls, restore_config_raises=False):
     monkeypatch.setattr(snapshot, "restore", lambda *a, **k: calls.append("restore_ledger") or True)
     monkeypatch.setattr(snapshot, "await_file", lambda *a, **k: calls.append("await_ledger"))
     monkeypatch.setattr(snapshot, "restore_artifacts", lambda *a, **k: calls.append("artifacts"))
+    monkeypatch.setattr(snapshot, "restore_state", lambda *a, **k: calls.append("state"))
     monkeypatch.setattr(snapshot, "restore_combinations_baseline", lambda *a, **k: calls.append("baseline"))
     monkeypatch.setattr(fetch_inputs, "fetch_attributes", lambda *a, **k: calls.append("attributes") or False)
 
@@ -37,7 +38,8 @@ def test_boot_runs_in_the_documented_order(monkeypatch, tmp_path):
     server.boot(tmp_path / "config.db", tmp_path / "ledger.db")
     # the config container never downloads the ledger itself: two restorers racing on the shared volume could
     # replace a ledger the sync server was already serving (and acking into). It waits for the one restorer.
-    assert calls == ["restore_config", "seed", "reconcile", "await_ledger", "artifacts", "baseline", "attributes"]
+    assert calls == ["restore_config", "seed", "reconcile", "await_ledger", "artifacts", "state", "baseline",
+                     "attributes"]
 
 
 def test_a_required_restore_failure_aborts_boot_before_anything_else(monkeypatch, tmp_path):

@@ -195,7 +195,10 @@ def _get_diagnostics(params, body, query):
     from stone_pipeline.config import diagnostics
     rows = diagnostics.read_all()
     _attach_image_progress(rows)
-    return 200, {"diagnostics": rows}
+    resp = {"diagnostics": rows}
+    if (pending := diagnostics.pending_apply()) is not None:
+        resp["pending_apply"] = pending      # global "N decisions changed since last produce -> re-produce"
+    return 200, resp
 
 
 def _get_diagnostics_source(params, body, query):
@@ -865,6 +868,9 @@ def boot(config_db, ledger_path) -> None:
     # off the ephemeral disk, so without this a redeploy wipes the last scrape and they abort with "no
     # source runs". No-op when a local scrape already exists or none has been snapshotted yet.
     snapshot.restore_artifacts()
+    # ...and the learned-alias write-back (state/alias_writeback.csv): matcher consistency accumulated over
+    # prior runs, on the same ephemeral disk. No-op when a local one already exists or none was snapshotted.
+    snapshot.restore_state()
     # ...and the last published big-list combinations file, which tree_build diffs against to emit only the
     # NEW combinations ("build on it"). Without it a cold task re-emits the whole ~2M set as the delta.
     snapshot.restore_combinations_baseline()

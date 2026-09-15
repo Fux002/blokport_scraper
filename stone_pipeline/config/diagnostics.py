@@ -99,6 +99,19 @@ def read_all(path: str | Path | None = None) -> list[dict]:
     return store.read_source_diagnostics(path=path)
 
 
+def pending_apply(path: str | Path | None = None) -> dict | None:
+    """The GLOBAL 're-produce to apply' banner for the diagnostics endpoint: operator decisions recorded
+    since the last catalog-applying produce are not yet reflected in the emitted catalog. Best-effort and
+    isolated (mirrors the images block): returns None on any read error so it never fails the diagnostics
+    response. See store.decisions_pending_apply for the (no-scan) computation."""
+    from stone_pipeline.config import store
+    try:
+        return store.decisions_pending_apply(path=path)
+    except Exception:
+        log.exception("pending-apply signal failed (non-fatal)")
+        return None
+
+
 def held_for_image(summary: dict) -> int:
     """Products the last produce could NOT emit but a republish CAN still emit once their image lands -- the
     REPUBLISHABLE subset of the images stage `no_image` count: rows that have a usable source image which is

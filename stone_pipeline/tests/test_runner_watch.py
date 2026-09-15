@@ -38,6 +38,7 @@ def _quiet(monkeypatch):
         monkeypatch.setattr(runner, name, lambda *a, **k: {} if name == "_capture_counts" else None)
     from stone_pipeline.ledger import snapshot
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: None)
+    monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
 
 
 def test_produce_log_is_streamed_and_the_tail_is_kept_on_failure(monkeypatch, capsys):

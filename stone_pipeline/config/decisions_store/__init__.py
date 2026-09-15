@@ -21,8 +21,8 @@ from __future__ import annotations
 
 from ._common import InvalidDecision
 from .attributes import attribute_ids, clear_attribute_ids, set_attribute_id
-from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, drop_backbone_membership,
-                     leaf_decided, list_decided_leaves, record_minted_membership, revise_leaf_decision,
+from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, leaf_decided,
+                     list_decided_leaves, record_minted_membership, revise_leaf_decision,
                      set_backbone_leaf_decision)
 from .origins import (clear_variety_origins, delete_variety_origin, get_variety_origin, list_variety_origins,
                       set_variety_origin, variety_origins)
@@ -47,7 +47,7 @@ __all__ = [
     # backbone leaf-growth
     "backbone_leaf_overlay", "leaf_decided", "set_backbone_leaf_decision", "approve_leaf_pending",
     "decide_leaf_pending", "list_decided_leaves", "revise_leaf_decision", "clear_leaf_decisions",
-    "record_minted_membership", "drop_backbone_membership", "_LEAF_ATTRIBUTES",
+    "record_minted_membership", "_LEAF_ATTRIBUTES",
     # pending review queue
     "replace_pending", "clear_review_pending", "pending_payload", "list_pending",
 ]
