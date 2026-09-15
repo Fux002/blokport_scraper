@@ -61,7 +61,17 @@ class Backbone:
         variety's colour/finish/quality durable through config.db -- the same lifecycle as its mint statement
         (snapshotted, restored, dropped only by a pristine reset). display name / category are cosmetic here:
         lookup is by (norm name, norm type) and reconcile reads only the value sets; the real Name comes from
-        the variation."""
+        the variation.
+
+        SAFETY of create-absent for a NON-mint approval: the overlay does not distinguish a mint's membership
+        from an operator leaf-approval (both are action='approve'), so a stale approval whose variety was
+        later removed from the seed also creates a record here. That created record is inert unless a product
+        resolves to its (name, type) -- and a product can only resolve to a variety present in the matcher's
+        candidate index, which is built from the BASE (existing-variants) file, not this overlay. So a
+        variety absent from the base is never a resolution target: the created record is never looked up and
+        cannot mis-bind. When the variety IS in the base (the actual drift this fixes: minted, in the base,
+        gone from the backbone files), creating it is exactly correct. Either way there is no wrong bind, and
+        the record is rebuilt from config.db each load, never written to the committed seed."""
         fields = {"color": "colors", "finish": "finishes", "quality": "qualities"}
         added = 0
         matched: set[tuple[str, str]] = set()

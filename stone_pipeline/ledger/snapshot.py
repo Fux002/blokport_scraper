@@ -291,6 +291,51 @@ def wipe_artifacts(env: str = ENV_NAME, outputs_dir=None, data_dir=None) -> dict
     return removed
 
 
+# -- learned-alias write-back (matcher consistency) ---------------------------
+# state/alias_writeback.csv holds confirmed fuzzy/phonetic/projection spellings the matcher learned, so a
+# next run resolves them as exact hits instead of re-reviewing (section 8.4). It lives on the task's
+# EPHEMERAL disk, so a roll dropped it and the accumulated consistency was lost. Persist it like the ledger.
+# ONLY this file is durable: state/ also holds magnitude_baselines.json, a DATA-derived drift baseline that
+# MUST regenerate fresh on a cold task (a restored stale baseline could fail emit after a dims/schema change),
+# so it is deliberately not snapshotted. A restored alias whose variant no longer exists is harmless: the
+# matcher applies a learned alias only for a cid present in the current index (index.add_surface_alias guards).
+def state_writeback_key(env: str = ENV_NAME) -> str:
+    """S3 key for the learned-alias write-back, under the DURABLE-state prefix (ENV_NAME) beside the ledger
+    and config.db, NOT the regenerable data plane."""
+    from stone_pipeline.state.writeback import ALIAS_WRITEBACK
+    return f"{env}/scraper/state/{ALIAS_WRITEBACK}"
+
+
+def _writeback_path(env: str = ENV_NAME) -> Path:
+    from stone_pipeline.config.settings import SETTINGS
+    from stone_pipeline.state.writeback import ALIAS_WRITEBACK
+    return Path(SETTINGS.paths.state_dir) / ALIAS_WRITEBACK
+
+
+def save_state(env: str = ENV_NAME) -> bool:
+    """Snapshot the learned-alias write-back after a produce, so a cold task restores accumulated matcher
+    consistency instead of re-learning it. Best-effort plain-file upload (a CSV, NOT the sqlite backup
+    path). No-op when the file does not exist yet. Mirrors save_artifacts."""
+    path = _writeback_path(env)
+    if not path.exists():
+        return False
+    key = state_writeback_key(env)
+    try:
+        _s3().upload_file(str(path), S3_BUCKET, key)
+        log.info("state snapshot uploaded", extra={"extra_fields": {"key": key, "bytes": path.stat().st_size}})
+        return True
+    except Exception:
+        log.exception("state snapshot failed (non-fatal)")
+        return False
+
+
+def restore_state(env: str = ENV_NAME) -> bool:
+    """Restore the learned-alias write-back onto a cold task BEFORE any produce (mirrors restore_artifacts).
+    No-op when a local write-back already exists (a warm task's is fresher) or nothing has been snapshotted
+    yet. Best-effort: a learned alias is self-regenerating, so a lost restore only costs one run's re-learn."""
+    return restore(_writeback_path(env), env, key=state_writeback_key(env))
+
+
 # -- combinations delta baseline ----------------------------------------------
 # tree_build emits the incremental 2_valid_combinations_update.csv by diffing the new set against the
 # PREVIOUS build's to_upload/2_valid_combinations.csv. On a cold task that file is gone, so the "delta"

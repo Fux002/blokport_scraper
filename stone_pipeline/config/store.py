@@ -611,6 +611,51 @@ def last_run_log(path: str | Path | None = None) -> dict | None:
         return json.loads(r["record"]) if r else None
 
 
+# stages that emit a catalog and so APPLY the operator's decisions (mirror produce._CATALOG_STAGES; kept
+# inline to avoid importing the heavy produce module into this low-level store, and store is imported BY it).
+_APPLIED_STAGES = ("catalog", "all", "republish")
+
+
+def decisions_pending_apply(path: str | Path | None = None) -> dict:
+    """The 're-produce to apply' signal (no product scan): how many operator decisions were recorded AFTER
+    the last catalog-applying produce finished, so the emitted catalog does not yet reflect them. A produce
+    binds products from the decisions as they stood when it ran; a decision made since then is pending.
+
+    Counts the `statement` table (bind / mint / reject) and `backbone_leaf_decision` (variety membership) --
+    the two decision stores a produce consumes -- comparing their `decided_at` to the finished_at of the
+    most recent SUCCESSFUL catalog/all/republish run (a scrape-only or inventory run applies no decisions).
+    Statements count by DISTINCT spelling_norm: one operator mint writes a vendor row AND a global (source='')
+    row for the same spelling, so counting rows would double it; a spelling is one decision. (Mint MEMBERSHIP
+    leaf rows are written DURING a produce, so their decided_at precedes that run's finished_at and they do
+    not inflate the post-produce count; only operator leaf approvals between produces do.) All timestamps are
+    UTC `datetime.isoformat()`, so the lexicographic compare is chronological. Reads the bounded run_log
+    (<=50 rows) plus two indexed aggregates. Returns {changed, latest_decision_at, last_produce_at}; changed
+    counts every decision when nothing has produced yet (last_produce_at is None)."""
+    with closing(open_store(path)) as conn:
+        last_produce_at = None
+        for r in conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL "
+                              "ORDER BY finished_at DESC LIMIT 50"):
+            rec = json.loads(r["record"])
+            if rec.get("status") == "succeeded" and rec.get("stage") in _APPLIED_STAGES:
+                last_produce_at = rec.get("finished_at")
+                break
+        latest_decision_at = conn.execute(
+            "SELECT MAX(d) AS latest FROM ("
+            "SELECT MAX(decided_at) AS d FROM statement "
+            "UNION ALL SELECT MAX(decided_at) FROM backbone_leaf_decision)").fetchone()["latest"]
+        if last_produce_at is None:
+            changed = conn.execute(
+                "SELECT (SELECT COUNT(DISTINCT spelling_norm) FROM statement) + "
+                "(SELECT COUNT(*) FROM backbone_leaf_decision) AS n").fetchone()["n"]
+        else:
+            changed = conn.execute(
+                "SELECT (SELECT COUNT(DISTINCT spelling_norm) FROM statement WHERE decided_at > ?) + "
+                "(SELECT COUNT(*) FROM backbone_leaf_decision WHERE decided_at > ?) AS n",
+                (last_produce_at, last_produce_at)).fetchone()["n"]
+    return {"changed": changed, "latest_decision_at": latest_decision_at,
+            "last_produce_at": last_produce_at}
+
+
 def record_source_diagnostic(source: str, run_id: str, summary: dict,
                              path: str | Path | None = None) -> None:
     """Store one source's latest-run diagnostic summary (compact JSON: per-stage status + health/gate/

@@ -26,6 +26,7 @@ def stubbed(monkeypatch):
     monkeypatch.setattr(produce, "_finalize_control_plane", lambda stage: calls.append("finalize"))
     monkeypatch.setattr(writethrough, "enabled", lambda: False)
     monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: calls.append("persist"))
+    monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: None)
     monkeypatch.setattr(upload_artifacts, "main", lambda run_id=None: calls.append(("publish", run_id)) or 0)
     return calls
 
