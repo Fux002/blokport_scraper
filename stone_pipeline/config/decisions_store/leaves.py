@@ -88,6 +88,43 @@ def set_backbone_leaf_decision(variety: str, stone_type: str, attribute: str, va
         conn.commit()
 
 
+def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
+    """Persist a MINTED variety's own colour/finish/quality as APPROVED leaf decisions, so its membership is
+    durable in config.db (snapshotted, restored, dropped by a pristine reset) -- the same lifecycle as its
+    mint statement. This is what stops base<->backbone drift: the transient backbone_additions file is
+    overwritten every produce (a variety no longer minted this run drops out of it), but the overlay this
+    feeds carries the membership forever, and apply_leaf_overlay CREATES the record for a variety absent from
+    every backbone file. `rows` are (variety, stone_type, attribute, value); a bad attribute/empty value is
+    skipped (never a guessed row). One transaction; idempotent (ON CONFLICT). Returns rows written."""
+    written = 0
+    with closing(store.open_store()) as conn:
+        for variety, stone_type, attribute, value in rows:
+            attribute = (attribute or "").strip().lower()
+            variety, value = (variety or "").strip(), (value or "").strip()
+            if attribute not in _LEAF_ATTRIBUTES or not variety or not value:
+                continue
+            conn.execute(
+                "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
+                "value_display, action, decided_at) VALUES (?, ?, ?, ?, ?, 'approve', ?) "
+                "ON CONFLICT(variety_norm, stone_type_norm, attribute, value_norm) DO UPDATE SET "
+                "value_display = excluded.value_display, action = 'approve', decided_at = excluded.decided_at",
+                (_norm(variety), _norm(stone_type), attribute, _norm(value), value, _now()))
+            written += 1
+        conn.commit()
+    return written
+
+
+def drop_backbone_membership(variety: str, stone_type: str) -> int:
+    """Remove a variety's leaf decisions (its overlay membership). unmint deletes the mint statement and, in
+    the same transaction, drops this membership (see statements.clear_for_variety); this standalone form is
+    for any caller that needs the drop alone. Returns rows deleted."""
+    with closing(store.open_store()) as conn:
+        n = conn.execute("DELETE FROM backbone_leaf_decision WHERE variety_norm = ? AND stone_type_norm = ?",
+                         (_norm(variety), _norm(stone_type))).rowcount
+        conn.commit()
+    return n
+
+
 def list_decided_leaves() -> list[dict]:
     """Every recorded backbone-leaf verdict (approve OR reject), newest first, each carrying the `ref` the
     review PUT takes -- so an operator can find and revise a past decision (e.g. undo a spurious approval a

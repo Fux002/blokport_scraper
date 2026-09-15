@@ -207,6 +207,64 @@ def write_backbone_leaf_pending(pending: list[dict]) -> int:
     return len(rows)
 
 
+def write_minted_membership(backbone_new: dict[str, list[dict]]) -> int:
+    """Persist each variety minted THIS run with its own colour/finish/quality, as durable approved leaf
+    decisions (config.db), so its backbone membership survives past this produce. The backbone_additions
+    FILE stays per-run (the texture queue reads it to find new-this-run varieties); durability lives in the
+    overlay, which apply_leaf_overlay turns into a created record. Deduped across branches (one variety, one
+    membership). No new value is guessed: only the mint's own observed/seed attributes."""
+    _attr = {"color": "color", "finishes": "finish", "qualities": "quality"}   # post key -> leaf attribute
+    seen: set[tuple[str, str, str, str]] = set()
+    membership: list[tuple[str, str, str, str]] = []
+    for posts in backbone_new.values():
+        for p in posts:
+            variety, stone_type = p.get("variant", ""), p.get("stone_type", "")
+            if not (variety and stone_type):
+                continue
+            for post_key, attribute in _attr.items():
+                for value in p.get(post_key) or []:
+                    k = (_norm(variety), _norm(stone_type), attribute, _norm(value))
+                    if k not in seen:
+                        seen.add(k)
+                        membership.append((variety, stone_type, attribute, value))
+    return decisions_store.record_minted_membership(membership)
+
+
+def heal_drifted_membership(rows) -> int:
+    """Idempotent heal for base<->backbone drift (a variety minted in a PRIOR run that dropped out of the
+    transient backbone_additions file, so reconcile flags its products no_backbone_record and they skip on
+    color_id with nothing to review). For every product-bound variety a row flags no_backbone_record, write
+    its membership durably (config.db overlay) so the NEXT produce resolves it. COLOUR comes FIRST from the
+    operator's mint statement (never overwrite an operator decision with a scrape value), else from observed
+    products; finish/quality from observed. A variety with NO colour at all is left to surface honestly as
+    needs-a-colour -- never a guessed value. Returns rows written."""
+    seed = decisions_store.mint_seed_colors()
+    drifted: dict[tuple[str, str], dict[str, set]] = {}
+    for r in rows:
+        if not any((f.method or "") == "no_backbone_record" for f in (r.review_flags or [])):
+            continue
+        name, stype = (r.variation_name or "").strip(), (r.type_name or "").strip()
+        if not (name and stype):
+            continue
+        d = drifted.setdefault((name, stype), {"color": set(), "finish": set(), "quality": set()})
+        if r.color_name:
+            d["color"].add(r.color_name)
+        if r.finish_name:
+            d["finish"].add(r.finish_name)
+        if r.quality_name:
+            d["quality"].add(r.quality_name)
+    membership: list[tuple[str, str, str, str]] = []
+    for (name, stype), obs in drifted.items():
+        seed_col = seed.get((_norm(name), _norm(stype)))
+        for c in ([seed_col] if seed_col else sorted(obs["color"])):     # statement colour FIRST, else observed
+            membership.append((name, stype, "color", c))
+        for value in sorted(obs["finish"]):
+            membership.append((name, stype, "finish", value))
+        for value in sorted(obs["quality"]):
+            membership.append((name, stype, "quality", value))
+    return decisions_store.record_minted_membership(membership)
+
+
 def adopt_attribute_ids(filled: dict[tuple[str, str], tuple[str, str]],
                         attributes_csv: Path | None = None) -> int:
     """Append the (kind, value, id) the operator filled into the env's attributes.csv vocab so the next

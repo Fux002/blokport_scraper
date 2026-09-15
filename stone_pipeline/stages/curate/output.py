@@ -96,6 +96,11 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     # surface the leaf additions for operator review (:4200) -> approve grows the backbone overlay next run.
     # Always called (empty clears the queue) so a resolved suggestion drops off, like the variety queue.
     decisions.write_backbone_leaf_pending(result.backbone_updates)
+    # DURABLE membership for THIS run's mints: persist each new variety's own colour/finish/quality as an
+    # approved leaf decision, so it survives past this produce. The backbone_additions files above stay
+    # per-run (the texture queue reads them for new-this-run varieties); durability lives in the overlay,
+    # which reconcile's apply_leaf_overlay turns into a record -- closing the base<->backbone drift.
+    decisions.write_minted_membership(result.backbone_new)
     result.counts["uncertain_aliases"] = len(needs_review)
     result.counts["suspicious_names_skipped"] = len(result.suspicious_names)
     log.info("curation written", extra={"extra_fields": result.counts})

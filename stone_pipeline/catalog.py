@@ -106,6 +106,12 @@ def run(outputs_root: Path | None = None) -> Path:
 
     ref = loaders.load_all()
     result = curate.run(rows, ref)                # -> to_upload/1_variants_update.csv, review/, backbone_additions/
+    # HEAL base<->backbone drift: a variety minted in a prior run dropped out of the per-run additions file
+    # (which must stay per-run for the texture queue), so its products flag no_backbone_record and skip on
+    # color_id with nothing reviewable. Persist those varieties' membership durably (config.db overlay,
+    # statement colour first) so the NEXT produce resolves them. New this run are already covered by curate.
+    from stone_pipeline.stages import decisions as _decisions
+    _decisions.heal_drifted_membership(rows)
     products = collect_products(outputs_root)     # -> to_upload/3_products_*.csv (per source + combined)
     # Regenerate every mirror backbone (Tiles) from the CURRENT slab backbone before anything reads it:
     # emit_catalog's tile mirror rows (below) and tree_build's combinations both consume the tile backbone,

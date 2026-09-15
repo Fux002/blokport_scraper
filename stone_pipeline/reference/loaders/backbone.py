@@ -52,14 +52,26 @@ class Backbone:
         """Grow varieties' allowed sets from an operator-approved overlay, keyed by (norm name, norm
         stone_type) -> {attribute: [values]}. Additive + idempotent: a value already allowed is skipped.
         The committed backbone seed is never touched -- this only widens the in-memory sets, so dropping
-        the overlay restores the pristine tree. Returns how many (variety, value) pairs were added."""
+        the overlay restores the pristine tree. Returns how many (variety, value) pairs were added.
+
+        An overlay key that matches NO existing backbone variety CREATES the record: a variety minted this
+        session lives in the base but in no backbone file, so widening alone would leave it with no
+        membership (the base<->backbone drift that reconcile flags as no_backbone_record). The mint writes
+        its membership into this same overlay, so creating the absent record here is what makes a minted
+        variety's colour/finish/quality durable through config.db -- the same lifecycle as its mint statement
+        (snapshotted, restored, dropped only by a pristine reset). display name / category are cosmetic here:
+        lookup is by (norm name, norm type) and reconcile reads only the value sets; the real Name comes from
+        the variation."""
         fields = {"color": "colors", "finish": "finishes", "quality": "qualities"}
         added = 0
+        matched: set[tuple[str, str]] = set()
         for varieties in self.by_norm_name.values():   # every variety lives here; aliases point to the same objects
             for variety in varieties:
-                adds = overlay.get((norm(variety.variant), norm(variety.stone_type)))
+                key = (norm(variety.variant), norm(variety.stone_type))
+                adds = overlay.get(key)
                 if not adds:
                     continue
+                matched.add(key)
                 for attribute, values in adds.items():
                     field_name = fields.get(attribute)
                     if not field_name:
@@ -71,6 +83,16 @@ class Backbone:
                             target.append(value)
                             have.add(norm(value))
                             added += 1
+        for (variety_norm, type_norm), adds in overlay.items():
+            if (variety_norm, type_norm) in matched or not type_norm:
+                continue                               # already grown above, or an unusable type-less key
+            created = BackboneVariety(
+                variant=variety_norm.title(), category="", stone_type=type_norm.title(),
+                colors=list(dict.fromkeys(adds.get("color", []))),
+                finishes=list(dict.fromkeys(adds.get("finish", []))),
+                qualities=list(dict.fromkeys(adds.get("quality", []))), aliases=[])
+            self.by_norm_name.setdefault(variety_norm, []).append(created)
+            added += len(created.colors) + len(created.finishes) + len(created.qualities)
         return added
 
     def is_valid_leaf(self, variety: BackboneVariety, color: str, finish: str, quality: str) -> bool:

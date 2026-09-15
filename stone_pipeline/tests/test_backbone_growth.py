@@ -59,11 +59,16 @@ def test_overlay_is_idempotent():
 
 
 def test_overlay_disambiguates_by_stone_type():
-    """A granite approval must not grow the same-named quartzite variety (no fuzzy fallback)."""
+    """A granite approval must never grow the same-named QUARTZITE twin (no fuzzy fallback). Absent from
+    every backbone file, the granite variety is now CREATED type-scoped (the mint-membership path that heals
+    base<->backbone drift) -- still perfectly disambiguated: the quartzite twin is untouched."""
     quartzite = _variety(stone_type="Quartzite")
     bb = _backbone(quartzite)
-    assert bb.apply_leaf_overlay({("tiger black", "granite"): {"quality": ["B"]}}) == 0
-    assert "B" not in quartzite.qualities
+    bb.apply_leaf_overlay({("tiger black", "granite"): {"quality": ["B"]}})
+    assert "B" not in quartzite.qualities                      # the twin is NEVER lent to (the guard)
+    assert bb.lookup("Tiger Black", "Quartzite") is quartzite  # quartzite variety unchanged
+    granite = bb.lookup("Tiger Black", "Granite")              # a SEPARATE granite record is created
+    assert granite is not None and granite is not quartzite and granite.qualities == ["B"]
 
 
 def test_overlay_routes_each_attribute_to_its_set():

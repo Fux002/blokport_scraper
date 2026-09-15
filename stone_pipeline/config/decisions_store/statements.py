@@ -127,8 +127,27 @@ def clear_for_variety(name: str, stone_type: str = "") -> int:
         n = 0
         for src, sp in doomed:
             n += conn.execute("DELETE FROM statement WHERE source = ? AND spelling_norm = ?", (src, sp)).rowcount
+        # the variety's durable backbone membership (leaves.record_minted_membership) rode beside its mint
+        # statement; drop it in the SAME transaction so unmint can never leave a stranded membership record
+        # (or its leaf overlay) behind -- one delete, the two can never diverge
+        if type_norm:
+            conn.execute("DELETE FROM backbone_leaf_decision WHERE variety_norm = ? AND stone_type_norm = ?",
+                         (norm, type_norm))
         conn.commit()
     return n
+
+
+def mint_seed_colors() -> dict[tuple[str, str], str]:
+    """(norm variety name, norm stone_type) -> the operator's seed COLOUR, for every 'is' statement that set
+    one. The variety is the statement's corrected name (a rename) else its spelling. A drift heal prefers
+    this operator decision over any scrape-derived colour, so a backfill never overwrites what the operator
+    stated. Empty for a fresh store."""
+    with closing(store.read_store()) as conn:
+        return {(_norm(r["name"] or r["spelling"]), _norm(r["stone_type"] or "")): r["color"]
+                for r in conn.execute(
+                    "SELECT spelling, name, stone_type, color FROM statement "
+                    "WHERE verdict = 'is' AND color IS NOT NULL AND color != '' AND stone_type IS NOT NULL "
+                    "AND stone_type != ''")}
 
 
 def clear_all_statements() -> int:

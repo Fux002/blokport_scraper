@@ -21,21 +21,22 @@ from __future__ import annotations
 
 from ._common import InvalidDecision
 from .attributes import attribute_ids, clear_attribute_ids, set_attribute_id
-from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, leaf_decided,
-                     list_decided_leaves, revise_leaf_decision, set_backbone_leaf_decision)
+from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, drop_backbone_membership,
+                     leaf_decided, list_decided_leaves, record_minted_membership, revise_leaf_decision,
+                     set_backbone_leaf_decision)
 from .origins import (clear_variety_origins, delete_variety_origin, get_variety_origin, list_variety_origins,
                       set_variety_origin, variety_origins)
 from .protected import add_protected, clear_protected, protected_keys
 from .queue import (approve_leaf_pending, clear_review_pending, decide_leaf_pending, list_pending,
                     pending_payload, replace_pending)
 from .statements import (_statement_rows, _upsert_statement, clear, clear_all_statements, clear_for_variety,
-                         decide, load_decisions, reject, scope_key)
+                         decide, load_decisions, mint_seed_colors, reject, scope_key)
 
 __all__ = [
     "InvalidDecision",
     # statements
     "scope_key", "load_decisions", "decide", "reject", "clear", "clear_for_variety", "clear_all_statements",
-    "_statement_rows", "_upsert_statement",
+    "_statement_rows", "_upsert_statement", "mint_seed_colors",
     # per-variety origins
     "set_variety_origin", "delete_variety_origin", "variety_origins", "list_variety_origins",
     "get_variety_origin", "clear_variety_origins",
@@ -46,7 +47,7 @@ __all__ = [
     # backbone leaf-growth
     "backbone_leaf_overlay", "leaf_decided", "set_backbone_leaf_decision", "approve_leaf_pending",
     "decide_leaf_pending", "list_decided_leaves", "revise_leaf_decision", "clear_leaf_decisions",
-    "_LEAF_ATTRIBUTES",
+    "record_minted_membership", "drop_backbone_membership", "_LEAF_ATTRIBUTES",
     # pending review queue
     "replace_pending", "clear_review_pending", "pending_payload", "list_pending",
 ]
