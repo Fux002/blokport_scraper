@@ -772,11 +772,16 @@ class ConfigHandler(BaseHTTPRequestHandler):
 
     def _respond(self, code: int, payload: object) -> None:
         data = json.dumps(payload).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # the client hung up before the reply landed (a page navigated away, a poller timed out): not an
+            # error of ours, and http.server would print a full traceback per hang-up. One line, no trace.
+            log.info("client hung up before the reply", extra={"extra_fields": {"path": self.path, "code": code}})
 
     def _authorized(self) -> bool:
         # constant-time compare so the token can't be recovered by response-timing (L1). Compare on BYTES:

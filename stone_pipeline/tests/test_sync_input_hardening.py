@@ -86,3 +86,17 @@ def test_failures_honours_the_documented_limit(tmp_path, monkeypatch):
         assert server.dispatch(ledger, "GET", "failures", {"limit": ["25"]}, None)[0] == 200
         assert server.dispatch(ledger, "GET", "failures", {"limit": ["x"]}, None)[0] == 400
     assert seen == [200, 25]
+
+
+# ---- a client that hangs up mid-reply -------------------------------------------------------------
+
+class _HungUp:
+    def write(self, data): raise BrokenPipeError(32, "Broken pipe")
+    def flush(self): pass
+
+
+def test_a_client_that_hangs_up_mid_reply_is_not_a_traceback():
+    h = SyncHandler.__new__(SyncHandler)
+    h.wfile, h.request_version, h.requestline, h.command = _HungUp(), "HTTP/1.1", "GET /x HTTP/1.1", "GET"
+    h.client_address, h.headers, h.path = ("10.0.0.1", 1), {}, "/x"
+    h._respond(200, {"ok": True})            # must not raise
