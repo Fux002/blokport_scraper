@@ -425556,46 +425556,6 @@
       "key": "slab_marble_retro_breccia_b175647b-909c-42a5-ba2b-8e98a4db4f25"
     },
     {
-      "variant_id": 9026,
-      "variant": "Revolution",
-      "category": "Slabs",
-      "stone_type": "Marble",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Revolution Quartzite"
-      ],
-      "image_file": "slab_rb_9026_marble_revolution.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": [],
-      "key": "slab_marble_revolution_318ada74-e631-475d-ad6f-6886190ec467"
-    },
-    {
       "variant_id": 9027,
       "variant": "Rhine White",
       "category": "Slabs",

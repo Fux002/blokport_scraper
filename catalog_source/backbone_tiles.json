@@ -416480,45 +416480,6 @@
       "merged_from": []
     },
     {
-      "key": "tile_marble_revolution_dd587321-cf08-5a1e-baaa-2e120f97462b",
-      "variant": "Revolution",
-      "category": "Tiles",
-      "stone_type": "Marble",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Polished",
-        "Honed",
-        "Brushed",
-        "Leathered",
-        "Sandblasted",
-        "Bush Hammered",
-        "Tumbled",
-        "Acid Washed",
-        "Sawn Cut",
-        "Split Face",
-        "Chiseled",
-        "Waterjet",
-        "Honed and Brushed",
-        "Sandblasted and Brushed",
-        "Bush Hammered and Brushed",
-        "Brushed and Tumbled",
-        "Antique",
-        "Raw"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Revolution Quartzite"
-      ],
-      "image_file": "tile_marble_revolution_dd587321-cf08-5a1e-baaa-2e120f97462b.png",
-      "exists": "no",
-      "in_csv": "no",
-      "merged_from": []
-    },
-    {
       "key": "tile_marble_rhine_white_424b3af4-55fc-5152-92e7-e1e30d26aadf",
       "variant": "Rhine White",
       "category": "Tiles",
