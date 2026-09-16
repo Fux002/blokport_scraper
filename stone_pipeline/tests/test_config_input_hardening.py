@@ -74,3 +74,21 @@ def test_wrong_token_is_unauthorized():
 
 def test_max_body_bytes_is_a_sane_cap():
     assert _MAX_BODY_BYTES == 1 << 20                 # 1 MiB, far above any real config payload
+
+
+# ---- a client that hangs up mid-reply -------------------------------------------------------------
+
+class _HungUp:
+    """A socket file whose write fails the way a closed peer does."""
+    def write(self, data): raise BrokenPipeError(32, "Broken pipe")
+    def flush(self): pass
+
+
+def test_a_client_that_hangs_up_mid_reply_is_not_a_traceback():
+    # Blokport's page navigates away before the reply lands: the write raises BrokenPipeError. Left alone,
+    # http.server prints a 20-line traceback per hang-up; it is not an error of ours, so _respond swallows
+    # exactly that (and its ConnectionResetError twin) and nothing escapes.
+    h = ConfigHandler.__new__(ConfigHandler)
+    h.wfile, h.request_version, h.requestline, h.command = _HungUp(), "HTTP/1.1", "GET /x HTTP/1.1", "GET"
+    h.client_address, h.headers, h.path = ("10.0.0.1", 1), {}, "/x"
+    h._respond(200, {"ok": True})            # must not raise
