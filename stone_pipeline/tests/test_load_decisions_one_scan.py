@@ -53,3 +53,21 @@ def test_injected_lookups_bypass_the_ledger_entirely():
         exists_as=lambda n, t: seen.append((n, t)) or False,
         alias_target=lambda n, t: None)
     assert isinstance(dec.statements, dict)
+
+
+def test_a_lookup_on_a_warm_index_normalises_only_its_own_arguments(monkeypatch):
+    # The cache held the SCAN but not the lookup: exists_as still normalised every row's name and type per call
+    # (12k rows x 83 lookups = 500k normalisations per review-list request on prod, seconds on a 1-vCPU task,
+    # and four polling clients pushed it past Blokport's 15 s deadline). A warm index is keyed by normalised
+    # (name, type), so one lookup normalises its two arguments and nothing else.
+    varieties._CACHE["fp"] = object()
+    rows = [{"name": f"Variety {i}", "stone_type": "Marble"} for i in range(5000)]
+    monkeypatch.setattr(varieties, "_build_index", lambda: varieties._index_from_rows(rows, {}))
+    assert varieties.exists_as("Variety 4999", "Marble") is True   # warms the cache
+    calls = {"n": 0}
+    real = varieties.proj.norm
+    monkeypatch.setattr(varieties.proj, "norm", lambda s: calls.__setitem__("n", calls["n"] + 1) or real(s))
+    assert varieties.exists_as("Variety 12", "Marble") is True
+    assert varieties.exists_as("Variety 12", "Onyx") is False
+    assert varieties.exists("Variety 7") is True
+    assert calls["n"] <= 5, f"{calls['n']} normalisations for three lookups on a warm index"

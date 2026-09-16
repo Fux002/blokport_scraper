@@ -32,7 +32,9 @@ from pathlib import Path
 from stone_pipeline.matching import projections as proj
 
 _CACHE_LOCK = threading.Lock()
-_CACHE: dict = {"fp": object(), "rows": [], "alias": {}}   # rows: deduped varieties; alias: (na, nt) -> name|None
+# rows: deduped varieties; alias: (na, nt) -> name|None; names / pairs: the normalised name set and (name, type)
+# set the lookups hit, built ONCE per scan so a lookup normalises only its own arguments (never every row).
+_CACHE: dict = {"fp": object(), "rows": [], "alias": {}, "names": set(), "pairs": set()}
 
 
 def _like_escape(s: str) -> str:
@@ -56,27 +58,33 @@ def _fingerprint():
     return (_stat(lp), _stat(lp + "-wal"), _stat(store.config_db_path()))
 
 
-def _index() -> tuple[list[dict], dict]:
-    """(deduped variety rows, alias map) from ONE ledger scan, cached until the fingerprint changes. rows are
-    [{'name','stone_type'}] deduped by (norm name, norm type); alias maps (norm alias, norm type) -> canonical
-    NAME, or None where an alias sits on two distinct same-type varieties (ambiguous, never guessed). Empty
-    when no ledger exists yet."""
+def _index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]]]:
+    """(deduped variety rows, alias map, normalised name set, normalised (name, type) set) from ONE ledger
+    scan, cached until the fingerprint changes. rows are [{'name','stone_type'}] deduped by (norm name, norm
+    type); alias maps (norm alias, norm type) -> canonical NAME, or None where an alias sits on two distinct
+    same-type varieties (ambiguous, never guessed). Empty when no ledger exists yet."""
     fp = _fingerprint()
     with _CACHE_LOCK:
         if _CACHE["fp"] == fp:
-            return _CACHE["rows"], _CACHE["alias"]
-    rows, alias = _build_index()
+            return _CACHE["rows"], _CACHE["alias"], _CACHE["names"], _CACHE["pairs"]
+    rows, alias, names, pairs = _build_index()
     with _CACHE_LOCK:
-        _CACHE.update(fp=fp, rows=rows, alias=alias)
-    return rows, alias
+        _CACHE.update(fp=fp, rows=rows, alias=alias, names=names, pairs=pairs)
+    return rows, alias, names, pairs
 
 
-def _build_index() -> tuple[list[dict], dict]:
+def _index_from_rows(rows: list[dict], alias: dict) -> tuple[list[dict], dict, set[str], set[tuple[str, str]]]:
+    """The lookup sets derived from a scan, normalised once here so exists/exists_as are set membership."""
+    pairs = {(proj.norm(r["name"]), proj.norm(r["stone_type"] or "")) for r in rows}
+    return rows, alias, {n for n, _ in pairs}, pairs
+
+
+def _build_index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]]]:
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger
     from stone_pipeline.stages import decisions
     if not writethrough.ledger_path().exists():
-        return [], {}                                 # no produce yet -> empty, every alias refused
+        return _index_from_rows([], {})               # no produce yet -> empty, every alias refused
     retired = decisions.load_retired()
     seen: set[tuple[str, str]] = set()
     rows: list[dict] = []
@@ -104,14 +112,14 @@ def _build_index() -> tuple[list[dict], dict]:
                     if na:
                         alias_hits.setdefault((na, nt), set()).add(r["name"])
     alias = {k: (next(iter(v)) if len(v) == 1 else None) for k, v in alias_hits.items()}
-    return rows, alias
+    return _index_from_rows(rows, alias)
 
 
 def _rows(q: str | None = None) -> list[dict]:
     """Existing, non-retired varieties from the ledger variation table: [{'name', 'stone_type'}], deduped by
     normalized name and sorted. `q` filters by name substring (a type-ahead). Empty when no ledger exists yet.
     Backed by the cached ledger index, so calling it many times in one pass does not re-scan the ledger."""
-    rows, _ = _index()
+    rows = _index()[0]
     if q:
         ql = q.lower()
         rows = [r for r in rows if ql in (r["name"] or "").lower()]
@@ -129,7 +137,7 @@ def exists(name: str) -> bool:
     """True iff `name` is an existing variety -- the set an alias can resolve onto. Same ledger source as
     the dropdown, so the picker and the validator agree by construction."""
     n = proj.norm(name or "")
-    return bool(n) and any(proj.norm(v["name"]) == n for v in _rows())
+    return bool(n) and n in _index()[2]
 
 
 def exists_as(name: str, stone_type: str) -> bool:
@@ -137,8 +145,7 @@ def exists_as(name: str, stone_type: str) -> bool:
     operator-corrected name (mint + rename) is refused only when that exact pair exists -- 'Calacatta' as a
     Quartzite is legal beside the Marble one. Same ledger source as exists()."""
     n, t = proj.norm(name or ""), proj.norm(stone_type or "")
-    return bool(n) and bool(t) and any(
-        proj.norm(v["name"]) == n and proj.norm(v["stone_type"]) == t for v in _rows())
+    return bool(n) and bool(t) and (n, t) in _index()[3]
 
 
 def alias_target(name: str, stone_type: str) -> str | None:
@@ -151,5 +158,4 @@ def alias_target(name: str, stone_type: str) -> str | None:
     n, t = proj.norm(name or ""), proj.norm(stone_type or "")
     if not n or not t:
         return None
-    _, alias = _index()
-    return alias.get((n, t))
+    return _index()[1].get((n, t))

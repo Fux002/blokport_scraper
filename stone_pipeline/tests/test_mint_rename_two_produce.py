@@ -108,7 +108,7 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
     paths = _paths(tmp_path)
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
-    monkeypatch.setattr(varieties, "_rows", lambda q=None: [{"name": "Alpine", "stone_type": "Granite"}])
+    monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([{"name": "Alpine", "stone_type": "Granite"}], {}))
     _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
     ref = loaders.load_all()
 
@@ -181,7 +181,7 @@ def test_a_matched_product_is_re_pointed_by_a_scoped_mint_rename(tmp_path, monke
     paths = _paths(tmp_path)
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
-    monkeypatch.setattr(varieties, "_rows", lambda q=None: [{"name": "Brown Granite", "stone_type": "Granite"}])
+    monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([{"name": "Brown Granite", "stone_type": "Granite"}], {}))
     BG_KEY = "slab_granite_brown_granite_00000000-0000-0000-0000-000000000002"
     _write_export(paths.export_file, [{"Id": "var_bg", "Key": BG_KEY, "Name": "Brown Granite"}])
 

@@ -42,7 +42,7 @@ def _card(stone_type: str = "onyx") -> None:
 
 
 def _vocab(monkeypatch, rows: list[dict]) -> None:
-    monkeypatch.setattr(varieties, "_rows", lambda q=None: rows)
+    monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows(rows, {}))
 
 
 def _row(name: str, key: str, stone_type: str = "Onyx", **attrs) -> CanonicalRow:
@@ -194,7 +194,7 @@ def _statement_setup(tmp_path, monkeypatch):
     paths = _paths(tmp_path)
     monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
     monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
-    monkeypatch.setattr(varieties, "_rows", lambda q=None: [])
+    monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([], {}))
     _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
     return loaders.load_all()
 
