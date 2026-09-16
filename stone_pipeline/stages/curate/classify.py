@@ -141,11 +141,11 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
         # A type the scrape did not make clear is NEVER auto-completed, not even to a single existing
         # same-name pair: (type, variant) is the unique identity; the operator sets the type via review.
         if len({o[0] for o in owners}) == 1:
-            hold_for_type(c, clean, row, sorted({o[1] for o in owners}))
+            hold_for_type(c, clean, row, sorted(owners))
         else:
             hold_collision(c, clean, "", sorted({o[0] for o in owners}), row)
         return True
-    hold_new_type(c, clean, stone_type, row, sorted({o[1] for o in owners}))
+    hold_new_type(c, clean, stone_type, row, sorted(owners))
     return True
 
 

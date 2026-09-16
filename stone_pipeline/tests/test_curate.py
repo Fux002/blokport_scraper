@@ -451,3 +451,25 @@ def test_review_evidence_falls_back_to_improved_key_when_no_supplier_url():
     row.raw_image_urls = []
     row.image_keys = ["https://.../dev/products/improved/varsha/abc.jpg"]
     assert curate._review_evidence(row)["image"] == row.image_keys[0]
+
+
+def test_new_type_card_names_the_owner_when_the_match_is_an_alias(ref, monkeypatch):
+    # prod 2026-09-16: Zucchi lists 'Crystal Absolut' typed Crystal. No variety of that name exists; the name
+    # is an ALIAS on the Onyx 'Absolut'. The card said "'Crystal Absolut' already exists as Onyx", which the
+    # operator could not find anywhere. The card must name the owner and say it is an alias.
+    def load(branch):
+        imp = curate.ImportFile(branch=branch, path=None)
+        v = {"Key": f"{branch}_onyx_absolut_x", "Name": "Absolut", "Image": "", "Aliases": "Crystal Absolut",
+             "Volume": "", "type": "onyx"}
+        imp.varieties.append(v); imp.by_name_type[("absolut", "onyx")] = v; imp.by_name["absolut"] = v
+        return imp
+    monkeypatch.setattr(curate, "load_all_existing", lambda: {b: load(b) for b in curate.BRANCHES})
+    r = CanonicalRow(src_site="zucchi", surrogate_key="ca", variety_match_key="Crystal Absolut", raw_type="Crystal")
+    r.add_gap(TreeGap(src_site="zucchi", surrogate_key="ca", raw_name="Crystal Absolut",
+                      gap_kind=GapKind.missing_variation, nearest_existing="Absolut", nearest_score=60.0))
+    res = curate.build_curation([r], ref)
+    card = next(p for p in res.pending_confirm if p["variant"] == "Crystal Absolut")
+    assert card["kind"] == "new_type"
+    assert "alias of 'Absolut' (Onyx)" in card["reason"], card["reason"]
+    assert "'Crystal Absolut' already exists" not in card["reason"], card["reason"]
+    assert card["nearest_existing"] == "Absolut (Onyx)", card["nearest_existing"]
