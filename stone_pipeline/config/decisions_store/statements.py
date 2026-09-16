@@ -236,6 +236,14 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     if exists_as(name, stone_type) or resolved_alias:
         _upsert_statement(src, spelling, "is", name=name, stone_type=stone_type, color=color,
                           origin_iso=origin, widen=widen, asked_by=src)
+        if color:
+            # a colour on a BIND documents that colour for the existing variety, exactly as a mint's colour
+            # seeds a new one: it lands as an approved colour leaf (the overlay the produce grows the variety
+            # with). A statement's colour used to be read only at mint time, so a variety minted from a
+            # colourless listing kept an empty colour set that no restatement could fill, and its colourless
+            # listings could never list. Idempotent: the leaf table is keyed by (variety, type, attribute, value).
+            from .leaves import set_backbone_leaf_decision
+            set_backbone_leaf_decision(name, stone_type, "color", color, "approve")
         outcome["result"] = "bound"
         if resolved_alias:
             outcome["resolved_alias"] = True

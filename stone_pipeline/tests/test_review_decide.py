@@ -372,3 +372,21 @@ def test_vendor_rename_to_the_same_name_wins_the_origin_regardless_of_insert_ord
     views.mint("Foo", stone_type="Granite", name="Bar", origin="BR", source="zucchi", asked_by="zucchi")
     views.mint("Baz", stone_type="Granite", name="Bar", origin="IN", source="", asked_by="polonine")
     assert views.country_rules(exists_as=_exists)[("bar", "granite")] == "BR"
+
+
+def test_a_colour_on_a_bind_documents_that_colour_for_the_existing_variety():
+    # prod 2026-09-17: 'Sparta White' (Granite) was minted from a Polonine listing that carried no colour, so
+    # its colour set is empty and its colourless listings can never list. Restating the decision with a colour
+    # changed nothing: a statement's colour was read only at MINT time. A colour on a bind is the operator
+    # documenting that colour for the variety, exactly like a mint's: it lands as an approved colour leaf, the
+    # overlay the produce grows the variety with.
+    sparta = lambda n, t: (n.lower(), t.lower()) == ("sparta white", "granite")   # the variety exists
+    out = decisions_store.decide("polonine", "SPARTA WHITE", "Sparta White", "Granite",
+                                 color="White", origin="BR", exists_as=sparta)
+    assert out["result"] == "bound"
+    overlay = decisions_store.backbone_leaf_overlay()
+    assert overlay.get(("sparta white", "granite"), {}).get("color") == ["White"], overlay
+    # idempotent: restating does not duplicate the leaf; no colour adds nothing
+    decisions_store.decide("polonine", "SPARTA WHITE", "Sparta White", "Granite", color="White", exists_as=sparta)
+    decisions_store.decide("polonine", "SPARTA WHITE", "Sparta White", "Granite", exists_as=sparta)
+    assert decisions_store.backbone_leaf_overlay()[("sparta white", "granite")]["color"] == ["White"]
