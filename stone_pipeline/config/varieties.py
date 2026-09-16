@@ -43,19 +43,29 @@ def _like_escape(s: str) -> str:
 
 
 def _fingerprint():
-    """A cheap fingerprint of everything the index depends on: the ledger db + its WAL (the variety rows) and
-    config.db (the retired set). Any write changes a size/mtime, so the cache never serves stale data."""
+    """A cheap fingerprint of everything the index depends on: the ledger db (the variety rows) and config.db
+    (the retired set), each as the main file's (size, mtime) plus the FRAMES in its WAL (the WAL's size).
+    A write lands as WAL frames (size grows) or, at checkpoint, in the main file (mtime moves), so the
+    cache never serves stale data. The WAL's mtime and existence are deliberately NOT part of it: SQLite
+    deletes the WAL when the last connection closes and recreates it empty on the next open, and both
+    containers open the ledger per request, so those flip constantly with no write behind them."""
     from stone_pipeline.config import store
     from stone_pipeline.ledger import writethrough
 
-    def _stat(p) -> tuple | None:
+    def _main(p) -> tuple | None:
         try:
             s = Path(p).stat()
             return (s.st_size, s.st_mtime_ns)
         except OSError:
             return None
-    lp = str(writethrough.ledger_path())
-    return (_stat(lp), _stat(lp + "-wal"), _stat(store.config_db_path()))
+
+    def _frames(p) -> int:
+        try:
+            return Path(str(p) + "-wal").stat().st_size
+        except OSError:
+            return 0
+    lp, cp = writethrough.ledger_path(), store.config_db_path()
+    return (_main(lp), _frames(lp), _main(cp), _frames(cp))
 
 
 def _index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]]]:
@@ -64,13 +74,14 @@ def _index() -> tuple[list[dict], dict, set[str], set[tuple[str, str]]]:
     type); alias maps (norm alias, norm type) -> canonical NAME, or None where an alias sits on two distinct
     same-type varieties (ambiguous, never guessed). Empty when no ledger exists yet."""
     fp = _fingerprint()
+    # single-flight: the rebuild runs UNDER the lock, so concurrent requests after an invalidation wait for
+    # the one build instead of each rebuilding (four polling clients turned one ~1 s build into four on a
+    # 1-vCPU task, past the admin's deadline). A hit costs the lock only for the comparison.
     with _CACHE_LOCK:
-        if _CACHE["fp"] == fp:
-            return _CACHE["rows"], _CACHE["alias"], _CACHE["names"], _CACHE["pairs"]
-    rows, alias, names, pairs = _build_index()
-    with _CACHE_LOCK:
-        _CACHE.update(fp=fp, rows=rows, alias=alias, names=names, pairs=pairs)
-    return rows, alias, names, pairs
+        if _CACHE["fp"] != fp:
+            rows, alias, names, pairs = _build_index()
+            _CACHE.update(fp=fp, rows=rows, alias=alias, names=names, pairs=pairs)
+        return _CACHE["rows"], _CACHE["alias"], _CACHE["names"], _CACHE["pairs"]
 
 
 def _index_from_rows(rows: list[dict], alias: dict) -> tuple[list[dict], dict, set[str], set[tuple[str, str]]]:
