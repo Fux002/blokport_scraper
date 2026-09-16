@@ -71,3 +71,53 @@ def test_a_lookup_on_a_warm_index_normalises_only_its_own_arguments(monkeypatch)
     assert varieties.exists_as("Variety 12", "Onyx") is False
     assert varieties.exists("Variety 7") is True
     assert calls["n"] <= 5, f"{calls['n']} normalisations for three lookups on a warm index"
+
+
+def test_concurrent_requests_after_an_invalidation_share_one_rebuild(monkeypatch):
+    # prod 2026-09-16: four admin clients poll the review list; when the index invalidates (a ledger or
+    # config.db write), every in-flight request rebuilt it in parallel on the 1-vCPU task (a ~1 s laptop build
+    # became 5 s each, past Blokport's 15 s deadline). A rebuild is single-flight: the first request builds,
+    # the others wait for that build and read it.
+    import threading, time
+    varieties._CACHE["fp"] = object()
+    monkeypatch.setattr(varieties, "_fingerprint", lambda: "same")
+    builds = {"n": 0}
+
+    def slow_build():
+        builds["n"] += 1
+        time.sleep(0.3)
+        return varieties._index_from_rows([{"name": "Alpine", "stone_type": "Granite"}], {})
+    monkeypatch.setattr(varieties, "_build_index", slow_build)
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(varieties.exists_as("Alpine", "Granite"))) for _ in range(6)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    assert results == [True] * 6
+    assert builds["n"] == 1, f"{builds['n']} parallel rebuilds for one invalidation"
+
+
+def test_an_empty_wal_appearing_beside_the_ledger_does_not_invalidate(tmp_path, monkeypatch):
+    # SQLite deletes the -wal when the last connection closes and recreates it empty on the next open. Both
+    # containers open the ledger per request, so on prod the WAL's existence and mtime flip constantly with
+    # no real write, and the index was rebuilt cold on nearly every review request. Only a change of the
+    # main file, or WAL frames (a non-zero WAL size), is a change of content.
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.config import store
+    ledger = tmp_path / "production.db"; ledger.write_bytes(b"x" * 10)
+    cfg = tmp_path / "config.db"; cfg.write_bytes(b"y" * 10)
+    monkeypatch.setattr(writethrough, "ledger_path", lambda: ledger)
+    monkeypatch.setattr(store, "config_db_path", lambda: cfg)
+    varieties._CACHE["fp"] = object()
+    builds = {"n": 0}
+    monkeypatch.setattr(varieties, "_build_index", lambda: builds.__setitem__("n", builds["n"] + 1) or
+                        varieties._index_from_rows([{"name": "Alpine", "stone_type": "Granite"}], {}))
+    assert varieties.exists_as("Alpine", "Granite")
+    (tmp_path / "production.db-wal").write_bytes(b"")          # a connection opened: empty WAL appears
+    (tmp_path / "config.db-wal").write_bytes(b"")
+    assert varieties.exists_as("Alpine", "Granite")
+    (tmp_path / "production.db-wal").unlink()                  # the last connection closed: WAL gone
+    assert varieties.exists_as("Alpine", "Granite")
+    assert builds["n"] == 1, f"{builds['n']} rebuilds for WAL files that carried no frames"
+    (tmp_path / "production.db-wal").write_bytes(b"frame")     # a real write: frames in the WAL
+    assert varieties.exists_as("Alpine", "Granite")
+    assert builds["n"] == 2
