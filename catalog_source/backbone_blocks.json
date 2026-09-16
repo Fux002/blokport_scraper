@@ -352210,38 +352210,6 @@
       "merged_from": []
     },
     {
-      "variant_id": 9026,
-      "variant": "Revolution",
-      "category": "Blocks",
-      "stone_type": "Marble",
-      "color": [
-        "Red"
-      ],
-      "finishes": [
-        "Raw",
-        "Diamond Wire Sawn & Squared",
-        "Diamond Wire Sawn & Un-squared",
-        "Chain Sawn & Squared",
-        "Chain Sawn & Un-squared",
-        "Drill, Split & Squared",
-        "Drill, Split & Un-squared",
-        "Flame Jet & Squared",
-        "Flame Jet & Un-squared",
-        "Water Jet Cut & Squared",
-        "Water Jet Cut & Un-squared"
-      ],
-      "qualities": [
-        "A"
-      ],
-      "aliases": [
-        "Revolution Quartzite"
-      ],
-      "image_file": "block_rb_9026_marble_revolution.png",
-      "exists": "no",
-      "in_csv": "yes",
-      "merged_from": []
-    },
-    {
       "variant_id": 9027,
       "variant": "Rhine White",
       "category": "Blocks",
