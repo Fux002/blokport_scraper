@@ -60,6 +60,7 @@ class Decisions:
     bindings: dict[Key, tuple[str, str]] = field(default_factory=dict)      # (vendor, spelling) -> (name, type or '')
     vendor_origins: dict[tuple[str, str, str], str] = field(default_factory=dict)  # (vendor, name, type) -> ISO
     widened: dict[tuple[str, str, str], str] = field(default_factory=dict)         # the ones the operator widened
+    colours: dict[tuple[str, str], list[str]] = field(default_factory=dict)         # (name, type) -> documented colours
 
     @classmethod
     def empty(cls) -> "Decisions":
@@ -76,6 +77,7 @@ class Decisions:
         bindings: dict[Key, tuple[str, str]] = {}
         origins: dict[tuple[str, str, str], str] = {}
         widened: dict[tuple[str, str, str], str] = {}
+        colours: dict[tuple[str, str], list[str]] = {}
         for r in rows:
             src, sp = _norm(r["source"]), _norm(r["spelling_norm"])
             display = r.get("spelling") or r["spelling_norm"]
@@ -91,6 +93,12 @@ class Decisions:
                 canonical = alias_target(name, stone_type)
             target = canonical or name
             iso, widen = (r.get("origin_iso") or None), bool(r.get("widen"))
+            # a statement's colour is a documented colour of the variety it names, mint or bind alike: the
+            # operator said "this stone is <colour>", and that is true of the variety, not of one listing
+            if (colour := (r.get("color") or "").strip()):
+                known = colours.setdefault((_norm(target), _norm(stone_type)), [])
+                if colour not in known:
+                    known.append(colour)
             if src:
                 bindings[(src, sp)] = (target, stone_type)
                 if iso:
@@ -107,7 +115,8 @@ class Decisions:
                 source=src, spelling=sp, display=display, verdict="is",
                 name=(r.get("name") or None), stone_type=stone_type or None, color=r.get("color") or None,
                 origin_iso=iso, widen=widen, asked_by=r.get("asked_by") or "")
-        return cls(statements=statements, bindings=bindings, vendor_origins=origins, widened=widened)
+        return cls(statements=statements, bindings=bindings, vendor_origins=origins, widened=widened,
+                   colours=colours)
 
     @classmethod
     def from_legacy(cls, actions: dict, scoped: dict | None = None, origins: dict | None = None,
@@ -193,6 +202,13 @@ class Decisions:
     def seed_types(self) -> dict[Key, str]:
         """(vendor, spelling) -> operator stone type, for every mint statement that set one."""
         return {k: s.stone_type for k, s in self.statements.items() if s.is_mint and s.stone_type}
+
+    def colour_leaves(self) -> dict[tuple[str, str], dict[str, list[str]]]:
+        """(norm name, norm type) -> {"color": [...]}: every colour an operator stated for a variety, in the
+        shape Backbone.apply_leaf_overlay grows the variety with. ONE rule for a statement's colour, applied
+        at reference load, so a variety minted from a colourless listing gets a colour the moment any
+        statement documents one, and a bind's colour counts exactly like a mint's."""
+        return {key: {"color": list(values)} for key, values in self.colours.items()}
 
     def mint_origin_rules(self) -> dict[tuple[str, str], str]:
         """(norm variety NAME, norm type) -> ISO, for every mint statement that set an origin: keyed by the name

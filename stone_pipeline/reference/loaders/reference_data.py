@@ -187,6 +187,9 @@ def load_all() -> ReferenceData:
     #   * a vendor's origin statement grows the per-vendor origin OVERRIDES, so a confirmed (source, variety,
     #     type) origin resolves at derive's supplier_override tier and is never re-asked.
     ref.decisions = decisions_store.load_decisions()        # empty on a fresh store (no config.db is created)
+    # a statement's colour is a documented colour of its variety (mint or bind alike): the same leaf overlay
+    # as an approved leaf, so a variety minted from a colourless listing has a colour to give its listings
+    ref.backbone.apply_leaf_overlay(ref.decisions.colour_leaves())
     ref.origin_map.apply_origin_overlay(ref.decisions.mint_origin_rules())
     if _have_config_db:
         # Operator "edit origins" edits win over both the CSV base and a mint's seed_country: applied LAST,
