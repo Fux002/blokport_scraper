@@ -11,6 +11,7 @@ canonical.parquet), which the container restores on boot with the rest of the ar
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import polars as pl
@@ -99,6 +100,27 @@ def _row(rec: dict, dec: Decisions) -> dict:
     }
 
 
+# Parsed frames per canonical file, keyed by the file's identity (path, size, mtime): the admin polls this
+# list and switches vendors far more often than a produce rewrites the files, so an unchanged tree is read
+# once. A produce that rewrites a file changes its identity and it is read again; a run that is no longer
+# the newest simply stops being asked for.
+_FRAME_LOCK = threading.Lock()
+_FRAMES: dict[Path, tuple[tuple[int, int], "pl.DataFrame"]] = {}
+
+
+def _frame(f: Path) -> "pl.DataFrame":
+    st = f.stat()
+    ident = (st.st_size, st.st_mtime_ns)
+    with _FRAME_LOCK:
+        hit = _FRAMES.get(f)
+        if hit is not None and hit[0] == ident:
+            return hit[1]
+    df = _read_canonical(f)
+    with _FRAME_LOCK:
+        _FRAMES[f] = (ident, df)
+    return df
+
+
 def _read_canonical(f) -> "pl.DataFrame":
     """Read the resolved columns from one canonical parquet, tolerant of a file that predates the image
     columns (raw_image_urls/image_keys were added later): request only the columns the file has, then
@@ -119,7 +141,7 @@ def list_resolved(source: str | None = None, decided: bool | None = None,
     files = [f for f in find_canonical(outputs_dir or SETTINGS.paths.outputs_dir) if f.exists()]
     if not files:
         return []
-    frame = pl.concat([_read_canonical(f) for f in files], how="vertical_relaxed")
+    frame = pl.concat([_frame(Path(f)) for f in files], how="vertical_relaxed")
     # RESOLVED means bound: a product the last produce could not bind belongs to the pending list (its card,
     # with any decision made on it as the card's current action), never to both lists at once
     frame = frame.filter(pl.col("variation_key").is_not_null() & (pl.col("variation_key") != ""))
