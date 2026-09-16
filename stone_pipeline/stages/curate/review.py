@@ -110,28 +110,48 @@ def hold_collision(c, clean: str, stone_type: str, owner_names: list[str], row) 
         review_evidence(row), stone_type=stone_type, nearest_existing=fam))
 
 
-def hold_for_type(c, clean: str, row, cand_types: list[str]) -> None:
-    """A type-less scrape whose name is a REAL variety under SEVERAL stone types: hold it for the human to
-    assign the correct type, surfacing the candidate types -- never a typeless clone onto an arbitrary type."""
-    types_txt = human_join([title_case(t) for t in cand_types])
+def known_as(clean: str, owners: list[tuple[str, str]]) -> tuple[str, str]:
+    """How a scraped name is already known, from its (norm name, norm type) owners: ("'X' already exists as
+    Granite and Marble", "X (Granite, Marble)") when varieties of that NAME exist; ("'X' is an alias of
+    'Absolut' (Onyx)", "Absolut (Onyx)") when the name is only an ALIAS on other varieties; both joined when
+    both apply. The operator must be told which variety a card is really pointing at: a name that exists
+    nowhere as a variety must never be described as one."""
+    n = proj.norm(clean)
+    same = sorted({t for name, t in owners if name == n})
+    alias_of = sorted({(name, t) for name, t in owners if name != n})
+    phrases, nearest = [], []
+    if same:
+        phrases.append(f"'{title_case(clean)}' already exists as {human_join([title_case(t) for t in same])}")
+        nearest.append(f"{title_case(clean)} ({human_join([title_case(t) for t in same])})")
+    if alias_of:
+        named = human_join([f"'{title_case(name)}' ({title_case(t)})" for name, t in alias_of])
+        phrases.append(f"'{title_case(clean)}' is an alias of {named}")
+        nearest += [f"{title_case(name)} ({title_case(t)})" for name, t in alias_of]
+    return " and ".join(phrases), "; ".join(nearest)
+
+
+def hold_for_type(c, clean: str, row, owners: list[tuple[str, str]]) -> None:
+    """A type-less scrape whose name is a REAL variety (or alias) under SEVERAL stone types: hold it for the
+    human to assign the correct type, surfacing the candidates -- never a typeless clone onto an arbitrary
+    type."""
+    phrase, nearest = known_as(clean, owners)
     c.pending_confirm.append(review_card("no_type", clean,
-        f"'{title_case(clean)}' already exists as {types_txt}. Pick one of those types to add "
-        f"this to the existing variety, or choose a different type to create a new one.",
-        review_evidence(row), color=title_case(attr_surface(row, "color")),
-        nearest_existing=named_with_types(c, clean)))
+        f"{phrase}. Pick one of those types to add this to the existing variety, or choose a different "
+        f"type to create a new one.",
+        review_evidence(row), color=title_case(attr_surface(row, "color")), nearest_existing=nearest))
 
 
-def hold_new_type(c, clean: str, stone_type: str, row, existing_types: list[str]) -> None:
-    """HOLD-never-guess: the scrape carries a stone type NOT among the types this name already exists under
-    ('Ocean Blue' exists as granite/marble, scrape says quartzite). A mis-tag would become a phantom, so the
-    operator confirms a genuinely new variety (mint) or rejects it. A mint decision on this name un-holds it."""
-    types_txt = human_join([title_case(t) for t in existing_types])
+def hold_new_type(c, clean: str, stone_type: str, row, owners: list[tuple[str, str]]) -> None:
+    """HOLD-never-guess: the scrape carries a stone type NOT among the types this name is already known
+    under ('Ocean Blue' exists as granite/marble, scrape says quartzite; or the name is only an alias on an
+    Onyx). A mis-tag would become a phantom, so the operator confirms a genuinely new variety (mint) or
+    rejects it. A mint decision on this name un-holds it."""
+    phrase, nearest = known_as(clean, owners)
     c.pending_confirm.append(review_card("new_type", clean,
-        f"'{title_case(clean)}' already exists as {types_txt}, but this scrape is typed "
-        f"'{title_case(stone_type)}'. Confirm it is a genuinely NEW variety to mint "
-        f"'{title_case(clean)} {title_case(stone_type)}', or reject it as a mis-tag.",
+        f"{phrase}, but this scrape is typed '{title_case(stone_type)}'. Confirm it is a genuinely NEW "
+        f"variety to mint '{title_case(clean)} {title_case(stone_type)}', or reject it as a mis-tag.",
         review_evidence(row), stone_type=title_case(stone_type),
-        color=title_case(attr_surface(row, "color")), nearest_existing=named_with_types(c, clean)))
+        color=title_case(attr_surface(row, "color")), nearest_existing=nearest))
 
 
 def hold_retired(c, title: str, stone_type: str, obs_color: str, evidence: dict) -> None:
