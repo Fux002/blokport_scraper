@@ -44,7 +44,7 @@ class WorklistRefinement:
     key: str           # the worklist entry's key (what the diagnostics panel groups by)
     rule: str          # the hard rule the row was rejected with
     detail: str        # the reject detail that selects this case
-    bound: bool        # True: only a row bound to a variety; False: only an unbound row
+    bound: bool | None # True: only a row bound to a variety; False: only an unbound row; None: either
     title: str
     recovery: str
     kind: str = "decision"
@@ -59,6 +59,14 @@ WORKLIST_REFINEMENTS: tuple[WorklistRefinement, ...] = (
                        title="Variety has no documented colour",
                        recovery="Amend the variety in Review and set a colour (any statement's colour documents "
                                 "it), then Republish. Lists on the next produce.", stage="Normalize"),
+    # A no_image reject with detail "no_source" is a listing the supplier shows no photo for: nothing failed
+    # and nothing can be retried; it lists only once the supplier adds one. The generic no_image entry is a
+    # photo that failed to fetch or process this run, which the next scrape retries on its own.
+    WorklistRefinement("supplier_no_photo", "no_image", "no_source", bound=None,
+                       title="Supplier lists no photo for this product", kind="transient",
+                       recovery="Nothing failed and nothing to decide: the listing carries no image on the "
+                                "supplier's site. Lists once the supplier adds a photo and the next scrape "
+                                "picks it up.", stage="Images"),
 )
 
 
@@ -67,50 +75,54 @@ WORKLIST_REFINEMENTS: tuple[WorklistRefinement, ...] = (
 MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement("required_id_null", "type_id, color_id, finish_id, quality_id, variation_id all non-null",
                 "normalize resolves ids; colour fills from the variety, finish/quality from last-resort defaults",
-                title="Attribute or variety not in the catalogue yet", kind="decision",
-                recovery="Add the missing colour/finish/quality value in Medusa and paste its id, or mint the "
-                         "variety, in review. Lists on the next produce.", stage="Normalize / Match Variation"),
+                title="Attribute or variety has no Medusa id yet", kind="decision",
+                recovery="A colour, finish, quality or variety this product needs does not exist in Medusa yet. "
+                         "Add the value in Medusa (the next produce picks up the export) or mint the "
+                         "variety in Review. Lists on the next produce.", stage="Normalize / Match Variation"),
     Requirement("tree_gap", "no unresolved tree gap (variation + leaf resolved)",
                 "match_variation + reconcile_tree; unresolved -> the review queue",
-                title="New or uncertain variety, or an attribute not yet allowed for it", kind="decision",
-                recovery="Resolve it in the variety / leaf review queue (mint the variety, confirm the match, "
-                         "or approve the attribute for it). Lists on the next produce.", stage="Match Variation / Reconcile"),
+                title="Variety unresolved, or an attribute not yet allowed for it", kind="decision",
+                recovery="Decide it in Review: bind or mint the variety, or approve the attribute for it. "
+                         "Lists on the next produce.", stage="Match Variation / Reconcile"),
     Requirement("category_invalid", "category_pcat_id is an ACTIVE category's pcat",
                 "derive_category from the resolved format; an inactive category (e.g. tiles until set) is held",
-                title="Selling format's category is not active yet", kind="decision",
-                recovery="Activate the category (set its Medusa pcat id). Lists once the category is live.", stage="Derive"),
+                title="Selling format's category is not active", kind="decision",
+                recovery="Activate the category by setting its Medusa category id. Lists once it is active.", stage="Derive"),
     Requirement("handle_missing", "handle and slug non-empty",
                 "derive_handle from variation_name/raw_name + source_code + surrogate_key",
                 title="Product handle could not be built", kind="config",
-                recovery="A system issue in handle derivation, not the row's data. Report it.", stage="Derive"),
+                recovery="A pipeline defect in handle derivation, not the product's data. Report it.", stage="Derive"),
     Requirement("handle_collision", "handle globally unique",
                 "surrogate_key uniqueness (Stage 2 keys/dedupe)",
                 title="Two products resolved to the same handle", kind="config",
-                recovery="A system issue (surrogate collision), not the row's data. Report it.", stage="Keys Dedupe"),
+                recovery="A pipeline defect (key collision), not the product's data. Report it.", stage="Keys Dedupe"),
     Requirement("owner_missing", "company_id and sales_channel_id non-empty",
                 "constants (Stage 8) from config; prod must set the env vars",
-                title="Company / sales channel not configured", kind="config",
-                recovery="Set the environment's company and sales-channel ids. Not a data problem.", stage="Constants"),
+                title="Company or sales channel not configured", kind="config",
+                recovery="Set the environment's company and sales channel ids. Not a data problem.", stage="Constants"),
     Requirement("origin_missing", "origin_country_code non-empty",
                 "scrape origin -> origin_map -> supplier default; none -> held",
                 title="Origin country could not be resolved", kind="decision",
-                recovery="Set the variety's origin or the supplier's default origin. Lists on the next produce.", stage="Derive"),
+                recovery="Confirm the origin card in Review, set the variety's origin, or set the supplier's "
+                         "default origin. Lists on the next produce.", stage="Derive"),
     Requirement("no_image", "an image present when images are required (unless no_publishable_image)",
                 "raw_image_urls -> the image stage; a terminal non-stone set publishes imageless",
-                title="No usable photo this run", kind="transient",
-                recovery="Held for retry; re-lists automatically once an image is scraped.", stage="Images"),
+                title="Photo failed to fetch or process this run", kind="transient",
+                recovery="Retried on the next scrape; lists once the photo comes through.", stage="Images"),
     Requirement("dimension_unavailable", "no dimension whose source FETCH failed (transient)",
                 "held for retry next scrape; never defaulted (freight-critical)",
-                title="Size fetch failed (temporary)", kind="transient",
-                recovery="Held for retry; re-lists automatically on the next scrape.", stage="Derive"),
+                title="Size fetch failed this run", kind="transient",
+                recovery="Retried on the next scrape; lists once the size comes through.", stage="Derive"),
     Requirement("dimension_invalid", "length, width, height all > 0",
                 "parsed dims or pack defaults; a parsed 0 is a data error and is held",
                 title="Unreadable size (zero or malformed)", kind="transient",
-                recovery="Re-lists on the next scrape that carries a valid size; or fix the source's size parse.", stage="Derive"),
+                recovery="Lists on the next scrape that carries a valid size. If it persists, the source's size "
+                         "parse needs a fix.", stage="Derive"),
     Requirement("stock_undetermined", "inventory_quantity determined (a real value, including 0)",
                 "a count, or a piece-count derived from an available stock area; else held",
                 title="Stock could not be determined", kind="decision",
-                recovery="Fix the scrape/adapter to read the stock, or set it. Lists on the next produce.", stage="Derive"),
+                recovery="The scrape carries no stock signal. Fix the adapter to read it, or set the stock. "
+                         "Lists on the next produce.", stage="Derive"),
 )
 
 MEDUSA_RULES: frozenset[str] = frozenset(r.rule for r in MEDUSA_REQUIREMENTS)
