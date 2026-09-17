@@ -32,6 +32,32 @@ class Requirement:
     recovery: str = ""      # what the operator does, or that it re-lists on its own
 
 
+@dataclass(frozen=True)
+class WorklistRefinement:
+    """ONE hard rule can hold a row for reasons the operator clears differently. A refinement gives such a
+    case its own worklist entry, keyed on the rule, the reject detail and whether the row is bound to a
+    variety; it carries its own text. It is NOT a reject rule (validate still emits the hard rule), so the
+    lockstep guard on MEDUSA_REQUIREMENTS is untouched."""
+    key: str           # the worklist entry's key (what the diagnostics panel groups by)
+    rule: str          # the hard rule the row was rejected with
+    detail: str        # the reject detail that selects this case
+    bound: bool        # True: only a row bound to a variety; False: only an unbound row
+    title: str
+    recovery: str
+    kind: str = "decision"
+
+
+# A variety minted from a colourless listing has no colour for its colourless listings to inherit, and no
+# review card is raised (the listing proposes nothing). The generic required_id_null text sent the operator
+# to Medusa; the fix is the amend flow, since any statement's colour documents the variety's colour.
+WORKLIST_REFINEMENTS: tuple[WorklistRefinement, ...] = (
+    WorklistRefinement("variety_no_colour", "required_id_null", "color_id", bound=True,
+                       title="Variety has no documented colour",
+                       recovery="Amend the variety in Review and set a colour (any statement's colour documents "
+                                "it), then Republish. Lists on the next produce."),
+)
+
+
 # Keep in lockstep with stone_pipeline/stages/validate.py. The guard test enforces that this set EXACTLY
 # equals the rules validate can reject with -- add/remove here whenever a hard requirement changes there.
 MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (

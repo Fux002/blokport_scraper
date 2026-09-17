@@ -63,3 +63,20 @@ def test_every_hard_rule_carries_operator_worklist_text():
 
 def test_no_rejects_is_an_empty_worklist():
     assert validate.held_breakdown([]) == []
+
+
+def test_a_bound_variety_without_a_colour_is_its_own_worklist_entry():
+    # prod 2026-09-17: Polonine's SPARTA WHITE binds to 'Sparta White' (Granite), a variety minted from a
+    # colourless listing, so it has no colour to inherit and rejects required_id_null: color_id. The generic
+    # text sent the operator to Medusa ("paste the id, or mint the variety"); nothing there fixes it. The
+    # fix is the amend flow (any statement's colour documents the variety), so it is its own entry.
+    bound = _row("Sparta White", ("required_id_null", "color_id"))
+    bound.variation_key = "slab_granite_sparta_white_x"
+    unbound = _row("Ocean X", ("required_id_null", "color_id"))     # no variety bound: the generic case
+    out = validate.held_breakdown([bound, unbound])
+    by = {g["rule"]: g for g in out}
+    assert by["variety_no_colour"]["count"] == 1
+    assert by["variety_no_colour"]["title"] == "Variety has no documented colour"
+    assert "Amend the variety in Review and set a colour" in by["variety_no_colour"]["recovery"]
+    assert by["variety_no_colour"]["examples"][0]["name"] == "Sparta White"
+    assert by["required_id_null"]["count"] == 1 and by["required_id_null"]["examples"][0]["name"] == "Ocean X"

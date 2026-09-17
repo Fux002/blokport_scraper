@@ -18,18 +18,28 @@ from dataclasses import dataclass, field
 from stone_pipeline.config.settings import active_categories
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
-from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS
+from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS
 
 log = logfmt.get_logger("validate")
 
 # the operator-facing worklist metadata per hard-reject rule (pinned in gates/requirements.py)
 _REQ_BY_RULE = {r.rule: r for r in MEDUSA_REQUIREMENTS}
+_REFINEMENT_BY_KEY = {r.key: r for r in WORKLIST_REFINEMENTS}
 _KIND_ORDER = {"decision": 0, "config": 1, "transient": 2}   # actionable first, self-healing last
 _MAX_EXAMPLES = 6
 
 
 def _row_label(row: CanonicalRow) -> str:
     return (row.variation_name or row.raw_name or "").strip() or row.surrogate_key
+
+
+def _worklist_key(row: CanonicalRow, rule: str, detail: str) -> str:
+    """The worklist entry a rejected row belongs to: a refinement's key when the rule, the detail and the
+    row's binding select one, else the hard rule itself."""
+    for r in WORKLIST_REFINEMENTS:
+        if r.rule == rule and r.detail == detail and bool(row.variation_key) == r.bound:
+            return r.key
+    return rule
 
 
 def held_breakdown(rejects: list[CanonicalRow]) -> list[dict]:
@@ -40,20 +50,21 @@ def held_breakdown(rejects: list[CanonicalRow]) -> list[dict]:
     groups: dict[str, dict] = {}
     for row in rejects:
         for rule in dict.fromkeys(rr.rule for rr in row.reject_reasons):     # once per rule per row
-            g = groups.setdefault(rule, {"count": 0, "examples": []})
+            detail = next((rr.detail for rr in row.reject_reasons if rr.rule == rule and rr.detail), "")
+            key = _worklist_key(row, rule, detail)
+            g = groups.setdefault(key, {"count": 0, "examples": []})
             g["count"] += 1
             if len(g["examples"]) < _MAX_EXAMPLES:
-                detail = next((rr.detail for rr in row.reject_reasons if rr.rule == rule and rr.detail), "")
                 g["examples"].append({"name": _row_label(row), "detail": detail})
     out = []
-    for rule, g in groups.items():
-        req = _REQ_BY_RULE.get(rule)
+    for key, g in groups.items():
+        entry = _REFINEMENT_BY_KEY.get(key) or _REQ_BY_RULE.get(key)
         out.append({
-            "rule": rule, "count": g["count"],
-            "kind": req.kind if req else "decision",
-            "title": req.title if req else rule,
-            "recovery": req.recovery if req else "",
-            "self_heals": bool(req and req.kind == "transient"),
+            "rule": key, "count": g["count"],
+            "kind": entry.kind if entry else "decision",
+            "title": entry.title if entry else key,
+            "recovery": entry.recovery if entry else "",
+            "self_heals": bool(entry and entry.kind == "transient"),
             "examples": g["examples"],
         })
     out.sort(key=lambda d: (_KIND_ORDER.get(d["kind"], 9), -d["count"]))
