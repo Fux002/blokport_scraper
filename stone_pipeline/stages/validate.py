@@ -64,6 +64,7 @@ def held_breakdown(rejects: list[CanonicalRow]) -> list[dict]:
             "kind": entry.kind if entry else "decision",
             "title": entry.title if entry else key,
             "recovery": entry.recovery if entry else "",
+            "stage": entry.stage if entry else "",     # the diagnostics layer that detected it (panel: "where")
             "self_heals": bool(entry and entry.kind == "transient"),
             "examples": g["examples"],
         })

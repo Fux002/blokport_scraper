@@ -6,8 +6,13 @@ cannot ship without a worklist entry."""
 from __future__ import annotations
 
 from stone_pipeline.core.schema import CanonicalRow, RejectReason
-from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS
+from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS
 from stone_pipeline.stages import validate
+
+# the diagnostics table's layer labels; a worklist stage must name one (or two, slash-joined) of these so
+# the panel can point the operator at the layer that detected the hold
+_LAYERS = {"Ingest", "Keys Dedupe", "Format", "Normalize", "Match Variation", "Reconcile", "Derive",
+           "Images", "Constants", "Validate"}
 
 
 def _row(name: str, *rejects: tuple[str, str]) -> CanonicalRow:
@@ -34,6 +39,9 @@ def test_held_breakdown_groups_by_rule_with_operator_text_and_examples():
     # an example carries the product name and the specific detail
     ex = by["required_id_null"]["examples"][0]
     assert ex["name"] in {"Ocean X", "Ocean Y"} and ex["detail"] in {"color_id", "finish_id"}
+    # each group names the layer that detected it (the "where"): size at Derive, a new variety at Match/Reconcile
+    assert by["dimension_invalid"]["stage"] == "Derive"
+    assert by["tree_gap"]["stage"] == "Match Variation / Reconcile"
 
 
 def test_actionable_holds_sort_before_self_healing():
@@ -59,6 +67,15 @@ def test_every_hard_rule_carries_operator_worklist_text():
         assert req.title.strip(), f"{req.rule} has no title"
         assert req.recovery.strip(), f"{req.rule} has no recovery"
         assert req.kind in {"decision", "transient", "config"}, f"{req.rule} bad kind {req.kind!r}"
+
+
+def test_every_worklist_entry_names_a_real_detecting_layer():
+    # the "where" the panel shows must be one (or two, slash-joined) of the diagnostics table's own layers,
+    # so a stage typo can never point at a layer that does not exist
+    for entry in (*MEDUSA_REQUIREMENTS, *WORKLIST_REFINEMENTS):
+        assert entry.stage.strip(), f"{entry.rule} has no detecting stage"
+        parts = [p.strip() for p in entry.stage.split("/")]
+        assert all(p in _LAYERS for p in parts), f"{entry.rule} stage {entry.stage!r} names a non-layer"
 
 
 def test_no_rejects_is_an_empty_worklist():
