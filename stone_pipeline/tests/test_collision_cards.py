@@ -103,3 +103,44 @@ def test_a_statement_binds_the_spelling_for_that_vendor_only(tmp_path, monkeypat
     assert code == 200 and body["result"] == "bound"
     assert views.scoped() == {("marenostone", "amazon green granite"): ("Golden Lightning", "Granite")}
     assert views.actions() == {}          # scoped: NOT a global decision
+
+
+def _marble_imports() -> dict[str, ImportFile]:
+    """Two SAME-TYPE marbles share the with-type alias 'Absolute Black Marble'; only ONE of them also carries
+    the type-stripped form 'Absolute Black' the cleaner produces (dev, 2026-09-17: Toros Black and Alaska
+    White). So the cleaned surface has a single marble owner while the matcher's verdict names two."""
+    branches = {}
+    for b in ("slab", "block", "tile"):
+        imp = ImportFile(branch=b, path=None)
+        if b == "slab":
+            for key, nm, aliases in (("slab_marble_toros_black_T", "Toros Black", "Absolute Black Marble"),
+                                     ("slab_marble_alaska_white_A", "Alaska White", "Absolute Black Marble|Absolute Black")):
+                v = {"Key": key, "Name": nm, "Image": "", "Aliases": aliases, "Volume": "",
+                     "type": curate.proj.norm(loaders.type_slug_from_key(key))}
+                imp.varieties.append(v)
+                imp.by_name_type[(curate.proj.norm(nm), v["type"])] = v
+                imp.by_name[curate.proj.norm(nm)] = v
+        branches[b] = imp
+    return branches
+
+
+def test_a_matcher_collision_is_never_narrowed_away_by_the_cleaned_surface(monkeypatch):
+    # The matcher held 'Absolute Black Marble Slab' as a collision of two marbles. Curate consulted the
+    # matcher's owners only when the cleaned surface ('Absolute Black') had none; here it had one (Alaska
+    # White), so curate 'aliased' onto an alias that already existed: no card, no mint, and the row held on
+    # every produce with nothing to decide. The matcher's verdict must WIDEN the owner set, never lose to
+    # a narrower surface: two same-type owners -> the collision card naming both.
+    monkeypatch.setattr(curate, "load_all_existing", lambda: _marble_imports())
+    monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
+    ref = loaders.load_all()
+    g = TreeGap(src_site="marenostone", surrogate_key="S/08/18", raw_name="Absolute Black Marble Slab",
+                normalized_name="absolute black marble", gap_kind=GapKind.missing_variation,
+                nearest_existing="Alaska White, Toros Black")
+    row = CanonicalRow(src_site="marenostone", surrogate_key="S/08/18", variety_match_key="Absolute Black Marble",
+                       raw_type="Marble", variation_method="exact_collision", tree_gaps=[g])
+    res = curate.build_curation([row], ref)
+    assert not res.alias_additions["slab"] and not _minted(res)
+    card = next((p for p in res.pending_confirm if p["variant"].lower().startswith("absolute black")), None)
+    assert card and "Matches several existing varieties" in card["reason"], res.pending_confirm
+    assert "Toros Black" in card["reason"] and "Alaska White" in card["reason"]
+    assert card["stone_type"] == "Marble"
