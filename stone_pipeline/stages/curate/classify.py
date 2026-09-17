@@ -125,7 +125,11 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
     aliaser. True = handled."""
     if is_generic(c, clean):
         return False
-    owners = c.existing_surface.get(proj.norm(clean)) or collision_owners(c, row, gap)
+    # the matcher's COLLISION verdict names the owners on the gap; they WIDEN the cleaned surface's own owners,
+    # never lose to them. Consulting them only when the cleaned surface had none let a narrower surface (the
+    # type-stripped spelling owned by ONE of two same-type varieties) turn an explicit collision into an alias
+    # that already existed: no card, no mint, the row held on every produce with nothing to decide.
+    owners = set(c.existing_surface.get(proj.norm(clean), set())) | collision_owners(c, row, gap)
     if not owners:
         return False
     st = proj.norm(stone_type)
