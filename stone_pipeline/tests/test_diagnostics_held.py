@@ -97,3 +97,29 @@ def test_a_bound_variety_without_a_colour_is_its_own_worklist_entry():
     assert "Amend the variety in Review and set a colour" in by["variety_no_colour"]["recovery"]
     assert by["variety_no_colour"]["examples"][0]["name"] == "Sparta White"
     assert by["required_id_null"]["count"] == 1 and by["required_id_null"]["examples"][0]["name"] == "Ocean X"
+
+
+def test_a_listing_with_no_photo_at_all_is_its_own_entry_not_a_transient_retry():
+    # prod 2026-09-17: 16 Varsha bundles carry no image url on the vendor's site. They were filed under the
+    # transient "no usable photo this run ... re-lists on its own", which is true only for a photo that
+    # failed to fetch or process; a listing with no source heals only when the supplier adds a photo.
+    out = validate.held_breakdown([
+        _row("Black Ultimate", ("no_image", "no_source")),
+        _row("Alaska Gold", ("no_image", "")),
+    ])
+    by = {g["rule"]: g for g in out}
+    assert by["supplier_no_photo"]["count"] == 1
+    assert by["supplier_no_photo"]["title"] == "Supplier lists no photo for this product"
+    assert by["supplier_no_photo"]["self_heals"] is True
+    assert "once the supplier adds a photo" in by["supplier_no_photo"]["recovery"]
+    assert by["no_image"]["count"] == 1 and by["no_image"]["examples"][0]["name"] == "Alaska Gold"
+
+
+def test_validate_marks_a_no_image_reject_with_its_cause():
+    # the detail is what the worklist keys on: "no_source" when the listing carries no image url at all,
+    # empty when a url existed but no image came through this run (fetch or processing failed)
+    from stone_pipeline.stages import validate as v
+    no_source = _row("Black Ultimate"); no_source.raw_image_urls = []
+    failed = _row("Alaska Gold"); failed.raw_image_urls = ["https://varsha/img/1.jpg"]
+    assert v.no_image_detail(no_source) == "no_source"
+    assert v.no_image_detail(failed) == ""

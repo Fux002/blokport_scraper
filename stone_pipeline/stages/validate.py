@@ -37,7 +37,7 @@ def _worklist_key(row: CanonicalRow, rule: str, detail: str) -> str:
     """The worklist entry a rejected row belongs to: a refinement's key when the rule, the detail and the
     row's binding select one, else the hard rule itself."""
     for r in WORKLIST_REFINEMENTS:
-        if r.rule == rule and r.detail == detail and bool(row.variation_key) == r.bound:
+        if r.rule == rule and r.detail == detail and (r.bound is None or bool(row.variation_key) == r.bound):
             return r.key
     return rule
 
@@ -73,6 +73,13 @@ def held_breakdown(rejects: list[CanonicalRow]) -> list[dict]:
 
 # required attribute ids for a row to be importable (section 7 Stage 9, 6A)
 REQUIRED_ID_FIELDS = ("type_id", "color_id", "finish_id", "quality_id", "variation_id")
+
+
+def no_image_detail(row: CanonicalRow) -> str:
+    """The cause behind a no_image reject, for the worklist: "no_source" when the listing carries no image url
+    at all (the supplier lists no photo; it lists only once they add one), empty when a url existed but no
+    image came through this run (fetch or processing failed; retried on the next scrape)."""
+    return "" if any((u or "").strip() for u in (row.raw_image_urls or [])) else "no_source"
 
 
 def _no_publishable_image(row: CanonicalRow) -> bool:
@@ -123,7 +130,7 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     # a row Stage 7 marked no_publishable_image is a terminal known-good empty -- it publishes WITHOUT an
     # image instead of being rejected, so a real stone whose only photos were spec sheets/logos is not lost.
     if require_images and not row.image_keys and not _no_publishable_image(row):
-        row.add_reject(RejectReason(rule="no_image", detail=""))
+        row.add_reject(RejectReason(rule="no_image", detail=no_image_detail(row)))
     # A dimension whose source FETCH FAILED (recoverable) is HELD as a distinct TRANSIENT reject -- "retry
     # me next scrape", not "bad data" -- and is exempt from the dimension_invalid check below so the hold
     # reads cleanly. Retries exactly like no_image (a fresh scrape re-derives; it emits once the fetch
