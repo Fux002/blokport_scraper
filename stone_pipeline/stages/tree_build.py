@@ -26,7 +26,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS, default_form_name
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
 
@@ -272,6 +272,21 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             d["colors"] |= p["colors"]
             d["quals"] |= p["quals"]
 
+    # Default-form (slab) colour/quality by (type, variety-name), for cross-form inheritance below. Keyed
+    # to each default-form EXPORT row's own resolved post (by KEY), not the post's name: the block backbone
+    # is keyless and its post names have drifted from the export, so slab (100% keyed) is the only place a
+    # variety's canonical colour/quality is reliably reachable by the clean export name.
+    _default_prefix = default_form_name()
+    df_cq: dict[tuple, dict] = {}
+    for key, vid, name in export_rows:
+        if key.split("_", 1)[0] == _default_prefix:
+            p = by_key.get(key)
+            if p:
+                t, c, q = combo(p)
+                d = df_cq.setdefault((t, match_key(name)), {"colors": set(), "quals": set()})
+                d["colors"] |= c
+                d["quals"] |= q
+
     combinations: set = set()
 
     def add(cat, typ, vid, finishes, colors, quals) -> bool:
@@ -321,6 +336,17 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         if inh := variety.get(nl):
             colors |= inh["colors"]
             quals |= inh["quals"]
+        # Cross-form inheritance: a non-default-form variation (block/tile) that documents no colour or
+        # quality of its OWN inherits it from the SAME (type, variety) default-form (slab) export row -- the
+        # canonical variety vocabulary. Type-matched (never a same-name different stone) and fills ONLY an
+        # empty dimension, so a form with its own value is never widened (that would change existing
+        # combinations). This is why block, whose backbone is keyless and drifted, is priceable from slab.
+        if prefix != _default_prefix and (not colors or not quals):
+            if df := df_cq.get((typ, nl)):
+                if not colors:
+                    colors |= df["colors"]
+                if not quals:
+                    quals |= df["quals"]
         # No colour/quality default: a variation nothing describes is UNCOVERED (the review file asks the
         # operator), never priced under the catalogue's most common colour.
         finishes = cat_finishes.get(prefix, []) or ([_raw_finish] if _raw_finish else [])

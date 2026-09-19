@@ -284,3 +284,39 @@ def test_a_type_word_in_the_name_is_not_the_type(tmp_path):
     assert [u["Id"] for u in unc] == ["v1"]
     assigned = tree_build.build_combinations(exp, _attrs(tmp_path), [], prod, {"everest quartzite": "t_quartz"})[0]
     assert {c[1] for c in _for(assigned, "v1")} == {"t_quartz"}     # the operator's assignment covers it
+
+
+def test_block_inherits_colour_quality_from_same_name_default_form(tmp_path):
+    # Cause A: block's backbone is keyless and its posts' NAMES have drifted from the export (slab covers
+    # its export row by KEY to a differently-named post, e.g. post 'Carrara (Bianco Carrara)' keyed to the
+    # 'Bianco Carrara' row). So a block export row finds no post by key OR by (type,name) and drops
+    # uncovered. It must inherit colour/quality from the SAME (type, variety) DEFAULT-FORM (slab) export
+    # row's resolved values. Type-matched (never a same-name different stone) and fills ONLY an empty
+    # dimension (a block row with its own colour is never widened).
+    posts = [
+        # slab post NAME is drifted, but it is KEYED to the clean 'Bianco Carrara' export row:
+        _post("slab_marble_bianco_carrara_1", "Carrara (Bianco Carrara)", ["Polished"], color=["White", "Grey"]),
+        _post("block_marble_x_1", "X", ["Raw"], category="Blocks", color=["Black"]),   # gives block a finish set
+        # a block variety WITH its own keyed post/colour, to prove no widening:
+        _post("slab_marble_statuario_1", "Statuario Drift", ["Polished"], color=["White"]),
+        _post("block_marble_statuario_1", "Statuario", ["Raw"], category="Blocks", color=["Grey"]),
+        # a QUARTZITE slab 'Titan' (drifted name), to prove a MARBLE block does not inherit it:
+        _post("slab_quartzite_titan_1", "Titan Q", ["Polished"], stone_type="Quartzite", color=["White"]),
+    ]
+    bb = _backbone(tmp_path, posts)
+    exp = _export(tmp_path, [
+        ("s1", "slab_marble_bianco_carrara_1", "Bianco Carrara"),
+        ("b1", "block_marble_bianco_carrara_1", "Bianco Carrara"),   # no post by key OR (type,name) -> inherits slab
+        ("s2", "slab_marble_statuario_1", "Statuario"),
+        ("b2", "block_marble_statuario_1", "Statuario"),             # own keyed colour -> not widened
+        ("st", "slab_quartzite_titan_1", "Titan"),
+        ("bt", "block_marble_titan_1", "Titan"),                     # MARBLE block, slab Titan is QUARTZITE
+    ])
+    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None)
+    b1 = _for(combos, "b1")
+    assert b1, "block should inherit colour/quality from the same (type, name) default-form export row"
+    assert {c[COL] for c in b1} == {"c_white", "c_grey"}
+    assert {c[QUAL] for c in b1} == {"q_a"}
+    assert {c[COL] for c in _for(combos, "b2")} == {"c_grey"}       # no widening
+    assert not _for(combos, "bt")                                    # type-safe: no cross-type inherit
+    assert "bt" in {u["Id"] for u in unc}
