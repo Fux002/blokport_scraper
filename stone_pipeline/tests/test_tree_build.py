@@ -320,3 +320,28 @@ def test_block_inherits_colour_quality_from_same_name_default_form(tmp_path):
     assert {c[COL] for c in _for(combos, "b2")} == {"c_grey"}       # no widening
     assert not _for(combos, "bt")                                    # type-safe: no cross-type inherit
     assert "bt" in {u["Id"] for u in unc}
+
+
+def test_leaf_overlay_covers_a_decided_variety(tmp_path):
+    # An operator-APPROVED colour/quality (config.db leaf overlay) makes a variety priceable even when it is
+    # minted-and-drifted out of the backbone files (no post) with no product -- otherwise it is re-flagged
+    # UNCOVERED although the decision already exists (the bug: tree_build read the files, not the overlay
+    # reference_data grows the matching backbone with). Type-scoped: a same-name different stone must not
+    # inherit it.
+    bb = _backbone(tmp_path, [_post("block_marble_other_1", "Other", ["Raw"], category="Blocks")])  # block finish
+    exp = _export(tmp_path, [
+        ("b1", "block_marble_crystal_vitro_1", "Crystal Vitro"),     # no post, no product
+        ("b2", "block_quartzite_crystal_vitro_1", "Crystal Vitro"),  # SAME name, DIFFERENT type
+    ])
+    overlay = {("crystal vitro", "marble"): {"color": ["White"], "quality": ["A"]}}
+    # without the overlay -> uncovered
+    combos0, _, _ = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None)
+    assert not _for(combos0, "b1")
+    # with the overlay -> the marble one is covered from the decision; the quartzite same-name is NOT
+    combos, _, unc = tree_build.build_combinations(exp, _attrs(tmp_path), [bb], None, leaf_overlay=overlay)
+    b1 = _for(combos, "b1")
+    assert b1, "a decided variety must be covered by the leaf overlay"
+    assert {c[COL] for c in b1} == {"c_white"}
+    assert {c[QUAL] for c in b1} == {"q_a"}
+    assert not _for(combos, "b2")                       # type-scoped: quartzite same-name not covered
+    assert "b2" in {u["Id"] for u in unc}

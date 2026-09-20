@@ -214,12 +214,20 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
                        products_csv: Path | None,
                        assigned_types: dict[str, str] | None = None,
                        exclude_ids: set[str] | None = None,
-                       retired_keys: set[str] | None = None) -> tuple[set, dict, list[dict]]:
+                       retired_keys: set[str] | None = None,
+                       leaf_overlay: "dict[tuple[str, str], dict[str, list[str]]] | None" = None,
+                       ) -> tuple[set, dict, list[dict]]:
     """Build the set of valid combinations (6-tuples). Returns (combinations, stats,
     uncovered). exclude_ids = variation IDs slated for deletion in Medusa (variants_to_delete);
     retired_keys = variation KEYS the operator retired. Both get NO combinations, but they live in
     DISTINCT namespaces (the export Id churns, the Key is stable) -- so a retired Key must be tested
-    against the Key column, never folded into the Id set (where it would never match and be inert)."""
+    against the Key column, never folded into the Id set (where it would never match and be inert).
+    leaf_overlay = decisions_store.backbone_leaf_overlay() -- the operator's APPROVED colour/quality
+    decisions, keyed (variety_norm, stone_type_norm). tree_build reads the backbone FILES, not the
+    in-memory Backbone that reference_data grows with this overlay, so without it a variety whose colour
+    the operator already decided (but which is minted-and-drifted out of the backbone files) is re-flagged
+    UNCOVERED here even though the decision exists. Applying it makes the combinations honour the same
+    decisions the matching pipeline already does (additive, like Backbone.apply_leaf_overlay)."""
     attr = _load_attributes(attributes_csv)
     # universal finish fallback: a variation in a category that declares NO finish is still priceable in the
     # pack's raw/unfinished finish (stone: 'Raw') rather than dropping uncovered. Sourced from the active
@@ -230,6 +238,14 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     retired_keys = retired_keys or set()
     by_key, by_cat_name, by_type_name = _load_backbone(backbone_paths)
     products = _load_products(products_csv)
+    # Operator leaf decisions as attribute IDs, keyed (variety_norm, stone_type_norm) -- precomputed once so
+    # the per-row lookup below is a dict hit, not a re-map of every decision each of ~36k rows.
+    overlay_ids: dict[tuple[str, str], tuple[set, set]] = {}
+    for (vnorm, tnorm), adds in (leaf_overlay or {}).items():
+        cids = {attr["color"][mk] for c in adds.get("color", []) if (mk := match_key(c)) in attr["color"]}
+        qids = {attr["quality"][mk] for q in adds.get("quality", []) if (mk := match_key(q)) in attr["quality"]}
+        if cids or qids:
+            overlay_ids[(vnorm, tnorm)] = (cids, qids)
     cat_finishes = _category_finishes(backbone_paths, attr, products)
     cat_pcat = {p: attr["category"].get(match_key(c)) for p, c in _PREFIX_CATEGORY.items()}
     type_key = {tid: k for k, tid in attr["type"].items()}              # type id -> the post's type key
@@ -336,6 +352,14 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
         if inh := variety.get(nl):
             colors |= inh["colors"]
             quals |= inh["quals"]
+        # Operator leaf decisions (config.db overlay): a colour/quality the operator has already APPROVED is
+        # authoritative membership for this (variety, type), the same overlay reference_data grows the
+        # matching backbone with. Applied here so a decided variety is never re-flagged uncovered by the
+        # combination build (which reads the backbone FILES, not the overlay-grown Backbone). Additive,
+        # matching Backbone.apply_leaf_overlay; type-scoped so a same-name different stone never inherits it.
+        if typ and (ov := overlay_ids.get((nl, type_key.get(typ, "")))):
+            colors |= ov[0]
+            quals |= ov[1]
         # Cross-form inheritance: a non-default-form variation (block/tile) that documents no colour or
         # quality of its OWN inherits it from the SAME (type, variety) default-form (slab) export row -- the
         # canonical variety vocabulary. Type-matched (never a same-name different stone) and fills ONLY an
@@ -437,10 +461,12 @@ def run() -> Path:
     # namespace from the export Ids in exclude_ids -- pass them separately so they are tested against the
     # Key column, not silently merged into the Id set (where they would never match and leak combinations).
     from stone_pipeline.stages import decisions
+    from stone_pipeline.config import decisions_store
     retired_keys = decisions.load_retired()
     combinations, stats, uncovered = build_combinations(
         export, SETTINGS.paths.attributes_csv, _backbone_paths(),
-        products if products.exists() else None, assigned, exclude_ids, retired_keys)
+        products if products.exists() else None, assigned, exclude_ids, retired_keys,
+        leaf_overlay=decisions_store.backbone_leaf_overlay())
 
     to_upload = SETTINGS.paths.to_upload_dir
     path = to_upload / "2_valid_combinations.csv"
