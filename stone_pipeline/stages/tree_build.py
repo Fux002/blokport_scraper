@@ -77,7 +77,19 @@ def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict, dict]:
     """Three lookups: by Key (primary join), by (category, name) and by (type, name), to recover variations
     whose Key isn't in the backbone (the block backbone is ~99% keyless, tiles mirror slabs). A variety's
     identity is (type, name): a same-name post of another category lends its colours ONLY when its type is
-    the variation's own, so a same-name post of a different stone never does."""
+    the variation's own, so a same-name post of a different stone never does.
+
+    KNOWN, ACCEPTED STATE (not a bug, do not "clean up" blindly): the block backbone is ~97% KEYLESS
+    (~327/12160 keyed) while slab and tile are fully keyed. That is why the by-name lookups above exist and
+    why build_combinations recovers a block variation's colour/quality three other ways -- the name lookups
+    here, the same-(type,name) slab cross-form inheritance, and the operator leaf-decision overlay
+    (backbone_leaf_overlay). Net effect: the pipeline produces CORRECT output despite the keyless block
+    backbone; it is compensated in code, not left broken. A full re-key of backbone_blocks.json (to make
+    block join by Key like slab/tile) is deliberately NOT done as a file edit: block's Keys are what
+    Medusa's EXISTING block products are matched on, so re-keying orphans those products unless Medusa
+    re-imports them -- i.e. it is a coordinated migration (re-key + re-import + dev-verified), not a
+    correction. Until that migration happens, the compensation above is the intended handling. Verified
+    live (dev + prod) after PRs #438 (slab->block colour inheritance) and #440 (honour the leaf overlay)."""
     by_key: dict[str, dict] = {}
     by_cat_name: dict[tuple, dict] = {}
     by_type_name: dict[tuple, dict] = {}
