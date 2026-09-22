@@ -322,3 +322,23 @@ def test_restore_state_never_clobbers_a_warm_writeback(tmp_path, monkeypatch):
     wb.write_text("variation_id,alias,method\nV2,Warm,fuzzy\n", encoding="utf-8")   # a live local copy wins
     assert snapshot.restore_state(env="development") is False
     assert "Warm" in wb.read_text(encoding="utf-8")
+
+
+def test_an_unchanged_db_is_not_uploaded_again(tmp_path, monkeypatch):
+    # The periodic snapshot (every 5 min, both containers, both stores) uploaded a byte-identical copy into a
+    # VERSIONED bucket whenever nothing had changed: prod held 305 GB and dev 1.2 TB of old snapshot versions
+    # against 9 GB of real data. An upload happens only when the copy's bytes differ from the last one sent.
+    fake = _FakeS3()
+    uploads = {"n": 0}
+    real = fake.upload_file
+    fake.upload_file = lambda *a, **k: uploads.__setitem__("n", uploads["n"] + 1) or real(*a, **k)
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    snapshot._LAST_UPLOADED.clear()
+    src = tmp_path / "development.db"
+    _seed(src, "slab_marble_test_1")
+    assert snapshot.save(src, env="development") is True
+    assert snapshot.save(src, env="development") is True          # unchanged: still "saved" (it is on S3)
+    assert uploads["n"] == 1, "an identical snapshot was uploaded again"
+    _seed(src, "slab_marble_test_2")                               # a real write
+    assert snapshot.save(src, env="development") is True
+    assert uploads["n"] == 2

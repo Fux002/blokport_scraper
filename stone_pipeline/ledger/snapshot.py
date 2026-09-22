@@ -12,6 +12,7 @@ plus a best-effort snapshot on shutdown is enough -- no need to snapshot on ever
 
 from __future__ import annotations
 
+import hashlib
 import os
 from stone_pipeline.core import env
 import sqlite3
@@ -33,6 +34,12 @@ _SNAPSHOT_INTERVAL = int(env.getenv("BLOKPORT_LEDGER_SNAPSHOT_SECONDS", "300"))
 # place before failing loud. A cold restore takes seconds; minutes means the sync container did not come up.
 _LEDGER_AWAIT_SECONDS = int(env.getenv("BLOKPORT_LEDGER_AWAIT_SECONDS", "120"))
 _LEDGER_AWAIT_POLL_SECONDS = 0.5
+# The digest of the last copy uploaded per S3 key, in this process. The periodic save runs every 5 minutes
+# whether or not anything changed; the buckets are versioned, so an identical upload still creates a new
+# version (prod held 305 GB and dev 1.2 TB of old snapshot versions against 9 GB of live data). A copy whose
+# bytes equal the last one sent is already on S3 and is not sent again. Process-local on purpose: a fresh
+# task uploads once and then only on change.
+_LAST_UPLOADED: dict[str, str] = {}
 
 
 def _s3():
@@ -87,7 +94,11 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         _consistent_copy(ledger_path, tmp_path)
+        digest = hashlib.sha256(tmp_path.read_bytes()).hexdigest()
+        if _LAST_UPLOADED.get(key) == digest:
+            return True                       # unchanged since the last upload: it is on S3 already
         _s3().upload_file(str(tmp_path), S3_BUCKET, key)
+        _LAST_UPLOADED[key] = digest
         log.info("db snapshot uploaded", extra={"extra_fields": {
             "key": key, "bytes": tmp_path.stat().st_size}})
         return True

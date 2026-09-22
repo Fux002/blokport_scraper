@@ -249,10 +249,11 @@ module "gpu_enhance_dev" {
   image_repo_url = local.ecr_repo_url
   image_tag      = var.gpu_image_tag
   region         = var.region
-  # 128 vCPU = up to 32 g4dn.xlarge in parallel. Full-catalog reprocess is ~53 GPU-hours at ~30s/image;
-  # 4 GPUs (the default 16) took >2h per slice and hit the Batch timeout. min stays 0, so idle cost is $0
-  # and total spend is ~flat vs 4 GPUs (same GPU-hours) -- this only compresses wall-clock to ~1.5-2h.
-  max_vcpus = 128
+  # 8 vCPU = 2 g4dn.xlarge. The steady state is a produce dispatching 30-50 two-minute jobs; with one
+  # instance per job (up to 32 in parallel) each job paid a ~4 min boot and a 5 GB image pull through NAT,
+  # so instance-hours ran 2-3x the job-hours. Two warm instances queue those jobs at the same total
+  # GPU-hours. Raise temporarily for a full-catalog backfill (~53 GPU-hours), where wall-clock matters.
+  max_vcpus = 8
   # FAL_KEY for the FAL FLUX Fill de-watermarker (watermarked sources). Wired by convention to the known
   # dev SSM param, exactly like the scraper/produce secrets, so a plain apply can never strip it.
   ssm_secret_arns = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
@@ -282,10 +283,9 @@ module "gpu_enhance_prod" {
   image_repo_url = local.ecr_repo_url
   image_tag      = var.prod_gpu_image_tag
   region         = var.region
-  # 96 vCPU = up to 24 g4dn.xlarge in parallel (account G/VT quota is 384). Prod ran the module default 16
-  # (4 GPUs) = ~6h for a full-catalog enhance backlog; 96 compresses it to ~1.5-2h. min stays 0 ($0 idle),
-  # same total GPU-hours -- only wall-clock shrinks. Dev is 128; both are well within the 384 quota.
-  max_vcpus   = 96
+  # 8 vCPU = 2 g4dn.xlarge, same reasoning as dev: the per-produce jobs are two minutes each and a boot per
+  # job (plus a 5 GB image pull through NAT) dominated the GPU bill. Raise temporarily for a backfill.
+  max_vcpus   = 8
   alert_email = var.alert_email
   # FAL_KEY (+ proxy) for FLUX texture gen + FAL de-watermark, by convention like dev. Empty until the
   # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
@@ -341,7 +341,7 @@ module "sync_service_dev" {
   # dropping the peak by a full copy, so 8 GB is comfortable (produce ~1.5 GB + servers ~0.5 GB) at 1
   # vCPU (servers idle; only the occasional produce needs CPU). Can right-size lower once a real /run's
   # peak is measured. NOT a separate produce task -- that races the single-host SQLite ledger invariant.
-  memory = 8192
+  memory = 6144 # 3.0 GB peak observed over two weeks (the combination tree build); 6 GB keeps 2x headroom
 
   vpc_id                = data.terraform_remote_state.platform_dev.outputs.vpc_id
   private_subnet_ids    = data.terraform_remote_state.platform_dev.outputs.private_subnet_ids
@@ -422,7 +422,7 @@ module "sync_service_prod" {
   image_tag           = var.prod_image_tag
   region              = var.region
   staging_bucket      = var.prod_staging_bucket
-  memory              = 8192 # same catalog RAM peak as dev (produce ~1.5 GB + servers ~0.5 GB)
+  memory              = 6144 # 3.0 GB peak observed over two weeks (the combination tree build); 6 GB keeps 2x headroom
   image_upgrade_batch = var.prod_image_upgrade_batch
   run_timeout_seconds = var.run_timeout_seconds
 
