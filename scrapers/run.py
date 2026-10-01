@@ -37,7 +37,7 @@ except ImportError:
 # unseeded box abort the whole produce on that dormant scraper's failure (rc=1). Add on full onboarding.
 # (fulei was the same supplier as fuleistone -- category 246 "Live Inventory" vs fuleistone's 148 "Stone Slabs"
 # superset -- so it was removed as a superseded duplicate, not a distinct pending source.)
-_SOURCES = ("marenostone", "polonine", "zucchi", "varsha", "fuleistone")
+_SOURCES = ("marenostone", "polonine", "zucchi", "varsha", "fuleistone", "sentas")
 
 
 def _discover(source: str) -> Type[ScraperBase]:

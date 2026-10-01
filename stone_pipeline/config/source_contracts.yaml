@@ -265,3 +265,45 @@ fuleistone:
   value_sets: {}
   value_patterns: {}
   row_baseline: 1274
+sentas:
+  adapter_version: 1.0.0
+  required_columns:
+  - product_id
+  - variety
+  - url
+  - finish
+  - thickness
+  - height_cm
+  - width_cm
+  - pieces
+  - image_urls
+  optional_columns:
+  - name
+  - caption
+  - variety_url
+  - stone_type
+  - total_sqm
+  - total_kg
+  - drive_folders
+  - drive_image_count
+  - format
+  - image_count
+  - image_filenames_local
+  - scrape_timestamp
+  - raw_json
+  - fetch_failed
+  fill_floors:
+    product_id: 0.7
+    variety: 0.7
+    url: 0.7
+    finish: 0.7
+    thickness: 0.7
+    height_cm: 0.7
+    width_cm: 0.7
+    pieces: 0.7
+    image_urls: 0.7
+  value_sets: {}
+  value_patterns:
+    image_urls: https?://
+    product_id: ^\d+$
+  row_baseline: 496
