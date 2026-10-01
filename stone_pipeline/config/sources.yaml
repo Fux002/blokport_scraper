@@ -64,3 +64,16 @@ fuleistone:
   origin_default: CN  # VERIFY supplier country
   default_bundle_size: 6
   min_expected_rows: 300  # Stone Slabs category ~1274
+sentas:
+  source_code: sen
+  vendor: Sentas Marble  # VERIFY: the company these products belong to
+  ports_default:
+    - Izmir  # VERIFY: factory + quarries in Iscehisar, Afyonkarahisar; Izmir is the Afyon region's export port
+  emit_on_review: true
+  origin_default: TR  # Turkish quarries (Afyon region)
+  primary_origin: TR  # PRIMARY quarry origin: Sentas quarries its own Turkish stone and trades a few imports; a
+  #                     map origin that is not TR holds for confirmation instead of shipping the map's guess.
+  collection_country_default: TR
+  collection_city_default: Afyonkarahisar
+  default_bundle_size: 6
+  min_expected_rows: 120  # recent ~500 bundles across 127 varieties

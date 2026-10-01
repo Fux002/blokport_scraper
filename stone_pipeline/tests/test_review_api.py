@@ -76,7 +76,7 @@ def test_get_adapters_lists_the_registry():
     # instead of parsing a 400 error. The real registry is the coded sources (fuleistone added, PR #185).
     code, body = server.dispatch("GET", ["adapters"], None)
     assert code == 200
-    assert set(body["adapters"]) == {"marenostone", "polonine", "varsha", "zucchi", "fuleistone"}
+    assert set(body["adapters"]) == {"marenostone", "polonine", "varsha", "zucchi", "fuleistone", "sentas"}
     assert server.dispatch("POST", ["adapters"], {})[0] == 405
 
 
