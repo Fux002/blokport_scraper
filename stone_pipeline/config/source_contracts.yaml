@@ -266,7 +266,7 @@ fuleistone:
   value_patterns: {}
   row_baseline: 1274
 sentas:
-  adapter_version: 1.0.0
+  adapter_version: 1.1.0
   required_columns:
   - product_id
   - variety
@@ -282,6 +282,7 @@ sentas:
   - caption
   - variety_url
   - stone_type
+  - color
   - total_sqm
   - total_kg
   - drive_folders
@@ -306,4 +307,4 @@ sentas:
   value_patterns:
     image_urls: https?://
     product_id: ^\d+$
-  row_baseline: 496
+  row_baseline: 505
