@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "c7c3bd24205cdd0a4fed138b0882c832c116dd42"     # :core w/ unchanged-snapshot skip (#443), on top of the tree fixes #438/#440 and the doc note #442
+prod_image_tag     = "73510bb5b098d6c44197dd8c312844d7d11ac68b"     # new source Sentas Marble (#445) + its site-rebuild follow-up (#446)
 prod_gpu_image_tag = "gpu-782f18c7944a3817dc211008002e9fe36e09165b" # current :gpu (reads SCRAPER_ env, prod bucket); was gpu-f9d828e0 (Aug18, pre-rename -> hit dev bucket)
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
