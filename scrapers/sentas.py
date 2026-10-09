@@ -1,20 +1,18 @@
 """Sentas Marble (sentasmarble.com) scraper, on ScraperBase.
 
-A plain PHP + jQuery site (no bot protection, no proxy). The slab inventory is organised per VARIETY:
-/en/stocks lists every variety (name + /en/slabs/<slug> page); the variety page carries its grid id
-(`kategoriID`) in an inline script, and POST /en/filter_data with that id returns the variety's bundle
-cards (id, caption, product-page url). Every bundle fact lives on the product page: height/width (cm),
-total sqm, total kg, piece count, surface finish, thickness, the photo gallery, and for some bundles
-links to Google Drive folders with extra photos ("Drive Link" = bundle photos, "Scanner Photo" = one scan
-per slab + a packing PDF). Those folder listings are read via Drive's public embedded folder view and the
-photos appended after the site gallery, up to the pipeline's product-image slot count.
+A Laravel site behind Cloudflare (plain requests pass; no proxy). The slab inventory is organised per
+VARIETY: GET /en/stocks?ajax=1&page=N returns JSON pages of variety cards (name + /en/categories/<slug>);
+GET /en/categories/<slug>?ajax=1&page=N returns JSON pages of that variety's bundle cards (product id,
+caption, product-page url). Every bundle fact lives on the product page: height/width/thickness (cm),
+total sqm, total kg, piece count, surface finish, colour, the photo gallery (the page's JSON-LD Product
+image list), and for some bundles Google Drive folders with extra photos ("Google Drive" = bundle photos,
+"Scanner Photo" = one scan per slab + a packing PDF). Those folder listings are read via Drive's public
+embedded folder view and the photos appended after the site gallery, up to the pipeline's product-image
+slot count.
 
-Stone type: the site publishes it only through its three collection grids (Marble / Travertine / Onyx),
-keyed by variety name. A variety in none of them ships untyped and the pipeline types it from the matched
-variety or holds it for review, never from a guess here.
-
-The product page also renders an unlabelled vendor code ("( BH-12 )") in a leftover review-stars slot. It
-is not a published grade and has no legend on the site, so it is deliberately not captured.
+Stone type: the site publishes it only through its three collection categories (marble / travertine /
+onyx), keyed by variety name. A variety in none of them ships untyped and the pipeline types it from the
+matched variety or holds it for review, never from a guess here.
 
 Run:  python -m scrapers.sentas
 """
@@ -22,6 +20,7 @@ Run:  python -m scrapers.sentas
 from __future__ import annotations
 
 import html
+import json
 import re
 from typing import Any, Iterable, Optional
 
@@ -37,9 +36,11 @@ from stone_pipeline.config.settings import SETTINGS
 
 SITE = "https://sentasmarble.com"
 STOCKS_URL = f"{SITE}/en/stocks"
-FILTER_URL = f"{SITE}/en/filter_data"
-# The site's own type classification: collection grid id -> stone type (verified on the live collections).
-COLLECTIONS = {"1": "Marble", "2": "Travertine", "3": "Onyx"}
+CATEGORY_URL = f"{SITE}/en/categories/{{slug}}"
+# The site's own type classification: collection category slug -> stone type (verified on the live site).
+COLLECTIONS = {"marble-collection": "Marble", "travertine-collection": "Travertine", "onyx-collection": "Onyx"}
+# Index cards that are GROUPINGS of bundles already listed under their variety, not varieties themselves.
+INDEX_SKIP_SLUGS = {"new-slabs", "warehouse-special-products"}
 AJAX_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 # A public Drive folder's embedded listing (no API key) and its CDN image url; =s2000 caps the long side
 # at 2000px (the original when smaller), the same form the develi scraper uses.
@@ -50,26 +51,27 @@ _DRIVE_IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp")
 # 30+), and every url past the cap would be downloaded, enhanced and hosted for nothing.
 MAX_IMAGES = SETTINGS.images.product_image_slots
 
-_STOCK_VARIETY = re.compile(r'href="(https://sentasmarble\.com/en/slabs/[^"]+)"[^>]*>\s*(?:<[^>]+>\s*)*([^<]+?)\s*<')
-_KATEGORI = re.compile(r"kategoriID\s*=\s*'(\d+)'")
-_GRID_ITEM = re.compile(r'data-id="(\d+)"\s+data-caption="([^"]*)".*?href="(https://sentasmarble\.com/en/product/[^"]+)"',
-                        re.DOTALL)
-_CAPTION = re.compile(r'data-caption="([^"]*)"')
+_CATEGORY_CARD = re.compile(r'href="https://sentasmarble\.com/en/categories/([^"/]+)"[^>]*>\s*<img[^>]*alt="([^"]*)"')
+_CARD_SPLIT = re.compile(r'<div class="tt-col-item">')
+_CARD_ID = re.compile(r"openProductQuickView\('(\d+)'")
+_CARD_LINK = re.compile(r'href="(https://sentasmarble\.com/en/products/[^"]+)"[^>]*>\s*<img[^>]*alt="([^"]*)"')
 _H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.DOTALL)
-# "<strong>Height:</strong> ... <span class="pill-cm">165 cm</span>"
-_DIM = re.compile(r"<strong>(Height|Width):</strong>.*?<span class=\"pill-cm\">([^<]*)</span>", re.DOTALL)
+# '<span class="dim-label">Height :</span> ... <span class="pill-cm">198 cm</span>'
+_DIM = re.compile(r'<span class="dim-label">(Height|Width|Thickness)\s*:</span>.*?<span class="pill-cm">([^<]*)</span>',
+                  re.DOTALL)
 # The three figure tiles are identified by their icon, the only stable marker in that block.
-_FIGURE = re.compile(r"icon_(sqm|weight|pieces)\.gif.*?<p[^>]*>\s*([\d.,]+)", re.DOTALL)
-_SPEC = re.compile(r"<li><span>(Surface Finish|Thickness):</span>\s*([^<]*?)\s*</li>", re.DOTALL)
-_GALLERY = re.compile(r'<ul id="smallGallery".*?</ul>', re.DOTALL)
-_GALLERY_IMAGE = re.compile(r'data-image="([^"]+)"')
-_DRIVE_FOLDER = re.compile(r"https://drive\.google\.com/drive/folders/([A-Za-z0-9_-]+)")
+_FIGURE = re.compile(r'icon_(sqm|weight|pieces)\.gif.*?<div[^>]*stat-main-val[^>]*>\s*([\d.,]+)', re.DOTALL)
+_SPEC = re.compile(r'<td[^>]*spec-label[^>]*>(Surface Finish|Thickness|Colors):</td>\s*<td[^>]*>(.*?)</td>', re.DOTALL)
+_JSON_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL)
+# The product page's Drive action cards: a folder link in either of Drive's url forms, labelled by the card.
+_ACTION_CARD = re.compile(r'<a href="([^"]+)"[^>]*class="action-card-item[^"]*"[^>]*>(.*?)</a>', re.DOTALL)
+_DRIVE_FOLDER_ID = re.compile(r"drive\.google\.com/(?:drive/(?:u/\d+/)?folders/|open\?id=)([A-Za-z0-9_-]+)")
 _DRIVE_ENTRY = re.compile(r'<div class="flip-entry" id="entry-([^"]+)".*?<div class="flip-entry-title">([^<]*)</div>',
                           re.DOTALL)
 
 
 def _text(fragment: str) -> str:
-    return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
 
 
 def _number(text: str) -> str:
@@ -81,75 +83,125 @@ def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def _gallery(page: str) -> list[str]:
+    """The product's own photos: the JSON-LD Product node's image list (the gallery; the page also shows
+    similar products, which the structured data does not include)."""
+    for raw in _JSON_LD.findall(page):
+        try:
+            node = json.loads(raw)
+        except ValueError:
+            continue
+        if node.get("@type") == "Product" and isinstance(node.get("image"), list):
+            return list(dict.fromkeys(u for u in node["image"] if isinstance(u, str) and u))
+    return []
+
+
+def _drive_folders(page: str) -> list[str]:
+    """Folder ids of the page's Drive photo cards, in page order (the packing-list sheet is not a folder)."""
+    ids = []
+    for href, body in _ACTION_CARD.findall(page):
+        found = _DRIVE_FOLDER_ID.search(html.unescape(href))
+        if found and "Drive Folder" in _text(body):
+            ids.append(found.group(1))
+    return list(dict.fromkeys(ids))
+
+
 def _parse_product_page(page: str) -> dict:
     """The bundle facts a product page renders. Absent elements come back empty, never guessed."""
     dims = {k.lower(): v.strip() for k, v in _DIM.findall(page)}
     figures = {k: _number(v) for k, v in _FIGURE.findall(page)}
-    specs = {k: v for k, v in _SPEC.findall(page)}
-    gallery = _GALLERY.search(page)
-    images = list(dict.fromkeys(_GALLERY_IMAGE.findall(gallery.group(0)))) if gallery else []
+    specs = {k: _text(v) for k, v in _SPEC.findall(page)}
     h1 = _H1.search(page)
     return {
         "name": _text(h1.group(1)) if h1 else "",
         "height_cm": dims.get("height", ""),            # the short face
         "width_cm": dims.get("width", ""),              # the long face
+        "thickness": specs.get("Thickness") or dims.get("thickness", ""),
         "total_sqm": figures.get("sqm", ""),
         "total_kg": figures.get("weight", ""),
         "pieces": figures.get("pieces", ""),
         "finish": specs.get("Surface Finish", ""),
-        "thickness": specs.get("Thickness", ""),
-        "image_urls": [f"{SITE}/{path}" for path in images],
-        "drive_folders": list(dict.fromkeys(_DRIVE_FOLDER.findall(page))),
+        "color": specs.get("Colors", ""),
+        "image_urls": _gallery(page),
+        "drive_folders": _drive_folders(page),
     }
+
+
+def _parse_cards(cards_html: str) -> list[tuple[str, str, str]]:
+    """(product id, caption, product url) per bundle card of a category page."""
+    out = []
+    for card in _CARD_SPLIT.split(cards_html)[1:]:
+        pid, link = _CARD_ID.search(card), _CARD_LINK.search(card)
+        if pid and link:
+            out.append((pid.group(1), html.unescape(link.group(2)).strip(), link.group(1)))
+    return out
 
 
 class SentasScraper(ScraperBase):
     source = "sentas"
-    category = "slab"   # /en/stocks is the "Slabs Inventory"; the site sells no blocks or tiles
-    # DECLARED source convention: the product page renders dimensions in centimetres ("165 cm"); the
+    category = "slab"   # /en/stocks is the slab inventory; the site sells no blocks or tiles
+    # DECLARED source convention: the product page renders dimensions in centimetres ("198 cm"); the
     # value is captured with its unit, so the adapter passes it through unchanged.
     dimension_unit = "cm"
-    # A plain PHP host with no rate limiting observed; ~900 requests per scrape stay well-spaced at this.
+    # No rate limiting observed; ~800 requests per scrape stay well-spaced at this.
     request_delay = (0.3, 0.8)
     columns = [
         "product_id", "name", "caption", "variety", "variety_url", "stone_type", "url",
-        "finish", "thickness", "height_cm", "width_cm", "total_sqm", "total_kg", "pieces",
+        "finish", "color", "thickness", "height_cm", "width_cm", "total_sqm", "total_kg", "pieces",
         "drive_folders", "drive_image_count",
     ]
 
     # --- listing ---------------------------------------------------------------------------------------
+    def _pages(self, url: str) -> Iterable[dict]:
+        """Every JSON page of a paginated listing (?ajax=1&page=N), following the server's hasMore flag."""
+        page = 1
+        while True:
+            data = self.get(url, params={"ajax": "1", "page": str(page)}, headers=AJAX_HEADERS).json()
+            yield data
+            if not data.get("hasMore"):
+                return
+            page += 1
+
+    def _category_names(self, slug: str) -> list[str]:
+        """The card titles of one collection category (variety names; its cards link to the variety's
+        showcase page, the same card shape as a bundle card), across all its pages."""
+        names = []
+        for data in self._pages(CATEGORY_URL.format(slug=slug)):
+            names.extend(html.unescape(n).strip() for _, n in _CARD_LINK.findall(data.get("cards_html") or ""))
+        return names
+
     def _type_map(self) -> dict[str, str]:
-        """Normalised variety name -> stone type, from the site's three collection grids."""
-        types: dict[str, str] = {}
-        for grid_id, stone_type in COLLECTIONS.items():
-            page = self.post(FILTER_URL, headers=AJAX_HEADERS, data={"kategoriID": grid_id, "sirala": "1"}).text
-            for caption in _CAPTION.findall(page):
-                types[_norm(html.unescape(caption))] = stone_type
-        self.log.info("collection grids typed %d varieties", len(types))
+        """Normalised variety name -> stone type, from the site's three collection categories."""
+        types = {_norm(name): stone_type
+                 for slug, stone_type in COLLECTIONS.items() for name in self._category_names(slug)}
+        self.log.info("collection categories typed %d varieties", len(types))
         return types
 
     def _varieties(self) -> list[tuple[str, str]]:
-        """(name, variety page url) for every variety on /en/stocks, in page order, deduped by url."""
-        page = self.get(STOCKS_URL).text
+        """(name, category url) for every variety on /en/stocks, in page order, deduped by slug."""
         seen: dict[str, str] = {}
-        for url, name in _STOCK_VARIETY.findall(page):
-            if name := html.unescape(name).strip():   # the image anchor of a card has no text; the title has
-                seen.setdefault(url, name)
-        return [(name, url) for url, name in seen.items()]
+        for data in self._pages(STOCKS_URL):
+            for slug, name in _CATEGORY_CARD.findall(data.get("html") or ""):
+                if slug not in INDEX_SKIP_SLUGS and (name := html.unescape(name).strip()):
+                    seen.setdefault(slug, name)
+        return [(name, CATEGORY_URL.format(slug=slug)) for slug, name in seen.items()]
 
     def _bundles(self, variety_url: str) -> list[tuple[str, str, str]]:
-        """(bundle id, caption, product url) for one variety: its page gives the grid id, the grid the cards."""
-        found = _KATEGORI.search(self.get(variety_url).text)
-        if not found:
-            raise RuntimeError(f"no kategoriID on {variety_url}")
-        grid = self.post(FILTER_URL, headers=AJAX_HEADERS,
-                         data={"kategoriID": found.group(1), "sirala": "1"}).text
-        return [(pid, html.unescape(caption).strip(), url) for pid, caption, url in _GRID_ITEM.findall(grid)]
+        """(product id, caption, product url) for one variety, across all its pages; the advertised total
+        is checked so a short page is a truncation, not a quiet end."""
+        bundles, total = [], None
+        for data in self._pages(variety_url):
+            total = data.get("total", total)
+            bundles.extend(_parse_cards(data.get("cards_html") or ""))
+        if total is not None and len(bundles) < int(total):
+            raise RuntimeError(f"{variety_url}: {len(bundles)} cards for an advertised total of {total}")
+        return bundles
 
     def list_products(self) -> Iterable[Any]:
         types = self._type_map()
         varieties = self._varieties()
-        self.log.info("stocks page lists %d varieties", len(varieties))
+        self.log.info("stocks index lists %d varieties", len(varieties))
+        seen: set[str] = set()   # a bundle listed under two cards is one product; the first card names it
         for name, variety_url in varieties:
             try:
                 bundles = self._bundles(variety_url)
@@ -157,9 +209,12 @@ class SentasScraper(ScraperBase):
                 # This variety's bundles are unknown, not absent: record the run as truncated so the
                 # pipeline never delists them off this scrape.
                 self.record_failure("variety", url=variety_url, error=str(exc))
-                self.mark_incomplete(f"variety grid failed: {variety_url}")
+                self.mark_incomplete(f"variety listing failed: {variety_url}")
                 continue
             for pid, caption, url in bundles:
+                if pid in seen:
+                    continue
+                seen.add(pid)
                 yield {"product_id": pid, "caption": caption, "url": url, "variety": name,
                        "variety_url": variety_url, "stone_type": types.get(_norm(name), "")}
 
@@ -200,6 +255,7 @@ class SentasScraper(ScraperBase):
             **item,
             "name": facts.get("name", ""),
             "finish": facts.get("finish", ""),
+            "color": facts.get("color", ""),
             "thickness": facts.get("thickness", ""),
             "height_cm": facts.get("height_cm", ""),
             "width_cm": facts.get("width_cm", ""),

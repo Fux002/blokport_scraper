@@ -3,9 +3,9 @@
 Named-variety source: the scraper takes the variety from the site's own stock index (/en/stocks), so the
 variety column is clean and needs no name surgery; the bundle caption ("B1103 - 2CM CALACATTA GREEN
 POLISHED") is kept only as raw capture. Type comes from the site's collection grids where it lists the
-variety, else is left for the matched variety to supply. The site publishes no colour and no quality
-grade: colour is recovered from a colour word in the variety name (as varsha/zucchi do) and quality is
-left blank so the shared last-resort rule grades and flags it. Dimensions arrive in cm with their unit;
+variety, else is left for the matched variety to supply. Colour is the page's own "Colors" field, else a
+colour word in the variety name (as varsha does). The site publishes no quality grade, so quality is left
+blank and the shared last-resort rule grades and flags it. Dimensions arrive in cm with their unit;
 weight is the bundle total and is normalised to the canonical per-piece value here.
 """
 
@@ -31,7 +31,7 @@ def _per_piece_kg(record) -> str:
 
 class SentasAdapter(AdapterBase):
     source = "sentas"
-    adapter_version = "1.0.0"
+    adapter_version = "1.1.0"
     variety_match_key = "variety"
     format_field = "format"
     required_columns = ["product_id", "variety", "url", "finish", "thickness",
@@ -45,10 +45,10 @@ class SentasAdapter(AdapterBase):
         "raw_name": _variety,
         "variety_match_key": _variety,
         "raw_type": lambda r: AdapterBase.clean(r.get("stone_type")),
-        "raw_color": lambda r: extract_color(_variety(r)),
+        "raw_color": lambda r: AdapterBase.clean(r.get("color")) or extract_color(_variety(r)),
         "raw_finish": lambda r: AdapterBase.clean(r.get("finish")),
-        # the site publishes no quality grade (its "( BH-12 )" code is an unlabelled vendor code, not a
-        # grade): blank on purpose, so the pack's last-resort grade applies, flagged for review
+        # the site publishes no quality grade: blank on purpose, so the pack's last-resort grade applies,
+        # flagged for review
         "raw_quality": lambda r: "",
         "raw_thickness": lambda r: AdapterBase.clean(r.get("thickness")),
         # 'width' is the long face on sentas -> length; 'height' the short face -> the raw dims 'height' key.
