@@ -483,6 +483,10 @@ class ImageProcessor:
         #    edge, CPU / cv2 -- no GPU) and re-encoded, so it is never re-hosted bloated. Either way the sha
         #    is marked processed so the publish gate treats it as done and it is not reprocessed.
         if enhance and self._esr.available():
+            # Never feed the model more pixels than the published image can show: the output is capped at
+            # target_long_edge below, so a larger original only multiplies GPU tiles for pixels that are
+            # thrown away (a 3,900 px original: 48 tiles, ~80 s per photo). Downscale only, never enlarge.
+            bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)
             bgr = self._esr.enhance(bgr)
             bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)      # cap the 4x output
             bgr = _levels(bgr, self.cfg.levels_lo_pct, self.cfg.levels_hi_pct)  # exposure lift
