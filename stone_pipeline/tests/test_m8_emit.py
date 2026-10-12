@@ -39,7 +39,7 @@ def test_header_matches_template_exactly(emitted, tmp_path_factory, scrape_data_
     with open(path, newline="", encoding="utf-8-sig") as handle:
         header = next(csv.reader(handle))
     assert header == read_template_columns()
-    assert len(header) == 55  # 45 base + Product Image 6..15 (see product_image_slots)
+    assert len(header) == 240  # 40 base + Product Image 1..200 (see product_image_slots)
 
 
 def test_emitted_rows_exist(emitted):

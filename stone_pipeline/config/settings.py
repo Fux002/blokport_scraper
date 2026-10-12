@@ -592,10 +592,13 @@ class ImagesConfig:
     # enhanced set before flipping on, else every image holds. Enable with BLOKPORT_REQUIRE_ENHANCED=true.
     require_enhanced: bool = _env_bool("BLOKPORT_REQUIRE_ENHANCED", False)
     # Number of numbered "Product Image N" columns a slab/tile product can fill. The pipeline
-    # fills as many as the product actually has, up to this cap; the rest stay blank. Shared by
-    # the image-slotting stage and the emit columns so they can never drift (the template header
-    # must carry exactly this many Product Image columns -- asserted in tests).
-    product_image_slots: int = 15
+    # fills as many as the product actually has; the rest stay blank. Shared by the image-slotting
+    # stage, the emit columns and the scrapers' per-product photo cap so they can never drift (the
+    # template header must carry exactly this many Product Image columns -- asserted in tests).
+    # A SAFETY CEILING, not a selection: every photo a vendor publishes is carried (Blokport's import,
+    # pull sync and gallery are uncapped); 200 sits well above the largest set seen (114, a Sentas
+    # scanner folder) and bounds what one runaway folder could cost in GPU time and hosting.
+    product_image_slots: int = 200
     # One-time QUALITY upgrade of legacy variant textures, drip-fed by the produce. A product-backed
     # variant whose {Key}.png was made by an older model is re-made ONCE with the current best model and
     # recorded in the durable refreshed marker, so it never re-generates (or re-bills) twice. Capped per
