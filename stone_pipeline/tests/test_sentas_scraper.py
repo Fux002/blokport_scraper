@@ -235,9 +235,19 @@ def test_a_failed_drive_listing_contributes_nothing_and_never_holds(tmp_path, mo
     assert [f["kind"] for f in s._failures] == ["drive"]
 
 
-def test_images_are_gallery_then_drive_capped_at_the_slot_count(tmp_path, monkeypatch):
+def test_images_take_every_photo_gallery_first_then_each_drive_folder(tmp_path, monkeypatch):
     s = SentasScraper(data_dir=tmp_path)
-    monkeypatch.setattr(s, "_drive_images", lambda fid: [f"{fid}-{i}" for i in range(20)])
+    monkeypatch.setattr(s, "_drive_images", lambda fid: [f"{fid}-{i}" for i in range(3)])
+    gallery = ["g1", "g2"]
+    urls, drive_used = s._images({"image_urls": gallery, "drive_folders": ["A", "B"]})
+    assert urls == gallery + [f"A-{i}" for i in range(3)] + [f"B-{i}" for i in range(3)] and drive_used == 6
+
+
+def test_images_stop_at_the_slot_ceiling(tmp_path, monkeypatch):
+    s = SentasScraper(data_dir=tmp_path)
+    many = sentas.MAX_IMAGES + 5                               # one runaway folder larger than the ceiling
+    monkeypatch.setattr(s, "_drive_images", lambda fid: [f"{fid}-{i}" for i in range(many)] if fid == "A"
+                        else pytest.fail("a folder was listed although the ceiling was already reached"))
     gallery = ["g1", "g2"]
     urls, drive_used = s._images({"image_urls": gallery, "drive_folders": ["A", "B"]})
     assert len(urls) == sentas.MAX_IMAGES and urls[:2] == gallery and urls[2:] == [f"A-{i}" for i in range(sentas.MAX_IMAGES - 2)]
