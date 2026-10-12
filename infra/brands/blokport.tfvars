@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "73510bb5b098d6c44197dd8c312844d7d11ac68b"     # new source Sentas Marble (#445) + its site-rebuild follow-up (#446)
+prod_image_tag     = "13c0cb94d14b8d6595deb930189295aca9453791"     # every vendor photo carried: product_image_slots 15 -> 200 (#450)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # enhance fits the input to the target before ESRGAN (#448): ~4x less GPU work on large originals
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
