@@ -235,8 +235,8 @@ LOT_REPLACEMENT_COLUMNS = ["Variant Sku", "Product Handle", "Lot Code", "Pieces"
 
 def write_lot_replacements_csv(discontinued: list[tuple[str, str]], replaced: dict[str, tuple[str, int]],
                                path: Path) -> Path:
-    """The cutover record: each bundle replaced by its lot (old SKU, old handle, the lot, its pieces), for
-    the diff both sides read before the pull resumes. Header-only when the run replaced nothing."""
+    """The replacement record: each bundle replaced by its lot this run (old SKU, old handle, the lot, its
+    pieces), for the run's review folder. Header-only when the run replaced nothing."""
     cells = [{"Variant Sku": sku, "Product Handle": handle_val, "Lot Code": replaced[sku][0],
               "Pieces": replaced[sku][1]} for sku, handle_val in discontinued if sku in replaced]
     csvio.write_dicts(path, LOT_REPLACEMENT_COLUMNS, cells, sanitize=False)   # atomic; derived values only

@@ -370,9 +370,9 @@ def run_source(
     known = product_state.load_known_products(known_path)
 
     # Lots: the loader step that decides lot membership (a bundle whose slabs' status is known becomes its
-    # full scanned sequence; a piece-native record gets its lot_code). After the adapt-drop guard, so that
-    # guard keeps comparing records with records; a no-op for a source whose `lots` switch is off. Its "which
-    # slabs are sold?" cards are raised either way, so they can be answered before the cutover.
+    # full scanned sequence; a piece-native record gets its lot_code; a bundle whose slabs' status is not
+    # known raises a "which slabs are sold?" card). After the adapt-drop guard, so that guard keeps comparing
+    # records with records.
     from stone_pipeline.config import decisions_store
     lot_answers = decisions_store.lot_answers(source_cfg.source)
     lot_cards = lots.cards(rows, source_cfg, lot_answers)

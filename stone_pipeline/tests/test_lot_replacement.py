@@ -1,6 +1,6 @@
 """A bundle replaced by its lot: the deactivation itself carries the redirect target.
 
-When a vendor's cutover splits a bundle into its pieces, the bundle's SKU vanishes from the scrape and
+When the loader turns a bundle into its pieces, the bundle's SKU vanishes from the scrape and
 takes the existing discontinued path (inventory 0). Agreed with Blokport: that inventory delta carries
 `reason: "replaced_by_lot"` and the `lot_code`, so Blokport deactivates the bundle (never deletes it) and
 301s its slug to the lot page from the same message. The delta is served only once a piece of that lot
@@ -21,7 +21,7 @@ from stone_pipeline.ledger.populate import populate_discontinued, populate_inven
 from stone_pipeline.ledger.sync import ready
 from stone_pipeline.stages import emit, lots
 
-CFG = SourceConfig(source="sentas", source_code="sen", lots=True)
+CFG = SourceConfig(source="sentas", source_code="sen")
 CODE = "B6208B-1b4d1c6e-0000-5000-8000-000000000000"
 
 
@@ -91,7 +91,7 @@ def test_a_plain_sold_out_delta_carries_no_reason_and_no_lot(tmp_path):
 
 
 def test_a_bundle_listed_again_drops_its_replacement(tmp_path):
-    # a reverted cutover: the bundle is scraped as one product again, so it is no longer replaced
+    # the bundle is scraped as one product again (its lot was not formed this run), so it is no longer replaced
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _product(ledger, "SEN-2555", medusa_id="m")
         _synced_stock(ledger, "SEN-2555", 9)

@@ -11,6 +11,7 @@ lot is one listing for near-duplicate detection (keys), and diagnostics count ea
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import uuid
 
@@ -23,8 +24,7 @@ from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
 from stone_pipeline.stages import derive, keys_dedupe, lots, validate
 
-ON = SourceConfig(source="sentas", source_code="sen", lots=True)
-OFF = SourceConfig(source="sentas", source_code="sen", lots=False)
+CFG = SourceConfig(source="sentas", source_code="sen")
 
 
 def _bundle(pieces, *, slab_count=None, key="7149", images=("g1", "g2", "s1", "s2"), **kw):
@@ -54,7 +54,7 @@ def test_the_lot_code_namespace_never_changes():
 # -- loader: bundle-shaped sources --------------------------------------------------------------------------
 
 def test_a_bundle_with_one_photo_per_listed_piece_becomes_one_product_per_piece():
-    pieces = lots.load([_bundle(TWO)], ON)
+    pieces = lots.load([_bundle(TWO)], CFG)
     assert [p.src_natural_key for p in pieces] == ["7149-1", "7149-4"]
     assert [p.lot_position for p in pieces] == [1, 4]                       # the vendor's slab numbers, gaps kept
     assert {p.lot_code for p in pieces} == {_code("sen", "7149", "B6392")}  # byte-identical on every piece
@@ -69,15 +69,15 @@ def test_a_bundle_with_one_photo_per_listed_piece_becomes_one_product_per_piece(
 
 
 def test_the_lot_code_is_deterministic_across_runs():
-    first = lots.load([_bundle(TWO)], ON)[0].lot_code
-    again = lots.load([_bundle(TWO)], ON)[0].lot_code
-    other_source = lots.load([_bundle(TWO)], SourceConfig(source="other", source_code="oth", lots=True))[0].lot_code
+    first = lots.load([_bundle(TWO)], CFG)[0].lot_code
+    again = lots.load([_bundle(TWO)], CFG)[0].lot_code
+    other_source = lots.load([_bundle(TWO)], SourceConfig(source="other", source_code="oth"))[0].lot_code
     assert first == again and first != other_source
 
 
 def test_the_label_defaults_to_the_lot_ref_and_is_whitespace_normalised():
-    assert lots.load([_bundle(TWO, src_lot_label=None)], ON)[0].lot_code == _code("sen", "7149", "7149")
-    assert lots.load([_bundle(TWO, src_lot_label="  B 63\t92 ")], ON)[0].lot_code == _code("sen", "7149", "B 63 92")
+    assert lots.load([_bundle(TWO, src_lot_label=None)], CFG)[0].lot_code == _code("sen", "7149", "7149")
+    assert lots.load([_bundle(TWO, src_lot_label="  B 63\t92 ")], CFG)[0].lot_code == _code("sen", "7149", "B 63 92")
 
 
 @pytest.mark.parametrize("pieces, slab_count", [
@@ -90,26 +90,27 @@ def test_the_label_defaults_to_the_lot_ref_and_is_whitespace_normalised():
 ])
 def test_a_bundle_without_complete_piece_evidence_stays_one_product(pieces, slab_count):
     row = _bundle(pieces, slab_count=slab_count)
-    out = lots.load([row], ON)
+    out = lots.load([row], CFG)
     assert len(out) == 1 and out[0].src_natural_key == "7149" and out[0].lot_code is None
 
 
 def test_malformed_piece_data_keeps_the_bundle_whole():
     row = _bundle(TWO)
     row.raw_pieces = "[{not json"
-    out = lots.load([row], ON)
+    out = lots.load([row], CFG)
     assert len(out) == 1 and out[0].lot_code is None
 
 
 def test_a_bundle_without_a_natural_key_is_never_split():
-    out = lots.load([_bundle(TWO, key=None)], ON)
+    out = lots.load([_bundle(TWO, key=None)], CFG)
     assert len(out) == 1 and out[0].lot_code is None
 
 
-def test_lots_off_changes_nothing():
-    row = _bundle(TWO)
-    out = lots.load([row], OFF)
-    assert len(out) == 1 and out[0] is row and row.lot_code is None
+def test_lot_membership_is_decided_by_the_data_alone_with_no_per_source_switch():
+    # Blokport takes a lot whenever one arrives, so no source setting gates the loader
+    assert "lots" not in {f.name for f in dataclasses.fields(SourceConfig)}
+    out = lots.load([_bundle(TWO)], SourceConfig(source="sentas", source_code="sen"))
+    assert [p.lot_position for p in out] == [1, 4] and len({p.lot_code for p in out}) == 1
 
 
 # -- loader: piece-native sources (e.g. a cutting-machine API) ---------------------------------------------
@@ -143,7 +144,7 @@ def _machine_frame():
 
 def test_a_piece_native_source_forms_a_lot_with_no_source_specific_code():
     rows = _CuttingMachineAdapter().adapt(_machine_frame())
-    out = lots.load(rows, SourceConfig(source="machine", source_code="mac", lots=True))
+    out = lots.load(rows, SourceConfig(source="machine", source_code="mac"))
     assert len(out) == 3                                                    # mapped 1:1, nothing expanded
     assert {r.lot_code for r in out} == {_code("mac", "BLK-88", "BLK-88")}
     assert [r.lot_position for r in out] == [1, 2, 3]
@@ -155,16 +156,16 @@ def test_a_piece_native_source_forms_a_lot_with_no_source_specific_code():
 
 def test_a_piece_native_position_that_is_not_a_positive_integer_is_left_unset():
     row = CanonicalRow(src_site="machine", src_natural_key="S1", src_lot_ref="BLK-88", raw_lot_position="x")
-    out = lots.load([row], SourceConfig(source="machine", source_code="mac", lots=True))
+    out = lots.load([row], SourceConfig(source="machine", source_code="mac"))
     assert out[0].lot_code and out[0].lot_position is None                 # validate holds the lot (below)
 
 
 # -- downstream: a piece is a single item ----------------------------------------------------------------
 
 def test_a_lot_piece_is_sold_singly_never_as_a_bundle():
-    piece = lots.load([_bundle(TWO)], ON)[0]
+    piece = lots.load([_bundle(TWO)], CFG)[0]
     piece.surrogate_key, piece.type_name = "7149-1", "Marble"
-    derive.derive_bundle_size(piece, None, ON)
+    derive.derive_bundle_size(piece, None, CFG)
     derive.derive_inventory(piece)
     assert piece.sold_in_bundle is False and piece.bundle_size is None and piece.bundle_size_method == "lot_piece"
     assert piece.inventory_quantity == 1
@@ -178,14 +179,14 @@ def _near_dup(row):
 
 
 def test_pieces_of_one_lot_are_not_near_duplicates_of_each_other():
-    pieces = lots.load([_bundle(TWO)], ON)
+    pieces = lots.load([_bundle(TWO)], CFG)
     keys_dedupe.run(pieces)
     assert not any(_near_dup(p) for p in pieces)
 
 
 def test_a_second_lot_of_the_same_stone_is_flagged_once_like_a_second_bundle():
-    first = lots.load([_bundle(TWO)], ON)
-    second = lots.load([_bundle(TWO, key="9000", src_lot_label="B9000")], ON)
+    first = lots.load([_bundle(TWO)], CFG)
+    second = lots.load([_bundle(TWO, key="9000", src_lot_label="B9000")], CFG)
     keys_dedupe.run(first + second)
     assert [_near_dup(p) for p in first + second] == [False, False, True, False]
 

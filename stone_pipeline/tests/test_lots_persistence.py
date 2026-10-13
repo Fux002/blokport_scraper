@@ -1,10 +1,11 @@
-"""Lots across the boundaries: the per-source `lots` switch in the config store (the cutover control, safe
-against an admin form that does not know the field), and lot_code / lot_position through the ledger into
+"""Lots across the boundaries: no per-source setting gates them (a config store that still holds the retired
+`lots` switch drops it and keeps its sources), and lot_code / lot_position travel through the ledger into
 the pull payload Blokport reads (stored, part of the change fingerprint, null outside a lot)."""
 
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -19,28 +20,33 @@ from stone_pipeline.stages import emit
 KEY = "slab_marble_calacatta_viola_1"
 
 
-# -- config store: the cutover switch -----------------------------------------------------------------------
+# -- config store: no lots setting --------------------------------------------------------------------------
 
-def test_lots_is_off_by_default_and_round_trips(tmp_path, monkeypatch):
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+def test_a_v7_config_store_drops_the_retired_lots_switch_and_keeps_its_sources(tmp_path, monkeypatch):
+    db = tmp_path / "config.db"
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(db))
     store.upsert_row({"source": "sentas", "source_code": "sen", "vendor": "Sentas Marble", "ports": ["Izmir"]})
-    assert store.read_sources()["sentas"].lots is False and store.get_row("sentas")["lots"] is False
-    store.upsert_row({**store.get_row("sentas"), "lots": True})
-    assert store.read_sources()["sentas"].lots is True and store.get_row("sentas")["lots"] is True
+    with closing(sqlite3.connect(db)) as raw:                              # simulate a v7 store
+        raw.execute("ALTER TABLE source ADD COLUMN lots INTEGER NOT NULL DEFAULT 0")
+        raw.execute("UPDATE source SET lots = 1")
+        raw.execute("PRAGMA user_version = 7")
+        raw.commit()
+    row = store.get_row("sentas")
+    assert "lots" not in row and (row["vendor"], row["ports"]) == ("Sentas Marble", ["Izmir"])
+    with closing(sqlite3.connect(db)) as raw:
+        assert "lots" not in {r[1] for r in raw.execute("PRAGMA table_info(source)")}
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
 
 
 def test_a_partial_put_changes_only_the_fields_it_names(tmp_path, monkeypatch):
-    # the cutover is one partial PUT {"lots": true}; and an admin form that does not render a field must
-    # never reset it to its default on save (that would silently undo a cutover).
+    # an admin form that does not render a field must never reset it to its default on save
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.upsert_row({"source": "sentas", "source_code": "sen", "vendor": "Sentas Marble", "ports": ["Izmir"],
                       "enhance": False, "primary_origin": "TR", "min_expected_rows": 120})
-    code, body = server.dispatch("PUT", ["sources", "sentas"], {"lots": True})
-    assert code == 200 and body["lots"] is True
+    code, body = server.dispatch("PUT", ["sources", "sentas"], {"vendor": "Sentas Mermer"})
+    assert code == 200
     assert (body["vendor"], body["ports"], body["enhance"], body["primary_origin"], body["min_expected_rows"]) \
-        == ("Sentas Marble", ["Izmir"], False, "TR", 120)
-    code, body = server.dispatch("PUT", ["sources", "sentas"], {"vendor": "Sentas Mermer"})   # a form without `lots`
-    assert code == 200 and body["lots"] is True and body["vendor"] == "Sentas Mermer"
+        == ("Sentas Mermer", ["Izmir"], False, "TR", 120)
 
 
 # -- ledger: stored, fingerprinted, migrated ----------------------------------------------------------------

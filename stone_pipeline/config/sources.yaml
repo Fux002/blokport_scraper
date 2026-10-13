@@ -12,9 +12,6 @@
 # defaults; replace per source when real accounts exist. VERIFY each origin_default.
 # min_expected_rows = catastrophic-scrape floor: a run below it aborts and never delists (guards a
 # broken/empty/truncated fetch). Set well under the normal count (~recent ÷ 4), not a tight bound.
-# lots = the per-vendor lot cutover switch (default false): on, a bundle with one photo per listed piece
-# is sent as its pieces sharing a lot_code (stone_pipeline/adapters/ADAPTERS.md, "Lots"). Flip it in the
-# config store as a coordinated cutover with Blokport, never by surprise.
 polonine:
   source_code: pol
   vendor: Polonine  # VERIFY: the company these products belong to

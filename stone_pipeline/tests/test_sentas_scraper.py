@@ -357,7 +357,7 @@ def test_the_captured_scanned_bundle_becomes_its_pieces_and_the_rest_stay_whole(
     from stone_pipeline.stages import lots
 
     rows = ADAPTER.adapt(read_scrape_csv(selftest.fixture_dir("sentas") / "input.csv"))
-    loaded = lots.load(rows, SourceConfig(source="sentas", source_code="sen", lots=True))
+    loaded = lots.load(rows, SourceConfig(source="sentas", source_code="sen"))
     pieces = [r for r in loaded if r.lot_code]
     assert len(loaded) == len(rows) - 1 + 9                         # bundle 2555 (9 pieces, 9 scans) split
     assert {p.src_lot_ref for p in pieces} == {"2555"} and len({p.lot_code for p in pieces}) == 1

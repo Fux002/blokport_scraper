@@ -77,11 +77,6 @@ class SourceConfig:
     # broken fetch can't mass-delist the catalog. Set well below the normal count (it guards against
     # near-empty scrapes, not normal supplier inventory variation). 0 = only the empty-scrape guard.
     min_expected_rows: int = 0
-    # Lots (the per-vendor CUTOVER switch, off by default). On: the loader establishes lot membership for this
-    # source -- a bundle with one photo per listed piece becomes one product per piece, a piece-native record
-    # carries its lot -- and every piece is sent with its lot_code. Flipping it on replaces the split bundles'
-    # products with their pieces on the next produce, so it is a coordinated, announced step per vendor.
-    lots: bool = False
 
     def __post_init__(self):
         # source_code is the SKU prefix ({source_code}-{surrogate}) and the delist scope key. A

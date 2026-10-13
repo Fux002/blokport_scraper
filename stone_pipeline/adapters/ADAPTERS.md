@@ -112,11 +112,9 @@ an adapter only declares what the source states, in one of two shapes:
   and the bundle stays one product (a lot already in Medusa goes offline, every piece at inventory 0, until
   answered). See `sentas.py`.
 
-Nothing happens until the source's `lots` setting is switched on (config store / sources.yaml, default
-off). Switching it on is the vendor's cutover: coordinate it with Blokport (category `lot_grouped` set
-first, their pull held while both sides review the result). Validate holds a whole lot whose pieces
-disagree (variety, type, category, position, quantity), and the run's diagnostics list each lot's pieces
-sent and held.
+No source setting gates lots: mapping these fields is all a source needs, and its lots are sent from the
+next produce on. Validate holds a whole lot whose pieces disagree (variety, type, category, position,
+quantity), and the run's diagnostics list each lot's pieces sent and held.
 
 ## Non-file data sources (API / DB / partner feed)
 
