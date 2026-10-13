@@ -272,6 +272,10 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "collection_country_code": p["collection_country_code"],
             "collection_city": p["collection_city"],
             "bundle_size": p["bundle_size"],   # under coordination: pallet model is retiring the multiplier
+            # LOTS: every piece of a lot carries the same lot_code and its place in the cut order; Blokport
+            # groups the catalog on lot_code. Both null outside a lot (the product's path is unchanged).
+            "lot_code": p["lot_code"],
+            "lot_position": p["lot_position"],
             # Images -- the SAME set the working CSV import carried, so Medusa builds the same media:
             #   thumbnail      = the CSV 'Product Thumbnail' (the product's MAIN display image)
             #   oriented_images= the CSV 'Front/Right/Back/Left Image' (a block's oriented shots)

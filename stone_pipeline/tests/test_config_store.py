@@ -262,7 +262,7 @@ def test_config_api_dispatch(tmp_path, monkeypatch):
     code, body = server.dispatch("GET", ["sources", "polonine"], None)
     assert code == 200 and body["vendor"] == "Polonine Stone Co"
 
-    # the UI disables a scraper + edits a setting (PUT replaces the row). ports are a hard requirement.
+    # the UI disables a scraper + edits a setting (PUT updates the named fields). ports are a hard requirement.
     code, body = server.dispatch("PUT", ["sources", "varsha"],
                                  {"enabled": False,  "source_code": "var",
                                   "vendor": "Varsha Stones", "ports": ["Brindisi"]})

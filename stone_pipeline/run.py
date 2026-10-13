@@ -42,6 +42,7 @@ from stone_pipeline.stages import (
     health,
     images,
     keys_dedupe,
+    lots,
     magnitude_drift,
     match_variation,
     normalize,
@@ -197,15 +198,17 @@ def _funnel(metrics) -> dict:
 
         listed == unmapped + deduped + rejected + held + clean
 
-    (ingest is the only entry and the only adapt-time drop; keys_dedupe is the only dedup drop; validate
-    splits the rest into reject/review/emit; the stages between them never drop a row) so the buckets always
-    reconcile -- a self-checking stat, unlike an opaque total. This is a ROW-level figure (what the source
-    offered vs what survived cleaning); it is deliberately NOT the downstream product or valid-combination
-    count, which are built later at catalog on a different unit."""
+    (ingest is the only entry and the only adapt-time drop; lots is the only stage that ADDS rows, a bundle
+    split into its pieces; keys_dedupe is the only dedup drop; validate splits the rest into reject/review/
+    emit; the other stages never drop a row) so the buckets always reconcile -- a self-checking stat, unlike
+    an opaque total. This is a ROW-level figure (what the source offered vs what survived cleaning), counted
+    in products: a bundle split into pieces is listed as its pieces. It is deliberately NOT the downstream
+    variety or valid-combination count, which are built later at catalog on a different unit."""
     by = {m.stage: m for m in metrics}
-    ingest, dd, val = by.get("ingest"), by.get("keys_dedupe"), by.get("validate")
+    ingest, lot, dd, val = by.get("ingest"), by.get("lots"), by.get("keys_dedupe"), by.get("validate")
+    split = (lot.rows_out - lot.rows_in) if lot else 0            # pieces added by splitting bundles
     return {
-        "listed": ingest.rows_in if ingest else 0,               # rows the source listed (scraped)
+        "listed": (ingest.rows_in if ingest else 0) + split,     # rows the source listed (scraped)
         "unmapped": (ingest.rows_in - ingest.rows_out) if ingest else 0,  # adapter could not map (missing field)
         "deduped": (dd.rows_in - dd.rows_out) if dd else 0,       # dropped as duplicate keys
         "rejected": val.rejected if val else 0,                  # dropped: unusable/bad data
@@ -228,6 +231,7 @@ def _write_diagnostics(manifest, layout) -> None:
         "gates": manifest.gate_status,
         "funnel": _funnel(manifest.stage_metrics),
         "held": manifest.held,          # the "what was skipped and why" worklist (grouped by reject rule)
+        "lots": manifest.lots,          # per lot: pieces loaded / sent / held
         "stages": [
             {"stage": m.stage, "status": m.status, "rows_in": m.rows_in, "rows_out": m.rows_out,
              "rejected": m.rejected, "reviewed": m.reviewed, "gapped": m.gapped, "extra": m.extra}
@@ -349,6 +353,14 @@ def run_source(
                        gates=manifest.gate_status)
         raise SystemExit(2)
 
+    # Lots: the loader step that decides lot membership (a bundle with one photo per listed piece becomes one
+    # product per piece; a piece-native record gets its lot_code). After the adapt-drop guard, so that guard
+    # keeps comparing records with records; a no-op for a source whose `lots` switch is off.
+    loaded = len(rows)
+    rows = lots.load(rows, source_cfg)
+    manifest.add_stage(StageMetric(stage="lots", rows_in=loaded, rows_out=len(rows),
+                                   extra={"lots": len({r.lot_code for r in rows if r.lot_code})}))
+
     # Ingest gate: the post-scrape check -- report what the scrape is missing per the ingest
     # contract before the generic pipeline runs. A field absent across most of the batch is a
     # systemically incomplete scrape and aborts here, with the exact gap named.
@@ -469,6 +481,7 @@ def run_source(
                                    reviewed=len(validation.review_only), extra={"images_staged": img_stats.staged}))
     # the operator-facing worklist for the diagnostics panel: why each held row was skipped + how it clears
     manifest.held = validate.held_breakdown(validation.rejects)
+    manifest.lots = lots.summary(rows)
 
     # metrics
     manifest.match_method_distribution = dict(Counter(r.variation_method for r in rows))

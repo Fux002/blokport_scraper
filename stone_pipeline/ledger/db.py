@@ -27,7 +27,8 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 6   # v6: product.collection_country_code/collection_city -- supplier collection location
+SCHEMA_VERSION = 7   # v6: product.collection_country_code/collection_city -- supplier collection location;
+#                      v7: product.lot_code/lot_position -- the pieces of a lot
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -160,6 +161,10 @@ class Ledger:
             self.conn.execute("ALTER TABLE product ADD COLUMN collection_country_code TEXT")
         if "collection_city" not in prod_cols:
             self.conn.execute("ALTER TABLE product ADD COLUMN collection_city TEXT")
+        if "lot_code" not in prod_cols:   # v7: the pieces of a lot (null on every product outside one)
+            self.conn.execute("ALTER TABLE product ADD COLUMN lot_code TEXT")
+        if "lot_position" not in prod_cols:
+            self.conn.execute("ALTER TABLE product ADD COLUMN lot_position INTEGER")
         removed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(removed)")}
         if "kind" not in removed_cols:   # v4: existing tombstones are all products (that was the only lane)
             self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")

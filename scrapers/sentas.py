@@ -8,7 +8,9 @@ total sqm, total kg, piece count, surface finish, colour, the photo gallery (the
 image list), and for some bundles Google Drive folders with extra photos ("Google Drive" = bundle photos,
 "Scanner Photo" = one scan per slab + a packing PDF). Those folder listings are read via Drive's public
 embedded folder view and the photos appended after the site gallery, up to the pipeline's product-image
-slot count.
+slot count. The per-slab scans (custom_<bundle>_<slab>.jpg) are also written as the bundle's `piece_scans`
+(slab number + its scan): the loader turns a bundle into its pieces when there is one scan per listed piece
+and the source's `lots` switch is on (stages/lots.py). Deciding that is not the scraper's job.
 
 Stone type: the site publishes it only through its three collection categories (marble / travertine /
 onyx), keyed by variety name. A variety in none of them ships untyped and the pipeline types it from the
@@ -50,6 +52,8 @@ _DRIVE_IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp")
 # Photos per bundle are capped at what the catalog can slot: a scanner folder holds one scan per slab (often
 # 30+), and every url past the cap would be downloaded, enhanced and hosted for nothing.
 MAX_IMAGES = SETTINGS.images.product_image_slots
+# A Scanner Photo file: one scan per slab, named by bundle and slab number (the slab's place in the cut).
+_SLAB_SCAN = re.compile(r"^custom_\d+_(\d+)\.(?:jpe?g|png|webp)$", re.IGNORECASE)
 
 _CATEGORY_CARD = re.compile(r'href="https://sentasmarble\.com/en/categories/([^"/]+)"[^>]*>\s*<img[^>]*alt="([^"]*)"')
 _CARD_SPLIT = re.compile(r'<div class="tt-col-item">')
@@ -148,7 +152,7 @@ class SentasScraper(ScraperBase):
     columns = [
         "product_id", "name", "caption", "variety", "variety_url", "stone_type", "url",
         "finish", "color", "thickness", "height_cm", "width_cm", "total_sqm", "total_kg", "pieces",
-        "drive_folders", "drive_image_count",
+        "drive_folders", "drive_image_count", "piece_scans",
     ]
 
     # --- listing ---------------------------------------------------------------------------------------
@@ -219,26 +223,30 @@ class SentasScraper(ScraperBase):
                        "variety_url": variety_url, "stone_type": types.get(_norm(name), "")}
 
     # --- detail ----------------------------------------------------------------------------------------
-    def _drive_images(self, folder_id: str) -> list[str]:
-        """CDN urls of the image files in a public Drive folder (PDF packing lists skipped). A folder that
-        fails to list is recorded and contributes nothing: Drive photos are an extra, never a hold."""
+    def _drive_images(self, folder_id: str) -> list[tuple[str, str]]:
+        """(file title, CDN url) of the image files in a public Drive folder (PDF packing lists skipped). A
+        folder that fails to list is recorded and contributes nothing: Drive photos are an extra, never a hold."""
         try:
             listing = self.get(DRIVE_FOLDER_VIEW.format(id=folder_id)).text
         except Exception as exc:
             self.record_failure("drive", id=folder_id, error=str(exc))
             return []
-        return [DRIVE_IMAGE.format(id=file_id) for file_id, title in _DRIVE_ENTRY.findall(listing)
+        return [(title, DRIVE_IMAGE.format(id=file_id)) for file_id, title in _DRIVE_ENTRY.findall(listing)
                 if title.lower().endswith(_DRIVE_IMAGE_EXT)]
 
-    def _images(self, detail: dict) -> tuple[list[str], int]:
-        """Site gallery first, then Drive photos, capped at MAX_IMAGES. Returns (urls, drive photos used)."""
-        urls = list(detail["image_urls"])
-        for folder_id in detail["drive_folders"]:
-            if len(urls) >= MAX_IMAGES:
-                break
-            urls.extend(self._drive_images(folder_id))
-        urls = list(dict.fromkeys(urls))[:MAX_IMAGES]
-        return urls, max(0, len(urls) - len(detail["image_urls"]))
+    def _photos(self, detail: dict) -> tuple[list[str], int, list[dict]]:
+        """(bundle photos, how many came from Drive, the per-slab scans). Bundle photos: the site gallery
+        first, then every Drive folder's images, capped at MAX_IMAGES. Every folder is read regardless of the
+        cap (a listing is one request; the cap bounds photo processing, not the evidence a lot needs). Scans:
+        [{"position": slab number, "image_urls": [its scans]}] in cut order."""
+        entries = [entry for folder_id in detail["drive_folders"] for entry in self._drive_images(folder_id)]
+        urls = list(dict.fromkeys([*detail["image_urls"], *(url for _, url in entries)]))[:MAX_IMAGES]
+        scans: dict[int, list[str]] = {}
+        for title, url in entries:
+            if found := _SLAB_SCAN.match(title.strip()):
+                scans.setdefault(int(found.group(1)), []).append(url)
+        pieces = [{"position": slab, "image_urls": scans[slab]} for slab in sorted(scans)]
+        return urls, max(0, len(urls) - len(detail["image_urls"])), pieces
 
     def parse_product(self, item: dict) -> Optional[dict]:
         try:
@@ -249,7 +257,7 @@ class SentasScraper(ScraperBase):
             detail = None
         else:
             self.note_detail(ok=True)
-        images, drive_count = self._images(detail) if detail else ([], 0)
+        images, drive_count, pieces = self._photos(detail) if detail else ([], 0, [])
         facts = detail or {}
         row = {
             **item,
@@ -264,6 +272,7 @@ class SentasScraper(ScraperBase):
             "pieces": facts.get("pieces", ""),
             "drive_folders": " | ".join(facts.get("drive_folders", [])),
             "drive_image_count": drive_count,
+            "piece_scans": json.dumps(pieces) if pieces else "",
             "image_urls": images,   # base keeps these as source links
         }
         if detail is None:

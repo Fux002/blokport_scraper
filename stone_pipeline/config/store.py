@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS source (
     emit_on_review      INTEGER NOT NULL DEFAULT 1,
     default_bundle_size INTEGER NOT NULL DEFAULT 6,
     min_expected_rows   INTEGER NOT NULL DEFAULT 0,
+    lots                INTEGER NOT NULL DEFAULT 0,     -- the per-vendor lot cutover switch (off until flipped)
     last_run_at         TEXT,                          -- when this source was last produced (ISO), for the admin list
     last_run_status     TEXT,                          -- running | succeeded | failed
     last_run_stage      TEXT,                          -- scrape | catalog | inventory | all
@@ -66,7 +67,8 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 5     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped
+SCHEMA_VERSION = 6     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+#                        6: source.lots, the per-vendor lot cutover switch
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -132,6 +134,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.commit()
     if "collection_city" not in cols:
         conn.execute("ALTER TABLE source ADD COLUMN collection_city TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    if "lots" not in cols:   # the per-vendor lot cutover switch; every existing source stays off
+        conn.execute("ALTER TABLE source ADD COLUMN lots INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     # F8: source_code must be UNIQUE among real codes (the empty default stays non-unique), so two vendors
     # can't collide their SKU namespace -- the app-level read-then-write check races under the threading
@@ -388,6 +393,7 @@ def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
         watermarked=bool(r["watermarked"]), enhance=bool(r["enhance"]), emit_on_review=bool(r["emit_on_review"]),
         fal_prompt=r["fal_prompt"],
         default_bundle_size=r["default_bundle_size"], min_expected_rows=r["min_expected_rows"],
+        lots=bool(r["lots"]),
     )
 
 
@@ -403,6 +409,7 @@ def _params(cfg: SourceConfig, enabled: bool) -> dict:
         "fal_prompt": cfg.fal_prompt,
         "emit_on_review": 1 if cfg.emit_on_review else 0,
         "default_bundle_size": cfg.default_bundle_size, "min_expected_rows": cfg.min_expected_rows,
+        "lots": 1 if cfg.lots else 0,
         "updated_at": _now(),
     }
 
@@ -428,6 +435,7 @@ def _row_dict(r: sqlite3.Row) -> dict:
         "fal_prompt": r["fal_prompt"],
         "emit_on_review": bool(r["emit_on_review"]),
         "default_bundle_size": r["default_bundle_size"], "min_expected_rows": r["min_expected_rows"],
+        "lots": bool(r["lots"]),
         # last run (for the admin list's "last run" label); null until this source has ever been produced.
         "last_run_at": r["last_run_at"], "last_run_status": r["last_run_status"],
         "last_run_stage": r["last_run_stage"],
@@ -463,6 +471,7 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
         emit_on_review=bool(data.get("emit_on_review", True)),
         default_bundle_size=int(data.get("default_bundle_size", 6)),
         min_expected_rows=int(data.get("min_expected_rows", 0)),
+        lots=bool(data.get("lots", False)),
     )
     # re-adding a source clears any prior removal tombstone (in ONE transaction with the upsert, so a crash
     # between the two can't leave the source added yet still tombstoned).

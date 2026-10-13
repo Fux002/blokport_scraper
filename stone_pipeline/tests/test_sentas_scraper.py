@@ -6,6 +6,8 @@ the one source-specific conversion."""
 
 from __future__ import annotations
 
+import json
+
 import polars as pl
 import pytest
 
@@ -216,13 +218,14 @@ def test_type_map_keys_collection_card_titles_by_normalised_name(tmp_path, monke
     assert s._type_map() == {"biancovenato": "Marble", "camelotgrey": "Marble", "redtravertine": "Travertine"}
 
 
-# -- images: gallery first, Drive appended, capped -------------------------------------------------------
+# -- photos: gallery first, every Drive folder appended (capped); the per-slab scans are the pieces --------
 
-def test_drive_listing_keeps_images_and_skips_the_packing_pdf(tmp_path, monkeypatch):
+def test_drive_listing_keeps_images_with_their_titles_and_skips_the_packing_pdf(tmp_path, monkeypatch):
     s = SentasScraper(data_dir=tmp_path)
     monkeypatch.setattr(s, "get", lambda url, **kw: _Resp(DRIVE_LISTING))
-    assert s._drive_images("f") == ["https://lh3.googleusercontent.com/d/1tB4t8gvpTUEWN4cxvRRXZP5jEWdZZNcx=s2000",
-                                    "https://lh3.googleusercontent.com/d/1tNgMcDiV7M7r7nRUd0VbTN6CZg_5WgRI=s2000"]
+    assert s._drive_images("f") == [
+        ("custom_6392_1.jpg", "https://lh3.googleusercontent.com/d/1tB4t8gvpTUEWN4cxvRRXZP5jEWdZZNcx=s2000"),
+        ("custom_6392_10.JPG", "https://lh3.googleusercontent.com/d/1tNgMcDiV7M7r7nRUd0VbTN6CZg_5WgRI=s2000")]
 
 
 def test_a_failed_drive_listing_contributes_nothing_and_never_holds(tmp_path, monkeypatch):
@@ -235,27 +238,29 @@ def test_a_failed_drive_listing_contributes_nothing_and_never_holds(tmp_path, mo
     assert [f["kind"] for f in s._failures] == ["drive"]
 
 
-def test_images_take_every_photo_gallery_first_then_each_drive_folder(tmp_path, monkeypatch):
-    s = SentasScraper(data_dir=tmp_path)
-    monkeypatch.setattr(s, "_drive_images", lambda fid: [f"{fid}-{i}" for i in range(3)])
-    gallery = ["g1", "g2"]
-    urls, drive_used = s._images({"image_urls": gallery, "drive_folders": ["A", "B"]})
-    assert urls == gallery + [f"A-{i}" for i in range(3)] + [f"B-{i}" for i in range(3)] and drive_used == 6
+_FOLDERS = {
+    "A": [("20261009_113443.jpg", "a1"), ("20261009_113520.jpg", "a2")],                 # bundle phone photos
+    "B": [("custom_6392_10.jpg", "s10"), ("custom_6392_2.jpg", "s2"), ("custom_6392_2b.jpg", "x")],   # scans
+}
 
 
-def test_images_stop_at_the_slot_ceiling(tmp_path, monkeypatch):
+def test_photos_take_every_photo_and_the_scans_become_pieces_by_slab_number(tmp_path, monkeypatch):
     s = SentasScraper(data_dir=tmp_path)
-    many = sentas.MAX_IMAGES + 5                               # one runaway folder larger than the ceiling
-    monkeypatch.setattr(s, "_drive_images", lambda fid: [f"{fid}-{i}" for i in range(many)] if fid == "A"
-                        else pytest.fail("a folder was listed although the ceiling was already reached"))
-    gallery = ["g1", "g2"]
-    urls, drive_used = s._images({"image_urls": gallery, "drive_folders": ["A", "B"]})
-    assert len(urls) == sentas.MAX_IMAGES and urls[:2] == gallery and urls[2:] == [f"A-{i}" for i in range(sentas.MAX_IMAGES - 2)]
-    assert drive_used == sentas.MAX_IMAGES - 2
-    # a bundle already at the cap never lists a folder
-    monkeypatch.setattr(s, "_drive_images", lambda fid: pytest.fail("folder listed past the cap"))
-    full = [f"g{i}" for i in range(sentas.MAX_IMAGES)]
-    assert s._images({"image_urls": full, "drive_folders": ["A"]}) == (full, 0)
+    monkeypatch.setattr(s, "_drive_images", lambda fid: _FOLDERS[fid])
+    urls, drive_used, pieces = s._photos({"image_urls": ["g1", "g2"], "drive_folders": ["A", "B"]})
+    assert urls == ["g1", "g2", "a1", "a2", "s10", "s2", "x"] and drive_used == 5
+    # one entry per slab number, in cut order; a file that is not a per-slab scan is not a piece
+    assert pieces == [{"position": 2, "image_urls": ["s2"]}, {"position": 10, "image_urls": ["s10"]}]
+
+
+def test_the_ceiling_caps_the_bundle_photos_but_every_folder_is_read_for_the_pieces(tmp_path, monkeypatch):
+    # listing a folder is one request; the ceiling bounds photo processing, not the evidence a lot needs
+    s = SentasScraper(data_dir=tmp_path)
+    many = [(f"p{i}.jpg", f"p{i}") for i in range(sentas.MAX_IMAGES + 5)]
+    monkeypatch.setattr(s, "_drive_images", lambda fid: many if fid == "A" else _FOLDERS["B"])
+    urls, drive_used, pieces = s._photos({"image_urls": ["g1", "g2"], "drive_folders": ["A", "B"]})
+    assert len(urls) == sentas.MAX_IMAGES and urls[:2] == ["g1", "g2"] and drive_used == sentas.MAX_IMAGES - 2
+    assert [p["position"] for p in pieces] == [2, 10]
 
 
 # -- parse_product: the detail fetch and its failure path -------------------------------------------------
@@ -267,14 +272,18 @@ _ITEM = {"product_id": "7149", "caption": "B6392 - 2 CM Calacatta Viola Honed", 
 def test_parse_product_rows_the_page_facts(tmp_path, monkeypatch):
     s = SentasScraper(data_dir=tmp_path)
     monkeypatch.setattr(s, "get", lambda url, **kw: _Resp(PRODUCT_PAGE))
-    monkeypatch.setattr(s, "_drive_images", lambda fid: [f"{fid}-1"])
+    folders = {"1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT": [("20261009_113443.jpg", "phone-1")],
+               "1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw": [("custom_6392_1.jpg", "scan-1"), ("custom_6392_3.jpg", "scan-3")]}
+    monkeypatch.setattr(s, "_drive_images", lambda fid: folders[fid])
     row = s.parse_product(dict(_ITEM))
     assert row["name"] == "B6392 - 2 CM Calacatta Viola Honed" and row["variety"] == "Calacatta Viola"
     assert (row["height_cm"], row["width_cm"], row["pieces"], row["total_kg"], row["color"]) == ("198 cm", "317 cm", "78", "26926.35", "Green, Purple")
     assert row["image_urls"][:2] == ["https://sentasmarble.com/upload/media/images/2026/10/a.webp",
                                      "https://sentasmarble.com/upload/media/images/2026/10/b.webp"]
-    assert row["image_urls"][2:] == ["1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT-1", "1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw-1"]
-    assert row["drive_image_count"] == 2 and "fetch_failed" not in row
+    assert row["image_urls"][2:] == ["phone-1", "scan-1", "scan-3"]
+    assert row["drive_image_count"] == 3 and "fetch_failed" not in row
+    assert json.loads(row["piece_scans"]) == [{"position": 1, "image_urls": ["scan-1"]},
+                                              {"position": 3, "image_urls": ["scan-3"]}]
     assert (s._detail_ok, s._detail_failed) == (1, 0)
 
 
@@ -286,7 +295,7 @@ def test_a_failed_product_page_holds_the_row_for_retry(tmp_path, monkeypatch):
     monkeypatch.setattr(s, "get", boom)
     row = s.parse_product(dict(_ITEM))
     assert row["product_id"] == "7149" and row["variety"] == "Calacatta Viola"   # identity kept: no delist
-    assert row["height_cm"] == "" and row["image_urls"] == []
+    assert row["height_cm"] == "" and row["image_urls"] == [] and row["piece_scans"] == ""
     assert row[SentasScraper.FETCH_FAILED_COL] == "dims"                          # derive holds, never defaults
     assert (s._detail_ok, s._detail_failed) == (0, 1)
     assert sorted(f["kind"] for f in s._failures) == ["detail", "dims"]
@@ -324,7 +333,34 @@ def test_adapter_colour_is_the_site_field_else_a_colour_word_in_the_name():
     assert _adapt(color="").raw_color == "White"
 
 
+def test_adapter_maps_the_piece_scans_and_the_printed_bundle_reference():
+    scans = '[{"position": 2, "image_urls": ["https://lh3/x=s2000"]}]'
+    row = _adapt(caption="B6392 - 2 CM Calacatta Viola Honed", piece_scans=scans)
+    assert row.raw_pieces == scans and row.src_lot_label == "B6392"
+    assert row.src_lot_ref is None                 # the loader takes the bundle's own key as the lot reference
+    assert _adapt(caption="Calacatta Viola", piece_scans="").raw_pieces == "" \
+        and _adapt(caption="Calacatta Viola").src_lot_label == ""
+
+
 def test_adapter_weight_is_blank_when_a_figure_is_missing_or_zero():
     assert _adapt(total_kg="").raw_weight == ""
     assert _adapt(pieces="0").raw_weight == ""
     assert _adapt(total_kg="abc").raw_weight == ""
+
+
+# -- real captured data: the loader turns exactly the fully scanned bundle into its pieces --------------
+
+def test_the_captured_scanned_bundle_becomes_its_pieces_and_the_rest_stay_whole():
+    from stone_pipeline.adapters import selftest
+    from stone_pipeline.adapters.base import read_scrape_csv
+    from stone_pipeline.config.sources import SourceConfig
+    from stone_pipeline.stages import lots
+
+    rows = ADAPTER.adapt(read_scrape_csv(selftest.fixture_dir("sentas") / "input.csv"))
+    loaded = lots.load(rows, SourceConfig(source="sentas", source_code="sen", lots=True))
+    pieces = [r for r in loaded if r.lot_code]
+    assert len(loaded) == len(rows) - 1 + 9                         # bundle 2555 (9 pieces, 9 scans) split
+    assert {p.src_lot_ref for p in pieces} == {"2555"} and len({p.lot_code for p in pieces}) == 1
+    assert pieces[0].lot_code.startswith("B6208B-")
+    assert [p.lot_position for p in pieces] == [4, 13, 20, 24, 34, 47, 49, 50, 66]
+    assert all(len(p.raw_image_urls) == 11 - 9 + 1 for p in pieces)   # own scan + the 2 shared photos

@@ -96,6 +96,13 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 "surrogate_key uniqueness (Stage 2 keys/dedupe)",
                 title="Two products resolved to the same handle", kind="config",
                 recovery="A pipeline defect (key collision), not the product's data. Report it.", stage="Keys Dedupe"),
+    Requirement("lot_inconsistent", "every piece of a lot shares variety, type and category, has its own "
+                                    "position and a stock of at most one",
+                "the loader (stages/lots.load) from the source's lot reference, positions and per-piece photos",
+                title="Pieces of one lot do not agree", kind="decision",
+                recovery="The whole lot is held, so no half lot is published. Correct a piece that resolved to "
+                         "another variety in Review, or have the source's lot data fixed. Lists on the next "
+                         "produce once every piece agrees.", stage="Validate"),
     Requirement("owner_missing", "company_id and sales_channel_id non-empty",
                 "constants (Stage 8) from config; prod must set the env vars",
                 title="Company or sales channel not configured", kind="config",

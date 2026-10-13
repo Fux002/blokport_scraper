@@ -266,7 +266,7 @@ fuleistone:
   value_patterns: {}
   row_baseline: 1274
 sentas:
-  adapter_version: 1.1.0
+  adapter_version: 1.2.0
   required_columns:
   - product_id
   - variety
@@ -287,6 +287,7 @@ sentas:
   - total_kg
   - drive_folders
   - drive_image_count
+  - piece_scans
   - format
   - image_count
   - image_filenames_local

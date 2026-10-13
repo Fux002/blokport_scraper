@@ -94,6 +94,27 @@ section 6.
 That's it: **adapter + config + fixture**, no manual registry edits, and the name-cleanup +
 matching + tree stages all apply unchanged.
 
+## Lots (pieces that belong together, e.g. slabs cut from one block)
+
+A lot is a set of ordinary products sharing one `lot_code`; each piece is sold on its own (inventory 1)
+with its own photo. The shared loader step (`stages/lots.py`, run right after `adapt`) decides membership;
+an adapter only declares what the source states, in one of two shapes:
+
+- **Piece-native** (one record per slab, e.g. a cutting-machine API): map `src_lot_ref` (the block or
+  bundle id), `raw_lot_position` (the cut sequence, a positive integer), optionally `src_lot_label` (a
+  readable reference), plus each piece's own measured dimensions and photo. Nothing is split.
+- **Bundle-shaped** (a listing of a whole bundle, e.g. a website): map `raw_pieces` to the bundle's
+  per-piece photos as JSON `[{"position": int, "image_urls": [str]}]` and optionally `src_lot_label`. The
+  loader splits the bundle into one product per piece ONLY when there is one entry per listed piece
+  (`raw_slab_count`), each with its own photo at a unique position; otherwise the bundle stays one product.
+  See `sentas.py` (per-slab scans).
+
+Nothing happens until the source's `lots` setting is switched on (config store / sources.yaml, default
+off). Switching it on is the vendor's cutover: coordinate it with Blokport (category `lot_grouped` set
+first, their pull held while both sides review the result). Validate holds a whole lot whose pieces
+disagree (variety, type, category, position, quantity), and the run's diagnostics list each lot's pieces
+sent and held.
+
 ## Non-file data sources (API / DB / partner feed)
 
 A scraper writes `data/<source>/<ts>/products.csv` and the adapter maps it. A source with **no

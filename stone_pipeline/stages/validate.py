@@ -3,6 +3,7 @@
 Reject a row on any hard failure: a required attribute id null (type, colour,
 finish, quality), variation_id null, an unresolved leaf (a tree gap present),
 category not the branch's valid category, handle or slug not globally unique, a
+lot whose pieces disagree (identity, position or quantity; the whole lot is held), a
 missing owner (company_id / sales_channel_id, required at all times), or no image
 when images are required by config -- EXCEPT a row Stage 7 marked no_publishable_image,
 a terminal known-good empty that publishes without an image. Soft issues (review
@@ -13,9 +14,10 @@ Hard rejects never reach the import CSV regardless of the switch.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 
-from stone_pipeline.config.settings import active_categories
+from stone_pipeline.config.settings import SETTINGS, active_categories
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, RejectReason
 from stone_pipeline.gates.requirements import MEDUSA_REQUIREMENTS, WORKLIST_REFINEMENTS
@@ -172,6 +174,7 @@ def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = F
             if row.handle in handles and handles[row.handle] != row.surrogate_key:
                 row.add_reject(RejectReason(rule="handle_collision", detail=row.handle))
             handles.setdefault(row.handle, row.surrogate_key)
+    _check_lots(rows)
 
     for row in rows:
         if not row.is_emittable:
@@ -184,3 +187,34 @@ def run(rows: list[CanonicalRow], emit_on_review: bool, require_images: bool = F
     log.info("validate done", extra={"extra_fields": {
         "emit": len(result.emit), "review_only": len(result.review_only), "rejects": len(result.rejects)}})
     return result
+
+
+def _check_lots(rows: list[CanonicalRow]) -> None:
+    """A lot's pieces must agree with each other, or the WHOLE lot is held: a piece that differs in
+    variety, type or category would form a second card, two pieces at one position make the picker
+    ambiguous, and a piece is one item. Per-piece problems (an image still processing) hold that piece
+    alone through the rules above; a lot showing a subset of its pieces is normal (sold pieces are absent)."""
+    by_code: dict[str, list[CanonicalRow]] = defaultdict(list)
+    for row in rows:
+        if row.lot_code:
+            by_code[row.lot_code].append(row)
+    for code, pieces in by_code.items():
+        problem = _lot_problem(code, pieces)
+        if problem:
+            for piece in pieces:
+                piece.add_reject(RejectReason(rule="lot_inconsistent", detail=problem))
+
+
+def _lot_problem(code: str, pieces: list[CanonicalRow]) -> str:
+    positions = [p.lot_position for p in pieces]
+    if len(code) > SETTINGS.lots.max_code_length:
+        return "code_too_long"
+    if any(n is None for n in positions):
+        return "position_missing"
+    if len(set(positions)) != len(positions):
+        return "position_duplicate"
+    if len({(p.variation_key, p.type_name, p.category_pcat_id) for p in pieces}) > 1:
+        return "identity_differs"
+    if any((p.inventory_quantity or 0) > 1 for p in pieces):
+        return "quantity_above_one"
+    return ""

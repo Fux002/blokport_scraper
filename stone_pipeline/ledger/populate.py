@@ -28,7 +28,8 @@ from stone_pipeline.stages.product_state import inventory_str
 # once, re-syncing the whole catalog with the new payload. v2: adds port_ids to the sync payload so Medusa
 # links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
 # origin_country_code (which fanned every product out to all ports in its quarry country).
-_PRODUCT_PAYLOAD_CONTRACT = "v4-flat-dims"   # height is the thickness, width the short face (every shape flat)
+# v4: height is the thickness, width the short face (every shape flat). v5: lot_code + lot_position.
+_PRODUCT_PAYLOAD_CONTRACT = "v5-lots"
 
 
 def _image_models(path: str | Path | None = None) -> dict[str, str]:
@@ -240,6 +241,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "sold_in_bundle": 1 if r.sold_in_bundle else 0,
             "bundle_size": r.bundle_size,
             "inventory_quantity": inventory_str(r),
+            "lot_code": r.lot_code,
+            "lot_position": r.lot_position,
             "payload_hash": (ph := payload_hash([
                 _PRODUCT_PAYLOAD_CONTRACT,   # bump forces a one-time full re-sync on a payload-shape change
                 variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
@@ -252,6 +255,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 r.bundle_size, json.dumps(r.port_ids or []),
                 # supplier collection location: a config change must flip the product dirty so it re-serves.
                 r.collection_country_code, r.collection_city,
+                # a piece's lot membership: a re-cut lot or a moved position must re-serve the piece
+                r.lot_code, r.lot_position,
             ])),
             "created_at": now,
             "updated_at": now,

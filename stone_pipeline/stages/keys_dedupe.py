@@ -2,7 +2,7 @@
 
 1. Surrogate key: natural key when present and unique, else a deterministic mint.
 2. Exact dedup on surrogate_key, keep first by scrape order, record the drop count.
-3. Near-duplicate flag: same normalized name + branch + colour. Never auto-merge.
+3. Near-duplicate flag: same normalized name + branch + colour (a lot counts once). Never auto-merge.
 4. Assert surrogate uniqueness after; a residual collision is a hard run error,
    not a row reject, because it means key minting is wrong.
 """
@@ -85,11 +85,17 @@ def run(rows: list[CanonicalRow]) -> DedupResult:
         seen[sk] = row.surrogate_key
         kept.append(row)
 
-    # near-duplicate flag: same normalized name + branch + colour
+    # near-duplicate flag: same normalized name + branch + colour. A lot is ONE listing here: its pieces are
+    # the same stone by construction, so only a lot's first piece is compared (against other listings).
     near_index: dict[tuple, str] = {}
     near_duplicates = 0
+    lots_seen: set[str] = set()
     bulk = bulk_form_name()   # the pack's uncut/solid form name (stone: 'block'); None for a domain without one
     for row in kept:
+        if row.lot_code:
+            if row.lot_code in lots_seen:
+                continue
+            lots_seen.add(row.lot_code)
         # branch from the RAW format tag, not row.is_block: keys_dedupe runs BEFORE format_resolve
         # and match_variation, the only stages that set is_block, so is_block is still its default
         # False here -- using it would collapse the bulk/default dimension and falsely flag a block and

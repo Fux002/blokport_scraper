@@ -847,6 +847,17 @@ class AutoTextureConfig:
 
 
 @dataclass(frozen=True)
+class LotConfig:
+    """A lot is a set of ordinary products (pieces) sharing one lot_code (stages/lots.py). The code is
+    `<label>-<uuid5(code_namespace, "<source_code>:<lot ref>")>`: unique, byte-identical on every piece,
+    stable across runs. The namespace is fixed for good: changing it re-keys every lot on the next produce,
+    so Blokport would see each as a new lot (guarded by a test)."""
+
+    code_namespace: str = "be1ef5d0-ee2e-4157-b6ec-8870c49e7deb"
+    max_code_length: int = 128   # Blokport's stated limit for lot_code (additional_data text field)
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: str = BLOKPORT_ENV  # "development" | "production" (BLOKPORT_ENV)
     # A hash of the live id set (section 3.2). Computed from reference data at
@@ -864,6 +875,7 @@ class Settings:
     auto_texture: AutoTextureConfig = field(default_factory=AutoTextureConfig)
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     curation: CurationConfig = field(default_factory=CurationConfig)
+    lots: LotConfig = field(default_factory=LotConfig)
 
     # The source proven first (section 14). develi is absent from the supplied
     # data, so polonine is the clean named-variety proving source.

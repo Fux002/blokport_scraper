@@ -294,10 +294,11 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
 
 # --- bundle size ladder (section 10.1, the exemplar) --------------------------
 def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
-    if row.is_block:
+    # a block, or one piece of a lot, is a single item: never sold as a bundle
+    if row.is_block or row.lot_code:
         row.sold_in_bundle = False
         row.bundle_size = None
-        row.bundle_size_method = "block_short_circuit"
+        row.bundle_size_method = "block_short_circuit" if row.is_block else "lot_piece"
         row.bundle_size_confidence = _conf_name(Confidence.high)
         return
 

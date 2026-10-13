@@ -77,6 +77,8 @@ class Manifest:
     # the "what was skipped and why" worklist for the diagnostics panel (validate.held_breakdown); [] on an
     # abort that never reached validate. Grouped by reject rule, each with title/kind/recovery + examples.
     held: list[dict] = field(default_factory=list)
+    # per lot: pieces loaded / sent / held (lots.summary); [] for a source without lots
+    lots: list[dict] = field(default_factory=list)
     totals: dict[str, int] = field(default_factory=dict)
     write_backs: list[str] = field(default_factory=list)
     started_at: Optional[str] = None
