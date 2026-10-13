@@ -68,12 +68,12 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
 
 def record_source(emit_rows: Sequence[CanonicalRow],
                   discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *,
-                  path: str | Path | None = None) -> None:
+                  replaced: dict[str, str] | None = None, path: str | Path | None = None) -> None:
     """Record one source's emitted products, their stock, and the discontinued delist into the ledger.
     No-op (returns True) when the flag is off. Never RAISES, but returns False if the write failed so the
     caller can surface it -- the ledger is the live sync source, so a swallowed failure would silently drop
     a catalog/stock change. Recorded the same in full and inventory-only runs: the emitted rows are valid
-    products in both.
+    products in both. `replaced` (sku -> lot_code): discontinued bundles that were replaced by their lot.
 
     Inventory is seeded from the FULL emit set (every product's current stock), not a
     pre-computed delta. The ledger tracks `last_synced_qty` per sku, so it derives the
@@ -86,7 +86,7 @@ def record_source(emit_rows: Sequence[CanonicalRow],
         with open_ledger(path) as ledger:
             n_products = populate.populate_products(ledger, emit_rows, cfg)
             n_stock = populate.populate_inventory(ledger, emit_rows, cfg)
-            n_gone = populate.populate_discontinued(ledger, discontinued)
+            n_gone = populate.populate_discontinued(ledger, discontinued, replaced)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
             "source": cfg.source_code, "products": n_products,
             "inventory": n_stock, "discontinued": n_gone}})

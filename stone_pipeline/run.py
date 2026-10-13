@@ -546,11 +546,18 @@ def run_source(
                         extra={"extra_fields": {"would_delist": len(discontinued), "source_known": _src_known,
                                                 "fraction": round(len(discontinued) / _src_known, 3)}})
         discontinued = []
+    # a discontinued bundle whose pieces now form a lot was REPLACED, not dropped: its delist names the lot
+    # (Blokport deactivates it and redirects its page there). After the guards, so a refused delist refuses both.
+    lot_of = lots.replacements(rows, source_cfg)
+    replaced = {sku: lot_of[sku] for sku, _ in discontinued if sku in lot_of}
     if known:  # always (re)write so a stale delta from a prior run (same scrape -> same folder) can't linger
         emit.write_inventory_csv(changed, source_cfg, layout.products_import / "inventory_update.csv",
                                  discontinued=tuple(discontinued))
-        emit.write_discontinued_csv(discontinued, layout.review / "products_discontinued.csv")
+        emit.write_discontinued_csv(discontinued, layout.review / "products_discontinued.csv",
+                                    replaced={sku: code for sku, (code, _) in replaced.items()})
+        emit.write_lot_replacements_csv(discontinued, replaced, layout.review / "lot_replacements.csv")
     manifest.totals["products_discontinued"] = len(discontinued)
+    manifest.totals["bundles_replaced_by_lots"] = len(replaced)
     gap_count = 0
     # rejects are an audit invariant: write them in BOTH modes so a rejected row never vanishes
     # without a per-row record (inventory_only still runs validate above).
@@ -580,7 +587,8 @@ def run_source(
     from stone_pipeline.ledger import writethrough
     ledger_failed = False
     if writethrough.enabled():
-        if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg):
+        if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg,
+                                          replaced={sku: code for sku, (code, _) in replaced.items()}):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it on the run and FAIL it (below, once the CSVs,
             # diagnostics and steps are written so the operator can read why): run_all then omits this

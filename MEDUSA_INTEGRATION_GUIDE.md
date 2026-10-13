@@ -220,8 +220,10 @@ a set of ordinary products (its pieces) that carry the same `lot_code`. Rules:
 - Every piece of a lot shares variation, category and type (the scraper holds the whole lot otherwise),
   is sold singly (`bundle_size` null, inventory 1) and carries its own photograph first.
 - A piece the vendor no longer lists arrives as inventory 0 (Flow B), never as "sold": deactivate it.
-- Lots are switched on per vendor (the scraper's `lots` setting), as a coordinated cutover: the vendor's
-  split bundle products go to inventory 0 and their pieces arrive as new products.
+- Lots are switched on per vendor (the scraper's `lots` setting), as a coordinated cutover: the pieces
+  arrive as new products, then each split bundle's inventory delta arrives with reason
+  `replaced_by_lot` and its `lot_code` (Flow B). The run's review folder lists every replacement
+  (`lot_replacements.csv`: old SKU, old handle, lot code, pieces) for the diff read before the pull resumes.
 
 > **`company_id`** is the single deliberate Medusa id in the payload: a small, hand-managed,
 > per-source seller id (the 4 companies), unlike the high-cardinality variation/attribute
@@ -266,6 +268,20 @@ feed an in-stock product never reports 0 (the pipeline floors a real stock to 1)
 always means the supplier **dropped** the product. Medusa can act on the 0 directly (no
 time-window guessing). It is reversible: a later scrape that carries the stone again sends
 a positive quantity and un-retires it. Ack each (no `medusa_id`).
+
+A zero may carry a `reason` (a closed set; an unknown reason is treated as a plain quantity update):
+
+- none: the supplier no longer lists the product (sold out or dropped). Deactivate it, never delete.
+- `"delisted"`: an operator took the product offline (admin delist). Hide it.
+- `"replaced_by_lot"`, with `"lot_code"`: a bundle split into its pieces at a vendor's lot cutover.
+  Deactivate the bundle (never delete: orders and documents reference it) and redirect its page to the
+  lot. Served only once at least one piece of that lot exists in Medusa, so the redirect never lands on
+  an empty lot page.
+
+```json
+{ "external_id": "SEN-2555", "payload": { "sku": "SEN-2555", "quantity": 0,
+  "reason": "replaced_by_lot", "lot_code": "B6208B-<uuid>" } }
+```
 
 ---
 
