@@ -67,8 +67,8 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 6     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
-#                        6: source.lots, the per-vendor lot cutover switch
+SCHEMA_VERSION = 7     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+#                        6: source.lots, the per-vendor lot cutover switch; 7: lot_sold_answer
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -214,6 +214,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "INSERT INTO review_pending__new SELECT kind, ref, payload, sources, updated_at FROM review_pending;"
             "DROP TABLE review_pending;"
             "ALTER TABLE review_pending__new RENAME TO review_pending;")
+    # Lot sold answers: which scanned slabs of a lot are sold, stated by the operator on the "which slabs are
+    # sold?" card for the stock figure it was asked at (stages/lots.sold_positions uses it only while that
+    # figure still holds). A fact about the vendor's stock, not catalog identity, so no reset clears it.
+    conn.execute("CREATE TABLE IF NOT EXISTS lot_sold_answer ("
+                 "source TEXT NOT NULL, lot_ref TEXT NOT NULL, available INTEGER NOT NULL, "
+                 "sold TEXT NOT NULL, decided_at TEXT NOT NULL, PRIMARY KEY (source, lot_ref))")
     # Backbone leaf-growth decisions: the operator APPROVES adding a value Medusa already has (quality
     # B/C/D, a colour/finish) onto a variety whose backbone does not allow it yet, disambiguated by
     # stone_type. An approved row becomes a LOAD-TIME OVERLAY on the backbone (loaders.Backbone.

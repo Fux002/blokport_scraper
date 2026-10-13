@@ -104,10 +104,13 @@ an adapter only declares what the source states, in one of two shapes:
   bundle id), `raw_lot_position` (the cut sequence, a positive integer), optionally `src_lot_label` (a
   readable reference), plus each piece's own measured dimensions and photo. Nothing is split.
 - **Bundle-shaped** (a listing of a whole bundle, e.g. a website): map `raw_pieces` to the bundle's
-  per-piece photos as JSON `[{"position": int, "image_urls": [str]}]` and optionally `src_lot_label`. The
-  loader splits the bundle into one product per piece ONLY when there is one entry per listed piece
-  (`raw_slab_count`), each with its own photo at a unique position; otherwise the bundle stays one product.
-  See `sentas.py` (per-slab scans).
+  scanned slabs as JSON `[{"position": int, "image_urls": [str]}]`, `raw_slab_count` to its slabs in stock,
+  `raw_sold_count` to its sold record when the source keeps one, and optionally `src_lot_label`. The loader
+  lists the full scanned sequence (a sold slab at inventory 0) when every slab's status is known: the scans
+  match the stock with no sale on record, or no sale is on record and there are fewer scans than stock, or
+  an operator answered the "which slabs are sold?" card for the current stock. Otherwise the card is raised
+  and the bundle stays one product (a lot already in Medusa goes offline, every piece at inventory 0, until
+  answered). See `sentas.py`.
 
 Nothing happens until the source's `lots` setting is switched on (config store / sources.yaml, default
 off). Switching it on is the vendor's cutover: coordinate it with Blokport (category `lot_grouped` set

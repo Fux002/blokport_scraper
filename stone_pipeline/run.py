@@ -353,11 +353,31 @@ def run_source(
                        gates=manifest.gate_status)
         raise SystemExit(2)
 
-    # Lots: the loader step that decides lot membership (a bundle with one photo per listed piece becomes one
-    # product per piece; a piece-native record gets its lot_code). After the adapt-drop guard, so that guard
-    # keeps comparing records with records; a no-op for a source whose `lots` switch is off.
+    # The Medusa product export: which products already exist. Tags new vs existing below, and tells the lots
+    # step which lots are already in Medusa (held whole rather than turned back into a bundle).
+    known_path = Path(known_products_path or SETTINGS.paths.products_known_csv)
+    # F9: an inventory-only refresh computes a stock DELTA against the Medusa export. If that export is
+    # absent (fetch failed / not seeded), load returns empty, every row looks new, the delta is empty and
+    # the run exits 0 "0 changed" -- a silent success that masks the missing export and drops real stock
+    # moves. Full mode legitimately has no export on a cold start (everything is new), so guard ONLY the
+    # inventory-only path: it cannot produce a trustworthy delta without the export, so fail loud.
+    if inventory_only and not known_path.exists():
+        run_log.error("inventory-only refresh aborted: the Medusa product export is missing, so no stock "
+                      "delta can be computed (a '0 changed' result would be a lie)",
+                      extra={"extra_fields": {"expected": str(known_path)}})
+        _write_diagnostics(manifest, layout)
+        raise SystemExit(2)
+    known = product_state.load_known_products(known_path)
+
+    # Lots: the loader step that decides lot membership (a bundle whose slabs' status is known becomes its
+    # full scanned sequence; a piece-native record gets its lot_code). After the adapt-drop guard, so that
+    # guard keeps comparing records with records; a no-op for a source whose `lots` switch is off. Its "which
+    # slabs are sold?" cards are raised either way, so they can be answered before the cutover.
+    from stone_pipeline.config import decisions_store
+    lot_answers = decisions_store.lot_answers(source_cfg.source)
+    lot_cards = lots.cards(rows, source_cfg, lot_answers)
     loaded = len(rows)
-    rows = lots.load(rows, source_cfg)
+    rows = lots.load(rows, source_cfg, answers=lot_answers, known_skus=frozenset(known.by_sku))
     manifest.add_stage(StageMetric(stage="lots", rows_in=loaded, rows_out=len(rows),
                                    extra={"lots": len({r.lot_code for r in rows if r.lot_code})}))
 
@@ -495,21 +515,8 @@ def run_source(
         rejected=len(validation.rejects),
     )
 
-    # Item 4: tag emitted products new vs existing (by SKU) against the Medusa
-    # product export, and flag inventory changes (feeds item 5).
-    known_path = Path(known_products_path or SETTINGS.paths.products_known_csv)
-    # F9: an inventory-only refresh computes a stock DELTA against the Medusa export. If that export is
-    # absent (fetch failed / not seeded), load returns empty, every row looks new, the delta is empty and
-    # the run exits 0 "0 changed" -- a silent success that masks the missing export and drops real stock
-    # moves. Full mode legitimately has no export on a cold start (everything is new), so guard ONLY the
-    # inventory-only path: it cannot produce a trustworthy delta without the export, so fail loud.
-    if inventory_only and not known_path.exists():
-        run_log.error("inventory-only refresh aborted: the Medusa product export is missing, so no stock "
-                      "delta can be computed (a '0 changed' result would be a lie)",
-                      extra={"extra_fields": {"expected": str(known_path)}})
-        _write_diagnostics(manifest, layout)
-        raise SystemExit(2)
-    known = product_state.load_known_products(known_path)
+    # Item 4: tag emitted products new vs existing (by SKU) against the Medusa product export (`known`,
+    # loaded before the lots step), and flag inventory changes (feeds item 5).
     pstats = product_state.classify(validation.emit, source_cfg, known)
     manifest.totals.update(products_new=pstats.new, products_existing=pstats.existing,
                            inventory_changed=pstats.inventory_changed)
@@ -556,6 +563,7 @@ def run_source(
         emit.write_discontinued_csv(discontinued, layout.review / "products_discontinued.csv",
                                     replaced={sku: code for sku, (code, _) in replaced.items()})
         emit.write_lot_replacements_csv(discontinued, replaced, layout.review / "lot_replacements.csv")
+    emit.write_lot_cards(lot_cards, layout.review / "lot_cards.json")   # always: a stale card must not linger
     manifest.totals["products_discontinued"] = len(discontinued)
     manifest.totals["bundles_replaced_by_lots"] = len(replaced)
     gap_count = 0

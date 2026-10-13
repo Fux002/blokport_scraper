@@ -15,6 +15,7 @@ once and de-duplicates a variant that several suppliers carry.
 from __future__ import annotations
 
 import csv
+import json
 import os
 import shutil
 import sys
@@ -123,6 +124,7 @@ def run(outputs_root: Path | None = None) -> Path:
                                                   #    (their variation ids), never a stale prior set
     inventory = collect_inventory(outputs_root)   # -> to_upload/4_inventory_update.csv (existing stock only)
     discontinued = collect_discontinued(outputs_root)  # -> review/4 delete-loop report (stock-0'd in inventory)
+    collect_lot_cards(outputs_root)                    # -> the "which slabs are sold?" review queue
     sync = write_sync_md(counts=result.counts, sources=sorted(set(sources)),
                          products=products, inventory=inventory, discontinued=discontinued)
     images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
@@ -503,6 +505,19 @@ def collect_inventory(outputs_root: Path) -> int:
     """Catalog path: consolidate the latest run per source's inventory delta."""
     return consolidate_inventory(
         [d / "4_products_import" / "inventory_update.csv" for d in latest_run_dirs(outputs_root)])
+
+
+def collect_lot_cards(outputs_root: Path) -> int:
+    """Replace the "which slabs are sold?" review queue with the cards of the latest run per source
+    (review/lot_cards.json, written by every run). Returns the number of cards."""
+    from stone_pipeline.config import decisions_store
+    cards: list[dict] = []
+    for d in latest_run_dirs(outputs_root):
+        p = d / "review" / "lot_cards.json"
+        if p.exists():
+            cards.extend(json.loads(p.read_text(encoding="utf-8")))
+    decisions_store.replace_pending("lot", cards)
+    return len(cards)
 
 
 def collect_discontinued(outputs_root: Path) -> int:

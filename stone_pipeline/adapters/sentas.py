@@ -8,6 +8,10 @@ colour word in the variety name (as varsha does). The site publishes no quality 
 blank and the shared last-resort rule grades and flags it. Dimensions arrive in cm with their unit;
 weight is the bundle total and is normalised to the canonical per-piece value here.
 
+Stock: where the bundle has a packing list it is the stock source (its IN STOCK, reserved included) and its
+sold record; a packing list that failed to load or could not be read holds the stock (never the site's
+possibly different figure in its place); without one the site's piece count is the stock.
+
 Lots: Sentas is BUNDLE-shaped. The bundle's per-slab scans map to raw_pieces and its printed reference
 ("B6392" in "B6392 - 2 CM ...") to src_lot_label; the shared loader (stages/lots.py) decides whether the
 bundle becomes its pieces. The lot reference is the bundle's own site id, never the printed reference,
@@ -30,6 +34,24 @@ def _printed_ref(record) -> str:
     return lead.strip() if separator else ""
 
 
+def _stock(record) -> str:
+    """The bundle's slabs in stock: the packing list's figure, '' (held) when it could not be read, or the
+    site's piece count when the bundle has no packing list."""
+    status = AdapterBase.clean(record.get("packing_status"))
+    if status == "ok":
+        return AdapterBase.clean(record.get("packing_available"))
+    if status:
+        return ""
+    return AdapterBase.clean(record.get("pieces"))
+
+
+def _sold(record) -> str:
+    """The packing list's sold count; '' when the bundle has no readable packing list (no sale record)."""
+    if AdapterBase.clean(record.get("packing_status")) != "ok":
+        return ""
+    return AdapterBase.clean(record.get("packing_sold"))
+
+
 def _per_piece_kg(record) -> str:
     """Sentas renders the bundle's total kg; canonical weight is PER PIECE, so divide by the piece count.
     Blank when either figure is missing or non-positive -> derive synthesises a per-piece value."""
@@ -42,7 +64,7 @@ def _per_piece_kg(record) -> str:
 
 class SentasAdapter(AdapterBase):
     source = "sentas"
-    adapter_version = "1.2.0"
+    adapter_version = "1.3.0"
     variety_match_key = "variety"
     format_field = "format"
     required_columns = ["product_id", "variety", "url", "finish", "thickness",
@@ -67,7 +89,8 @@ class SentasAdapter(AdapterBase):
         "raw_dimensions": lambda r: AdapterBase.build_dims(r.get("width_cm"), r.get("height_cm"), unit=""),
         "raw_weight": _per_piece_kg,
         "raw_total_m2": lambda r: AdapterBase.clean(r.get("total_sqm")),
-        "raw_slab_count": lambda r: AdapterBase.clean(r.get("pieces")),
+        "raw_slab_count": _stock,
+        "raw_sold_count": _sold,
         "raw_description": lambda r: "",   # the site has no product description
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls"), "|"),
         # lots: the per-slab scans as written by the scraper (JSON, passed through untouched) + the label

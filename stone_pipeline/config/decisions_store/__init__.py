@@ -11,6 +11,7 @@ into one module per table so a storage bug stays local:
   - attributes  -- operator-pasted Medusa ids for new colour/finish/type/quality values.
   - protected   -- 'not a duplicate' verdicts the reconcile dedup must never drop.
   - leaves      -- backbone leaf-growth verdicts (approve/reject a value onto a variety's allowed set).
+  - lots        -- lot sold answers: which scanned slabs of a lot are sold, for a given stock figure.
   - queue       -- the pending review queue produce WRITES and the API READS, plus the card projection.
 
 This module is the FACADE: callers use `decisions_store.<name>` and nothing imports the submodules directly,
@@ -24,6 +25,7 @@ from .attributes import attribute_ids, clear_attribute_ids, set_attribute_id
 from .leaves import (_LEAF_ATTRIBUTES, backbone_leaf_overlay, clear_leaf_decisions, leaf_decided,
                      list_decided_leaves, record_minted_membership, revise_leaf_decision,
                      set_backbone_leaf_decision)
+from .lots import answer_lot, lot_answers
 from .origins import (clear_variety_origins, delete_variety_origin, get_variety_origin, list_variety_origins,
                       set_variety_origin, variety_origins)
 from .protected import add_protected, clear_protected, protected_keys
@@ -48,6 +50,8 @@ __all__ = [
     "backbone_leaf_overlay", "leaf_decided", "set_backbone_leaf_decision", "approve_leaf_pending",
     "decide_leaf_pending", "list_decided_leaves", "revise_leaf_decision", "clear_leaf_decisions",
     "record_minted_membership", "_LEAF_ATTRIBUTES",
+    # lot sold answers
+    "answer_lot", "lot_answers",
     # pending review queue
     "replace_pending", "clear_review_pending", "pending_payload", "list_pending",
 ]

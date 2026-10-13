@@ -1,6 +1,6 @@
 [
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Purple",
     "raw_description": "",
@@ -33,6 +33,7 @@
     "raw_quality": "",
     "raw_slab_count": "78",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -48,7 +49,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -68,6 +69,7 @@
     "raw_quality": "",
     "raw_slab_count": "6",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -83,7 +85,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Green, Purple",
     "raw_description": "",
@@ -109,6 +111,7 @@
     "raw_quality": "",
     "raw_slab_count": "42",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -124,7 +127,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Green, Purple",
     "raw_description": "",
@@ -157,6 +160,7 @@
     "raw_quality": "",
     "raw_slab_count": "35",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -172,7 +176,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "White",
     "raw_description": "",
@@ -205,6 +209,7 @@
     "raw_quality": "",
     "raw_slab_count": "44",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -220,7 +225,7 @@
     "variety_match_key": "Afyon White"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "White",
     "raw_description": "",
@@ -240,6 +245,7 @@
     "raw_quality": "",
     "raw_slab_count": "13",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -255,7 +261,7 @@
     "variety_match_key": "Afyon White"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Pink",
     "raw_description": "",
@@ -276,6 +282,7 @@
     "raw_quality": "",
     "raw_slab_count": "1",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -291,7 +298,7 @@
     "variety_match_key": "Pink Onyx"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "Pink",
     "raw_description": "",
@@ -315,6 +322,7 @@
     "raw_quality": "",
     "raw_slab_count": "2",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
@@ -330,7 +338,7 @@
     "variety_match_key": "Pink Onyx"
   },
   {
-    "adapter_version": "1.2.0",
+    "adapter_version": "1.3.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -359,6 +367,7 @@
     "raw_quality": "",
     "raw_slab_count": "9",
     "raw_slabs_array": null,
+    "raw_sold_count": "",
     "raw_stock_m2": null,
     "raw_stock_status": null,
     "raw_thickness": "2 cm",
