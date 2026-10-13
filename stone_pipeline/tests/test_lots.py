@@ -244,4 +244,5 @@ def test_the_lot_summary_counts_each_lot_s_pieces():
     held.add_reject(RejectReason(rule="no_image", detail=""))                # a piece held for its own reason
     rows = [_emittable_piece(position=1), held, _emittable_piece(code=None, position=None)]
     assert lots.summary(rows) == [{"lot_code": "L-1", "variety": "Calacatta Viola",
-                                   "pieces": 2, "emitted": 1, "held": 1}]
+                                   "pieces": 2, "sold": 0, "emitted": 1, "held": 1,
+                                   "awaiting_answer": False}]

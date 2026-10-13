@@ -13,6 +13,7 @@ semantics; nothing upstream changes.
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Callable
 
@@ -219,6 +220,13 @@ def write_discontinued_csv(discontinued: list[tuple[str, str]], path: Path,
     cells = [{"Variant Sku": sku, "Product Handle": handle_val, "Action": action(sku)}
              for sku, handle_val in discontinued]
     csvio.write_dicts(path, DISCONTINUED_COLUMNS, cells, sanitize=False)   # atomic
+    return Path(path)
+
+
+def write_lot_cards(cards: list[dict], path: Path) -> Path:
+    """This run's "which slabs are sold?" cards (stages/lots.cards), for the catalog to put in the review
+    queue. Always written (an empty list when none), so a card answered or resolved never lingers."""
+    csvio.atomic_write(Path(path), lambda h: h.write(json.dumps(cards, ensure_ascii=False, sort_keys=True)))
     return Path(path)
 
 

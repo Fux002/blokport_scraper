@@ -9,8 +9,12 @@ image list), and for some bundles Google Drive folders with extra photos ("Googl
 "Scanner Photo" = one scan per slab + a packing PDF). Those folder listings are read via Drive's public
 embedded folder view and the photos appended after the site gallery, up to the pipeline's product-image
 slot count. The per-slab scans (custom_<bundle>_<slab>.jpg) are also written as the bundle's `piece_scans`
-(slab number + its scan): the loader turns a bundle into its pieces when there is one scan per listed piece
-and the source's `lots` switch is on (stages/lots.py). Deciding that is not the scraper's job.
+(slab number + its scan): the loader decides whether the bundle becomes its pieces (stages/lots.py).
+
+Packing list: where the page links one (a Google Sheet), it is the bundle's stock source. Only the vendor's
+own summary rows are read (TOTAL and IN STOCK, reserved counted as in stock): a sheet can carry stray rows
+copied from another block, and only the summary is this product's figure. Written as packing_available /
+packing_sold with packing_status ok | failed | unreadable (empty when the bundle has none).
 
 Stone type: the site publishes it only through its three collection categories (marble / travertine /
 onyx), keyed by variety name. A variety in none of them ships untyped and the pipeline types it from the
@@ -21,7 +25,9 @@ Run:  python -m scrapers.sentas
 
 from __future__ import annotations
 
+import csv
 import html
+import io
 import json
 import re
 from typing import Any, Iterable, Optional
@@ -54,6 +60,9 @@ _DRIVE_IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp")
 MAX_IMAGES = SETTINGS.images.product_image_slots
 # A Scanner Photo file: one scan per slab, named by bundle and slab number (the slab's place in the cut).
 _SLAB_SCAN = re.compile(r"^custom_\d+_(\d+)\.(?:jpe?g|png|webp)$", re.IGNORECASE)
+# The packing list: a Google Sheet linked from the product page, read as CSV (public export, no API key).
+PACKING_LIST_CSV = "https://docs.google.com/spreadsheets/d/{id}/export?format=csv"
+_PACKING_SHEET = re.compile(r"docs\.google\.com/spreadsheets/d/([A-Za-z0-9_-]+)")
 
 _CATEGORY_CARD = re.compile(r'href="https://sentasmarble\.com/en/categories/([^"/]+)"[^>]*>\s*<img[^>]*alt="([^"]*)"')
 _CARD_SPLIT = re.compile(r'<div class="tt-col-item">')
@@ -110,6 +119,42 @@ def _drive_folders(page: str) -> list[str]:
     return list(dict.fromkeys(ids))
 
 
+def _packing_list_id(page: str) -> str:
+    """The Google Sheet id of the page's "Packing List" card, or '' (none, or a link that is not a Sheet)."""
+    for href, body in _ACTION_CARD.findall(page):
+        if "Packing List" in _text(body):
+            found = _PACKING_SHEET.search(html.unescape(href))
+            return found.group(1) if found else ""
+    return ""
+
+
+def _packing_counts(text: str) -> Optional[tuple[int, int]]:
+    """(in stock, sold) from the packing list's own summary rows, or None when it has no readable summary.
+    IN STOCK includes reserved slabs; sold = TOTAL - IN STOCK. The piece column is the first PCS/PIECES."""
+    rows = list(csv.reader(io.StringIO(text)))
+    header = next((r for r in rows if r and r[0].strip().upper().startswith("BLOCK")), None)
+    if header is None:
+        return None
+    names = [c.strip().upper() for c in header]
+    pcs = next((i for i, name in enumerate(names) if name in ("PCS", "PIECES")), None)
+    summary: dict[str, list[str]] = {}
+    for r in rows:
+        label = r[0].strip().upper() if r else ""
+        if label in ("TOTAL", "IN STOCK"):
+            summary.setdefault(label, r)
+    if pcs is None or len(summary) != 2:
+        return None
+    total, in_stock = (_count(summary[label][pcs] if len(summary[label]) > pcs else "") for label in ("TOTAL", "IN STOCK"))
+    if total is None or in_stock is None or in_stock > total:
+        return None
+    return in_stock, total - in_stock
+
+
+def _count(text: str) -> Optional[int]:
+    value = _number(text)
+    return int(value) if value.isdigit() else None
+
+
 def _parse_product_page(page: str) -> dict:
     """The bundle facts a product page renders. Absent elements come back empty, never guessed."""
     dims = {k.lower(): v.strip() for k, v in _DIM.findall(page)}
@@ -128,6 +173,7 @@ def _parse_product_page(page: str) -> dict:
         "color": specs.get("Colors", ""),
         "image_urls": _gallery(page),
         "drive_folders": _drive_folders(page),
+        "packing_list": _packing_list_id(page),
     }
 
 
@@ -153,6 +199,7 @@ class SentasScraper(ScraperBase):
         "product_id", "name", "caption", "variety", "variety_url", "stone_type", "url",
         "finish", "color", "thickness", "height_cm", "width_cm", "total_sqm", "total_kg", "pieces",
         "drive_folders", "drive_image_count", "piece_scans",
+        "packing_status", "packing_available", "packing_sold",
     ]
 
     # --- listing ---------------------------------------------------------------------------------------
@@ -248,6 +295,21 @@ class SentasScraper(ScraperBase):
         pieces = [{"position": slab, "image_urls": scans[slab]} for slab in sorted(scans)]
         return urls, max(0, len(urls) - len(detail["image_urls"])), pieces
 
+    def _packing(self, sheet_id: str) -> dict:
+        """The bundle's packing-list figures. A list that fails to load or has no readable summary is recorded
+        as such (the adapter then holds the bundle's stock rather than use the site's figure in its place)."""
+        blank = {"packing_status": "", "packing_available": "", "packing_sold": ""}
+        if not sheet_id:
+            return blank
+        try:
+            counts = _packing_counts(self.get(PACKING_LIST_CSV.format(id=sheet_id)).text)
+        except Exception as exc:
+            self.record_failure("packing_list", id=sheet_id, error=str(exc))
+            return {**blank, "packing_status": "failed"}
+        if counts is None:
+            return {**blank, "packing_status": "unreadable"}
+        return {"packing_status": "ok", "packing_available": counts[0], "packing_sold": counts[1]}
+
     def parse_product(self, item: dict) -> Optional[dict]:
         try:
             detail = _parse_product_page(self.get(item["url"]).text)
@@ -273,6 +335,7 @@ class SentasScraper(ScraperBase):
             "drive_folders": " | ".join(facts.get("drive_folders", [])),
             "drive_image_count": drive_count,
             "piece_scans": json.dumps(pieces) if pieces else "",
+            **self._packing(facts.get("packing_list", "")),
             "image_urls": images,   # base keeps these as source links
         }
         if detail is None:

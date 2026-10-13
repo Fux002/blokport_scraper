@@ -179,6 +179,9 @@ class CanonicalRow(BaseModel):
     # count); a non-positive flag ("out-of-stock") does NOT match, so a sold-out item is never given stock.
     raw_stock_status: Optional[str] = None
     raw_slab_count: Optional[str] = None
+    # how many of the source's pieces are on record as SOLD (e.g. a packing list's TOTAL - IN STOCK); None when
+    # the source keeps no such record. Decides, with the stock, whether each scanned slab's status is known.
+    raw_sold_count: Optional[str] = None
     raw_bundle_size: Optional[str] = None
     raw_slabs_array: Optional[str] = None
     raw_image_urls: list[str] = Field(default_factory=list)
@@ -203,6 +206,10 @@ class CanonicalRow(BaseModel):
     # the piece's place in the cut order. None = not part of a lot (the product takes the path it always did).
     lot_code: Optional[str] = None
     lot_position: Optional[int] = None
+    # True for the pieces of a lot already in Medusa whose sold slabs are not known this run (stock moved and
+    # no operator answer for it yet): the loader sends every piece at inventory 0 (offline) until the "which
+    # slabs are sold?" card is answered, so a buyer is never offered a slab that may be gone.
+    lot_unresolved: bool = False
 
     # resolved attributes (Stage 3 / Stage 5)
     type_id: Optional[str] = None

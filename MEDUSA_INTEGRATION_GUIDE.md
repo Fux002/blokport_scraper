@@ -215,11 +215,13 @@ a set of ordinary products (its pieces) that carry the same `lot_code`. Rules:
   **same on every run**: `<vendor's printed reference>-<uuid5(fixed namespace, source + lot reference)>`.
   Treat it as opaque; never parse it.
 - `lot_position` is a positive integer, the piece's place in the lot's cut order, unique within the lot.
-  Gaps are normal (sold pieces are absent).
+  Gaps are normal (a slab never scanned, or broken in the cut).
 - Both are `null` outside a lot: such a product takes exactly the path it always did.
 - Every piece of a lot shares variation, category and type (the scraper holds the whole lot otherwise),
-  is sold singly (`bundle_size` null, inventory 1) and carries its own photograph first.
-- A piece the vendor no longer lists arrives as inventory 0 (Flow B), never as "sold": deactivate it.
+  is sold singly (`bundle_size` null) and carries its own photograph first.
+- The lot is its **full scanned sequence**: a piece the vendor has sold stays in the lot at inventory 0
+  (Flow B); every other piece is at inventory 1. A lot is only sent when every piece's status is known;
+  where the vendor's data does not say which slabs are sold, an operator answers it first (below).
 - Lots are switched on per vendor (the scraper's `lots` setting), as a coordinated cutover: the pieces
   arrive as new products, then each split bundle's inventory delta arrives with reason
   `replaced_by_lot` and its `lot_code` (Flow B). The run's review folder lists every replacement
@@ -429,6 +431,21 @@ LAST, `manifest.json` next to them:
   not since your last load, and is retired; ignore it until it stops being written.
 
 ---
+
+### Lots: "which slabs are sold?" (config server, admin review)
+
+Some vendors record sales per sub-bundle, not per slab, and keep the scans of sold slabs. For such a lot
+the scraper raises a card instead of guessing; until it is answered a bundle never sent as a lot stays one
+bundle product, and a lot already in Medusa goes offline: every piece at inventory 0 (deactivate them),
+back at their real stock once answered.
+
+| Method | Path | Body / response |
+|---|---|---|
+| `GET` | `/config/v1/review/lots` | `{lots: [card]}`; a card: `ref` ("source\|lot ref"), `label`, `variety`, `src_url`, `available` (slabs in stock), `sold_known` (sold on record, or null), `scanned`, `must_mark_sold`, `pieces: [{position, image}]`, `previous_answer`, `decided`, `current_sold` |
+| `PUT` | `/config/v1/review/lots/<ref>` | `{sold: [positions]}` -> `{ref, sold}`; 400 when it names a slab not scanned, names one twice, or leaves more slabs on offer than `available`; 404 when there is no such card |
+
+An answer holds for the stock figure it was given at; a later sale (a lower `available`) raises the card
+again with the previous answer shown.
 
 ## 11. Endpoint reference
 

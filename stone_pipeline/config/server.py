@@ -518,6 +518,28 @@ def _put_review_backbone_leaf(params, body, query):
     return 200, {"ref": ref, "action": action}
 
 
+# -- lots: "which slabs are sold?" ---------------------------------------------------------------------------
+def _get_review_lots(params, body, query):
+    # the lots whose sold slabs the vendor's data does not identify, each with every scanned slab to choose from
+    from stone_pipeline.config import decisions_store
+    return 200, {"lots": decisions_store.list_pending("lot")}
+
+
+def _put_review_lot(params, body, query):
+    # {"sold": [slab positions]}: the operator's answer for the card's current stock figure
+    from stone_pipeline.config import decisions_store
+    if not isinstance(body, dict):
+        return 400, {"error": "body must be a JSON object {sold: [positions]}"}
+    ref = unquote(params["ref"])
+    try:
+        sold = decisions_store.answer_lot(ref, body.get("sold"))
+    except LookupError as e:
+        return 404, {"error": str(e)}
+    except decisions_store.InvalidDecision as e:
+        return 400, {"error": str(e)}
+    return 200, {"ref": ref, "sold": sold}
+
+
 # -- origins: PER-VARIETY origin EDITS (the "edit origins" admin action) ----------------------------------
 # The same channel a mint uses for its origin (seed_country), but for ANY variety and holding a country
 # LIST. Overlaid onto the origin map on the next produce; the per-vendor gate then picks each vendor's
@@ -675,6 +697,8 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("GET", ("review", "backbone", "decided"), _get_review_backbone_decided),
     ("POST", ("review", "backbone", "approve_all"), _post_review_backbone_approve_all),
     ("PUT", ("review", "backbone", "{ref}"), _put_review_backbone_leaf),
+    ("GET", ("review", "lots"), _get_review_lots),
+    ("PUT", ("review", "lots", "{ref}"), _put_review_lot),
     ("GET", ("origins",), _get_origins),
     ("GET", ("origins", "lookup"), _get_origins_lookup),
     ("PUT", ("origins", "{ref}"), _put_origin),

@@ -11,11 +11,11 @@ from contextlib import closing
 from stone_pipeline.config import store
 from stone_pipeline.config.decisions_model import Decisions
 
-from . import leaves
+from . import leaves, lots
 from ._common import InvalidDecision, _norm, _now
 from .statements import scope_key
 
-_PENDING_KINDS = ("variety", "attribute", "backbone_leaf", "origin", "decision_gap")
+_PENDING_KINDS = ("variety", "attribute", "backbone_leaf", "origin", "decision_gap", "lot")
 
 
 def replace_pending(kind: str, rows: list[dict]) -> None:
@@ -174,6 +174,12 @@ def list_pending(kind: str) -> list[dict]:
         elif kind == "backbone_leaf":
             item["current_action"] = leaf_actions.get(r["ref"])
             item["decided"] = leaf_actions.get(r["ref"]) is not None
+        elif kind == "lot":
+            # an answer counts for the stock figure this card asks at (a later sale raises a new figure)
+            answer = lots.lot_answers(item["source"]).get(item["lot_ref"])
+            current = answer is not None and answer[0] == item["available"]
+            item["decided"] = current
+            item["current_sold"] = sorted(answer[1]) if current else None
         out.append(item)
     return out
 
