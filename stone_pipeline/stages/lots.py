@@ -15,8 +15,8 @@ It serves both source shapes without any source-specific code:
     (`cards`); until it is answered a bundle never sent as a lot stays one product, and a lot already in
     Medusa goes OFFLINE, every piece at inventory 0 (it never flips back to a bundle: its old page redirects
     to the lot; and no slab that may be sold stays on offer). The answer brings the right pieces back.
-A source whose `lots` switch is off is left untouched (its cards are still raised, so they can be answered
-before the cutover). `summary` counts each lot's pieces for diagnostics.
+No per-source setting gates any of this: membership follows from the data alone, and Blokport takes a lot
+whenever one arrives. `summary` counts each lot's pieces for diagnostics.
 """
 
 from __future__ import annotations
@@ -75,8 +75,6 @@ def load(rows: list[CanonicalRow], cfg: SourceConfig, answers: Optional[dict[str
          known_skus: frozenset[str] = frozenset()) -> list[CanonicalRow]:
     """Establish lot membership for one source's adapted rows (see the module docstring). `answers` are the
     operator's sold answers by lot reference; `known_skus` the products already in Medusa (upper-case SKUs)."""
-    if not cfg.lots:
-        return rows
     answers = answers or {}
     out: list[CanonicalRow] = []
     kept_whole = offline = 0
@@ -107,8 +105,7 @@ def load(rows: list[CanonicalRow], cfg: SourceConfig, answers: Optional[dict[str
 
 def cards(rows: list[CanonicalRow], cfg: SourceConfig, answers: dict[str, Answer]) -> list[dict]:
     """The "which slabs are sold?" cards: one per bundle with a scanned sequence whose sold slabs are not
-    known, with every scan to choose from. Raised whether or not the source's `lots` switch is on, so the
-    answers can be given before the cutover. Shaped for the review queue (ref, payload, sources)."""
+    known, with every scan to choose from. Shaped for the review queue (ref, payload, sources)."""
     out = []
     for row in rows:
         pieces = _pieces(row) if row.raw_pieces else []

@@ -202,8 +202,8 @@ class CanonicalRow(BaseModel):
     src_lot_label: Optional[str] = None
     raw_lot_position: Optional[str] = None
     raw_pieces: Optional[str] = None
-    # Set by the loader when the source's `lots` switch is on: the code every piece of the lot carries, and
-    # the piece's place in the cut order. None = not part of a lot (the product takes the path it always did).
+    # Set by the loader (stages/lots): the code every piece of the lot carries, and the piece's place in the
+    # cut order. None = not part of a lot (the product takes the path it always did).
     lot_code: Optional[str] = None
     lot_position: Optional[int] = None
     # True for the pieces of a lot already in Medusa whose sold slabs are not known this run (stock moved and

@@ -222,10 +222,10 @@ a set of ordinary products (its pieces) that carry the same `lot_code`. Rules:
 - The lot is its **full scanned sequence**: a piece the vendor has sold stays in the lot at inventory 0
   (Flow B); every other piece is at inventory 1. A lot is only sent when every piece's status is known;
   where the vendor's data does not say which slabs are sold, an operator answers it first (below).
-- Lots are switched on per vendor (the scraper's `lots` setting), as a coordinated cutover: the pieces
-  arrive as new products, then each split bundle's inventory delta arrives with reason
-  `replaced_by_lot` and its `lot_code` (Flow B). The run's review folder lists every replacement
-  (`lot_replacements.csv`: old SKU, old handle, lot code, pieces) for the diff read before the pull resumes.
+- Lots are sent whenever a vendor's data supports them; there is no per-vendor setting. When a bundle
+  becomes its lot, the pieces arrive as new products, then the bundle's inventory delta arrives with
+  reason `replaced_by_lot` and its `lot_code` (Flow B). The run's review folder lists every replacement
+  (`lot_replacements.csv`: old SKU, old handle, lot code, pieces).
 
 > **`company_id`** is the single deliberate Medusa id in the payload: a small, hand-managed,
 > per-source seller id (the 4 companies), unlike the high-cardinality variation/attribute
@@ -275,7 +275,7 @@ A zero may carry a `reason` (a closed set; an unknown reason is treated as a pla
 
 - none: the supplier no longer lists the product (sold out or dropped). Deactivate it, never delete.
 - `"delisted"`: an operator took the product offline (admin delist). Hide it.
-- `"replaced_by_lot"`, with `"lot_code"`: a bundle split into its pieces at a vendor's lot cutover.
+- `"replaced_by_lot"`, with `"lot_code"`: a bundle replaced by its pieces (its lot).
   Deactivate the bundle (never delete: orders and documents reference it) and redirect its page to the
   lot. Served only once at least one piece of that lot exists in Medusa, so the redirect never lands on
   an empty lot page.
