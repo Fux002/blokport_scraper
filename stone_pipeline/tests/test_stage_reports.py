@@ -46,6 +46,19 @@ def test_funnel_reconciles_listed_to_clean():
     assert f["listed"] == f["unmapped"] + f["deduped"] + f["rejected"] + f["held"] + f["clean"]
 
 
+def test_funnel_counts_split_bundles_as_their_pieces_and_still_reconciles():
+    from stone_pipeline.run import _funnel
+    metrics = [
+        StageMetric(stage="ingest", rows_in=511, rows_out=510),          # 1 record the adapter could not map
+        StageMetric(stage="lots", rows_in=510, rows_out=2103),           # 34 bundles became 1,627 pieces
+        StageMetric(stage="keys_dedupe", rows_in=2103, rows_out=2103),
+        StageMetric(stage="validate", rows_in=2103, rows_out=2080, rejected=23, reviewed=0),
+    ]
+    f = _funnel(metrics)
+    assert f["listed"] == 511 + 1593
+    assert f["listed"] == f["unmapped"] + f["deduped"] + f["rejected"] + f["held"] + f["clean"]
+
+
 def test_funnel_is_all_zeros_on_an_empty_or_aborted_run():
     from stone_pipeline.run import _funnel
     assert _funnel([]) == {"listed": 0, "unmapped": 0, "deduped": 0, "rejected": 0, "held": 0, "clean": 0}

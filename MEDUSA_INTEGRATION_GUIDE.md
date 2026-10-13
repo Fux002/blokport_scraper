@@ -171,6 +171,7 @@ Only products whose variation is synced and whose texture is live.
     "origin_port": "ITMDC", "origin_country_code": "IT",
     "collection_country_code": "IT", "collection_city": "Verona",
     "bundle_size": 7,
+    "lot_code": null, "lot_position": null,
     "image_urls": ["https://.../products/improved/polonine/<sha>.jpg"]
   }
 }
@@ -206,6 +207,21 @@ customs) and the port (departure). Rules:
   an error, and do **not** overload `origin_country_code` with the collection location.
 - Set at the **scraper** level, per source (the supplier's warehouse is a per-supplier constant), in
   the :4200 admin config -- not derived Medusa-side.
+
+**Lots** (`lot_code`, `lot_position`; product payload contract `v5-lots`). A lot is not an entity: it is
+a set of ordinary products (its pieces) that carry the same `lot_code`. Rules:
+
+- `lot_code` is text, at most 128 characters, **byte-identical on every piece** of the lot and the
+  **same on every run**: `<vendor's printed reference>-<uuid5(fixed namespace, source + lot reference)>`.
+  Treat it as opaque; never parse it.
+- `lot_position` is a positive integer, the piece's place in the lot's cut order, unique within the lot.
+  Gaps are normal (sold pieces are absent).
+- Both are `null` outside a lot: such a product takes exactly the path it always did.
+- Every piece of a lot shares variation, category and type (the scraper holds the whole lot otherwise),
+  is sold singly (`bundle_size` null, inventory 1) and carries its own photograph first.
+- A piece the vendor no longer lists arrives as inventory 0 (Flow B), never as "sold": deactivate it.
+- Lots are switched on per vendor (the scraper's `lots` setting), as a coordinated cutover: the vendor's
+  split bundle products go to inventory 0 and their pieces arrive as new products.
 
 > **`company_id`** is the single deliberate Medusa id in the payload: a small, hand-managed,
 > per-source seller id (the 4 companies), unlike the high-cardinality variation/attribute

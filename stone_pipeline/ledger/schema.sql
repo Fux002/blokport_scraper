@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS product (
     sold_in_bundle       INTEGER,                       -- 0/1
     bundle_size          INTEGER,
     inventory_quantity   TEXT,                          -- the resolved stock string (derive.derive_inventory)
+    lot_code             TEXT,                          -- shared by every piece of a lot; null = not in a lot
+    lot_position         INTEGER,                       -- the piece's place in the lot's cut order
     medusa_id            TEXT,                          -- null until synced
     payload_hash         TEXT,
     state                TEXT NOT NULL DEFAULT 'pending'

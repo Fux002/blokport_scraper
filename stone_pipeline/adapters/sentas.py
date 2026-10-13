@@ -7,6 +7,11 @@ variety, else is left for the matched variety to supply. Colour is the page's ow
 colour word in the variety name (as varsha does). The site publishes no quality grade, so quality is left
 blank and the shared last-resort rule grades and flags it. Dimensions arrive in cm with their unit;
 weight is the bundle total and is normalised to the canonical per-piece value here.
+
+Lots: Sentas is BUNDLE-shaped. The bundle's per-slab scans map to raw_pieces and its printed reference
+("B6392" in "B6392 - 2 CM ...") to src_lot_label; the shared loader (stages/lots.py) decides whether the
+bundle becomes its pieces. The lot reference is the bundle's own site id, never the printed reference,
+which the vendor does not keep unique ("B898-899", "T7").
 """
 
 from __future__ import annotations
@@ -17,6 +22,12 @@ from stone_pipeline.adapters.tokens import extract_color
 
 def _variety(record) -> str:
     return AdapterBase.clean(record.get("variety"))
+
+
+def _printed_ref(record) -> str:
+    """The vendor's printed bundle reference, the caption's lead before ' - ' ('B6392'); '' when none."""
+    lead, separator, _ = AdapterBase.clean(record.get("caption")).partition(" - ")
+    return lead.strip() if separator else ""
 
 
 def _per_piece_kg(record) -> str:
@@ -31,7 +42,7 @@ def _per_piece_kg(record) -> str:
 
 class SentasAdapter(AdapterBase):
     source = "sentas"
-    adapter_version = "1.1.0"
+    adapter_version = "1.2.0"
     variety_match_key = "variety"
     format_field = "format"
     required_columns = ["product_id", "variety", "url", "finish", "thickness",
@@ -59,6 +70,9 @@ class SentasAdapter(AdapterBase):
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("pieces")),
         "raw_description": lambda r: "",   # the site has no product description
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls"), "|"),
+        # lots: the per-slab scans as written by the scraper (JSON, passed through untouched) + the label
+        "raw_pieces": lambda r: (r.get("piece_scans") or "").strip(),
+        "src_lot_label": _printed_ref,
     }
 
 

@@ -624,7 +624,10 @@ def _put_source(params, body, query):
     if not isinstance(body, dict):
         return 400, {"error": "body must be a JSON object of source settings"}
     name = params["name"]
-    body = {**body, "source": name}   # the path name is authoritative
+    # The body updates the fields it names over the stored row, so a field the admin form does not render
+    # (e.g. `lots`, the cutover switch) keeps its value on save instead of resetting to its default. A new
+    # source has no stored row and is validated as sent. The path name is authoritative.
+    body = {**(store.get_row(name) or {}), **body, "source": name}
     err = _validate_source_put(name, body)
     if err:
         return err

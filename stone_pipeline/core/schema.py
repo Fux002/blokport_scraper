@@ -190,6 +190,20 @@ class CanonicalRow(BaseModel):
     fetch_failed_fields: list[str] = Field(default_factory=list)
     raw_inventory_quantity: Optional[str] = None
 
+    # Lot membership, as the source states it (stages/lots.load turns it into lot_code / lot_position). A
+    # PIECE-native source (one record per slab, e.g. a cutting-machine API) maps src_lot_ref (its block or
+    # bundle id) and raw_lot_position (its cut sequence). A BUNDLE-shaped source maps raw_pieces instead: the
+    # bundle's per-piece photos as JSON [{"position": int, "image_urls": [str]}], which the loader expands into
+    # one product per piece. src_lot_label is the vendor's printed reference, the readable prefix of the code.
+    src_lot_ref: Optional[str] = None
+    src_lot_label: Optional[str] = None
+    raw_lot_position: Optional[str] = None
+    raw_pieces: Optional[str] = None
+    # Set by the loader when the source's `lots` switch is on: the code every piece of the lot carries, and
+    # the piece's place in the cut order. None = not part of a lot (the product takes the path it always did).
+    lot_code: Optional[str] = None
+    lot_position: Optional[int] = None
+
     # resolved attributes (Stage 3 / Stage 5)
     type_id: Optional[str] = None
     type_name: Optional[str] = None
