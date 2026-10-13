@@ -83,6 +83,19 @@ def summary(rows: list[CanonicalRow]) -> list[dict]:
     return out
 
 
+def replacements(rows: list[CanonicalRow], cfg: SourceConfig) -> dict[str, tuple[str, int]]:
+    """Bundle SKU -> (lot_code, pieces) for every lot in the run: the SKU a split bundle carried (its key
+    is the lot reference). When that SKU is among the run's discontinued products, the bundle was replaced
+    by its lot rather than dropped, and its delist carries the lot (Blokport deactivates it and 301s its
+    slug to the lot page). A piece-native lot's reference names no product, so it never matches."""
+    out: dict[str, list] = {}
+    for row in rows:
+        if row.lot_code and row.src_lot_ref:
+            entry = out.setdefault(f"{cfg.source_code}-{row.src_lot_ref}".upper(), [row.lot_code, 0])
+            entry[1] += 1
+    return {sku: (code, pieces) for sku, (code, pieces) in out.items()}
+
+
 def _split(bundle: CanonicalRow, cfg: SourceConfig) -> list[CanonicalRow]:
     """The bundle's pieces, or [] when the piece evidence is incomplete (the bundle then stays whole)."""
     pieces = _complete_pieces(bundle)

@@ -221,7 +221,9 @@ CREATE TABLE IF NOT EXISTS inventory (
     qty              INTEGER NOT NULL,
     last_synced_qty  INTEGER,                           -- null until first inventory sync
     reason           TEXT,                              -- why qty is 0: 'delisted' (admin take-offline, Medusa
-                                                        -- hides it) vs null (ordinary out-of-stock, stays listed)
+                                                        -- hides it), 'replaced_by_lot' (a bundle split into its
+                                                        -- pieces) vs null (ordinary out-of-stock, stays listed)
+    replaced_by_lot_code TEXT,                          -- reason 'replaced_by_lot': the lot that replaced it
     updated_at       TEXT NOT NULL
 );
 -- served when qty IS DISTINCT FROM last_synced_qty; this index supports that scan.

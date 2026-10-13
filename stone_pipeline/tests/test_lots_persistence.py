@@ -96,8 +96,10 @@ def test_a_v6_ledger_gains_the_lot_columns_and_keeps_its_data(tmp_path):
     with Ledger.open(p, env="development") as lg:
         _seed_variation(lg)
     raw = sqlite3.connect(p)                                                # simulate a v6 ledger
+    raw.execute("DROP INDEX idx_product_lot_code")                          # a v6 ledger has neither
     for col in ("lot_code", "lot_position"):
         raw.execute(f"ALTER TABLE product DROP COLUMN {col}")
+    raw.execute("ALTER TABLE inventory DROP COLUMN replaced_by_lot_code")
     raw.execute("PRAGMA user_version = 6")
     raw.execute("UPDATE ledger_meta SET schema_version = 6")
     raw.commit()

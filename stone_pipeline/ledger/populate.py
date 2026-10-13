@@ -301,18 +301,23 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
             "last_synced_qty": None,   # only on insert (a never-synced row is a delta)
             "reason": None,            # a normal scrape write clears any 'delisted' marker: re-scraping a
                                        # re-enabled vendor republishes it (restock delta, no reason).
+            "replaced_by_lot_code": None,   # listed again, so no longer replaced by a lot
             "updated_at": now,
         }, pk=("sku",), keep_on_update=("last_synced_qty",))
         n += 1
     return n
 
 
-def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]]) -> int:
+def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
+                          replaced: dict[str, str] | None = None) -> int:
     """Mark products the supplier dropped as out of stock (qty 0), the reversible
     delist (design 5A). `pairs` are the (sku, handle) tuples product_state.discontinued
     produces. Distinct from in-stock quantity (which floors at 1), so a product can
     only reach 0 through this path. A minimal product row is created if absent (the
-    dropped product is not in this run's emit), without clobbering an existing one."""
+    dropped product is not in this run's emit), without clobbering an existing one.
+    `replaced` (sku -> lot_code) names the dropped products that are bundles replaced by
+    their lot: their delist carries reason 'replaced_by_lot' and the code (lots.replacements)."""
+    replaced = replaced or {}
     now = now_iso()
     n = 0
     for sku, handle in pairs:
@@ -327,8 +332,9 @@ def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]]) -> i
         )
         # keep last_synced_qty on update (ack-owned), so a still-discontinued product
         # is not re-served as a delist on every run (same fix as populate_inventory).
-        ledger.upsert("inventory", {"sku": sku, "qty": 0, "last_synced_qty": None,
-                                    "updated_at": now}, pk=("sku",),
-                      keep_on_update=("last_synced_qty",))
+        record = {"sku": sku, "qty": 0, "last_synced_qty": None, "updated_at": now}
+        if sku in replaced:
+            record.update(reason="replaced_by_lot", replaced_by_lot_code=replaced[sku])
+        ledger.upsert("inventory", record, pk=("sku",), keep_on_update=("last_synced_qty",))
         n += 1
     return n

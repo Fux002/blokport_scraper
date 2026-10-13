@@ -203,14 +203,35 @@ def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
 DISCONTINUED_COLUMNS = ["Variant Sku", "Product Handle", "Action"]
 
 
-def write_discontinued_csv(discontinued: list[tuple[str, str]], path: Path) -> Path:
+def write_discontinued_csv(discontinued: list[tuple[str, str]], path: Path,
+                           replaced: dict[str, str] | None = None) -> Path:
     """The delete-loop report: products in Medusa that the supplier no longer carries. The
     inventory update already set them to stock 0 (out of stock); this lists them so they can be
-    reviewed and optionally hard-deleted/archived in Medusa. The pipeline never auto-deletes."""
-    cells = [{"Variant Sku": sku, "Product Handle": handle_val,
-              "Action": "set to stock 0; review for delete/archive"}
+    reviewed and optionally hard-deleted/archived in Medusa. The pipeline never auto-deletes.
+    A bundle `replaced` by its lot (sku -> lot_code) is deactivated and redirected, never deleted."""
+    replaced = replaced or {}
+
+    def action(sku: str) -> str:
+        if sku in replaced:
+            return f"replaced by lot {replaced[sku]}: deactivate and redirect to the lot, never remove"
+        return "set to stock 0; review for delete/archive"
+
+    cells = [{"Variant Sku": sku, "Product Handle": handle_val, "Action": action(sku)}
              for sku, handle_val in discontinued]
     csvio.write_dicts(path, DISCONTINUED_COLUMNS, cells, sanitize=False)   # atomic
+    return Path(path)
+
+
+LOT_REPLACEMENT_COLUMNS = ["Variant Sku", "Product Handle", "Lot Code", "Pieces"]
+
+
+def write_lot_replacements_csv(discontinued: list[tuple[str, str]], replaced: dict[str, tuple[str, int]],
+                               path: Path) -> Path:
+    """The cutover record: each bundle replaced by its lot (old SKU, old handle, the lot, its pieces), for
+    the diff both sides read before the pull resumes. Header-only when the run replaced nothing."""
+    cells = [{"Variant Sku": sku, "Product Handle": handle_val, "Lot Code": replaced[sku][0],
+              "Pieces": replaced[sku][1]} for sku, handle_val in discontinued if sku in replaced]
+    csvio.write_dicts(path, LOT_REPLACEMENT_COLUMNS, cells, sanitize=False)   # atomic; derived values only
     return Path(path)
 
 

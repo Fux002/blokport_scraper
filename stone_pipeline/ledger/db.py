@@ -27,8 +27,9 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 7   # v6: product.collection_country_code/collection_city -- supplier collection location;
-#                      v7: product.lot_code/lot_position -- the pieces of a lot
+SCHEMA_VERSION = 8   # v6: product.collection_country_code/collection_city -- supplier collection location;
+#                      v7: product.lot_code/lot_position -- the pieces of a lot;
+#                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -156,6 +157,8 @@ class Ledger:
         inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
+        if "replaced_by_lot_code" not in inv_cols:   # v8: the lot a bundle was replaced by (its redirect target)
+            self.conn.execute("ALTER TABLE inventory ADD COLUMN replaced_by_lot_code TEXT")
         prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}
         if "collection_country_code" not in prod_cols:   # v6: supplier collection location (independent of origin)
             self.conn.execute("ALTER TABLE product ADD COLUMN collection_country_code TEXT")
@@ -175,6 +178,9 @@ class Ledger:
         # not-yet-added `kind` column would fail. Idempotent, so fresh ledgers pick it up here too.
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_removed_serve_kind "
                           "ON removed (state, kind, created_at, external_id)")
+        # the lot lookup that gates a bundle's replacement delta on its pieces (sync.ready_inventory); HERE for
+        # the same reason: on an old ledger product.lot_code only exists after the ALTER above
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_product_lot_code ON product (lot_code)")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""
