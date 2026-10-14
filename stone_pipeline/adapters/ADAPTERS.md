@@ -108,9 +108,9 @@ an adapter only declares what the source states, in one of two shapes:
   (each slab's OWN measured size and weight, in the same raw forms as the row's; a scan the source does not
   measure omits both and is never offered), `raw_slab_count` to its slabs in stock, `raw_sold_count` to its
   sold record when the source keeps one, and optionally `src_lot_label`. The loader
-  lists the full measured sequence (a sold slab at inventory 0) when every slab's status is known: the scans
-  match the stock with no sale on record, or no sale is on record and there are fewer scans than stock, or
-  an operator answered the "which slabs are sold?" card for the current stock. Otherwise the card is raised
+  lists the measured slabs (a sold slab at inventory 0) when every slab's status is known: nothing is sold
+  (the sale record says 0, or there is none and the scans match the stock) and no more slabs are offered
+  than are in stock, or an operator answered the "which slabs are sold?" card for the current stock. Otherwise the card is raised
   and the bundle stays one product (a lot already in Medusa goes offline, every piece at inventory 0, until
   answered). See `sentas.py`.
 

@@ -235,6 +235,16 @@ def test_allow_missing_still_raises_on_a_non_404_error(tmp_path, monkeypatch):
         s.get("http://x/page/3", allow_missing=True)
 
 
+def test_a_caller_can_name_other_statuses_it_knows_to_be_definitive(tmp_path, monkeypatch):
+    # e.g. a Drive folder that is not shared answers 401: definitive for that caller, never retried
+    s = _Fake(data_dir=tmp_path)
+    client = _SeqClient([401])
+    s._client = client
+    _sleepless(monkeypatch)
+    assert s.get("http://x/folder", allow_missing=True, missing_statuses=(401, 403, 404)) is None
+    assert client.i == 1
+
+
 def test_retry_after_both_forms_and_clamp(tmp_path):
     from datetime import timedelta
     from email.utils import format_datetime

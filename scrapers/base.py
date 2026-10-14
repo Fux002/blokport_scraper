@@ -214,14 +214,16 @@ class ScraperBase:
         except (TypeError, ValueError):
             return fallback
 
-    def _request(self, method: str, url: str, throttle: bool = True, allow_missing: bool = False, **kwargs):
+    def _request(self, method: str, url: str, throttle: bool = True, allow_missing: bool = False,
+                 missing_statuses: tuple[int, ...] = (404,), **kwargs):
         """HTTP with a preventive throttle, retry, backoff, a per-session UA, and 429 handling. Routes
         through curl_cffi when use_curl_cffi is set (Cloudflare-fronted sites). `throttle=False` skips the
         preventive delay (used by image downloads, which pace themselves via image_delay).
 
-        `allow_missing=True` returns None on a definitive 404 without retrying, so a paginator can tell
-        'past the last page' (a legitimate stop) from a transient failure (which still retries then raises).
-        Every other non-200 status is treated as a retryable error exactly as before."""
+        `allow_missing=True` returns None on a definitive absence without retrying: a 404, or any status in
+        `missing_statuses` the caller knows to be definitive for its resource (e.g. 401/403 for a file that is
+        not shared). So a paginator can tell 'past the last page' (a legitimate stop) from a transient failure
+        (which still retries then raises). Every other non-200 status is treated as a retryable error."""
         # Preventive spacing, ONCE per logical request (not per redirect hop, not per retry): keep page/detail
         # GETs from provoking a 429. Reactive 429/transient backoffs below still apply on top when needed.
         if throttle and self.request_delay[1] > 0:
@@ -252,7 +254,7 @@ class ScraperBase:
                         continue
                     if r.status_code == 200:
                         return r
-                    if allow_missing and r.status_code == 404:
+                    if allow_missing and r.status_code in missing_statuses:
                         return None   # definitive absence -> caller's end-of-list, not a transient error
                     if r.status_code == 429:
                         # record WHY (else the final raise reports last_exc=None for a pure-429 run) and
@@ -273,7 +275,7 @@ class ScraperBase:
         raise RuntimeError(f"{method} failed after {self.max_retries} tries: {url}")
 
     def get(self, url: str, **kwargs) -> Optional[httpx.Response]:
-        # Returns an httpx.Response, or None only when allow_missing=True and the server gave a 404.
+        # Returns an httpx.Response, or None only when allow_missing=True and the server gave a definitive status.
         return self._request("GET", url, **kwargs)
 
     def post(self, url: str, **kwargs) -> httpx.Response:

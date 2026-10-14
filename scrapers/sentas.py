@@ -64,6 +64,8 @@ AJAX_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 DRIVE_FOLDER_VIEW = "https://drive.google.com/embeddedfolderview?id={id}"
 DRIVE_IMAGE = "https://lh3.googleusercontent.com/d/{id}=s2000"
 DRIVE_FILE = "https://drive.google.com/uc?export=download&id={id}"
+# What a folder that is not publicly shared (or no longer exists) answers: definitive, never retried.
+DRIVE_FOLDER_NOT_SHARED = (401, 403, 404)
 _DRIVE_IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp")
 # Photos per bundle are capped at what the catalog can slot: a scanner folder holds one scan per slab (often
 # 30+), and every url past the cap would be downloaded, enhanced and hosted for nothing.
@@ -364,14 +366,19 @@ class SentasScraper(ScraperBase):
 
     # --- detail ----------------------------------------------------------------------------------------
     def _drive_files(self, folder_id: str) -> Optional[list[tuple[str, str]]]:
-        """(title, file id) of every file in a public Drive folder, or None when it fails to list (recorded):
-        its contents, which may be the slab scans and the block sheet, are then unknown, not absent."""
+        """(title, file id) of every file in a public Drive folder; [] for a folder that is not shared (nothing
+        in it can be read on any run); None when it fails to list: its contents, which may be the slab scans
+        and the block sheet, are then unknown, not absent. Both are recorded."""
         try:
-            listing = self.get(DRIVE_FOLDER_VIEW.format(id=folder_id)).text
+            response = self.get(DRIVE_FOLDER_VIEW.format(id=folder_id), allow_missing=True,
+                                missing_statuses=DRIVE_FOLDER_NOT_SHARED)
         except Exception as exc:
             self.record_failure("drive", id=folder_id, error=str(exc))
             return None
-        return [(title.strip(), file_id) for file_id, title in _DRIVE_ENTRY.findall(listing)]
+        if response is None:
+            self.record_failure("drive_not_shared", id=folder_id, error="the folder is not publicly shared")
+            return []
+        return [(title.strip(), file_id) for file_id, title in _DRIVE_ENTRY.findall(response.text)]
 
     def _pieces(self, folders: list[list[tuple[str, str]]]) -> tuple[list[dict], str]:
         """(the per-slab scans in cut order, a block-sheet problem or ''). Each scan: {"position", "image_urls"}
