@@ -230,6 +230,20 @@ def test_drive_listing_returns_every_file_with_its_id(tmp_path, monkeypatch):
                                    ("custom_6392_10.JPG", "1tNgMcDiV7M7r7nRUd0VbTN6CZg_5WgRI")]
 
 
+def test_a_drive_folder_that_is_not_shared_is_empty_not_unknown(tmp_path, monkeypatch):
+    # a private folder answers 401/403: its contents cannot be read on any run, so nothing is held for it
+    s = SentasScraper(data_dir=tmp_path)
+    seen: list = []
+
+    def get(url, **kw):
+        seen.append(kw.get("missing_statuses"))
+        return None                                      # the base's answer to a definitive status
+    monkeypatch.setattr(s, "get", get)
+    assert s._drive_files("f") == []
+    assert seen == [sentas.DRIVE_FOLDER_NOT_SHARED] and {401, 403, 404} <= set(sentas.DRIVE_FOLDER_NOT_SHARED)
+    assert [f["kind"] for f in s._failures] == ["drive_not_shared"]
+
+
 def test_a_failed_drive_listing_is_unknown_not_empty(tmp_path, monkeypatch):
     s = SentasScraper(data_dir=tmp_path)
 
