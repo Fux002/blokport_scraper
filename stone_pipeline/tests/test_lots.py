@@ -109,10 +109,17 @@ def test_a_bundle_without_complete_piece_evidence_stays_one_product(pieces, slab
 def test_a_scan_the_source_does_not_measure_is_never_offered():
     # e.g. a void entry on the vendor's cutting list (no size, a stand-in photo): not a slab that can be sold
     pieces = [*TWO, _slab(7, "s7", size=None)]
-    out = lots.load([_bundle(pieces, slab_count=2)], CFG)
+    out = lots.load([_bundle(pieces, slab_count=3)], CFG)
     assert [p.lot_position for p in out] == [1, 4]                          # the measured slabs; 7 is a gap
-    stocked = lots.load([_bundle(pieces, slab_count=3, raw_sold_count="0")], CFG)
-    assert [p.lot_position for p in stocked] == [1, 4]                      # 3 in stock, 2 can be offered
+
+
+def test_which_slabs_are_sold_is_read_on_the_vendor_s_full_scanned_sequence():
+    # The vendor counts a void slab in its stock (B6244: 65 scans, 65 in stock, one void, no packing list):
+    # every scan matches the stock and nothing is sold, so the 64 measured slabs are all available.
+    pieces = [*TWO, _slab(7, "s7", size=None)]
+    out = lots.load([_bundle(pieces, slab_count=3)], CFG, known_skus=frozenset({"SEN-7149-1"}))
+    assert [(p.lot_position, p.raw_inventory_quantity) for p in out] == [(1, "1"), (4, "1")]
+    assert not any(p.lot_unresolved for p in out)                           # never taken offline for a void
 
 
 def test_malformed_piece_data_keeps_the_bundle_whole():

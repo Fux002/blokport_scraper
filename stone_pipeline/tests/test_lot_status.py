@@ -1,11 +1,9 @@
 """Which slabs of a lot are sold: one rule, in the loader.
 
-The full sequence of measured scanned slabs is listed; a sold slab stays in the sequence at inventory 0. A
-scan the source does not measure is never offered (it is not counted as a scan below). A slab's
-status is KNOWN when:
-  * every scan matches the stock and no sold slab is on record (all available), or
-  * the packing list records nothing sold and there are fewer scans than slabs in stock (all scans
-    available; the unscanned slabs cannot be offered), or
+The measured slabs are listed; a sold slab stays in the lot at inventory 0, and a scan the source does not
+measure is never offered. Which slabs are sold is KNOWN when:
+  * nothing is sold (the packing list records 0 sold, or there is none and every scan matches the
+    stock) and no more slabs are offered than are in stock (all offered slabs available), or
   * an operator answered which slabs are sold, for the CURRENT stock figure.
 Otherwise it is unknown and an operator card asks "which slabs are sold?". Until it is answered, a bundle
 that was never sent as a lot stays one bundle product; a lot whose pieces already exist in Medusa is held
@@ -61,6 +59,17 @@ def test_unknown_status_keeps_a_never_sent_bundle_whole(positions, available, so
     row = _bundle(positions, available, sold_known)
     out = lots.load([row], CFG)
     assert out == [row] and row.lot_code is None
+
+
+def test_a_record_of_nothing_sold_lists_every_measured_slab_up_to_the_stock():
+    # B4306: the packing list says 26 in stock, none sold; 27 scans, one of them not a measured slab
+    out = lots.load([_bundle([1, 2, 3, 4], available=3, sold_known=0, unmeasured=(4,))], CFG)
+    assert _stock(out) == {1: "1", 2: "1", 3: "1"}
+
+
+def test_more_measured_slabs_than_the_stock_is_never_offered_on_a_record_of_nothing_sold():
+    row = _bundle([1, 2, 3, 4], available=3, sold_known=0)
+    assert lots.load([row], CFG) == [row] and row.lot_code is None        # contradictory: asked, not guessed
 
 
 def test_an_answer_for_the_current_stock_lists_the_full_sequence_with_the_sold_slabs_at_zero():
@@ -136,11 +145,24 @@ def test_a_card_asks_which_slabs_are_sold_with_every_scan_to_choose_from():
         "pieces": [{"position": n, "image": f"scan-{n}"} for n in (1, 2, 3, 4)]}}]
 
 
-def test_a_card_offers_only_the_measured_slabs():
-    cards = lots.cards([_bundle([1, 2, 3, 4, 5], available=2, sold_known=2, unmeasured=(5,))], CFG, answers={})
+def test_a_card_asks_about_the_vendor_s_full_scanned_sequence():
+    # the sold slabs are counted against the vendor's stock, which counts every scanned slab
+    cards = lots.cards([_bundle([1, 2, 3, 4, 5], available=2, sold_known=3, unmeasured=(5,))], CFG, answers={})
     payload = cards[0]["payload"]
-    assert [p["position"] for p in payload["pieces"]] == [1, 2, 3, 4]
-    assert (payload["scanned"], payload["must_mark_sold"]) == (4, 2)
+    assert [p["position"] for p in payload["pieces"]] == [1, 2, 3, 4, 5]
+    assert (payload["scanned"], payload["must_mark_sold"]) == (5, 3)
+
+
+def test_an_answer_lists_only_the_measured_slabs_with_the_sold_ones_at_zero():
+    row = _bundle([1, 2, 3, 4, 5], available=2, sold_known=3, unmeasured=(5,))
+    out = lots.load([row], CFG, answers={"2351": (2, frozenset({1, 3, 5}))})
+    assert _stock(out) == {1: "0", 2: "1", 3: "0", 4: "1"}                # 5: sold and unmeasured, not listed
+
+
+def test_a_bundle_with_no_measured_slab_raises_no_card():
+    # it can never become a lot (no slab could be offered), so there is nothing to answer
+    row = _bundle([1, 2, 3, 4], available=2, sold_known=2, unmeasured=(1, 2, 3, 4))
+    assert lots.cards([row], CFG, answers={}) == []
 
 
 def test_a_stale_answer_is_shown_on_the_card_and_a_known_status_raises_no_card():

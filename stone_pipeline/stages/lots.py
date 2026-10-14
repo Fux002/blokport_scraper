@@ -10,10 +10,11 @@ It serves both source shapes without any source-specific code:
     bundle id), raw_lot_position (cut sequence) and the slab's own stock. The row gets its lot_code here.
   * BUNDLE-shaped (e.g. a website listing a bundle): the adapter maps raw_pieces, the bundle's scanned slabs
     (position + own photo + the slab's own measured size and weight), with the bundle's stock
-    (raw_slab_count) and sold record (raw_sold_count). A lot slab is a slab with its own photo AND its own
-    measured size: a scan the source does not measure is never offered. The bundle becomes its FULL
-    sequence of measured slabs, a sold slab staying in it at inventory 0, when every slab's status is known
-    (`sold_positions`). When it is not, an operator card asks which slabs are sold
+    (raw_slab_count) and sold record (raw_sold_count). Two separate facts: WHICH SLABS ARE SOLD comes from
+    the vendor's sale record and its scanned sequence against its stock (`sold_positions`; the vendor
+    counts an unmeasured scan in its stock), and WHICH SLABS CAN BE OFFERED are the measured ones (own photo
+    AND own measured size; an unmeasured scan is never offered, its position a gap). The bundle becomes
+    its measured slabs, a sold slab staying in the lot at inventory 0, when every slab's status is known. When it is not, an operator card asks which slabs are sold
     (`cards`); until it is answered a bundle never sent as a lot stays one product, and a lot already in
     Medusa goes OFFLINE, every piece at inventory 0 (it never flips back to a bundle: its old page redirects
     to the lot; and no slab that may be sold stays on offer). The answer brings the right pieces back.
@@ -55,25 +56,22 @@ def lot_code(source_code: str, lot_ref: str, label: Optional[str]) -> str:
     return f"{readable}-{uuid.uuid5(_NAMESPACE, f'{source_code}:{lot_ref}')}"
 
 
-def sold_positions(positions: list[int], available: Optional[int], sold_known: Optional[int],
+def sold_positions(scanned: list[int], offered: list[int], available: Optional[int], sold_known: Optional[int],
                    answer: Optional[Answer]) -> Optional[frozenset[int]]:
-    """The scanned slabs that are sold, or None when that is not known. Known when:
-      * an operator answered for this stock figure and the answer still leaves no more slabs on offer
+    """The sold slabs among the vendor's scanned sequence, or None when that is not known. Known when:
+      * an operator answered for this stock figure, and the answer leaves no more scanned slabs unsold
         than are in stock; or
-      * every scan matches the stock and no sale is on record (all available); or
-      * no sale is on record and there are fewer scans than slabs in stock (all scans available; the
-        unscanned slabs cannot be offered).
-    Anything else (more scans than stock, a sale on record without the slabs it was) is not known."""
+      * nothing is sold (the sale record says 0, or there is none and every scan matches the stock) and no
+        more slabs are offered than are in stock.
+    Anything else (a sale on record without the slabs it was, more scans than stock with no record, more
+    slabs to offer than the stock) is not known: an operator is asked, never a guess."""
     if available is None:
         return None
     if answer is not None and answer[0] == available:
-        sold = answer[1] & set(positions)
-        return frozenset(sold) if len(positions) - len(sold) <= available else None
-    if not sold_known and len(positions) == available:
-        return frozenset()
-    if sold_known == 0 and len(positions) < available:
-        return frozenset()
-    return None
+        sold = answer[1] & set(scanned)
+        return frozenset(sold) if len(scanned) - len(sold) <= available else None
+    nothing_sold = sold_known == 0 or (sold_known is None and len(scanned) == available)
+    return frozenset() if nothing_sold and len(offered) <= available else None
 
 
 def load(rows: list[CanonicalRow], cfg: SourceConfig, answers: Optional[dict[str, Answer]] = None,
@@ -86,10 +84,10 @@ def load(rows: list[CanonicalRow], cfg: SourceConfig, answers: Optional[dict[str
     for row in rows:
         if row.raw_pieces:                                   # bundle-shaped
             scanned = _pieces(row)
-            offered = [p for p in scanned if p.get("raw_dimensions")]
-            sold = sold_positions([p["position"] for p in offered], _count(row.raw_slab_count),
-                                  _count(row.raw_sold_count), answers.get(row.src_natural_key or "")) \
-                if offered else None
+            offered = _measured(scanned)
+            sold = sold_positions([p["position"] for p in scanned], [p["position"] for p in offered],
+                                  _count(row.raw_slab_count), _count(row.raw_sold_count),
+                                  answers.get(row.src_natural_key or "")) if offered else None
             if sold is not None:
                 out.extend(_split(row, cfg, offered, sold))
             elif scanned and _in_medusa(row, cfg, scanned, known_skus):
@@ -113,15 +111,18 @@ def load(rows: list[CanonicalRow], cfg: SourceConfig, answers: Optional[dict[str
 
 
 def cards(rows: list[CanonicalRow], cfg: SourceConfig, answers: dict[str, Answer]) -> list[dict]:
-    """The "which slabs are sold?" cards: one per bundle with a measured sequence whose sold slabs are not
-    known, with every measured slab to choose from. Shaped for the review queue (ref, payload, sources)."""
+    """The "which slabs are sold?" cards: one per bundle that can become a lot (a measured slab) whose sold
+    slabs are not known, with every scan of the vendor's sequence to choose from (its stock counts them all).
+    Shaped for the review queue (ref, payload, sources)."""
     out = []
     for row in rows:
-        pieces = [p for p in _pieces(row) if p.get("raw_dimensions")] if row.raw_pieces else []
+        pieces = _pieces(row) if row.raw_pieces else []
+        offered = _measured(pieces)
         available, sold_known = _count(row.raw_slab_count), _count(row.raw_sold_count)
         answer = answers.get(row.src_natural_key or "")
-        positions = [p["position"] for p in pieces]
-        if not pieces or available is None or sold_positions(positions, available, sold_known, answer) is not None:
+        if not offered or available is None or sold_positions(
+                [p["position"] for p in pieces], [p["position"] for p in offered], available, sold_known,
+                answer) is not None:
             continue
         out.append({"ref": f"{cfg.source}|{row.src_natural_key}", "sources": [cfg.source], "payload": {
             "source": cfg.source, "lot_ref": row.src_natural_key, "label": row.src_lot_label,
@@ -209,6 +210,11 @@ def _pieces(bundle: CanonicalRow) -> list[dict]:
     if not all(isinstance(p.get(field, ""), str) for p in pieces for field in _PIECE_MEASURES):
         return []
     return sorted(pieces, key=lambda p: p["position"])
+
+
+def _measured(pieces: list[dict]) -> list[dict]:
+    """The pieces that can be offered: those with their own measured size."""
+    return [p for p in pieces if p.get("raw_dimensions")]
 
 
 def _in_medusa(bundle: CanonicalRow, cfg: SourceConfig, pieces: list[dict], known_skus: frozenset[str]) -> bool:
