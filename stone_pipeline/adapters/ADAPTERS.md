@@ -104,9 +104,11 @@ an adapter only declares what the source states, in one of two shapes:
   bundle id), `raw_lot_position` (the cut sequence, a positive integer), optionally `src_lot_label` (a
   readable reference), plus each piece's own measured dimensions and photo. Nothing is split.
 - **Bundle-shaped** (a listing of a whole bundle, e.g. a website): map `raw_pieces` to the bundle's
-  scanned slabs as JSON `[{"position": int, "image_urls": [str]}]`, `raw_slab_count` to its slabs in stock,
-  `raw_sold_count` to its sold record when the source keeps one, and optionally `src_lot_label`. The loader
-  lists the full scanned sequence (a sold slab at inventory 0) when every slab's status is known: the scans
+  scanned slabs as JSON `[{"position": int, "image_urls": [str], "raw_dimensions": str, "raw_weight": str}]`
+  (each slab's OWN measured size and weight, in the same raw forms as the row's; a scan the source does not
+  measure omits both and is never offered), `raw_slab_count` to its slabs in stock, `raw_sold_count` to its
+  sold record when the source keeps one, and optionally `src_lot_label`. The loader
+  lists the full measured sequence (a sold slab at inventory 0) when every slab's status is known: the scans
   match the stock with no sale on record, or no sale is on record and there are fewer scans than stock, or
   an operator answered the "which slabs are sold?" card for the current stock. Otherwise the card is raised
   and the bundle stays one product (a lot already in Medusa goes offline, every piece at inventory 0, until

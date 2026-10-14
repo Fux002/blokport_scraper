@@ -2,7 +2,8 @@
 
 The loader step (stages/lots.load) establishes lot membership for both source shapes:
   * a BUNDLE-shaped source (a website listing a bundle with a per-piece photo list) is expanded into one
-    product per piece, only when every listed piece has its own photo; otherwise it stays one product;
+    product per piece: a slab with its own photo and its own measured size; a bundle with no such slab
+    stays one product;
   * a PIECE-native source (a cutting-machine API: one record per slab with its block id and cut sequence)
     is mapped 1:1 by its adapter and only gets its lot_code here, with no source-specific code.
 Downstream: a piece is a single item (derive), a lot's pieces must agree with each other (validate), a
@@ -37,7 +38,14 @@ def _bundle(pieces, *, slab_count=None, key="7149", images=("g1", "g2", "s1", "s
     return CanonicalRow(**base)
 
 
-TWO = [{"position": 1, "image_urls": ["s1"]}, {"position": 4, "image_urls": ["s2"]}]
+def _slab(position, *urls, size="length=306 cm;height=153 cm", kg="291.0"):
+    """A scanned slab as the adapter declares it: its photo(s), and its own measured size and weight
+    (size=None: a scan the source does not measure)."""
+    measured = {"raw_dimensions": size, "raw_weight": kg} if size is not None else {}
+    return {"position": position, "image_urls": list(urls), **measured}
+
+
+TWO = [_slab(1, "s1"), _slab(4, "s2", size="length=307 cm;height=160 cm", kg="309.0")]
 
 
 def _code(source_code, ref, label):
@@ -64,8 +72,10 @@ def test_a_bundle_with_one_photo_per_listed_piece_becomes_one_product_per_piece(
     # a piece is one item: inventory 1, the bundle's quantity figures are not facts about the piece
     assert all(p.raw_inventory_quantity == "1" and p.raw_slab_count is None and p.raw_total_m2 is None
                and p.raw_pieces is None for p in pieces)
-    # the measurable facts the bundle states carry over (Sentas: the bundle size, agreed with Blokport)
-    assert all(p.raw_dimensions == "length=317 cm;height=198 cm" and p.raw_weight == "345.2" for p in pieces)
+    # each piece carries its OWN measured size and weight; the thickness the bundle states carries over
+    assert [(p.raw_dimensions, p.raw_weight) for p in pieces] == [("length=306 cm;height=153 cm", "291.0"),
+                                                                  ("length=307 cm;height=160 cm", "309.0")]
+    assert all(p.raw_thickness == "2 cm" for p in pieces)
 
 
 def test_the_lot_code_is_deterministic_across_runs():
@@ -82,16 +92,27 @@ def test_the_label_defaults_to_the_lot_ref_and_is_whitespace_normalised():
 
 @pytest.mark.parametrize("pieces, slab_count", [
     (TWO, 3),                                                              # a listed piece has no photo
-    ([{"position": 1, "image_urls": ["s1"]}, {"position": 1, "image_urls": ["s2"]}], None),   # duplicate position
-    ([{"position": 1, "image_urls": []}, {"position": 2, "image_urls": ["s2"]}], None),       # a piece without a photo
-    ([{"position": 0, "image_urls": ["s1"]}], None),                       # positions start at 1
-    ([{"position": "1", "image_urls": ["s1"]}], None),                     # not an integer
-    (TWO, ""),                                                             # the listed count is unknown
+    ([_slab(1, "s1"), _slab(1, "s2")], None),                               # duplicate position
+    ([_slab(1), _slab(2, "s2")], None),                                     # a piece without a photo
+    ([_slab(0, "s1")], None),                                               # positions start at 1
+    ([{**_slab(1, "s1"), "position": "1"}], None),                          # not an integer
+    ([{**_slab(1, "s1"), "raw_dimensions": 306}], None),                    # a size that is not raw text
+    (TWO, ""),                                                              # the listed count is unknown
+    ([_slab(1, "s1", size=None), _slab(4, "s2", size=None)], None),         # no scan is measured
 ])
 def test_a_bundle_without_complete_piece_evidence_stays_one_product(pieces, slab_count):
     row = _bundle(pieces, slab_count=slab_count)
     out = lots.load([row], CFG)
     assert len(out) == 1 and out[0].src_natural_key == "7149" and out[0].lot_code is None
+
+
+def test_a_scan_the_source_does_not_measure_is_never_offered():
+    # e.g. a void entry on the vendor's cutting list (no size, a stand-in photo): not a slab that can be sold
+    pieces = [*TWO, _slab(7, "s7", size=None)]
+    out = lots.load([_bundle(pieces, slab_count=2)], CFG)
+    assert [p.lot_position for p in out] == [1, 4]                          # the measured slabs; 7 is a gap
+    stocked = lots.load([_bundle(pieces, slab_count=3, raw_sold_count="0")], CFG)
+    assert [p.lot_position for p in stocked] == [1, 4]                      # 3 in stock, 2 can be offered
 
 
 def test_malformed_piece_data_keeps_the_bundle_whole():

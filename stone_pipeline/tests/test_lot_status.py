@@ -1,6 +1,7 @@
 """Which slabs of a lot are sold: one rule, in the loader.
 
-The full sequence of scanned slabs is listed; a sold slab stays in the sequence at inventory 0. A slab's
+The full sequence of measured scanned slabs is listed; a sold slab stays in the sequence at inventory 0. A
+scan the source does not measure is never offered (it is not counted as a scan below). A slab's
 status is KNOWN when:
   * every scan matches the stock and no sold slab is on record (all available), or
   * the packing list records nothing sold and there are fewer scans than slabs in stock (all scans
@@ -24,8 +25,10 @@ from stone_pipeline.stages import derive, lots, validate
 CFG = SourceConfig(source="sentas", source_code="sen")
 
 
-def _bundle(positions, available, sold_known=None, key="2351"):
-    pieces = [{"position": n, "image_urls": [f"scan-{n}"]} for n in positions]
+def _bundle(positions, available, sold_known=None, key="2351", unmeasured=()):
+    pieces = [{"position": n, "image_urls": [f"scan-{n}"],
+               **({} if n in unmeasured else {"raw_dimensions": f"length=30{n} cm;height=180 cm", "raw_weight": "300.0"})}
+              for n in positions]
     return CanonicalRow(src_site="sentas", src_natural_key=key, raw_name="Golden Emparador", src_lot_label="B4804",
                         raw_slab_count=None if available is None else str(available),
                         raw_sold_count=None if sold_known is None else str(sold_known),
@@ -93,6 +96,13 @@ def test_an_established_lot_with_unknown_status_goes_offline_until_answered():
     assert _stock(answered) == {1: "1", 2: "0", 3: "1", 4: "0"} and not any(r.lot_unresolved for r in answered)
 
 
+def test_an_established_lot_goes_offline_even_when_no_scan_is_measured_this_run():
+    # its cutting list missing this run: the pieces already in Medusa still go to zero, never back to a bundle
+    known = frozenset({"SEN-2351-1"})
+    out = lots.load([_bundle([1, 2], available=2, unmeasured=(1, 2))], CFG, known_skus=known)
+    assert _stock(out) == {1: "0", 2: "0"} and all(r.lot_unresolved for r in out)
+
+
 def _emittable(piece):
     piece.surrogate_key = piece.src_natural_key
     for name, value in dict(variation_key="k", variation_id="V", type_name="Marble", type_id="T", color_id="C",
@@ -124,6 +134,13 @@ def test_a_card_asks_which_slabs_are_sold_with_every_scan_to_choose_from():
         "source": "sentas", "lot_ref": "2351", "label": "B4804", "variety": "Golden Emparador", "src_url": None,
         "available": 2, "sold_known": 2, "scanned": 4, "must_mark_sold": 2, "previous_answer": None,
         "pieces": [{"position": n, "image": f"scan-{n}"} for n in (1, 2, 3, 4)]}}]
+
+
+def test_a_card_offers_only_the_measured_slabs():
+    cards = lots.cards([_bundle([1, 2, 3, 4, 5], available=2, sold_known=2, unmeasured=(5,))], CFG, answers={})
+    payload = cards[0]["payload"]
+    assert [p["position"] for p in payload["pieces"]] == [1, 2, 3, 4]
+    assert (payload["scanned"], payload["must_mark_sold"]) == (4, 2)
 
 
 def test_a_stale_answer_is_shown_on_the_card_and_a_known_status_raises_no_card():

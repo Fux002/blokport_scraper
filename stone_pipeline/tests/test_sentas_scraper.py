@@ -7,6 +7,8 @@ the one source-specific conversion."""
 from __future__ import annotations
 
 import json
+import shutil
+from pathlib import Path
 
 import polars as pl
 import pytest
@@ -100,8 +102,8 @@ DRIVE_LISTING = """
 
 
 class _Resp:
-    def __init__(self, text: str = "", payload: dict | None = None):
-        self.text, self._payload = text, payload
+    def __init__(self, text: str = "", payload: dict | None = None, content: bytes = b""):
+        self.text, self._payload, self.content = text, payload, content
 
     def json(self):
         return self._payload
@@ -218,73 +220,223 @@ def test_type_map_keys_collection_card_titles_by_normalised_name(tmp_path, monke
     assert s._type_map() == {"biancovenato": "Marble", "camelotgrey": "Marble", "redtravertine": "Travertine"}
 
 
-# -- photos: gallery first, every Drive folder appended (capped); the per-slab scans are the pieces --------
+# -- Drive folders: every file listed with its title ----------------------------------------------------
 
-def test_drive_listing_keeps_images_with_their_titles_and_skips_the_packing_pdf(tmp_path, monkeypatch):
+def test_drive_listing_returns_every_file_with_its_id(tmp_path, monkeypatch):
     s = SentasScraper(data_dir=tmp_path)
     monkeypatch.setattr(s, "get", lambda url, **kw: _Resp(DRIVE_LISTING))
-    assert s._drive_images("f") == [
-        ("custom_6392_1.jpg", "https://lh3.googleusercontent.com/d/1tB4t8gvpTUEWN4cxvRRXZP5jEWdZZNcx=s2000"),
-        ("custom_6392_10.JPG", "https://lh3.googleusercontent.com/d/1tNgMcDiV7M7r7nRUd0VbTN6CZg_5WgRI=s2000")]
+    assert s._drive_files("f") == [("6392.pdf", "1rteWYDVmqrkmkWLKOR5AiKHuklEtAAwe"),
+                                   ("custom_6392_1.jpg", "1tB4t8gvpTUEWN4cxvRRXZP5jEWdZZNcx"),
+                                   ("custom_6392_10.JPG", "1tNgMcDiV7M7r7nRUd0VbTN6CZg_5WgRI")]
 
 
-def test_a_failed_drive_listing_contributes_nothing_and_never_holds(tmp_path, monkeypatch):
+def test_a_failed_drive_listing_is_unknown_not_empty(tmp_path, monkeypatch):
     s = SentasScraper(data_dir=tmp_path)
 
     def boom(url, **kw):
         raise RuntimeError("GET failed after 5 tries")
     monkeypatch.setattr(s, "get", boom)
-    assert s._drive_images("f") == []
+    assert s._drive_files("f") is None
     assert [f["kind"] for f in s._failures] == ["drive"]
 
 
-_FOLDERS = {
-    "A": [("20261009_113443.jpg", "a1"), ("20261009_113520.jpg", "a2")],                 # bundle phone photos
-    "B": [("custom_6392_10.jpg", "s10"), ("custom_6392_2.jpg", "s2"), ("custom_6392_2b.jpg", "x")],   # scans
-}
+# -- photos: gallery first, every Drive image appended (capped) -------------------------------------------
+
+_PHONE = [("20261009_113443.jpg", "a1"), ("20261009_113520.jpg", "a2"), ("B6392.xlsx", "x1")]
+_SCANS = [("custom_6392_10.jpg", "s10"), ("custom_6392_2.jpg", "s2"), ("custom_6392_2b.jpg", "x"), ("6392.pdf", "pdf")]
 
 
-def test_photos_take_every_photo_and_the_scans_become_pieces_by_slab_number(tmp_path, monkeypatch):
-    s = SentasScraper(data_dir=tmp_path)
-    monkeypatch.setattr(s, "_drive_images", lambda fid: _FOLDERS[fid])
-    urls, drive_used, pieces = s._photos({"image_urls": ["g1", "g2"], "drive_folders": ["A", "B"]})
-    assert urls == ["g1", "g2", "a1", "a2", "s10", "s2", "x"] and drive_used == 5
-    # one entry per slab number, in cut order; a file that is not a per-slab scan is not a piece
-    assert pieces == [{"position": 2, "image_urls": ["s2"]}, {"position": 10, "image_urls": ["s10"]}]
+def _cdn(file_id):
+    return sentas.DRIVE_IMAGE.format(id=file_id)
 
 
-def test_the_ceiling_caps_the_bundle_photos_but_every_folder_is_read_for_the_pieces(tmp_path, monkeypatch):
-    # listing a folder is one request; the ceiling bounds photo processing, not the evidence a lot needs
-    s = SentasScraper(data_dir=tmp_path)
+def test_photos_take_the_gallery_then_every_drive_image():
+    urls, drive_used = sentas._photo_urls(["g1", "g2"], [*_PHONE, *_SCANS])
+    assert urls == ["g1", "g2", *map(_cdn, ["a1", "a2", "s10", "s2", "x"])] and drive_used == 5
+
+
+def test_the_ceiling_caps_the_bundle_photos():
     many = [(f"p{i}.jpg", f"p{i}") for i in range(sentas.MAX_IMAGES + 5)]
-    monkeypatch.setattr(s, "_drive_images", lambda fid: many if fid == "A" else _FOLDERS["B"])
-    urls, drive_used, pieces = s._photos({"image_urls": ["g1", "g2"], "drive_folders": ["A", "B"]})
+    urls, drive_used = sentas._photo_urls(["g1", "g2"], many)
     assert len(urls) == sentas.MAX_IMAGES and urls[:2] == ["g1", "g2"] and drive_used == sentas.MAX_IMAGES - 2
-    assert [p["position"] for p in pieces] == [2, 10]
 
 
-# -- parse_product: the detail fetch and its failure path -------------------------------------------------
+# -- the block sheet: the scanner's cutting list, one measured entry per slab -----------------------------
+
+BLOCK_SHEET = (Path(__file__).parent / "fixtures" / "sentas_block_sheet_6208B.txt").read_text()
+
+# Real entry shapes: two void entries (no size, weight 0.0 kg*) and an older sheet's starred but MEASURED slab.
+_SHEET = """BLOCK SHEET
+
+Date:        09/10/2026                  Block:       6392
+Material:    CALACATTA VIOLA             Weight: {kg} Kg   Area:     {m2} m2
+
+
+ 15                                                               16
+
+
+
+
+ SIZE 0 x 0 x 2.00                       QA       -               SIZE 305 x 183 x 2.00                  QA   -
+ FINS Honed               A   0.000 m2   W        0.0 kg*         FINS Honed              A   5.582 m2   W    315.0 kg
+
+
+ 81                                                               2
+
+
+
+
+ SIZE -5 x -5 x 2.00                     QA       -               SIZE 218 x 167 x 2.00                  QA   -
+ FINS Polished            A   0.003 m2   W        0.0 kg*         FINS Honed              A   3.641 m2   W    270.6 kg*
+
+
+Defects:    ---
+
+                                                              1
+"""
+
+
+def test_the_block_sheet_gives_each_slab_its_own_measured_size_and_weight():
+    sheet = sentas._block_sheet(BLOCK_SHEET)
+    assert sheet.block == "6208"
+    assert sorted(sheet.slabs) == [4, 13, 20, 24, 34, 47, 49, 50, 66]     # exactly the bundle's nine scans
+    assert sheet.slabs[4] == (299.0, 167.0, 260.0) and sheet.slabs[66] == (284.0, 171.0, 269.0)
+
+
+def test_a_void_entry_is_not_a_measured_slab_and_a_starred_weight_is():
+    sheet = sentas._block_sheet(_SHEET.format(kg="585.6", m2="9.226"))
+    assert sheet.slabs == {16: (305.0, 183.0, 315.0), 2: (218.0, 167.0, 270.6)}
+
+
+def test_a_page_titled_with_the_bare_block_number_is_not_a_row_of_slabs():
+    # some sheets title every page with just the block number ("4720"), right above the page header
+    page = _SHEET.format(kg="585.6", m2="9.226").replace("BLOCK SHEET", "6392")
+    first, second = page.split(" 81 ")
+    two_pages = first + "\n6392\n\nDate:        09/10/2026                  Block:       6392\n\n 81 " + second
+    assert sentas._block_sheet(two_pages).slabs == {16: (305.0, 183.0, 315.0), 2: (218.0, 167.0, 270.6)}
+
+
+@pytest.mark.parametrize("text", [
+    _SHEET.format(kg="999.0", m2="9.226"),                                  # slabs do not add up to the header
+    _SHEET.format(kg="585.6", m2="12.000"),
+    _SHEET.format(kg="585.6", m2="9.226").replace(" SIZE -5 x -5 x 2.00", " SIZE x"),   # a label without its size
+    _SHEET.format(kg="585.6", m2="9.226").replace("Block:       6392", ""),  # no block number
+    "",
+])
+def test_a_sheet_that_cannot_be_read_with_certainty_is_none(text):
+    assert sentas._block_sheet(text) is None
+
+
+@pytest.mark.skipif(shutil.which("pdftotext") is None, reason="the PDF reader is not installed here")
+def test_a_file_that_is_not_a_readable_pdf_converts_to_none():
+    assert sentas._pdf_text(b"%PDF-1.4 truncated") is None
+
+
+# -- the slab scans: measured from the block sheet beside them ----------------------------------------------
+
+def _scraper(tmp_path, monkeypatch, folders, sheet_text=BLOCK_SHEET):
+    s = SentasScraper(data_dir=tmp_path)
+    monkeypatch.setattr(s, "_drive_files", lambda fid: folders[fid])
+    downloads: list = []
+
+    def get(url, **kw):
+        downloads.append(url)
+        if sheet_text is None:
+            raise RuntimeError("GET failed after 5 tries")
+        return _Resp(content=b"%PDF-1.4 sheet")
+    monkeypatch.setattr(s, "get", get)
+    monkeypatch.setattr(sentas, "_pdf_text", lambda data: sheet_text)
+    return s, downloads
+
+
+_SCAN_FOLDER = [("custom_6208_4.jpg", "s4"), ("custom_6208_13.jpg", "s13"), ("custom_6208_99.jpg", "s99"),
+                ("6208B.pdf", "sheet")]
+
+
+def test_each_scan_carries_its_slab_s_measured_size_and_weight(tmp_path, monkeypatch):
+    s, downloads = _scraper(tmp_path, monkeypatch, {"A": _PHONE, "B": _SCAN_FOLDER})
+    pieces, problem = s._pieces([_PHONE, _SCAN_FOLDER])
+    assert problem == "" and downloads == [sentas.DRIVE_FILE.format(id="sheet")]
+    assert pieces == [
+        {"position": 4, "image_urls": [_cdn("s4")], "length_cm": 299.0, "width_cm": 167.0, "weight_kg": 260.0},
+        {"position": 13, "image_urls": [_cdn("s13")], "length_cm": 298.0, "width_cm": 170.0, "weight_kg": 261.0},
+        {"position": 99, "image_urls": [_cdn("s99")]}]                      # not on the sheet: not measured
+
+
+def test_scans_without_a_block_sheet_are_listed_unmeasured_and_nothing_is_held(tmp_path, monkeypatch):
+    folder = [f for f in _SCAN_FOLDER if not f[0].endswith(".pdf")]
+    s, downloads = _scraper(tmp_path, monkeypatch, {"B": folder})
+    pieces, problem = s._pieces([folder])
+    assert problem == "" and downloads == [] and all(set(p) == {"position", "image_urls"} for p in pieces)
+
+
+@pytest.mark.parametrize("folder, sheet_text, problem", [
+    (_SCAN_FOLDER, None, "download failed"),                                # transient: retried next scrape
+    (_SCAN_FOLDER, "garbled", "unreadable"),
+    ([("custom_7000_4.jpg", "s4"), ("7000.pdf", "sheet")], BLOCK_SHEET, "block 6208"),   # another block's sheet
+    ([*_SCAN_FOLDER, ("6208-old.pdf", "old")], BLOCK_SHEET, "2 PDFs"),      # which one is the sheet is unknown
+])
+def test_a_block_sheet_that_cannot_be_used_is_a_problem_never_a_guess(tmp_path, monkeypatch, folder, sheet_text, problem):
+    s, _ = _scraper(tmp_path, monkeypatch, {"B": folder}, sheet_text=sheet_text)
+    pieces, found = s._pieces([folder])
+    assert problem in found and all("length_cm" not in p for p in pieces)
+
+
+# -- parse_product: the detail fetch and its failure paths ------------------------------------------------
 
 _ITEM = {"product_id": "7149", "caption": "B6392 - 2 CM Calacatta Viola Honed", "url": "p",
          "variety": "Calacatta Viola", "variety_url": "v", "stone_type": "Marble"}
 
+_PAGE_FOLDERS = {"1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT": [("20261009_113443.jpg", "phone-1")],
+                 "1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw": [("custom_6208_4.jpg", "scan-4"), ("custom_6208_13.jpg", "scan-13"),
+                                                        ("6208B.pdf", "sheet")]}
+
+
+def _page_scraper(tmp_path, monkeypatch, sheet_text=BLOCK_SHEET):
+    s = SentasScraper(data_dir=tmp_path)
+
+    def get(url, **kw):
+        if url == sentas.DRIVE_FILE.format(id="sheet"):
+            if sheet_text is None:
+                raise RuntimeError("GET failed after 5 tries")
+            return _Resp(content=b"%PDF-1.4 sheet")
+        return _Resp(PRODUCT_PAGE)
+    monkeypatch.setattr(s, "get", get)
+    monkeypatch.setattr(s, "_drive_files", lambda fid: _PAGE_FOLDERS[fid])
+    monkeypatch.setattr(sentas, "_pdf_text", lambda data: sheet_text)
+    return s
+
 
 def test_parse_product_rows_the_page_facts(tmp_path, monkeypatch):
-    s = SentasScraper(data_dir=tmp_path)
-    monkeypatch.setattr(s, "get", lambda url, **kw: _Resp(PRODUCT_PAGE))
-    folders = {"1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT": [("20261009_113443.jpg", "phone-1")],
-               "1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw": [("custom_6392_1.jpg", "scan-1"), ("custom_6392_3.jpg", "scan-3")]}
-    monkeypatch.setattr(s, "_drive_images", lambda fid: folders[fid])
+    s = _page_scraper(tmp_path, monkeypatch)
     row = s.parse_product(dict(_ITEM))
     assert row["name"] == "B6392 - 2 CM Calacatta Viola Honed" and row["variety"] == "Calacatta Viola"
     assert (row["height_cm"], row["width_cm"], row["pieces"], row["total_kg"], row["color"]) == ("198 cm", "317 cm", "78", "26926.35", "Green, Purple")
     assert row["image_urls"][:2] == ["https://sentasmarble.com/upload/media/images/2026/10/a.webp",
                                      "https://sentasmarble.com/upload/media/images/2026/10/b.webp"]
-    assert row["image_urls"][2:] == ["phone-1", "scan-1", "scan-3"]
+    assert row["image_urls"][2:] == [_cdn("phone-1"), _cdn("scan-4"), _cdn("scan-13")]
     assert row["drive_image_count"] == 3 and "fetch_failed" not in row
-    assert json.loads(row["piece_scans"]) == [{"position": 1, "image_urls": ["scan-1"]},
-                                              {"position": 3, "image_urls": ["scan-3"]}]
+    assert json.loads(row["piece_scans"]) == [
+        {"position": 4, "image_urls": [_cdn("scan-4")], "length_cm": 299.0, "width_cm": 167.0, "weight_kg": 260.0},
+        {"position": 13, "image_urls": [_cdn("scan-13")], "length_cm": 298.0, "width_cm": 170.0, "weight_kg": 261.0}]
     assert (s._detail_ok, s._detail_failed) == (1, 0)
+
+
+def test_a_block_sheet_that_failed_holds_the_row_for_retry(tmp_path, monkeypatch):
+    # the slabs' sizes are unknown this run, not absent: hold, never offer them on the bundle's size
+    s = _page_scraper(tmp_path, monkeypatch, sheet_text=None)
+    row = s.parse_product(dict(_ITEM))
+    assert row[SentasScraper.FETCH_FAILED_COL] == "dims"
+    assert [f["kind"] for f in s._failures] == ["dims"] and "block sheet" in s._failures[0]["error"]
+
+
+def test_a_drive_folder_that_failed_to_list_holds_the_row_for_retry(tmp_path, monkeypatch):
+    # its scans and block sheet are unknown this run: a lot must never fall back to its bundle on a blip
+    s = _page_scraper(tmp_path, monkeypatch)
+    monkeypatch.setattr(s, "_drive_files", lambda fid: None if fid == "1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw"
+                        else _PAGE_FOLDERS[fid])
+    row = s.parse_product(dict(_ITEM))
+    assert row[SentasScraper.FETCH_FAILED_COL] == "dims" and "Drive folder" in s._failures[0]["error"]
 
 
 def test_a_failed_product_page_holds_the_row_for_retry(tmp_path, monkeypatch):
@@ -333,10 +485,16 @@ def test_adapter_colour_is_the_site_field_else_a_colour_word_in_the_name():
     assert _adapt(color="").raw_color == "White"
 
 
-def test_adapter_maps_the_piece_scans_and_the_printed_bundle_reference():
-    scans = '[{"position": 2, "image_urls": ["https://lh3/x=s2000"]}]'
+def test_adapter_maps_each_scan_with_its_measured_size_and_the_printed_bundle_reference():
+    scans = json.dumps([{"position": 2, "image_urls": ["https://lh3/x=s2000"], "length_cm": 299.0, "width_cm": 167.0,
+                         "weight_kg": 260.5},
+                        {"position": 7, "image_urls": ["https://lh3/y=s2000"]}])
     row = _adapt(caption="B6392 - 2 CM Calacatta Viola Honed", piece_scans=scans)
-    assert row.raw_pieces == scans and row.src_lot_label == "B6392"
+    assert json.loads(row.raw_pieces) == [
+        {"position": 2, "image_urls": ["https://lh3/x=s2000"], "raw_dimensions": "length=299 cm;height=167 cm",
+         "raw_weight": "260.5"},
+        {"position": 7, "image_urls": ["https://lh3/y=s2000"]}]              # unmeasured: no size declared
+    assert row.src_lot_label == "B6392"
     assert row.src_lot_ref is None                 # the loader takes the bundle's own key as the lot reference
     assert _adapt(caption="Calacatta Viola", piece_scans="").raw_pieces == "" \
         and _adapt(caption="Calacatta Viola").src_lot_label == ""
@@ -359,8 +517,13 @@ def test_the_captured_scanned_bundle_becomes_its_pieces_and_the_rest_stay_whole(
     rows = ADAPTER.adapt(read_scrape_csv(selftest.fixture_dir("sentas") / "input.csv"))
     loaded = lots.load(rows, SourceConfig(source="sentas", source_code="sen"))
     pieces = [r for r in loaded if r.lot_code]
-    assert len(loaded) == len(rows) - 1 + 9                         # bundle 2555 (9 pieces, 9 scans) split
+    assert len(loaded) == len(rows) - 1 + 9                         # bundle 2555 (9 measured scans) split
     assert {p.src_lot_ref for p in pieces} == {"2555"} and len({p.lot_code for p in pieces}) == 1
     assert pieces[0].lot_code.startswith("B6208B-")
     assert [p.lot_position for p in pieces] == [4, 13, 20, 24, 34, 47, 49, 50, 66]
     assert all(len(p.raw_image_urls) == 11 - 9 + 1 for p in pieces)   # own scan + the 2 shared photos
+    # each slab its own size and weight, from the vendor's block sheet (the real B6208B sheet, pinned above)
+    sheet = sentas._block_sheet(BLOCK_SHEET)
+    assert [(p.raw_dimensions, p.raw_weight) for p in pieces] == [
+        (f"length={sheet.slabs[n][0]:g} cm;height={sheet.slabs[n][1]:g} cm", f"{sheet.slabs[n][2]:g}")
+        for n in (4, 13, 20, 24, 34, 47, 49, 50, 66)]

@@ -9,9 +9,11 @@ It serves both source shapes without any source-specific code:
   * PIECE-native (e.g. a cutting-machine API): one record per slab, the adapter maps src_lot_ref (block or
     bundle id), raw_lot_position (cut sequence) and the slab's own stock. The row gets its lot_code here.
   * BUNDLE-shaped (e.g. a website listing a bundle): the adapter maps raw_pieces, the bundle's scanned slabs
-    (position + own photo), with the bundle's stock (raw_slab_count) and sold record (raw_sold_count). The
-    bundle becomes its FULL scanned sequence, a sold slab staying in it at inventory 0, when every slab's
-    status is known (`sold_positions`). When it is not, an operator card asks which slabs are sold
+    (position + own photo + the slab's own measured size and weight), with the bundle's stock
+    (raw_slab_count) and sold record (raw_sold_count). A lot slab is a slab with its own photo AND its own
+    measured size: a scan the source does not measure is never offered. The bundle becomes its FULL
+    sequence of measured slabs, a sold slab staying in it at inventory 0, when every slab's status is known
+    (`sold_positions`). When it is not, an operator card asks which slabs are sold
     (`cards`); until it is answered a bundle never sent as a lot stays one product, and a lot already in
     Medusa goes OFFLINE, every piece at inventory 0 (it never flips back to a bundle: its old page redirects
     to the lot; and no slab that may be sold stays on offer). The answer brings the right pieces back.
@@ -38,6 +40,9 @@ _NAMESPACE = uuid.UUID(SETTINGS.lots.code_namespace)
 # The bundle's quantity figures describe the bundle, not one of its pieces, so a piece does not inherit them.
 _BUNDLE_QUANTITY_FIELDS = ("raw_slab_count", "raw_sold_count", "raw_bundle_size", "raw_total_m2",
                            "raw_per_slab_m2", "raw_stock_m2", "raw_slabs_array")
+
+# A piece's own measured figures, declared per piece by a bundle-shaped adapter (raw text, like the row's).
+_PIECE_MEASURES = ("raw_dimensions", "raw_weight")
 
 # An operator answer for one lot: the stock figure it was given for, and the slab positions marked sold.
 Answer = tuple[int, frozenset[int]]
@@ -80,15 +85,19 @@ def load(rows: list[CanonicalRow], cfg: SourceConfig, answers: Optional[dict[str
     kept_whole = offline = 0
     for row in rows:
         if row.raw_pieces:                                   # bundle-shaped
-            pieces = _pieces(row)
-            sold = sold_positions([p["position"] for p in pieces], _count(row.raw_slab_count),
+            scanned = _pieces(row)
+            offered = [p for p in scanned if p.get("raw_dimensions")]
+            sold = sold_positions([p["position"] for p in offered], _count(row.raw_slab_count),
                                   _count(row.raw_sold_count), answers.get(row.src_natural_key or "")) \
-                if pieces else None
+                if offered else None
             if sold is not None:
-                out.extend(_split(row, cfg, pieces, sold))
-            elif pieces and _in_medusa(row, cfg, pieces, known_skus):
+                out.extend(_split(row, cfg, offered, sold))
+            elif scanned and _in_medusa(row, cfg, scanned, known_skus):
+                # Offline: every piece that can be in Medusa goes to zero, i.e. the measured slabs (the only
+                # ones ever offered); when none is measured this run, the scanned sequence.
                 offline += 1
-                out.extend(_split(row, cfg, pieces, frozenset(p["position"] for p in pieces), unresolved=True))
+                down = offered or scanned
+                out.extend(_split(row, cfg, down, frozenset(p["position"] for p in down), unresolved=True))
             else:
                 kept_whole += 1
                 out.append(row)
@@ -104,11 +113,11 @@ def load(rows: list[CanonicalRow], cfg: SourceConfig, answers: Optional[dict[str
 
 
 def cards(rows: list[CanonicalRow], cfg: SourceConfig, answers: dict[str, Answer]) -> list[dict]:
-    """The "which slabs are sold?" cards: one per bundle with a scanned sequence whose sold slabs are not
-    known, with every scan to choose from. Shaped for the review queue (ref, payload, sources)."""
+    """The "which slabs are sold?" cards: one per bundle with a measured sequence whose sold slabs are not
+    known, with every measured slab to choose from. Shaped for the review queue (ref, payload, sources)."""
     out = []
     for row in rows:
-        pieces = _pieces(row) if row.raw_pieces else []
+        pieces = [p for p in _pieces(row) if p.get("raw_dimensions")] if row.raw_pieces else []
         available, sold_known = _count(row.raw_slab_count), _count(row.raw_sold_count)
         answer = answers.get(row.src_natural_key or "")
         positions = [p["position"] for p in pieces]
@@ -158,7 +167,8 @@ def _split(bundle: CanonicalRow, cfg: SourceConfig, pieces: list[dict], sold: fr
            unresolved: bool = False) -> list[CanonicalRow]:
     """The bundle as its full sequence of pieces: a piece in `sold` at inventory 0, every other at 1 (an
     unresolved lot passes every piece as `sold`: offline until answered). Each piece shows its own photo
-    first, then the bundle's shared photos (never another piece's own photo)."""
+    first, then the bundle's shared photos (never another piece's own photo), and carries its own measured
+    size and weight (an unmeasured piece, only ever taken offline, keeps the bundle's stated figures)."""
     ref = bundle.src_lot_ref or bundle.src_natural_key
     code = lot_code(cfg.source_code, ref, bundle.src_lot_label)
     own = {url for p in pieces for url in p["image_urls"]}
@@ -172,12 +182,14 @@ def _split(bundle: CanonicalRow, cfg: SourceConfig, pieces: list[dict], sold: fr
         "lot_position": p["position"],
         "raw_inventory_quantity": "0" if p["position"] in sold else "1",
         "raw_image_urls": list(dict.fromkeys([*p["image_urls"], *shared])),
+        **{field: p[field] for field in _PIECE_MEASURES if p.get(field)},
     }) for p in pieces]
 
 
 def _pieces(bundle: CanonicalRow) -> list[dict]:
     """The bundle's scanned slabs in cut order when the list is well formed (each slab at a unique positive
-    position with its own photo) and the bundle has a key to derive the pieces' keys from; else []."""
+    position with its own photo, any measured figure as raw text) and the bundle has a key to derive the
+    pieces' keys from; else []."""
     if not bundle.src_natural_key:
         return []
     try:
@@ -193,6 +205,8 @@ def _pieces(bundle: CanonicalRow) -> list[dict]:
         return []
     if not all(isinstance(p.get("image_urls"), list) and p["image_urls"]
                and all(isinstance(u, str) and u for u in p["image_urls"]) for p in pieces):
+        return []
+    if not all(isinstance(p.get(field, ""), str) for p in pieces for field in _PIECE_MEASURES):
         return []
     return sorted(pieces, key=lambda p: p["position"])
 

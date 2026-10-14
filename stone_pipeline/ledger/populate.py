@@ -308,6 +308,22 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
     return n
 
 
+def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
+    """Withdraw this source's products that Medusa never received (no medusa_id, waiting to be served) and
+    that this run no longer produces: dropped by the supplier, held this run, or found not to be a product
+    (a void slab). Left waiting, the next pull would create them with stale data and stock. A product
+    already in Medusa (the delist owns it) or in flight ('syncing') is untouched; a withdrawn product that
+    comes back is simply written again. Returns how many were withdrawn."""
+    produced = {_sku(r, cfg) for r in rows}
+    stale = [r["sku"] for r in ledger.execute(
+        "SELECT sku FROM product WHERE source = ? AND medusa_id IS NULL AND state IN ('pending', 'dirty')",
+        (cfg.source_code,)) if r["sku"] not in produced]
+    for sku in stale:
+        ledger.execute("DELETE FROM inventory WHERE sku = ?", (sku,))   # the stock row references the product
+        ledger.execute("DELETE FROM product WHERE sku = ?", (sku,))
+    return len(stale)
+
+
 def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
                           replaced: dict[str, str] | None = None) -> int:
     """Mark products the supplier dropped as out of stock (qty 0), the reversible

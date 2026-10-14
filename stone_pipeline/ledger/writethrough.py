@@ -86,10 +86,11 @@ def record_source(emit_rows: Sequence[CanonicalRow],
         with open_ledger(path) as ledger:
             n_products = populate.populate_products(ledger, emit_rows, cfg)
             n_stock = populate.populate_inventory(ledger, emit_rows, cfg)
+            n_withdrawn = populate.withdraw_unsent(ledger, emit_rows, cfg)
             n_gone = populate.populate_discontinued(ledger, discontinued, replaced)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
             "source": cfg.source_code, "products": n_products,
-            "inventory": n_stock, "discontinued": n_gone}})
+            "inventory": n_stock, "withdrawn_unsent": n_withdrawn, "discontinued": n_gone}})
         return True
     except Exception:
         # NOT "shadow only" anymore: the ledger IS the live sync source (Medusa pulls it). A failure here

@@ -115,3 +115,31 @@ def test_record_source_returns_false_on_failure_without_raising(tmp_path, monkey
     result = writethrough.record_source(_rows(), [], load_source("polonine"),
                                         path=tmp_path / "dev.ledger")
     assert result is False, "a write failure must return False, not raise and not report success"
+
+
+def test_record_source_withdraws_unsent_products_the_run_no_longer_produces(tmp_path, monkeypatch):
+    # A product waiting to be pulled that the latest run no longer produces (dropped by the supplier, held,
+    # or found void) must never reach Medusa on the next pull with its stale data and stock. Only this
+    # source's never-sent rows are withdrawn: a product in Medusa (the delist owns it) or in flight stays.
+    monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
+    monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    ledger_path = tmp_path / "dev.ledger"
+    _open_seeded(ledger_path).close()
+    first = [*_rows(), CanonicalRow(src_site="polonine", surrogate_key="DDD", variation_key=_VARIATION_KEY,
+                                    handle="h-ddd", title="Carrara Three")]
+    assert writethrough.record_source(first, [], load_source("polonine"), path=ledger_path)
+    with _open_seeded(ledger_path) as ledger:
+        ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_b' WHERE sku = 'POL-BBB'")
+        ledger.execute("UPDATE product SET state = 'syncing' WHERE sku = 'POL-DDD'")
+        ledger.execute("INSERT INTO product (sku, source, state, created_at, updated_at) "
+                       "VALUES ('MAR-1', 'mar', 'pending', 'x', 'x')")
+        ledger.conn.commit()
+
+    later = [CanonicalRow(src_site="polonine", surrogate_key="EEE", variation_key=_VARIATION_KEY,
+                          handle="h-eee", title="Carrara Four")]
+    assert writethrough.record_source(later, [], load_source("polonine"), path=ledger_path)
+    with _open_seeded(ledger_path) as ledger:
+        skus = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
+        stock = {r["sku"] for r in ledger.execute("SELECT sku FROM inventory")}
+    assert skus == {"POL-BBB", "POL-DDD", "POL-EEE", "MAR-1"}             # POL-AAA withdrawn
+    assert "POL-AAA" not in stock

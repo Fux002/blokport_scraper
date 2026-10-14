@@ -1,6 +1,6 @@
 [
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Purple",
     "raw_description": "",
@@ -49,7 +49,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -85,7 +85,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Green, Purple",
     "raw_description": "",
@@ -127,7 +127,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Green, Purple",
     "raw_description": "",
@@ -176,7 +176,7 @@
     "variety_match_key": "Calacatta Viola"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "White",
     "raw_description": "",
@@ -225,7 +225,7 @@
     "variety_match_key": "Afyon White"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "White",
     "raw_description": "",
@@ -261,7 +261,7 @@
     "variety_match_key": "Afyon White"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Pink",
     "raw_description": "",
@@ -298,7 +298,7 @@
     "variety_match_key": "Pink Onyx"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "Pink",
     "raw_description": "",
@@ -338,7 +338,7 @@
     "variety_match_key": "Pink Onyx"
   },
   {
-    "adapter_version": "1.3.0",
+    "adapter_version": "1.4.0",
     "raw_bundle_size": null,
     "raw_color": "",
     "raw_description": "",
@@ -363,7 +363,7 @@
     "raw_name": "Afyon Sugar",
     "raw_origin": null,
     "raw_per_slab_m2": null,
-    "raw_pieces": "[{\"position\": 4, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1ohuWx7R1YIkiErWly9yN3XbXWKtqRw1L=s2000\"]}, {\"position\": 13, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1sj0zL1-72Z_4k6LtHP1HwejC8nDQdgO_=s2000\"]}, {\"position\": 20, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1m0wp_eunhhjRJDyhd7vdOB7gjTDyTKQt=s2000\"]}, {\"position\": 24, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1aurex31gPSEJgfguCpyY6y8j6SVEbsln=s2000\"]}, {\"position\": 34, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1chTJ3QHc-maQYYnx26oMM4G0xvBLSV76=s2000\"]}, {\"position\": 47, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1jBUlTZwR9Za-4FT43UfzWAceP9XYGMNW=s2000\"]}, {\"position\": 49, \"image_urls\": [\"https://lh3.googleusercontent.com/d/10VzMKeQa5mNTGrLS8t_Fp2H-0g34jP4H=s2000\"]}, {\"position\": 50, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1_JidIMrijn7y9uI4_iOuu4ZUwcsqHJSo=s2000\"]}, {\"position\": 66, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1UPqcYmlyTBCTPSvNuZ8Qps2S6wpMOcCe=s2000\"]}]",
+    "raw_pieces": "[{\"position\": 4, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1ohuWx7R1YIkiErWly9yN3XbXWKtqRw1L=s2000\"], \"raw_dimensions\": \"length=299 cm;height=167 cm\", \"raw_weight\": \"260\"}, {\"position\": 13, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1sj0zL1-72Z_4k6LtHP1HwejC8nDQdgO_=s2000\"], \"raw_dimensions\": \"length=298 cm;height=170 cm\", \"raw_weight\": \"261\"}, {\"position\": 20, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1m0wp_eunhhjRJDyhd7vdOB7gjTDyTKQt=s2000\"], \"raw_dimensions\": \"length=295 cm;height=171 cm\", \"raw_weight\": \"260\"}, {\"position\": 24, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1aurex31gPSEJgfguCpyY6y8j6SVEbsln=s2000\"], \"raw_dimensions\": \"length=282 cm;height=171 cm\", \"raw_weight\": \"260\"}, {\"position\": 34, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1chTJ3QHc-maQYYnx26oMM4G0xvBLSV76=s2000\"], \"raw_dimensions\": \"length=292 cm;height=171 cm\", \"raw_weight\": \"259\"}, {\"position\": 47, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1jBUlTZwR9Za-4FT43UfzWAceP9XYGMNW=s2000\"], \"raw_dimensions\": \"length=293 cm;height=172 cm\", \"raw_weight\": \"259\"}, {\"position\": 49, \"image_urls\": [\"https://lh3.googleusercontent.com/d/10VzMKeQa5mNTGrLS8t_Fp2H-0g34jP4H=s2000\"], \"raw_dimensions\": \"length=291 cm;height=173 cm\", \"raw_weight\": \"258\"}, {\"position\": 50, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1_JidIMrijn7y9uI4_iOuu4ZUwcsqHJSo=s2000\"], \"raw_dimensions\": \"length=289 cm;height=171 cm\", \"raw_weight\": \"258\"}, {\"position\": 66, \"image_urls\": [\"https://lh3.googleusercontent.com/d/1UPqcYmlyTBCTPSvNuZ8Qps2S6wpMOcCe=s2000\"], \"raw_dimensions\": \"length=284 cm;height=171 cm\", \"raw_weight\": \"269\"}]",
     "raw_quality": "",
     "raw_slab_count": "9",
     "raw_slabs_array": null,
