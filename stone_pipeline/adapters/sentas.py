@@ -12,13 +12,16 @@ Stock: where the bundle has a packing list it is the stock source (its IN STOCK,
 sold record; a packing list that failed to load or could not be read holds the stock (never the site's
 possibly different figure in its place); without one the site's piece count is the stock.
 
-Lots: Sentas is BUNDLE-shaped. The bundle's per-slab scans map to raw_pieces and its printed reference
-("B6392" in "B6392 - 2 CM ...") to src_lot_label; the shared loader (stages/lots.py) decides whether the
-bundle becomes its pieces. The lot reference is the bundle's own site id, never the printed reference,
+Lots: Sentas is BUNDLE-shaped. The bundle's per-slab scans map to raw_pieces, each with the slab's own
+measured size and weight where the vendor's block sheet gives them, and its printed reference ("B6392" in
+"B6392 - 2 CM ...") to src_lot_label; the shared loader (stages/lots.py) decides which slabs the bundle is
+sold as. The lot reference is the bundle's own site id, never the printed reference,
 which the vendor does not keep unique ("B898-899", "T7").
 """
 
 from __future__ import annotations
+
+import json
 
 from stone_pipeline.adapters.base import AdapterBase
 from stone_pipeline.adapters.tokens import extract_color
@@ -62,9 +65,44 @@ def _per_piece_kg(record) -> str:
     return str(round(total / pieces, 3)) if (total > 0 and pieces > 0) else ""
 
 
+# A scan's measured figures as the scraper writes them (from the vendor's block sheet).
+_MEASURED = ("length_cm", "width_cm", "weight_kg")
+
+
+def _measurement_ok(scan: dict) -> bool:
+    """A scan carries no measurement, or all three figures as numbers."""
+    present = [key in scan for key in _MEASURED]
+    if not any(present):
+        return True
+    return all(present) and all(type(scan[key]) in (int, float) for key in _MEASURED)
+
+
+def _pieces(record) -> str:
+    """The scanned slabs for the loader (stages/lots.py): each scan's position and photo, plus the slab's own
+    raw size (length = the long face, height = the short face, in cm) and weight (kg) when the block sheet
+    measured it. Malformed scan data passes through untouched, so no slab is measured from it and the loader
+    keeps the bundle whole."""
+    text = (record.get("piece_scans") or "").strip()
+    try:
+        scans = json.loads(text) if text else []
+    except ValueError:
+        return text
+    if not isinstance(scans, list) or not all(isinstance(scan, dict) and _measurement_ok(scan) for scan in scans):
+        return text
+    pieces = []
+    for scan in scans:
+        piece = {"position": scan.get("position"), "image_urls": scan.get("image_urls")}
+        if _MEASURED[0] in scan:
+            length, width, kg = (scan[key] for key in _MEASURED)
+            piece["raw_dimensions"] = AdapterBase.build_dims(f"{length:g} cm", f"{width:g} cm")
+            piece["raw_weight"] = f"{kg:g}"
+        pieces.append(piece)
+    return json.dumps(pieces) if pieces else ""
+
+
 class SentasAdapter(AdapterBase):
     source = "sentas"
-    adapter_version = "1.3.0"
+    adapter_version = "1.4.0"
     variety_match_key = "variety"
     format_field = "format"
     required_columns = ["product_id", "variety", "url", "finish", "thickness",
@@ -93,8 +131,8 @@ class SentasAdapter(AdapterBase):
         "raw_sold_count": _sold,
         "raw_description": lambda r: "",   # the site has no product description
         "raw_image_urls": lambda r: AdapterBase.split_list(r.get("image_urls"), "|"),
-        # lots: the per-slab scans as written by the scraper (JSON, passed through untouched) + the label
-        "raw_pieces": lambda r: (r.get("piece_scans") or "").strip(),
+        # lots: the per-slab scans with each slab's own measured size + the printed bundle label
+        "raw_pieces": _pieces,
         "src_lot_label": _printed_ref,
     }
 

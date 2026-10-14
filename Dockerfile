@@ -24,9 +24,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Runtime libs: ca-certificates for TLS; libglib2.0-0 for opencv-python-headless.
+# Runtime libs: ca-certificates for TLS; libglib2.0-0 for opencv-python-headless; poppler-utils for
+# pdftotext (the Sentas scraper reads each bundle's block sheet PDF for every slab's measured size).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libglib2.0-0 \
+    && apt-get install -y --no-install-recommends ca-certificates libglib2.0-0 poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Patch build tooling first: setuptools < 78.1.1 is vulnerable to PYSEC-2025-49.

@@ -218,8 +218,10 @@ a set of ordinary products (its pieces) that carry the same `lot_code`. Rules:
   Gaps are normal (a slab never scanned, or broken in the cut).
 - Both are `null` outside a lot: such a product takes exactly the path it always did.
 - Every piece of a lot shares variation, category and type (the scraper holds the whole lot otherwise),
-  is sold singly (`bundle_size` null) and carries its own photograph first.
-- The lot is its **full scanned sequence**: a piece the vendor has sold stays in the lot at inventory 0
+  is sold singly (`bundle_size` null), carries its own photograph first, and its **own measured length,
+  width and weight** (thickness is the lot's listed thickness). A slab the vendor has no measurement for
+  is never sent as a piece (its `lot_position` is a gap).
+- The lot is its **full measured sequence**: a piece the vendor has sold stays in the lot at inventory 0
   (Flow B); every other piece is at inventory 1. A lot is only sent when every piece's status is known;
   where the vendor's data does not say which slabs are sold, an operator answers it first (below).
 - Lots are sent whenever a vendor's data supports them; there is no per-vendor setting. When a bundle

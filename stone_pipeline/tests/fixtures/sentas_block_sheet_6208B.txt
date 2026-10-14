@@ -1,0 +1,55 @@
+BUNDLE 6208
+
+Date:        14/08/2026                  Block:       6208
+Material:    AFYON SUGAR                 Weight: 2344.0 Kg   Area:     44.791 m2
+
+
+ 4                                                               13
+
+
+
+
+ SIZE 299 x 167 x 2.00                   QA       -              SIZE 298 x 170 x 2.00                  QA   -
+ FINS Honed               A   4.993 m2   W        260.0 kg       FINS Honed              A   5.066 m2   W    261.0 kg
+
+
+ 20                                                              24
+
+
+
+
+ SIZE 295 x 171 x 2.00                   QA       -              SIZE 282 x 171 x 2.00                  QA   -
+ FINS Honed               A   5.045 m2   W        260.0 kg       FINS Honed              A   4.822 m2   W    260.0 kg
+
+
+ 34                                                              47
+
+
+
+
+ SIZE 292 x 171 x 2.00                   QA       -              SIZE 293 x 172 x 2.00                  QA   -
+ FINS Honed               A   4.993 m2   W        259.0 kg       FINS Honed              A   5.040 m2   W    259.0 kg
+
+
+ 49                                                              50
+
+
+
+
+ SIZE 291 x 173 x 2.00                   QA       -              SIZE 289 x 171 x 2.00                  QA   -
+ FINS Honed               A   5.034 m2   W        258.0 kg       FINS Honed              A   4.942 m2   W    258.0 kg
+
+
+ 66
+
+
+
+
+ SIZE 284 x 171 x 2.00                   QA       -
+ FINS Honed               A   4.856 m2   W        269.0 kg
+
+
+Defects:    ---
+
+                                                             1
+

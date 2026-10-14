@@ -266,7 +266,7 @@ fuleistone:
   value_patterns: {}
   row_baseline: 1274
 sentas:
-  adapter_version: 1.3.0
+  adapter_version: 1.4.0
   required_columns:
   - product_id
   - variety
