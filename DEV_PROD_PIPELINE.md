@@ -42,6 +42,7 @@ reproduce dev-staging, so an unset environment behaves exactly as before.
 | `SCRAPER_S3_DRY_RUN` | `true` in development, `false` in production | the ECS task sets `false`; a laptop never writes the bucket by default |
 | `SCRAPER_IMAGE_MODE` | `passthrough` | `s3` to download → process → re-host product photos |
 | `SCRAPER_IMAGE_PROCESSING` | `false` | `true` to enhance/de-watermark before re-host |
+| `SCRAPER_IMAGE_TONE` | `true` | `false` = detail-only enhance: Real-ESRGAN 4x + the long-edge cap, without the exposure lift and vibrance |
 | `SCRAPER_KEEP_SCRAPED` | `false` | `true` to also keep the raw download in the sibling `scraped/` folder |
 | `SCRAPER_VARIANT_IMAGE_BASE` | dev variations URL | The variant `{Key}.png` base stamped into the catalog |
 
