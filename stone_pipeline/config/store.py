@@ -626,6 +626,24 @@ def last_run_log(path: str | Path | None = None) -> dict | None:
 _APPLIED_STAGES = ("catalog", "all", "republish")
 
 
+def _last_applied_produce_at(conn) -> str | None:
+    """finished_at of the newest SUCCESSFUL catalog/all/republish run in the bounded run_log (<=50 rows), the
+    moment the emitted catalog last reflected the decisions; None when none has completed."""
+    for r in conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL "
+                          "ORDER BY finished_at DESC LIMIT 50"):
+        rec = json.loads(r["record"])
+        if rec.get("status") == "succeeded" and rec.get("stage") in _APPLIED_STAGES:
+            return rec.get("finished_at")
+    return None
+
+
+def last_applied_produce_at(path: str | Path | None = None) -> str | None:
+    """When the last produce that APPLIED the operator's decisions finished (see _last_applied_produce_at): a
+    decision made after it has not reached any product yet. A pure read: never creates config.db."""
+    with closing(read_store(path)) as conn:
+        return _last_applied_produce_at(conn)
+
+
 def decisions_pending_apply(path: str | Path | None = None) -> dict:
     """The 're-produce to apply' signal (no product scan): how many operator decisions were recorded AFTER
     the last catalog-applying produce finished, so the emitted catalog does not yet reflect them. A produce
@@ -642,13 +660,7 @@ def decisions_pending_apply(path: str | Path | None = None) -> dict:
     (<=50 rows) plus two indexed aggregates. Returns {changed, latest_decision_at, last_produce_at}; changed
     counts every decision when nothing has produced yet (last_produce_at is None)."""
     with closing(open_store(path)) as conn:
-        last_produce_at = None
-        for r in conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL "
-                              "ORDER BY finished_at DESC LIMIT 50"):
-            rec = json.loads(r["record"])
-            if rec.get("status") == "succeeded" and rec.get("stage") in _APPLIED_STAGES:
-                last_produce_at = rec.get("finished_at")
-                break
+        last_produce_at = _last_applied_produce_at(conn)
         latest_decision_at = conn.execute(
             "SELECT MAX(d) AS latest FROM ("
             "SELECT MAX(decided_at) AS d FROM statement "

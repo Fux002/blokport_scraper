@@ -8,6 +8,7 @@ overlaid. Self-contained: stub variety lookup, tmp config.db, a hand-written can
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import polars as pl
 import pytest
@@ -26,6 +27,8 @@ def _db(tmp_path, monkeypatch):
     monkeypatch.setattr(varieties, "exists_as", lambda n, t: (_norm(n), _norm(t)) in EXISTING)
     monkeypatch.setattr(varieties, "alias_target", lambda n, t: None)   # no alias resolution unless a test opts in
     monkeypatch.setattr(server, "_type_vocab", lambda: {"granite": "Granite", "onyx": "Onyx", "quartzite": "Quartzite"})
+    # the undo guard reads the produce output; never the developer's real outputs/ tree
+    monkeypatch.setattr(resolved, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(outputs_dir=tmp_path / "no-outputs")))
     yield
 
 

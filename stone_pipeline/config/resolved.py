@@ -133,6 +133,21 @@ def _read_canonical(f) -> "pl.DataFrame":
     return df.select(_COLUMNS)
 
 
+def bound_products(source: str, scraped: str, outputs_dir: Path | None = None) -> int | None:
+    """How many of `source`'s products listed as `scraped` the last produce BOUND to a variety, matched on the
+    listing spelling or the raw name (either can be the key a statement was made on). None when this host has
+    no produce output at all, so a caller can tell 'bound nothing' from 'cannot tell'."""
+    files = [f for f in find_canonical(outputs_dir or SETTINGS.paths.outputs_dir) if f.exists()]
+    if not files:
+        return None
+    frame = pl.concat([_frame(Path(f)) for f in files], how="vertical_relaxed")
+    frame = frame.filter((pl.col("src_site") == source) & pl.col("variation_key").is_not_null()
+                         & (pl.col("variation_key") != ""))
+    sp = _norm(scraped)
+    return sum(1 for raw, key in frame.select("raw_name", "variety_match_key").iter_rows()
+               if sp in (_norm(raw), _norm(key)))
+
+
 def list_resolved(source: str | None = None, decided: bool | None = None,
                   outputs_dir: Path | None = None) -> list[dict]:
     """Every product of the last produce (optionally one vendor), newest run per source, with its

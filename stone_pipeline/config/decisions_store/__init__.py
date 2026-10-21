@@ -32,13 +32,13 @@ from .protected import add_protected, clear_protected, protected_keys
 from .queue import (approve_leaf_pending, clear_review_pending, decide_leaf_pending, list_pending,
                     pending_payload, replace_pending)
 from .statements import (_statement_rows, _upsert_statement, clear, clear_all_statements, clear_for_variety,
-                         decide, load_decisions, mint_seed_colors, reject, scope_key)
+                         decide, load_decisions, mint_seed_colors, reject, scope_key, statement_decided_at)
 
 __all__ = [
     "InvalidDecision",
     # statements
     "scope_key", "load_decisions", "decide", "reject", "clear", "clear_for_variety", "clear_all_statements",
-    "_statement_rows", "_upsert_statement", "mint_seed_colors",
+    "_statement_rows", "_upsert_statement", "mint_seed_colors", "statement_decided_at",
     # per-variety origins
     "set_variety_origin", "delete_variety_origin", "variety_origins", "list_variety_origins",
     "get_variety_origin", "clear_variety_origins",
