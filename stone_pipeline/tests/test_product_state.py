@@ -126,6 +126,36 @@ def test_discontinued_is_source_scoped_and_scrape_aware(tmp_path):
     assert dict(gone)["POL-2"] == "h2"                           # handle carried for the report
 
 
+def _export(tmp_path, rows):
+    path = tmp_path / "known.csv"
+    path.write_text("Variant Sku,Product Handle,Variant Inventory Quantity\n"
+                    + "".join(f"{sku},h-{sku.lower()},{qty}\n" for sku, qty in rows), encoding="utf-8")
+    return product_state.load_known_products(path)
+
+
+def test_delist_exposure_counts_only_products_still_live(tmp_path):
+    # Medusa keeps a sold product at stock 0 for good, so a source's export carries its whole sold history.
+    # Those are delisted already: they must count on neither side of the mass-delist guard, or the history
+    # outgrows 30% of the catalogue and every later delist is refused (sold slabs stay live with stock).
+    cfg = load_source("polonine")
+    known = _export(tmp_path, [("POL-1", 5), ("POL-2", 5)]                       # live: 1 scraped, 2 gone
+                    + [(f"POL-S{i}", 0) for i in range(10)]                      # sold history, all gone
+                    + [("POL-U", ""), ("MAR-9", 5)])                             # unknown stock; other source
+    gone = product_state.discontinued([_row("1")], cfg, known)
+    # the delist itself still names every absent SKU (re-zeroing a sold one is a no-op)
+    assert {s for s, _ in gone} == {"POL-2", "POL-U"} | {f"POL-S{i}" for i in range(10)}
+    # an unknown stock counts as live, so an unreadable export can only make the guard stricter
+    assert product_state.delist_exposure(gone, cfg, known) == (2, 3)
+
+
+def test_delist_exposure_still_flags_a_partial_scrape(tmp_path):
+    # the guard's purpose is unchanged: half the LIVE catalogue missing is a partial scrape
+    cfg = load_source("polonine")
+    known = _export(tmp_path, [(f"POL-{i}", 4) for i in range(10)] + [("POL-S", 0)])
+    gone = product_state.discontinued([_row(str(i)) for i in range(5)], cfg, known)
+    assert product_state.delist_exposure(gone, cfg, known) == (5, 10)
+
+
 def test_discontinued_empty_without_baseline(tmp_path):
     cfg = load_source("polonine")
     known = product_state.load_known_products(tmp_path / "absent.csv")
