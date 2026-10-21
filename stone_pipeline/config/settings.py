@@ -490,6 +490,10 @@ class ImageProcessingConfig:
     esrgan_weights: str = env.getenv("BLOKPORT_ESRGAN_WEIGHTS", "")  # path override; else models/<model>.pth
     esrgan_tile: int = 512            # per-tile input for large images (0 = whole image)
     target_long_edge: int = 2048      # cap the 4x output at this long edge (INTER_AREA downscale)
+    # The tone steps after the model (exposure lift + vibrance), on by default (the slab-photo recipe).
+    # Off = detail only: Real-ESRGAN 4x + the long-edge cap, the photo's own tones kept (a bright studio
+    # render on white would be darkened by the percentile stretch). SCRAPER_IMAGE_TONE=false turns it off.
+    tone: bool = _env_bool("BLOKPORT_IMAGE_TONE", True)
     levels_lo_pct: float = 0.5        # exposure lift: black-point percentile
     levels_hi_pct: float = 99.6       # exposure lift: white-point percentile
     vibrance: float = 0.20            # restore colour muted by bad light (0 = off)

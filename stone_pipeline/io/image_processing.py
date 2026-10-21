@@ -489,8 +489,9 @@ class ImageProcessor:
             bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)
             bgr = self._esr.enhance(bgr)
             bgr, _ = _fit_long_edge(bgr, self.cfg.target_long_edge)      # cap the 4x output
-            bgr = _levels(bgr, self.cfg.levels_lo_pct, self.cfg.levels_hi_pct)  # exposure lift
-            bgr = _vibrance(bgr, self.cfg.vibrance)                      # restore muted colour
+            if self.cfg.tone:                                            # off = detail only
+                bgr = _levels(bgr, self.cfg.levels_lo_pct, self.cfg.levels_hi_pct)  # exposure lift
+                bgr = _vibrance(bgr, self.cfg.vibrance)                  # restore muted colour
             res.enhanced = True
             res.upscaled = True
         else:
