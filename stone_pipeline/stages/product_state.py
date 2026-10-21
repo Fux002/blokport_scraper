@@ -126,3 +126,21 @@ def discontinued(rows: list[CanonicalRow], cfg: SourceConfig, known: KnownProduc
     prefix = f"{cfg.source_code}-".upper()
     return [(sku, (entry.get("handle") or "")) for sku, entry in known.by_sku.items()
             if sku.startswith(prefix) and sku not in scraped]
+
+
+def _is_live(entry: dict) -> bool:
+    """Medusa still lists this product with stock. Only a readable quantity <= 0 is delisted already; a
+    blank or unreadable one counts as live, so an unknown can only make the mass-delist guard stricter."""
+    raw = (entry.get("inventory") or "").strip()
+    qty = parse_number(raw) if raw else None
+    return qty is None or qty > 0
+
+
+def delist_exposure(gone: list[tuple[str, str]], cfg: SourceConfig, known: KnownProducts) -> tuple[int, int]:
+    """(live products this delist would take down, live products this source has in Medusa): the two sides
+    of the mass-delist guard in run_source. A product Medusa holds at stock 0 is sold history, delisted
+    already: it counts on neither side, or the history outgrows the live catalogue and every delist is
+    refused, leaving sold slabs listed with stock."""
+    prefix = f"{cfg.source_code}-".upper()
+    live = {sku for sku, entry in known.by_sku.items() if sku.startswith(prefix) and _is_live(entry)}
+    return sum(1 for sku, _ in gone if sku in live), len(live)

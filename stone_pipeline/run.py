@@ -543,15 +543,14 @@ def run_source(
         discontinued = []
     # SAFETY: a partial scrape (truncated Cloudflare page, transient block) passes the DEGRADED
     # health gate yet would delist every product it failed to fetch. Refuse to mass-delist: if a
-    # single run would discontinue >30% of this source's known products, drop the delist and flag
+    # single run would take down >30% of this source's LIVE products, drop the delist and flag
     # it loudly -- almost certainly an incomplete scrape, not a real bulk discontinuation.
-    _src_prefix = f"{source_cfg.source_code}-".upper()
-    _src_known = sum(1 for sku in known.by_sku if sku.startswith(_src_prefix)) if known else 0
-    if _src_known and len(discontinued) > SETTINGS.thresholds.delist_max_fraction * _src_known:
+    _would_delist, _src_live = product_state.delist_exposure(discontinued, source_cfg, known) if known else (0, 0)
+    if _src_live and _would_delist > SETTINGS.thresholds.delist_max_fraction * _src_live:
         run_log.warning("delist refused: a single run would discontinue too much of the catalog "
                         "(likely a partial scrape) -- keeping products listed",
-                        extra={"extra_fields": {"would_delist": len(discontinued), "source_known": _src_known,
-                                                "fraction": round(len(discontinued) / _src_known, 3)}})
+                        extra={"extra_fields": {"would_delist": _would_delist, "source_live": _src_live,
+                                                "fraction": round(_would_delist / _src_live, 3)}})
         discontinued = []
     # a discontinued bundle whose pieces now form a lot was REPLACED, not dropped: its delist names the lot
     # (Blokport deactivates it and redirects its page there). After the guards, so a refused delist refuses both.
