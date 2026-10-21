@@ -409,13 +409,38 @@ def _decide_listings(body) -> list[tuple[str, str]]:
 
 
 def _delete_review_decide(params, body, query):
-    # DELETE {source, scraped}: clear that vendor's decisions for the spelling
-    from stone_pipeline.config import decisions_store
+    # DELETE {listings}: clear each vendor's statement on the spelling, all or nothing. Refused when a statement
+    # the last produce APPLIED bound products of its listing: undone, they may be held on the next produce, and
+    # a held product is never written, so it would stay live in Medusa under the old variety with frozen stock.
+    # Restating the listing (PUT) re-binds those products in place instead. A statement made after the last
+    # applying produce has reached no product yet, so undoing it is always safe. run_log keeps only the newest
+    # 50 runs, so "no applying run on record" is ambiguous (never produced, or rolled out by later inventory
+    # runs): there the produce output decides, and no output at all means nothing from this host is live.
+    from stone_pipeline.config import decisions_store, resolved, store
     if not isinstance(body, dict):
         return 400, {"error": "body must be a JSON object {source, scraped, name, type, ...}"}
     listings = _decide_listings(body)
     if not listings:
         return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
+    applied_at = store.last_applied_produce_at()
+    blocked = []
+    for s, sp in listings:
+        decided_at = decisions_store.statement_decided_at(s, sp)
+        if decided_at is None or (applied_at is not None and decided_at > applied_at):
+            continue
+        bound = resolved.bound_products(s, sp)
+        if bound is None:
+            if applied_at is None:
+                continue
+            return 409, {"error": f"cannot verify which live products depend on {s} '{sp}': this host has no "
+                                  f"produce output. Restate the listing with the correct variety instead."}
+        if bound:
+            blocked.append({"source": s, "scraped": sp, "products": bound})
+    if blocked:
+        return 409, {"error": "undo refused: live products are bound by this decision, and removing it would "
+                              "leave them listed under the current variety with frozen stock. Restate the "
+                              "listing with the correct variety instead.",
+                     "blocked": blocked}
     return 200, {"listings": [{"source": s, "scraped": sp} for s, sp in listings],
                  "cleared": [{"statements": decisions_store.clear(s, sp)} for s, sp in listings]}
 
@@ -828,7 +853,9 @@ class ConfigHandler(BaseHTTPRequestHandler):
         if len(seg) < 2 or seg[0] != "config" or seg[1] != "v1":
             return self._respond(404, {"error": "not found; expected /config/v1/..."})
         body = None
-        if method in ("PUT", "POST"):
+        # DELETE carries a body too (DELETE /review/decide takes {listings}); reading it only for PUT/POST
+        # handed that route no body, so every undo over HTTP was a 400.
+        if method in ("PUT", "POST", "DELETE"):
             # A malformed Content-Length ('abc') must be a 400, not an int() ValueError that escapes the
             # handler (this parse sits BEFORE the dispatch try/except) and drops the connection; and the
             # length is client-controlled, so cap it before read() to bound memory.

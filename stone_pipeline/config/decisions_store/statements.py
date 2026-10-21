@@ -110,6 +110,15 @@ def clear(source: str, spelling: str) -> int:
     return n
 
 
+def statement_decided_at(source: str, spelling: str) -> str | None:
+    """When `source`'s own statement on `spelling` was decided: the row clear() would drop, keyed the same way
+    (source as stored, normalized spelling). None when there is none."""
+    with closing(store.read_store()) as conn:
+        r = conn.execute("SELECT decided_at FROM statement WHERE source = ? AND spelling_norm = ?",
+                         ((source or "").strip(), _norm(spelling))).fetchone()
+    return r["decided_at"] if r else None
+
+
 def clear_for_variety(name: str, stone_type: str = "") -> int:
     """Drop every 'is' statement whose result is the variety (name, type): used by unmint, so a removed variety
     does not re-mint on the next produce and its listings resurface undecided. `stone_type` may be the
