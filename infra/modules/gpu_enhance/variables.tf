@@ -70,6 +70,12 @@ variable "alert_email" {
   default     = ""
 }
 
+variable "extra_image_buckets" {
+  description = "Other brands' media buckets this env's GPU job may enhance in place: read + write ONLY under <env-segment>/products/ (dev/ or prod/), list only that prefix, never delete. Default none."
+  type        = list(string)
+  default     = []
+}
+
 # Brand + product-type selection. The GPU jobs run pipeline code (de-watermark / generate-textures) that
 # reads active_pack() from DOMAIN_PACK -- without these, a wudport/wood GPU job would default to the STONE
 # pack and generate stone textures/densities. Defaults keep this the blokport-stone stack.

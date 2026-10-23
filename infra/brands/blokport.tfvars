@@ -32,6 +32,11 @@ prod_home_env         = "prod"
 prod_image_tag     = "92ae05f7d132e77c364cb00dc7f24a70778a07d8"     # delist guard counts live products only (#462) + safe review undo (#461)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # enhance fits the input to the target before ESRGAN (#448): ~4x less GPU work on large originals
 
+# The DEV GPU enhancer may enhance WudPort's dev catalog images in place (owner-approved one-off run;
+# read + write under dev/products/ only, no delete). The job is submitted with SCRAPER_S3_BUCKET and
+# SCRAPER_BRAND overridden to wudport's, which the brand<->bucket guard requires.
+dev_gpu_extra_image_buckets = ["wudport-dev-media-505d2e"]
+
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
 # :4200 admin UI (source.enhance / source.watermarked), NOT these infra flags -- these just make prod's
 # task config identical to dev so the UI behaves the same. prod gpu image (gpu-782f18c7) == dev's :gpu

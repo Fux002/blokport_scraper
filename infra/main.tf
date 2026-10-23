@@ -258,6 +258,8 @@ module "gpu_enhance_dev" {
   # dev SSM param, exactly like the scraper/produce secrets, so a plain apply can never strip it.
   ssm_secret_arns = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
   alert_email     = var.alert_email
+  # other brands' media buckets the dev enhancer may enhance in place (dev/products/ only)
+  extra_image_buckets = var.dev_gpu_extra_image_buckets
 }
 
 locals {
