@@ -3,15 +3,19 @@
 Every network call is fallible and isolated: a failed image returns None (the
 caller flags the row and skips the slot), never a crashed run. Bounded
 concurrency, per-host courtesy via a small connection pool, timeouts, and retry
-with backoff on transient errors. Content-hash dedup happens in the image stage,
-so an image is fetched once even across re-runs (the backend skips re-upload).
+with backoff on transient errors. A body that is not an image is refused the same
+way. Content-hash dedup happens in the image stage, so an image is fetched once
+even across re-runs (the backend skips re-upload).
 """
 
 from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 from typing import Callable, Optional
+
+from PIL import Image, UnidentifiedImageError
 
 from stone_pipeline.core import logfmt
 from stone_pipeline.io.ssrf import url_allowed
@@ -23,6 +27,17 @@ _MAX_REDIRECTS = 5
 # rejected so a hostile/broken host can't OOM the run (read in capped chunks, so a chunked response
 # with no Content-Length is bounded too).
 _MAX_BYTES = 25 * 1024 * 1024
+
+
+def _is_image(data: bytes) -> bool:
+    """True when Pillow identifies the bytes as an image. Judged on the bytes, never the Content-Type: a
+    host's error page can arrive as a 200 labelled image/jpeg (a supplier's nginx 500 page reached the
+    catalog as a product photo that way), and some image hosts label real photos generically."""
+    try:
+        with Image.open(BytesIO(data)):
+            return True
+    except UnidentifiedImageError:
+        return False
 
 
 def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5) -> Callable[[str], Optional[bytes]]:
@@ -75,7 +90,16 @@ def httpx_fetcher(timeout: float = 20.0, retries: int = 3, backoff: float = 0.5)
                                 log.warning("image exceeds size cap (streamed)",
                                             extra={"extra_fields": {"url": current}})
                                 return None
-                        return bytes(buf) if buf else None
+                        if not buf:
+                            return None
+                        if not _is_image(buf):
+                            # a verdict on the body, not a transport failure: no retry this run; the row
+                            # is flagged image_download_failed and the next run fetches it again
+                            log.warning("not an image, refused", extra={"extra_fields": {
+                                "url": current, "content_type": response.headers.get("content-type"),
+                                "bytes": len(buf)}})
+                            return None
+                        return bytes(buf)
                 else:
                     log.warning("too many redirects", extra={"extra_fields": {"url": url}})
                     return None
