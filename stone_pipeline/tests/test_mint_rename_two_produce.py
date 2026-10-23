@@ -152,6 +152,33 @@ def test_operator_api_decision_drives_the_renamed_mint_end_to_end(tmp_path, monk
     assert curate.build_curation([zucchi], ref3).new_variants["slab"] == []   # nothing proposed again
 
 
+def test_one_session_mints_named_apart_only_by_case_create_one_variety(tmp_path, monkeypatch):
+    # The admin review reads bind vs mint from the ledger, which holds a mint only after the next produce, so
+    # two cards stated in one session as 'Agata Blue' and 'agata blue' both read as mints and both are sent.
+    # The fold is curate's: the mint is keyed on the title-cased name's norm, so they are ONE variety.
+    from stone_pipeline.config import server, varieties
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    paths = _paths(tmp_path)
+    monkeypatch.setattr(loaders, "SETTINGS", SimpleNamespace(paths=paths))
+    monkeypatch.setattr(curate, "_alias_model", lambda *a, **k: (None, {}))
+    monkeypatch.setattr(varieties, "_index", lambda: varieties._index_from_rows([{"name": "Alpine", "stone_type": "Granite"}], {}))
+    _write_export(paths.export_file, [{"Id": "var_alpine", "Key": EXISTING_KEY, "Name": "Alpine"}])
+    ref = loaders.load_all()
+    rows = [_typed_gap_row("Agata Blu", "Granite"), _typed_gap_row("Agata Bleu", "Granite")]
+    decisions.write_confirm_file(curate.build_curation(rows, ref).pending_confirm)
+
+    for scraped, name in (("Agata Blu", "Agata Blue"), ("Agata Bleu", "agata blue")):
+        code, body = server.dispatch("PUT", ["review", "decide"],
+                                     {"source": "zucchi", "scraped": scraped, "name": name, "type": "Granite"})
+        assert code == 200 and body["result"] == "minted", body
+
+    minted = curate.build_curation(rows, ref).new_variants
+    for branch in ("slab", "block", "tile"):
+        assert [r["Name"] for r in minted[branch]] == ["Agata Blue"], (branch, minted[branch])
+    assert minted["slab"][0]["Key"].startswith("slab_granite_agata_blue_")
+    assert set(minted["slab"][0]["Aliases"].split("|")) == {"Agata Blu", "Agata Bleu"}
+
+
 def test_renamed_mint_is_idempotent_while_the_pull_lags(tmp_path, monkeypatch):
     # If produce 2 runs BEFORE Medusa has re-exported (the export still lacks 'Honey'), the row gaps again
     # and curate mints the same Key with the same alias -- byte-identical output, no drift, no duplicate.
