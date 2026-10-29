@@ -46,6 +46,12 @@ variable "gpu_image_tag" {
   description = "ECR tag the DEV GPU Batch enhancer runs (:gpu tracks the latest build)."
 }
 
+variable "dev_gpu_extra_image_buckets" {
+  type        = list(string)
+  default     = []
+  description = "Other brands' media buckets the DEV GPU enhancer may enhance in place (read + write under dev/products/ only, no delete). Dev only: prod has no equivalent."
+}
+
 variable "prod_gpu_image_tag" {
   type        = string
   default     = "gpu"

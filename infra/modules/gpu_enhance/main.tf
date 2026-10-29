@@ -11,6 +11,8 @@ locals {
   platform_name = "${var.brand}-${var.home_env}"
   bucket_arn    = "arn:aws:s3:::${var.staging_bucket}"
   object_arn    = "arn:aws:s3:::${var.staging_bucket}/*"
+  # The products tree the pipeline reads and writes in a bucket (stone_pipeline ENV_SEGMENT: dev | prod).
+  products_prefix = var.target_env == "production" ? "prod/products" : "dev/products"
 }
 
 data "aws_region" "current" {}
@@ -141,6 +143,29 @@ data "aws_iam_policy_document" "job" {
     sid       = "StagingBucketList"
     actions   = ["s3:ListBucket"]
     resources = [local.bucket_arn]
+  }
+  # Other brands' media buckets (var.extra_image_buckets): the reprocess reads scraped/ originals and writes
+  # improved/ images + markers, all under the products tree, and never deletes.
+  dynamic "statement" {
+    for_each = length(var.extra_image_buckets) == 0 ? [] : [1]
+    content {
+      sid       = "BrandMediaRW"
+      actions   = ["s3:GetObject", "s3:PutObject"]
+      resources = [for b in var.extra_image_buckets : "arn:aws:s3:::${b}/${local.products_prefix}/*"]
+    }
+  }
+  dynamic "statement" {
+    for_each = length(var.extra_image_buckets) == 0 ? [] : [1]
+    content {
+      sid       = "BrandMediaList"
+      actions   = ["s3:ListBucket"]
+      resources = [for b in var.extra_image_buckets : "arn:aws:s3:::${b}"]
+      condition {
+        test     = "StringLike"
+        variable = "s3:prefix"
+        values   = ["${local.products_prefix}/*"]
+      }
+    }
   }
 }
 
