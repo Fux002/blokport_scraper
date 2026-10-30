@@ -44,6 +44,12 @@ def upscale(rgb, esr, factor):
     return np.clip(cv2.cvtColor(base, cv2.COLOR_LAB2RGB) * 255 + 0.5, 0, 255).astype(np.uint8)
 
 
+def outline_with_erased(outline, marks, inside):
+    """The slab's outline including what was erased on it: a card or sticker on the edge is not a bite out of the
+    stone, its place is filled with stone. Only within the fitted slab, so a mark on the floor never grows it."""
+    return outline | (marks & inside)
+
+
 def squared_slabs(rgb, seg, det, lama, esr):
     """One/two (squared slab RGB, its alpha) pairs, cleaned and lit as one set (a pair keeps one light), or the
     reason (str) no whole slab was found.
@@ -70,6 +76,7 @@ def squared_slabs(rgb, seg, det, lama, esr):
     for q in quads:
         marks |= proto.foreign_objects(q, raw)
     rgb = proto.erase(rgb, marks, lama, hull)
+    outline = outline_with_erased(outline, marks, inside)
     flats, alphas = [], []
     for q in quads:
         f, H = openbook._flat(rgb, q)

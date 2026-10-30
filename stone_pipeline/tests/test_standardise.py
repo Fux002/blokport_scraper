@@ -76,6 +76,24 @@ def test_a_labels_square_bite_is_filled_but_a_strip_along_a_side_is_not():
     assert filled[320, 1190] == 1 and filled[400, 2] == 0
 
 
+def test_a_card_erased_on_the_slabs_edge_leaves_no_bite():
+    outline = np.ones((800, 1200), np.uint8)
+    outline[:60, 500:800] = 0                          # SAM saw the card on the top edge as not stone
+    inside = np.ones((800, 1200), np.uint8)
+    marks = np.zeros((800, 1200), np.uint8)
+    marks[:70, 490:810] = 1                            # the card, erased and filled with stone
+    assert layout.outline_with_erased(outline, marks, inside)[30, 650] == 1
+
+
+def test_a_mark_outside_the_slab_does_not_grow_it():
+    outline = np.zeros((800, 1200), np.uint8)
+    outline[100:700, 100:1100] = 1
+    inside = outline.copy()
+    marks = np.zeros((800, 1200), np.uint8)
+    marks[20:60, 300:500] = 1                          # a painted code on the floor
+    assert layout.outline_with_erased(outline, marks, inside)[40, 400] == 0
+
+
 def test_a_real_corner_chip_stays():
     alpha = np.ones((800, 1200), np.float32)
     cv2.fillConvexPoly(alpha, np.array([[0, 700], [100, 799], [0, 799]]), 0)
