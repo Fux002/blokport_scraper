@@ -130,6 +130,11 @@ def _trim_side(lab, alpha, band):
     found = edge[np.arange(h), at] > C.TRIM_LINE * float(np.percentile(inner, C.TRIM_LINE_PCT))
     cut = np.maximum(cut, (at + 1) * found)
     cut = np.array([np.median(cut[max(0, i - k // 2):i + k // 2 + 1]) for i in range(h)], np.float32)
+    # A neighbour's side runs a long way along an edge; a short cut is a vein meeting the edge, and would be a nick.
+    n, labels, stats, _ = cv2.connectedComponentsWithStats((cut > 0).astype(np.uint8).reshape(-1, 1))
+    for i in range(1, n):
+        if stats[i, cv2.CC_STAT_HEIGHT] < C.TRIM_MIN_LENGTH * h:
+            cut[labels.ravel() == i] = 0
     # A real edge has no steps.
     cut = cv2.GaussianBlur(cut.reshape(-1, 1), (0, 0), sigmaX=1, sigmaY=C.TRIM_SOFT * h).ravel()
     out = alpha.copy()

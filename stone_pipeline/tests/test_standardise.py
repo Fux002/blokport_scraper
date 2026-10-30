@@ -56,6 +56,13 @@ def test_a_neighbours_strip_along_a_side_is_cut():
     assert alpha[400, 5] == 0 and alpha[400, 100] == 1
 
 
+def test_a_short_vein_at_the_edge_leaves_no_nick():
+    stone = _stone(800, 1200, base=150, var=4)
+    stone[380:420, :24] = (70, 40, 40)                 # a dark vein meeting the left edge
+    alpha = layout.trim_edges(stone, np.ones((800, 1200), np.float32))
+    assert alpha[400, 3] == 1
+
+
 def test_plain_stone_loses_nothing_at_its_edges():
     alpha = layout.trim_edges(_stone(800, 1200, base=150, var=4), np.ones((800, 1200), np.float32))
     assert alpha.mean() > 0.995

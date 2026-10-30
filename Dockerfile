@@ -191,3 +191,10 @@ COPY . /app
 RUN for f in /app/from_medusa/*/variants_export_base.csv; do [ -e "$f" ] && cp "$f" "${f%.csv}.seed.csv"; done
 RUN chmod +x /app/deploy/run_pipeline.sh
 ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
+
+# ---------------------------------------------------------------------------------------------------
+# Comparison image only: :standardise plus an open editing model, to judge against real photos. Not a production image.
+#   docker build --target standardise-edit -t blokport-scraper:standardise-edit .
+FROM standardise AS standardise-edit
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from huggingface_hub import snapshot_download as d; \
+    d('black-forest-labs/FLUX.2-klein-4B', revision='e7b7dc27f91deacad38e78976d1f2b499d76a294', local_dir='/app/models/flux2-klein-4b', ignore_patterns=['flux-2-klein-4b.safetensors','*.bin','*.md','*.png','*.jpg'])"

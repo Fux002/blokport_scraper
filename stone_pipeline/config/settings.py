@@ -943,6 +943,16 @@ class STANDARDISE:
     FILL_DETAIL_SIGMA = 0.003      # an erased area keeps LaMa's texture finer than this share of the long side; coarser tone is the stone's around it
     # --- marks ---
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
+    EDIT_DIR = "/app/models/flux2-klein-4b"   # FLUX.2 Klein 4B (Apache-2.0), baked in the :standardise-edit image only
+    EDIT_PIXELS = 1_000_000            # the model edits at about this many pixels
+    EDIT_STEPS, EDIT_GUIDANCE = 4, 1.0
+    _KEEP = ("Keep the stone, its colour, veining, edges and everything else in the photo exactly as they are. "
+             "Do not add anything.")
+    EDIT_PROMPTS = {
+        "strap": "Remove the two straps leaning across the stone slab, showing the slab's natural surface where they were. " + _KEEP,
+        "logo": "Remove the company logo and its text from the surface of the stone, showing the natural stone beneath. " + _KEEP,
+        "cards": "Remove the fan of sample cards lying on the stone, showing the natural stone beneath. " + _KEEP,
+    }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
     # The revision each model is baked at in the image (Dockerfile): the jobs run offline, so "latest" cannot resolve.
@@ -1052,6 +1062,7 @@ class STANDARDISE:
     TRIM_OWN, TRIM_OWN_PCT = 1.2, 98   # ... and from this many times what the stone itself varies by (this percentile), so a busy stone is left alone
     TRIM_SOFT = 0.006                  # the cut is smoothed along the edge over this share of it
     TRIM_LINE, TRIM_LINE_PCT = 1.6, 99.5   # a physical edge is this many times this percentile of the stone's own change further in
+    TRIM_MIN_LENGTH = 0.2              # a cut must run along at least this share of the edge, else it would leave a nick
     TRIM_RUN = 0.03                    # a cut must run along this share of the edge (a vein crossing the edge does not)
     NOTCH_FILL = 0.08                  # bites in an edge narrower than this share of the slab's height are filled
     OUTLINE_CLOSE = 0.012              # notches thinner than this share of the photo's long side are filled, wider ones are real
