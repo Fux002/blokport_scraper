@@ -33,7 +33,9 @@ def main() -> int:
     # The machine has 16 GB of memory, and the text encoder and the image model do not fit in it together: the few fixed
     # instructions are encoded once, the encoder freed, and only then is the image model loaded.
     encoder = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, transformer=None, vae=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
-    embeds = {task: encoder.encode_prompt(prompt=prompt, device="cuda")[0].cpu() for task, prompt in C.EDIT_PROMPTS.items()}
+    with torch.no_grad():
+        embeds = {task: encoder.encode_prompt(prompt=prompt, device="cuda", max_sequence_length=C.EDIT_MAX_TOKENS)[0].cpu()
+                  for task, prompt in C.EDIT_PROMPTS.items()}
     del encoder
     gc.collect()
     torch.cuda.empty_cache()

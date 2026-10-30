@@ -946,6 +946,7 @@ class STANDARDISE:
     EDIT_DIR = "/app/models/flux2-klein-4b"   # FLUX.2 Klein 4B (Apache-2.0), baked in the :standardise-edit image only
     EDIT_PIXELS = 1_000_000            # the model edits at about this many pixels
     EDIT_STEPS, EDIT_GUIDANCE = 4, 1.0
+    EDIT_MAX_TOKENS = 128              # the instructions are short; the encoder's memory grows with this
     _KEEP = ("Keep the stone, its colour, veining, edges and everything else in the photo exactly as they are. "
              "Do not add anything.")
     EDIT_PROMPTS = {
