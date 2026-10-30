@@ -944,7 +944,7 @@ class STANDARDISE:
     # --- marks ---
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
-    SHEET_KEY = "to_upload/3_products_all.csv"   # the product sheet, under <env>/
+    SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
     CLIP_MODEL = "openai/clip-vit-base-patch32"
     BLEND_MODEL = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"   # Open RAIL++-M
     BLEND_VAE = "madebyollin/sdxl-vae-fp16-fix"   # the stock SDXL VAE overflows in fp16 (black images)

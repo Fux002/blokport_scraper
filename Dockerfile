@@ -143,3 +143,48 @@ COPY . /app
 RUN for f in /app/from_medusa/*/variants_export_base.csv; do [ -e "$f" ] && cp "$f" "${f%.csv}.seed.csv"; done
 RUN chmod +x /app/deploy/run_pipeline.sh
 ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
+
+# ---------------------------------------------------------------------------------------------------
+# The photo standardiser (RUN_MODE=standardise): its own image, because its models need far newer torch +
+# transformers + diffusers than the :gpu target's pinned stack, and dev's live enhancer runs :gpu. No hosted
+# API: every model is open, baked here at an immutable revision, so no fetch ever happens on a live task.
+#   docker build --target standardise -t blokport-scraper:standardise .
+FROM python:3.12-slim AS standardise
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates libgl1 libglib2.0-0 curl tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+COPY stone_pipeline/requirements.txt /tmp/requirements.txt
+COPY stone_pipeline/requirements-standardise.txt /tmp/requirements-standardise.txt
+RUN pip install --upgrade "pip" "setuptools>=78.1.1" \
+    && pip install -r /tmp/requirements.txt \
+    && pip install --extra-index-url https://download.pytorch.org/whl/cu126 -r /tmp/requirements-standardise.txt \
+    && pip install --no-deps "simple-lama-inpainting==0.1.2"
+# --no-deps: its declared pins (numpy<2, pillow<10) are stale; the module works on the current ones.
+RUN mkdir -p /app/models \
+    && curl -fsSL -o /app/models/RealESRGAN_x4plus.pth \
+       https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth \
+    && echo "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1  /app/models/RealESRGAN_x4plus.pth" | sha256sum -c - \
+    && curl -fsSL -o /app/models/big-lama.pt \
+       https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt
+RUN python -c "from huggingface_hub import snapshot_download as d; \
+    d('facebook/sam-vit-huge', revision='87aecf0df4ce6b30cd7de76e87673c49644bdf67', allow_patterns=['*.json','*.txt','model.safetensors']); \
+    d('IDEA-Research/grounding-dino-base', revision='12bdfa3120f3e7ec7b434d90674b3396eccf88eb', ignore_patterns=['*.bin']); \
+    d('openai/clip-vit-base-patch32', revision='3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268', ignore_patterns=['*.msgpack','*.h5','*.bin','*.ot']); \
+    d('diffusers/stable-diffusion-xl-1.0-inpainting-0.1', revision='115134f363124c53c7d878647567d04daf26e41e', allow_patterns=['*.json','*.txt','*fp16.safetensors','tokenizer*/*','scheduler/*']); \
+    d('madebyollin/sdxl-vae-fp16-fix', revision='207b116dae70ace3637169f1ddd2434b91b3a8cd', allow_patterns=['config.json','diffusion_pytorch_model.safetensors'])"
+ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
+    LAMA_MODEL=/app/models/big-lama.pt \
+    BLOKPORT_IMAGE_PROCESSING=true \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_DOWNLOAD_TIMEOUT=15 \
+    BLOKPORT_REQUIRE_CUDA=1
+COPY . /app
+RUN for f in /app/from_medusa/*/variants_export_base.csv; do [ -e "$f" ] && cp "$f" "${f%.csv}.seed.csv"; done
+RUN chmod +x /app/deploy/run_pipeline.sh
+ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
