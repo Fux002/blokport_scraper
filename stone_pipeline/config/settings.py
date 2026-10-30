@@ -945,6 +945,12 @@ class STANDARDISE:
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
+    # The revision each model is baked at in the image (Dockerfile): the jobs run offline, so "latest" cannot resolve.
+    SAM_REVISION = "87aecf0df4ce6b30cd7de76e87673c49644bdf67"
+    DETECTOR_REVISION = "12bdfa3120f3e7ec7b434d90674b3396eccf88eb"
+    CLIP_REVISION = "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
+    BLEND_REVISION = "115134f363124c53c7d878647567d04daf26e41e"
+    BLEND_VAE_REVISION = "207b116dae70ace3637169f1ddd2434b91b3a8cd"
     CLIP_MODEL = "openai/clip-vit-base-patch32"
     BLEND_MODEL = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"   # Open RAIL++-M
     BLEND_VAE = "madebyollin/sdxl-vae-fp16-fix"   # the stock SDXL VAE overflows in fp16 (black images)

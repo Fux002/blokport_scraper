@@ -194,7 +194,7 @@ def _in_frame(q, shape):
 
 def load_detector(device):
     from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
-    return AutoModelForZeroShotObjectDetection.from_pretrained(C.DETECTOR).to(device), AutoProcessor.from_pretrained(C.DETECTOR)
+    return AutoModelForZeroShotObjectDetection.from_pretrained(C.DETECTOR, revision=C.DETECTOR_REVISION).to(device), AutoProcessor.from_pretrained(C.DETECTOR, revision=C.DETECTOR_REVISION)
 
 
 def detect(det, rgb, prompt=None, threshold=None):

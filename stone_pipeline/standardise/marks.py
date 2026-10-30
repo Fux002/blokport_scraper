@@ -31,8 +31,8 @@ def load_sam():
     from transformers import SamModel, SamProcessor
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     dtype = torch.float16 if device == "cuda" else torch.float32     # fp16 on CUDA; MPS/CPU stay fp32
-    sam = SamModel.from_pretrained(C.SAM_MODEL, torch_dtype=dtype).to(device).eval()
-    return sam, SamProcessor.from_pretrained(C.SAM_MODEL), device
+    sam = SamModel.from_pretrained(C.SAM_MODEL, revision=C.SAM_REVISION, torch_dtype=dtype).to(device).eval()
+    return sam, SamProcessor.from_pretrained(C.SAM_MODEL, revision=C.SAM_REVISION), device
 
 
 def embed(model, rgb: np.ndarray):

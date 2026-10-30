@@ -39,13 +39,13 @@ def _esrgan():
 
 def _clip(dev):
     from transformers import CLIPModel, CLIPProcessor
-    return CLIPModel.from_pretrained(C.CLIP_MODEL).to(dev).eval(), CLIPProcessor.from_pretrained(C.CLIP_MODEL), dev
+    return CLIPModel.from_pretrained(C.CLIP_MODEL, revision=C.CLIP_REVISION).to(dev).eval(), CLIPProcessor.from_pretrained(C.CLIP_MODEL, revision=C.CLIP_REVISION), dev
 
 
 def _inpaint(dev):
     from diffusers import AutoencoderKL, StableDiffusionXLInpaintPipeline
-    vae = AutoencoderKL.from_pretrained(C.BLEND_VAE, torch_dtype=torch.float16)
-    return StableDiffusionXLInpaintPipeline.from_pretrained(C.BLEND_MODEL, vae=vae, torch_dtype=torch.float16, variant="fp16",
+    vae = AutoencoderKL.from_pretrained(C.BLEND_VAE, revision=C.BLEND_VAE_REVISION, torch_dtype=torch.float16)
+    return StableDiffusionXLInpaintPipeline.from_pretrained(C.BLEND_MODEL, revision=C.BLEND_REVISION, vae=vae, torch_dtype=torch.float16, variant="fp16",
                                                             use_safetensors=True).to(dev)
 
 
