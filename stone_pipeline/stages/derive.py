@@ -648,25 +648,26 @@ def derive_ports(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig
 
 
 # --- collection location (section 3.3b) ---------------------------------------
-def derive_collection(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
-    # Where this source's products are physically COLLECTED before shipping (the supplier's warehouse): a
-    # per-source constant, independent of origin (provenance/quarry) and of ports (departure). Optional and
-    # NEVER required -- a blank config leaves both null and the product still lists. Country is validated
-    # against the same ISO reference as origin (a typo emits null + a loud log, never a wrong country); city
-    # is free text. City is only meaningful WITH a resolved country (the emit contract), so the two stand or
-    # fall together. A per-PRODUCT scrape override can layer here later (precedence scrape > default).
+def collection_location(ref: ReferenceData, source_cfg: SourceConfig) -> tuple[str | None, str | None]:
+    """(ISO country, city) where this source's products are physically COLLECTED before shipping (the supplier's
+    warehouse): a per-source constant, independent of origin (provenance/quarry) and of ports (departure). Wholly blank
+    is a stated "none" and emits null; the backend clears a product's location on a stated null, so a mistyped country
+    or a city with no country raises instead of reading the same. run_source checks this before any stage and holds the
+    source, keeping its last good run. City is free text. A per-PRODUCT scrape override can layer here later."""
     country = (source_cfg.collection_country_default or "").strip()
     city = (source_cfg.collection_city_default or "").strip()
-    iso = _to_iso(country, ref) if country else None
-    if country and not iso:
-        log.warning("collection_country_default did not resolve to a country; emitting null collection",
-                    extra={"extra_fields": {"source": source_cfg.source, "value": country}})
-    elif city and not country:
-        log.warning("collection_city set without a collection_country_default; emitting null collection "
-                    "(a city is only meaningful with a country)",
-                    extra={"extra_fields": {"source": source_cfg.source, "city": city}})
-    row.collection_country_code = iso
-    row.collection_city = (city or None) if iso else None
+    if not country and not city:
+        return None, None
+    if not country:
+        raise ValueError(f"collection_city_default {city!r} is set without a collection_country_default")
+    iso = _to_iso(country, ref)
+    if not iso:
+        raise ValueError(f"collection_country_default {country!r} does not resolve to a country")
+    return iso, city or None
+
+
+def derive_collection(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
+    row.collection_country_code, row.collection_city = collection_location(ref, source_cfg)
 
 
 # --- title / description / handle (section 10.3, 10.4) ------------------------
