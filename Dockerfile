@@ -175,8 +175,10 @@ RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('facebook/sam-vit-huge', revision='87aecf0df4ce6b30cd7de76e87673c49644bdf67', allow_patterns=['*.json','*.txt','model.safetensors']); \
     d('IDEA-Research/grounding-dino-base', revision='12bdfa3120f3e7ec7b434d90674b3396eccf88eb', ignore_patterns=['*.bin']); \
     d('openai/clip-vit-base-patch32', revision='3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268', ignore_patterns=['*.msgpack','*.h5','*.ot']); \
-    d('diffusers/stable-diffusion-xl-1.0-inpainting-0.1', revision='115134f363124c53c7d878647567d04daf26e41e', allow_patterns=['*.json','*.txt','*fp16.safetensors','tokenizer*/*','scheduler/*']); \
     d('madebyollin/sdxl-vae-fp16-fix', revision='207b116dae70ace3637169f1ddd2434b91b3a8cd', allow_patterns=['config.json','diffusion_pytorch_model.safetensors'])"
+# The library's own download: exactly the files its loader then asks for, offline.
+RUN python -c "import torch; from diffusers import StableDiffusionXLInpaintPipeline as P; \\
+    P.download('diffusers/stable-diffusion-xl-1.0-inpainting-0.1', revision='115134f363124c53c7d878647567d04daf26e41e', variant='fp16', use_safetensors=True)"
 ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
     LAMA_MODEL=/app/models/big-lama.pt \
     BLOKPORT_IMAGE_PROCESSING=true \
