@@ -51,22 +51,18 @@ def test_collection_null_when_unconfigured(ref, cfg):
     assert row.collection_country_code is None and row.collection_city is None
 
 
-def test_collection_bad_country_emits_null_not_a_guess(ref, cfg):
-    # an unresolvable country is emitted as null (never a wrong country); the city falls with it, since a
-    # city is only meaningful WITH a country.
+def test_collection_bad_country_is_a_config_error_not_a_null(ref, cfg):
+    # a typo must never read as "this source has no location": the sync sends null and the backend clears it.
     c = dataclasses.replace(cfg, collection_country_default="XX", collection_city_default="Nowhere")
-    row = _slab_row()
-    derive.derive_collection(row, ref, c)
-    assert row.collection_country_code is None and row.collection_city is None
+    with pytest.raises(ValueError, match="collection_country_default"):
+        derive.collection_location(ref, c)
 
 
-def test_collection_city_without_country_is_null(ref, cfg):
-    # a city configured without a country is meaningless (the emit contract) -> both null.
+def test_collection_city_without_country_is_a_config_error(ref, cfg):
+    # half a location is a misconfiguration too, and would clear the same products: only a wholly blank one is a stated null.
     c = dataclasses.replace(cfg, collection_country_default="", collection_city_default="Verona")
-    row = _slab_row()
-    derive.derive_collection(row, ref, c)
-    assert row.collection_country_code is None and row.collection_city is None
-
+    with pytest.raises(ValueError, match="collection_city_default"):
+        derive.collection_location(ref, c)
 
 def test_bundle_from_slab_count_high(ref, cfg):
     row = _slab_row(raw_slab_count="10")
