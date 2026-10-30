@@ -5,6 +5,7 @@ only): reads the list at <env>/standardise-test/edit-test.json ([{"src", "sha", 
 
 from __future__ import annotations
 
+import gc
 import io
 import json
 import sys
@@ -29,14 +30,20 @@ def main() -> int:
     client = boto3.client("s3", region_name=S3_REGION)
     prefix = f"{ENV_SEGMENT}/{C.TEST_PREFIX}"
     items = json.loads(client.get_object(Bucket=S3_BUCKET, Key=f"{prefix}/edit-test.json")["Body"].read())
-    pipe = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, torch_dtype=torch.float16)
-    pipe.enable_model_cpu_offload()                    # the T4's 16 GB holds one part at a time
+    # The machine has 16 GB of memory, and the text encoder and the image model do not fit in it together: the few fixed
+    # instructions are encoded once, the encoder freed, and only then is the image model loaded.
+    encoder = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, transformer=None, vae=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
+    embeds = {task: encoder.encode_prompt(prompt=prompt, device="cuda")[0].cpu() for task, prompt in C.EDIT_PROMPTS.items()}
+    del encoder
+    gc.collect()
+    torch.cuda.empty_cache()
+    pipe = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, text_encoder=None, tokenizer=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
     for item in items:
         started = time.time()
         key = f"{imagestore.scraped_prefix(item['src'])}{item['sha']}.jpg"
         img = Image.open(io.BytesIO(client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())).convert("RGB")
         w, h = _size(img)
-        out = pipe(prompt=C.EDIT_PROMPTS[item["task"]], image=img.resize((w, h), Image.LANCZOS), width=w, height=h,
+        out = pipe(prompt_embeds=embeds[item["task"]].to("cuda"), image=img.resize((w, h), Image.LANCZOS), width=w, height=h,
                    num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
                    generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0]
         buf = io.BytesIO()
