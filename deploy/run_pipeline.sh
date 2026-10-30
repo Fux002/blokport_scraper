@@ -24,10 +24,13 @@ case "$RUN_MODE" in
   reprocess)
     echo "==> reprocess a source's scraped/ originals -> improved/ (no scrape)"
     exec python -m deploy.reprocess_source ;;
+  standardise)
+    echo "==> standardise a source's scraped/ originals -> the test prefix (no scrape, never improved/)"
+    exec python -m deploy.standardise_source ;;
   generate-textures)
     echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> the env's variations/ prefix), no scrape"
     exec python -m stone_pipeline.prepare_variant_images ;;
   *)
-    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: validate-dewatermark | reprocess | generate-textures)" >&2
+    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: validate-dewatermark | reprocess | standardise | generate-textures)" >&2
     exit 2 ;;
 esac
