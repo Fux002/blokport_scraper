@@ -45,8 +45,9 @@ def _clip(dev):
 def _inpaint(dev):
     from diffusers import AutoencoderKL, StableDiffusionXLInpaintPipeline
     vae = AutoencoderKL.from_pretrained(C.BLEND_VAE, revision=C.BLEND_VAE_REVISION, torch_dtype=torch.float16)
-    return StableDiffusionXLInpaintPipeline.from_pretrained(C.BLEND_MODEL, revision=C.BLEND_REVISION, vae=vae, torch_dtype=torch.float16, variant="fp16",
-                                                            use_safetensors=True).to(dev)
+    baked = os.environ.get("STANDARDISE_SDXL_DIR", "")   # the image's own folder; elsewhere the pinned Hub revision
+    where = dict(pretrained_model_name_or_path=baked) if baked else dict(pretrained_model_name_or_path=C.BLEND_MODEL, revision=C.BLEND_REVISION)
+    return StableDiffusionXLInpaintPipeline.from_pretrained(**where, vae=vae, torch_dtype=torch.float16, variant="fp16", use_safetensors=True).to(dev)
 
 
 def load(survey_only=False):
