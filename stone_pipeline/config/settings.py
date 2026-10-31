@@ -943,6 +943,24 @@ class STANDARDISE:
     FILL_DETAIL_SIGMA = 0.003      # an erased area keeps LaMa's texture finer than this share of the long side; coarser tone is the stone's around it
     # --- marks ---
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
+    CARD_PROMPT = "a stack of color sample cards. a sticker. a paper label. a price tag."
+    CARD_MIN_SCORE = 0.3
+    CARD_MAX_BOX = 0.12                # a detected card or label is at most this share of the photo (else it is the slab)
+    RETOUCH_PROMPT = ("Remove the straps, sample cards, stickers and labels lying on or crossing the stone, showing the natural stone "
+                      "beneath. Keep the stone, its colour, veining and edges and everything else exactly as they are. Do not add anything.")
+    RETOUCH_GROW = 0.006               # a found card is widened by this share of the photo's long side
+    RETOUCH_GUARD = 0.02               # the stone is compared this far away from what was found (share of the long side)
+    RETOUCH_BROAD = 0.01               # at this scale, so fine redrawing does not count, only moved colour
+    RETOUCH_PCT = 98
+    RETOUCH_MAX_CHANGE = 8.0           # outside the found area the broad colour may move this much (Lab): else the model repainted the stone
+    RETOUCH_RING = 0.02                # the fill is compared with the stone this far around it (share of the long side)
+    RETOUCH_MAX_COLOUR = 14.0          # its colour may differ this much (Lab) ...
+    RETOUCH_MAX_TEXTURE = 1.9          # ... and it may be this many times busier: an invented pile of rocks is not
+    RETOUCH_FEATHER = 2.0
+    WHITE_MARGIN = 0.05                # on white, the slab's border (share of the canvas)
+    WHITE_SEAM = 4                     # an open book's gap on white (px)
+    WHITE_SHADOWS = ((26, 12, 0.30), (5, 3, 0.28))   # blur, drop (px), strength: a soft shadow and a tight contact one
+    WHITE_TINT = (20, 41, 73)          # the shadow's colour, the site's navy
     EDIT_DIR = "/app/models/flux2-klein-4b"   # FLUX.2 Klein 4B (Apache-2.0), baked in the :standardise-edit image only
     EDIT_PIXELS = 1_000_000            # the model edits at about this many pixels
     EDIT_STEPS, EDIT_GUIDANCE = 4, 1.0

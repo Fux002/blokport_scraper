@@ -27,6 +27,9 @@ case "$RUN_MODE" in
   standardise)
     echo "==> standardise a source's scraped/ originals -> the test prefix (no scrape, never improved/)"
     exec python -m deploy.standardise_source ;;
+  standardise-retouch)
+    echo "==> take straps, cards and stickers off a source's photos (no scrape, never improved/)"
+    exec python -m deploy.standardise_retouch ;;
   standardise-edit-test)
     echo "==> compare editing models on hard photos (dev only, nothing published)"
     exec python -m deploy.standardise_edit_test ;;
@@ -34,6 +37,6 @@ case "$RUN_MODE" in
     echo "==> generate new-variant textures (FLUX.2 -> BEN2 -> the env's variations/ prefix), no scrape"
     exec python -m stone_pipeline.prepare_variant_images ;;
   *)
-    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: validate-dewatermark | reprocess | standardise | standardise-edit-test | generate-textures)" >&2
+    echo "ERROR: unknown RUN_MODE='$RUN_MODE' (expected: validate-dewatermark | reprocess | standardise | standardise-retouch | standardise-edit-test | generate-textures)" >&2
     exit 2 ;;
 esac

@@ -8,7 +8,6 @@ re-run is safe. One bad photo is recorded and never stops the slice.
 from __future__ import annotations
 
 import collections
-import io
 import json
 import os
 import sys
@@ -20,7 +19,7 @@ import numpy as np
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
-from stone_pipeline.standardise import index, kinds, layout, models, outline, photo
+from stone_pipeline.standardise import index, kinds, models, outline, photo
 
 
 def _encode(rgb, quality=92):
@@ -58,6 +57,27 @@ def _survey(rgb, m):
     return "open book" if len(quads) == 2 else "slab"
 
 
+def run_prefix(src):
+    """Where a test run writes: RUN_TAG keeps runs apart, so a new run never skips work done by an older one."""
+    tag = os.environ.get("RUN_TAG", "").strip()
+    return f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag + '/' if tag else ''}{src}/"
+
+
+def _photo_keys(client, src):
+    """The photos of this run: the known ones, stable order (slices rely on it), SAMPLE and the slice applied."""
+    sample = int(os.environ.get("SAMPLE", "0"))
+    offset, count = int(os.environ.get("SLICE_OFFSET", "0")), int(os.environ.get("SLICE_COUNT", "0"))
+    photos = index.build(_get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8"))
+    keys = []
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.scraped_prefix(src)):
+        keys.extend(o["Key"] for o in page.get("Contents", []))
+    keys.sort()
+    known = [k for k in keys if imagestore.sha_from_url(k) in photos]
+    if sample:
+        known = known[:sample]
+    return known[offset:offset + count] if count else known[offset:]
+
+
 def main() -> int:
     src = os.environ.get("SRC", "").strip()
     if not src:
@@ -66,21 +86,12 @@ def main() -> int:
     survey = os.environ.get("SURVEY", "false").lower() in ("1", "true", "yes")
     watermarked = os.environ.get("WATERMARKED", "false").lower() in ("1", "true", "yes")
     extra = os.environ.get("EXTRA_VIEWS", "true").lower() in ("1", "true", "yes")
-    sample = int(os.environ.get("SAMPLE", "0"))
-    offset, count = int(os.environ.get("SLICE_OFFSET", "0")), int(os.environ.get("SLICE_COUNT", "0"))
+    offset = int(os.environ.get("SLICE_OFFSET", "0"))
     client = boto3.client("s3", region_name=S3_REGION)
-    out = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{src}/"
+    out = run_prefix(src)
     photos = index.build(_get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8"))
-
-    keys = []
-    for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.scraped_prefix(src)):
-        keys.extend(o["Key"] for o in page.get("Contents", []))
-    keys.sort()                                        # the stable order slices rely on (see deploy.reprocess_source)
-    known = [k for k in keys if imagestore.sha_from_url(k) in photos]
-    if sample:
-        known = known[:sample]
-    sliced = known[offset:offset + count] if count else known[offset:]
-    print(f"==> standardise {src}: {len(sliced)} of {len(known)} known photos ({len(keys)} scraped), survey={survey}", flush=True)
+    sliced = _photo_keys(client, src)
+    print(f"==> standardise {src}: {len(sliced)} photos, survey={survey}", flush=True)
     m = models.load(survey_only=survey)
     tally = collections.Counter()
     spent = []
@@ -92,7 +103,17 @@ def main() -> int:
             if not survey and (_exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")):
                 tally["already done"] += 1
                 continue
-            rgb = photo.decode(_get(client, key))
+            # A retouched photo is the start; a refused retouch holds the photo unless only straps were to come off, which stay.
+            source_key = f"{out}retouched/{sha}.jpg"
+            refused = f"{out}retouch_held/{sha}.json"
+            if not survey and not _exists(client, source_key) and _exists(client, refused):
+                note = json.loads(_get(client, refused))
+                if not note["straps_only"]:
+                    client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
+                                      Body=json.dumps({"reason": note["reason"], "kind": ""}, sort_keys=True).encode())
+                    tally["held"] += 1
+                    continue
+            rgb = photo.decode(_get(client, source_key if _exists(client, source_key) else key))
             if survey:
                 tally[_survey(rgb, m) if info["format"] == "slab" else info["format"]] += 1
             else:
@@ -106,7 +127,8 @@ def main() -> int:
                                       Body=json.dumps({"reason": res.held, "kind": res.kind}, sort_keys=True).encode())
                     tally["held"] += 1
                 else:
-                    for name, img in res.images.items():
+                    # Written last, so "main" means this photo is complete.
+                    for name, img in sorted(res.images.items(), key=lambda kv: kv[0] == "main"):
                         client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{name}.jpg", Body=_encode(img), ContentType="image/jpeg")
                     if res.slab:
                         client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")

@@ -292,3 +292,51 @@ def masks(slabs, key):
     solid = (np.abs(dark - light).max(axis=2) < C.OPAQUE_MAX_CHANGE).astype(np.uint8)
     stand = ((np.abs(with_it - without).max(axis=2) > C.STAND_MIN_CHANGE) & (with_it.max(axis=2) < C.STEEL_MAX)).astype(np.uint8)
     return solid, stand
+
+
+def _white_slabs(slabs):
+    """(colour, coverage) of the slab(s) laid out on the white canvas, centred, as large as the border allows."""
+    fixed = []
+    for i, (s, a) in enumerate(slabs):
+        skip = ("right",) if i == 0 and len(slabs) > 1 else ("left",) if i and len(slabs) > 1 else ()
+        fixed.append((s, trim_edges(s, _fill_bites(a), skip=skip)))
+    gap = C.WHITE_SEAM if len(fixed) > 1 else 0
+    tw, th = sum(s.shape[1] for s, _ in fixed), fixed[0][0].shape[0]
+    k = min((C.OUT_W * (1 - 2 * C.WHITE_MARGIN) - gap) / tw, C.OUT_H * (1 - 2 * C.WHITE_MARGIN) / th)
+    sh, total = int(round(th * k)), int(round(tw * k)) + gap
+    x, y = (C.OUT_W - total) // 2, (C.OUT_H - sh) // 2
+    rgb = np.full((C.OUT_H, C.OUT_W, 3), 255, np.float32)
+    cover = np.zeros((C.OUT_H, C.OUT_W), np.float32)
+    for s, a in fixed:
+        sw = int(round(s.shape[1] * k))
+        solid = cv2.erode((cv2.resize(a, (sw, sh), interpolation=cv2.INTER_AREA) > 0.5).astype(np.uint8), np.ones((C.EDGE_INSET * 2 + 1,) * 2, np.uint8))
+        cover[y:y + sh, x:x + sw] = cv2.GaussianBlur(solid.astype(np.float32), (0, 0), C.EDGE_SOFT)
+        rgb[y:y + sh, x:x + sw] = cv2.resize(s, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32)
+        x += sw + gap
+    return rgb, cover
+
+
+def _on_white(rgb, cover):
+    out = np.full((C.OUT_H, C.OUT_W, 3), 255, np.float32)
+    tint = np.array(C.WHITE_TINT, np.float32)
+    for blur, drop, strength in C.WHITE_SHADOWS:
+        s = np.roll(cv2.GaussianBlur(cover, (0, 0), blur), drop, axis=0)[..., None] * strength
+        out = out * (1 - s) + tint * s
+    a = cover[..., None]
+    return (out * (1 - a) + rgb * a).clip(0, 255).astype(np.uint8)
+
+
+def on_white(slabs, turn=None):
+    """The slab(s) on plain white with a soft shadow, no room and no stand (no room to clash with, nothing that can trace a
+    vendor). turn = "left" | "right": the same slab turned, about its middle."""
+    rgb, cover = _white_slabs(slabs)
+    if turn:
+        w, h = C.OUT_W, C.OUT_H
+        inset, cy = C.ANGLE_NARROW * w, h / 2
+        l, r = (C.ANGLE_FAR, C.ANGLE_NEAR) if turn == "left" else (C.ANGLE_NEAR, C.ANGLE_FAR)
+        x0, x1 = (inset, w) if turn == "left" else (0, w - inset)
+        dst = np.array([[x0, cy - cy * l], [x1, cy - cy * r], [x1, cy + cy * r], [x0, cy + cy * l]], np.float32)
+        H = cv2.getPerspectiveTransform(np.array([[0, 0], [w, 0], [w, h], [0, h]], np.float32), dst)
+        rgb = cv2.warpPerspective(rgb, H, (w, h), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
+        cover = cv2.warpPerspective(cover, H, (w, h), flags=cv2.INTER_LINEAR)
+    return _on_white(rgb, cover)

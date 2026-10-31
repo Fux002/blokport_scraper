@@ -48,10 +48,12 @@ def standardise(rgb, *, fmt, key, size=None, clean=None, watermarked=False, mode
     else:
         kind = "slab"
     images = {"main": _finished(slabs, key, models, C.BLEND_SEED)}
+    images["white"] = layout.on_white(slabs)
     if extra_views and kind != "close-up":
         for side in C.ANGLE_SIDES:
             img, solid, stand = views.angled(slabs, key, side)
             images[f"angle_{side}"] = blend.blend(img, solid, stand, models.inpaint, C.BLEND_SEED)
+            images[f"white_angle_{side}"] = layout.on_white(slabs, turn=side)
         if kind == "slab":
             up = views.close_up(slabs[0][0], slabs[0][1], models.esr)
             if up is not None:
