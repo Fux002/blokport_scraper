@@ -30,6 +30,38 @@ def keep_on_slab(found, slab, share):
     return out
 
 
+def same_ink(rgb, found, slab, long):
+    """More of the writing the detector found part of: near each found mark on the slab, strokes in the same vivid ink
+    (the numbers under a block's code in the same marker). Only where the ink is vivid, of a colour stone does not have
+    and unlike this stone, so writing on a blue stone, a white paper label or an orange clamp adds nothing."""
+    lab = cv2.cvtColor(rgb.astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
+    ab = cv2.GaussianBlur(lab[:, :, 1:], (0, 0), 1.0)
+    vivid = np.hypot(ab[..., 0], ab[..., 1]) > C.INK_CHROMA
+    stone = (slab > 0) & (found == 0)
+    more = np.zeros_like(found)
+    if not stone.any():
+        return more
+    around = np.median(ab[stone], axis=0)
+    k = max(1, int(C.INK_REACH * long))
+    n, parts = cv2.connectedComponents(found)
+    for i in range(1, n):
+        part = parts == i
+        ink = part & vivid
+        if ink.sum() < C.INK_MIN_SHARE * part.sum():
+            continue
+        colour = np.median(ab[ink], axis=0)
+        # Blue, green, pink and violet ink only: yellow, orange and red-brown are also the stone's own iron colours.
+        if colour[1] > C.INK_MAX_YELLOW or np.linalg.norm(colour - around) < C.INK_APART:
+            continue
+        near = (cv2.dilate(part.astype(np.uint8), np.ones((2 * k + 1, 2 * k + 1), np.uint8)) > 0) & stone
+        more |= (near & vivid & (np.linalg.norm(ab - colour, axis=2) < C.INK_SAME)).astype(np.uint8)
+    # A written character is a stroke of some size; a speck of the same colour is a crystal of the stone.
+    n, pieces, stats, _ = cv2.connectedComponentsWithStats(more)
+    small = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] < C.INK_MIN_PIECE * more.size]
+    more[np.isin(pieces, small)] = 0
+    return more
+
+
 def find_marks(seg, det, rgb):
     """(straps, cards, stone, slab): masks of the straps and of the cards, stickers, labels and racks on the slab, what the
     segmenter saw as stone (it must not change), and the slab: the stone's outline and the detector's box around it (the
@@ -54,8 +86,10 @@ def find_marks(seg, det, rgb):
         if (x1 - x0) * (y1 - y0) > C.CARD_MAX_BOX * w * h:
             continue
         cards |= marks.slab_mask(seg, rgb, (x0, y0, x1, y1), emb)[1]
+    cards = keep_on_slab(cards, hull, C.CARD_ON_SLAB)
+    cards |= same_ink(rgb, cards, hull, max(h, w))
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, cv2.dilate(keep_on_slab(cards, hull, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone, slab
+    return straps, cv2.dilate(cards, np.ones((k, k), np.uint8)), stone, slab
 
 
 def _lab(rgb):
@@ -176,6 +210,46 @@ def _fill(rgb, mask, stone, slab, box, edit):
         if piece is not None:
             return piece, ""
     return None, f"{reason} on all {len(C.RETOUCH_SEEDS)} tries"
+
+
+def too_wide_to_fill(mask):
+    """Whether any group of marks reaches too far from real stone to be filled without inventing what was under it."""
+    long = max(mask.shape)
+    return any(too_wide(mask[y0:y1, x0:x1], long) > C.RETOUCH_MAX_REACH for x0, y0, x1, y1 in regions(mask))
+
+
+def clear_crop(mask):
+    """(x0, y0, x1, y1) of the largest landscape part of the photo clear of every mark, at least CROP_MIN_SHARE of it, or
+    None: a close-up whose fan of sample cards is too wide to fill is shown as the real stone beside the cards, never with
+    stone invented under them. A margin keeps it off the marks and off a card the detector did not find beside them."""
+    h, w = mask.shape
+    s = C.CROP_WORK / max(h, w)
+    small = cv2.resize(mask, (max(1, round(w * s)), max(1, round(h * s))), interpolation=cv2.INTER_NEAREST)
+    k = max(1, round(C.CROP_MARGIN * C.CROP_WORK))
+    free = cv2.dilate(small, np.ones((2 * k + 1, 2 * k + 1), np.uint8)) == 0
+    lo, hi = C.CROP_ASPECT
+    rows, cols = free.shape
+    heights = np.zeros(cols + 1, int)
+    best, box = 0, None
+    # Every maximal clear rectangle, by the histogram of clear run lengths per row; each is cut to the allowed shape.
+    for y in range(rows):
+        heights[:cols] = np.where(free[y], heights[:cols] + 1, 0)
+        stack = []
+        for x in range(cols + 1):
+            start = x
+            while stack and stack[-1][1] >= heights[x]:
+                sx, sh = stack.pop()
+                bw = x - sx
+                cw = min(bw, int(sh * hi))
+                ch = min(sh, int(cw / lo))
+                if cw * ch > best:
+                    best, box = cw * ch, (sx, y - sh + 1, sx + cw, y - sh + 1 + ch)
+                start = sx
+            stack.append((start, heights[x]))
+    if box is None or best < C.CROP_MIN_SHARE * rows * cols:
+        return None
+    x0, y0, x1, y1 = (round(v / s) for v in box)
+    return x0, y0, min(w, x1), min(h, y1)
 
 
 def regions(mask):

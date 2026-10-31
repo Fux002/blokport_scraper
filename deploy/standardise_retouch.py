@@ -129,7 +129,7 @@ def main() -> int:
     if not found:
         return 0
     edit = _load_editor()
-    done = refused = 0
+    done = refused = cropped = 0
     for key, packed in found.items():
         sha = imagestore.sha_from_url(key)
         started = time.time()
@@ -139,7 +139,14 @@ def main() -> int:
             rec = _Recorder(client, out, sha) if os.environ.get("RUN_TAG") else _NoRecord()
             for name, mask in (("straps", straps), ("cards", cards), ("stone", stone), ("slab", slab)):
                 rec.put(f"{name}.png", mask * 255, png=True)
-            merged, reason = retouch.retouch(rgb, straps | cards, stone, slab, rec.wrap(edit, "marks"))
+            marked = straps | cards
+            box = retouch.clear_crop(marked) if retouch.too_wide_to_fill(marked) else None
+            if box is not None:                        # too wide to fill: the real stone beside the marks, nothing invented
+                x0, y0, x1, y1 = box
+                merged, reason = rgb[y0:y1, x0:x1], ""
+                cropped += 1
+            else:
+                merged, reason = retouch.retouch(rgb, marked, stone, slab, rec.wrap(edit, "marks"))
             if merged is None:
                 _hold(client, out, sha, reason, not cards.any())
                 refused += 1
@@ -147,10 +154,10 @@ def main() -> int:
                 continue
             client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouched/{sha}.jpg", Body=_encode(merged, 95), ContentType="image/jpeg")
             done += 1
-            print(f"   {sha[:12]} retouched {time.time() - started:.1f}s", flush=True)
+            print(f"   {sha[:12]} {'cropped clear of its marks' if box else 'retouched'} {time.time() - started:.1f}s", flush=True)
         except Exception as exc:                       # one bad photo never stops the slice
             print(f"   FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
-    print(f"==> retouch {src} done: {done} retouched, {refused} refused", flush=True)
+    print(f"==> retouch {src} done: {done} retouched ({cropped} by cropping), {refused} refused", flush=True)
     return 0
 
 

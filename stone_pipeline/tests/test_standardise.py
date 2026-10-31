@@ -6,7 +6,7 @@ import pytest
 
 from stone_pipeline.config import settings
 from stone_pipeline.config.settings import STANDARDISE as C
-from stone_pipeline.standardise import blend, index, kinds, layout, logos, marks, retouch, views
+from stone_pipeline.standardise import blend, index, kinds, layout, logos, marks, retouch, studio, views
 
 
 def _stone(h, w, seed=1, base=170, var=18):
@@ -489,3 +489,116 @@ def test_the_near_floor_has_no_streaks_or_leftover_bands():
     assert np.abs(np.diff(near.mean(axis=1))).max() < 2
     top = int(C.FLOOR_CLEAN[0] * h)
     assert np.array_equal(out[:top], room[:top])
+
+
+def test_a_close_up_with_a_fan_of_cards_is_cropped_to_its_clear_stone():
+    h, w = 1280, 1707
+    fan = np.zeros((h, w), np.uint8); fan[900:1280, 500:1000] = 1      # the cards at the bottom of a close-up, as on Zucchi's
+    box = retouch.clear_crop(fan)
+    assert box is not None
+    x0, y0, x1, y1 = box
+    assert not fan[y0:y1, x0:x1].any() and y1 <= 900 - C.CROP_MARGIN * w * 0.9
+    assert C.CROP_ASPECT[0] <= (x1 - x0) / (y1 - y0) <= C.CROP_ASPECT[1] + 0.05
+    assert (x1 - x0) * (y1 - y0) >= C.CROP_MIN_SHARE * h * w
+
+
+def test_marks_all_over_leave_no_crop():
+    h, w = 1280, 1707
+    spread = np.zeros((h, w), np.uint8)
+    spread[200:300, :] = 1; spread[700:800, :] = 1; spread[:, 600:700] = 1
+    assert retouch.clear_crop(spread) is None
+
+
+def _black_slab():
+    rgb = _stone(600, 900, base=25, var=4)
+    return rgb, np.ones((600, 900), np.float32)
+
+
+def test_a_slab_that_took_in_the_white_slab_behind_its_broken_corner_is_held():
+    rgb, alpha = _black_slab()
+    corner = np.zeros((600, 900), np.uint8)
+    cv2.fillPoly(corner, [np.array([[0, 0], [420, 0], [0, 330]])], 1)
+    corner[:25, :] = 1; corner[:, 870:] = 1                              # and on along its top to its far edge, one piece as on sen-00946947
+    rgb[corner > 0] = _stone(600, 900, seed=4, base=225, var=6)[corner > 0]
+    assert layout.two_stones(rgb, alpha)
+
+
+def test_white_veins_or_a_two_tone_breccia_are_one_stone():
+    rgb, alpha = _black_slab()
+    for x in range(60, 900, 140):
+        cv2.line(rgb, (x, 0), (x + 200, 600), (235, 235, 230), 9)         # Nero Marquina's white veins
+    assert not layout.two_stones(rgb, alpha)
+    breccia = _stone(600, 900, base=180, var=10)
+    rng = np.random.default_rng(2)
+    for _ in range(60):
+        cx, cy = rng.integers(0, 900), rng.integers(0, 600)
+        cv2.circle(breccia, (int(cx), int(cy)), int(rng.integers(15, 45)), (70, 55, 60), -1)
+    assert not layout.two_stones(breccia, alpha)
+
+
+def _written(stone_rgb):
+    rgb = stone_rgb.copy()
+    for y in (300, 360, 420):                                       # three lines of marker numbers
+        cv2.putText(rgb, "270", (420, y), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (40, 90, 230), 5)
+    cv2.putText(rgb, "406-SD", (380, 230), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (40, 90, 230), 5)
+    found = np.zeros(rgb.shape[:2], np.uint8); found[185:245, 370:620] = 1   # the detector found only the first line
+    return rgb, found
+
+
+def test_the_rest_of_the_writing_in_the_same_ink_is_found():
+    rgb, found = _written(_stone(800, 1200, base=170, var=8))
+    more = retouch.same_ink(rgb, found, _whole(), 1200)
+    assert more[270:430, 420:520].sum() > 300 and more[:, :350].sum() == 0 and more[500:].sum() == 0
+
+
+def test_writing_on_a_blue_stone_or_a_white_label_finds_nothing_more():
+    blue = np.dstack([np.full((800, 1200), 40), np.full((800, 1200), 90), np.full((800, 1200), 225)]).astype(np.uint8)
+    rgb, found = _written(blue)
+    assert retouch.same_ink(rgb, found, _whole(), 1200).sum() == 0
+    label = _stone(800, 1200, base=170, var=8); label[185:245, 370:620] = 250
+    assert retouch.same_ink(label, found, _whole(), 1200).sum() == 0
+
+
+def test_orange_ink_or_tiny_specks_add_nothing():
+    stone = _stone(800, 1200, base=170, var=8)
+    stone[300:340, 560:620] = (225, 125, 45)                        # an orange-yellow piece of the stone itself
+    rgb = stone.copy()
+    cv2.putText(rgb, "406", (380, 230), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (230, 120, 30), 5)   # an orange clamp or crayon
+    found = np.zeros(rgb.shape[:2], np.uint8); found[185:245, 370:520] = 1
+    assert retouch.same_ink(rgb, found, _whole(), 1200).sum() == 0
+    rgb, found = _written(_stone(800, 1200, base=170, var=8))
+    rgb[500:506, 450:456] = (40, 90, 230)                            # a blue speck in the stone
+    assert retouch.same_ink(rgb, found, _whole(), 1200)[490:515, 440:465].sum() == 0
+
+
+def test_the_near_floor_is_a_calm_light_neutral():
+    h, w = C.OUT_H, C.OUT_W
+    room = np.dstack([np.full((h, w), 120), np.full((h, w), 108), np.full((h, w), 92)]).astype(np.float32)   # a warm taupe floor
+    out = layout.clean_floor(room)
+    near = out[int(C.FLOOR_CLEAN[1] * h):].reshape(-1, 3).mean(0)
+    lab = lambda rgb: cv2.cvtColor(np.array([[rgb]], np.float32) / 255, cv2.COLOR_RGB2LAB)[0, 0]
+    was, now = lab(room[-1, 0]), lab(near)
+    assert now[0] > was[0] + 0.5 * C.FLOOR_LIFT and np.hypot(*now[1:]) < 0.6 * np.hypot(*was[1:])
+
+
+def test_the_studio_image_is_the_storefront_frame_and_repeatable():
+    out = studio.place([_slab(800, 1400)])
+    assert out.shape == (C.OUT_H, C.OUT_W, 3)
+    assert np.array_equal(out, studio.place([_slab(800, 1400)]))
+    assert out[10, 10].min() > 235                                   # the white studio backdrop
+
+
+def test_the_studio_slab_keeps_its_proportions_and_stands_on_the_feet():
+    for h, w in ((800, 1400), (1000, 1300)):
+        q = studio.face(w / h)
+        assert np.allclose(q[2:], studio.FACE[2:], atol=0.5)        # the same foot line, the clips under it
+        assert abs(studio.true_aspect(q) - w / h) < 0.03 * w / h
+
+
+def test_the_old_slab_is_gone_and_the_clips_stay():
+    black = (np.full((800, 1400, 3), 15, np.uint8), np.ones((800, 1400), np.float32))
+    out = studio.place([black]).astype(np.float32)
+    assert (out.max(axis=2) > 200).any()                            # chrome highlights of the clips in front of it
+    face = studio.face(1400 / 800)
+    cx, cy = studio.to_frame(face.mean(axis=0), face)
+    assert out[int(cy), int(cx)].max() < 40                          # the face is the new stone, nothing of the old slab

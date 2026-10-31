@@ -39,6 +39,11 @@ def clean_floor(room):
     out = room.copy()
     floor = room[start:]
     rows = cv2.GaussianBlur(np.median(floor, axis=1)[:, None, :], (0, 0), sigmaX=0.1, sigmaY=C.FLOOR_CLEAN_ROWS * h)
+    # A calm, light, neutral concrete, as Blokport's own pages show stone: the room's warm cast taken mostly out.
+    lab = cv2.cvtColor(np.clip(rows, 0, 255).astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
+    lab[..., 0] += C.FLOOR_LIFT
+    lab[..., 1:] *= C.FLOOR_CHROMA
+    rows = np.clip(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB), 0, 1) * 255
     clean = rows + C.FLOOR_GRAIN * (floor - cv2.GaussianBlur(floor, (0, 0), 1.5))
     w = np.clip((np.arange(start, h) - start) / max(1, full - start), 0, 1)[:, None, None]
     out[start:] = floor * (1 - w) + clean * w
@@ -69,6 +74,33 @@ def outline_with_erased(outline, marks, inside):
     """The slab's outline including what was erased on it: a card or sticker on the edge is not a bite out of the
     stone, its place is filled with stone. Only within the fitted slab, so a mark on the floor never grows it."""
     return outline | (marks & inside)
+
+
+def two_stones(rgb, alpha):
+    """Whether the cut-out holds a second, very different stone along its border: a slab with a broken corner can take
+    in the slab standing behind it (a black slab with a white wedge), which would show the wrong stone and the wrong
+    shape. Split by lightness (Otsu, so the same photo always splits the same); a vein or breccia pieces spread through
+    the stone, the slab behind is one large piece along the border."""
+    s = C.TWO_STONES_WORK / max(rgb.shape[:2])
+    small = cv2.resize(rgb, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+    inside = cv2.resize(alpha.astype(np.float32), small.shape[1::-1], interpolation=cv2.INTER_AREA) > 0.5
+    if inside.sum() < 100:
+        return False
+    lab = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_RGB2LAB), (0, 0), C.TWO_STONES_BLUR)
+    thr, _ = cv2.threshold(lab[:, :, 0][inside].reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    light = (lab[:, :, 0] > thr) & inside
+    dark = inside & ~light
+    if not light.any() or not dark.any():
+        return False
+    gap = float(np.linalg.norm(lab[light].astype(np.float32).mean(0) - lab[dark].astype(np.float32).mean(0)))
+    minor = light if light.sum() < dark.sum() else dark
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(minor.astype(np.uint8))
+    if gap <= C.TWO_STONES_GAP or n < 2:
+        return False
+    piece = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    ring = inside & (cv2.erode(inside.astype(np.uint8), np.ones((5, 5), np.uint8), borderValue=0) == 0)
+    return (stats[piece, cv2.CC_STAT_AREA] >= C.TWO_STONES_PIECE * inside.sum()
+            and (ring & (labels == piece)).sum() >= C.TWO_STONES_BORDER * ring.sum())
 
 
 def squared_slabs(rgb, seg, det, lama, esr):
@@ -120,6 +152,8 @@ def squared_slabs(rgb, seg, det, lama, esr):
         (l, la), (r, ra) = out
         kl, kr = max(1, int(C.JOINT_TRIM * l.shape[1])), max(1, int(C.JOINT_TRIM * r.shape[1]))
         out = [(l[:, :-kl], la[:, :-kl]), (r[:, kr:], ra[:, kr:])]
+    if any(two_stones(f, a) for f, a in out):
+        return "two stones in one outline (the slab behind it, seen past a broken corner?)"
     return out
 
 

@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from stone_pipeline.config.settings import STANDARDISE as C
-from stone_pipeline.standardise import blend, closeup, kinds, layout, logos, scene, views
+from stone_pipeline.standardise import blend, closeup, kinds, layout, logos, scene, studio, views
 
 
 @dataclass
@@ -49,6 +49,8 @@ def standardise(rgb, *, fmt, key, size=None, clean=None, watermarked=False, mode
         kind = "slab"
     images = {"main": _finished(slabs, key, models, C.BLEND_SEED)}
     images["white"] = layout.on_white(slabs)
+    if kind != "close-up":                              # Blokport's studio scene: the slab on its chrome feet
+        images["studio"] = studio.place(slabs)
     if extra_views and kind != "close-up":
         for side in C.ANGLE_SIDES:
             img, solid, stand = views.angled(slabs, key, side)
