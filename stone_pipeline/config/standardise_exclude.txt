@@ -1,0 +1,3 @@
+# Standardised photos a person reviewed and found wrong, which no automatic check catches: never published, so their
+# products keep the images they had. One sha256 per line, then a note. Read by deploy/standardise_publish.py.
+74f80bdaddd0c0474e017b9759cc080762325d9351828d06ca4887a2d4ffe6a4  # sentas: two slabs, one cut off, outline took in the floor and the wall slabs
