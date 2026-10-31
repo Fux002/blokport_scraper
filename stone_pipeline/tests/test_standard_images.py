@@ -84,3 +84,9 @@ def test_the_exclude_list_reads_one_sha_per_line_with_comments():
     from deploy import standardise_publish as pub
     text = f"# a cut-out that took in the floor\n{A}  # sentas, open book over the wall slabs\n\n"
     assert pub.read_exclude(text) == {A}
+
+
+def test_a_whole_slab_leads_even_when_a_close_up_comes_first():
+    views = {"main": {A, B}, "white": {A, B}, "studio": {B}, "close": {B}}     # A is a close-up: no side view
+    out = images.standardised([_improved(A), _improved(B)], views)
+    assert out == [_std("main", B), _std("white", B), _std("studio", B), _std("close", B), _std("white", A)]

@@ -289,10 +289,12 @@ _HOSTED = re.compile(r"/products/(?:[a-z]+/)?([a-z_]+)/([0-9a-f]{64})\.[a-z0-9]+
 
 
 def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
-    """A product's images, standardised where a published set exists: the first standardised photo's showroom
-    image (the catalog thumbnail), then its white, side and close-up views, then each further standardised photo's
-    white view (its showroom image when it has no white view, a block). A photo without a standardised set is
-    left out, its warehouse would show next to the showroom; a product with none keeps the images it had."""
+    """A product's images, standardised where a published set exists. The lead photo is the first, in the product's
+    order, that shows a whole slab or an open book (it has a side view); only when none does, the first standardised
+    photo (a close-up). The lead gives the showroom image (the catalog thumbnail) and its white, side and close-up
+    views; then each further standardised photo, in order, its white view (its showroom image when it has no white
+    view, a block): every slab of a lot is shown. A photo without a standardised set is left out, its warehouse would
+    show next to the showroom; a product with none keeps the images it had."""
     found = []
     for url in urls:
         m = _HOSTED.search(url)
@@ -303,9 +305,10 @@ def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
 
     def view_url(base, src, sha, view):
         return f"{base}/products/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
-    base, src, sha = found[0]
+    lead = next((f for f in found if f[2] in views.get("studio", ())), found[0])
+    base, src, sha = lead
     out = [view_url(base, src, sha, v) for v in imagestore.STANDARD_VIEWS if sha in views.get(v, ())]
-    for base, src, sha in found[1:]:
+    for base, src, sha in (f for f in found if f is not lead):
         out.append(view_url(base, src, sha, "white" if sha in views.get("white", ()) else "main"))
     return out
 
