@@ -1128,7 +1128,7 @@ class STANDARDISE:
     JOINT_TRIM = 0.006                 # each slab's edge face at the seam (catches the light) trimmed, share of its width
     DETAIL_SCALE = 0.8                 # ESRGAN contributes detail finer than this many source pixels
     ESRGAN_TILE = 512                  # ESRGAN input tile (bounds GPU memory on large slabs)
-    CACHE_TAG = "v11-flares"      # squared-slab cache, per pipeline version
+    CACHE_TAG = "v13-reflections-by-model"      # squared-slab cache, per pipeline version
     # --- layout ---
     DEFAULT_SLAB = (3.04, 1.87)        # median prod slab L x W (m): proportions for test photos with no product
     CLOSEUP_BORDER = 0.70              # stone along at least this share of EACH photo border: a close-up ...

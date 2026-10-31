@@ -138,7 +138,7 @@ def squared_slabs(rgb, seg, det, lama, esr):
     outline = cv2.drawContours(np.zeros_like(mask), contours, -1, 1, -1)
     # One erase of everything foreign: text is read on the photo as shot (a half-erased label no longer reads
     # as text), plus the labels/clips SAM did not count as stone inside each slab.
-    marks = proto.mark_mask(rgb, hull) | proto.flare_mask(rgb, hull & (straps == 0))
+    marks = proto.mark_mask(rgb, hull)                 # lamp reflections are the retouch model's (retouch.reflections)
     for q in quads:
         marks |= proto.foreign_objects(q, raw)
     rgb = proto.erase(rgb, marks, lama, hull)

@@ -62,10 +62,17 @@ def same_ink(rgb, found, slab, long):
     return more
 
 
+def reflections(rgb, hull, straps):
+    """Lamp reflections on the slab, not under a strap (which comes off itself): the model fills them like any mark, and a
+    refused fill leaves them as photographed. A fast fill smudged them on striped and veined stone."""
+    return marks.flare_mask(rgb, hull & (straps == 0))
+
+
 def find_marks(seg, det, rgb):
-    """(straps, cards, stone, slab): masks of the straps and of the cards, stickers, labels and racks on the slab, what the
-    segmenter saw as stone (it must not change), and the slab: the stone's outline and the detector's box around it (the
-    segmenter can lose the strip of stone beyond a strap at the slab's edge, the box does not)."""
+    """(straps, flares, cards, stone, slab): masks of the straps, of the lamp reflections and of the cards, stickers,
+    labels and racks on the slab, what the segmenter saw as stone (it must not change), and the slab: the stone's outline
+    and the detector's box around it (the segmenter can lose the strip of stone beyond a strap at the slab's edge, the box
+    does not). Straps and reflections may stay as shot when their fill is refused; cards may not."""
     h, w = rgb.shape[:2]
     emb = marks.embed(seg, rgb)
     boxes = [b for b in outline.detect(det, rgb) if (b[2] - b[0]) * (b[3] - b[1]) >= C.MIN_SLAB_SHARE * w * h]
@@ -73,7 +80,7 @@ def find_marks(seg, det, rgb):
     stone = marks.slab_mask(seg, rgb, box, emb, widest=True)[0]
     none = np.zeros((h, w), np.uint8)
     if not stone.any():                                # no slab seen: nothing on it to take off
-        return none, none, stone, none
+        return none, none, none, stone, none
     hull = _slab(stone)
     slab = hull.copy()
     bx0, by0, bx1, by1 = (int(round(v)) for v in box)
@@ -89,7 +96,7 @@ def find_marks(seg, det, rgb):
     cards = keep_on_slab(cards, hull, C.CARD_ON_SLAB)
     cards |= same_ink(rgb, cards, hull, max(h, w))
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, cv2.dilate(cards, np.ones((k, k), np.uint8)), stone, slab
+    return straps, reflections(rgb, hull, straps), cv2.dilate(cards, np.ones((k, k), np.uint8)), stone, slab
 
 
 def _lab(rgb):

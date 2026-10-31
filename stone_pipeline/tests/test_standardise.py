@@ -659,3 +659,13 @@ def test_a_floor_under_the_stone_means_a_whole_scene_not_a_close_up():
     assert closeup.shows_floor([(0, 600, w, h, 0.8), (0, 0, w, h, 0.5)], h)        # open books on the warehouse floor
     assert not closeup.shows_floor([(0, 0, w, 990, 0.8)], h)                       # the detector boxes a close-up's stone as floor
     assert not closeup.shows_floor([], h)
+
+
+def test_a_lamp_reflection_on_the_slab_is_a_mark_for_the_model_but_not_under_a_strap_or_off_the_slab():
+    stone = _stone(1000, 1500, base=150, var=6)
+    for x0 in (300, 1300, 700):                                     # on the slab, off it, under a strap
+        cv2.rectangle(stone, (x0, 200), (x0 + 60, 240), (255, 255, 255), -1)
+    hull = np.zeros((1000, 1500), np.uint8); hull[100:900, 100:1200] = 1
+    straps = np.zeros_like(hull); straps[:, 680:780] = 1
+    found = retouch.reflections(stone, hull, straps)
+    assert found[220, 330] == 1 and found[220, 1330] == 0 and found[220, 730] == 0

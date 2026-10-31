@@ -109,12 +109,13 @@ def main() -> int:
             if not survey and finished(client, out, sha):
                 tally["already done"] += 1
                 continue
-            # A retouched photo is the start; a refused retouch holds the photo unless only straps were to come off, which stay.
+            # A retouched photo is the start; a refused retouch holds the photo unless only straps and lamp reflections
+            # were to come off, which stay as shot.
             source_key = f"{out}retouched/{sha}.jpg"
             refused = f"{out}retouch_held/{sha}.json"
             if not survey and not _exists(client, source_key) and _exists(client, refused):
                 note = json.loads(_get(client, refused))
-                if not note["straps_only"]:
+                if not note["stays_as_shot"]:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": note["reason"], "kind": ""}, sort_keys=True).encode())
                     tally["held"] += 1

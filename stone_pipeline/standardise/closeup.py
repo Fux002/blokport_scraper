@@ -49,8 +49,7 @@ def closeup(rgb, size, seg, det, lama, esr):
     if _sharp(rgb) < C.SHARP_MIN:
         return "blurred close-up"
     straps = openbook._straps(seg, det, rgb, (0, 0, w - 1, h - 1), emb)    # kept as shot (the user's choice)
-    marks = proto.mark_mask(rgb) | proto.flare_mask(rgb, (straps == 0).astype(np.uint8)) | \
-        (cv2.dilate(1 - raw, np.ones((15, 15), np.uint8)) & (straps == 0))
+    marks = proto.mark_mask(rgb) | (cv2.dilate(1 - raw, np.ones((15, 15), np.uint8)) & (straps == 0))
     rgb = proto.erase(rgb, marks, lama, raw)
     length, width = size or C.DEFAULT_SLAB
     stone = _crop_to(rgb, length / width)
