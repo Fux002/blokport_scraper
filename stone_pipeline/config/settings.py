@@ -1080,6 +1080,7 @@ class STANDARDISE:
     FRAME_EDGE = 0.01              # a slab corner this close (share of the photo) to the frame edge: cut off, no composite
     # --- outline ---
     ROOM_COUNT = 3                     # rooms/<1..n>.jpg, and far_<1..n>.jpg (the same hall from twice as far, for an open book)
+    FAR_ROOM_BLUR = 3.0                # px: the far hall softened like a background behind slabs in focus
     OUT_W, OUT_H = 2048, 1365           # every image: the storefront's 3:2 frame (card, product page, viewer) at the 2048 px it stores
     MARGIN = 0.035                     # showroom border left, right and above the slab(s), share of OUT_W
     FLOOR_SHARE = 0.13                 # the one floor line: floor below every slab, share of the canvas height

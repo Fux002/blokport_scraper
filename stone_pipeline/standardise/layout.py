@@ -36,7 +36,10 @@ def room_for(key, far):
 
 @functools.lru_cache(maxsize=None)
 def _room(name):
-    return clean_floor(np.asarray(Image.open(ROOM_DIR / name).convert("RGB")).astype(np.float32))
+    room = np.asarray(Image.open(ROOM_DIR / name).convert("RGB")).astype(np.float32)
+    if name.startswith("far_"):                        # out of focus behind slabs in focus, like the regular halls
+        room = cv2.GaussianBlur(room, (0, 0), C.FAR_ROOM_BLUR)
+    return clean_floor(room)
 
 
 def clean_floor(room):

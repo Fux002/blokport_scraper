@@ -643,3 +643,11 @@ def test_text_left_around_a_mark_does_not_make_a_clean_fill_look_smeared():
                 cv2.putText(original, "S", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (90, 90, 90), 2)
     merged, reason = retouch.merge(original, clean, mask, _whole(), _whole(), 1200)
     assert reason == ""
+
+
+def test_the_far_hall_is_softened_like_a_background_behind_slabs_in_focus():
+    from PIL import Image
+    raw = np.asarray(Image.open(layout.ROOM_DIR / "far_1.jpg").convert("RGB")).astype(np.float32)
+    used = layout._room("far_1.jpg")
+    sharp = lambda im: np.abs(cv2.Laplacian(cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2GRAY), cv2.CV_32F))[:400].mean()
+    assert sharp(used) < 0.6 * sharp(raw)
