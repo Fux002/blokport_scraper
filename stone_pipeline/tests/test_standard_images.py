@@ -1,6 +1,6 @@
-"""Products link to their standardised photos when a published set exists: the showroom image first (the catalog
-thumbnail), then the white, side and close-up views of that photo, then each further photo's white view; a product
-with no standardised photo keeps the images it had."""
+"""Products link to their standardised photos when a published set exists: the lead slab's showroom image first (the
+catalog thumbnail), then for every slab in turn its white, side and close-up views (every slab of a lot is shown
+whole); a product with no standardised photo keeps the images it had."""
 from __future__ import annotations
 
 from stone_pipeline.config.settings import ENV_SEGMENT
@@ -25,10 +25,11 @@ def test_the_standard_key_carries_the_sha_like_every_image_key():
     assert imagestore.sha_from_url(key) == A
 
 
-def test_a_standardised_product_shows_the_showroom_first_then_its_gallery():
-    views = {"main": {A, B}, "white": {A, B}, "studio": {A, B}, "close": {A}}
+def test_every_slab_of_a_product_shows_its_white_side_and_close_up_after_the_showroom():
+    views = {"main": {A, B}, "white": {A, B}, "studio": {A, B}, "close": {A, B}}
     out = images.standardised([_improved(A), _improved(B)], views)
-    assert out == [_std("main", A), _std("white", A), _std("studio", A), _std("close", A), _std("white", B)]
+    assert out == [_std("main", A), _std("white", A), _std("studio", A), _std("close", A),
+                   _std("white", B), _std("studio", B), _std("close", B)]
 
 
 def test_an_unstandardised_photo_is_dropped_when_others_are_standardised():
@@ -42,7 +43,7 @@ def test_a_product_with_no_standardised_photo_keeps_its_images():
     assert images.standardised(urls, {"main": {B}, "white": set(), "studio": set(), "close": set()}) == urls
 
 
-def test_a_further_photo_without_a_white_view_shows_its_main_image():
+def test_a_further_photo_with_no_gallery_view_shows_its_main_image():
     views = {"main": {A, B}, "white": {A}, "studio": set(), "close": set()}       # B is a block: one image only
     out = images.standardised([_improved(A, "zucchi"), _improved(B, "zucchi")], views)
     assert out == [_std("main", A, "zucchi"), _std("white", A, "zucchi"), _std("main", B, "zucchi")]
@@ -89,4 +90,9 @@ def test_the_exclude_list_reads_one_sha_per_line_with_comments():
 def test_a_whole_slab_leads_even_when_a_close_up_comes_first():
     views = {"main": {A, B}, "white": {A, B}, "studio": {B}, "close": {B}}     # A is a close-up: no side view
     out = images.standardised([_improved(A), _improved(B)], views)
-    assert out == [_std("main", B), _std("white", B), _std("studio", B), _std("close", B), _std("white", A)]
+    assert out == [_std("main", B), _std("white", B), _std("studio", B), _std("close", B), _std("white", A)]   # A: a close-up, white only
+
+
+def test_a_lead_block_is_shown_once():
+    views = {"main": {A}, "white": set(), "studio": set(), "close": set()}
+    assert images.standardised([_improved(A)], views) == [_std("main", A)]
