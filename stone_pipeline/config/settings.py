@@ -943,37 +943,33 @@ class STANDARDISE:
     FILL_DETAIL_SIGMA = 0.003      # an erased area keeps LaMa's texture finer than this share of the long side; coarser tone is the stone's around it
     # --- marks ---
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
-    CARD_PROMPT = "a stack of color sample cards. a sticker. a paper label. a price tag. a metal rack. a metal stand."
+    CARD_PROMPT = ("a stack of color sample cards. a sticker. a paper label. a printed sheet. a price tag. handwritten numbers. "
+                   "a metal rack. a metal stand.")
     CARD_MIN_SCORE = 0.35              # a weaker detection fires on most photos
     CARD_ON_SLAB = 0.6                 # a mark counts when this share of it lies on the slab
     STRAP_ON_SLAB = 0.6                # so does a strap (one sticking out above the slab still has most of it on the slab)
     CARD_MAX_BOX = 0.12                # a detected card or label is at most this share of the photo (else it is the slab)
-    RETOUCH_PROMPT = ("Remove the straps, metal racks, sample cards, stickers and labels in front of or on the stone, showing the natural stone "
+    RETOUCH_PROMPT = ("Remove the straps, metal racks, sample cards, stickers, labels and handwritten numbers in front of or on the stone, showing the natural stone "
                       "beneath. Keep the stone, its colour, veining and edges and everything else exactly as they are. Do not add anything.")
     RETOUCH_GROW = 0.006               # a found card is widened by this share of the photo's long side
-    RETOUCH_GUARD = 0.02               # the stone is compared this far away from what was found (share of the long side)
+    RETOUCH_GUARD = 0.02               # the stone is compared this far away from what was found and from the slab's edge (share of the long side)
     RETOUCH_BROAD = 0.01               # at this scale, so fine redrawing does not count, only moved colour
-    RETOUCH_PCT = 98
-    RETOUCH_MAX_CHANGE = 8.0           # outside the found area the broad colour may move this much (Lab): else the model repainted the stone
-    RETOUCH_MAX_DRIFT = 18.0           # the whole crop may drift this much evenly (Lab): more is another stone
+    RETOUCH_MAX_DRIFT = 9.5            # the model may shift the stone's colour evenly this much (Lab): on 69 real crops good fills were <= 8.0, repaints >= 10.7
+    RETOUCH_MAX_REACH = 0.08           # a fill may reach this far from real stone (share of the long side): straps and labels <= 0.063, card fans >= 0.105
     RETOUCH_MARGIN = 0.05              # the model sees this much around a mark (share of the photo's long side)
     RETOUCH_MIN_CROP = 384             # px: at least this much of the photo, so it sees the stone and not only the mark
     RETOUCH_MAX_ASPECT = 2.5           # and no narrower than this
     RETOUCH_MAX_SCALE = 2.0            # a small crop is enlarged at most this much for the model
-    RETOUCH_TONE_BAND = 0.008          # a fill's edge is matched to the stone over this width (share of the crop's long side)
-    RETOUCH_RING = 0.02                # the fill is compared with the stone this far around it (share of the long side)
-    RETOUCH_MAX_COLOUR = 14.0          # its colour may differ this much (Lab) ...
-    RETOUCH_MAX_TEXTURE = 1.9          # ... and it may be this many times busier: an invented pile of rocks is not
+    RETOUCH_TONE_BAND = 0.008          # a fill's edge is matched to the stone over this width (share of the long side)
+    RETOUCH_RING = 0.02                # the fill is compared with the stone this far around it (share of the long side) ...
+    RETOUCH_RING_INSET = 3             # ... both kept this many px inside the slab
+    RETOUCH_MAX_COLOUR = 14.0          # its colour may differ this much (Lab) from the real stone around it ...
+    RETOUCH_MAX_BUSIER = 2.4           # ... it may be this many times busier (good real fills <= 1.93; a glossy ring is calm) ...
+    RETOUCH_MAX_SMOOTHER = 1.9         # ... and this many times smoother: more is a smear
     RETOUCH_FEATHER = 2.0
-    REFLECT_PROMPT = "Remove the reflections of lamps and windows and the glare from the polished stone, showing the natural stone beneath. " + \
-        "Keep the stone, its colour, veining, edges and everything else in the photo exactly as they are. Do not add anything."
-    REFLECT_BROAD = 0.03               # the model also recolours the stone: only what it changed finer than this (share of the long side) counts
-    REFLECT_MIN_CHANGE = 7.0           # it darkened the spot by at least this much (L*) ...
-    REFLECT_ABOVE = 3.0                # ... and the spot is this much brighter than the stone around it (L*)
-    REFLECT_AREA = (0.00002, 0.02)     # a spot's share of the photo
-    REFLECT_INSET = 0.012              # not this close to the slab's edge (share of the long side): the model moves the edge slightly
-    REFLECT_MAX_SPOTS = 60             # more is the model reworking the pattern, not reflections: none are taken
-    REFLECT_GROW = 0.003               # the fill also covers the glow around a spot (share of the long side)
+    SHADOW_REACH = 0.03                # a mark's shadow is taken off this far from it (share of the long side): a stand's bar cast 0.023
+    SHADOW_MIN_LIFT = 8.0              # where the photo is this much darker (L*) than the edit, beyond the edit's own shift ...
+    SHADOW_MAX_HUE = 3.0               # ... and its colour (a*, b*) moved less than this: a missed black card moved more
     WHITE_MARGIN = 0.05                # on white, the slab's border (share of the canvas)
     WHITE_SEAM = 4                     # an open book's gap on white (px)
     WHITE_SHADOWS = ((26, 12, 0.30), (5, 3, 0.28))   # blur, drop (px), strength: a soft shadow and a tight contact one

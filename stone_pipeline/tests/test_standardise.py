@@ -220,7 +220,7 @@ def _strap_edit():
 def test_a_clean_edit_is_taken_only_inside_the_found_area():
     original, edit, mask = _strap_edit()
     original[100:140, 700:760] = (10, 200, 10)         # outside the mask: must stay the real photo
-    merged, reason = retouch.merge(original, edit, mask, _whole())
+    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
     assert reason == ""
     assert np.array_equal(merged[120, 730], original[120, 730]) and merged[400, 330, 0] > 130
 
@@ -228,22 +228,22 @@ def test_a_clean_edit_is_taken_only_inside_the_found_area():
 def test_a_repainted_stone_is_refused():
     original, _, mask = _strap_edit()
     repainted = _stone(800, 1200, seed=5, base=60, var=20)
-    merged, reason = retouch.merge(original, repainted, mask, _whole())
-    assert merged is None and "changed the stone" in reason
+    merged, reason = retouch.merge(original, repainted, mask, _whole(), 1200)
+    assert merged is None and "recoloured" in reason
 
 
 def test_an_invented_busy_fill_is_refused():
     original, edit, mask = _strap_edit()
     rng = np.random.default_rng(1)
     edit[:, 290:370] = rng.integers(0, 255, (800, 80, 3), dtype=np.uint8)
-    merged, reason = retouch.merge(original, edit, mask, _whole())
+    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
     assert merged is None and "does not match" in reason
 
 
 def test_a_fill_brighter_than_the_stone_leaves_no_band():
     original, edit, mask = _strap_edit()
     edit[:, 290:370] = np.clip(edit[:, 290:370].astype(np.int16) + 25, 0, 255).astype(np.uint8)
-    merged, reason = retouch.merge(original, edit, mask, _whole())
+    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
     assert reason == ""
     inside, beside = merged[:, 300:360].astype(np.float32).mean(), merged[:, 240:280].astype(np.float32).mean()
     assert abs(inside - beside) < 4
@@ -251,8 +251,8 @@ def test_a_fill_brighter_than_the_stone_leaves_no_band():
 
 def test_an_even_drift_of_the_whole_edit_is_not_a_repaint():
     original, edit, mask = _strap_edit()
-    drifted = np.clip(edit.astype(np.int16) + 25, 0, 255).astype(np.uint8)
-    merged, reason = retouch.merge(original, drifted, mask, _whole())
+    drifted = np.clip(edit.astype(np.int16) + 15, 0, 255).astype(np.uint8)
+    merged, reason = retouch.merge(original, drifted, mask, _whole(), 1200)
     assert reason == "" and abs(merged[:, 300:360].astype(np.float32).mean() - merged[:, 240:280].astype(np.float32).mean()) < 4
 
 
@@ -262,7 +262,7 @@ def test_a_smeared_flat_fill_is_refused():
     mask = np.zeros((800, 1200), np.uint8); mask[:, 290:370] = 1
     edit = original.copy()
     edit[:, 290:370] = original.reshape(-1, 3).mean(axis=0).astype(np.uint8)
-    merged, reason = retouch.merge(original, edit, mask, _whole())
+    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
     assert merged is None and "does not match" in reason
 
 
@@ -312,58 +312,6 @@ def test_a_mark_in_a_notch_of_the_slab_counts_as_on_it():
     assert retouch.keep_on_slab(rack, stone, C.CARD_ON_SLAB).any()
 
 
-def _reflecting():
-    clean = _stone(800, 1200, base=150, var=6)
-    shot = clean.copy()
-    shot[200:260, 500:530] = 250                       # a window's reflection
-    stone = np.zeros((800, 1200), np.uint8); stone[50:750, 50:1150] = 1
-    return shot, clean, stone
-
-
-def test_what_the_model_darkened_compactly_is_a_reflection():
-    shot, clean, stone = _reflecting()
-    found = retouch.reflect_mask(shot, clean, stone)
-    assert found[230, 515] and found.sum() < 0.01 * found.size
-
-
-def test_the_models_broad_recolouring_is_not_a_reflection():
-    shot, clean, stone = _reflecting()
-    warmer = np.clip(clean.astype(np.int16) - (0, 15, 30), 0, 255).astype(np.uint8)
-    found = retouch.reflect_mask(_stone(800, 1200, base=150, var=6), warmer, stone)
-    assert found.sum() == 0
-
-
-def test_a_reflection_off_the_stone_or_at_its_edge_is_left():
-    shot, clean, stone = _reflecting()
-    shot[5:40, 300:340] = 250                          # on the room behind
-    shot[50:60, 700:730] = 250                         # along the slab's edge: the model's small shift of the edge looks the same
-    found = retouch.reflect_mask(shot, clean, stone)
-    assert not found[20, 320] and not found[52, 715]
-
-
-def test_a_stone_full_of_changes_is_no_reflection():
-    shot, clean, stone = _reflecting()
-    for y in range(80, 720, 40):
-        for x in range(80, 1120, 40):
-            shot[y:y + 12, x:x + 12] = 250
-    assert retouch.reflect_mask(shot, clean, stone).sum() == 0
-
-
-def test_a_refused_reflection_stays_and_the_others_come_off():
-    shot, clean, stone = _reflecting()
-    shot[600:660, 900:930] = 250
-    found = retouch.reflect_mask(shot, clean, stone)
-    calls = []
-
-    def edit(crop):
-        calls.append(crop.shape)
-        return np.zeros_like(crop) if len(calls) == 1 else _stone(crop.shape[0], crop.shape[1], base=150, var=6)
-
-    out, left = retouch.take_off_reflections(shot, found, stone, edit)
-    assert left == 1 and len(calls) == 2
-    assert out[230, 515].min() > 240 and out[630, 915].max() < 200
-
-
 def test_a_strap_off_the_slab_is_no_strap_but_one_sticking_out_above_it_is():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     beside = np.zeros_like(stone); beside[50:750, 1120:1180] = 1     # the edge of the next slab in the row
@@ -383,7 +331,7 @@ def test_a_changed_background_is_not_a_changed_stone():
     original, edit, mask = _strap_edit()
     edit[:150] = (30, 60, 200)                         # the model repainted the warehouse behind the slab
     stone = _whole(); stone[:200] = 0
-    merged, reason = retouch.merge(original, edit, mask & stone, stone)
+    merged, reason = retouch.merge(original, edit, mask & stone, stone, 1200)
     assert reason == "" and merged is not None
 
 
@@ -392,3 +340,67 @@ def test_a_mark_off_the_slab_is_not_a_mark():
     on = np.zeros_like(stone); on[300:340, 500:600] = 1
     off = np.zeros_like(stone); off[720:780, 200:400] = 1      # a painted code on the floor
     assert retouch.keep_on_slab(on, stone, C.CARD_ON_SLAB).any() and not retouch.keep_on_slab(off, stone, C.CARD_ON_SLAB).any()
+
+
+def test_the_model_also_clearing_an_unmarked_logo_is_no_repaint():
+    original, edit, mask = _strap_edit()
+    original[100:220, 600:900] = (200, 40, 120)        # a vendor logo nobody marked: the model takes it off too, it is never pasted
+    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
+    assert reason == "" and np.array_equal(merged[150, 700], original[150, 700])
+
+
+def test_a_strong_even_recolouring_is_refused():
+    original, edit, mask = _strap_edit()
+    recoloured = np.clip(edit.astype(np.int16) + (30, 30, 10), 0, 255).astype(np.uint8)
+    merged, reason = retouch.merge(original, recoloured, mask, _whole(), 1200)
+    assert merged is None and "recoloured" in reason
+
+
+def test_a_label_on_the_slabs_top_edge_is_judged_against_the_stone_only():
+    original, edit, mask = _strap_edit()
+    stone = _whole(); stone[:200] = 0
+    original[:200], edit[:200] = (20, 20, 25), (20, 20, 25)   # the dark hall above the slab
+    label = np.zeros_like(mask); label[150:300, 500:640] = 1
+    original[150:300, 500:640] = 250
+    merged, reason = retouch.merge(original, edit, label, stone, 1200)
+    assert reason == "" and merged[260, 570].max() < 200
+
+
+def test_a_fill_matching_the_models_repaint_but_not_the_real_stone_is_refused():
+    original, _, mask = _strap_edit()
+    original = _stone(800, 1200, base=160, var=1)                 # a plain grey slab
+    rng = np.random.default_rng(9)
+    busy = np.clip(rng.normal(160, 40, (800, 1200, 3)), 0, 255).astype(np.uint8)   # the model drew a busy one in its place
+    merged, reason = retouch.merge(original, busy, mask, _whole(), 1200)
+    assert merged is None
+
+
+def test_a_mark_too_wide_to_fill_is_refused_before_the_model_runs():
+    original = _stone(800, 1200, base=160, var=8)
+    fan = np.zeros((800, 1200), np.uint8); fan[300:650, 400:800] = 1   # a fan of sample cards on a close-up
+    calls = []
+    out, reason = retouch.retouch(original, fan, _whole(), lambda crop: calls.append(crop) or crop)
+    assert out is None and "too large" in reason and not calls
+
+
+def _stand():
+    clean = _stone(800, 1200, base=170, var=6)
+    shot = clean.copy()
+    shot[500:530, 300:900] = (70, 70, 75)                       # the stand's top bar
+    shot[530:560, 300:900] = (shot[530:560, 300:900] * 0.75).astype(np.uint8)   # its shadow on the stone
+    bar = np.zeros((800, 1200), np.uint8); bar[495:535, 295:905] = 1
+    return shot, clean, bar
+
+
+def test_the_shadow_a_stand_casts_comes_off_with_it():
+    shot, clean, bar = _stand()
+    merged, reason = retouch.merge(shot, clean, bar, _whole(), 1200)
+    assert reason == ""
+    assert abs(merged[550, 600].astype(np.float32).mean() - clean[550, 600].astype(np.float32).mean()) < 6
+
+
+def test_a_dark_thing_beside_a_mark_that_changes_colour_is_no_shadow():
+    shot, clean, bar = _stand()
+    shot[530:560, 300:900] = (40, 40, 140)                      # a blue sticker the detector missed, touching the bar
+    merged, _ = retouch.merge(shot, clean, bar, _whole(), 1200)
+    assert merged is None or np.array_equal(merged[550, 600], shot[550, 600])
