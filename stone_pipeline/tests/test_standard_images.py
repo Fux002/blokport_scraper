@@ -70,3 +70,17 @@ def test_a_photo_already_finished_or_held_is_not_worked_on_again():
     out = "dev/standardise-test/full/sentas/"
     bucket = _Bucket([f"{out}{A}.main.jpg", f"{out}held/{B}.json"])
     assert src.finished(bucket, out, A) and src.finished(bucket, out, B) and not src.finished(bucket, out, C_)
+
+
+def test_an_excluded_photo_is_never_published():
+    from deploy import standardise_publish as pub
+    run = f"{ENV_SEGMENT}/standardise-test/full/sentas/"
+    keys = [f"{run}{A}.main.jpg", f"{run}{A}.white.jpg", f"{run}{B}.main.jpg"]
+    assert pub.copies("sentas", run, keys, exclude={B}) == sorted(
+        (f"{run}{A}.{v}.jpg", imagestore.standard_key("sentas", A, v)) for v in ("main", "white"))
+
+
+def test_the_exclude_list_reads_one_sha_per_line_with_comments():
+    from deploy import standardise_publish as pub
+    text = f"# a cut-out that took in the floor\n{A}  # sentas, open book over the wall slabs\n\n"
+    assert pub.read_exclude(text) == {A}
