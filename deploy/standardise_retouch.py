@@ -20,7 +20,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from deploy.standardise_source import _encode, _get, _photo_keys, finished, run_prefix
+from deploy.standardise_source import _encode, _exists, _get, _photo_keys, finished, run_prefix
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import marks, outline, photo, retouch
@@ -116,6 +116,11 @@ def _load_editor():
     return edit
 
 
+def retouched(client, out, sha):
+    """This photo's retouch already ended, retouched or refused: a re-run of the slice only edits what is new."""
+    return _exists(client, f"{out}retouched/{sha}.jpg") or _exists(client, f"{out}retouch_held/{sha}.json")
+
+
 def _hold(client, out, sha, reason, straps_only):
     body = {"reason": reason, "straps_only": straps_only}
     client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_held/{sha}.json", Body=json.dumps(body, sort_keys=True).encode(), ContentType="application/json")
@@ -128,7 +133,8 @@ def main() -> int:
         return 2
     client = boto3.client("s3", region_name=S3_REGION)
     out = run_prefix(src)
-    keys = [k for k in _photo_keys(client, src) if not finished(client, out, imagestore.sha_from_url(k))]
+    keys = [k for k in _photo_keys(client, src)
+            if not finished(client, out, sha := imagestore.sha_from_url(k)) and not retouched(client, out, sha)]
     found = _find(client, keys, out)
     print(f"==> retouch {src}: marks on {len(found)} of {len(keys)} photos", flush=True)
     if not found:

@@ -73,6 +73,13 @@ def test_a_photo_already_finished_or_held_is_not_worked_on_again():
     assert src.finished(bucket, out, A) and src.finished(bucket, out, B) and not src.finished(bucket, out, C_)
 
 
+def test_a_photo_already_retouched_or_refused_is_not_retouched_again():
+    from deploy import standardise_retouch as rt
+    out = "dev/standardise-test/full/sentas/"
+    bucket = _Bucket([f"{out}retouched/{A}.jpg", f"{out}retouch_held/{B}.json"])
+    assert rt.retouched(bucket, out, A) and rt.retouched(bucket, out, B) and not rt.retouched(bucket, out, C_)
+
+
 def test_an_excluded_photo_is_never_published():
     from deploy import standardise_publish as pub
     run = f"{ENV_SEGMENT}/standardise-test/full/sentas/"
