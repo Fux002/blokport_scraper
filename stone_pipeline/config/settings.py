@@ -946,6 +946,7 @@ class STANDARDISE:
     CARD_PROMPT = "a stack of color sample cards. a sticker. a paper label. a price tag. a metal rack. a metal stand."
     CARD_MIN_SCORE = 0.35              # a weaker detection fires on most photos
     CARD_ON_SLAB = 0.6                 # a mark counts when this share of it lies on the slab
+    STRAP_ON_SLAB = 0.6                # so does a strap (one sticking out above the slab still has most of it on the slab)
     CARD_MAX_BOX = 0.12                # a detected card or label is at most this share of the photo (else it is the slab)
     RETOUCH_PROMPT = ("Remove the straps, metal racks, sample cards, stickers and labels in front of or on the stone, showing the natural stone "
                       "beneath. Keep the stone, its colour, veining and edges and everything else exactly as they are. Do not add anything.")
@@ -964,6 +965,15 @@ class STANDARDISE:
     RETOUCH_MAX_COLOUR = 14.0          # its colour may differ this much (Lab) ...
     RETOUCH_MAX_TEXTURE = 1.9          # ... and it may be this many times busier: an invented pile of rocks is not
     RETOUCH_FEATHER = 2.0
+    REFLECT_PROMPT = "Remove the reflections of lamps and windows and the glare from the polished stone, showing the natural stone beneath. " + \
+        "Keep the stone, its colour, veining, edges and everything else in the photo exactly as they are. Do not add anything."
+    REFLECT_BROAD = 0.03               # the model also recolours the stone: only what it changed finer than this (share of the long side) counts
+    REFLECT_MIN_CHANGE = 7.0           # it darkened the spot by at least this much (L*) ...
+    REFLECT_ABOVE = 3.0                # ... and the spot is this much brighter than the stone around it (L*)
+    REFLECT_AREA = (0.00002, 0.02)     # a spot's share of the photo
+    REFLECT_INSET = 0.012              # not this close to the slab's edge (share of the long side): the model moves the edge slightly
+    REFLECT_MAX_SPOTS = 60             # more is the model reworking the pattern, not reflections: none are taken
+    REFLECT_GROW = 0.003               # the fill also covers the glow around a spot (share of the long side)
     WHITE_MARGIN = 0.05                # on white, the slab's border (share of the canvas)
     WHITE_SEAM = 4                     # an open book's gap on white (px)
     WHITE_SHADOWS = ((26, 12, 0.30), (5, 3, 0.28))   # blur, drop (px), strength: a soft shadow and a tight contact one
@@ -978,8 +988,6 @@ class STANDARDISE:
         "strap": "Remove the two straps leaning across the stone slab, showing the slab's natural surface where they were. " + _KEEP,
         "logo": "Remove the company logo and its text from the surface of the stone, showing the natural stone beneath. " + _KEEP,
         "cards": "Remove the fan of sample cards lying on the stone, showing the natural stone beneath. " + _KEEP,
-        "reflect": "Remove the reflections of lamps and windows and the glare from the polished stone, showing the natural stone beneath. " + _KEEP,
-        "mirror": "This polished stone mirrors the room in front of it. Remove the mirrored room, people, windows and floor, showing only the natural stone's own surface. " + _KEEP,
     }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/

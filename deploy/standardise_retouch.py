@@ -1,8 +1,9 @@
-"""Take straps, racks, sample cards and stickers off a source's photos (RUN_MODE=standardise-retouch, GPU), ahead of deploy.standardise_source,
+"""Take straps, racks, sample cards, stickers and reflections off a source's photos (RUN_MODE=standardise-retouch, GPU), ahead of deploy.standardise_source,
 which then starts from the result. Two phases, because the machine holds one set of models at a time: find the marks on
 every photo, free those models, then edit. Writes <run prefix>/retouched/<sha>.jpg, or retouch_held/<sha>.json when a result
-is refused. A photo with nothing to take off is never sent to the model. A test run (RUN_TAG) also writes what was found to
-retouch_marks/<sha>.jpg, for a person to check.
+is refused. Every photo is checked once for reflections; a mark is sent to the model only when one was found. A test run (RUN_TAG) also writes what was found to
+retouch_marks/<sha>.jpg, for a person to check, and under retouch_debug/<sha>/ the masks and every model output in the order
+the crops were edited (retouch.regions), so the checks can be tuned on what the model really does.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import sys
 import time
 
 import boto3
+import cv2
 import numpy as np
 import torch
 from PIL import Image
@@ -31,7 +33,44 @@ def _write_found(client, out, sha, rgb, straps, cards):
     client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_marks/{sha}.jpg", Body=_encode(shown, 80), ContentType="image/jpeg")
 
 
+class _Recorder:
+    """A test run's record of one photo: its masks and each model output, written as they come."""
+
+    def __init__(self, client, out, sha):
+        self.client, self.prefix, self.n = client, f"{out}retouch_debug/{sha}/", 0
+
+    def put(self, name, img, png=False):
+        data = cv2.imencode(".png", img)[1].tobytes() if png else _encode(img, 95)
+        self.client.put_object(Bucket=S3_BUCKET, Key=f"{self.prefix}{name}", Body=data, ContentType="image/png" if png else "image/jpeg")
+
+    def wrap(self, edit, kind):
+        def recorded(crop):
+            result = edit(crop)
+            self.put(f"{kind}_{self.n:02d}.jpg", result)
+            self.n += 1
+            return result
+        return recorded
+
+
+class _NoRecord:
+    def put(self, name, img, png=False):
+        pass
+
+    def wrap(self, edit, kind):
+        return edit
+
+
+def _pack(mask):
+    # A full slice holds a mask set per photo in a 16 GB machine until the edit phase: kept compressed.
+    return cv2.imencode(".png", mask)[1].tobytes()
+
+
+def _unpack(data):
+    return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
+
+
 def _find(client, keys, out):
+    """{key: packed (straps, cards, stone)} of every photo that could be read: each is also checked for reflections."""
     seg = marks.load_sam()
     det = outline.load_detector(seg[2])
     found = {}
@@ -40,10 +79,9 @@ def _find(client, keys, out):
         try:
             rgb = photo.decode(_get(client, key))
             straps, cards, stone = retouch.find_marks(seg, det, rgb)
-            if straps.any() or cards.any():
-                found[key] = (straps, cards, stone)
-                if os.environ.get("RUN_TAG"):
-                    _write_found(client, out, sha, rgb, straps, cards)
+            found[key] = (_pack(straps), _pack(cards), _pack(stone))
+            if os.environ.get("RUN_TAG") and (straps.any() or cards.any()):
+                _write_found(client, out, sha, rgb, straps, cards)
         except Exception as exc:                       # one bad photo never stops the slice
             print(f"   FIND FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
     del seg, det
@@ -53,14 +91,30 @@ def _find(client, keys, out):
 
 
 def _load_editor():
+    """(the model, one function per instruction: crop to edited crop)."""
     from diffusers import Flux2KleinPipeline
     encoder = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, transformer=None, vae=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
     with torch.no_grad():
-        embed = encoder.encode_prompt(prompt=C.RETOUCH_PROMPT, device="cuda", max_sequence_length=C.EDIT_MAX_TOKENS)[0].cpu()
+        marks_embed, reflect_embed = (encoder.encode_prompt(prompt=p, device="cuda", max_sequence_length=C.EDIT_MAX_TOKENS)[0].cpu()
+                                      for p in (C.RETOUCH_PROMPT, C.REFLECT_PROMPT))
     del encoder
     gc.collect()
     torch.cuda.empty_cache()
-    return Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, text_encoder=None, tokenizer=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda"), embed
+    pipe = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, text_encoder=None, tokenizer=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
+
+    def editor(embed):
+        def edit(crop):
+            w, h = retouch.model_size(crop.shape[1], crop.shape[0])
+            return np.asarray(pipe(prompt_embeds=embed.to("cuda"), image=Image.fromarray(crop).resize((w, h), Image.LANCZOS), width=w, height=h,
+                                   num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
+                                   generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0])
+        return edit
+    return editor(marks_embed), editor(reflect_embed)
+
+
+def _hold(client, out, sha, reason, straps_only):
+    body = {"reason": reason, "straps_only": straps_only}
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_held/{sha}.json", Body=json.dumps(body, sort_keys=True).encode(), ContentType="application/json")
 
 
 def main() -> int:
@@ -72,33 +126,44 @@ def main() -> int:
     out = run_prefix(src)
     keys = _photo_keys(client, src)
     found = _find(client, keys, out)
-    print(f"==> retouch {src}: marks on {len(found)} of {len(keys)} photos", flush=True)
+    print(f"==> retouch {src}: looked at {len(found)} of {len(keys)} photos", flush=True)
     if not found:
         return 0
-    pipe, embed = _load_editor()
-    done = refused = 0
-    for key, (straps, cards, stone) in found.items():
+    edit_marks, edit_reflections = _load_editor()
+    done = refused = cleared = left = 0
+    for key, packed in found.items():
         sha = imagestore.sha_from_url(key)
         started = time.time()
         try:
+            straps, cards, stone = (_unpack(p) for p in packed)
             rgb = photo.decode(_get(client, key))
-            def edit(crop):
-                w, h = retouch.model_size(crop.shape[1], crop.shape[0])
-                return np.asarray(pipe(prompt_embeds=embed.to("cuda"), image=Image.fromarray(crop).resize((w, h), Image.LANCZOS), width=w, height=h,
-                                       num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
-                                       generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0])
-            merged, reason = retouch.retouch(rgb, straps | cards, stone, edit)
-            if merged is None:
-                body = {"reason": reason, "straps_only": not cards.any()}
-                client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_held/{sha}.json", Body=json.dumps(body, sort_keys=True).encode(), ContentType="application/json")
-                refused += 1
-            else:
-                client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouched/{sha}.jpg", Body=_encode(merged, 95), ContentType="image/jpeg")
-                done += 1
-            print(f"   {sha[:12]} {'refused: ' + reason if merged is None else 'ok'} {time.time() - started:.1f}s", flush=True)
+            rec = _Recorder(client, out, sha) if os.environ.get("RUN_TAG") else _NoRecord()
+            for name, mask in (("straps", straps), ("cards", cards), ("stone", stone)):
+                rec.put(f"{name}.png", mask * 255, png=True)
+            start = rgb
+            if straps.any() or cards.any():
+                merged, reason = retouch.retouch(rgb, straps | cards, stone, rec.wrap(edit_marks, "marks"))
+                if merged is None:
+                    _hold(client, out, sha, reason, not cards.any())
+                    refused += 1
+                    print(f"   {sha[:12]} refused: {reason} {time.time() - started:.1f}s", flush=True)
+                    if cards.any():                    # this photo is held: nothing more to do for it
+                        continue
+                else:
+                    start = merged
+                    done += 1
+            whole = rec.wrap(edit_reflections, "reflect_whole")(rgb)
+            spots = retouch.reflect_mask(rgb, whole, stone) & ((straps | cards) == 0)
+            rec.put("spots.png", spots * 255, png=True)
+            result, missed = retouch.take_off_reflections(start, spots, stone, rec.wrap(edit_reflections, "reflect")) if spots.any() else (start, 0)
+            cleared += bool(spots.any())
+            left += missed
+            if result is not rgb:
+                client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouched/{sha}.jpg", Body=_encode(result, 95), ContentType="image/jpeg")
+            print(f"   {sha[:12]} reflections {int(spots.sum())} px, {missed} left {time.time() - started:.1f}s", flush=True)
         except Exception as exc:                       # one bad photo never stops the slice
             print(f"   FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
-    print(f"==> retouch {src} done: {done} retouched, {refused} refused", flush=True)
+    print(f"==> retouch {src} done: {done} retouched, {refused} refused, reflections on {cleared} photos, {left} groups left", flush=True)
     return 0
 
 

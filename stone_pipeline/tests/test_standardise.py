@@ -309,7 +309,67 @@ def test_a_mark_in_a_notch_of_the_slab_counts_as_on_it():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     stone[500:700, 500:800] = 0                                # the photo's rack stands in front of the slab
     rack = np.zeros_like(stone); rack[500:700, 500:800] = 1
-    assert retouch.keep_on_slab(rack, stone).any()
+    assert retouch.keep_on_slab(rack, stone, C.CARD_ON_SLAB).any()
+
+
+def _reflecting():
+    clean = _stone(800, 1200, base=150, var=6)
+    shot = clean.copy()
+    shot[200:260, 500:530] = 250                       # a window's reflection
+    stone = np.zeros((800, 1200), np.uint8); stone[50:750, 50:1150] = 1
+    return shot, clean, stone
+
+
+def test_what_the_model_darkened_compactly_is_a_reflection():
+    shot, clean, stone = _reflecting()
+    found = retouch.reflect_mask(shot, clean, stone)
+    assert found[230, 515] and found.sum() < 0.01 * found.size
+
+
+def test_the_models_broad_recolouring_is_not_a_reflection():
+    shot, clean, stone = _reflecting()
+    warmer = np.clip(clean.astype(np.int16) - (0, 15, 30), 0, 255).astype(np.uint8)
+    found = retouch.reflect_mask(_stone(800, 1200, base=150, var=6), warmer, stone)
+    assert found.sum() == 0
+
+
+def test_a_reflection_off_the_stone_or_at_its_edge_is_left():
+    shot, clean, stone = _reflecting()
+    shot[5:40, 300:340] = 250                          # on the room behind
+    shot[50:60, 700:730] = 250                         # along the slab's edge: the model's small shift of the edge looks the same
+    found = retouch.reflect_mask(shot, clean, stone)
+    assert not found[20, 320] and not found[52, 715]
+
+
+def test_a_stone_full_of_changes_is_no_reflection():
+    shot, clean, stone = _reflecting()
+    for y in range(80, 720, 40):
+        for x in range(80, 1120, 40):
+            shot[y:y + 12, x:x + 12] = 250
+    assert retouch.reflect_mask(shot, clean, stone).sum() == 0
+
+
+def test_a_refused_reflection_stays_and_the_others_come_off():
+    shot, clean, stone = _reflecting()
+    shot[600:660, 900:930] = 250
+    found = retouch.reflect_mask(shot, clean, stone)
+    calls = []
+
+    def edit(crop):
+        calls.append(crop.shape)
+        return np.zeros_like(crop) if len(calls) == 1 else _stone(crop.shape[0], crop.shape[1], base=150, var=6)
+
+    out, left = retouch.take_off_reflections(shot, found, stone, edit)
+    assert left == 1 and len(calls) == 2
+    assert out[230, 515].min() > 240 and out[630, 915].max() < 200
+
+
+def test_a_strap_off_the_slab_is_no_strap_but_one_sticking_out_above_it_is():
+    stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
+    beside = np.zeros_like(stone); beside[50:750, 1120:1180] = 1     # the edge of the next slab in the row
+    across = np.zeros_like(stone); across[20:700, 300:360] = 1       # a strap, its top above the slab
+    assert not retouch.keep_on_slab(beside, stone, C.STRAP_ON_SLAB).any()
+    assert retouch.keep_on_slab(across, stone, C.STRAP_ON_SLAB).sum() == across.sum()
 
 
 @pytest.mark.parametrize("h,w", [(800, 1400), (500, 1900), (1200, 900)])
@@ -331,4 +391,4 @@ def test_a_mark_off_the_slab_is_not_a_mark():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     on = np.zeros_like(stone); on[300:340, 500:600] = 1
     off = np.zeros_like(stone); off[720:780, 200:400] = 1      # a painted code on the floor
-    assert retouch.keep_on_slab(on, stone).any() and not retouch.keep_on_slab(off, stone).any()
+    assert retouch.keep_on_slab(on, stone, C.CARD_ON_SLAB).any() and not retouch.keep_on_slab(off, stone, C.CARD_ON_SLAB).any()

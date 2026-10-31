@@ -11,9 +11,10 @@ from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import marks, outline
 
 
-def keep_on_slab(found, stone):
-    """Only the parts of `found` that lie on the slab: a code painted on the floor or a sign behind is cropped away anyway.
-    The slab is the stone's convex hull: a card or a rack in front of it is a hole or a notch in what was seen as stone."""
+def keep_on_slab(found, stone, share):
+    """Only the parts of `found` with this share on the slab: a code painted on the floor, a sign behind or the edge of the
+    next slab in the row is cropped away anyway. The slab is the stone's convex hull: a card or a rack in front of it is a
+    hole or a notch in what was seen as stone."""
     n, labels, stats, _ = cv2.connectedComponentsWithStats(found)
     out = np.zeros_like(found)
     if not stone.any():
@@ -21,7 +22,7 @@ def keep_on_slab(found, stone):
     slab = cv2.fillConvexPoly(np.zeros_like(found), cv2.convexHull(cv2.findNonZero(stone)), 1)
     for i in range(1, n):
         part = labels == i
-        if (slab[part] > 0).mean() >= C.CARD_ON_SLAB:
+        if (slab[part] > 0).mean() >= share:
             out[part] = 1
     return out
 
@@ -34,14 +35,14 @@ def find_marks(seg, det, rgb):
     boxes = [b for b in outline.detect(det, rgb) if (b[2] - b[0]) * (b[3] - b[1]) >= C.MIN_SLAB_SHARE * w * h]
     box = max(boxes, key=lambda b: b[4])[:4] if boxes else (0, 0, w - 1, h - 1)
     stone = marks.slab_mask(seg, rgb, box, emb, widest=True)[0]
-    straps = outline._straps(seg, det, rgb, box, emb)
+    straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), stone, C.STRAP_ON_SLAB)
     cards = np.zeros((h, w), np.uint8)
     for x0, y0, x1, y1, _ in outline.detect(det, rgb, C.CARD_PROMPT, C.CARD_MIN_SCORE):
         if (x1 - x0) * (y1 - y0) > C.CARD_MAX_BOX * w * h:
             continue
         cards |= marks.slab_mask(seg, rgb, (x0, y0, x1, y1), emb)[1]
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, cv2.dilate(keep_on_slab(cards, stone), np.ones((k, k), np.uint8)), stone
+    return straps, cv2.dilate(keep_on_slab(cards, stone, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone
 
 
 def _lab(rgb):
@@ -147,3 +148,39 @@ def retouch(rgb, mask, stone, edit):
             return None, reason
         out[y0:y1, x0:x1] = piece
     return out, ""
+
+
+def reflect_mask(rgb, edited, stone):
+    """The reflections on the slab, as the model saw them: the small bright spots it took out when asked to remove reflections.
+    Fixed rules on the photo cannot tell a window's reflection from a white piece of breccia; the model can, but it repaints
+    too much to be used as it is. So it only finds them: its broad recolouring is taken out of the difference first."""
+    h, w = rgb.shape[:2]
+    long = max(h, w)
+    edited = cv2.resize(edited, (w, h), interpolation=cv2.INTER_CUBIC)
+    shot = _lab(rgb)[:, :, 0]
+    sigma = C.REFLECT_BROAD * long
+    change = cv2.GaussianBlur(shot - _lab(edited)[:, :, 0], (0, 0), 1.5)
+    change -= cv2.GaussianBlur(change, (0, 0), sigma)
+    k = max(3, int(C.REFLECT_INSET * long))
+    inside = cv2.erode(stone, np.ones((k, k), np.uint8), borderValue=0)
+    found = ((change > C.REFLECT_MIN_CHANGE) & (shot > cv2.GaussianBlur(shot, (0, 0), sigma) + C.REFLECT_ABOVE) & (inside > 0)).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(found)
+    spots = [i for i in range(1, n) if C.REFLECT_AREA[0] * h * w <= stats[i, cv2.CC_STAT_AREA] <= C.REFLECT_AREA[1] * h * w]
+    if not spots or len(spots) > C.REFLECT_MAX_SPOTS:
+        return np.zeros((h, w), np.uint8)
+    g = max(3, int(C.REFLECT_GROW * long))
+    return cv2.dilate(np.isin(labels, spots).astype(np.uint8), np.ones((g, g), np.uint8))
+
+
+def take_off_reflections(rgb, mask, stone, edit):
+    """(rgb with the reflections filled, how many groups were refused and left as shot): a reflection left is what the photo
+    showed, unlike a strap half gone, so one refusal does not stop the others."""
+    out = rgb.copy()
+    left = 0
+    for x0, y0, x1, y1 in regions(mask):
+        piece, reason = merge(rgb[y0:y1, x0:x1], edit(rgb[y0:y1, x0:x1]), mask[y0:y1, x0:x1], stone[y0:y1, x0:x1])
+        if piece is None:
+            left += 1
+        else:
+            out[y0:y1, x0:x1] = piece
+    return out, left
