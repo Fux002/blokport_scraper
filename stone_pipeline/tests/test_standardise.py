@@ -168,13 +168,6 @@ def test_only_a_sure_pile_hangar_or_interior_is_skipped(kind, conf, skipped):
     assert kinds.is_skipped(kind, conf) is skipped
 
 
-def test_an_angled_view_keeps_the_canvas_and_the_floor_line():
-    img, solid, stand = views.angled([_slab(800, 1400)], "p", "left")
-    assert img.shape == (C.OUT_H, C.OUT_W, 3)
-    bottom = np.where(solid[:, C.OUT_W // 2])[0].max()
-    assert abs(bottom - C.OUT_H * (1 - C.FLOOR_SHARE)) < 0.12 * C.OUT_H
-
-
 def test_a_close_up_is_only_of_real_stone():
     slab, alpha = _slab(800, 1400)
     alpha[350:450, 650:750] = 0
@@ -350,7 +343,6 @@ def test_a_strap_at_the_slabs_edge_counts_when_the_stone_beyond_it_was_missed():
 def test_on_white_is_the_same_canvas_with_white_corners(h, w):
     out = layout.on_white([_slab(h, w)])
     assert out.shape == (C.OUT_H, C.OUT_W, 3) and out[2, 2].min() > 250
-    assert layout.on_white([_slab(h, w)], turn="left").shape == (C.OUT_H, C.OUT_W, 3)
 
 
 def test_a_changed_background_is_not_a_changed_stone():
@@ -602,3 +594,28 @@ def test_the_old_slab_is_gone_and_the_clips_stay():
     face = studio.face(1400 / 800)
     cx, cy = studio.to_frame(face.mean(axis=0), face)
     assert out[int(cy), int(cx)].max() < 40                          # the face is the new stone, nothing of the old slab
+
+
+def _feet_rows():
+    bottom = C.OUT_H - int(round(C.FLOOR_SHARE * C.OUT_H))
+    return bottom + 2, bottom + 40
+
+
+def test_the_showroom_stand_is_two_chrome_feet_with_nothing_between_them():
+    grey = np.full((C.OUT_H, C.OUT_W, 3), 128, np.float32)
+    with_it = layout.compose([_slab(800, 1400)], "p", room=grey.copy()).astype(np.float32)
+    without = layout.compose([_slab(800, 1400)], "p", room=grey.copy(), stand=False).astype(np.float32)
+    y0, y1 = _feet_rows()
+    changed = np.abs(with_it - without).max(axis=2)[y0:y1] > 20
+    runs = np.diff(np.concatenate([[0], changed.any(axis=0).astype(int), [0]]))
+    assert (runs == 1).sum() == 2                                    # two feet, no rail joining them
+    assert with_it[y0:y1][changed].max() > 200                      # polished chrome catches the light
+
+
+def test_the_stand_mask_covers_the_chrome_feet():
+    grey = np.full((C.OUT_H, C.OUT_W, 3), 128, np.float32)
+    with_it = layout.compose([_slab(800, 1400)], "p", room=grey.copy()).astype(np.float32)
+    _, stand = layout.masks([_slab(800, 1400)], "p")
+    y0, y1 = _feet_rows()
+    bright = with_it[y0:y1].max(axis=2) > 200
+    assert bright.any() and stand[y0:y1][bright].all()

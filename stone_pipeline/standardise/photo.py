@@ -51,15 +51,10 @@ def standardise(rgb, *, fmt, key, size=None, clean=None, watermarked=False, mode
     images["white"] = layout.on_white(slabs)
     if kind != "close-up":                              # Blokport's studio scene: the slab on its chrome feet
         images["studio"] = studio.place(slabs)
-    if extra_views and kind != "close-up":
-        for side in C.ANGLE_SIDES:
-            img, solid, stand = views.angled(slabs, key, side)
-            images[f"angle_{side}"] = blend.blend(img, solid, stand, models.inpaint, C.BLEND_SEED)
-            images[f"white_angle_{side}"] = layout.on_white(slabs, turn=side)
-        if kind == "slab":
-            up = views.close_up(slabs[0][0], slabs[0][1], models.esr)
-            if up is not None:
-                images["close"] = up
+    if extra_views and kind == "slab":
+        up = views.close_up(slabs[0][0], slabs[0][1], models.esr)
+        if up is not None:
+            images["close"] = up
     return Result(kind=kind, images=images, slab=slabs[0] if kind == "slab" else ())
 
 

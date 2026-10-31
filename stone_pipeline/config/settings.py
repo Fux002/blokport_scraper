@@ -1023,8 +1023,7 @@ class STANDARDISE:
     BAND_FADE = 0.7                    # it fades out over this share of its width, so no rectangle shows on the floor
     BAND_CHIP_SOFT = 2.0               # a real chip is never repainted (edge softness, px)
     OPAQUE_MAX_CHANGE = 12             # a pixel changing less than this with the room behind it is slab or stand
-    STAND_MIN_CHANGE = 6               # a pixel changing more than this without the stand is the stand ...
-    STEEL_MAX = 70                     # ... when darker than this (its soft shade on the floor is not steel)
+    STAND_MIN_CHANGE = 6               # a pixel changing more than this without the stand is the stand or its shadow
     PHOTO_KINDS = {
         "slab": "a photo of one large polished stone slab standing upright, the whole slab in view",
         "close-up": "a close-up photo of the surface texture of polished stone",
@@ -1049,9 +1048,6 @@ class STANDARDISE:
     LOGO_FEATHER = 2.0
     LOGO_HUE, LOGO_MIN_SAT, LOGO_MIN_VAL = (160, 3), 110, 110   # the logo's pink (HSV, 0..180 / 0..255)
     LOGO_MAX_LEFT = 40                 # more pink pixels than this left after removal: held
-    ANGLE_SIDES = ("left", "right")
-    ANGLE_NARROW = 0.10                # turned: the far side moves in by this share of the width ...
-    ANGLE_FAR, ANGLE_NEAR = 0.90, 1.0  # ... and is this much shorter than the near side, about the floor line
     CLOSEUP_SHARE = 0.45               # a close-up shows this share of the slab's width
     SEAM_BAND = (0.46, 0.54)       # an open book is two equal slabs from one block: its seam is central
     SEAM_MIN = 6.0                 # robust z-score of a joint column (edge change + dark gap)
@@ -1102,12 +1098,6 @@ class STANDARDISE:
     REFLECT_FALL = 0.09                # ... fading over this share of the canvas height ...
     REFLECT_BLUR = (3.0, 14.0)         # ... and blurring from this sigma at its foot to this one further out (polished, not mirror) ...
     REFLECT_SIDE = 0.08                # ... and fading in over this share of the canvas width from its sides
-    STAND_INSET = 0.07                 # the stand: inset from the slab's ends, share of its width
-    RAIL_HEIGHT, RAIL_LIP = 26, 10     # its rail's height (px), and how far its front lip rises over the slab's foot
-    FOOT_WIDTH, FOOT_ABOVE, FOOT_BELOW = 62, 34, 88   # a foot's width, height above the slab's foot and reach below it (the floor)
-    RAIL_SHADES, FOOT_SHADES = (44.0, 15.0), (40.0, 13.0)  # front face brightness, top to bottom
-    RAIL_LIGHT = 105.0                 # the light caught along a steel edge
-    RAIL_SHADE = 0.34                  # the floor's shade under the rail
     CONTACT = 0.6                      # under the slab the floor is this much darker (no light gets there) ...
     CONTACT_DEPTH = 0.04               # ... over this share of the canvas height ...
     CAST = 0.55                        # ... and a soft shadow spills past the slab's ends: this strong ...
@@ -1131,7 +1121,6 @@ class STANDARDISE:
     EDGE = 0.45                        # the slab's bottom edge face (its thickness): this bright, relative to the stone ...
     EDGE_HEIGHT = 0.004                # ... this high, share of the canvas height
     FOOT_FADE = (0.10, 0.03)           # the stone's lowest part, near the floor, gets less light: by this much, over this share of the height
-    FOOT_SHADOW = 0.6                  # contact shadow under the stand's feet: strength ...
     AMBIENT_FALL = 0.035               # the slab's soft shade on the floor in front of it, share of the canvas height
     JOINT = 3                          # an open book's seam: this many dark pixels between the two slabs
     JOINT_COLOUR = (28, 28, 30)

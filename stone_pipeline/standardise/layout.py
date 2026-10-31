@@ -14,7 +14,15 @@ from stone_pipeline.standardise import marks as proto
 
 HERE = Path(__file__).parent
 ROOM_DIR = HERE / "assets" / "rooms"   # the user's showroom, fixed assets (made once from their example photo)
-STEEL = np.array((1.0, 1.0, 1.03), np.float32)    # black steel's tint
+STAND_PATH = HERE / "assets" / "stand_front.jpg"
+STAND_FACE = (240, 1284, 853)          # the slab's face in that image: left x, right x, its foot's row
+STAND_FLOOR = (600, 700)               # plain floor columns beside the feet, for their shadow
+STAND_PAD = (12, 12)                   # px kept round each foot (its shadow)
+STAND_FEET = (                         # each foot's outline in that image, traced at 8x
+    ((467, 840), (470, 837), (479, 836), (484, 838), (486, 846), (488, 853), (489, 858), (489, 866), (486, 876), (484, 886), (486, 888),
+     (485, 893), (450, 894), (449, 889), (455, 884), (457, 880), (457, 858), (462, 852), (464, 846)),
+    ((1027, 840), (1031, 836), (1036, 836), (1043, 843), (1047, 850), (1049, 855), (1053, 856), (1054, 888), (1061, 889), (1061, 894),
+     (1026, 894), (1026, 889), (1029, 887), (1013, 862), (1014, 859), (1024, 859), (1030, 852), (1027, 846)))
 
 
 def room_for(key, wide):
@@ -226,37 +234,44 @@ def trim_edges(rgb, alpha, skip=()):
     return np.ascontiguousarray(out)
 
 
-def _stand(out, x, width, bottom, scale):
-    """A black steel stand, drawn so it is sharp: two feet joined by a rail, the slab standing IN the rail behind its
-    front lip. `scale`: an open book's slabs and room are drawn smaller (seen from further away), so is its stand. It
-    spans the slab inset at both ends; the floor is under the feet."""
-    x0, x1 = x + int(C.STAND_INSET * width), x + width - int(C.STAND_INSET * width)
-    foot_w, above = int(C.FOOT_WIDTH * scale), int(C.FOOT_ABOVE * scale)
-    top, rail_end, floor = bottom - int(C.RAIL_LIP * scale), bottom + int((C.RAIL_HEIGHT - C.RAIL_LIP) * scale), bottom + int(C.FOOT_BELOW * scale)
-    # What the stand throws on the floor: a soft shade under the rail, a dark contact line under each foot.
-    shade = np.zeros(out.shape[:2], np.float32)
-    shade[rail_end:floor, x0 + foot_w:x1 - foot_w] = C.RAIL_SHADE
-    out *= (1 - cv2.GaussianBlur(shade, (0, 0), 12))[:, :, None]
-    foot = np.zeros(out.shape[:2], np.float32)
-    for fx in (x0, x1 - foot_w):
-        foot[floor - 3:floor + 4, fx - 2:fx + foot_w + 2] = 1
-    out *= (1 - C.FOOT_SHADOW * cv2.GaussianBlur(foot, (0, 0), 5))[:, :, None]
-    # The steel, on its own layer so its edges can be softened as a lens would.
-    layer, alpha = np.zeros(out.shape, np.float32), np.zeros(out.shape[:2], np.float32)
+@functools.lru_cache(maxsize=1)
+def _feet():
+    """[(rgb, alpha, shade, centre share, foot-line row, centre x)] of Blokport's two chrome feet, cut once from its front
+    studio image (assets/stand_front.jpg, the same stand as its storefront's base image, seen from the front): the
+    traced outline is the foot, the floor around it darker than the plain floor beside it is its shadow."""
+    im = np.asarray(Image.open(STAND_PATH).convert("RGB")).astype(np.float32)
+    feet = []
+    for poly in STAND_FEET:
+        p = np.array(poly, np.float32)
+        x0, y0 = (p.min(0) - STAND_PAD).astype(int)
+        x1, y1 = (p.max(0) + STAND_PAD).astype(int)
+        rgb = im[y0:y1, x0:x1]
+        alpha = np.zeros(rgb.shape[:2], np.float32)
+        cv2.fillPoly(alpha, [np.round(p - [x0, y0]).astype(np.int32)], 1.0)
+        floor = np.median(im[y0:y1, STAND_FLOOR[0]:STAND_FLOOR[1]], axis=1).mean(axis=1)[:, None]
+        shade = np.clip(rgb.mean(axis=2) / np.maximum(floor, 1), 0, 1)
+        shade[:STAND_FACE[2] + 2 - y0] = 1.0                            # above the slab's foot it is the slab, not floor
+        fade = np.zeros_like(shade)                                      # the shadow fades out before the cut's edges
+        fade[STAND_PAD[1] // 2:-STAND_PAD[1] // 2, STAND_PAD[0] // 2:-STAND_PAD[0] // 2] = 1
+        shade = 1 - (1 - shade) * cv2.GaussianBlur(fade, (0, 0), STAND_PAD[0] / 4)
+        feet.append((rgb, cv2.GaussianBlur(alpha, (0, 0), 0.6), shade,
+                     (p[:, 0].mean() - STAND_FACE[0]) / (STAND_FACE[1] - STAND_FACE[0]), STAND_FACE[2] - y0, p[:, 0].mean() - x0))
+    return feet
 
-    def face(y0, y1, fx0, fx1, shades):
-        ramp = np.interp(np.arange(y1 - y0), [0, max(1, y1 - y0 - 1)], shades).astype(np.float32)
-        layer[y0:y1, fx0:fx1] = ramp[:, None, None] * STEEL
-        alpha[y0:y1, fx0:fx1] = 1
-    face(top, rail_end, x0, x1, C.RAIL_SHADES)                                     # the rail's front face
-    face(top, top + 2, x0, x1, (C.RAIL_LIGHT, C.RAIL_LIGHT))                         # the light along its upper edge
-    for fx in (x0, x1 - foot_w):
-        face(bottom - above, floor, fx, fx + foot_w, C.FOOT_SHADES)       # a foot's front face
-        face(bottom - above, bottom - above + 3, fx, fx + foot_w, (C.RAIL_LIGHT, C.RAIL_LIGHT))
-    keep = cv2.GaussianBlur(alpha, (0, 0), 0.7)[:, :, None]
-    # Divided by the softened mask, or the softened edges would be dark halos of the empty layer.
-    steel = cv2.GaussianBlur(layer, (0, 0), 0.7) / np.maximum(keep, 1e-3)
-    out[:] = out * (1 - keep) + steel * keep
+
+def _stand(out, x, width, bottom):
+    """Blokport's chrome stand: its two feet, at the places and the size they have under the slab in its front studio
+    image, the slab's foot on their line; each foot's own shadow darkens the floor."""
+    s = width / (STAND_FACE[1] - STAND_FACE[0])
+    for rgb, alpha, shade, share, line, mid in _feet():
+        size = (max(1, round(rgb.shape[1] * s)), max(1, round(rgb.shape[0] * s)))
+        r = cv2.resize(rgb, size, interpolation=cv2.INTER_CUBIC)
+        a = cv2.resize(alpha, size, interpolation=cv2.INTER_LINEAR)[..., None]
+        sh = cv2.resize(shade, size, interpolation=cv2.INTER_LINEAR)[..., None]
+        fx, fy = round(x + share * width - mid * s), round(bottom - line * s)
+        h = min(size[1], out.shape[0] - fy)
+        region = out[fy:fy + h, fx:fx + size[0]]
+        region[:] = region * sh[:h] * (1 - a[:h]) + r[:h] * a[:h]
 
 
 def _reflect(out, left, total, bottom):
@@ -332,7 +347,7 @@ def compose(slabs, key, room=None, stand=True):
     _ground(out, left, total, top, bottom)
     for x, sw in placed:
         if stand:
-            _stand(out, x, sw, bottom, 1 / len(slabs))
+            _stand(out, x, sw, bottom)
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
@@ -345,7 +360,7 @@ def masks(slabs, key):
     with_it = compose(slabs, key, room=grey).astype(np.int16)
     without = compose(slabs, key, room=grey, stand=False).astype(np.int16)
     solid = (np.abs(dark - light).max(axis=2) < C.OPAQUE_MAX_CHANGE).astype(np.uint8)
-    stand = ((np.abs(with_it - without).max(axis=2) > C.STAND_MIN_CHANGE) & (with_it.max(axis=2) < C.STEEL_MAX)).astype(np.uint8)
+    stand = (np.abs(with_it - without).max(axis=2) > C.STAND_MIN_CHANGE).astype(np.uint8)
     return solid, stand
 
 
@@ -381,17 +396,7 @@ def _on_white(rgb, cover):
     return (out * (1 - a) + rgb * a).clip(0, 255).astype(np.uint8)
 
 
-def on_white(slabs, turn=None):
+def on_white(slabs):
     """The slab(s) on plain white with a soft shadow, no room and no stand (no room to clash with, nothing that can trace a
-    vendor). turn = "left" | "right": the same slab turned, about its middle."""
-    rgb, cover = _white_slabs(slabs)
-    if turn:
-        w, h = C.OUT_W, C.OUT_H
-        inset, cy = C.ANGLE_NARROW * w, h / 2
-        l, r = (C.ANGLE_FAR, C.ANGLE_NEAR) if turn == "left" else (C.ANGLE_NEAR, C.ANGLE_FAR)
-        x0, x1 = (inset, w) if turn == "left" else (0, w - inset)
-        dst = np.array([[x0, cy - cy * l], [x1, cy - cy * r], [x1, cy + cy * r], [x0, cy + cy * l]], np.float32)
-        H = cv2.getPerspectiveTransform(np.array([[0, 0], [w, 0], [w, h], [0, h]], np.float32), dst)
-        rgb = cv2.warpPerspective(rgb, H, (w, h), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
-        cover = cv2.warpPerspective(cover, H, (w, h), flags=cv2.INTER_LINEAR)
-    return _on_white(rgb, cover)
+    vendor)."""
+    return _on_white(*_white_slabs(slabs))
