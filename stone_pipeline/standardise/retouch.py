@@ -128,8 +128,9 @@ def fill_unlike_stone(original, edited, mask, stone, slab, long):
         return float("inf")
     shot, fill = _lab(original), _lab(edited)
     colour = float(np.linalg.norm(fill[inside].mean(axis=0) - shot[ring].mean(axis=0)))
-    texture = float((np.abs(cv2.Laplacian(fill[:, :, 0], cv2.CV_32F))[inside].mean() + 0.5)
-                    / (np.abs(cv2.Laplacian(shot[:, :, 0], cv2.CV_32F))[ring].mean() + 0.5))
+    # Medians: text or a vein left beside the mark is a few strong strokes, it must not set the stone's texture.
+    texture = float((np.median(np.abs(cv2.Laplacian(fill[:, :, 0], cv2.CV_32F))[inside]) + 0.5)
+                    / (np.median(np.abs(cv2.Laplacian(shot[:, :, 0], cv2.CV_32F))[ring]) + 0.5))
     return max(colour / C.RETOUCH_MAX_COLOUR, texture / C.RETOUCH_MAX_BUSIER, 1 / texture / C.RETOUCH_MAX_SMOOTHER)
 
 

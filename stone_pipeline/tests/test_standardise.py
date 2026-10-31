@@ -619,3 +619,16 @@ def test_the_stand_mask_covers_the_chrome_feet():
     y0, y1 = _feet_rows()
     bright = with_it[y0:y1].max(axis=2) > 200
     assert bright.any() and stand[y0:y1][bright].all()
+
+
+def test_text_left_around_a_mark_does_not_make_a_clean_fill_look_smeared():
+    clean = _stone(800, 1200, base=215, var=1)                       # a plain white marble
+    original = clean.copy()
+    mask = np.zeros((800, 1200), np.uint8); mask[380:440, 300:420] = 1
+    original[385:435, 305:415] = (200, 40, 120)                      # the logo's first word, found
+    for y in (410, 460):                                             # the rest of its lettering round it, not found
+        for x in range(260, 560, 22):
+            if not 300 <= x <= 420 or y > 440:
+                cv2.putText(original, "S", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (90, 90, 90), 2)
+    merged, reason = retouch.merge(original, clean, mask, _whole(), _whole(), 1200)
+    assert reason == ""
