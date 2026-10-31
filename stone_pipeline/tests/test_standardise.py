@@ -220,7 +220,7 @@ def _strap_edit():
 def test_a_clean_edit_is_taken_only_inside_the_found_area():
     original, edit, mask = _strap_edit()
     original[100:140, 700:760] = (10, 200, 10)         # outside the mask: must stay the real photo
-    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, edit, mask, _whole(), _whole(), 1200)
     assert reason == ""
     assert np.array_equal(merged[120, 730], original[120, 730]) and merged[400, 330, 0] > 130
 
@@ -228,7 +228,7 @@ def test_a_clean_edit_is_taken_only_inside_the_found_area():
 def test_a_repainted_stone_is_refused():
     original, _, mask = _strap_edit()
     repainted = _stone(800, 1200, seed=5, base=60, var=20)
-    merged, reason = retouch.merge(original, repainted, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, repainted, mask, _whole(), _whole(), 1200)
     assert merged is None and "recoloured" in reason
 
 
@@ -236,14 +236,14 @@ def test_an_invented_busy_fill_is_refused():
     original, edit, mask = _strap_edit()
     rng = np.random.default_rng(1)
     edit[:, 290:370] = rng.integers(0, 255, (800, 80, 3), dtype=np.uint8)
-    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, edit, mask, _whole(), _whole(), 1200)
     assert merged is None and "does not match" in reason
 
 
 def test_a_fill_brighter_than_the_stone_leaves_no_band():
     original, edit, mask = _strap_edit()
     edit[:, 290:370] = np.clip(edit[:, 290:370].astype(np.int16) + 25, 0, 255).astype(np.uint8)
-    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, edit, mask, _whole(), _whole(), 1200)
     assert reason == ""
     inside, beside = merged[:, 300:360].astype(np.float32).mean(), merged[:, 240:280].astype(np.float32).mean()
     assert abs(inside - beside) < 4
@@ -252,7 +252,7 @@ def test_a_fill_brighter_than_the_stone_leaves_no_band():
 def test_an_even_drift_of_the_whole_edit_is_not_a_repaint():
     original, edit, mask = _strap_edit()
     drifted = np.clip(edit.astype(np.int16) + 15, 0, 255).astype(np.uint8)
-    merged, reason = retouch.merge(original, drifted, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, drifted, mask, _whole(), _whole(), 1200)
     assert reason == "" and abs(merged[:, 300:360].astype(np.float32).mean() - merged[:, 240:280].astype(np.float32).mean()) < 4
 
 
@@ -262,7 +262,7 @@ def test_a_smeared_flat_fill_is_refused():
     mask = np.zeros((800, 1200), np.uint8); mask[:, 290:370] = 1
     edit = original.copy()
     edit[:, 290:370] = original.reshape(-1, 3).mean(axis=0).astype(np.uint8)
-    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, edit, mask, _whole(), _whole(), 1200)
     assert merged is None and "does not match" in reason
 
 
@@ -294,7 +294,7 @@ def test_only_the_crops_go_to_the_model_and_the_rest_stays_the_photo():
         seen.append(crop.shape)
         return clean[y0:y1, x0:x1]
 
-    out, reason = retouch.retouch(original, mask, _whole(), edit)
+    out, reason = retouch.retouch(original, mask, _whole(), _whole(), edit)
     assert reason == "" and seen == [(y1 - y0, x1 - x0, 3)]
     assert np.array_equal(out[:, :x0], original[:, :x0]) and out[400, 330, 0] > 130
 
@@ -308,14 +308,14 @@ def test_a_refused_try_is_tried_again_with_the_next_seed():
         seeds.append(seed)
         return np.zeros_like(crop) if len(seeds) == 1 else clean[y0:y1, x0:x1]
 
-    out, reason = retouch.retouch(original, mask, _whole(), edit)
+    out, reason = retouch.retouch(original, mask, _whole(), _whole(), edit)
     assert reason == "" and seeds == list(C.RETOUCH_SEEDS[:2]) and out[400, 330, 0] > 130
 
 
 def test_a_mark_refused_on_every_seed_refuses_the_photo():
     original, _, mask = _strap_edit()
     seeds = []
-    out, reason = retouch.retouch(original, mask, _whole(), lambda crop, seed: seeds.append(seed) or np.zeros_like(crop))
+    out, reason = retouch.retouch(original, mask, _whole(), _whole(), lambda crop, seed: seeds.append(seed) or np.zeros_like(crop))
     assert out is None and reason and seeds == list(C.RETOUCH_SEEDS)
 
 
@@ -357,7 +357,7 @@ def test_a_changed_background_is_not_a_changed_stone():
     original, edit, mask = _strap_edit()
     edit[:150] = (30, 60, 200)                         # the model repainted the warehouse behind the slab
     stone = _whole(); stone[:200] = 0
-    merged, reason = retouch.merge(original, edit, mask & stone, stone, 1200)
+    merged, reason = retouch.merge(original, edit, mask & stone, stone, retouch._slab(stone), 1200)
     assert reason == "" and merged is not None
 
 
@@ -371,14 +371,14 @@ def test_a_mark_off_the_slab_is_not_a_mark():
 def test_the_model_also_clearing_an_unmarked_logo_is_no_repaint():
     original, edit, mask = _strap_edit()
     original[100:220, 600:900] = (200, 40, 120)        # a vendor logo nobody marked: the model takes it off too, it is never pasted
-    merged, reason = retouch.merge(original, edit, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, edit, mask, _whole(), _whole(), 1200)
     assert reason == "" and np.array_equal(merged[150, 700], original[150, 700])
 
 
 def test_a_strong_even_recolouring_is_refused():
     original, edit, mask = _strap_edit()
     recoloured = np.clip(edit.astype(np.int16) + (30, 30, 10), 0, 255).astype(np.uint8)
-    merged, reason = retouch.merge(original, recoloured, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, recoloured, mask, _whole(), _whole(), 1200)
     assert merged is None and "recoloured" in reason
 
 
@@ -388,7 +388,7 @@ def test_a_label_on_the_slabs_top_edge_is_judged_against_the_stone_only():
     original[:200], edit[:200] = (20, 20, 25), (20, 20, 25)   # the dark hall above the slab
     label = np.zeros_like(mask); label[150:300, 500:640] = 1
     original[150:300, 500:640] = 250
-    merged, reason = retouch.merge(original, edit, label, stone, 1200)
+    merged, reason = retouch.merge(original, edit, label, stone, retouch._slab(stone), 1200)
     assert reason == "" and merged[260, 570].max() < 200
 
 
@@ -397,7 +397,7 @@ def test_a_fill_matching_the_models_repaint_but_not_the_real_stone_is_refused():
     original = _stone(800, 1200, base=160, var=1)                 # a plain grey slab
     rng = np.random.default_rng(9)
     busy = np.clip(rng.normal(160, 40, (800, 1200, 3)), 0, 255).astype(np.uint8)   # the model drew a busy one in its place
-    merged, reason = retouch.merge(original, busy, mask, _whole(), 1200)
+    merged, reason = retouch.merge(original, busy, mask, _whole(), _whole(), 1200)
     assert merged is None
 
 
@@ -405,7 +405,7 @@ def test_a_mark_too_wide_to_fill_is_refused_before_the_model_runs():
     original = _stone(800, 1200, base=160, var=8)
     fan = np.zeros((800, 1200), np.uint8); fan[300:650, 400:800] = 1   # a fan of sample cards on a close-up
     calls = []
-    out, reason = retouch.retouch(original, fan, _whole(), lambda crop, seed: calls.append(crop) or crop)
+    out, reason = retouch.retouch(original, fan, _whole(), _whole(), lambda crop, seed: calls.append(crop) or crop)
     assert out is None and "too large" in reason and not calls
 
 
@@ -420,7 +420,7 @@ def _stand():
 
 def test_the_shadow_a_stand_casts_comes_off_with_it():
     shot, clean, bar = _stand()
-    merged, reason = retouch.merge(shot, clean, bar, _whole(), 1200)
+    merged, reason = retouch.merge(shot, clean, bar, _whole(), _whole(), 1200)
     assert reason == ""
     assert abs(merged[550, 600].astype(np.float32).mean() - clean[550, 600].astype(np.float32).mean()) < 6
 
@@ -428,7 +428,7 @@ def test_the_shadow_a_stand_casts_comes_off_with_it():
 def test_a_dark_thing_beside_a_mark_that_changes_colour_is_no_shadow():
     shot, clean, bar = _stand()
     shot[530:560, 300:900] = (40, 40, 140)                      # a blue sticker the detector missed, touching the bar
-    merged, _ = retouch.merge(shot, clean, bar, _whole(), 1200)
+    merged, _ = retouch.merge(shot, clean, bar, _whole(), _whole(), 1200)
     assert merged is None or np.array_equal(merged[550, 600], shot[550, 600])
 
 
@@ -440,8 +440,27 @@ def test_a_fill_shaded_where_nothing_measures_its_edge_takes_the_stones_tone():
     original[150:300, 500:640] = 250
     shade = np.linspace(-30, 0, 100)[:, None, None]                 # the model drew the label's area darker toward the top
     edit[200:300, 500:640] = np.clip(edit[200:300, 500:640] + shade, 0, 255).astype(np.uint8)
-    merged, reason = retouch.merge(original, edit, label, stone, 1200)
+    merged, reason = retouch.merge(original, edit, label, stone, retouch._slab(stone), 1200)
     assert reason == ""
     tone = lambda im, ys, xs: im[ys, xs].astype(np.float32).mean()
     assert abs(tone(merged, slice(200, 250), slice(510, 630)) - tone(original, slice(200, 250), slice(660, 720))) < 5
     assert abs(tone(merged, slice(200, 300), slice(510, 630)) - tone(original, slice(200, 300), slice(660, 720))) < 3
+
+
+def test_a_strap_where_the_stone_beyond_it_was_lost_takes_the_stones_tone():
+    clean = _stone(800, 1200, base=150, var=8)
+    original = clean.copy(); original[:, 200:260] = (120, 80, 50)
+    stone = np.zeros((800, 1200), np.uint8); stone[:, 260:] = 1    # the segmenter lost the strip left of the strap
+    strap = np.zeros_like(stone); strap[:, 195:265] = 1
+    bluer = np.clip(clean.astype(np.int16) + (-4, -2, 8), 0, 255).astype(np.uint8)   # the model drew the stone a little bluer
+    merged, reason = retouch.merge(original, bluer, strap, stone, _whole(), 1200)
+    assert reason == ""
+    assert np.abs(merged[:, 210:250].reshape(-1, 3).mean(0) - clean[:, 210:250].reshape(-1, 3).mean(0)).max() < 2
+
+
+def test_a_shadows_soft_edge_comes_off_too():
+    shot, clean, bar = _stand()
+    shot[560:568, 300:900] = (clean[560:568, 300:900] * 0.9).astype(np.uint8)   # the shadow's fringe, within SHADOW_REACH
+    merged, reason = retouch.merge(shot, clean, bar, _whole(), _whole(), 1200)
+    assert reason == ""
+    assert abs(merged[564, 600].astype(np.float32).mean() - clean[564, 600].astype(np.float32).mean()) < 3

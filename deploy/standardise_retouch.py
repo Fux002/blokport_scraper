@@ -70,7 +70,7 @@ def _unpack(data):
 
 
 def _find(client, keys, out):
-    """{key: packed (straps, cards, stone)} of every photo with a mark on it."""
+    """{key: packed (straps, cards, stone, slab)} of every photo with a mark on it."""
     seg = marks.load_sam()
     det = outline.load_detector(seg[2])
     found = {}
@@ -78,10 +78,10 @@ def _find(client, keys, out):
         sha = imagestore.sha_from_url(key)
         try:
             rgb = photo.decode(_get(client, key))
-            straps, cards, stone = retouch.find_marks(seg, det, rgb)
+            straps, cards, stone, slab = retouch.find_marks(seg, det, rgb)
             if not (straps.any() or cards.any()):
                 continue
-            found[key] = (_pack(straps), _pack(cards), _pack(stone))
+            found[key] = (_pack(straps), _pack(cards), _pack(stone), _pack(slab))
             if os.environ.get("RUN_TAG"):
                 _write_found(client, out, sha, rgb, straps, cards)
         except Exception as exc:                       # one bad photo never stops the slice
@@ -134,12 +134,12 @@ def main() -> int:
         sha = imagestore.sha_from_url(key)
         started = time.time()
         try:
-            straps, cards, stone = (_unpack(p) for p in packed)
+            straps, cards, stone, slab = (_unpack(p) for p in packed)
             rgb = photo.decode(_get(client, key))
             rec = _Recorder(client, out, sha) if os.environ.get("RUN_TAG") else _NoRecord()
-            for name, mask in (("straps", straps), ("cards", cards), ("stone", stone)):
+            for name, mask in (("straps", straps), ("cards", cards), ("stone", stone), ("slab", slab)):
                 rec.put(f"{name}.png", mask * 255, png=True)
-            merged, reason = retouch.retouch(rgb, straps | cards, stone, rec.wrap(edit, "marks"))
+            merged, reason = retouch.retouch(rgb, straps | cards, stone, slab, rec.wrap(edit, "marks"))
             if merged is None:
                 _hold(client, out, sha, reason, not cards.any())
                 refused += 1

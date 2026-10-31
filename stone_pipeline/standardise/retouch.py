@@ -31,8 +31,9 @@ def keep_on_slab(found, slab, share):
 
 
 def find_marks(seg, det, rgb):
-    """(mask of straps, mask of cards, stickers and labels on the slab, mask of the slab): what should come off this photo,
-    and the stone that must not change."""
+    """(straps, cards, stone, slab): masks of the straps and of the cards, stickers, labels and racks on the slab, what the
+    segmenter saw as stone (it must not change), and the slab: the stone's outline and the detector's box around it (the
+    segmenter can lose the strip of stone beyond a strap at the slab's edge, the box does not)."""
     h, w = rgb.shape[:2]
     emb = marks.embed(seg, rgb)
     boxes = [b for b in outline.detect(det, rgb) if (b[2] - b[0]) * (b[3] - b[1]) >= C.MIN_SLAB_SHARE * w * h]
@@ -40,21 +41,21 @@ def find_marks(seg, det, rgb):
     stone = marks.slab_mask(seg, rgb, box, emb, widest=True)[0]
     none = np.zeros((h, w), np.uint8)
     if not stone.any():                                # no slab seen: nothing on it to take off
-        return none, none, stone
-    slab = _slab(stone)
-    # A strap at the slab's edge counts by the detector's box as well: the segmenter can lose the strip of stone beyond
-    # it. Cards, stickers and racks count by the stone only: the box also holds the floor and the hall beside the slab.
-    strapped = slab.copy()
+        return none, none, stone, none
+    hull = _slab(stone)
+    slab = hull.copy()
     bx0, by0, bx1, by1 = (int(round(v)) for v in box)
-    strapped[by0:by1 + 1, bx0:bx1 + 1] = 1
-    straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), strapped, C.STRAP_ON_SLAB)
+    slab[by0:by1 + 1, bx0:bx1 + 1] = 1
+    # A strap counts by the slab, box included. Cards, stickers and racks count by the stone's outline only: the box also
+    # holds the floor and the hall beside the slab (a bucket, a sign).
+    straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), slab, C.STRAP_ON_SLAB)
     cards = none.copy()
     for x0, y0, x1, y1, _ in outline.detect(det, rgb, C.CARD_PROMPT, C.CARD_MIN_SCORE):
         if (x1 - x0) * (y1 - y0) > C.CARD_MAX_BOX * w * h:
             continue
         cards |= marks.slab_mask(seg, rgb, (x0, y0, x1, y1), emb)[1]
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, cv2.dilate(keep_on_slab(cards, slab, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone
+    return straps, cv2.dilate(keep_on_slab(cards, hull, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone, slab
 
 
 def _lab(rgb):
@@ -76,7 +77,7 @@ def recoloured(original, edited, mask, stone, long):
     return float(np.linalg.norm(np.median(diff, axis=0)))
 
 
-def fill_unlike_stone(original, edited, mask, stone, long):
+def fill_unlike_stone(original, edited, mask, stone, slab, long):
     """How unlike the REAL stone around it the fill is: the largest of its colour distance, how much busier and how much
     smoother it is, each scaled so 1 is the limit. Judged against the photo, not the edit: a model that drew another stone
     everywhere would match its own drawing. An invented pile of rocks where a card lay fails this, so does a smooth smear;
@@ -88,7 +89,7 @@ def fill_unlike_stone(original, edited, mask, stone, long):
     # the photo are no texture of the stone.
     inset = np.ones((2 * C.RETOUCH_RING_INSET + 1,) * 2, np.uint8)
     ring = (cv2.dilate(mask, np.ones((k, k), np.uint8)) > 0) & (cv2.dilate(mask, inset) == 0) & (cv2.erode(stone, inset, borderValue=1) > 0)
-    inside = (mask > 0) & (cv2.erode(_slab(stone), inset, borderValue=1) > 0)
+    inside = (mask > 0) & (cv2.erode(slab, inset, borderValue=1) > 0)
     if not ring.any() or not inside.any():
         return float("inf")
     shot, fill = _lab(original), _lab(edited)
@@ -105,26 +106,33 @@ def too_wide(mask, long):
     return float(cv2.distanceTransform(mask, cv2.DIST_L2, 5).max()) / long
 
 
-def with_shadow(original, edited, mask, stone, long):
-    """The found area with the shadow its mark cast: next to it on the slab, where the photo is darker than the edit by more
-    than the edit's own shift away from the mark, with the same colour (a shadow only darkens the stone; a card or a rack the
-    detector missed changes the colour too, and is left for a person to see rather than half taken off)."""
+def without_shadow(original, edited, mask, stone, slab, long):
+    """The photo with the shadow a mark cast lifted off the real stone: next to the mark on the slab, connected to it, where
+    the edit is lighter than the photo beyond its own shift away from the mark and the colour did not move, the photo's
+    lightness is raised by that much. The stone under a shadow stays the photo's own, and a shadow's soft edge fades out
+    with it. A card or a rack the detector missed changes the colour too, and is left for a person to see."""
     k = max(1, int(C.SHADOW_REACH * long))
-    near = (cv2.dilate(mask, np.ones((2 * k + 1, 2 * k + 1), np.uint8)) > 0) & (mask == 0) & (_slab(stone) > 0)
+    near = (cv2.dilate(mask, np.ones((2 * k + 1, 2 * k + 1), np.uint8)) > 0) & (mask == 0) & (slab > 0)
     g = max(3, int(C.RETOUCH_GUARD * long))
     away = (cv2.dilate(mask, np.ones((2 * k + g, 2 * k + g), np.uint8)) == 0) & (stone > 0)
     if not near.any() or not away.any():
-        return mask
+        return original
     shot, edit = _lab(original), _lab(edited)
     lift = cv2.GaussianBlur(edit[:, :, 0] - shot[:, :, 0], (0, 0), 1.5)
+    lift -= np.median(lift[away])
     hue = np.linalg.norm(cv2.GaussianBlur(edit[:, :, 1:] - shot[:, :, 1:], (0, 0), 1.5), axis=2)
-    shade = near & (lift > np.median(lift[away]) + C.SHADOW_MIN_LIFT) & (hue < C.SHADOW_MAX_HUE)
+    shade = near & (lift > C.SHADOW_MIN_LIFT) & (hue < C.SHADOW_MAX_HUE)
     _, labels = cv2.connectedComponents((shade | (mask > 0)).astype(np.uint8))
     touching = np.unique(labels[mask > 0])
-    return mask | (np.isin(labels, touching[touching > 0]) & shade).astype(np.uint8)
+    shadow = (np.isin(labels, touching[touching > 0]) & shade).astype(np.float32)
+    if not shadow.any():
+        return original
+    weight = cv2.GaussianBlur(shadow, (0, 0), C.RETOUCH_FEATHER)
+    shot[:, :, 0] += weight * np.clip(lift, 0, None)
+    return (np.clip(cv2.cvtColor(shot, cv2.COLOR_LAB2RGB), 0, 1) * 255 + 0.5).astype(np.uint8)
 
 
-def merge(original, edited, mask, stone, long):
+def merge(original, edited, mask, stone, slab, long):
     """(the real photo with only the found area taken from the edit, why it was refused or ""): long is the whole photo's
     long side, so every check means the same on a close crop as on a wide one."""
     h, w = original.shape[:2]
@@ -132,22 +140,20 @@ def merge(original, edited, mask, stone, long):
     moved = recoloured(original, edited, mask, stone, long)
     if moved > C.RETOUCH_MAX_DRIFT:
         return None, f"retouch: the model recoloured the stone ({moved:.1f})"
+    base = without_shadow(original, edited, mask, stone, slab, long)
     # Matched and judged on the slab only: a label's part above the slab's top edge is the hall in the edit, and is cut away.
-    on_slab = mask
-    if stone.any():
-        mask = with_shadow(original, edited, mask, stone, long)
-        on_slab = mask & _slab(stone)
     # The fill's broad tone is the real stone's around it, carried in smoothly; the model gives only the finer texture.
-    edited = np.where(mask[..., None] > 0, edited, original)
-    edited = marks.match_tone(edited, on_slab > 0, ((on_slab == 0) & (stone > 0)).astype(np.float32), C.RETOUCH_TONE_SIGMA * long)
-    unlike = fill_unlike_stone(original, edited, on_slab, stone, long)
+    on_slab = (mask > 0) & (slab > 0)
+    fill = np.where(mask[..., None] > 0, edited, base)
+    fill = marks.match_tone(fill, on_slab, ((mask == 0) & (stone > 0)).astype(np.float32), C.RETOUCH_TONE_SIGMA * long)
+    unlike = fill_unlike_stone(base, fill, on_slab.astype(np.uint8), stone, slab, long)
     if unlike > 1:
         return None, f"retouch: the fill does not match the stone around it ({unlike:.2f})"
     k = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), C.RETOUCH_FEATHER)[..., None]
-    return (original * (1 - k) + edited * k).clip(0, 255).astype(np.uint8), ""
+    return (base * (1 - k) + fill * k).clip(0, 255).astype(np.uint8), ""
 
 
-def _fill(rgb, mask, stone, box, edit):
+def _fill(rgb, mask, stone, slab, box, edit):
     """(this crop with its marks filled, why it was refused or ""): a mark too wide to fill honestly never goes to the model.
     One draw of the model can recolour the stone where the next is faithful: each seed of C.RETOUCH_SEEDS is tried in turn
     (fixed, so the same photo gives the same result) and the first that passes every check is taken."""
@@ -156,9 +162,9 @@ def _fill(rgb, mask, stone, box, edit):
     reach = too_wide(mask[y0:y1, x0:x1], long)
     if reach > C.RETOUCH_MAX_REACH:
         return None, f"retouch: the mark is too large to fill without inventing stone ({reach:.3f})"
-    crop, found, slab = rgb[y0:y1, x0:x1], mask[y0:y1, x0:x1], stone[y0:y1, x0:x1]
+    crop = rgb[y0:y1, x0:x1]
     for seed in C.RETOUCH_SEEDS:
-        piece, reason = merge(crop, edit(crop, seed), found, slab, long)
+        piece, reason = merge(crop, edit(crop, seed), mask[y0:y1, x0:x1], stone[y0:y1, x0:x1], slab[y0:y1, x0:x1], long)
         if piece is not None:
             return piece, ""
     return None, f"{reason} on all {len(C.RETOUCH_SEEDS)} tries"
@@ -187,12 +193,12 @@ def model_size(w, h):
     return max(16, int(w * k) // 16 * 16), max(16, int(h * k) // 16 * 16)
 
 
-def retouch(rgb, mask, stone, edit):
+def retouch(rgb, mask, stone, slab, edit):
     """(rgb with every mark taken off, why it was refused or ""): edit(crop, seed) is the model. One refused mark refuses the photo:
     half a retouch (one strap off, one on) is worse than none."""
     out = rgb.copy()
     for x0, y0, x1, y1 in regions(mask):
-        piece, reason = _fill(rgb, mask, stone, (x0, y0, x1, y1), edit)
+        piece, reason = _fill(rgb, mask, stone, slab, (x0, y0, x1, y1), edit)
         if piece is None:
             return None, reason
         out[y0:y1, x0:x1] = piece
