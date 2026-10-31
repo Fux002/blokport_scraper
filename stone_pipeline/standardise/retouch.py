@@ -18,17 +18,11 @@ def _slab(stone):
     return cv2.fillConvexPoly(np.zeros_like(stone), cv2.convexHull(cv2.findNonZero(stone)), 1)
 
 
-def keep_on_slab(found, stone, box, share):
-    """Only the parts of `found` with this share on the slab: a code painted on the floor, a sign behind or the edge of the
-    next slab in the row is cropped away anyway. The slab is the stone's outline and the detector's box around it: the
-    segmenter can lose the strip of stone beyond a strap at the slab's edge, the box does not."""
+def keep_on_slab(found, slab, share):
+    """Only the parts of `found` with this share on `slab`: a code painted on the floor, a sign behind or the edge of the
+    next slab in the row is cropped away anyway."""
     n, labels, stats, _ = cv2.connectedComponentsWithStats(found)
     out = np.zeros_like(found)
-    if not stone.any():
-        return out
-    x0, y0, x1, y1 = (int(round(v)) for v in box)
-    slab = _slab(stone)
-    slab[y0:y1 + 1, x0:x1 + 1] = 1
     for i in range(1, n):
         part = labels == i
         if (slab[part] > 0).mean() >= share:
@@ -44,14 +38,23 @@ def find_marks(seg, det, rgb):
     boxes = [b for b in outline.detect(det, rgb) if (b[2] - b[0]) * (b[3] - b[1]) >= C.MIN_SLAB_SHARE * w * h]
     box = max(boxes, key=lambda b: b[4])[:4] if boxes else (0, 0, w - 1, h - 1)
     stone = marks.slab_mask(seg, rgb, box, emb, widest=True)[0]
-    straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), stone, box, C.STRAP_ON_SLAB)
-    cards = np.zeros((h, w), np.uint8)
+    none = np.zeros((h, w), np.uint8)
+    if not stone.any():                                # no slab seen: nothing on it to take off
+        return none, none, stone
+    slab = _slab(stone)
+    # A strap at the slab's edge counts by the detector's box as well: the segmenter can lose the strip of stone beyond
+    # it. Cards, stickers and racks count by the stone only: the box also holds the floor and the hall beside the slab.
+    strapped = slab.copy()
+    bx0, by0, bx1, by1 = (int(round(v)) for v in box)
+    strapped[by0:by1 + 1, bx0:bx1 + 1] = 1
+    straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), strapped, C.STRAP_ON_SLAB)
+    cards = none.copy()
     for x0, y0, x1, y1, _ in outline.detect(det, rgb, C.CARD_PROMPT, C.CARD_MIN_SCORE):
         if (x1 - x0) * (y1 - y0) > C.CARD_MAX_BOX * w * h:
             continue
         cards |= marks.slab_mask(seg, rgb, (x0, y0, x1, y1), emb)[1]
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, cv2.dilate(keep_on_slab(cards, stone, box, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone
+    return straps, cv2.dilate(keep_on_slab(cards, slab, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone
 
 
 def _lab(rgb):
@@ -145,13 +148,20 @@ def merge(original, edited, mask, stone, long):
 
 
 def _fill(rgb, mask, stone, box, edit):
-    """(this crop with its marks filled, why it was refused or ""): a mark too wide to fill honestly never goes to the model."""
+    """(this crop with its marks filled, why it was refused or ""): a mark too wide to fill honestly never goes to the model.
+    One draw of the model can recolour the stone where the next is faithful: each seed of C.RETOUCH_SEEDS is tried in turn
+    (fixed, so the same photo gives the same result) and the first that passes every check is taken."""
     x0, y0, x1, y1 = box
     long = max(rgb.shape[:2])
     reach = too_wide(mask[y0:y1, x0:x1], long)
     if reach > C.RETOUCH_MAX_REACH:
         return None, f"retouch: the mark is too large to fill without inventing stone ({reach:.3f})"
-    return merge(rgb[y0:y1, x0:x1], edit(rgb[y0:y1, x0:x1]), mask[y0:y1, x0:x1], stone[y0:y1, x0:x1], long)
+    crop, found, slab = rgb[y0:y1, x0:x1], mask[y0:y1, x0:x1], stone[y0:y1, x0:x1]
+    for seed in C.RETOUCH_SEEDS:
+        piece, reason = merge(crop, edit(crop, seed), found, slab, long)
+        if piece is not None:
+            return piece, ""
+    return None, f"{reason} on all {len(C.RETOUCH_SEEDS)} tries"
 
 
 def regions(mask):
@@ -178,7 +188,7 @@ def model_size(w, h):
 
 
 def retouch(rgb, mask, stone, edit):
-    """(rgb with every mark taken off, why it was refused or ""): edit(crop) is the model. One refused mark refuses the photo:
+    """(rgb with every mark taken off, why it was refused or ""): edit(crop, seed) is the model. One refused mark refuses the photo:
     half a retouch (one strap off, one on) is worse than none."""
     out = rgb.copy()
     for x0, y0, x1, y1 in regions(mask):

@@ -967,6 +967,7 @@ class STANDARDISE:
     RETOUCH_MAX_BUSIER = 2.4           # ... it may be this many times busier (good real fills <= 1.93; a glossy ring is calm) ...
     RETOUCH_MAX_SMOOTHER = 1.9         # ... and this many times smoother: more is a smear
     RETOUCH_FEATHER = 2.0
+    RETOUCH_SEEDS = (20261030, 20261031, 20261101)   # a refused removal is tried again with the next draw of the model
     SHADOW_REACH = 0.03                # a mark's shadow is taken off this far from it (share of the long side): a stand's bar cast 0.023
     SHADOW_MIN_LIFT = 8.0              # where the photo is this much darker (L*) than the edit, beyond the edit's own shift ...
     SHADOW_MAX_HUE = 3.0               # ... and its colour (a*, b*) moved less than this: a missed black card moved more

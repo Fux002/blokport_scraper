@@ -290,7 +290,7 @@ def test_only_the_crops_go_to_the_model_and_the_rest_stays_the_photo():
     seen = []
     x0, y0, x1, y1 = retouch.regions(mask)[0]
 
-    def edit(crop):
+    def edit(crop, seed):
         seen.append(crop.shape)
         return clean[y0:y1, x0:x1]
 
@@ -299,34 +299,51 @@ def test_only_the_crops_go_to_the_model_and_the_rest_stays_the_photo():
     assert np.array_equal(out[:, :x0], original[:, :x0]) and out[400, 330, 0] > 130
 
 
-def test_one_refused_mark_refuses_the_photo():
+def test_a_refused_try_is_tried_again_with_the_next_seed():
+    original, clean, mask = _strap_edit()
+    x0, y0, x1, y1 = retouch.regions(mask)[0]
+    seeds = []
+
+    def edit(crop, seed):                              # the first draw recolours the stone, the second is faithful
+        seeds.append(seed)
+        return np.zeros_like(crop) if len(seeds) == 1 else clean[y0:y1, x0:x1]
+
+    out, reason = retouch.retouch(original, mask, _whole(), edit)
+    assert reason == "" and seeds == list(C.RETOUCH_SEEDS[:2]) and out[400, 330, 0] > 130
+
+
+def test_a_mark_refused_on_every_seed_refuses_the_photo():
     original, _, mask = _strap_edit()
-    out, reason = retouch.retouch(original, mask, _whole(), lambda crop: np.zeros_like(crop))
-    assert out is None and reason
+    seeds = []
+    out, reason = retouch.retouch(original, mask, _whole(), lambda crop, seed: seeds.append(seed) or np.zeros_like(crop))
+    assert out is None and reason and seeds == list(C.RETOUCH_SEEDS)
 
 
-_BOX = (100, 100, 1099, 699)                                   # the detector's box around the slab in these tests
+def _with_box(stone):                                           # the slab as straps count it: the stone and the detector's box
+    slab = retouch._slab(stone)
+    slab[100:700, 100:1100] = 1
+    return slab
 
 
 def test_a_mark_in_a_notch_of_the_slab_counts_as_on_it():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
-    stone[500:700, 500:800] = 0                                # the photo's rack stands in front of the slab
+    stone[500:700, 500:800] = 0                               # the photo's rack stands in front of the slab
     rack = np.zeros_like(stone); rack[500:700, 500:800] = 1
-    assert retouch.keep_on_slab(rack, stone, _BOX, C.CARD_ON_SLAB).any()
+    assert retouch.keep_on_slab(rack, retouch._slab(stone), C.CARD_ON_SLAB).any()
 
 
 def test_a_strap_off_the_slab_is_no_strap_but_one_sticking_out_above_it_is():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     beside = np.zeros_like(stone); beside[50:750, 1120:1180] = 1     # the edge of the next slab in the row
     across = np.zeros_like(stone); across[20:700, 300:360] = 1       # a strap, its top above the slab
-    assert not retouch.keep_on_slab(beside, stone, _BOX, C.STRAP_ON_SLAB).any()
-    assert retouch.keep_on_slab(across, stone, _BOX, C.STRAP_ON_SLAB).sum() == across.sum()
+    assert not retouch.keep_on_slab(beside, _with_box(stone), C.STRAP_ON_SLAB).any()
+    assert retouch.keep_on_slab(across, _with_box(stone), C.STRAP_ON_SLAB).sum() == across.sum()
 
 
 def test_a_strap_at_the_slabs_edge_counts_when_the_stone_beyond_it_was_missed():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 260:1100] = 1   # SAM lost the strip of stone left of the strap
     strap = np.zeros_like(stone); strap[20:700, 200:260] = 1
-    assert retouch.keep_on_slab(strap, stone, _BOX, C.STRAP_ON_SLAB).sum() == strap.sum()
+    assert retouch.keep_on_slab(strap, _with_box(stone), C.STRAP_ON_SLAB).sum() == strap.sum()
 
 
 @pytest.mark.parametrize("h,w", [(800, 1400), (500, 1900), (1200, 900)])
@@ -348,7 +365,7 @@ def test_a_mark_off_the_slab_is_not_a_mark():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     on = np.zeros_like(stone); on[300:340, 500:600] = 1
     off = np.zeros_like(stone); off[720:780, 200:400] = 1      # a painted code on the floor
-    assert retouch.keep_on_slab(on, stone, _BOX, C.CARD_ON_SLAB).any() and not retouch.keep_on_slab(off, stone, _BOX, C.CARD_ON_SLAB).any()
+    assert retouch.keep_on_slab(on, retouch._slab(stone), C.CARD_ON_SLAB).any() and not retouch.keep_on_slab(off, retouch._slab(stone), C.CARD_ON_SLAB).any()
 
 
 def test_the_model_also_clearing_an_unmarked_logo_is_no_repaint():
@@ -388,7 +405,7 @@ def test_a_mark_too_wide_to_fill_is_refused_before_the_model_runs():
     original = _stone(800, 1200, base=160, var=8)
     fan = np.zeros((800, 1200), np.uint8); fan[300:650, 400:800] = 1   # a fan of sample cards on a close-up
     calls = []
-    out, reason = retouch.retouch(original, fan, _whole(), lambda crop: calls.append(crop) or crop)
+    out, reason = retouch.retouch(original, fan, _whole(), lambda crop, seed: calls.append(crop) or crop)
     assert out is None and "too large" in reason and not calls
 
 

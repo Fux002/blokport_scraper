@@ -44,8 +44,8 @@ class _Recorder:
         self.client.put_object(Bucket=S3_BUCKET, Key=f"{self.prefix}{name}", Body=data, ContentType="image/png" if png else "image/jpeg")
 
     def wrap(self, edit, kind):
-        def recorded(crop):
-            result = edit(crop)
+        def recorded(crop, seed):
+            result = edit(crop, seed)
             self.put(f"{kind}_{self.n:02d}.jpg", result)
             self.n += 1
             return result
@@ -93,7 +93,7 @@ def _find(client, keys, out):
 
 
 def _load_editor():
-    """The model, as a function: crop to edited crop."""
+    """The model, as a function: (crop, seed) to edited crop."""
     from diffusers import Flux2KleinPipeline
     encoder = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, transformer=None, vae=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
     with torch.no_grad():
@@ -103,11 +103,11 @@ def _load_editor():
     torch.cuda.empty_cache()
     pipe = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, text_encoder=None, tokenizer=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
 
-    def edit(crop):
+    def edit(crop, seed):
         w, h = retouch.model_size(crop.shape[1], crop.shape[0])
         return np.asarray(pipe(prompt_embeds=embed.to("cuda"), image=Image.fromarray(crop).resize((w, h), Image.LANCZOS), width=w, height=h,
                                num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
-                               generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0])
+                               generator=torch.Generator("cpu").manual_seed(seed)).images[0])
     return edit
 
 
