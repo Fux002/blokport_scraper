@@ -305,19 +305,28 @@ def test_one_refused_mark_refuses_the_photo():
     assert out is None and reason
 
 
+_BOX = (100, 100, 1099, 699)                                   # the detector's box around the slab in these tests
+
+
 def test_a_mark_in_a_notch_of_the_slab_counts_as_on_it():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     stone[500:700, 500:800] = 0                                # the photo's rack stands in front of the slab
     rack = np.zeros_like(stone); rack[500:700, 500:800] = 1
-    assert retouch.keep_on_slab(rack, stone, C.CARD_ON_SLAB).any()
+    assert retouch.keep_on_slab(rack, stone, _BOX, C.CARD_ON_SLAB).any()
 
 
 def test_a_strap_off_the_slab_is_no_strap_but_one_sticking_out_above_it_is():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     beside = np.zeros_like(stone); beside[50:750, 1120:1180] = 1     # the edge of the next slab in the row
     across = np.zeros_like(stone); across[20:700, 300:360] = 1       # a strap, its top above the slab
-    assert not retouch.keep_on_slab(beside, stone, C.STRAP_ON_SLAB).any()
-    assert retouch.keep_on_slab(across, stone, C.STRAP_ON_SLAB).sum() == across.sum()
+    assert not retouch.keep_on_slab(beside, stone, _BOX, C.STRAP_ON_SLAB).any()
+    assert retouch.keep_on_slab(across, stone, _BOX, C.STRAP_ON_SLAB).sum() == across.sum()
+
+
+def test_a_strap_at_the_slabs_edge_counts_when_the_stone_beyond_it_was_missed():
+    stone = np.zeros((800, 1200), np.uint8); stone[100:700, 260:1100] = 1   # SAM lost the strip of stone left of the strap
+    strap = np.zeros_like(stone); strap[20:700, 200:260] = 1
+    assert retouch.keep_on_slab(strap, stone, _BOX, C.STRAP_ON_SLAB).sum() == strap.sum()
 
 
 @pytest.mark.parametrize("h,w", [(800, 1400), (500, 1900), (1200, 900)])
@@ -339,7 +348,7 @@ def test_a_mark_off_the_slab_is_not_a_mark():
     stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
     on = np.zeros_like(stone); on[300:340, 500:600] = 1
     off = np.zeros_like(stone); off[720:780, 200:400] = 1      # a painted code on the floor
-    assert retouch.keep_on_slab(on, stone, C.CARD_ON_SLAB).any() and not retouch.keep_on_slab(off, stone, C.CARD_ON_SLAB).any()
+    assert retouch.keep_on_slab(on, stone, _BOX, C.CARD_ON_SLAB).any() and not retouch.keep_on_slab(off, stone, _BOX, C.CARD_ON_SLAB).any()
 
 
 def test_the_model_also_clearing_an_unmarked_logo_is_no_repaint():
@@ -404,3 +413,18 @@ def test_a_dark_thing_beside_a_mark_that_changes_colour_is_no_shadow():
     shot[530:560, 300:900] = (40, 40, 140)                      # a blue sticker the detector missed, touching the bar
     merged, _ = retouch.merge(shot, clean, bar, _whole(), 1200)
     assert merged is None or np.array_equal(merged[550, 600], shot[550, 600])
+
+
+def test_a_fill_shaded_where_nothing_measures_its_edge_takes_the_stones_tone():
+    original, edit, _ = _strap_edit()
+    stone = _whole(); stone[:200] = 0
+    original[:200], edit[:200] = (20, 20, 25), (20, 20, 25)        # the hall above the slab
+    label = np.zeros((800, 1200), np.uint8); label[150:300, 500:640] = 1
+    original[150:300, 500:640] = 250
+    shade = np.linspace(-30, 0, 100)[:, None, None]                 # the model drew the label's area darker toward the top
+    edit[200:300, 500:640] = np.clip(edit[200:300, 500:640] + shade, 0, 255).astype(np.uint8)
+    merged, reason = retouch.merge(original, edit, label, stone, 1200)
+    assert reason == ""
+    tone = lambda im, ys, xs: im[ys, xs].astype(np.float32).mean()
+    assert abs(tone(merged, slice(200, 250), slice(510, 630)) - tone(original, slice(200, 250), slice(660, 720))) < 5
+    assert abs(tone(merged, slice(200, 300), slice(510, 630)) - tone(original, slice(200, 300), slice(660, 720))) < 3

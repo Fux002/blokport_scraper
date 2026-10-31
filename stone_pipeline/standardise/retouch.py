@@ -1,6 +1,6 @@
 """Straps, sample cards, stickers and the photo's own rack taken off a photo with an editing model, safely. The model redraws
 all it is given and can invent stone (it turned a black slab blue and gold), so: it is given only a close crop around each
-mark found; only the found area is taken from its output, with its edges brought to the real stone's tone, the rest stays the
+mark found; only the found area is taken from its output, with its broad tone taken from the real stone, the rest stays the
 real photo; and the result is refused when the model recoloured the stone beside that area, or the filled area does not look
 like the real stone around it, or the mark is too wide to fill without inventing what was under it. Never guessed: a refused
 photo is reported.
@@ -18,14 +18,17 @@ def _slab(stone):
     return cv2.fillConvexPoly(np.zeros_like(stone), cv2.convexHull(cv2.findNonZero(stone)), 1)
 
 
-def keep_on_slab(found, stone, share):
+def keep_on_slab(found, stone, box, share):
     """Only the parts of `found` with this share on the slab: a code painted on the floor, a sign behind or the edge of the
-    next slab in the row is cropped away anyway."""
+    next slab in the row is cropped away anyway. The slab is the stone's outline and the detector's box around it: the
+    segmenter can lose the strip of stone beyond a strap at the slab's edge, the box does not."""
     n, labels, stats, _ = cv2.connectedComponentsWithStats(found)
     out = np.zeros_like(found)
     if not stone.any():
         return out
+    x0, y0, x1, y1 = (int(round(v)) for v in box)
     slab = _slab(stone)
+    slab[y0:y1 + 1, x0:x1 + 1] = 1
     for i in range(1, n):
         part = labels == i
         if (slab[part] > 0).mean() >= share:
@@ -41,14 +44,14 @@ def find_marks(seg, det, rgb):
     boxes = [b for b in outline.detect(det, rgb) if (b[2] - b[0]) * (b[3] - b[1]) >= C.MIN_SLAB_SHARE * w * h]
     box = max(boxes, key=lambda b: b[4])[:4] if boxes else (0, 0, w - 1, h - 1)
     stone = marks.slab_mask(seg, rgb, box, emb, widest=True)[0]
-    straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), stone, C.STRAP_ON_SLAB)
+    straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), stone, box, C.STRAP_ON_SLAB)
     cards = np.zeros((h, w), np.uint8)
     for x0, y0, x1, y1, _ in outline.detect(det, rgb, C.CARD_PROMPT, C.CARD_MIN_SCORE):
         if (x1 - x0) * (y1 - y0) > C.CARD_MAX_BOX * w * h:
             continue
         cards |= marks.slab_mask(seg, rgb, (x0, y0, x1, y1), emb)[1]
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, cv2.dilate(keep_on_slab(cards, stone, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone
+    return straps, cv2.dilate(keep_on_slab(cards, stone, box, C.CARD_ON_SLAB), np.ones((k, k), np.uint8)), stone
 
 
 def _lab(rgb):
@@ -68,26 +71,6 @@ def recoloured(original, edited, mask, stone, long):
     sigma = C.RETOUCH_BROAD * long
     diff = (cv2.GaussianBlur(_lab(original), (0, 0), sigma) - cv2.GaussianBlur(_lab(edited), (0, 0), sigma))[outside]
     return float(np.linalg.norm(np.median(diff, axis=0)))
-
-
-def _fit_tone(original, edited, mask, stone, long):
-    """The edit with its fill's edges brought to the real stone's tone just outside them, the correction carried smoothly
-    across the fill: the fill keeps its own veining, but leaves no band or step. Where the fill's edge is off the stone
-    (a strap sticking out above the slab) nothing is measured."""
-    k = max(3, int(C.RETOUCH_TONE_BAND * long))
-    kernel = np.ones((k, k), np.uint8)
-    outer = ((cv2.dilate(mask, kernel) > 0) & (mask == 0) & (stone > 0)).astype(np.float32)
-    inner = ((mask > 0) & (cv2.erode(mask, kernel, borderValue=1) == 0)).astype(np.float32)
-    if not outer.any() or not inner.any():
-        return edited
-
-    def tone(rgb, w):
-        return cv2.GaussianBlur(rgb.astype(np.float32) * w[..., None], (0, 0), k) / np.maximum(cv2.GaussianBlur(w, (0, 0), k), 1e-3)[..., None]
-    edge = ((cv2.dilate(mask, kernel) > 0) & (cv2.erode(mask, kernel, borderValue=1) == 0) & (cv2.GaussianBlur(outer, (0, 0), k) > 0.05)).astype(np.float32)
-    if not edge.any():
-        return edited
-    step = marks._push_pull(tone(original, outer) - tone(edited, inner), edge)
-    return np.clip(edited + cv2.GaussianBlur(step, (0, 0), k), 0, 255).astype(np.uint8)
 
 
 def fill_unlike_stone(original, edited, mask, stone, long):
@@ -151,7 +134,9 @@ def merge(original, edited, mask, stone, long):
     if stone.any():
         mask = with_shadow(original, edited, mask, stone, long)
         on_slab = mask & _slab(stone)
-    edited = _fit_tone(original, edited, on_slab, stone, long)
+    # The fill's broad tone is the real stone's around it, carried in smoothly; the model gives only the finer texture.
+    edited = np.where(mask[..., None] > 0, edited, original)
+    edited = marks.match_tone(edited, on_slab > 0, ((on_slab == 0) & (stone > 0)).astype(np.float32), C.RETOUCH_TONE_SIGMA * long)
     unlike = fill_unlike_stone(original, edited, on_slab, stone, long)
     if unlike > 1:
         return None, f"retouch: the fill does not match the stone around it ({unlike:.2f})"

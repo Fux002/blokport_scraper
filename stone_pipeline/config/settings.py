@@ -960,7 +960,7 @@ class STANDARDISE:
     RETOUCH_MIN_CROP = 384             # px: at least this much of the photo, so it sees the stone and not only the mark
     RETOUCH_MAX_ASPECT = 2.5           # and no narrower than this
     RETOUCH_MAX_SCALE = 2.0            # a small crop is enlarged at most this much for the model
-    RETOUCH_TONE_BAND = 0.008          # a fill's edge is matched to the stone over this width (share of the long side)
+    RETOUCH_TONE_SIGMA = 0.02          # a fill's tone coarser than this (share of the long side) is the real stone's around it; finer is the model's
     RETOUCH_RING = 0.02                # the fill is compared with the stone this far around it (share of the long side) ...
     RETOUCH_RING_INSET = 3             # ... both kept this many px inside the slab
     RETOUCH_MAX_COLOUR = 14.0          # its colour may differ this much (Lab) from the real stone around it ...

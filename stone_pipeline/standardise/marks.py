@@ -273,19 +273,18 @@ def erase(rgb: np.ndarray, mask: np.ndarray, lama, stone: np.ndarray) -> np.ndar
     if not mask.any():
         return rgb
     out = lama(Image.fromarray(rgb), Image.fromarray(mask * 255))
-    return _match_tone(np.asarray(out.convert("RGB"))[: rgb.shape[0], : rgb.shape[1]], mask, stone)
-
-
-def _match_tone(filled: np.ndarray, mask: np.ndarray, stone: np.ndarray) -> np.ndarray:
-    """LaMa keeps the stone's texture but gets a wide fill's tone wrong (an erased strap on bright stone comes
-    out darker, darkest in its middle, with a step at its edge). Inside every filled area on the stone, the
-    tone coarser than C.FILL_DETAIL_SIGMA (per channel, in linear light) is the stone's tone around it, smoothly
-    interpolated across (push-pull); only the finer texture is LaMa's."""
     hole = (mask > 0) & (stone > 0)
     around = ((mask == 0) & (stone > 0)).astype(np.float32)
+    return match_tone(np.asarray(out.convert("RGB"))[: rgb.shape[0], : rgb.shape[1]], hole, around, C.FILL_DETAIL_SIGMA * max(mask.shape))
+
+
+def match_tone(filled: np.ndarray, hole: np.ndarray, around: np.ndarray, sigma: float) -> np.ndarray:
+    """A fill keeps the stone's texture but can get its tone wrong (LaMa: an erased strap on bright stone comes out
+    darker, darkest in its middle, with a step at its edge; the editing model: shaded where nothing around measures it).
+    Inside the hole, the tone coarser than sigma (px, per channel, in linear light) is the tone of the real stone
+    `around`, smoothly interpolated across (push-pull); only the finer texture is the fill's."""
     if not hole.any() or not around.any():             # no stone around the fill to take a tone from
         return filled
-    sigma = C.FILL_DETAIL_SIGMA * max(mask.shape)
     lin = _to_linear(filled)
 
     def local(w):                                      # mean of lin over the pixels weighted w, at sigma
