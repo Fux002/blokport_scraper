@@ -39,14 +39,14 @@ def test_the_same_input_gives_the_same_image():
 
 
 def test_the_room_comes_from_the_product_alone():
-    assert np.array_equal(layout.room_for("handle-a", False), layout.room_for("handle-a", False))
-    seen = {hash(layout.room_for(f"handle-{i}", False).tobytes()) for i in range(40)}
+    assert np.array_equal(layout.room_for("handle-a"), layout.room_for("handle-a"))
+    seen = {hash(layout.room_for(f"handle-{i}").tobytes()) for i in range(40)}
     assert len(seen) == C.ROOM_COUNT
 
 
 def test_room_for_takes_no_vendor_or_origin():
     import inspect
-    assert list(inspect.signature(layout.room_for).parameters) == ["key", "wide"]
+    assert list(inspect.signature(layout.room_for).parameters) == ["key"]
 
 
 def test_a_neighbours_strip_along_a_side_is_cut():
