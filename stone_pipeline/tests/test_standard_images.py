@@ -55,3 +55,18 @@ def test_a_finished_run_is_published_view_by_view_and_nothing_else():
             f"{run}held/{B}.json", f"{run}retouched/{A}.jpg", f"{run}{B}.angle_left.jpg"]
     assert pub.copies("sentas", run, keys) == sorted(
         (f"{run}{A}.{v}.jpg", imagestore.standard_key("sentas", A, v)) for v in imagestore.STANDARD_VIEWS)
+
+
+class _Bucket:
+    def __init__(self, keys):
+        self.keys = keys
+
+    def list_objects_v2(self, Bucket, Prefix, MaxKeys):
+        return {"KeyCount": sum(k.startswith(Prefix) for k in self.keys)}
+
+
+def test_a_photo_already_finished_or_held_is_not_worked_on_again():
+    from deploy import standardise_source as src
+    out = "dev/standardise-test/full/sentas/"
+    bucket = _Bucket([f"{out}{A}.main.jpg", f"{out}held/{B}.json"])
+    assert src.finished(bucket, out, A) and src.finished(bucket, out, B) and not src.finished(bucket, out, C_)

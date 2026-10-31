@@ -46,6 +46,12 @@ def _exists(client, prefix):
     return client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=1).get("KeyCount", 0) > 0
 
 
+def finished(client, out, sha):
+    """This photo's run already ended, finished or held: a re-run, or results copied in from another environment's
+    run of the same photo, is never worked on again."""
+    return _exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")
+
+
 def _survey(rgb, m):
     """What this photo would become, without the expensive steps."""
     kind, confidence = kinds.classify(m.clip, rgb)
@@ -100,7 +106,7 @@ def main() -> int:
         info = photos[sha]
         started = time.time()
         try:
-            if not survey and (_exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")):
+            if not survey and finished(client, out, sha):
                 tally["already done"] += 1
                 continue
             # A retouched photo is the start; a refused retouch holds the photo unless only straps were to come off, which stay.

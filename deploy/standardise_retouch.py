@@ -20,7 +20,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from deploy.standardise_source import _encode, _get, _photo_keys, run_prefix
+from deploy.standardise_source import _encode, _get, _photo_keys, finished, run_prefix
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import marks, outline, photo, retouch
@@ -128,7 +128,7 @@ def main() -> int:
         return 2
     client = boto3.client("s3", region_name=S3_REGION)
     out = run_prefix(src)
-    keys = _photo_keys(client, src)
+    keys = [k for k in _photo_keys(client, src) if not finished(client, out, imagestore.sha_from_url(k))]
     found = _find(client, keys, out)
     print(f"==> retouch {src}: marks on {len(found)} of {len(keys)} photos", flush=True)
     if not found:
