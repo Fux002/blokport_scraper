@@ -651,3 +651,11 @@ def test_the_far_hall_is_softened_like_a_background_behind_slabs_in_focus():
     used = layout._room("far_1.jpg")
     sharp = lambda im: np.abs(cv2.Laplacian(cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2GRAY), cv2.CV_32F))[:400].mean()
     assert sharp(used) < 0.6 * sharp(raw)
+
+
+def test_a_floor_under_the_stone_means_a_whole_scene_not_a_close_up():
+    from stone_pipeline.standardise import closeup
+    h, w = 1000, 1500
+    assert closeup.shows_floor([(0, 600, w, h, 0.8), (0, 0, w, h, 0.5)], h)        # open books on the warehouse floor
+    assert not closeup.shows_floor([(0, 0, w, 990, 0.8)], h)                       # the detector boxes a close-up's stone as floor
+    assert not closeup.shows_floor([], h)

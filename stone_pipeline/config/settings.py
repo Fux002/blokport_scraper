@@ -1133,6 +1133,9 @@ class STANDARDISE:
     DEFAULT_SLAB = (3.04, 1.87)        # median prod slab L x W (m): proportions for test photos with no product
     CLOSEUP_BORDER = 0.70              # stone along at least this share of EACH photo border: a close-up ...
     CLOSEUP_INSET = 0.02               # ... read this share in from the edge (SAM's masks stop a few px short of it)
+    CLOSEUP_FLOOR_PROMPT = "a floor."  # a close-up shows no floor: the detector boxes its stone as "floor" from the top ...
+    CLOSEUP_FLOOR_MIN = 0.35           # ... (real close-ups 0.41-0.91, box from the top), but under a slab the real floor
+    CLOSEUP_FLOOR_TOP = 0.30           # ... starts lower (best box from 0.46-0.76 H on 56 Sentas warehouse photos)
     SHARP_MIN = 15.0                   # variance of the Laplacian at 1024 px below this: blurred, skipped (calm sharp marble ~32, blurred ~4)
     # --- closeup ---
     BLOCK_PROMPT = "a stone block."

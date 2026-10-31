@@ -28,6 +28,13 @@ def _crop_to(rgb, aspect, offset=0.5):
     return rgb[y:y + ch]
 
 
+def shows_floor(boxes, h):
+    """The detector's best "floor" box starts well below the top: real floor under a slab, so the photo is a whole
+    scene the outline did not find, not stone filling the frame."""
+    best = max(boxes, key=lambda b: b[4], default=None)
+    return best is not None and best[1] >= C.CLOSEUP_FLOOR_TOP * h
+
+
 def closeup(rgb, size, seg, det, lama, esr):
     """[(slab, alpha)] for a texture close-up (the stone fills the frame), or the reason it is not one. size =
     (length, width) of the product in metres, or None."""
@@ -37,6 +44,8 @@ def closeup(rgb, size, seg, det, lama, esr):
     dy, dx = int(C.CLOSEUP_INSET * h), int(C.CLOSEUP_INSET * w)
     if min(raw[dy].mean(), raw[h - 1 - dy].mean(), raw[:, dx].mean(), raw[:, w - 1 - dx].mean()) < C.CLOSEUP_BORDER:
         return "not a close-up: background shows along a side (a whole slab that was not found)"
+    if shows_floor(openbook.detect(det, rgb, C.CLOSEUP_FLOOR_PROMPT, C.CLOSEUP_FLOOR_MIN), h):
+        return "not a close-up: a floor shows below the stone (a whole slab or open book that was not found)"
     if _sharp(rgb) < C.SHARP_MIN:
         return "blurred close-up"
     straps = openbook._straps(seg, det, rgb, (0, 0, w - 1, h - 1), emb)    # kept as shot (the user's choice)
