@@ -10,6 +10,8 @@ Layout (under the env segment, e.g. dev/):
     products/<src>/<hash>.jpg               a raw image staged in s3 mode (no keep_scraped)
     products/scraped/<src>/<hash>.jpg       a raw ORIGINAL kept alongside processing (keep_scraped)
     products/improved/<src>/<hash>.jpg      the TREATED image (enhance + upscale + compress; de-wm)
+    products/standard/<view>/<src>/<hash>.jpg  a STANDARDISED image of that photo (deploy.standardise_publish):
+                                            view = main (showroom), white, studio (side view), close
 """
 
 from __future__ import annotations
@@ -23,6 +25,8 @@ IMPROVED_SUBDIR = "improved"                 # the treated-image folder name (al
 SCRAPED_SUBDIR = "scraped"
 DISCARDED_SUBDIR = "discarded"               # non-stone images the classifier rejected (spec sheets, logos)
 ENHANCED_SUBDIR = "enhanced"                 # per-image "done" markers the GPU reprocess writes (see below)
+STANDARD_SUBDIR = "standard"                 # the standardised photos, one folder per view
+STANDARD_VIEWS = ("main", "white", "studio", "close")
 
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
@@ -75,6 +79,15 @@ def enhanced_key(source: str, sha256: str) -> str:
     """The per-image ENHANCED marker key (the GPU reprocess writes it after enhancing an image). Marks the
     image "done" for incremental auto-enhance, distinct from produce's raw re-encode in improved/."""
     return f"{_PRODUCTS}/{ENHANCED_SUBDIR}/{source}/{sha256}.txt"
+
+
+def standard_prefix(view: str) -> str:
+    return f"{_PRODUCTS}/{STANDARD_SUBDIR}/{view}/"
+
+
+def standard_key(source: str, sha256: str, view: str) -> str:
+    """A standardised view of one photo. The view is a folder, so the key still ends <sha>.<ext> like every image key."""
+    return f"{standard_prefix(view)}{source}/{sha256}.jpg"
 
 
 def sha_from_url(url: str) -> Optional[str]:
