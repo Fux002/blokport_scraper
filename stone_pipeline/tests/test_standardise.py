@@ -464,3 +464,28 @@ def test_a_shadows_soft_edge_comes_off_too():
     merged, reason = retouch.merge(shot, clean, bar, _whole(), _whole(), 1200)
     assert reason == ""
     assert abs(merged[564, 600].astype(np.float32).mean() - clean[564, 600].astype(np.float32).mean()) < 3
+
+
+def test_a_marks_own_border_line_does_not_stay_at_the_fills_edge():
+    original, clean, mask = _strap_edit()
+    original[:, 290:292] = 60                                     # the label's dark border, right at the edge of what was found
+    merged, reason = retouch.merge(original, clean, mask, _whole(), _whole(), 1200)
+    assert reason == ""
+    assert np.abs(merged[:, 290:292].astype(np.float32) - clean[:, 290:292].astype(np.float32)).mean() < 4
+
+
+def test_the_near_floor_has_no_streaks_or_leftover_bands():
+    h, w = C.OUT_H, C.OUT_W
+    room = np.full((h, w, 3), 120, np.float32)
+    streaks = np.zeros((h, w), np.float32)
+    for x in range(0, w, 128):
+        streaks[:, x:x + 30] = 110                                  # lamps and racks mirrored in a glossy floor
+    room += cv2.GaussianBlur(streaks, (0, 0), 8)[..., None]
+    room[int(0.90 * h):int(0.92 * h)] = 40                          # a band left over from the example photo's stand
+    room = cv2.GaussianBlur(room, (0, 0), 3)                        # as soft as in a photo
+    out = layout.clean_floor(room)
+    near = out[int(C.FLOOR_CLEAN[1] * h):, :, 0]
+    assert near.std(axis=1).max() < 6
+    assert np.abs(np.diff(near.mean(axis=1))).max() < 2
+    top = int(C.FLOOR_CLEAN[0] * h)
+    assert np.array_equal(out[:top], room[:top])

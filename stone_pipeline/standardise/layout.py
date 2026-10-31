@@ -1,6 +1,7 @@
 """Standard look: every cleaned, squared slab (or open-book pair) in ONE showroom, each slab on the SAME stand.
 Every image is the same canvas: the slab(s) as large as fit, on the same floor line."""
 from stone_pipeline.config.settings import STANDARDISE as C
+import functools
 import hashlib
 from pathlib import Path
 
@@ -20,8 +21,28 @@ def room_for(key, wide):
     """The room behind a product: chosen from `key` alone, never its vendor or origin, so backgrounds cannot trace a
     vendor (the user's requirement); the same key always gets the same room."""
     n = int(hashlib.sha256(key.encode()).hexdigest(), 16) % C.ROOM_COUNT + 1
-    path = ROOM_DIR / f"{'wide_' if wide else ''}{n}.jpg"
-    return np.asarray(Image.open(path).convert("RGB")).astype(np.float32)
+    return _room(f"{'wide_' if wide else ''}{n}.jpg").copy()
+
+
+@functools.lru_cache(maxsize=None)
+def _room(name):
+    return clean_floor(np.asarray(Image.open(ROOM_DIR / name).convert("RGB")).astype(np.float32))
+
+
+def clean_floor(room):
+    """The room with its near floor clean: the example photo's glossy floor mirrors lamps and racks where our slab now
+    stands, and keeps a band from the stand that was in it. From FLOOR_CLEAN[0] down it fades into each row's median
+    colour (smoothed down the rows, so no band stays) with the photo's own fine grain, fully by FLOOR_CLEAN[1]; the slab
+    adds its own reflection on top (_reflect)."""
+    h = room.shape[0]
+    start, full = int(C.FLOOR_CLEAN[0] * h), int(C.FLOOR_CLEAN[1] * h)
+    out = room.copy()
+    floor = room[start:]
+    rows = cv2.GaussianBlur(np.median(floor, axis=1)[:, None, :], (0, 0), sigmaX=0.1, sigmaY=C.FLOOR_CLEAN_ROWS * h)
+    clean = rows + C.FLOOR_GRAIN * (floor - cv2.GaussianBlur(floor, (0, 0), 1.5))
+    w = np.clip((np.arange(start, h) - start) / max(1, full - start), 0, 1)[:, None, None]
+    out[start:] = floor * (1 - w) + clean * w
+    return out
 
 
 def fit_working(rgb):

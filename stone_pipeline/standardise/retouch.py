@@ -141,15 +141,23 @@ def merge(original, edited, mask, stone, slab, long):
     if moved > C.RETOUCH_MAX_DRIFT:
         return None, f"retouch: the model recoloured the stone ({moved:.1f})"
     base = without_shadow(original, edited, mask, stone, slab, long)
+    # The mark is replaced whole and the edit fades out beyond it, over real stone: a fade inside it would leave half of the
+    # mark's own border, and a short one a straight seam where the fill's grain meets the stone's.
+    b = max(1, int(C.RETOUCH_BLEND * long))
+    reach = cv2.dilate(mask, np.ones((2 * b + 1, 2 * b + 1), np.uint8))
     # Matched and judged on the slab only: a label's part above the slab's top edge is the hall in the edit, and is cut away.
-    # The fill's broad tone is the real stone's around it, carried in smoothly; the model gives only the finer texture.
+    # The fill's broad tone is the real stone's around it, carried in smoothly; the model gives only the finer texture. The
+    # band it fades out over is matched on its own, to the stone beyond it, so the two do not average each other's tone.
+    sigma = C.RETOUCH_TONE_SIGMA * long
     on_slab = (mask > 0) & (slab > 0)
-    fill = np.where(mask[..., None] > 0, edited, base)
-    fill = marks.match_tone(fill, on_slab, ((mask == 0) & (stone > 0)).astype(np.float32), C.RETOUCH_TONE_SIGMA * long)
+    band = (reach > 0) & (mask == 0)
+    fill = marks.match_tone(np.where(mask[..., None] > 0, edited, base), on_slab, ((mask == 0) & (stone > 0)).astype(np.float32), sigma)
+    faded = marks.match_tone(np.where(band[..., None], edited, base), band & (slab > 0), ((reach == 0) & (stone > 0)).astype(np.float32), sigma)
+    fill = np.where(band[..., None], faded, fill)
     unlike = fill_unlike_stone(base, fill, on_slab.astype(np.uint8), stone, slab, long)
     if unlike > 1:
         return None, f"retouch: the fill does not match the stone around it ({unlike:.2f})"
-    k = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), C.RETOUCH_FEATHER)[..., None]
+    k = np.clip(1 - cv2.distanceTransform((mask == 0).astype(np.uint8), cv2.DIST_L2, 5) / b, 0, 1)[..., None]
     return (base * (1 - k) + fill * k).clip(0, 255).astype(np.uint8), ""
 
 
