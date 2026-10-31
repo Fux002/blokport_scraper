@@ -36,9 +36,9 @@ def _find(client, keys):
         sha = imagestore.sha_from_url(key)
         try:
             rgb = photo.decode(_get(client, key))
-            straps, cards = retouch.find_marks(seg, det, rgb)
+            straps, cards, stone = retouch.find_marks(seg, det, rgb)
             if straps.any() or cards.any():
-                found[key] = (straps, cards)
+                found[key] = (straps, cards, stone)
         except Exception as exc:                       # one bad photo never stops the slice
             print(f"   FIND FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
     del seg, det
@@ -72,7 +72,7 @@ def main() -> int:
         return 0
     pipe, embed = _load_editor()
     done = refused = 0
-    for key, (straps, cards) in found.items():
+    for key, (straps, cards, stone) in found.items():
         sha = imagestore.sha_from_url(key)
         started = time.time()
         try:
@@ -81,7 +81,7 @@ def main() -> int:
             edit = pipe(prompt_embeds=embed.to("cuda"), image=Image.fromarray(rgb).resize((w, h), Image.LANCZOS), width=w, height=h,
                         num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
                         generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0]
-            merged, reason = retouch.merge(rgb, np.asarray(edit), straps | cards)
+            merged, reason = retouch.merge(rgb, np.asarray(edit), straps | cards, stone)
             if merged is None:
                 body = {"reason": reason, "straps_only": not cards.any()}
                 client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_held/{sha}.json", Body=json.dumps(body, sort_keys=True).encode(), ContentType="application/json")

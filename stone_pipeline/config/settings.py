@@ -944,7 +944,8 @@ class STANDARDISE:
     # --- marks ---
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
     CARD_PROMPT = "a stack of color sample cards. a sticker. a paper label. a price tag."
-    CARD_MIN_SCORE = 0.3
+    CARD_MIN_SCORE = 0.45              # a sure detection only: a weaker one fires on most photos
+    CARD_ON_SLAB = 0.6                 # a mark counts when this share of it lies on the slab
     CARD_MAX_BOX = 0.12                # a detected card or label is at most this share of the photo (else it is the slab)
     RETOUCH_PROMPT = ("Remove the straps, sample cards, stickers and labels lying on or crossing the stone, showing the natural stone "
                       "beneath. Keep the stone, its colour, veining and edges and everything else exactly as they are. Do not add anything.")

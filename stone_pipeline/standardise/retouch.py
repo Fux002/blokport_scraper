@@ -10,12 +10,25 @@ from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import marks, outline
 
 
+def keep_on_slab(found, stone):
+    """Only the parts of `found` that lie on the slab: a code painted on the floor or a sign behind is cropped away anyway."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(found)
+    out = np.zeros_like(found)
+    for i in range(1, n):
+        part = labels == i
+        if (stone[part] > 0).mean() >= C.CARD_ON_SLAB:
+            out[part] = 1
+    return out
+
+
 def find_marks(seg, det, rgb):
-    """(mask of straps, mask of cards, stickers and labels): what should come off this photo."""
+    """(mask of straps, mask of cards, stickers and labels on the slab, mask of the slab): what should come off this photo,
+    and the stone that must not change."""
     h, w = rgb.shape[:2]
     emb = marks.embed(seg, rgb)
     boxes = [b for b in outline.detect(det, rgb) if (b[2] - b[0]) * (b[3] - b[1]) >= C.MIN_SLAB_SHARE * w * h]
     box = max(boxes, key=lambda b: b[4])[:4] if boxes else (0, 0, w - 1, h - 1)
+    stone = marks.slab_mask(seg, rgb, box, emb, widest=True)[0]
     straps = outline._straps(seg, det, rgb, box, emb)
     cards = np.zeros((h, w), np.uint8)
     for x0, y0, x1, y1, _ in outline.detect(det, rgb, C.CARD_PROMPT, C.CARD_MIN_SCORE):
@@ -23,18 +36,18 @@ def find_marks(seg, det, rgb):
             continue
         cards |= marks.slab_mask(seg, rgb, (x0, y0, x1, y1), emb)[1]
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, cv2.dilate(cards, np.ones((k, k), np.uint8))
+    return straps, cv2.dilate(keep_on_slab(cards, stone), np.ones((k, k), np.uint8)), stone
 
 
 def _lab(rgb):
     return cv2.cvtColor(rgb.astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
 
 
-def changed_outside(original, edited, mask):
-    """How much the broad colour moved outside the found area (Lab, a high percentile): near zero when only the marks
-    were edited, large when the model repainted the stone."""
+def changed_outside(original, edited, mask, stone):
+    """How much the broad colour of the STONE moved outside the found area (Lab, a high percentile): near zero when only the
+    marks were edited, large when the model repainted the slab. The room behind the slab does not count: it is cut away."""
     k = max(3, int(C.RETOUCH_GUARD * max(mask.shape)))
-    outside = cv2.dilate(mask, np.ones((k, k), np.uint8)) == 0
+    outside = (cv2.dilate(mask, np.ones((k, k), np.uint8)) == 0) & (stone > 0)
     if not outside.any():
         return float("inf")
     sigma = C.RETOUCH_BROAD * max(mask.shape)
@@ -56,11 +69,11 @@ def fill_unlike_surroundings(edited, mask):
     return max(colour / C.RETOUCH_MAX_COLOUR, texture / C.RETOUCH_MAX_TEXTURE)
 
 
-def merge(original, edited, mask):
+def merge(original, edited, mask, stone):
     """(the real photo with only the found area taken from the edit, why it was refused or "")."""
     h, w = original.shape[:2]
     edited = cv2.resize(edited, (w, h), interpolation=cv2.INTER_CUBIC)
-    moved = changed_outside(original, edited, mask)
+    moved = changed_outside(original, edited, mask, stone)
     if moved > C.RETOUCH_MAX_CHANGE:
         return None, f"retouch: the model changed the stone ({moved:.1f})"
     unlike = fill_unlike_surroundings(edited, mask)

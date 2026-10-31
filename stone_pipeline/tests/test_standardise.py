@@ -204,6 +204,10 @@ def test_an_unknown_category_fails_loud(_active_slab):
         index.build(SHEET.replace("pcat_01M1GWN1V1E66J1NM1PTQ3ESAK", "pcat_new"))
 
 
+def _whole(shape=(800, 1200)):
+    return np.ones(shape, np.uint8)
+
+
 def _strap_edit():
     stone = _stone(800, 1200, base=160, var=8)
     with_strap = stone.copy()
@@ -216,7 +220,7 @@ def _strap_edit():
 def test_a_clean_edit_is_taken_only_inside_the_found_area():
     original, edit, mask = _strap_edit()
     original[100:140, 700:760] = (10, 200, 10)         # outside the mask: must stay the real photo
-    merged, reason = retouch.merge(original, edit, mask)
+    merged, reason = retouch.merge(original, edit, mask, _whole())
     assert reason == ""
     assert np.array_equal(merged[120, 730], original[120, 730]) and merged[400, 330, 0] > 130
 
@@ -224,7 +228,7 @@ def test_a_clean_edit_is_taken_only_inside_the_found_area():
 def test_a_repainted_stone_is_refused():
     original, _, mask = _strap_edit()
     repainted = _stone(800, 1200, seed=5, base=60, var=20)
-    merged, reason = retouch.merge(original, repainted, mask)
+    merged, reason = retouch.merge(original, repainted, mask, _whole())
     assert merged is None and "changed the stone" in reason
 
 
@@ -232,7 +236,7 @@ def test_an_invented_busy_fill_is_refused():
     original, edit, mask = _strap_edit()
     rng = np.random.default_rng(1)
     edit[:, 290:370] = rng.integers(0, 255, (800, 80, 3), dtype=np.uint8)
-    merged, reason = retouch.merge(original, edit, mask)
+    merged, reason = retouch.merge(original, edit, mask, _whole())
     assert merged is None and "does not match" in reason
 
 
@@ -241,3 +245,18 @@ def test_on_white_is_the_same_canvas_with_white_corners(h, w):
     out = layout.on_white([_slab(h, w)])
     assert out.shape == (C.OUT_H, C.OUT_W, 3) and out[2, 2].min() > 250
     assert layout.on_white([_slab(h, w)], turn="left").shape == (C.OUT_H, C.OUT_W, 3)
+
+
+def test_a_changed_background_is_not_a_changed_stone():
+    original, edit, mask = _strap_edit()
+    edit[:150] = (30, 60, 200)                         # the model repainted the warehouse behind the slab
+    stone = _whole(); stone[:200] = 0
+    merged, reason = retouch.merge(original, edit, mask & stone, stone)
+    assert reason == "" and merged is not None
+
+
+def test_a_mark_off_the_slab_is_not_a_mark():
+    stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
+    on = np.zeros_like(stone); on[300:340, 500:600] = 1
+    off = np.zeros_like(stone); off[720:780, 200:400] = 1      # a painted code on the floor
+    assert retouch.keep_on_slab(on, stone).any() and not retouch.keep_on_slab(off, stone).any()
