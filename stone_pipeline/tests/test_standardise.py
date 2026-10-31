@@ -240,6 +240,78 @@ def test_an_invented_busy_fill_is_refused():
     assert merged is None and "does not match" in reason
 
 
+def test_a_fill_brighter_than_the_stone_leaves_no_band():
+    original, edit, mask = _strap_edit()
+    edit[:, 290:370] = np.clip(edit[:, 290:370].astype(np.int16) + 25, 0, 255).astype(np.uint8)
+    merged, reason = retouch.merge(original, edit, mask, _whole())
+    assert reason == ""
+    inside, beside = merged[:, 300:360].astype(np.float32).mean(), merged[:, 240:280].astype(np.float32).mean()
+    assert abs(inside - beside) < 4
+
+
+def test_an_even_drift_of_the_whole_edit_is_not_a_repaint():
+    original, edit, mask = _strap_edit()
+    drifted = np.clip(edit.astype(np.int16) + 25, 0, 255).astype(np.uint8)
+    merged, reason = retouch.merge(original, drifted, mask, _whole())
+    assert reason == "" and abs(merged[:, 300:360].astype(np.float32).mean() - merged[:, 240:280].astype(np.float32).mean()) < 4
+
+
+def test_a_smeared_flat_fill_is_refused():
+    rng = np.random.default_rng(3)
+    original = np.clip(rng.normal(150, 30, (800, 1200, 3)), 0, 255).astype(np.uint8)
+    mask = np.zeros((800, 1200), np.uint8); mask[:, 290:370] = 1
+    edit = original.copy()
+    edit[:, 290:370] = original.reshape(-1, 3).mean(axis=0).astype(np.uint8)
+    merged, reason = retouch.merge(original, edit, mask, _whole())
+    assert merged is None and "does not match" in reason
+
+
+def test_each_mark_gets_its_own_close_crop():
+    mask = np.zeros((1200, 1800), np.uint8)
+    mask[100:1100, 200:260] = 1
+    mask[100:1100, 1500:1560] = 1
+    boxes = retouch.regions(mask)
+    assert len(boxes) == 2
+    for x0, y0, x1, y1 in boxes:
+        assert (x1 - x0) * (y1 - y0) < 0.6 * mask.size and (y1 - y0) <= C.RETOUCH_MAX_ASPECT * (x1 - x0)
+        assert mask[y0:y1, x0:x1].any() and not mask[y0:y1, x0:x1].all()
+    assert sum(int(mask[b[1]:b[3], b[0]:b[2]].sum()) for b in boxes) == int(mask.sum())
+
+
+def test_the_model_sees_multiples_of_16_and_small_marks_larger():
+    w, h = retouch.model_size(400, 400)
+    assert w % 16 == 0 and h % 16 == 0 and w > 400 and w <= C.RETOUCH_MAX_SCALE * 400
+    w, h = retouch.model_size(3000, 2000)
+    assert w % 16 == 0 and h % 16 == 0 and w * h <= C.EDIT_PIXELS
+
+
+def test_only_the_crops_go_to_the_model_and_the_rest_stays_the_photo():
+    original, clean, mask = _strap_edit()
+    seen = []
+    x0, y0, x1, y1 = retouch.regions(mask)[0]
+
+    def edit(crop):
+        seen.append(crop.shape)
+        return clean[y0:y1, x0:x1]
+
+    out, reason = retouch.retouch(original, mask, _whole(), edit)
+    assert reason == "" and seen == [(y1 - y0, x1 - x0, 3)]
+    assert np.array_equal(out[:, :x0], original[:, :x0]) and out[400, 330, 0] > 130
+
+
+def test_one_refused_mark_refuses_the_photo():
+    original, _, mask = _strap_edit()
+    out, reason = retouch.retouch(original, mask, _whole(), lambda crop: np.zeros_like(crop))
+    assert out is None and reason
+
+
+def test_a_mark_in_a_notch_of_the_slab_counts_as_on_it():
+    stone = np.zeros((800, 1200), np.uint8); stone[100:700, 100:1100] = 1
+    stone[500:700, 500:800] = 0                                # the photo's rack stands in front of the slab
+    rack = np.zeros_like(stone); rack[500:700, 500:800] = 1
+    assert retouch.keep_on_slab(rack, stone).any()
+
+
 @pytest.mark.parametrize("h,w", [(800, 1400), (500, 1900), (1200, 900)])
 def test_on_white_is_the_same_canvas_with_white_corners(h, w):
     out = layout.on_white([_slab(h, w)])

@@ -1,7 +1,8 @@
-"""Take straps, sample cards and stickers off a source's photos (RUN_MODE=standardise-retouch, GPU), ahead of deploy.standardise_source,
+"""Take straps, racks, sample cards and stickers off a source's photos (RUN_MODE=standardise-retouch, GPU), ahead of deploy.standardise_source,
 which then starts from the result. Two phases, because the machine holds one set of models at a time: find the marks on
 every photo, free those models, then edit. Writes <run prefix>/retouched/<sha>.jpg, or retouch_held/<sha>.json when a result
-is refused. A photo with nothing to take off is never sent to the model.
+is refused. A photo with nothing to take off is never sent to the model. A test run (RUN_TAG) also writes what was found to
+retouch_marks/<sha>.jpg, for a person to check.
 """
 
 from __future__ import annotations
@@ -23,12 +24,14 @@ from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import marks, outline, photo, retouch
 
 
-def _size(w, h):
-    k = (C.EDIT_PIXELS / (w * h)) ** 0.5
-    return int(w * k) // 16 * 16, int(h * k) // 16 * 16
+def _write_found(client, out, sha, rgb, straps, cards):
+    shown = rgb.copy()
+    shown[straps > 0] = (shown[straps > 0] * 0.5 + np.array((255, 0, 0)) * 0.5).astype(np.uint8)
+    shown[cards > 0] = (shown[cards > 0] * 0.5 + np.array((0, 255, 0)) * 0.5).astype(np.uint8)
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_marks/{sha}.jpg", Body=_encode(shown, 80), ContentType="image/jpeg")
 
 
-def _find(client, keys):
+def _find(client, keys, out):
     seg = marks.load_sam()
     det = outline.load_detector(seg[2])
     found = {}
@@ -39,6 +42,8 @@ def _find(client, keys):
             straps, cards, stone = retouch.find_marks(seg, det, rgb)
             if straps.any() or cards.any():
                 found[key] = (straps, cards, stone)
+                if os.environ.get("RUN_TAG"):
+                    _write_found(client, out, sha, rgb, straps, cards)
         except Exception as exc:                       # one bad photo never stops the slice
             print(f"   FIND FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
     del seg, det
@@ -66,7 +71,7 @@ def main() -> int:
     client = boto3.client("s3", region_name=S3_REGION)
     out = run_prefix(src)
     keys = _photo_keys(client, src)
-    found = _find(client, keys)
+    found = _find(client, keys, out)
     print(f"==> retouch {src}: marks on {len(found)} of {len(keys)} photos", flush=True)
     if not found:
         return 0
@@ -77,11 +82,12 @@ def main() -> int:
         started = time.time()
         try:
             rgb = photo.decode(_get(client, key))
-            w, h = _size(rgb.shape[1], rgb.shape[0])
-            edit = pipe(prompt_embeds=embed.to("cuda"), image=Image.fromarray(rgb).resize((w, h), Image.LANCZOS), width=w, height=h,
-                        num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
-                        generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0]
-            merged, reason = retouch.merge(rgb, np.asarray(edit), straps | cards, stone)
+            def edit(crop):
+                w, h = retouch.model_size(crop.shape[1], crop.shape[0])
+                return np.asarray(pipe(prompt_embeds=embed.to("cuda"), image=Image.fromarray(crop).resize((w, h), Image.LANCZOS), width=w, height=h,
+                                       num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
+                                       generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0])
+            merged, reason = retouch.retouch(rgb, straps | cards, stone, edit)
             if merged is None:
                 body = {"reason": reason, "straps_only": not cards.any()}
                 client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_held/{sha}.json", Body=json.dumps(body, sort_keys=True).encode(), ContentType="application/json")

@@ -943,17 +943,23 @@ class STANDARDISE:
     FILL_DETAIL_SIGMA = 0.003      # an erased area keeps LaMa's texture finer than this share of the long side; coarser tone is the stone's around it
     # --- marks ---
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
-    CARD_PROMPT = "a stack of color sample cards. a sticker. a paper label. a price tag."
-    CARD_MIN_SCORE = 0.45              # a sure detection only: a weaker one fires on most photos
+    CARD_PROMPT = "a stack of color sample cards. a sticker. a paper label. a price tag. a metal rack. a metal stand."
+    CARD_MIN_SCORE = 0.35              # a weaker detection fires on most photos
     CARD_ON_SLAB = 0.6                 # a mark counts when this share of it lies on the slab
     CARD_MAX_BOX = 0.12                # a detected card or label is at most this share of the photo (else it is the slab)
-    RETOUCH_PROMPT = ("Remove the straps, sample cards, stickers and labels lying on or crossing the stone, showing the natural stone "
+    RETOUCH_PROMPT = ("Remove the straps, metal racks, sample cards, stickers and labels in front of or on the stone, showing the natural stone "
                       "beneath. Keep the stone, its colour, veining and edges and everything else exactly as they are. Do not add anything.")
     RETOUCH_GROW = 0.006               # a found card is widened by this share of the photo's long side
     RETOUCH_GUARD = 0.02               # the stone is compared this far away from what was found (share of the long side)
     RETOUCH_BROAD = 0.01               # at this scale, so fine redrawing does not count, only moved colour
     RETOUCH_PCT = 98
     RETOUCH_MAX_CHANGE = 8.0           # outside the found area the broad colour may move this much (Lab): else the model repainted the stone
+    RETOUCH_MAX_DRIFT = 18.0           # the whole crop may drift this much evenly (Lab): more is another stone
+    RETOUCH_MARGIN = 0.05              # the model sees this much around a mark (share of the photo's long side)
+    RETOUCH_MIN_CROP = 384             # px: at least this much of the photo, so it sees the stone and not only the mark
+    RETOUCH_MAX_ASPECT = 2.5           # and no narrower than this
+    RETOUCH_MAX_SCALE = 2.0            # a small crop is enlarged at most this much for the model
+    RETOUCH_TONE_BAND = 0.008          # a fill's edge is matched to the stone over this width (share of the crop's long side)
     RETOUCH_RING = 0.02                # the fill is compared with the stone this far around it (share of the long side)
     RETOUCH_MAX_COLOUR = 14.0          # its colour may differ this much (Lab) ...
     RETOUCH_MAX_TEXTURE = 1.9          # ... and it may be this many times busier: an invented pile of rocks is not
@@ -972,6 +978,8 @@ class STANDARDISE:
         "strap": "Remove the two straps leaning across the stone slab, showing the slab's natural surface where they were. " + _KEEP,
         "logo": "Remove the company logo and its text from the surface of the stone, showing the natural stone beneath. " + _KEEP,
         "cards": "Remove the fan of sample cards lying on the stone, showing the natural stone beneath. " + _KEEP,
+        "reflect": "Remove the reflections of lamps and windows and the glare from the polished stone, showing the natural stone beneath. " + _KEEP,
+        "mirror": "This polished stone mirrors the room in front of it. Remove the mirrored room, people, windows and floor, showing only the natural stone's own surface. " + _KEEP,
     }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
