@@ -39,14 +39,25 @@ def test_the_same_input_gives_the_same_image():
 
 
 def test_the_room_comes_from_the_product_alone():
-    assert np.array_equal(layout.room_for("handle-a"), layout.room_for("handle-a"))
-    seen = {hash(layout.room_for(f"handle-{i}").tobytes()) for i in range(40)}
+    assert np.array_equal(layout.room_for("handle-a", False), layout.room_for("handle-a", False))
+    seen = {hash(layout.room_for(f"handle-{i}", False).tobytes()) for i in range(40)}
     assert len(seen) == C.ROOM_COUNT
 
 
 def test_room_for_takes_no_vendor_or_origin():
     import inspect
-    assert list(inspect.signature(layout.room_for).parameters) == ["key"]
+    assert list(inspect.signature(layout.room_for).parameters) == ["key", "far"]
+
+
+def test_an_open_book_stands_in_the_same_hall_seen_from_twice_as_far():
+    near, far = layout.room_for("handle-a", False), layout.room_for("handle-a", True)
+    assert near.shape == far.shape and not np.array_equal(near, far)
+    # the middle of the far view is the near view at half size, about the floor line's centre
+    h, w = near.shape[:2]
+    small = cv2.resize(near, (w // 2, h // 2), interpolation=cv2.INTER_AREA)
+    y0, x0 = int(h * (1 - C.FLOOR_SHARE) / 2), w // 4
+    middle = far[y0 + 40:y0 + h // 4, x0 + 40:x0 + w // 4]
+    assert np.abs(middle - small[40:h // 4 - y0 + y0, 40:w // 4]).mean() < 12
 
 
 def test_a_neighbours_strip_along_a_side_is_cut():

@@ -25,12 +25,13 @@ STAND_FEET = (                         # each foot's outline in that image, trac
      (1026, 894), (1026, 889), (1029, 887), (1013, 862), (1014, 859), (1024, 859), (1030, 852), (1027, 846)))
 
 
-def room_for(key):
+def room_for(key, far):
     """The room behind a product: chosen from `key` alone, never its vendor or origin, so backgrounds cannot trace a
-    vendor (the user's requirement); the same key always gets the same room. An open book stands in the same rooms:
-    one hall for the whole catalog."""
+    vendor (the user's requirement); the same key always gets the same room. far: the same hall seen from twice as far,
+    for an open book, which is drawn at half a slab's size (assets/rooms/far_<n>.jpg: the real hall at half size in the
+    middle, the band around it generated once to continue it)."""
     n = int(hashlib.sha256(key.encode()).hexdigest(), 16) % C.ROOM_COUNT + 1
-    return _room(f"{n}.jpg").copy()
+    return _room(f"{'far_' if far else ''}{n}.jpg").copy()
 
 
 @functools.lru_cache(maxsize=None)
@@ -323,7 +324,7 @@ def compose(slabs, key, room=None, stand=True):
     total = int(round(width * scale)) + gaps
     left = (C.OUT_W - total) // 2
     top = bottom - sh
-    out = room_for(key) if room is None else room.copy()
+    out = room_for(key, len(slabs) > 1) if room is None else room.copy()
     # The floor's shade right under the slab, fading towards the viewer (a soft light from above).
     fall = np.exp(-np.maximum(np.arange(C.OUT_H, dtype=np.float32) - bottom, 0) / (C.AMBIENT_FALL * C.OUT_H))[:, None]
     shadow = np.zeros(out.shape[:2], np.float32)
