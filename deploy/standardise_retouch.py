@@ -1,7 +1,7 @@
 """Take straps, racks, sample cards, stickers and writing off a source's photos (RUN_MODE=standardise-retouch, GPU), ahead of
 deploy.standardise_source, which then starts from the result. Two phases, because the machine holds one set of models at a
 time: find the marks on every photo, free those models, then edit. Writes <run prefix>/retouched/<sha>.jpg, or
-retouch_held/<sha>.json when a result is refused. A test run (RUN_TAG) also writes what was found to retouch_marks/<sha>.jpg,
+retouch_held/<sha>.json when a result is refused. A debug run (RECORD=true) also writes what was found to retouch_marks/<sha>.jpg,
 for a person to check, and under retouch_debug/<sha>/ the masks and every model output in the order the crops were edited
 (retouch.regions), so the checks can be tuned on what the model really does.
 """
@@ -60,6 +60,11 @@ class _NoRecord:
         return edit
 
 
+def _recording():
+    # Opt-in: a full run of thousands of photos does not keep every mask and model output.
+    return os.environ.get("RECORD", "").lower() in ("1", "true", "yes")
+
+
 def _pack(mask):
     # A full slice holds a mask set per photo in a 16 GB machine until the edit phase: kept compressed.
     return cv2.imencode(".png", mask)[1].tobytes()
@@ -82,7 +87,7 @@ def _find(client, keys, out):
             if not (straps.any() or cards.any()):
                 continue
             found[key] = (_pack(straps), _pack(cards), _pack(stone), _pack(slab))
-            if os.environ.get("RUN_TAG"):
+            if _recording():
                 _write_found(client, out, sha, rgb, straps, cards)
         except Exception as exc:                       # one bad photo never stops the slice
             print(f"   FIND FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
@@ -136,7 +141,7 @@ def main() -> int:
         try:
             straps, cards, stone, slab = (_unpack(p) for p in packed)
             rgb = photo.decode(_get(client, key))
-            rec = _Recorder(client, out, sha) if os.environ.get("RUN_TAG") else _NoRecord()
+            rec = _Recorder(client, out, sha) if _recording() else _NoRecord()
             for name, mask in (("straps", straps), ("cards", cards), ("stone", stone), ("slab", slab)):
                 rec.put(f"{name}.png", mask * 255, png=True)
             marked = straps | cards
