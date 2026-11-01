@@ -66,18 +66,42 @@ def _listing(*photos, key="slab-1"):
 
 
 # --- the GPU round --------------------------------------------------------------------------------------------------
-def test_each_source_is_sliced_and_each_slice_is_a_retouch_then_a_standardise(monkeypatch):
+def test_each_slice_has_its_own_fixed_list_and_is_a_retouch_then_a_standardise(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 2)
     batch, s3 = _Batch(), _S3()
     ids = gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True}, "R1")
     names = [j["jobName"] for j in batch.submitted]
-    assert names == ["retouch-sentas-v9-0", "standardise-sentas-v9-0", "retouch-sentas-v9-2", "standardise-sentas-v9-2",
+    assert names == ["retouch-sentas-v9-0", "standardise-sentas-v9-0", "retouch-sentas-v9-1", "standardise-sentas-v9-1",
                      "retouch-varsha-v9-0", "standardise-varsha-v9-0"]
     assert batch.submitted[1]["dependsOn"] == [{"jobId": ids[0]}]                     # standardise waits for its retouch
-    env = {e["name"]: e["value"] for e in batch.submitted[5]["containerOverrides"]["environment"]}
-    assert env["RUN_MODE"] == "standardise" and env["WATERMARKED"] == "true" and env["RUN_TAG"] == "v9"
-    assert env["ONLY_KEY"].endswith("/v9/gpu-todo-R1.json")                          # this run's own list
-    assert json.loads(s3.objects[env["ONLY_KEY"]]) == sorted([A, B, D, E])
+    envs = [{e["name"]: e["value"] for e in j["containerOverrides"]["environment"]} for j in batch.submitted]
+    assert envs[0]["ONLY_KEY"] == envs[1]["ONLY_KEY"] != envs[2]["ONLY_KEY"]            # one list per slice, both jobs
+    assert [json.loads(s3.objects[e["ONLY_KEY"]]) for e in envs[::2]] == [[A, B], [D], [E]]
+    assert "SLICE_OFFSET" not in envs[0] and envs[5]["WATERMARKED"] == "true" and envs[5]["RUN_MODE"] == "standardise"
+
+
+def test_waiting_gives_up_after_the_deadline(monkeypatch):
+    monkeypatch.setattr(C, "RUN_MAX_WAIT_SECONDS", 100)
+    times = iter([0, 50, 150])
+    with pytest.raises(TimeoutError):
+        gpu.wait(_Batch(polls=[("RUNNING",)]), ["j1"], sleep=lambda s: None, clock=lambda: next(times))
+
+
+def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_back(monkeypatch):
+    monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
+    batch, stopped = _Batch(), []
+    batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt):
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1")
+    assert stopped == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
+
+
+def test_a_run_of_a_source_with_no_listings_refuses_to_start(monkeypatch):
+    monkeypatch.setattr(runner, "sheet_listings", lambda s3: [_listing(A)])
+    with pytest.raises(ValueError, match="no listings for sentsa"):
+        runner.listings(None, {"sentas", "sentsa"}, "")
 
 
 def test_waiting_asks_until_every_job_has_ended_and_names_the_failed(monkeypatch):

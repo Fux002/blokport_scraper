@@ -8,8 +8,8 @@ reported and never stops the others.
   clean   per listing with no pass, the first CLEAN_PHOTOS_PER_LISTING photos a cleaned copy can fix (failed only for
           reflections or marks, or held by the retouch or logo step) are edited by each CLEAN_MODELS model in turn until
           a copy passes the clean check; that copy becomes <clean tag>/<src>/cleaned/<sha>.jpg
-  report  from the stored answers only: <clean tag>/chosen.json (what is published) and <clean tag>/tracked.csv (every
-          listing with no good photo, with what happened to each of its photos)
+  report  from the stored answers only: each listing's choice record (<clean tag>/chosen/<listing>.json, what publish
+          reads) and <clean tag>/tracked.csv (this run's listings with no good photo, what happened to each photo)
 """
 
 from __future__ import annotations
@@ -21,7 +21,9 @@ import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from deploy.standardise_publish import EXCLUDE_PATH, read_exclude
+import httpx
+
+from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, read_exclude
 from deploy.standardise_source import round_prefix
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -56,7 +58,8 @@ class Spend:
 
 class Round:
     """What one run tag holds for one source, its keys listed once: finished photos, held ones, verdicts, cleaned copies
-    and clean attempts ("<sha>.<model>": its check, and its edited copy)."""
+    and clean attempts ("<sha>.<model>": its check, its edited copy, its stored hosted request). One lock per photo: a
+    photo several listings share is judged and cleaned once, never by two threads at once."""
 
     def __init__(self, client, tag, src):
         self.prefix = round_prefix(tag, src)
@@ -66,8 +69,19 @@ class Round:
         self.held = _shas(keys, "held/")
         self.judged = _shas(keys, "judged/")
         self.cleaned = _shas(keys, "cleaned/")
-        self.attempts = {k[len("attempts/"):-len(".json")] for k in keys if k.startswith("attempts/") and k.endswith(".json")}
-        self.edited = {k[len("attempts/"):-len(".jpg")] for k in keys if k.startswith("attempts/") and k.endswith(".jpg")}
+        self.requested = _attempts(keys, ".request.json")
+        self.edited = _attempts(keys, ".jpg")
+        self.attempts = _attempts([k for k in keys if not k.endswith(".request.json")], ".json")
+        self._locks, self._guard = {}, threading.Lock()
+
+    def lock(self, sha):
+        with self._guard:
+            return self._locks.setdefault(sha, threading.Lock())
+
+
+def _attempts(keys, suffix):
+    """{"<sha>.<model>"} of the attempt files ending in suffix."""
+    return {k[len("attempts/"):-len(suffix)] for k in keys if k.startswith("attempts/") and k.endswith(suffix)}
 
 
 def _shas(keys, folder):
@@ -98,42 +112,50 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
     """The judge's stored verdict on this tag's result for the photo; judged now when there is none and spend is given,
     None when there is none and none may be bought."""
     key = f"{rnd.prefix}judged/{sha}.json"
-    if sha in rnd.judged:
-        return _get_json(client, key)
-    if spend is None:
-        return None
-    spend.reserve(C.JUDGE_PRICE_USD)
-    cost = 0.0
-    try:
-        found, cost = judge.judge(_original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg"), fmt)
-    finally:
-        spend.settle(C.JUDGE_PRICE_USD, cost)
-    _put_json(client, key, {**found, "cost": cost})
-    rnd.judged.add(sha)
-    return found
+    with rnd.lock(sha):
+        if sha in rnd.judged:
+            return _get_json(client, key)
+        if spend is None:
+            return None
+        spend.reserve(C.JUDGE_PRICE_USD)
+        cost = 0.0
+        try:
+            found, cost = judge.judge(_original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg"), fmt)
+        finally:
+            spend.settle(C.JUDGE_PRICE_USD, cost)
+        _put_json(client, key, {**found, "cost": cost})
+        rnd.judged.add(sha)
+        return found
+
+def candidates(listing, exclude):
+    """The photos a listing is judged on: its first JUDGE_MAX_PER_LISTING photos, excluded ones left out first. The GPU
+    works exactly these (Selection.gpu_todo) and the judge looks at exactly these, so the two never differ."""
+    return [sha for sha in listing["photos"] if sha not in exclude][:C.JUDGE_MAX_PER_LISTING]
 
 
 def choose(client, rounds, listing, exclude, spend=None):
-    """((tag, sha) of the listing's photo to publish or None, whether every photo looked at has a verdict): its finished
-    photos in its own order, the standardiser's run first and then the cleaned copies' run, the first the judge passes.
-    At most JUDGE_MAX_PER_LISTING per tag are looked at: one good photo is enough, more would only cost."""
+    """((tag, sha) of the listing's photo to publish or None, whether the answer is final): the standardiser's results of
+    its candidates in order, then its cleaned copies' results, the first the judge passes. A photo held by the
+    standardiser is skipped; a photo with no result yet, or no verdict yet, leaves the answer open (never read as "no
+    good photo", which would send the listing to the hosted edit or the tracked list). rounds = [(tag, {source:
+    Round})], the scraped run first, then (optionally) the cleaned run."""
     src = listing["source"]
     complete = True
-    for tag, rnd in rounds:
-        looked = 0
-        for sha in listing["photos"]:
-            if looked == C.JUDGE_MAX_PER_LISTING:
-                break
-            if sha in exclude or sha not in rnd[src].finished:
+    for i, (tag, rnd) in enumerate(rounds):
+        r = rnd[src]
+        shas = candidates(listing, exclude) if i == 0 else [sha for sha in listing["photos"] if sha in r.cleaned and sha not in exclude]
+        for sha in shas:
+            if sha in r.held:
                 continue
-            looked += 1
-            found = verdict(client, rnd[src], src, sha, listing["format"], spend)
+            if sha not in r.finished:
+                complete = False
+                continue
+            found = verdict(client, r, src, sha, listing["format"], spend)
             if found is None:
                 complete = False
             elif judge.passed(found):
                 return (tag, sha), True
     return None, complete
-
 
 def fixable(client, rnd, sha, exclude):
     """Whether a cleaned copy of this photo could pass: the judge failed its result only for reflections, marks or fills,
@@ -149,55 +171,79 @@ def fixable(client, rnd, sha, exclude):
 
 def clean_photo(client, cl, src, sha, spend):
     """Each model in turn until a cleaned copy passes the clean check; that copy becomes cleaned/<sha>.jpg. Returns
-    whether one passed. Each attempt (the copy and its check) is kept, so a re-run goes on where this one stopped."""
-    original = _original(client, src, sha)
-    for name in clean.MODELS:
-        att = f"{cl.prefix}attempts/{sha}.{name}"
-        if f"{sha}.{name}" in cl.attempts:
-            check = _get_json(client, f"{att}.json")
-        else:
-            if f"{sha}.{name}" in cl.edited:           # paid for before, its check not made: the copy is reused
-                copy, price = _get(client, f"{att}.jpg"), 0.0
-            else:
-                spend.reserve(C.CLEAN_PRICE_USD[name])
-                price = 0.0
-                try:
-                    copy = clean.edit(name, original)
-                    price = C.CLEAN_PRICE_USD[name]
-                finally:
-                    spend.settle(C.CLEAN_PRICE_USD[name], price)
-                _put(client, f"{att}.jpg", copy, "image/jpeg")
-                cl.edited.add(f"{sha}.{name}")
-            spend.reserve(C.JUDGE_PRICE_USD)
-            judged = 0.0
-            try:
-                check, judged = judge.check_clean(original, copy)
-            finally:
-                spend.settle(C.JUDGE_PRICE_USD, judged)
-            _put_json(client, f"{att}.json", {**check, "edit_model": name, "cost": price + judged})
-            cl.attempts.add(f"{sha}.{name}")
-        if check["passes"]:
-            client.copy_object(Bucket=S3_BUCKET, Key=f"{cl.prefix}cleaned/{sha}.jpg", CopySource={"Bucket": S3_BUCKET, "Key": f"{att}.jpg"},
-                               ContentType="image/jpeg", MetadataDirective="REPLACE")
-            cl.cleaned.add(sha)
+    whether one passed."""
+    with cl.lock(sha):
+        if sha in cl.cleaned:
             return True
-    return False
+        original = _original(client, src, sha)
+        for name in clean.MODELS:
+            if _attempt(client, cl, sha, name, original, spend)["passes"]:
+                client.copy_object(Bucket=S3_BUCKET, Key=f"{cl.prefix}cleaned/{sha}.jpg", ContentType="image/jpeg",
+                                   CopySource={"Bucket": S3_BUCKET, "Key": f"{cl.prefix}attempts/{sha}.{name}.jpg"},
+                                   MetadataDirective="REPLACE")
+                cl.cleaned.add(sha)
+                return True
+        return False
 
+
+def _attempt(client, cl, sha, name, original, spend):
+    """The clean check of model `name`'s copy of the photo, made once. A stored check is read back, a stored copy is
+    checked, a stored request is collected; only a photo never sent is sent, its price counted as soon as the queue
+    accepts it (it is paid even if collecting it fails later). A request the queue no longer has is forgotten, so the
+    next run sends it again."""
+    att, ident = f"{cl.prefix}attempts/{sha}.{name}", f"{sha}.{name}"
+    if ident in cl.attempts:
+        return _get_json(client, f"{att}.json")
+    if ident in cl.edited:
+        copy = _get(client, f"{att}.jpg")
+    else:
+        if ident in cl.requested:
+            job = _get_json(client, f"{att}.request.json")
+        else:
+            price = C.CLEAN_PRICE_USD[name]
+            spend.reserve(price)
+            try:
+                job = clean.submit(name, original)
+            except BaseException:
+                spend.settle(price, 0.0)
+                raise
+            spend.settle(price, price)
+            _put_json(client, f"{att}.request.json", job)
+            cl.requested.add(ident)
+        try:
+            copy = clean.collect(job)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (404, 410):
+                client.delete_object(Bucket=S3_BUCKET, Key=f"{att}.request.json")
+                cl.requested.discard(ident)
+            raise
+        _put(client, f"{att}.jpg", copy, "image/jpeg")
+        cl.edited.add(ident)
+    spend.reserve(C.JUDGE_PRICE_USD)
+    cost = 0.0
+    try:
+        check, cost = judge.check_clean(original, copy)
+    finally:
+        spend.settle(C.JUDGE_PRICE_USD, cost)
+    _put_json(client, f"{att}.json", {**check, "edit_model": name, "check_cost": cost})
+    cl.attempts.add(ident)
+    return check
 
 def clean_listing(client, rounds, listing, exclude, spend):
-    """A listing with no good photo: its first CLEAN_PHOTOS_PER_LISTING fixable photos are cleaned (one is enough)."""
-    picked, complete = choose(client, rounds, listing, exclude)
+    """A listing with no good photo from the standardiser: its first CLEAN_PHOTOS_PER_LISTING fixable photos are
+    cleaned (one is enough). Nothing to do when it already has a cleaned copy (its result is judged later)."""
+    (_, gpu), (_, cl) = rounds
+    src = listing["source"]
+    if any(sha in cl[src].cleaned for sha in listing["photos"]):
+        return
+    picked, complete = choose(client, rounds[:1], listing, exclude)
     if picked is not None:
         return
     if not complete:
-        raise RuntimeError("not every photo looked at has a verdict: the judge step must run first")
-    (_, gpu), (_, cl) = rounds
-    src = listing["source"]
-    candidates = [sha for sha in listing["photos"] if fixable(client, gpu[src], sha, exclude)][:C.CLEAN_PHOTOS_PER_LISTING]
-    for sha in candidates:
-        if sha in cl[src].cleaned or clean_photo(client, cl[src], src, sha, spend):
+        raise RuntimeError("its first photos have no standardiser result or verdict yet: nothing is cleaned before they do")
+    for sha in [sha for sha in listing["photos"] if fixable(client, gpu[src], sha, exclude)][:C.CLEAN_PHOTOS_PER_LISTING]:
+        if clean_photo(client, cl[src], src, sha, spend):
             return
-
 
 def photo_notes(client, rounds, listing, exclude):
     """What happened to each of a listing's photos, for a person reading the tracked list."""
@@ -272,20 +318,24 @@ def clean_all(sel, spend):
 
 
 def report(sel):
-    """{"chosen", "tracked", "pending"}: writes chosen.json (what is published) and tracked.csv (the listings with no
-    good photo); pending = listings not fully judged, which are neither."""
+    """{"chosen", "tracked", "pending"} of this run's listings. Each listing with a good photo gets its choice record, a
+    listing now without one loses its record (and is in tracked.csv, this run's list of listings with no good photo);
+    a listing not fully judged is neither and its record is left as it is. Listings outside this run are untouched."""
     chosen, tracked, pending = [], [], []
+    prefix = chosen_prefix(sel.root)
     for l in sel.listings:
         picked, complete = choose(sel.client, sel.rounds, l, sel.exclude)
         if picked:
             tag, sha = picked
-            chosen.append({"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])})
+            record = {"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])}
+            _put_json(sel.client, f"{prefix}{l['key']}.json", record)
+            chosen.append(record)
         elif complete:
+            sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")
             tracked.append({"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
                             "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)})
         else:
             pending.append(l["key"])
-    _put_json(sel.client, f"{sel.root}chosen.json", chosen)
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
     writer.writeheader()

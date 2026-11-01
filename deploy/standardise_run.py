@@ -5,7 +5,7 @@
   3. clean: a hosted edit of one fixable photo of each listing still without a pass
   4. GPU: the cleaned copies, through every step a scraped photo takes
   5. judge: the cleaned copies' results
-  6. report: chosen.json + tracked.csv
+  6. report: one choice record per listing (what publish reads) + tracked.csv
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice.
 Env: RUN_TAG, CLEAN_TAG (the scraped and the cleaned run), SRC (space-separated sources), LISTINGS_KEY (optional:
 an S3 JSON list of listing keys), FAL_KEY, SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF.
@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from deploy import standardise_batch as gpu
@@ -57,9 +59,19 @@ def exclusive(s3, owner):
 
 
 def listings(s3, sources, wanted_key):
-    """This environment's listings of the sources, limited to the stored list when one is given."""
+    """This environment's listings of the sources, limited to the stored list when one is given. ValueError when a
+    source has none (a mistyped source, or a list that names none of its listings): a run of nothing is no run."""
     keep = set(json.loads(s3.get_object(Bucket=S3_BUCKET, Key=wanted_key)["Body"].read())) if wanted_key else None
-    return [l for l in sheet_listings(s3) if l["source"] in sources and (keep is None or l["key"] in keep)]
+    found = [l for l in sheet_listings(s3) if l["source"] in sources and (keep is None or l["key"] in keep)]
+    if empty := sorted(sources - {l["source"] for l in found}):
+        raise ValueError(f"no listings for {', '.join(empty)} in this environment's product sheet")
+    return found
+
+
+def _stopped(signum, frame):
+    # SIGTERM (a stopped task or a closed terminal) unwinds like an error: the round's jobs are stopped, the GPU pool's
+    # ceiling and the run lock are restored by their finally blocks, which a bare SIGTERM would skip
+    raise SystemExit(f"stopped by signal {signum}")
 
 
 def gpu_round(batch, sel, tag, todo, run_id):
@@ -109,12 +121,20 @@ def main() -> int:
     if not sources or not run_tag or not clean_tag or run_tag == clean_tag:
         print("ERROR: RUN_TAG, CLEAN_TAG (a different tag) and SRC are required; aborting")
         return 2
-    s3, batch = boto3.client("s3", region_name=S3_REGION), boto3.client("batch", region_name=S3_REGION)
+    signal.signal(signal.SIGTERM, _stopped)
+    retries = Config(retries={"mode": "standard", "max_attempts": 10})     # a throttled call is retried, never fatal
+    s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
+    batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     owner = {"run_id": run_id, "tags": [run_tag, clean_tag], "sources": sorted(sources)}
     try:
+        found = listings(s3, sources, os.environ.get("LISTINGS_KEY", "").strip())
+    except ValueError as exc:
+        print(f"ERROR: {exc}; aborting")
+        return 2
+    try:
         with exclusive(s3, owner):
-            sel = select.Selection(s3, listings(s3, sources, os.environ.get("LISTINGS_KEY", "").strip()), run_tag, clean_tag)
+            sel = select.Selection(s3, found, run_tag, clean_tag)
             spend = select.Spend(C.SPEND_CAP_USD)
             print(f"==> standardise run {run_id}: {len(sel.listings)} listings of {', '.join(sel.sources)}; "
                   f"{run_tag} then {clean_tag}", flush=True)

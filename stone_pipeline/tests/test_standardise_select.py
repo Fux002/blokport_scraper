@@ -31,16 +31,21 @@ class _S3:
     def copy_object(self, Bucket, Key, CopySource, ContentType, MetadataDirective):
         self.objects[Key] = self.objects[CopySource["Key"]]
 
+    def delete_object(self, Bucket, Key):
+        self.objects.pop(Key, None)
 
-def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=()):
+
+def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=(), requested=()):
+    import threading
     r = object.__new__(sel.Round)
     r.prefix, r.finished, r.held, r.judged = prefix, set(finished), set(held), set(judged)
-    r.cleaned, r.attempts, r.edited = set(cleaned), set(attempts), set(edited)
+    r.cleaned, r.attempts, r.edited, r.requested = set(cleaned), set(attempts), set(edited), set(requested)
+    r._locks, r._guard = {}, threading.Lock()
     return r
 
 
-def _listing(*photos):
-    return {"key": "slab-1", "source": "sentas", "format": "slab", "photos": list(photos)}
+def _listing(*photos, key="slab-1"):
+    return {"key": key, "source": "sentas", "format": "slab", "photos": list(photos)}
 
 
 def _verdict(v, *kinds):
@@ -125,7 +130,7 @@ def test_at_most_the_set_number_of_photos_is_judged_per_listing(monkeypatch):
 def test_an_excluded_photo_is_never_chosen_and_a_cleaned_copy_counts_after_the_gpu_run():
     s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection"), f"{CL}judged/{B}.json": _verdict("pass")})
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(B,))}),
-              ("v9-clean", {"sentas": _round(CL, finished=(B,), judged=(B,))})]
+              ("v9-clean", {"sentas": _round(CL, finished=(B,), judged=(B,), cleaned=(B,))})]
     assert sel.choose(s3, rounds, _listing(A, B), {A}) == (("v9-clean", B), True)
 
 
@@ -139,7 +144,8 @@ def _clean_setup(monkeypatch, passes_at):
     s3 = _S3({f"dev/products/scraped/sentas/{s}.jpg": b"o" for s in (A, B)}
              | {f"{GPU}judged/{A}.json": _verdict("fail", "not_one_slab"), f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection")})
     edits = []
-    monkeypatch.setattr(sel.clean, "edit", lambda name, img: edits.append(name) or f"copy-{name}".encode())
+    monkeypatch.setattr(sel.clean, "submit", lambda name, img: edits.append(name) or {"model": name})
+    monkeypatch.setattr(sel.clean, "collect", lambda job: f"copy-{job['model']}".encode())
     monkeypatch.setattr(sel.judge, "check_clean", lambda o, c: ({"passes": c == f"copy-{passes_at}".encode()}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
     return s3, edits, rounds
@@ -162,9 +168,9 @@ def test_a_paid_edit_whose_check_was_not_made_is_reused(monkeypatch):
 
 
 def test_a_listing_not_fully_judged_is_never_cleaned(monkeypatch):
-    monkeypatch.setattr(sel.clean, "edit", lambda *a: pytest.fail("cleaned before judging"))
+    monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned before judging"))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
-    with pytest.raises(RuntimeError, match="judge step must run first"):
+    with pytest.raises(RuntimeError, match="nothing is cleaned before they do"):
         sel.clean_listing(_S3(), rounds, _listing(A), set(), sel.Spend(10))
 
 
@@ -217,3 +223,67 @@ def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
 def test_a_photo_with_a_cleaned_copy_is_still_retouched():
     from deploy import standardise_retouch as rt
     assert not rt.retouched(_Bucket({f"{CL}cleaned/{A}.jpg": b""}), CL, A)
+
+
+
+# --- review fixes -------------------------------------------------------------------------------------------------------
+def test_a_photo_with_no_standardiser_result_leaves_the_listing_open_not_without_a_good_photo():
+    s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection")})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(B,), judged=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(s3, rounds, _listing(A, B), set()) == (None, False)          # A: its GPU job left no result
+
+
+def test_the_gpu_and_the_judge_look_at_the_same_photos_excluded_ones_left_out_first():
+    photos = [c * 64 for c in "123456"]
+    assert sel.candidates(_listing(*photos), {photos[0]}) == photos[1:1 + C.JUDGE_MAX_PER_LISTING]
+
+
+def test_a_photo_two_listings_share_is_judged_once_even_in_parallel(monkeypatch):
+    import threading
+    import time
+    s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    calls = []
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: (calls.append(1), time.sleep(0.05))[0] or ({"verdict": "pass", "problems": []}, 0.02))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    spend = sel.Spend(10)
+    threads = [threading.Thread(target=sel.choose, args=(s3, rounds, _listing(A, key=k), set(), spend)) for k in ("one", "two")]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert len(calls) == 1
+
+
+def test_a_sent_edit_is_paid_even_when_collecting_it_fails_and_a_rerun_collects_it_without_sending_again(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(TimeoutError("queue slow")))
+    spend = sel.Spend(10)
+    with pytest.raises(TimeoutError):
+        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == ["kontext"] and spend.spent == pytest.approx(C.CLEAN_PRICE_USD["kontext"])   # counted when sent
+    assert f"{CL}attempts/{B}.kontext.request.json" in s3.objects
+    monkeypatch.setattr(sel.clean, "collect", lambda job: b"copy-kontext")
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == ["kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"   # collected, not sent again
+
+
+def test_a_request_the_queue_no_longer_has_is_forgotten_so_the_next_run_sends_it_again(monkeypatch):
+    import httpx
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    gone = httpx.HTTPStatusError("gone", request=httpx.Request("GET", "https://q"), response=httpx.Response(404))
+    monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(gone))
+    with pytest.raises(httpx.HTTPStatusError):
+        sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert f"{CL}attempts/{B}.kontext.request.json" not in s3.objects
+
+
+def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_listings():
+    s3 = _S3({f"{GPU}judged/{A}.json": _verdict("pass"), f"{GPU}judged/{B}.json": _verdict("fail", "not_one_slab"),
+              "r/chosen/other.json": b'{"key": "other"}', "r/chosen/two.json": b'{"key": "two"}'})
+    s = object.__new__(sel.Selection)
+    s.client, s.exclude, s.root = s3, set(), "r/"
+    s.listings = [_listing(A, key="one"), _listing(B, key="two")]
+    s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
+    result = sel.report(s)
+    assert [c["key"] for c in result["chosen"]] == ["one"] and [t["listing"] for t in result["tracked"]] == ["two"]
+    assert json.loads(s3.objects["r/chosen/one.json"])["sha"] == A                      # chosen: recorded
+    assert "r/chosen/two.json" not in s3.objects                                        # now without a good photo
+    assert s3.objects["r/chosen/other.json"] == b'{"key": "other"}'                     # outside this run: untouched

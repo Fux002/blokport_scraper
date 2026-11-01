@@ -1,6 +1,7 @@
 """One GPU round of a standardise run on AWS Batch: the listed photos of each source, in slices of RUN_SLICE, each slice a
-retouch job then a standardise job that starts when the retouch ended. The round's photo list is stored as the jobs'
-ONLY_KEY; the GPU pool's ceiling is raised for the round and always set back. Queue and job definition come from the
+retouch job then a standardise job that starts when the retouch ended, both reading the slice's own fixed photo list
+(ONLY_KEY). The GPU pool's ceiling is raised for the round and always set back; a round that fails, times out or is
+stopped stops its jobs. Queue and job definition come from the
 environment (SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF), never named here."""
 
 from __future__ import annotations
@@ -41,21 +42,21 @@ def raised(batch, ce):
 
 
 def slices(todo):
-    """[(source, offset, count)] covering every source's listed photos in RUN_SLICE steps."""
-    return [(src, o, C.RUN_SLICE) for src, shas in sorted(todo.items()) for o in range(0, len(shas), C.RUN_SLICE)]
+    """[(source, n, shas)]: every source's listed photos in chunks of RUN_SLICE. Each slice's retouch and standardise job
+    read the same fixed list, so a product sheet rewritten between the two can never shift which photos a job gets."""
+    return [(src, n, shas[i:i + C.RUN_SLICE]) for src, shas in sorted(todo.items())
+            for n, i in enumerate(range(0, len(shas), C.RUN_SLICE))]
 
 
 def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id):
-    """Store the round's photo list and submit its jobs: [job ids]. todo = {source: shas}; watermarked = {source: bool}.
-    The list is the run's own file (run_id), so no other run's round can ever replace it under running jobs."""
-    only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo-{run_id}.json"
-    s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(sorted(s for v in todo.values() for s in v)).encode(),
-                  ContentType="application/json")
+    """Store each slice's photo list (the run's own files, run_id) and submit its two jobs: [job ids]. todo = {source:
+    shas}; watermarked = {source: bool}."""
     ids = []
-    for src, offset, count in slices(todo):
-        common = [{"name": k, "value": str(v)} for k, v in (("SRC", src), ("SLICE_OFFSET", offset), ("SLICE_COUNT", count),
-                                                              ("RUN_TAG", tag), ("ONLY_KEY", only))]
-        name = f"{src}-{tag}-{offset}"
+    for src, n, shas in slices(todo):
+        only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo-{run_id}-{src}-{n}.json"
+        s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(shas).encode(), ContentType="application/json")
+        common = [{"name": k, "value": str(v)} for k, v in (("SRC", src), ("RUN_TAG", tag), ("ONLY_KEY", only))]
+        name = f"{src}-{tag}-{n}"
         retouch = batch.submit_job(jobName=f"retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
                                    timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT},
                                    containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise-retouch"}] + common})["jobId"]
@@ -68,13 +69,23 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id):
     return ids
 
 
-def wait(batch, ids, sleep=time.sleep):
-    """Block until every job has ended: [(job name, why)] of the jobs that failed."""
+def wait(batch, ids, sleep=time.sleep, clock=time.monotonic):
+    """Block until every job has ended: [(job name, why)] of the jobs that failed. TimeoutError after
+    RUN_MAX_WAIT_SECONDS (jobs stuck waiting for GPUs never end on their own)."""
+    deadline = clock() + C.RUN_MAX_WAIT_SECONDS
     while True:
         jobs = [j for i in range(0, len(ids), 100) for j in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]]
         if all(j["status"] in _DONE for j in jobs):
             return [(j["jobName"], j.get("statusReason", "")) for j in jobs if j["status"] == "FAILED"]
+        if clock() > deadline:
+            raise TimeoutError(f"GPU jobs not done after {C.RUN_MAX_WAIT_SECONDS}s")
         sleep(C.RUN_POLL_SECONDS)
+
+
+def stop(batch, ids, why):
+    """Stop every job of the round that has not ended (a run that fails or is stopped leaves no GPU work behind)."""
+    for job_id in ids:
+        batch.terminate_job(jobId=job_id, reason=why[:250])
 
 
 def run_round(batch, s3, tag, todo, watermarked, run_id):
@@ -84,4 +95,9 @@ def run_round(batch, s3, tag, todo, watermarked, run_id):
         return []
     queue, jobdef = target()
     with raised(batch, pool(batch, queue)):
-        return wait(batch, submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id))
+        ids = submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id)
+        try:
+            return wait(batch, ids)
+        except BaseException as exc:
+            stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
+            raise
