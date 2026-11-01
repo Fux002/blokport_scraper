@@ -62,10 +62,11 @@ def same_ink(rgb, found, slab, long):
     return more
 
 
-def reflections(rgb, hull, straps):
-    """Lamp reflections on the slab, not under a strap (which comes off itself): the model fills them like any mark, and a
-    refused fill leaves them as photographed. A fast fill smudged them on striped and veined stone."""
-    return marks.flare_mask(rgb, hull & (straps == 0))
+def reflections(rgb, stone, straps):
+    """Lamp reflections on the stone (its holes filled), not under a strap (which comes off itself): the model fills them
+    like any mark, and a refused fill leaves them as photographed. A fast fill smudged them on striped and veined stone.
+    Not the slab's hull: sky through a gap or a skylight just past the edge is bright too, and is not stone."""
+    return marks.flare_mask(rgb, stone & (straps == 0))
 
 
 def find_marks(seg, det, rgb):
@@ -96,7 +97,7 @@ def find_marks(seg, det, rgb):
     cards = keep_on_slab(cards, hull, C.CARD_ON_SLAB)
     cards |= same_ink(rgb, cards, hull, max(h, w))
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))
-    return straps, reflections(rgb, hull, straps), cv2.dilate(cards, np.ones((k, k), np.uint8)), stone, slab
+    return straps, reflections(rgb, stone, straps), cv2.dilate(cards, np.ones((k, k), np.uint8)), stone, slab
 
 
 def _lab(rgb):
@@ -224,6 +225,13 @@ def too_wide_to_fill(mask):
     """Whether any group of marks reaches too far from real stone to be filled without inventing what was under it."""
     long = max(mask.shape)
     return any(too_wide(mask[y0:y1, x0:x1], long) > C.RETOUCH_MAX_REACH for x0, y0, x1, y1 in regions(mask))
+
+
+def crop_clear_of_wide_marks(straps, cards):
+    """The crop clear of straps and cards too wide to fill (clear_crop), or None when they can be filled. Lamp
+    reflections never decide a crop: one left inside it stays as shot, as when its fill is refused."""
+    marked = straps | cards
+    return clear_crop(marked) if too_wide_to_fill(marked) else None
 
 
 def clear_crop(mask):

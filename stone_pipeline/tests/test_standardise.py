@@ -661,11 +661,22 @@ def test_a_floor_under_the_stone_means_a_whole_scene_not_a_close_up():
     assert not closeup.shows_floor([], h)
 
 
-def test_a_lamp_reflection_on_the_slab_is_a_mark_for_the_model_but_not_under_a_strap_or_off_the_slab():
-    stone = _stone(1000, 1500, base=150, var=6)
-    for x0 in (300, 1300, 700):                                     # on the slab, off it, under a strap
-        cv2.rectangle(stone, (x0, 200), (x0 + 60, 240), (255, 255, 255), -1)
-    hull = np.zeros((1000, 1500), np.uint8); hull[100:900, 100:1200] = 1
-    straps = np.zeros_like(hull); straps[:, 680:780] = 1
-    found = retouch.reflections(stone, hull, straps)
+def test_a_lamp_reflection_on_the_stone_is_a_mark_for_the_model_but_not_under_a_strap_or_off_the_stone():
+    rgb = _stone(1000, 1500, base=150, var=6)
+    for x0 in (300, 1300, 700):                                     # on the stone, past its edge, under a strap
+        cv2.rectangle(rgb, (x0, 200), (x0 + 60, 240), (255, 255, 255), -1)
+    stone = np.zeros((1000, 1500), np.uint8); stone[100:900, 100:1200] = 1
+    straps = np.zeros_like(stone); straps[:, 680:780] = 1
+    found = retouch.reflections(rgb, stone, straps)
     assert found[220, 330] == 1 and found[220, 1330] == 0 and found[220, 730] == 0
+
+
+def test_a_lamp_reflection_never_stops_a_card_fan_being_cropped_away():
+    h, w = 1280, 1707
+    fan = np.zeros((h, w), np.uint8); fan[900:1280, 500:1000] = 1
+    flares = np.zeros_like(fan); flares[100:160, 300:360] = 1; flares[500:560, 1300:1360] = 1   # lamps above the cards
+    none = np.zeros_like(fan)
+    assert retouch.crop_clear_of_wide_marks(none, fan) is not None
+    x0, y0, x1, y1 = retouch.crop_clear_of_wide_marks(none, fan)
+    assert not fan[y0:y1, x0:x1].any()
+    assert retouch.crop_clear_of_wide_marks(none, flares) is None            # reflections alone are filled, not cropped
