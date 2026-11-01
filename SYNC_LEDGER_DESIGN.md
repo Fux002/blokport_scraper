@@ -321,8 +321,14 @@ Properties:
   (`attributes_to_add.csv`, `variants_to_confirm.csv`) and wait for a human. That
   hold is the safety: an uncertain entity is never auto-listed, so it can never
   produce a faulty listing (fixes L1).
-- **Resumable.** A `failed` ack leaves the entity `dirty`; the next pull offers it
-  again. One bad entity never blocks the batch.
+- **Resumable.** A `failed` ack leaves the entity `dirty`; a pull offers it again
+  once its retry wait has passed (5 min, doubling per consecutive failure: 5, 10,
+  20, 40 min; the 5th failure in a row dead-letters it to `gap_held`). The wait
+  keeps a passing hiccup on the Medusa side (an S3 blip while it copies a photo)
+  from failing every immediate re-serve and dead-lettering within seconds. A
+  `synced` ack, a requeue, a reset or new content (a changed payload_hash) ends the
+  wait; a `blocked` tombstone waits the same way. One bad entity never blocks the
+  batch.
 - **Dry-run and consistency are queries.** The service can report the full diff
   (what is ready, what would change, what would orphan) without Medusa pulling, and
   the old `catalog.verify_consistency()` cross-file checks become ledger
@@ -611,7 +617,8 @@ the ack, which writes only the scraper's own ledger, never Medusa.
 - Body: a list of `{key|sku, medusa_id, status: created|updated|skipped|failed,
   error?}`.
 - The scraper writes `medusa_id` into the ledger and moves the entity to `synced`,
-  or records `failed` with the error and leaves it `dirty` for the next pull. This
+  or records `failed` with the error and leaves it `dirty`, offered again once its
+  retry wait has passed (section 5, Resumable). This
   is the only write the integration performs, and it writes the scraper ledger,
   not Medusa.
 
@@ -702,8 +709,8 @@ is resolved.
 - **Re-seed.** Because every reference is by Key or canonical name, a re-seeded
   Medusa re-resolves everything on the next pull. The scraper marks ids stale
   (section 9) and the acks repopulate them. No coordinated migration.
-- **Failure and retry.** A `failed` ack leaves the entity `dirty`, so the next
-  pull offers it again. A persistently failing entity surfaces in `GET
+- **Failure and retry.** A `failed` ack leaves the entity `dirty`, so a pull offers
+  it again once its retry wait has passed. A persistently failing entity surfaces in `GET
   /sync/status` and the run summary. One bad entity never blocks the batch: Medusa
   acks the good ones and reports the bad ones.
 

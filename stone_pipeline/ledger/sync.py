@@ -43,6 +43,19 @@ class ServeInFlight(Exception):
 # populate with changed data, or an explicit requeue, un-quarantines it.
 _MAX_SYNC_ATTEMPTS = 5
 
+# A failed apply is not re-served on the very next pull: a passing hiccup (an S3 blip while Medusa copies a photo)
+# would fail every immediate retry too and reach the dead-letter cap within seconds. It waits _RETRY_BASE_SECONDS,
+# doubled with each consecutive failure (5, 10, 20, 40 min), so the cap means over an hour of real failures.
+_RETRY_BASE_SECONDS = 300
+_RETRY_FACTOR = 2
+
+
+def _retry_after(attempts: int) -> str:
+    """When an entity that just failed for the attempts-th time in a row may be served again."""
+    wait = _RETRY_BASE_SECONDS * _RETRY_FACTOR ** (attempts - 1)
+    return (datetime.now(timezone.utc) + timedelta(seconds=wait)).isoformat()
+
+
 # A served-but-not-yet-acked entity is leased in state 'syncing' (the in-flight guard) so two
 # overlapping pulls can NEVER double-serve the same rows. If Medusa pulls but never acks (crash /
 # lost response), the lease is reclaimed to 'dirty' after this many seconds and re-served.
@@ -147,11 +160,14 @@ def _sub_limit(limit: int | None) -> str:
 
 # ONE source of truth for "eligible to serve", reused by the lease (ready_*) AND the non-leasing
 # peek (count_ready) so the two can never diverge -- a variation is servable once produced + typed;
-# a product once its variation is LIVE (synced, typed, textured). `v` is the joined variation alias.
-_ELIGIBLE_VARIATION = "state IN ('pending', 'dirty') AND in_full = 1 AND type IS NOT NULL AND type != ''"
+# a product once its variation is LIVE (synced, typed, textured). `v` is the joined variation alias. Neither while
+# it waits out a failed apply (retry_after): each takes the current time as its one parameter.
+_ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND type IS NOT NULL AND type != '' "
+                       "AND (retry_after IS NULL OR retry_after <= ?)")
 _ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') AND v.state = 'synced' "
                      "AND v.type IS NOT NULL AND v.type != '' "
-                     "AND v.image_url IS NOT NULL AND v.image_url != ''")
+                     "AND v.image_url IS NOT NULL AND v.image_url != '' "
+                     "AND (p.retry_after IS NULL OR p.retry_after <= ?)")
 
 
 def count_ready(ledger: Ledger, type_: str) -> int:
@@ -159,11 +175,11 @@ def count_ready(ledger: Ledger, type_: str) -> int:
     mark the rows 'syncing' and consume them, so use this for convergence checks, monitoring, and
     any assertion that must not have a side effect. Same eligibility predicates as ready()."""
     if type_ in ("variations", "variation"):
-        return ledger.execute("SELECT COUNT(*) n FROM variation WHERE " + _ELIGIBLE_VARIATION).fetchone()["n"]
+        return ledger.execute("SELECT COUNT(*) n FROM variation WHERE " + _ELIGIBLE_VARIATION, (now_iso(),)).fetchone()["n"]
     if type_ in ("products", "product"):
         return ledger.execute(
             "SELECT COUNT(*) n FROM product p JOIN variation v ON v.key = p.variation_key "
-            "WHERE " + _ELIGIBLE_PRODUCT).fetchone()["n"]
+            "WHERE " + _ELIGIBLE_PRODUCT, (now_iso(),)).fetchone()["n"]
     if type_ == "inventory":
         return len(ready_inventory(ledger))
     raise ValueError(f"unsupported sync type {type_!r}")
@@ -194,12 +210,13 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
     can never double-serve the same rows (the second's subquery no longer sees them as pending/dirty).
     ack flips 'syncing'->'synced'/'dirty'; an un-acked lease is reclaimed by reap_stale_syncing."""
     reap_stale_syncing(ledger, "variation")
+    now = now_iso()
     rows = ledger.execute(
         "UPDATE variation SET state = 'syncing', updated_at = ? WHERE key IN ("
         "  SELECT key FROM variation WHERE " + _ELIGIBLE_VARIATION +
         "  ORDER BY created_at, key" + _sub_limit(limit) + ") "
         "RETURNING key, branch, type, name, aliases, image_url, payload_hash",
-        (now_iso(),)).fetchall()
+        (now, now)).fetchall()
     return _isolate(ledger, "variation", "key", rows, lambda v: {
         "external_id": v["key"],
         "payload_hash": v["payload_hash"],
@@ -235,12 +252,13 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
     `image_urls` are ingestion sources Medusa copies into its own storage."""
     # atomically LEASE the eligible products to 'syncing' (in-flight guard, same as variations).
     reap_stale_syncing(ledger, "product")
+    now = now_iso()
     rows = ledger.execute(
         "UPDATE product SET state = 'syncing', updated_at = ? WHERE sku IN ("
         "  SELECT p.sku FROM product p JOIN variation v ON v.key = p.variation_key "
         "  WHERE " + _ELIGIBLE_PRODUCT +
         "  ORDER BY p.created_at, p.sku" + _sub_limit(limit) + ") RETURNING *",
-        (now_iso(),)).fetchall()
+        (now, now)).fetchall()
     return _isolate(ledger, "product", "sku", rows, lambda p: {
         "external_id": p["sku"],
         "payload_hash": p["payload_hash"],
@@ -321,7 +339,8 @@ def ready_removed(ledger: Ledger, limit: int | None = None) -> list[dict]:
     Medusa deletes a variety's products before the variety entity (a variant with children can't drop)."""
     rows = ledger.execute(
         "SELECT external_id, kind, source, reason FROM removed WHERE state = 'pending' "
-        f"ORDER BY kind, created_at, rowid{_sub_limit(limit)}")
+        "AND (retry_after IS NULL OR retry_after <= ?) "
+        f"ORDER BY kind, created_at, rowid{_sub_limit(limit)}", (now_iso(),))
     out = []
     for r in rows:
         if r["kind"] == "variation":
@@ -353,8 +372,9 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     """Medusa talks back for ONE entity. Returns the number of ledger rows changed (0 = the
     external_id was not found, or the ack was REFUSED as out-of-order -- see the eligibility guard).
       synced -> record the minted/matched id, mark synced, clear the failure counter+reason.
-      failed -> record the reason and re-serve (dirty); after _MAX_SYNC_ATTEMPTS consecutive failures
-                the entity is DEAD-LETTERED to 'gap_held' (stops serving, surfaces in /status).
+      failed -> record the reason and re-serve (dirty) once its retry_after has passed (_RETRY_BASE_SECONDS,
+                doubling per consecutive failure); after _MAX_SYNC_ATTEMPTS consecutive failures the entity
+                is DEAD-LETTERED to 'gap_held' (stops serving, surfaces in /status).
 
     ELIGIBILITY GUARD (defense in depth): a product is only marked synced if its variation is
     already synced, and stock only if its product is synced -- so a duplicate/out-of-order ack can
@@ -391,8 +411,8 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
         attempts = ((row["sync_attempts"] or 0)) + 1
         state = "dead" if attempts >= _MAX_SYNC_ATTEMPTS else "pending"
         cur = ledger.execute(
-            "UPDATE removed SET state = ?, sync_attempts = ?, sync_error = ?, updated_at = ? "
-            "WHERE external_id = ?", (state, attempts, (reason or "blocked")[:500], now, external_id))
+            "UPDATE removed SET state = ?, sync_attempts = ?, sync_error = ?, retry_after = ?, updated_at = ? "
+            "WHERE external_id = ?", (state, attempts, (reason or "blocked")[:500], _retry_after(attempts), now, external_id))
         if state == "dead" and cur.rowcount:
             log.warning("tombstone dead-lettered after repeated blocks (open reservation?)",
                         extra={"extra_fields": {"external_id": external_id, "attempts": attempts}})
@@ -425,9 +445,9 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
         # 'retiring' row back to dirty/gap_held, which would re-enter the serve lane while its tombstone
         # still serves /removed. A failed ack on a retiring row is a no-op (0 rows) by design.
         cur = ledger.execute(
-            f"UPDATE {table} SET state = ?, sync_attempts = ?, sync_error = ?, updated_at = ? "
+            f"UPDATE {table} SET state = ?, sync_attempts = ?, sync_error = ?, retry_after = ?, updated_at = ? "
             f"WHERE {pk} = ? AND state != 'retiring'",
-            (state, attempts, (reason or "apply failed")[:500], now, external_id))
+            (state, attempts, (reason or "apply failed")[:500], _retry_after(attempts), now, external_id))
         if state == "gap_held" and cur.rowcount:
             log.warning("entity dead-lettered after repeated Medusa failures",
                         extra={"extra_fields": {"type": type_, "external_id": external_id,
@@ -451,7 +471,7 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     else:
         version_cond, version_params = "", []
     cur = ledger.execute(
-        f"UPDATE {table} SET medusa_id = ?, state = 'synced', sync_attempts = 0, sync_error = NULL, "
+        f"UPDATE {table} SET medusa_id = ?, state = 'synced', sync_attempts = 0, sync_error = NULL, retry_after = NULL, "
         f"last_synced = ?, updated_at = ? WHERE {pk} = ? AND state != 'retiring'{guard}{version_cond}",
         (medusa_id, now, now, external_id, *version_params))
     if cur.rowcount == 0 and type_ == "products":
@@ -517,7 +537,7 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
     now, n = now_iso(), 0
     for table in tables:
         cur = ledger.execute(
-            f"UPDATE {table} SET state = 'dirty', sync_attempts = 0, sync_error = NULL, updated_at = ? "
+            f"UPDATE {table} SET state = 'dirty', sync_attempts = 0, sync_error = NULL, retry_after = NULL, updated_at = ? "
             f"WHERE state = 'gap_held' AND abandoned_at IS NULL", (now,))   # an abandoned dead-letter stays put
         n += cur.rowcount
     return n
@@ -560,7 +580,7 @@ def _reset_overlay(ledger: Ledger, table: str, now: str, where: str = "", params
     # abandoned_at is cleared on a re-serve-from-zero reset: the reset IS the un-abandon escape hatch, so a
     # dropped dead-letter gets one more chance (it re-serves; if it still structurally fails it re-dead-letters).
     sets += [f"{c} = CASE WHEN state = 'retiring' THEN {c} ELSE NULL END"
-             for c in ("medusa_id", "last_synced", "sync_error", "abandoned_at") if c in cols]
+             for c in ("medusa_id", "last_synced", "sync_error", "abandoned_at", "retry_after") if c in cols]
     if "sync_attempts" in cols:
         sets.append("sync_attempts = CASE WHEN state = 'retiring' THEN sync_attempts ELSE 0 END")
     return ledger.execute(f"UPDATE {table} SET {', '.join(sets)}{where}", (now, *params)).rowcount
@@ -718,7 +738,7 @@ def record_tombstones(ledger: Ledger, pairs: list[tuple], reason: str = "discont
     for external_id, source in pairs:
         ledger.upsert("removed", {"external_id": external_id, "kind": kind, "source": source,
                                   "reason": reason, "state": "pending", "sync_attempts": 0,
-                                  "sync_error": None, "created_at": now, "updated_at": now},
+                                  "sync_error": None, "retry_after": None, "created_at": now, "updated_at": now},
                       pk=("external_id",))
     return len(pairs)
 
