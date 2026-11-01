@@ -1060,9 +1060,14 @@ Your whole answer is one JSON object and nothing else:
     # clean and faithful; the three in turn 16. The queue, not the sync gateway: a slow model outlasts it (504) and the
     # paid call is lost.
     CLEAN_QUEUE_URL = "https://queue.fal.run"
-    CLEAN_INSTRUCTION = ("Remove only these from the polished stone slab: reflections of lamps, light tubes, windows and the room "
-                         "mirrored on its surface, and any label, sticker, sample card, tape, writing or logo on it. Keep the stone's "
-                         "colour, veins, pattern and texture exactly as they are, and keep the rest of the photo unchanged.")
+    # Straps too (sample 2026-11-01: 27 of 42 failures were the GPU's own strap fills, light bands and clamp remnants, on
+    # copies the hosted edit had otherwise cleaned): the hosted edit takes off everything foreign, so the retouch finds
+    # nothing left to fill.
+    CLEAN_INSTRUCTION = ("Remove only these from the polished stone slab: lifting straps, belts and their corner clamps or "
+                         "protectors; reflections of lamps, light tubes, windows and the room mirrored on its surface; and any "
+                         "label, sticker, sample card, tape, writing or logo on it. Where they were, show the slab's own stone, "
+                         "continuing its pattern. Keep the stone's colour, veins, pattern and texture exactly as they are, and keep "
+                         "the slab's outline and the rest of the photo unchanged.")
     CLEAN_MODELS = (                   # (name, endpoint, extra input); the photo goes in as image_url or image_urls
         ("kontext", "fal-ai/flux-pro/kontext", {"output_format": "jpeg", "seed": 1}),
         ("nano2", "fal-ai/nano-banana-2/edit", {"resolution": "2K", "output_format": "jpeg", "seed": 1}),
@@ -1075,10 +1080,11 @@ Your whole answer is one JSON object and nothing else:
     # find, stacked slabs) is not worth an edit.
     CLEAN_FIXES_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark")
     CLEAN_FIXES_HELD = ("retouch:", "logo:")   # held reasons (their start) a cleaned copy removes the cause of
-    CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove reflections
-(lamps, light tubes, windows, the room mirrored on the polished stone) and foreign marks (labels, stickers, sample
-cards, tape, writing, logos) from the stone, and nothing else. Judge image 2 on two questions:
-1. clean: are all such reflections and marks gone from the stone in image 2? (true/false)
+    CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
+straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and
+foreign marks (labels, stickers, sample cards, tape, writing, logos) from the stone, and nothing else. Judge image 2
+on two questions:
+1. clean: are all such straps, clamps, reflections and marks gone from the stone in image 2? (true/false)
 2. faithful: is the stone itself the same stone as in image 1 (same colour, veins, pattern and texture, nothing
    invented, nothing smeared or blurred, slab outline unchanged)? (true/false)
 Your whole answer is one JSON object and nothing else:
