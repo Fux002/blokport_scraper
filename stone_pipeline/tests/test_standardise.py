@@ -765,3 +765,15 @@ def test_a_chipped_corner_or_rough_edge_is_no_hollow():
     alpha[20:120, 1080:1180] = np.tril(np.ones((100, 100), np.float32))[:, ::-1]   # a corner broken off
     alpha[300:310, 20:26] = 0                                                       # a small chip in the edge
     assert layout.hollow(alpha) <= C.OUTLINE_HOLLOW_MAX
+
+
+def test_a_small_sticker_counts_from_a_lower_score_than_a_large_card():
+    w, h = 2000, 1500
+    small = 0.004 * w * h                                              # a sticker or label, as on zuc-156dc3e2 / mar-1c345582
+    side = int(small ** 0.5)
+    found = [(10, 10, 10 + side, 10 + side, 0.30),                    # small, weak: counts
+             (10, 10, 10 + side, 10 + side, 0.20),                    # small, weaker than the label bar: not
+             (0, 0, 600, 400, 0.30),                                  # large and weak: not (stone fires there)
+             (0, 0, 600, 400, 0.40),                                  # large and sure: counts
+             (0, 0, 1000, 1000, 0.90)]                                # larger than any card: the slab itself
+    assert retouch.card_boxes(found, w, h) == [found[0][:4], found[3][:4]]

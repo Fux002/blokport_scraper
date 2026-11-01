@@ -69,6 +69,18 @@ def reflections(rgb, stone, straps):
     return marks.flare_mask(rgb, stone & (straps == 0))
 
 
+def card_boxes(found, w, h):
+    """The detected cards, stickers and labels to take off, as (x0, y0, x1, y1): any up to CARD_MAX_BOX of the photo at
+    CARD_MIN_SCORE, a small one (up to LABEL_MAX_BOX) already at LABEL_MIN_SCORE. A sticker or label scores lower than a
+    card fan, and a small fill is cheap and checked like any other, so a clean patch of stone sent to the model stays as it is."""
+    kept = []
+    for x0, y0, x1, y1, score in found:
+        area = (x1 - x0) * (y1 - y0)
+        if area <= C.CARD_MAX_BOX * w * h and (score >= C.CARD_MIN_SCORE or area <= C.LABEL_MAX_BOX * w * h and score >= C.LABEL_MIN_SCORE):
+            kept.append((x0, y0, x1, y1))
+    return kept
+
+
 def find_marks(seg, det, rgb):
     """(straps, flares, cards, stone, slab): masks of the straps, of the lamp reflections and of the cards, stickers,
     labels and racks on the slab, what the segmenter saw as stone (it must not change), and the slab: the stone's outline
@@ -90,10 +102,10 @@ def find_marks(seg, det, rgb):
     # holds the floor and the hall beside the slab (a bucket, a sign).
     straps = keep_on_slab(outline._straps(seg, det, rgb, box, emb), slab, C.STRAP_ON_SLAB)
     cards = none.copy()
-    for x0, y0, x1, y1, _ in outline.detect(det, rgb, C.CARD_PROMPT, C.CARD_MIN_SCORE):
-        if (x1 - x0) * (y1 - y0) > C.CARD_MAX_BOX * w * h:
-            continue
+    for x0, y0, x1, y1 in card_boxes(outline.detect(det, rgb, C.CARD_PROMPT, C.LABEL_MIN_SCORE), w, h):
+        # A card is its box too: the segmenter loses a white card on white marble (zuc-1362666e).
         cards |= marks.slab_mask(seg, rgb, (x0, y0, x1, y1), emb)[1]
+        cv2.rectangle(cards, (int(x0), int(y0)), (int(x1), int(y1)), 1, -1)
     cards = keep_on_slab(cards, hull, C.CARD_ON_SLAB)
     cards |= same_ink(rgb, cards, hull, max(h, w))
     k = max(3, int(C.RETOUCH_GROW * max(h, w)))

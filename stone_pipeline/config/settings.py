@@ -952,7 +952,9 @@ class STANDARDISE:
     # --- models and the join (blend), logos, views, what a photo shows (kinds) ---
     CARD_PROMPT = ("a stack of color sample cards. a sticker. a paper label. a printed sheet. a price tag. handwritten numbers. "
                    "a metal rack. a metal stand.")
-    CARD_MIN_SCORE = 0.35              # a weaker detection fires on most photos
+    CARD_MIN_SCORE = 0.35              # a weaker detection fires on most photos ...
+    LABEL_MIN_SCORE, LABEL_MAX_BOX = 0.25, 0.01   # ... but a small one (this share of the photo) counts from this score:
+                                   # stickers and labels on the stone scored 0.27-0.45 (2026-11-01); a fill is checked anyway
     CARD_ON_SLAB = 0.6                 # a mark counts when this share of it lies on the slab
     STRAP_ON_SLAB = 0.6                # so does a strap (one sticking out above the slab still has most of it on the slab)
     INK_CHROMA = 15.0                  # writing found in part is completed by its ink: a stroke this vivid (Lab a*b*) ...
