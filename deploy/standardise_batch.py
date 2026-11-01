@@ -1,0 +1,86 @@
+"""One GPU round of a standardise run on AWS Batch: the listed photos of each source, in slices of RUN_SLICE, each slice a
+retouch job then a standardise job that starts when the retouch ended. The round's photo list is stored as the jobs'
+ONLY_KEY; the GPU pool's ceiling is raised for the round and always set back. Queue and job definition come from the
+environment (SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF), never named here."""
+
+from __future__ import annotations
+
+import json
+import time
+from contextlib import contextmanager
+
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
+from stone_pipeline.core import env
+
+_DONE = ("SUCCEEDED", "FAILED")
+
+
+def target():
+    """(queue, job definition) of this environment's standardise jobs; fails loud when either is not configured."""
+    return env.require("GPU_QUEUE"), env.require("STANDARDISE_JOBDEF")
+
+
+def pool(batch, queue):
+    """The compute environment behind the queue (the GPU pool whose ceiling a run raises)."""
+    order = batch.describe_job_queues(jobQueues=[queue])["jobQueues"][0]["computeEnvironmentOrder"]
+    return order[0]["computeEnvironment"]
+
+
+def _ceiling(batch, ce, vcpus):
+    batch.update_compute_environment(computeEnvironment=ce, computeResources={"maxvCpus": vcpus})
+
+
+@contextmanager
+def raised(batch, ce):
+    """The pool's ceiling at RUN_GPU_VCPUS for the block, back at IDLE_GPU_VCPUS after, whatever happened in it."""
+    _ceiling(batch, ce, C.RUN_GPU_VCPUS)
+    try:
+        yield
+    finally:
+        _ceiling(batch, ce, C.IDLE_GPU_VCPUS)
+
+
+def slices(todo):
+    """[(source, offset, count)] covering every source's listed photos in RUN_SLICE steps."""
+    return [(src, o, C.RUN_SLICE) for src, shas in sorted(todo.items()) for o in range(0, len(shas), C.RUN_SLICE)]
+
+
+def submit(batch, s3, queue, jobdef, tag, todo, watermarked):
+    """Store the round's photo list and submit its jobs: [job ids]. todo = {source: shas}; watermarked = {source: bool}."""
+    only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo.json"
+    s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(sorted(s for v in todo.values() for s in v)).encode(),
+                  ContentType="application/json")
+    ids = []
+    for src, offset, count in slices(todo):
+        common = [{"name": k, "value": str(v)} for k, v in (("SRC", src), ("SLICE_OFFSET", offset), ("SLICE_COUNT", count),
+                                                              ("RUN_TAG", tag), ("ONLY_KEY", only))]
+        name = f"{src}-{tag}-{offset}"
+        retouch = batch.submit_job(jobName=f"retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
+                                   timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT},
+                                   containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise-retouch"}] + common})["jobId"]
+        standardise = batch.submit_job(jobName=f"standardise-{name}", jobQueue=queue, jobDefinition=jobdef,
+                                       dependsOn=[{"jobId": retouch}], timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT},
+                                       containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise"},
+                                                                           {"name": "WATERMARKED", "value": str(watermarked[src]).lower()}]
+                                                           + common})["jobId"]
+        ids += [retouch, standardise]
+    return ids
+
+
+def wait(batch, ids, sleep=time.sleep):
+    """Block until every job has ended: [(job name, why)] of the jobs that failed."""
+    while True:
+        jobs = [j for i in range(0, len(ids), 100) for j in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]]
+        if all(j["status"] in _DONE for j in jobs):
+            return [(j["jobName"], j.get("statusReason", "")) for j in jobs if j["status"] == "FAILED"]
+        sleep(C.RUN_POLL_SECONDS)
+
+
+def run_round(batch, s3, tag, todo, watermarked):
+    """Every listed photo through retouch and standardise under `tag`: [(job name, why)] of failed jobs. No jobs, no
+    ceiling change, when nothing is listed."""
+    if not any(todo.values()):
+        return []
+    queue, jobdef = target()
+    with raised(batch, pool(batch, queue)):
+        return wait(batch, submit(batch, s3, queue, jobdef, tag, todo, watermarked))

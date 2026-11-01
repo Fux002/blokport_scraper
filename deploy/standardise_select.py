@@ -1,18 +1,15 @@
 """Choose each listing's one good photo (user 2026-11-01: one very good image per listing is enough; it gives every view).
-Hosted calls only, no model runs here. Two run tags take part: RUN_TAG, the standardiser's run over the scraped photos,
-and CLEAN_TAG, its run over the copies a hosted edit model cleaned. Every answer is stored next to the image it is about,
-so a re-run reads it back and never pays twice; one listing's failure is reported and never stops the others.
-PHASE:
-  judge   per listing, its finished photos in its own order (RUN_TAG first, then CLEAN_TAG) go to the judge until one
-          passes, at most JUDGE_MAX_PER_LISTING per tag; the verdict is kept at <tag>/<src>/judged/<sha>.json
-  clean   per listing with no pass, the first photo a cleaned copy can fix (failed only for reflections or marks, or held
-          by the retouch or logo step) is edited by each CLEAN_MODELS model in turn until a copy passes the clean check;
-          that copy becomes <CLEAN_TAG>/<src>/cleaned/<sha>.jpg, and the photos still to standardise are listed in
-          <CLEAN_TAG>/todo.json (the GPU run's ONLY_KEY)
-  report  from the stored answers only: <CLEAN_TAG>/chosen.json (what is published) and <CLEAN_TAG>/tracked.csv (every
+The steps deploy.standardise_run calls in order; hosted calls only, no model runs here. Two run tags take part: the
+standardiser's run over the scraped photos and its run over the copies a hosted edit model cleaned. Every answer is
+stored next to the image it is about, so a re-run reads it back and never pays twice; one listing's failure is
+reported and never stops the others.
+  judge   per listing, its finished photos in its own order (the scraped run first, then the cleaned run) go to the
+          judge until one passes, at most JUDGE_MAX_PER_LISTING per tag; the verdict is kept at <tag>/<src>/judged/
+  clean   per listing with no pass, the first CLEAN_PHOTOS_PER_LISTING photos a cleaned copy can fix (failed only for
+          reflections or marks, or held by the retouch or logo step) are edited by each CLEAN_MODELS model in turn until
+          a copy passes the clean check; that copy becomes <clean tag>/<src>/cleaned/<sha>.jpg
+  report  from the stored answers only: <clean tag>/chosen.json (what is published) and <clean tag>/tracked.csv (every
           listing with no good photo, with what happened to each of its photos)
-Env: PHASE, RUN_TAG, CLEAN_TAG, SRC (space-separated sources); LISTINGS_KEY (optional) = S3 key of a JSON list of listing
-keys to work on; FAL_KEY. Hosted spend stops loud at SPEND_CAP_USD (exit 3).
 """
 
 from __future__ import annotations
@@ -20,17 +17,13 @@ from __future__ import annotations
 import csv
 import io
 import json
-import os
 import re
-import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import boto3
-
 from deploy.standardise_publish import EXCLUDE_PATH, read_exclude
-from deploy.standardise_source import round_prefix, sheet_listings
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from deploy.standardise_source import round_prefix
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import clean, judge
 
@@ -197,7 +190,7 @@ def clean_listing(client, rounds, listing, exclude, spend):
     if picked is not None:
         return
     if not complete:
-        raise RuntimeError("not every photo looked at has a verdict: run PHASE=judge first")
+        raise RuntimeError("not every photo looked at has a verdict: the judge step must run first")
     (_, gpu), (_, cl) = rounds
     src = listing["source"]
     candidates = [sha for sha in listing["photos"] if fixable(client, gpu[src], sha, exclude)][:C.CLEAN_PHOTOS_PER_LISTING]
@@ -232,11 +225,73 @@ def photo_notes(client, rounds, listing, exclude):
     return " | ".join(notes)
 
 
-def _listings(client):
-    wanted = os.environ.get("LISTINGS_KEY", "").strip()
-    sources = set(os.environ["SRC"].split())
-    keep = set(json.loads(_get(client, wanted))) if wanted else None
-    return [l for l in sheet_listings(client) if l["source"] in sources and (keep is None or l["key"] in keep)]
+class Selection:
+    """The listings one run works on and what the two run tags hold for them (re-read after each GPU round)."""
+
+    def __init__(self, client, listings, run_tag, clean_tag):
+        if not run_tag or not clean_tag or run_tag == clean_tag:
+            raise ValueError("two different run tags are required: the scraped photos' run and the cleaned copies' run")
+        self.client, self.listings, self.tags = client, listings, (run_tag, clean_tag)
+        self.sources = sorted({l["source"] for l in listings})
+        self.exclude = read_exclude(EXCLUDE_PATH.read_text())
+        self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
+        self.refresh()
+
+    def refresh(self):
+        self.rounds = [(tag, {src: Round(self.client, tag, src) for src in self.sources}) for tag in self.tags]
+
+    def gpu_todo(self):
+        """{source: shas} the standardiser has not run yet among each listing's first JUDGE_MAX_PER_LISTING photos (the
+        judge never looks further)."""
+        gpu = self.rounds[0][1]
+        return _by_source((l["source"], sha) for l in self.listings for sha in l["photos"][:C.JUDGE_MAX_PER_LISTING]
+                          if sha not in self.exclude and sha not in gpu[l["source"]].finished | gpu[l["source"]].held)
+
+    def clean_todo(self):
+        """{source: shas} with a cleaned copy the standardiser has not run yet."""
+        cl = self.rounds[1][1]
+        return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned
+                          if sha not in cl[src].finished | cl[src].held)
+
+
+def _by_source(pairs):
+    out = {}
+    for src, sha in sorted(set(pairs)):
+        out.setdefault(src, []).append(sha)
+    return out
+
+
+def judge_all(sel, spend):
+    """(failures, cap reached): every listing judged until its first pass."""
+    return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.exclude, spend))
+
+
+def clean_all(sel, spend):
+    """(failures, cap reached): every listing with no pass gets a cleaned copy where one can be made."""
+    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.exclude, spend))
+
+
+def report(sel):
+    """{"chosen", "tracked", "pending"}: writes chosen.json (what is published) and tracked.csv (the listings with no
+    good photo); pending = listings not fully judged, which are neither."""
+    chosen, tracked, pending = [], [], []
+    for l in sel.listings:
+        picked, complete = choose(sel.client, sel.rounds, l, sel.exclude)
+        if picked:
+            tag, sha = picked
+            chosen.append({"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])})
+        elif complete:
+            tracked.append({"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
+                            "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)})
+        else:
+            pending.append(l["key"])
+    _put_json(sel.client, f"{sel.root}chosen.json", chosen)
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
+    writer.writeheader()
+    writer.writerows(tracked)
+    _put(sel.client, f"{sel.root}tracked.csv", out.getvalue().encode(), "text/csv")
+    return {"chosen": chosen, "tracked": tracked, "pending": pending}
 
 
 def _each(listings, work):
@@ -258,61 +313,3 @@ def _each(listings, work):
     with ThreadPoolExecutor(C.SELECT_WORKERS) as pool:
         list(pool.map(one, listings))
     return failures, stop.is_set()
-
-
-def main() -> int:
-    phase = os.environ.get("PHASE", "").strip()
-    run_tag, clean_tag = os.environ.get("RUN_TAG", "").strip(), os.environ.get("CLEAN_TAG", "").strip()
-    if phase not in ("judge", "clean", "report") or not run_tag or not clean_tag or run_tag == clean_tag or not os.environ.get("SRC", "").strip():
-        print("ERROR: PHASE (judge|clean|report), RUN_TAG, CLEAN_TAG (a different tag) and SRC are required; aborting")
-        return 2
-    client = boto3.client("s3", region_name=S3_REGION)
-    exclude = read_exclude(EXCLUDE_PATH.read_text())
-    listings = _listings(client)
-    sources = sorted({l["source"] for l in listings})
-    rounds = [(tag, {src: Round(client, tag, src) for src in sources}) for tag in (run_tag, clean_tag)]
-    root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
-    spend = Spend(C.SPEND_CAP_USD)
-    print(f"==> {phase}: {len(listings)} listings of {', '.join(sources)}; {run_tag} then {clean_tag}", flush=True)
-    if phase == "judge":
-        failures, capped = _each(listings, lambda l: choose(client, rounds, l, exclude, spend))
-    elif phase == "clean":
-        failures, capped = _each(listings, lambda l: clean_listing(client, rounds, l, exclude, spend))
-        todo = sorted(sha for src in sources for sha in rounds[1][1][src].cleaned
-                      if sha not in rounds[1][1][src].finished and sha not in rounds[1][1][src].held)
-        _put_json(client, f"{root}todo.json", todo)
-        print(f"==> {len(todo)} cleaned photos to standardise: ONLY_KEY={root}todo.json RUN_TAG={clean_tag}", flush=True)
-    else:
-        failures, capped = [], False
-        chosen, tracked, pending = [], [], []
-        for l in listings:
-            picked, complete = choose(client, rounds, l, exclude)
-            if picked:
-                tag, sha = picked
-                chosen.append({"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])})
-            elif not complete:
-                pending.append(l["key"])
-            else:
-                tracked.append({"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
-                                "what_happened": photo_notes(client, rounds, l, exclude)})
-        _put_json(client, f"{root}chosen.json", chosen)
-        out = io.StringIO()
-        writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
-        writer.writeheader()
-        writer.writerows(tracked)
-        _put(client, f"{root}tracked.csv", out.getvalue().encode(), "text/csv")
-        by_tag = {tag: sum(c["tag"] == tag for c in chosen) for tag in (run_tag, clean_tag)}
-        print(f"==> {len(chosen)} listings with a good photo {by_tag}, {len(tracked)} without (s3://{S3_BUCKET}/{root}tracked.csv)", flush=True)
-        if pending:
-            failures = [(key, "not judged yet: run PHASE=judge") for key in pending]
-    print(f"==> hosted spend this run ${spend.spent:.2f}", flush=True)
-    for key, why in failures:
-        print(f"   FAILED {key}: {why}", flush=True)
-    if capped:
-        print(f"==> STOPPED at the spend cap (${C.SPEND_CAP_USD:.2f}); raise it in settings to go on", flush=True)
-        return 3
-    return 1 if failures else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

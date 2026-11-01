@@ -1087,6 +1087,13 @@ Your whole answer is one JSON object and nothing else:
     SPEND_CAP_USD = 60.0
     JUDGE_PRICE_USD = 0.03             # a judge call's cost reserved before it is made (an upper bound; Opus bills ~0.016)
     CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
+    # A run (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
+    # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
+    # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
+    RUN_SLICE = 150
+    RUN_GPU_VCPUS, IDLE_GPU_VCPUS = 128, 8
+    RUN_POLL_SECONDS = 60              # how often a run asks Batch whether its jobs are done
+    RETOUCH_TIMEOUT, STANDARDISE_TIMEOUT = 14400, 21600   # s a Batch job may take before Batch stops it
     SELECT_WORKERS = 12                # listings worked on at once (hosted calls; no model runs here)
     # Per edit at the sizes above, an upper bound (fal.ai/pricing: Kontext per megapixel rounded up, Nano Banana 2 per image
     # with 2K above base, FLUX 3 per megapixel), so the cap stops early rather than late.

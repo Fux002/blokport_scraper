@@ -1,0 +1,98 @@
+"""A standardise run, end to end, for one environment and a set of listings: each listing ends with one good photo
+(published by deploy.standardise_publish) or on the tracked list with the reason. In order:
+  1. GPU: the listings' first photos the standardiser has not run yet (deploy.standardise_batch)
+  2. judge: each listing's results in its own order until one passes
+  3. clean: a hosted edit of one fixable photo of each listing still without a pass
+  4. GPU: the cleaned copies, through every step a scraped photo takes
+  5. judge: the cleaned copies' results
+  6. report: chosen.json + tracked.csv
+Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice.
+Env: RUN_TAG, CLEAN_TAG (the scraped and the cleaned run), SRC (space-separated sources), LISTINGS_KEY (optional:
+an S3 JSON list of listing keys), FAL_KEY, SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF.
+Exit 0 done; 1 some listings or photos failed (run again); 2 not configured; 3 the hosted spend cap was reached.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+import boto3
+
+from deploy import standardise_batch as gpu
+from deploy import standardise_select as select
+from deploy.standardise_source import sheet_listings
+from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.sources import load_source
+
+
+def listings(s3, sources, wanted_key):
+    """This environment's listings of the sources, limited to the stored list when one is given."""
+    keep = set(json.loads(s3.get_object(Bucket=S3_BUCKET, Key=wanted_key)["Body"].read())) if wanted_key else None
+    return [l for l in sheet_listings(s3) if l["source"] in sources and (keep is None or l["key"] in keep)]
+
+
+def gpu_round(batch, sel, tag, todo):
+    """The GPU round for `todo`, then the stores re-read: [problems] (failed jobs, listed photos left without a result)."""
+    watermarked = {src: load_source(src).watermarked for src in todo}
+    problems = [f"GPU job {name} failed: {why}" for name, why in gpu.run_round(batch, sel.client, tag, todo, watermarked)]
+    sel.refresh()
+    rnd = dict(sel.rounds)[tag]
+    problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas
+                 if sha not in rnd[src].finished | rnd[src].held]
+    return problems
+
+
+def hosted(step, sel, spend):
+    """A hosted step over every listing, run a second time for the listings that failed (a passing hiccup): (problems,
+    cap reached)."""
+    failures, capped = step(sel, spend)
+    if failures and not capped:
+        failures, capped = step(sel, spend)
+    return [f"{key}: {why}" for key, why in failures], capped
+
+
+def run(batch, sel, spend, say=print):
+    """The six steps; (problems, cap reached). Stops at the cap: what is stored stays, the next run goes on."""
+    problems = gpu_round(batch, sel, sel.tags[0], sel.gpu_todo())
+    for step in (select.judge_all, select.clean_all):
+        found, capped = hosted(step, sel, spend)
+        problems += found
+        if capped:
+            return problems, True
+    problems += gpu_round(batch, sel, sel.tags[1], sel.clean_todo())
+    found, capped = hosted(select.judge_all, sel, spend)
+    problems += found
+    if capped:
+        return problems, True
+    result = select.report(sel)
+    by_tag = {tag: sum(c["tag"] == tag for c in result["chosen"]) for tag in sel.tags}
+    say(f"==> {len(result['chosen'])} of {len(sel.listings)} listings with a good photo {by_tag}; "
+        f"{len(result['tracked'])} on the tracked list (s3://{S3_BUCKET}/{sel.root}tracked.csv)")
+    problems += [f"{key}: not fully judged" for key in result["pending"]]
+    return problems, False
+
+
+def main() -> int:
+    run_tag, clean_tag = os.environ.get("RUN_TAG", "").strip(), os.environ.get("CLEAN_TAG", "").strip()
+    sources = set(os.environ.get("SRC", "").split())
+    if not sources or not run_tag or not clean_tag or run_tag == clean_tag:
+        print("ERROR: RUN_TAG, CLEAN_TAG (a different tag) and SRC are required; aborting")
+        return 2
+    s3, batch = boto3.client("s3", region_name=S3_REGION), boto3.client("batch", region_name=S3_REGION)
+    sel = select.Selection(s3, listings(s3, sources, os.environ.get("LISTINGS_KEY", "").strip()), run_tag, clean_tag)
+    spend = select.Spend(C.SPEND_CAP_USD)
+    print(f"==> standardise run: {len(sel.listings)} listings of {', '.join(sel.sources)}; {run_tag} then {clean_tag}", flush=True)
+    problems, capped = run(batch, sel, spend)
+    print(f"==> hosted spend ${spend.spent:.2f}", flush=True)
+    for p in problems:
+        print(f"   {p}", flush=True)
+    if capped:
+        print(f"==> STOPPED at the hosted spend cap (${C.SPEND_CAP_USD:.2f}); run again to go on", flush=True)
+        return 3
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

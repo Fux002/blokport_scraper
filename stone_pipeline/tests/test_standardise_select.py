@@ -164,7 +164,7 @@ def test_a_paid_edit_whose_check_was_not_made_is_reused(monkeypatch):
 def test_a_listing_not_fully_judged_is_never_cleaned(monkeypatch):
     monkeypatch.setattr(sel.clean, "edit", lambda *a: pytest.fail("cleaned before judging"))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
-    with pytest.raises(RuntimeError, match="PHASE=judge"):
+    with pytest.raises(RuntimeError, match="judge step must run first"):
         sel.clean_listing(_S3(), rounds, _listing(A), set(), sel.Spend(10))
 
 
