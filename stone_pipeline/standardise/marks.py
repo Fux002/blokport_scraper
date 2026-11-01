@@ -79,19 +79,23 @@ def slab_mask(model, rgb: np.ndarray, box, emb, widest=False) -> tuple[np.ndarra
 
 
 def flare_mask(rgb: np.ndarray, on: np.ndarray) -> np.ndarray:
-    """Reflections of lamps on a polished slab: blown out, colourless, far brighter than the stone around them, and
-    compact. A white vein fails these (thin, irregular, not blown out, or on stone nearly as bright)."""
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    """Reflections of lamps on a polished slab: colourless, brighter than the stone around them, compact, with a core the
+    camera clipped and far brighter than the stone's own brightest (its top FLARE_STONE_PCT, veins and white clasts
+    included). A white vein or clast is the stone's own brightest, so it never clears that bar; nor does a pattern of
+    white pieces, which is more of the stone than its top share."""
     h, w = rgb.shape[:2]
+    out = np.zeros((h, w), np.uint8)
+    if not on.any():
+        return out
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     s = C.FLARE_BASE_SIZE / max(h, w)
     small = cv2.resize(gray, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
     base = cv2.resize(cv2.medianBlur(small, C.FLARE_BASE_BLUR), (w, h), interpolation=cv2.INTER_LINEAR)
-    found = (hsv[:, :, 2] >= C.FLARE_MIN_V) & (hsv[:, :, 1] <= C.FLARE_MAX_S) & (gray.astype(np.int16) - base >= C.FLARE_CONTRAST) & (on > 0)
+    found = (hsv[:, :, 1] <= C.FLARE_MAX_S) & (gray.astype(np.int16) - base >= C.FLARE_CONTRAST) & (on > 0)
+    bar = max(C.FLARE_PEAK_MIN, float(np.percentile(gray[on > 0], C.FLARE_STONE_PCT)) + C.FLARE_ABOVE_STONE)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(found.astype(np.uint8))
-    out = np.zeros((h, w), np.uint8)
-    slab = max(1, int((on > 0).sum()))
-    kept = 0
+    slab = int((on > 0).sum())
     for i in range(1, n):
         x, y, bw, bh, area = stats[i]
         if not C.FLARE_AREA[0] * slab <= area <= C.FLARE_AREA[1] * slab or min(bw, bh) < C.FLARE_MIN_THICK:
@@ -99,12 +103,11 @@ def flare_mask(rgb: np.ndarray, on: np.ndarray) -> np.ndarray:
         part = (labels[y:y + bh, x:x + bw] == i).astype(np.uint8)
         contours, _ = cv2.findContours(part, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         hull = cv2.contourArea(cv2.convexHull(max(contours, key=cv2.contourArea)))
-        clipped = (hsv[y:y + bh, x:x + bw, 2][part > 0] >= C.FLARE_CLIP_V).mean()
-        if area >= C.FLARE_SOLIDITY * max(1.0, hull) and clipped >= C.FLARE_CLIPPED:
+        (_, _), (a, b), _ = cv2.minAreaRect(cv2.findNonZero(part))
+        core = np.percentile(gray[y:y + bh, x:x + bw][part > 0], C.FLARE_CORE_PCT)
+        if area >= C.FLARE_SOLIDITY * max(1.0, hull) and max(a, b) <= C.FLARE_MAX_ELONGATION * max(1.0, min(a, b)) \
+                and core >= bar:
             out[labels == i] = 1
-            kept += 1
-    if kept > C.FLARE_MAX_COUNT:                         # a pattern of white pieces is the stone, not lamps: never touched
-        return np.zeros((h, w), np.uint8)
     return cv2.dilate(out, np.ones((C.FLARE_GROW, C.FLARE_GROW), np.uint8))
 
 

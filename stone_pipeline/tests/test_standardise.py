@@ -146,6 +146,43 @@ def test_a_blown_compact_reflection_is_a_flare_and_a_white_vein_is_not():
     assert found[220, 330] == 1 and found[500, 950] == 0
 
 
+def test_a_tube_reflection_not_fully_at_255_is_a_flare():
+    stone = _stone(1000, 1500, base=180, var=4)                     # a white marble lit by strip lights (sen-0c66cf30)
+    for y in (150, 230, 310):
+        cv2.rectangle(stone, (700, y), (760, y + 40), (250, 250, 250), -1)
+    found = marks.flare_mask(stone, np.ones((1000, 1500), np.uint8))
+    assert found[170, 730] == 1 and found[250, 730] == 1 and found[330, 730] == 1
+
+
+def test_every_spot_of_a_row_of_ceiling_lights_is_a_flare():
+    stone = _stone(1000, 1500, base=185, var=4)                     # rows of small lamps on white marble (zuc-1e5875ec)
+    spots = [(x, y) for y in (80, 160, 240) for x in range(200, 1400, 60)]
+    for x, y in spots:
+        cv2.ellipse(stone, (x, y), (6, 9), 0, 0, 360, (248, 248, 248), -1)
+    found = marks.flare_mask(stone, np.ones((1000, 1500), np.uint8))
+    assert all(found[y, x] == 1 for x, y in spots)
+
+
+def test_clipped_white_veins_that_are_the_stone_s_own_brightest_are_not_flares():
+    stone = _stone(1000, 1500, base=60, var=6)                      # a dark marble with a net of white veins (sen-000963c8)
+    for i in range(14):
+        cv2.line(stone, (0, 40 + 70 * i), (1500, 140 + 60 * i), (249, 249, 249), 9)
+    assert marks.flare_mask(stone, np.ones((1000, 1500), np.uint8)).sum() == 0
+
+
+def test_pale_spots_on_a_black_stone_far_above_it_but_not_clipped_are_not_flares():
+    stone = _stone(1000, 1500, base=25, var=4)                      # gold and pale flecks on a black granite (var-5356f4e0)
+    for x in (300, 700, 1100):
+        cv2.ellipse(stone, (x, 500), (14, 10), 0, 0, 360, (215, 215, 215), -1)
+    assert marks.flare_mask(stone, np.ones((1000, 1500), np.uint8)).sum() == 0
+
+
+def test_a_soft_ceiling_light_not_fully_clipped_is_a_flare():
+    stone = _stone(1000, 1500, base=185, var=4)                     # the dimmer lamps of a row (zuc-1e5875ec): 232..244
+    cv2.ellipse(stone, (600, 300), (8, 12), 0, 0, 360, (236, 236, 236), -1)
+    assert marks.flare_mask(stone, np.ones((1000, 1500), np.uint8))[300, 600] == 1
+
+
 def test_many_white_pieces_are_the_stone_not_flares():
     stone = _stone(1000, 1500, base=150, var=6)
     for x in range(100, 1400, 90):
