@@ -68,3 +68,22 @@ def test_fetch_attributes_best_effort_on_s3_error(tmp_path):
     assert fetch_inputs.fetch_attributes(client=_FakeS3(None), target=target) is False   # download raises -> kept
     assert target.read_text() == before
     assert not target.with_suffix(".csv.incoming").exists()
+
+
+def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
+    # Medusa's export also lists other vendors' variants (dev 2026-11-01: non-stone test products, np-cattle-...,
+    # np-diesel-...): not ours to match, mint or sync, and the ledger refuses them, which aborted the produce
+    export = tmp_path / "variants_export.csv"
+    export.write_text("Id,Key,Name,Image,Aliases\n"
+                      "v1,slab_marble_carrara_0001,Carrara,,\n"
+                      "v2,np-cattle-heifer-limousin-430,Heifer,,\n"
+                      "v3,tile_marble_carrara_0001,Carrara,,\n"
+                      "v4,np-diesel-en590-summer,Diesel,,\n", encoding="utf-8")
+    assert fetch_inputs.own_variants(export) == 2
+    lines = export.read_text(encoding="utf-8").splitlines()
+    assert lines == ["Id,Key,Name,Image,Aliases", "v1,slab_marble_carrara_0001,Carrara,,", "v3,tile_marble_carrara_0001,Carrara,,"]
+    assert fetch_inputs.own_variants(export) == 0                     # already clean: nothing to drop, same file
+
+
+def test_both_variant_exports_are_kept_to_the_scraper_s_own_variants():
+    assert fetch_inputs._VARIANT_EXPORTS == {"variants_export.csv", "variants_export_base.csv"}

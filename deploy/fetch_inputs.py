@@ -10,12 +10,13 @@ variant as new. Auth is the task's IAM role.
 
 from __future__ import annotations
 
+import csv
 import sys
 from pathlib import Path
 
 import boto3
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, category
 
 # A thin/empty S3 copy (Medusa mid-reset, or an export not yet fully seeded) must never overwrite a fuller
 # local file, or the run silently starts from the wrong base:
@@ -28,6 +29,26 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SE
 # These keep the local copy unless the S3 copy is at least half as complete (_MIN_KEEP_FRACTION).
 _PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv", "ports.csv"}
 _MIN_KEEP_FRACTION = 0.5
+# The variant exports list every vendor's variants; the scraper keeps only its own (a Key whose prefix is one of its
+# categories). Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
+# dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
+_VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
+
+
+def own_variants(path: Path) -> int:
+    """Rewrite a variant export keeping only the scraper's own variants (and rows without a Key, as before); returns
+    how many rows it dropped. A file with nothing to drop is left as it is."""
+    with path.open(encoding="utf-8-sig", newline="") as h:
+        rows = list(csv.reader(h))
+    if not rows or "Key" not in rows[0]:
+        return 0
+    at = rows[0].index("Key")
+    kept = [r for r in rows[1:] if len(r) <= at or not r[at].strip() or category(r[at].split("_", 1)[0])]
+    dropped = len(rows) - 1 - len(kept)
+    if dropped:
+        with path.open("w", encoding="utf-8", newline="") as h:
+            csv.writer(h, lineterminator="\n").writerows([rows[0], *kept])
+    return dropped
 
 
 def _line_count(path: Path) -> int:
@@ -102,6 +123,8 @@ def main() -> int:
                 tmp.replace(target)
             else:
                 client.download_file(S3_BUCKET, key, str(target))
+            if name in _VARIANT_EXPORTS and (dropped := own_variants(target)):
+                print(f"   {name}: dropped {dropped} variants of other vendors (not a scraper category)")
             print(f"   {name}")
             n += 1
     if n == 0:
