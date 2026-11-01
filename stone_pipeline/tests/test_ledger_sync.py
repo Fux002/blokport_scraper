@@ -80,8 +80,10 @@ def test_sync_loop_serve_ack_converges(tmp_path):
         p = ledger.get("product", "sku", "S-1")
         assert p["medusa_id"] == "PID-1" and p["state"] == "synced"
 
-        # a failed ack returns it to dirty, so it is offered again next pull
+        # a failed ack returns it to dirty, offered again once its wait has passed (test_ledger_retry_backoff)
         ack(ledger, "products", "S-1", None, "failed")
+        assert ready(ledger, "products") == []
+        ledger.execute("UPDATE product SET retry_after = '2000-01-01T00:00:00+00:00' WHERE sku = 'S-1'")
         assert [r["external_id"] for r in ready(ledger, "products")] == ["S-1"]
 
 

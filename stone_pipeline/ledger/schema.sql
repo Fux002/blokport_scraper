@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS variation (
     sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive failed Medusa applies (dead-letter counter)
     sync_error    TEXT,                                 -- last Medusa failure reason; null once synced
     abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
+    retry_after   TEXT,                                 -- after a failed apply: not served again before this time
     first_seen    TEXT NOT NULL,
     last_synced   TEXT,
     created_at    TEXT NOT NULL,
@@ -203,6 +204,7 @@ CREATE TABLE IF NOT EXISTS product (
     sync_attempts        INTEGER NOT NULL DEFAULT 0,    -- consecutive failed Medusa applies (dead-letter counter)
     sync_error           TEXT,                          -- last Medusa failure reason; null once synced
     abandoned_at         TEXT,                          -- set when the operator drops a structural dead-letter (terminal)
+    retry_after          TEXT,                          -- after a failed apply: not served again before this time
     last_synced          TEXT,
     created_at           TEXT NOT NULL,
     updated_at           TEXT NOT NULL
@@ -295,6 +297,7 @@ CREATE TABLE IF NOT EXISTS removed (
     sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive 'blocked' acks (dead-letter counter)
     sync_error    TEXT,
     abandoned_at  TEXT,                                 -- set when the operator drops a structural dead-letter (terminal)
+    retry_after   TEXT,                                 -- after a 'blocked' ack: not served again before this time
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
 );

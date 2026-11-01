@@ -27,9 +27,10 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 8   # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 9   # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
-#                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot
+#                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
+#                      v9: variation/product/removed.retry_after -- the wait after a failed apply
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -154,6 +155,8 @@ class Ledger:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN sync_error TEXT")
             if "abandoned_at" not in cols:   # v5: a dead-letter the operator dropped (terminal, but auditable)
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN abandoned_at TEXT")
+            if "retry_after" not in cols:   # v9: the wait after a failed apply
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN retry_after TEXT")
         inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
@@ -173,6 +176,8 @@ class Ledger:
             self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")
         if "abandoned_at" not in removed_cols:   # v5: a dead tombstone the operator dropped
             self.conn.execute("ALTER TABLE removed ADD COLUMN abandoned_at TEXT")
+        if "retry_after" not in removed_cols:   # v9: the wait after a 'blocked' ack
+            self.conn.execute("ALTER TABLE removed ADD COLUMN retry_after TEXT")
         # covering index for the serve order (products before variations, E1). Created HERE, not in
         # schema.sql, because schema.sql runs BEFORE this ALTER on an old ledger, where an index on the
         # not-yet-added `kind` column would fail. Idempotent, so fresh ledgers pick it up here too.
