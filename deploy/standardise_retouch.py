@@ -26,8 +26,9 @@ from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import marks, outline, photo, retouch
 
 
-def _write_found(client, out, sha, rgb, straps, flares, cards):
+def _write_found(client, out, sha, rgb, straps, flares, labels, cards):
     shown = rgb.copy()
+    shown[labels > 0] = (shown[labels > 0] * 0.5 + np.array((255, 255, 0)) * 0.5).astype(np.uint8)
     shown[straps > 0] = (shown[straps > 0] * 0.5 + np.array((255, 0, 0)) * 0.5).astype(np.uint8)
     shown[flares > 0] = (shown[flares > 0] * 0.5 + np.array((0, 0, 255)) * 0.5).astype(np.uint8)
     shown[cards > 0] = (shown[cards > 0] * 0.5 + np.array((0, 255, 0)) * 0.5).astype(np.uint8)
@@ -76,7 +77,7 @@ def _unpack(data):
 
 
 def _find(client, keys, out):
-    """({key: packed (straps, flares, cards, stone, slab)} of every photo with a mark on it, {keys whose search failed})."""
+    """({key: packed (straps, flares, labels, cards, stone, slab)} of every photo with a mark on it, {keys whose search failed})."""
     seg = marks.load_sam()
     det = outline.load_detector(seg[2])
     found, failed = {}, set()
@@ -84,12 +85,12 @@ def _find(client, keys, out):
         sha = imagestore.sha_from_url(key)
         try:
             rgb = photo.decode(_get(client, key))
-            straps, flares, cards, stone, slab = retouch.find_marks(seg, det, rgb)
-            if not (straps.any() or flares.any() or cards.any()):
+            straps, flares, labels, cards, stone, slab = retouch.find_marks(seg, det, rgb)
+            if not (straps.any() or flares.any() or labels.any() or cards.any()):
                 continue
-            found[key] = (_pack(straps), _pack(flares), _pack(cards), _pack(stone), _pack(slab))
+            found[key] = tuple(_pack(m) for m in (straps, flares, labels, cards, stone, slab))
             if _recording():
-                _write_found(client, out, sha, rgb, straps, flares, cards)
+                _write_found(client, out, sha, rgb, straps, flares, labels, cards)
         except Exception as exc:                       # one bad photo never stops the slice
             failed.add(key)
             print(f"   FIND FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
@@ -174,12 +175,12 @@ def main() -> int:
         sha = imagestore.sha_from_url(key)
         started = time.time()
         try:
-            straps, flares, cards, stone, slab = (_unpack(p) for p in packed)
+            straps, flares, labels, cards, stone, slab = (_unpack(p) for p in packed)
             rgb = photo.decode(_get(client, key))
             rec = _Recorder(client, out, sha) if _recording() else _NoRecord()
-            for name, mask in (("straps", straps), ("flares", flares), ("cards", cards), ("stone", stone), ("slab", slab)):
+            for name, mask in (("straps", straps), ("flares", flares), ("labels", labels), ("cards", cards), ("stone", stone), ("slab", slab)):
                 rec.put(f"{name}.png", mask * 255, png=True)
-            marked = straps | flares | cards
+            marked = straps | flares | labels | cards
             box = retouch.crop_clear_of_wide_marks(straps, cards, stone)
             if box is not None:                        # too wide to fill: the real stone beside the marks, nothing invented
                 x0, y0, x1, y1 = box

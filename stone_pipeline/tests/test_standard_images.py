@@ -111,8 +111,8 @@ def test_a_marks_survey_notes_whether_a_photo_carries_lamp_reflections():
     none = np.zeros((40, 60), np.uint8)
     lamp = none.copy(); lamp[10:14, 20:24] = 1
     assert rt.survey_note(None) == {"marks": False, "flares": False}
-    assert rt.survey_note(tuple(rt._pack(m) for m in (none, lamp, none, none, none))) == {"marks": True, "flares": True}
-    assert rt.survey_note(tuple(rt._pack(m) for m in (lamp, none, none, none, none))) == {"marks": True, "flares": False}
+    assert rt.survey_note(tuple(rt._pack(m) for m in (none, lamp, none, none, none, none))) == {"marks": True, "flares": True}
+    assert rt.survey_note(tuple(rt._pack(m) for m in (lamp, none, none, none, none, none))) == {"marks": True, "flares": False}
 
 
 def test_a_run_can_be_limited_to_a_list_of_photos():

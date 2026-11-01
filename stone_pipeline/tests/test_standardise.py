@@ -767,7 +767,7 @@ def test_a_chipped_corner_or_rough_edge_is_no_hollow():
     assert layout.hollow(alpha) <= C.OUTLINE_HOLLOW_MAX
 
 
-def test_a_small_sticker_counts_from_a_lower_score_than_a_large_card():
+def test_a_sure_card_must_go_and_a_small_weak_label_may_stay_when_its_fill_is_refused():
     w, h = 2000, 1500
     small = 0.004 * w * h                                              # a sticker or label, as on zuc-156dc3e2 / mar-1c345582
     side = int(small ** 0.5)
@@ -776,7 +776,8 @@ def test_a_small_sticker_counts_from_a_lower_score_than_a_large_card():
              (0, 0, 600, 400, 0.30),                                  # large and weak: not (stone fires there)
              (0, 0, 600, 400, 0.40),                                  # large and sure: counts
              (0, 0, 1000, 1000, 0.90)]                                # larger than any card: the slab itself
-    assert retouch.card_boxes(found, w, h) == [found[0][:4], found[3][:4]]
+    sure, labels = retouch.card_boxes(found, w, h)
+    assert sure == [found[3][:4]] and labels == [found[0][:4]]        # a weak small one also fires on clean stone (2026-11-01)
 
 
 def _two_slabs_one_box(monkeypatch, neighbour):
