@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import csv
 
+import pytest
+
 from stone_pipeline.run import run_source
 
 
@@ -56,3 +58,22 @@ def test_a_partial_scrape_is_still_refused(tmp_path, scrape_data_dir, caplog):
 
     assert any("delist refused" in r.getMessage() for r in caplog.records)
     assert _skus(second / "review" / "products_discontinued.csv") == set()
+
+
+def test_a_mistyped_collection_country_holds_the_source_and_keeps_the_last_good_run(tmp_path, scrape_data_dir, monkeypatch, caplog):
+    import dataclasses
+    from stone_pipeline import run as run_module
+    from stone_pipeline.config.sources import load_source
+    out = tmp_path / "outputs"
+    good = dataclasses.replace(load_source("marenostone"), collection_country_default="IT", collection_city_default="Verona")
+    monkeypatch.setattr(run_module, "load_source", lambda name: good)
+    run_source("marenostone", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
+    before = {p: p.read_bytes() for p in out.rglob("canonical.parquet")}
+    assert before
+    typo = dataclasses.replace(good, collection_country_default="Itly")
+    monkeypatch.setattr(run_module, "load_source", lambda name: typo)
+    with pytest.raises(SystemExit) as stopped, caplog.at_level("ERROR"):
+        run_source("marenostone", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
+    assert stopped.value.code == 2
+    assert "Itly" in caplog.text
+    assert {p: p.read_bytes() for p in out.rglob("canonical.parquet")} == before

@@ -317,6 +317,19 @@ def run_source(
                        gates=manifest.gate_status)
         raise SystemExit(2)
 
+    # COLLECTION-LOCATION GUARD (before any stage): a mistyped country would otherwise emit null, and the backend clears
+    # a product's location on a stated null, so one typo would clear this whole source's locations on its next sync.
+    # Held like the floor above: no canonical is written, so the last good run stays in force.
+    try:
+        derive.collection_location(ref, source_cfg)
+    except ValueError as exc:
+        run_log.error(f"source configuration error, holding this source (last good run stays in force): {exc}")
+        manifest.health_status = "FAILED"
+        _write_diagnostics(manifest, layout)
+        write_steps_md(layout, source=source, run_id=run_id, health="FAILED", counts={},
+                       gates=manifest.gate_status)
+        raise SystemExit(2)
+
     # Stage 0: health
     contract = contracts.load_contract(source) or adapter.generate_contract(frame)
     baseline = contracts.load_baselines().get(source)
