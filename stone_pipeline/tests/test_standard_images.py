@@ -166,3 +166,18 @@ def test_listings_keep_each_product_s_photos_in_its_own_order_once_each(monkeypa
              "none,pcat_S,,,\n")
     assert index.listings(sheet) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [B, A]},
                                      {"key": "two", "source": "sentas", "format": "slab", "photos": [A]}]
+
+
+def test_a_published_listing_keeps_its_photo_in_the_index(monkeypatch):
+    # once a listing's photo is published, the emitted sheet carries its standardised views, not the scraped photo:
+    # the index must still see that photo (the view's name is the photo's sha), or a later run loses the listing
+    from dataclasses import replace
+    from stone_pipeline.config import settings
+    from stone_pipeline.standardise import index
+    slab = replace(settings.category("slab"), pcat_id="pcat_S")
+    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
+    std = "https://b.s3.amazonaws.com/dev/products/standard/{}/sentas/{}.jpg"
+    sheet = ("Product Handle,Product Category 1,Product Length,Product Width,Product Image 1,Product Image 2,Product Image 3\n"
+             f"one,pcat_S,3.0,1.8,{std.format('main', A)},{std.format('white', A)},{std.format('studio', A)}\n")
+    assert index.listings(sheet) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [A]}]
+    assert index.build(sheet)[A]["source"] == "sentas"
