@@ -198,17 +198,22 @@ class _Bucket:
         return {"Body": io.BytesIO(self.objects[Key])}
 
 
-def test_a_cleaned_copy_is_the_standardiser_s_start_and_has_its_marks_off():
+def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
+    # the hosted edit leaves the straps: the cleaned copy is retouched like any photo, only its logo step is skipped
     from deploy import standardise_source as src
     key = f"dev/products/scraped/sentas/{A}.jpg"
+    cleaned, retouched = f"{CL}cleaned/{A}.jpg", f"{CL}retouched/{A}.jpg"
     held = json.dumps({"reason": "retouch: too large", "stays_as_shot": False}).encode()
     as_shot = json.dumps({"reason": "retouch: refused", "stays_as_shot": True}).encode()
-    assert src.start(_Bucket({f"{CL}cleaned/{A}.jpg": b"", f"{CL}retouched/{A}.jpg": b""}), CL, key, A) == (f"{CL}cleaned/{A}.jpg", True, "")
-    assert src.start(_Bucket({f"{CL}retouched/{A}.jpg": b""}), CL, key, A) == (f"{CL}retouched/{A}.jpg", False, "")
+    assert src.photo_source(_Bucket({cleaned: b""}), CL, key, A) == cleaned
+    assert src.photo_source(_Bucket({}), CL, key, A) == key
+    assert src.start(_Bucket({cleaned: b"", retouched: b""}), CL, key, A) == (retouched, True, "")
+    assert src.start(_Bucket({cleaned: b""}), CL, key, A) == (cleaned, True, "")
+    assert src.start(_Bucket({retouched: b""}), CL, key, A) == (retouched, False, "")
     assert src.start(_Bucket({f"{CL}retouch_held/{A}.json": held}), CL, key, A) == (None, False, "retouch: too large")
     assert src.start(_Bucket({f"{CL}retouch_held/{A}.json": as_shot}), CL, key, A) == (key, False, "")
 
 
-def test_a_photo_with_a_cleaned_copy_is_not_retouched():
+def test_a_photo_with_a_cleaned_copy_is_still_retouched():
     from deploy import standardise_retouch as rt
-    assert rt.retouched(_Bucket({f"{CL}cleaned/{A}.jpg": b""}), CL, A)
+    assert not rt.retouched(_Bucket({f"{CL}cleaned/{A}.jpg": b""}), CL, A)

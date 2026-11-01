@@ -53,19 +53,26 @@ def finished(client, out, sha):
     return _exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")
 
 
+def photo_source(client, out, key, sha):
+    """The photo a run works from: its cleaned copy when a hosted edit made one (deploy.standardise_select: reflections and
+    marks off), else the scraped photo. A cleaned copy goes through every step a scraped photo does (the hosted edit
+    leaves the straps, which the retouch takes off), except the logo step: it has no logo left."""
+    cleaned = f"{out}cleaned/{sha}.jpg"
+    return cleaned if _exists(client, cleaned) else key
+
+
 def start(client, out, key, sha):
-    """(the key this photo starts from, whether its marks are already off, a hold reason or ""): a cleaned copy (a hosted
-    edit took the reflections and marks off, deploy.standardise_select) first; then the retouched photo; a refused retouch
-    holds the photo unless only straps and lamp reflections were to come off, which stay as shot; else the scraped photo."""
-    if _exists(client, cleaned := f"{out}cleaned/{sha}.jpg"):
-        return cleaned, True, ""
+    """(the key this photo's standardising starts from, whether it is a cleaned copy, a hold reason or ""): the retouched
+    photo first; a refused retouch holds the photo unless only straps and lamp reflections were to come off, which stay
+    as shot; else the photo the run works from (photo_source)."""
+    source = photo_source(client, out, key, sha)
     if _exists(client, retouched := f"{out}retouched/{sha}.jpg"):
-        return retouched, False, ""
+        return retouched, source != key, ""
     if _exists(client, refused := f"{out}retouch_held/{sha}.json"):
         note = json.loads(_get(client, refused))
         if not note["stays_as_shot"]:
-            return None, False, note["reason"]
-    return key, False, ""
+            return None, source != key, note["reason"]
+    return source, source != key, ""
 
 
 def _survey(rgb, m):
@@ -164,14 +171,14 @@ def main() -> int:
                 rgb = photo.decode(_get(client, key))
                 tally[_survey(rgb, m) if info["format"] == "slab" else info["format"]] += 1
             else:
-                source_key, marks_off, refused = start(client, out, key, sha)
+                source_key, cleaned, refused = start(client, out, key, sha)
                 if refused:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
                     tally["held"] += 1
                     continue
                 rgb = photo.decode(_get(client, source_key))
-                logo = watermarked and not marks_off           # a cleaned copy has no logo left to take off
+                logo = watermarked and not cleaned             # a cleaned copy has no logo left to take off
                 clean = photo.decode(_get(client, f"{imagestore.improved_prefix(src)}{sha}.jpg")) if logo else None
                 res = photo.standardise(rgb, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
                                         clean=clean, watermarked=logo, models=m, extra_views=extra)

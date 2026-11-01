@@ -20,7 +20,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from deploy.standardise_source import _encode, _exists, _get, _photo_keys, finished, run_prefix, sheet_photos
+from deploy.standardise_source import _encode, _exists, _get, _photo_keys, finished, photo_source, run_prefix, sheet_photos
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import marks, outline, photo, retouch
@@ -84,7 +84,7 @@ def _find(client, keys, out):
     for key in keys:
         sha = imagestore.sha_from_url(key)
         try:
-            rgb = photo.decode(_get(client, key))
+            rgb = photo.decode(_get(client, photo_source(client, out, key, sha)))
             straps, flares, labels, cards, stone, slab = retouch.find_marks(seg, det, rgb)
             if not (straps.any() or flares.any() or labels.any() or cards.any()):
                 continue
@@ -145,9 +145,8 @@ def _load_editor():
 
 
 def retouched(client, out, sha):
-    """This photo needs no retouch now: it already ended, retouched or refused (a re-run of the slice only edits what is
-    new), or a cleaned copy is its start (a hosted edit already took its marks off)."""
-    return any(_exists(client, f"{out}{k}") for k in (f"retouched/{sha}.jpg", f"retouch_held/{sha}.json", f"cleaned/{sha}.jpg"))
+    """This photo's retouch already ended, retouched or refused: a re-run of the slice only edits what is new."""
+    return _exists(client, f"{out}retouched/{sha}.jpg") or _exists(client, f"{out}retouch_held/{sha}.json")
 
 
 def _hold(client, out, sha, reason, stays_as_shot):
@@ -177,7 +176,7 @@ def main() -> int:
         started = time.time()
         try:
             straps, flares, labels, cards, stone, slab = (_unpack(p) for p in packed)
-            rgb = photo.decode(_get(client, key))
+            rgb = photo.decode(_get(client, photo_source(client, out, key, sha)))
             rec = _Recorder(client, out, sha) if _recording() else _NoRecord()
             for name, mask in (("straps", straps), ("flares", flares), ("labels", labels), ("cards", cards), ("stone", stone), ("slab", slab)):
                 rec.put(f"{name}.png", mask * 255, png=True)
