@@ -3,7 +3,8 @@ deploy.standardise_source, which then starts from the result. Two phases, becaus
 time: find the marks on every photo, free those models, then edit. Writes <run prefix>/retouched/<sha>.jpg, or
 retouch_held/<sha>.json when a result is refused. A debug run (RECORD=true) also writes what was found to retouch_marks/<sha>.jpg,
 for a person to check, and under retouch_debug/<sha>/ the masks and every model output in the order the crops were edited
-(retouch.regions), so the checks can be tuned on what the model really does.
+(retouch.regions), so the checks can be tuned on what the model really does. A marks survey (MARKS_SURVEY=true) only notes
+which marks each photo carries, under marks_survey/<sha>.json, and edits nothing.
 """
 
 from __future__ import annotations
@@ -76,10 +77,10 @@ def _unpack(data):
 
 
 def _find(client, keys, out):
-    """{key: packed (straps, flares, cards, stone, slab)} of every photo with a mark on it."""
+    """({key: packed (straps, flares, cards, stone, slab)} of every photo with a mark on it, {keys whose search failed})."""
     seg = marks.load_sam()
     det = outline.load_detector(seg[2])
-    found = {}
+    found, failed = {}, set()
     for key in keys:
         sha = imagestore.sha_from_url(key)
         try:
@@ -91,11 +92,35 @@ def _find(client, keys, out):
             if _recording():
                 _write_found(client, out, sha, rgb, straps, flares, cards)
         except Exception as exc:                       # one bad photo never stops the slice
+            failed.add(key)
             print(f"   FIND FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
     del seg, det
     gc.collect()
     torch.cuda.empty_cache()
-    return found
+    return found, failed
+
+
+def _surveying():
+    # MARKS_SURVEY=true only notes which marks each photo carries (marks_survey/<sha>.json), editing nothing: what a
+    # re-run with a changed finder must redo.
+    return os.environ.get("MARKS_SURVEY", "").lower() in ("1", "true", "yes")
+
+
+def survey_note(packed):
+    """What a marks survey keeps of one photo: whether it carries any mark, and lamp reflections among them."""
+    return {"marks": packed is not None, "flares": packed is not None and bool(_unpack(packed[1]).any())}
+
+
+def _survey(client, src, out):
+    """Note every photo of the slice not yet surveyed; a photo whose search failed gets no note (it is not 'no marks')."""
+    keys = [k for k in _photo_keys(client, src) if not _exists(client, f"{out}marks_survey/{imagestore.sha_from_url(k)}.json")]
+    found, failed = _find(client, keys, out)
+    for key in keys:
+        if key not in failed:
+            client.put_object(Bucket=S3_BUCKET, Key=f"{out}marks_survey/{imagestore.sha_from_url(key)}.json",
+                              Body=json.dumps(survey_note(found.get(key)), sort_keys=True).encode(), ContentType="application/json")
+    print(f"==> marks survey {src}: {len(keys) - len(failed)} noted, {len(found)} with marks, {len(failed)} failed", flush=True)
+    return 0
 
 
 def _load_editor():
@@ -134,9 +159,11 @@ def main() -> int:
         return 2
     client = boto3.client("s3", region_name=S3_REGION)
     out = run_prefix(src)
+    if _surveying():
+        return _survey(client, src, out)
     keys = [k for k in _photo_keys(client, src)
             if not finished(client, out, sha := imagestore.sha_from_url(k)) and not retouched(client, out, sha)]
-    found = _find(client, keys, out)
+    found, _ = _find(client, keys, out)
     print(f"==> retouch {src}: marks on {len(found)} of {len(keys)} photos", flush=True)
     if not found:
         return 0

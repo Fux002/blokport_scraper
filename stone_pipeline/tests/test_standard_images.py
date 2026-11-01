@@ -103,3 +103,13 @@ def test_a_whole_slab_leads_even_when_a_close_up_comes_first():
 def test_a_lead_block_is_shown_once():
     views = {"main": {A}, "white": set(), "studio": set(), "close": set()}
     assert images.standardised([_improved(A)], views) == [_std("main", A)]
+
+
+def test_a_marks_survey_notes_whether_a_photo_carries_lamp_reflections():
+    import numpy as np
+    from deploy import standardise_retouch as rt
+    none = np.zeros((40, 60), np.uint8)
+    lamp = none.copy(); lamp[10:14, 20:24] = 1
+    assert rt.survey_note(None) == {"marks": False, "flares": False}
+    assert rt.survey_note(tuple(rt._pack(m) for m in (none, lamp, none, none, none))) == {"marks": True, "flares": True}
+    assert rt.survey_note(tuple(rt._pack(m) for m in (lamp, none, none, none, none))) == {"marks": True, "flares": False}
