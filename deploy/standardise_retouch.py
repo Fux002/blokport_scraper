@@ -152,7 +152,7 @@ def main() -> int:
             for name, mask in (("straps", straps), ("flares", flares), ("cards", cards), ("stone", stone), ("slab", slab)):
                 rec.put(f"{name}.png", mask * 255, png=True)
             marked = straps | flares | cards
-            box = retouch.crop_clear_of_wide_marks(straps, cards)
+            box = retouch.crop_clear_of_wide_marks(straps, cards, stone)
             if box is not None:                        # too wide to fill: the real stone beside the marks, nothing invented
                 x0, y0, x1, y1 = box
                 merged, reason = rgb[y0:y1, x0:x1], ""

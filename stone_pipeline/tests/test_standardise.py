@@ -675,8 +675,17 @@ def test_a_lamp_reflection_never_stops_a_card_fan_being_cropped_away():
     h, w = 1280, 1707
     fan = np.zeros((h, w), np.uint8); fan[900:1280, 500:1000] = 1
     flares = np.zeros_like(fan); flares[100:160, 300:360] = 1; flares[500:560, 1300:1360] = 1   # lamps above the cards
-    none = np.zeros_like(fan)
-    assert retouch.crop_clear_of_wide_marks(none, fan) is not None
-    x0, y0, x1, y1 = retouch.crop_clear_of_wide_marks(none, fan)
+    none, close_up = np.zeros_like(fan), np.ones_like(fan)
+    assert retouch.crop_clear_of_wide_marks(none, fan, close_up) is not None
+    x0, y0, x1, y1 = retouch.crop_clear_of_wide_marks(none, fan, close_up)
     assert not fan[y0:y1, x0:x1].any()
-    assert retouch.crop_clear_of_wide_marks(none, flares) is None            # reflections alone are filled, not cropped
+    assert retouch.crop_clear_of_wide_marks(none, flares, close_up) is None  # reflections alone are filled, not cropped
+
+
+def test_a_whole_slab_is_never_cropped_to_clear_a_mark():
+    h, w = 1500, 2000
+    stone = np.zeros((h, w), np.uint8); stone[150:1300, 340:1950] = 1        # the whole slab inside the photo
+    beside = np.zeros_like(stone); beside[0:1300, 0:330] = 1                  # a rack beside it taken for a strap (be9e3ec7)
+    none = np.zeros_like(stone)
+    assert retouch.too_wide_to_fill(beside)
+    assert retouch.crop_clear_of_wide_marks(beside, none, stone) is None

@@ -227,11 +227,21 @@ def too_wide_to_fill(mask):
     return any(too_wide(mask[y0:y1, x0:x1], long) > C.RETOUCH_MAX_REACH for x0, y0, x1, y1 in regions(mask))
 
 
-def crop_clear_of_wide_marks(straps, cards):
-    """The crop clear of straps and cards too wide to fill (clear_crop), or None when they can be filled. Lamp
-    reflections never decide a crop: one left inside it stays as shot, as when its fill is refused."""
+def crop_clear_of_wide_marks(straps, cards, stone):
+    """The crop clear of straps and cards too wide to fill (clear_crop), or None when they can be filled or the whole
+    slab is in the photo: a crop would cut the slab off, so it is never cropped (its marks are filled, or stay as
+    shot when refused). Only a close-up, stone up to the frame, is cropped. Lamp reflections never decide a crop: one
+    left inside it stays as shot, as when its fill is refused."""
     marked = straps | cards
-    return clear_crop(marked) if too_wide_to_fill(marked) else None
+    return clear_crop(marked) if too_wide_to_fill(marked) and not whole_in_frame(stone) else None
+
+
+def whole_in_frame(stone):
+    """The stone's outline clears every edge of the photo: a whole slab, not a close-up."""
+    h, w = stone.shape
+    x, y, bw, bh = cv2.boundingRect(stone)
+    mx, my = C.FRAME_EDGE * w, C.FRAME_EDGE * h
+    return bool(stone.any()) and x >= mx and y >= my and x + bw <= w - mx and y + bh <= h - my
 
 
 def clear_crop(mask):
