@@ -37,7 +37,7 @@ def standardise(rgb, *, fmt, key, size=None, clean=None, watermarked=False, mode
     kind, confidence = kinds.classify(models.clip, rgb)
     if kinds.is_skipped(kind, confidence):
         return Result(held=f"not a slab photo: {kind} ({confidence:.2f})", kind=kind)
-    slabs = layout.squared_slabs(rgb, *models.cleaners)
+    slabs = layout.squared_slabs(rgb, *models.cleaners, size=size)
     if isinstance(slabs, str):
         slabs_reason, slabs = slabs, closeup.closeup(rgb, size, *models.cleaners)
         if isinstance(slabs, str):

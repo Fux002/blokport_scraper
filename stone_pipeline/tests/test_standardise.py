@@ -6,7 +6,7 @@ import pytest
 
 from stone_pipeline.config import settings
 from stone_pipeline.config.settings import STANDARDISE as C
-from stone_pipeline.standardise import blend, index, kinds, layout, logos, marks, retouch, studio, views
+from stone_pipeline.standardise import blend, index, kinds, layout, logos, marks, outline, retouch, studio, views
 
 
 def _stone(h, w, seed=1, base=170, var=18):
@@ -726,3 +726,58 @@ def test_a_whole_slab_is_never_cropped_to_clear_a_mark():
     none = np.zeros_like(stone)
     assert retouch.too_wide_to_fill(beside)
     assert retouch.crop_clear_of_wide_marks(beside, none, stone) is None
+
+
+def _quad_mask(corners, h=1500, w=2000):
+    return cv2.fillConvexPoly(np.zeros((h, w), np.uint8), np.array(corners, np.int32), 1)
+
+
+def test_a_slab_shot_at_an_angle_is_fitted_up_to_its_far_side_at_two_fifths_of_its_near():
+    near, far = 1000, 1000 / 2.3                                     # 1ca6fd5d, adeebb0f: the far side 0.4..0.6 of the near
+    angled = _quad_mask([(200, 250), (1800, 250 + (near - far) / 2), (1800, 250 + (near + far) / 2), (200, 1250)])
+    assert marks.four_corners(angled) is not None
+    far = 1000 / 3.1                                                 # 19ab0177: the far end too soft to show
+    steeper = _quad_mask([(200, 250), (1800, 250 + (near - far) / 2), (1800, 250 + (near + far) / 2), (200, 1250)])
+    assert marks.four_corners(steeper) is None
+
+
+def test_a_slab_shot_near_square_on_is_measured_from_its_sides():
+    q = np.float32([[200, 250], [1800, 300], [1800, 1200], [200, 1250]])
+    assert outline.steep_aspect(q, (3.0, 1.8)) is None
+
+
+def test_a_steep_shot_takes_the_slab_s_real_proportions():
+    q = np.float32([[200, 250], [1400, 450], [1400, 1050], [200, 1250]])     # the right side 0.6 of the left
+    assert outline.steep_aspect(q, (2.65, 1.8)) == pytest.approx(2.65 / 1.8)
+    assert outline.steep_aspect(q, (1.8, 2.65)) == pytest.approx(2.65 / 1.8)  # a slab stands on its long edge
+
+
+def test_a_steep_shot_without_a_real_size_is_held():
+    q = np.float32([[200, 250], [1400, 450], [1400, 1050], [200, 1250]])
+    assert isinstance(outline.steep_aspect(q, None), str)
+
+
+def test_a_real_size_narrower_than_the_foreshortened_photo_is_held():
+    q = np.float32([[100, 250], [1900, 450], [1900, 1050], [100, 1250]])     # seen 2.25 wide, shortened: at least that
+    assert isinstance(outline.steep_aspect(q, (2.0, 1.8)), str)
+
+
+def test_a_steep_slab_is_flattened_at_its_real_proportions_keeping_its_unshortened_height():
+    rgb = _stone(1500, 2000)
+    q = np.float32([[200, 250], [1400, 450], [1400, 1050], [200, 1250]])
+    flat, _ = outline._flat(rgb, q, 1.5)
+    _, h = outline._size(q)
+    assert flat.shape[0] == int(h) and abs(flat.shape[1] - int(h * 1.5)) <= 1
+
+
+def test_a_stand_in_front_of_the_slab_bites_a_hollow_out_of_its_outline():
+    alpha = np.zeros((800, 1200), np.float32); alpha[20:780, 20:1180] = 1     # the squared slab
+    alpha[560:780, 300:760] = 0                                              # the stand cut out of its foot (mar-2864d056)
+    assert layout.hollow(alpha) > C.OUTLINE_HOLLOW_MAX
+
+
+def test_a_chipped_corner_or_rough_edge_is_no_hollow():
+    alpha = np.zeros((800, 1200), np.float32); alpha[20:780, 20:1180] = 1
+    alpha[20:120, 1080:1180] = np.tril(np.ones((100, 100), np.float32))[:, ::-1]   # a corner broken off
+    alpha[300:310, 20:26] = 0                                                       # a small chip in the edge
+    assert layout.hollow(alpha) <= C.OUTLINE_HOLLOW_MAX

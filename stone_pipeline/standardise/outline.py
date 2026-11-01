@@ -27,8 +27,37 @@ def _size(q):
     return (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) / 2, (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr)) / 2
 
 
-def _flat(rgb, q):
+def _sides(q):
+    """(across, up): how many times longer the longer of q's opposite sides is, left/right and top/bottom. A shot at an
+    angle across the slab shortens its far side: across > 1, its width foreshortened."""
+    top, right, bottom, left = (np.linalg.norm(q[(i + 1) % 4] - q[i]) for i in range(4))
+    return max(left, right) / min(left, right), max(top, bottom) / min(top, bottom)
+
+
+def steep_aspect(q, size):
+    """The width/height to flatten slab q at. None for a shot near square-on: its sides measure it. A steeper shot
+    foreshortens one axis, so the slab's real proportions (size = (length, width)), the long side across as a slab
+    stands; a str (why it is held) when the real size is unknown or does not fit the photo: foreshortening only
+    shortens, so the real proportions are at least as wide as seen when the width is the shortened axis."""
+    across, up = _sides(q)
+    if max(across, up) <= C.SIDE_RATIO_MEASURED:
+        return None
+    if size is None:
+        return "slab shot at a steep angle and its real size is unknown"
+    real = max(size) / min(size)
     w, h = _size(q)
+    seen = w / h
+    fits = real >= seen * (1 - C.ASPECT_TOLERANCE) if across >= up else real <= seen * (1 + C.ASPECT_TOLERANCE)
+    return real if fits else f"slab shot at a steep angle: its real size {max(size)} x {min(size)} does not fit the photo ({seen:.2f} wide)"
+
+
+def _flat(rgb, q, aspect=None):
+    """rgb inside q squared to a rectangle, and the homography. aspect: the slab's real width/height (steep_aspect);
+    the axis the angle did not shorten keeps its measured length."""
+    w, h = _size(q)
+    if aspect is not None:
+        across, up = _sides(q)
+        w, h = (h * aspect, h) if across >= up else (w, w / aspect)
     H = cv2.getPerspectiveTransform(q, np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], np.float32))
     return cv2.warpPerspective(rgb, H, (int(w), int(h)), flags=cv2.INTER_CUBIC), H
 

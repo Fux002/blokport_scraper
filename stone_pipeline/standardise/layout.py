@@ -89,6 +89,17 @@ def outline_with_erased(outline, marks, inside):
     return outline | (marks & inside)
 
 
+def hollow(alpha):
+    """The share of the cut-out's convex hull it does not cover: a stand or rack in front of the slab bites a hollow
+    out of its outline (the stone behind it is not seen, so it is cut away); a chip or a rough natural edge barely
+    does (it is outside, not a bite)."""
+    inside = (alpha > 0.5).astype(np.uint8)
+    if not inside.any():
+        return 1.0
+    hull = cv2.fillConvexPoly(np.zeros_like(inside), cv2.convexHull(cv2.findNonZero(inside)), 1)
+    return float(((hull > 0) & (inside == 0)).sum() / hull.sum())
+
+
 def two_stones(rgb, alpha):
     """Whether the cut-out holds a second, very different stone along its border: a slab with a broken corner can take
     in the slab standing behind it (a black slab with a white wedge), which would show the wrong stone and the wrong
@@ -116,13 +127,16 @@ def two_stones(rgb, alpha):
             and (ring & (labels == piece)).sum() >= C.TWO_STONES_BORDER * ring.sum())
 
 
-def squared_slabs(rgb, seg, det, lama, esr):
+def squared_slabs(rgb, seg, det, lama, esr, size=None):
     """One/two (squared slab RGB, its alpha) pairs, cleaned and lit as one set (a pair keeps one light), or the
-    reason (str) no whole slab was found.
+    reason (str) no whole slab was found. size = (length, width): a slab shot at a steep angle is squared to it.
     The alpha is the slab's own outline: a chipped corner shows the plate, never the warehouse behind it."""
     quads, mask, raw, straps, reason = openbook.find_slabs(seg, det, rgb)
     if not quads:
         return reason
+    aspects = [openbook.steep_aspect(q, size) for q in quads]
+    if refused := next((a for a in aspects if isinstance(a, str)), None):
+        return refused
     # The slab's own outline, not a ruled rectangle (the user: squared-off edges look fake): what SAM saw as this
     # stone with its holes filled, inside the fitted corners. Closing keeps a real chip or rough edge but fills a
     # thin notch from a label or hook sitting on the edge (its stone is erased and refilled below). The straps
@@ -144,8 +158,8 @@ def squared_slabs(rgb, seg, det, lama, esr):
     rgb = proto.erase(rgb, marks, lama, hull)
     outline = outline_with_erased(outline, marks, inside)
     flats, alphas = [], []
-    for q in quads:
-        f, H = openbook._flat(rgb, q)
+    for q, aspect in zip(quads, aspects):
+        f, H = openbook._flat(rgb, q, aspect)
         flats.append(f)
         alphas.append(cv2.warpPerspective(outline.astype(np.float32), H, f.shape[1::-1], flags=cv2.INTER_LINEAR))
     h = min(f.shape[0] for f in flats)
@@ -167,6 +181,8 @@ def squared_slabs(rgb, seg, det, lama, esr):
         out = [(l[:, :-kl], la[:, :-kl]), (r[:, kr:], ra[:, kr:])]
     if any(two_stones(f, a) for f, a in out):
         return "two stones in one outline (the slab behind it, seen past a broken corner?)"
+    if (bite := max(hollow(a) for _, a in out)) > C.OUTLINE_HOLLOW_MAX:
+        return f"something stands in front of the slab (a stand or rack bites {bite:.0%} out of its outline)"
     return out
 
 

@@ -924,7 +924,10 @@ class STANDARDISE:
     CARD_MAX_SHARE = 0.08          # and no larger than this share of the photo
     CARD_SEARCH = 4.0              # look for a card outline within this many word-heights around a text cluster
     CARD_MAX_TO_TEXT = 4.0         # a card outline counts only up to this many times the area of the text it holds
-    SIDE_RATIO_MAX = 1.35          # opposite sides may differ by this factor (perspective of a slab shot at an angle)
+    SIDE_RATIO_MAX = 2.5           # opposite sides may differ by this factor (a slab shot at an angle): steeper leaves the far
+                                   # end too soft to show (19ab0177 at 3.1; 2.4 still sharp, adeebb0f)
+    SIDE_RATIO_MEASURED = 1.35     # up to this the sides measure the slab's proportions; steeper, its real size does
+    ASPECT_TOLERANCE = 0.10        # the real proportions may be this much narrower than a foreshortened photo shows
     OCR_CLUSTER = 1.5              # words within this many word-heights of each other form one mark
     OCR_LINE_GAP = 3.0             # a word on a surely-read word's text line, within this many word-heights, joins it
     OCR_LINE_HEIGHT = (0.5, 1.6)   # ... when its height is within this ratio of that word's
@@ -1119,6 +1122,8 @@ class STANDARDISE:
     TRIM_RUN = 0.03                    # a cut must run along this share of the edge (a vein crossing the edge does not)
     NOTCH_FILL = 0.08                  # bites in an edge narrower than this share of the slab's height are filled
     OUTLINE_CLOSE = 0.012              # notches thinner than this share of the photo's long side are filled, wider ones are real
+    OUTLINE_HOLLOW_MAX = 0.02          # a cut-out missing more than this share of its convex hull has a stand in front of it
+                                       # (measured 2026-11-01 on 320 slabs: normal <= 0.0064, a stand cut out 0.108-0.153)
     EDGE_INSET = 2                     # the outline is taken this many px inside the photo's mixed edge pixels
     EDGE_SOFT = 0.6                    # the slab's edge softness (px): crisp
     FACE_WIDTH = 11                    # the stone's thickness on the canvas: about 2 cm of a 3 m slab (px)
