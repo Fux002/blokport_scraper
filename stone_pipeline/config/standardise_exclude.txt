@@ -1,3 +1,10 @@
 # Standardised photos a person reviewed and found wrong, which no automatic check catches: never published, so their
 # products keep the images they had. One sha256 per line, then a note. Read by deploy/standardise_publish.py.
 74f80bdaddd0c0474e017b9759cc080762325d9351828d06ca4887a2d4ffe6a4  # sentas: two slabs, one cut off, outline took in the floor and the wall slabs
+4bf67db36840739ada49955b95bd6cf5ca6e67e2c0306dfe754566f2af232f21  # polonine: the hall's windows and lamps mirrored in the polished stone (user 2026-11-01)
+1e5875ec51d6efeaf6dd9c8e2a4b5335230e23431f6c73a38e49b3089816bb77  # zucchi: rows of ceiling lights left on the stone (user 2026-11-01)
+4b774b0437f836b064985202a98113c7922a5d530ac71dbc76da267dec93a461  # varsha: darker rectangle where the logo was removed (user 2026-11-01)
+c9b5f0695447db96fe8dcff8805c9855b106f1873cbb53c3a1e33901f0529b69  # zucchi: pale flat patch where a label was filled (user 2026-11-01)
+37671cd546a52aa305ed8d52ba9eba2fccdb8891482f00699fd2dfd661faad8e  # marenostone: two slabs stacked with an offset shown as one (user 2026-11-01)
+1362666e9a2e18ec30488b0e7e2f3b0774019a05d8e6f2628b735d1c11a6efb3  # zucchi: white sample card left at the foot of the close-up
+035d936362e5b2a26b7b4d98d1d56eb58df0e40cf42818c40c7b085640460478  # varsha: darker patches where the label sheet was filled
