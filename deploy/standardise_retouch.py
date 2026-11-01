@@ -145,8 +145,9 @@ def _load_editor():
 
 
 def retouched(client, out, sha):
-    """This photo's retouch already ended, retouched or refused: a re-run of the slice only edits what is new."""
-    return _exists(client, f"{out}retouched/{sha}.jpg") or _exists(client, f"{out}retouch_held/{sha}.json")
+    """This photo needs no retouch now: it already ended, retouched or refused (a re-run of the slice only edits what is
+    new), or a cleaned copy is its start (a hosted edit already took its marks off)."""
+    return any(_exists(client, f"{out}{k}") for k in (f"retouched/{sha}.jpg", f"retouch_held/{sha}.json", f"cleaned/{sha}.jpg"))
 
 
 def _hold(client, out, sha, reason, stays_as_shot):

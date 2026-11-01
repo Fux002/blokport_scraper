@@ -53,6 +53,21 @@ def finished(client, out, sha):
     return _exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")
 
 
+def start(client, out, key, sha):
+    """(the key this photo starts from, whether its marks are already off, a hold reason or ""): a cleaned copy (a hosted
+    edit took the reflections and marks off, deploy.standardise_select) first; then the retouched photo; a refused retouch
+    holds the photo unless only straps and lamp reflections were to come off, which stay as shot; else the scraped photo."""
+    if _exists(client, cleaned := f"{out}cleaned/{sha}.jpg"):
+        return cleaned, True, ""
+    if _exists(client, retouched := f"{out}retouched/{sha}.jpg"):
+        return retouched, False, ""
+    if _exists(client, refused := f"{out}retouch_held/{sha}.json"):
+        note = json.loads(_get(client, refused))
+        if not note["stays_as_shot"]:
+            return None, False, note["reason"]
+    return key, False, ""
+
+
 def _survey(rgb, m):
     """What this photo would become, without the expensive steps."""
     kind, confidence = kinds.classify(m.clip, rgb)
@@ -64,10 +79,14 @@ def _survey(rgb, m):
     return "open book" if len(quads) == 2 else "slab"
 
 
+def round_prefix(tag, src):
+    """Where the run tagged `tag` keeps one source's results."""
+    return f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag + '/' if tag else ''}{src}/"
+
+
 def run_prefix(src):
     """Where a test run writes: RUN_TAG keeps runs apart, so a new run never skips work done by an older one."""
-    tag = os.environ.get("RUN_TAG", "").strip()
-    return f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag + '/' if tag else ''}{src}/"
+    return round_prefix(os.environ.get("RUN_TAG", "").strip(), src)
 
 
 def only(keys, wanted):
@@ -78,16 +97,26 @@ def only(keys, wanted):
     return [k for k in keys if imagestore.sha_from_url(k) in wanted]
 
 
-def sheet_photos(client):
-    """{sha: {source, key, format, size}} of this environment's product sheet. Its categories are read from the
-    environment's CURRENT Medusa export first, as the produce does (fetch_inputs, then refresh_category_pcats): category
-    ids differ per environment, prod has no committed export, and a committed one can lag Medusa. A fetch that fails
-    keeps what is on disk, so a prod run without its export fails loud on its first category, never guesses."""
+def _sheet(client):
+    """This environment's product sheet, its categories read from the environment's CURRENT Medusa export first, as the
+    produce does (fetch_inputs, then refresh_category_pcats): category ids differ per environment, prod has no committed
+    export, and a committed one can lag Medusa. A fetch that fails keeps what is on disk, so a prod run without its export
+    fails loud on its first category, never guesses."""
     from deploy import fetch_inputs
     from stone_pipeline.config import settings
     fetch_inputs.fetch_attributes(client)
     settings.refresh_category_pcats()
-    return index.build(_get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8"))
+    return _get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8")
+
+
+def sheet_photos(client):
+    """{sha: {source, key, format, size}} of this environment's product sheet."""
+    return index.build(_sheet(client))
+
+
+def sheet_listings(client):
+    """This environment's listings with their photos in order (index.listings)."""
+    return index.listings(_sheet(client))
 
 
 def _photo_keys(client, src, photos):
@@ -131,26 +160,21 @@ def main() -> int:
             if not survey and finished(client, out, sha):
                 tally["already done"] += 1
                 continue
-            # A retouched photo is the start; a refused retouch holds the photo unless only straps and lamp reflections
-            # were to come off, which stay as shot.
-            source_key = f"{out}retouched/{sha}.jpg"
-            refused = f"{out}retouch_held/{sha}.json"
-            if not survey and not _exists(client, source_key) and _exists(client, refused):
-                note = json.loads(_get(client, refused))
-                if not note["stays_as_shot"]:
-                    client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
-                                      Body=json.dumps({"reason": note["reason"], "kind": ""}, sort_keys=True).encode())
-                    tally["held"] += 1
-                    continue
-            rgb = photo.decode(_get(client, source_key if _exists(client, source_key) else key))
             if survey:
+                rgb = photo.decode(_get(client, key))
                 tally[_survey(rgb, m) if info["format"] == "slab" else info["format"]] += 1
             else:
-                clean = None
-                if watermarked:
-                    clean = photo.decode(_get(client, f"{imagestore.improved_prefix(src)}{sha}.jpg"))
+                source_key, marks_off, refused = start(client, out, key, sha)
+                if refused:
+                    client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
+                                      Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
+                    tally["held"] += 1
+                    continue
+                rgb = photo.decode(_get(client, source_key))
+                logo = watermarked and not marks_off           # a cleaned copy has no logo left to take off
+                clean = photo.decode(_get(client, f"{imagestore.improved_prefix(src)}{sha}.jpg")) if logo else None
                 res = photo.standardise(rgb, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
-                                        clean=clean, watermarked=watermarked, models=m, extra_views=extra)
+                                        clean=clean, watermarked=logo, models=m, extra_views=extra)
                 if res.held:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": res.held, "kind": res.kind}, sort_keys=True).encode())

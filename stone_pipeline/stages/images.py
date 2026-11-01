@@ -289,12 +289,12 @@ _HOSTED = re.compile(r"/products/(?:[a-z]+/)?([a-z_]+)/([0-9a-f]{64})\.[a-z0-9]+
 
 
 def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
-    """A product's images, standardised where a published set exists. The lead photo is the first, in the product's
-    order, that shows a whole slab or an open book (it has a side view); only when none does, the first standardised
-    photo (a close-up). Its showroom image is the catalog thumbnail; then every photo, the lead first and the rest in
-    order, gives its gallery views: white, side, close-up, whichever it has (a block, none: its showroom image).
-    Every slab of a lot is shown whole. A photo without a standardised set is left out, its warehouse would show next
-    to the showroom; a product with none keeps the images it had."""
+    """A product's images: its one standardised photo when a published one exists (user 2026-11-01: one very good image
+    per listing is enough, shown in every view). Only photos the judge passed are published, one chosen per listing; the
+    lead is the first published photo in the product's order that shows a whole slab or an open book (it has a side
+    view), else the first published one. Its showroom image is the catalog thumbnail, then its white, side and close-up
+    views, whichever it has (a block: its showroom image only). The product's other photos are left out, their warehouse
+    would show next to the showroom; a product with no published photo keeps the images it had."""
     found = []
     for url in urls:
         m = _HOSTED.search(url)
@@ -302,17 +302,9 @@ def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
             found.append((url[:m.start()], m.group(1), m.group(2)))     # (url up to /products, source, sha)
     if not found:
         return urls
-
-    def view_url(base, src, sha, view):
-        return f"{base}/products/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
-    lead = next((f for f in found if f[2] in views.get("studio", ())), found[0])
-    out = [view_url(*lead, "main")]
-    for photo in [lead] + [f for f in found if f is not lead]:
-        gallery = [v for v in imagestore.STANDARD_VIEWS[1:] if photo[2] in views.get(v, ())]
-        if not gallery and photo is not lead:             # a block: its one image (the lead's is already first)
-            gallery = ["main"]
-        out += [view_url(*photo, v) for v in gallery]
-    return out
+    base, src, sha = next((f for f in found if f[2] in views.get("studio", ())), found[0])
+    return [f"{base}/products/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
+            for view in imagestore.STANDARD_VIEWS if sha in views.get(view, ())]
 
 
 def _load_standard_views(cfg) -> dict[str, set[str]]:

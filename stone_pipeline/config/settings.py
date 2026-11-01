@@ -1017,6 +1017,80 @@ class STANDARDISE:
     }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
+    # The last check before a finished photo is published (user 2026-11-01: GPU first, a strict check, the hosted model for
+    # the rest): a vision model sees the original and the catalog image and passes or fails it with reasons. Opus matched the
+    # user's own labels best (23 of 25 defects, 6 of 6 flagged; Haiku 16, Sonnet 19). One good photo per listing is enough:
+    # its photos are judged in order and judging stops at the first pass, at most JUDGE_MAX_PER_LISTING of them.
+    JUDGE_URL = "https://fal.run/openrouter/router/vision"
+    JUDGE_MODEL = "anthropic/claude-opus-5.5"
+    JUDGE_REASONING = True             # the endpoint refuses this model without it
+    JUDGE_MAX_TOKENS = 6000            # reasoning included
+    JUDGE_LONG_SIDE, JUDGE_JPEG_QUALITY = 1024, 88   # each image is sent at this long side
+    JUDGE_TIMEOUT = 300                # s per call
+    JUDGE_MAX_PER_LISTING = 3
+    JUDGE_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark", "not_one_slab", "wrong_shape", "other")
+    JUDGE_PROMPT = """You are the last quality check before a natural-stone product photo is published in a marketplace catalog.
+Image 1 is the supplier's original photo. Image 2 is our processed catalog image of it.
+- For a SLAB (or two bookmatched slabs side by side): the slab is cut out of image 1, squared, cleaned and placed
+  upright in a showroom. Its chrome feet / supports at the bottom belong to the showroom stand.
+- For a BLOCK or TILE: image 2 is the product cleaned in its own surroundings; there is no showroom. A quarry
+  block's painted numbers and markings, its lifting cables and chains, and the quarry or yard around it are normal
+  and never a problem.
+Judge ONLY the stone product in image 2 (its surface, its outline and what is on it), using image 1 to tell what is
+real stone and what is not. The showroom room, floor, stand and feet are fixed and never a problem.
+
+FAIL image 2 if a buyer looking at it at catalog size would clearly notice any of these on the stone:
+- light_reflection: lamp spots, rows of ceiling lights, light tubes or bright glare mirrored on the polished surface
+- scene_reflection: windows, the hall, people or objects clearly mirrored in the stone
+- bad_fill: a patch, rectangle or smear whose tone, brightness or texture does not match the stone around it
+  (where a label, logo, card or strap was removed)
+- leftover_mark: a label, sticker, card, logo, writing, tape or strap still on the stone
+- not_one_slab: two or more slabs shown as one (stacked with an offset, a second slab's edge visible), or another
+  stone taken in
+- wrong_shape: the product cut off, part of it missing, warped, or something in front of it cut into its outline
+- other: any other clear defect of the image (not of the stone itself)
+
+PASS when the stone looks clean and natural. Natural features of the stone (veins, cracks, holes, colour changes,
+breccia, resin, sheen, rough or chipped edges) are not problems, nor is a faint soft sheen a buyer would not notice.
+Your whole answer is one JSON object and nothing else:
+{"verdict": "pass" | "fail", "problems": [{"kind": "<one of the kinds>", "where": "<short>"}]}"""
+    # A listing with no photo that passes: the hosted edit models clean ONE of its photos (the first that can be fixed by
+    # cleaning) in turn until a copy passes the clean check; that copy then goes through the standardiser like any photo and
+    # the judge again. Order from the 20-photo test (user 2026-11-01): Kontext 12, Nano Banana 2 12, FLUX 3 edit 8 of 20
+    # clean and faithful; the three in turn 16. The queue, not the sync gateway: a slow model outlasts it (504) and the
+    # paid call is lost.
+    CLEAN_QUEUE_URL = "https://queue.fal.run"
+    CLEAN_INSTRUCTION = ("Remove only these from the polished stone slab: reflections of lamps, light tubes, windows and the room "
+                         "mirrored on its surface, and any label, sticker, sample card, tape, writing or logo on it. Keep the stone's "
+                         "colour, veins, pattern and texture exactly as they are, and keep the rest of the photo unchanged.")
+    CLEAN_MODELS = (                   # (name, endpoint, extra input); the photo goes in as image_url or image_urls
+        ("kontext", "fal-ai/flux-pro/kontext", {"output_format": "jpeg", "seed": 1}),
+        ("nano2", "fal-ai/nano-banana-2/edit", {"resolution": "2K", "output_format": "jpeg", "seed": 1}),
+        ("flux3", "blackforestlabs/flux-3/edit-image", {"resolution": "1.5k", "output_format": "jpeg"}),
+    )
+    CLEAN_SINGLE_IMAGE = ("kontext",)  # these take one image_url; the others a list, image_urls
+    CLEAN_SEND_LONG = 2048             # the photo is sent at this long side
+    CLEAN_TIMEOUT, CLEAN_POLL = 600, 3 # s: give up on a queued edit after this long, asking every this many s
+    # Problems a cleaned copy can fix; a photo held or failed for anything else (an outline the standardiser could not
+    # find, stacked slabs) is not worth an edit.
+    CLEAN_FIXES_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark")
+    CLEAN_FIXES_HELD = ("retouch:", "logo:")   # held reasons (their start) a cleaned copy removes the cause of
+    CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove reflections
+(lamps, light tubes, windows, the room mirrored on the polished stone) and foreign marks (labels, stickers, sample
+cards, tape, writing, logos) from the stone, and nothing else. Judge image 2 on two questions:
+1. clean: are all such reflections and marks gone from the stone in image 2? (true/false)
+2. faithful: is the stone itself the same stone as in image 1 (same colour, veins, pattern and texture, nothing
+   invented, nothing smeared or blurred, slab outline unchanged)? (true/false)
+Your whole answer is one JSON object and nothing else:
+{"clean": true|false, "faithful": true|false, "problems": "<short, empty if none>"}"""
+    # Spend: each run stops loud before it would pass this many USD of hosted calls (judge as billed, edits at list price).
+    SPEND_CAP_USD = 60.0
+    JUDGE_PRICE_USD = 0.03             # a judge call's cost reserved before it is made (an upper bound; Opus bills ~0.016)
+    CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
+    SELECT_WORKERS = 12                # listings worked on at once (hosted calls; no model runs here)
+    # Per edit at the sizes above, an upper bound (fal.ai/pricing: Kontext per megapixel rounded up, Nano Banana 2 per image
+    # with 2K above base, FLUX 3 per megapixel), so the cap stops early rather than late.
+    CLEAN_PRICE_USD = {"kontext": 0.15, "nano2": 0.12, "flux3": 0.15}
     # The revision each model is baked at in the image (Dockerfile): the jobs run offline, so "latest" cannot resolve.
     SAM_REVISION = "87aecf0df4ce6b30cd7de76e87673c49644bdf67"
     DETECTOR_REVISION = "12bdfa3120f3e7ec7b434d90674b3396eccf88eb"
