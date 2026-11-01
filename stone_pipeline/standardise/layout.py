@@ -39,28 +39,7 @@ def _room(name):
     room = np.asarray(Image.open(ROOM_DIR / name).convert("RGB")).astype(np.float32)
     if name.startswith("far_"):                        # out of focus behind slabs in focus, like the regular halls
         room = cv2.GaussianBlur(room, (0, 0), C.FAR_ROOM_BLUR)
-    return clean_floor(room)
-
-
-def clean_floor(room):
-    """The room with its near floor clean: the example photo's glossy floor mirrors lamps and racks where our slab now
-    stands, and keeps a band from the stand that was in it. From FLOOR_CLEAN[0] down it fades into each row's median
-    colour (smoothed down the rows, so no band stays) with the photo's own fine grain, fully by FLOOR_CLEAN[1]; the slab
-    adds its own reflection on top (_reflect)."""
-    h = room.shape[0]
-    start, full = int(C.FLOOR_CLEAN[0] * h), int(C.FLOOR_CLEAN[1] * h)
-    out = room.copy()
-    floor = room[start:]
-    rows = cv2.GaussianBlur(np.median(floor, axis=1)[:, None, :], (0, 0), sigmaX=0.1, sigmaY=C.FLOOR_CLEAN_ROWS * h)
-    # A calm, light, neutral concrete, as Blokport's own pages show stone: the room's warm cast taken mostly out.
-    lab = cv2.cvtColor(np.clip(rows, 0, 255).astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
-    lab[..., 0] += C.FLOOR_LIFT
-    lab[..., 1:] *= C.FLOOR_CHROMA
-    rows = np.clip(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB), 0, 1) * 255
-    clean = rows + C.FLOOR_GRAIN * (floor - cv2.GaussianBlur(floor, (0, 0), 1.5))
-    w = np.clip((np.arange(start, h) - start) / max(1, full - start), 0, 1)[:, None, None]
-    out[start:] = floor * (1 - w) + clean * w
-    return out
+    return room
 
 
 def fit_working(rgb):
@@ -296,18 +275,22 @@ def _stand(out, x, width, bottom):
 
 
 def _reflect(out, left, total, bottom):
-    """The slab mirrored in the matte concrete at its foot: faint, fading and blurring with the distance."""
+    """The hall's polished floor in front of the slab: it can only mirror the slab there (the slab hides the hall behind
+    it), so the hall's own mirrored lamps and racks give way to the floor's plain tone (the hall floor smoothed across)
+    with the slab mirrored at the floor's gloss, fading and blurring with the distance. Beside the slab the hall's floor
+    stays as photographed; the sides blend, as a reflection in a real floor has no hard vertical edge."""
     rows = C.OUT_H - bottom
+    floor = out[bottom:, left:left + total]
+    tone = cv2.GaussianBlur(floor, (0, 0), sigmaX=C.FLOOR_TONE_SPREAD * C.OUT_W, sigmaY=C.FLOOR_TONE_ROWS)
     mirrored = out[bottom - rows:bottom, left:left + total][::-1]
     near = cv2.GaussianBlur(mirrored, (0, 0), C.REFLECT_BLUR[0])
     far = cv2.GaussianBlur(mirrored, (0, 0), C.REFLECT_BLUR[1])
     t = np.arange(rows, dtype=np.float32)[:, None, None]
-    spread = np.clip(t / (2 * C.REFLECT_FALL * C.OUT_H), 0, 1)
+    spread = t / max(1, rows - 1)
     strength = C.REFLECT * np.exp(-t / (C.REFLECT_FALL * C.OUT_H))
-    # Soft at the sides: a reflection in a real floor has no hard vertical edge.
+    under = tone * (1 - strength) + (near * (1 - spread) + far * spread) * strength
     edge = np.clip(np.minimum(np.arange(total), np.arange(total)[::-1]) / (C.REFLECT_SIDE * C.OUT_W), 0, 1)[None, :, None].astype(np.float32)
-    floor = out[bottom:, left:left + total]
-    floor[:] = floor * (1 - strength * edge) + (near * (1 - spread) + far * spread) * strength * edge
+    floor[:] = floor * (1 - edge) + under * edge
 
 
 def _ground(out, left, total, top, bottom):

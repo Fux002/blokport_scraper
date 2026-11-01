@@ -514,21 +514,36 @@ def test_a_marks_own_border_line_does_not_stay_at_the_fills_edge():
     assert np.abs(merged[:, 290:292].astype(np.float32) - clean[:, 290:292].astype(np.float32)).mean() < 4
 
 
-def test_the_near_floor_has_no_streaks_or_leftover_bands():
+def _hall_with_slab(slab_grey):
+    """A canvas: a glossy hall floor mirroring lamps and racks as bright streaks, a slab standing on the floor line."""
     h, w = C.OUT_H, C.OUT_W
-    room = np.full((h, w, 3), 120, np.float32)
+    out = np.full((h, w, 3), 120, np.float32)
     streaks = np.zeros((h, w), np.float32)
     for x in range(0, w, 128):
-        streaks[:, x:x + 30] = 110                                  # lamps and racks mirrored in a glossy floor
-    room += cv2.GaussianBlur(streaks, (0, 0), 8)[..., None]
-    room[int(0.90 * h):int(0.92 * h)] = 40                          # a band left over from the example photo's stand
-    room = cv2.GaussianBlur(room, (0, 0), 3)                        # as soft as in a photo
-    out = layout.clean_floor(room)
-    near = out[int(C.FLOOR_CLEAN[1] * h):, :, 0]
-    assert near.std(axis=1).max() < 6
-    assert np.abs(np.diff(near.mean(axis=1))).max() < 2
-    top = int(C.FLOOR_CLEAN[0] * h)
-    assert np.array_equal(out[:top], room[:top])
+        streaks[:, x:x + 30] = 110
+    out += cv2.GaussianBlur(streaks, (0, 0), 8)[..., None]
+    bottom = h - int(round(C.FLOOR_SHARE * h))
+    left, total = 400, 1200
+    out[:bottom, left:left + total] = slab_grey
+    return out, left, total, bottom
+
+
+def test_in_front_of_the_slab_the_floor_mirrors_the_slab_not_the_hall():
+    out, left, total, bottom = _hall_with_slab(40)                   # a dark slab
+    before = out.copy()
+    layout._reflect(out, left, total, bottom)
+    mid = slice(left + total // 4, left + 3 * total // 4)
+    near = out[bottom + 5:bottom + 40, mid, 0]
+    assert near.std(axis=1).max() < 0.3 * before[bottom + 5:bottom + 40, mid, 0].std(axis=1).max()   # the hall's streaks gone
+    assert near.mean() < before[bottom + 5:bottom + 40, mid, 0].mean() - 20                          # the dark slab mirrored
+
+
+def test_beside_the_slab_the_hall_floor_stays_as_photographed():
+    out, left, total, bottom = _hall_with_slab(40)
+    before = out.copy()
+    layout._reflect(out, left, total, bottom)
+    assert np.array_equal(out[:, :left], before[:, :left]) and np.array_equal(out[:, left + total:], before[:, left + total:])
+    assert np.array_equal(out[:bottom], before[:bottom])
 
 
 def test_a_close_up_with_a_fan_of_cards_is_cropped_to_its_clear_stone():
@@ -609,16 +624,6 @@ def test_orange_ink_or_tiny_specks_add_nothing():
     rgb, found = _written(_stone(800, 1200, base=170, var=8))
     rgb[500:506, 450:456] = (40, 90, 230)                            # a blue speck in the stone
     assert retouch.same_ink(rgb, found, _whole(), 1200)[490:515, 440:465].sum() == 0
-
-
-def test_the_near_floor_is_a_calm_light_neutral():
-    h, w = C.OUT_H, C.OUT_W
-    room = np.dstack([np.full((h, w), 120), np.full((h, w), 108), np.full((h, w), 92)]).astype(np.float32)   # a warm taupe floor
-    out = layout.clean_floor(room)
-    near = out[int(C.FLOOR_CLEAN[1] * h):].reshape(-1, 3).mean(0)
-    lab = lambda rgb: cv2.cvtColor(np.array([[rgb]], np.float32) / 255, cv2.COLOR_RGB2LAB)[0, 0]
-    was, now = lab(room[-1, 0]), lab(near)
-    assert now[0] > was[0] + 0.5 * C.FLOOR_LIFT and np.hypot(*now[1:]) < 0.6 * np.hypot(*was[1:])
 
 
 def test_the_studio_image_is_the_storefront_frame_and_repeatable():
