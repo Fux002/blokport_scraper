@@ -777,3 +777,34 @@ def test_a_small_sticker_counts_from_a_lower_score_than_a_large_card():
              (0, 0, 600, 400, 0.40),                                  # large and sure: counts
              (0, 0, 1000, 1000, 0.90)]                                # larger than any card: the slab itself
     assert retouch.card_boxes(found, w, h) == [found[0][:4], found[3][:4]]
+
+
+def _two_slabs_one_box(monkeypatch, neighbour):
+    """A photo of a slab with (or without) a separate, unmirrored slab beside it, the detector boxing both as one."""
+    from stone_pipeline.standardise import marks as proto
+    h, w = 1000, 2000
+    rgb = np.full((h, w, 3), 90, np.uint8)
+    left, right = np.zeros((h, w), np.uint8), np.zeros((h, w), np.uint8)
+    left[300:800, 100:900] = 1
+    right[300:800, 950:1750] = 1
+    rgb[left > 0] = _stone(h, w, seed=1)[left > 0]
+    if neighbour:
+        rgb[right > 0] = _stone(h, w, seed=7, base=120)[right > 0]
+    box = (90.0, 290.0, 1760.0, 810.0)                                 # one box over both places
+    monkeypatch.setattr(outline, "detect", lambda det, img, prompt=None, threshold=None: [] if prompt else [(*box, 0.6)])
+    monkeypatch.setattr(proto, "embed", lambda seg, img: None)
+    def slab_mask(seg, img, b, emb, widest=False):
+        m = left if b[0] < 500 else (right if neighbour else np.zeros_like(right))
+        return m.copy(), m.copy()
+    monkeypatch.setattr(proto, "slab_mask", slab_mask)
+    return outline.find_slabs(None, None, rgb)
+
+
+def test_a_slab_beside_another_in_one_detector_box_is_whole(monkeypatch):
+    quads, _, _, _, reason = _two_slabs_one_box(monkeypatch, neighbour=True)      # sen-39212b82
+    assert reason == "" and len(quads) == 1 and quads[0][:, 0].max() < 950
+
+
+def test_a_detector_box_past_the_slab_with_nothing_beside_it_still_holds(monkeypatch):
+    quads, _, _, _, reason = _two_slabs_one_box(monkeypatch, neighbour=False)     # only floor beside it: part of it unseen
+    assert quads == [] and "continues past" in reason

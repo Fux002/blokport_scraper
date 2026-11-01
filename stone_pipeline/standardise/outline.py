@@ -182,14 +182,15 @@ def _joint_mirrors(left_flat, right_flat):
     return mirrored >= C.JOINT_MIRROR_MIN and mirrored - unmirrored >= C.JOINT_MARGIN
 
 
-def _partner(seg, rgb, q, own, emb):
-    """(the bookmatched pair [left, right], the partner's mask) or None: SAM boxed into the slab-sized region past each side edge;
-    accepted only when it is a different slab of matching size meeting ours at that edge AND the veining
-    mirrors across the joint (a rack neighbour that merely stands beside it is not a partner)."""
+def _neighbours(seg, rgb, q, own, emb):
+    """[(side -1 left / +1 right, its quad, its mask, gap)] for each slab of matching size beside slab q: SAM boxed into
+    the slab-sized region past a side edge, a different slab whose near edge is within BESIDE_GAP of ours; gap = that
+    distance as a share of our width."""
     w, h = _size(q)
     tl, tr, br, bl = q
     H, W = rgb.shape[:2]
     top, bottom = float(min(tl[1], tr[1])), float(max(bl[1], br[1]))
+    found = []
     for edge_top, edge_bot, direction in ((tl, bl, -1), (tr, br, 1)):
         edge_x = float((edge_top[0] + edge_bot[0]) / 2)
         x0, x1 = (edge_x - w, edge_x) if direction < 0 else (edge_x, edge_x + w)
@@ -205,8 +206,17 @@ def _partner(seg, rgb, q, own, emb):
         w2, h2 = _size(q2)
         mid = (edge_top + edge_bot) / 2
         near = (q2[1] + q2[2]) / 2 if direction < 0 else (q2[0] + q2[3]) / 2
-        if np.linalg.norm(near - mid) > C.NEIGHBOUR_GAP * w or \
-                not (C.NEIGHBOUR_SIZE[0] <= h2 / h <= C.NEIGHBOUR_SIZE[1] and C.NEIGHBOUR_SIZE[0] <= w2 / w <= C.NEIGHBOUR_SIZE[1]):
+        gap = float(np.linalg.norm(near - mid)) / w
+        if gap <= C.BESIDE_GAP and C.NEIGHBOUR_SIZE[0] <= h2 / h <= C.NEIGHBOUR_SIZE[1] and C.NEIGHBOUR_SIZE[0] <= w2 / w <= C.NEIGHBOUR_SIZE[1]:
+            found.append((direction, q2, m, gap))
+    return found
+
+
+def _partner(rgb, q, neighbours):
+    """(the bookmatched pair [left, right], the partner's mask) or None: a neighbour is the partner only when it meets
+    ours (within NEIGHBOUR_GAP) and the veining mirrors across the joint (a rack neighbour that merely stands beside it is not)."""
+    for direction, q2, m, gap in neighbours:
+        if gap > C.NEIGHBOUR_GAP:
             continue
         pair = [q2, q] if direction < 0 else [q, q2]
         if _joint_mirrors(_flat(rgb, pair[0])[0], _flat(rgb, pair[1])[0]):
@@ -307,11 +317,14 @@ def find_slabs(seg, det, rgb):
     quads = _along(q, rgb)
     if not quads:
         return [], None, None, straps, "slab cut off by the photo edge"
-    if len(quads) == 1 and (found := _partner(seg, rgb, quads[0], m, emb)) is not None:
+    beside = _neighbours(seg, rgb, quads[0], m, emb) if len(quads) == 1 else []
+    if (found := _partner(rgb, quads[0], beside)) is not None:
         quads, partner = found
         m, raw = m | partner, raw | partner
+        beside = []
     if not all(_in_frame(x, rgb.shape) for x in quads):
         return [], None, None, straps, "slab cut off by the photo edge"
-    if not _outline_whole(box, quads):
+    # The detector may box a slab and the separate slab beside it as one (sen-39212b82): the neighbour explains its box.
+    if not _outline_whole(box, quads + [q2 for _, q2, _, _ in beside]):
         return [], None, None, straps, "the slab continues past the outline (only part of it found)"
     return quads, m, raw, straps, ""

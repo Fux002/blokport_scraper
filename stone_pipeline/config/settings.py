@@ -1077,6 +1077,8 @@ class STANDARDISE:
     PAIR_ASPECT = 2.4              # an outline this wide is two slabs: a strong seam alone splits it
     SAME_IOU = 0.5                 # a probed mask overlapping ours this much is our own slab, not a partner
     NEIGHBOUR_GAP = 0.04           # the partner's near edge within this share of the slab width of ours
+    BESIDE_GAP = 0.15              # a separate slab beside ours (a rack's next slab, a pole between: 39212b82 ~0.10) within this:
+                                   # it explains a detector box reaching past our slab
     NEIGHBOUR_SIZE = (0.88, 1.12)  # and its width and height within this ratio of ours (equal slabs)
     DETECTOR = "IDEA-Research/grounding-dino-base"   # Apache-2.0 open-vocabulary detector, our GPU
     DETECT_PROMPT = "a stone slab."
