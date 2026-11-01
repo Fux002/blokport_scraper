@@ -4,13 +4,13 @@ own, the stand the one drawn stand, and a real chip stays a chip.
 """
 import cv2
 import numpy as np
-import torch
 from PIL import Image
 
 from stone_pipeline.config.settings import STANDARDISE as C
 
 
 def _repaint(img, band, pipe, seed):
+    import torch
     out = pipe(C.BLEND_PROMPT, negative_prompt=C.BLEND_NEGATIVE, image=Image.fromarray(img).resize(C.BLEND_SIZE, Image.LANCZOS),
                mask_image=Image.fromarray(band * 255).resize(C.BLEND_SIZE, Image.BILINEAR), width=C.BLEND_SIZE[0], height=C.BLEND_SIZE[1],
                num_inference_steps=C.BLEND_STEPS, guidance_scale=C.BLEND_GUIDANCE, strength=C.BLEND_STRENGTH,

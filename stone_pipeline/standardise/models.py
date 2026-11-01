@@ -3,8 +3,6 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-import torch
-
 from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import marks, outline
 
@@ -25,6 +23,7 @@ class Models:
 
 
 def device():
+    import torch
     return "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 
@@ -43,6 +42,7 @@ def _clip(dev):
 
 
 def _inpaint(dev):
+    import torch
     from diffusers import AutoencoderKL, StableDiffusionXLInpaintPipeline
     vae = AutoencoderKL.from_pretrained(C.BLEND_VAE, revision=C.BLEND_VAE_REVISION, torch_dtype=torch.float16)
     baked = os.environ.get("STANDARDISE_SDXL_DIR", "")   # the image's own folder; elsewhere the pinned Hub revision

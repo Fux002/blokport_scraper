@@ -18,7 +18,6 @@ import time
 import boto3
 import cv2
 import numpy as np
-import torch
 from PIL import Image
 
 from deploy.standardise_source import _encode, _exists, _get, _photo_keys, finished, run_prefix
@@ -96,6 +95,7 @@ def _find(client, keys, out):
             print(f"   FIND FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
     del seg, det
     gc.collect()
+    import torch
     torch.cuda.empty_cache()
     return found, failed
 
@@ -125,6 +125,7 @@ def _survey(client, src, out):
 
 def _load_editor():
     """The model, as a function: (crop, seed) to edited crop."""
+    import torch
     from diffusers import Flux2KleinPipeline
     encoder = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, transformer=None, vae=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
     with torch.no_grad():
