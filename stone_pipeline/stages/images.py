@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 from stone_pipeline.core import env
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -277,7 +278,47 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         _link_from_manifest(rows, cfg, stats)
     else:
         _stage_and_link(rows, fetch, cfg, stats)
+    views = _load_standard_views(cfg)
+    for row in rows:
+        if row.image_keys:
+            _slot_row(row, standardised(row.image_keys, views))
     return stats
+
+
+_HOSTED = re.compile(r"/products/(?:[a-z]+/)?([a-z_]+)/([0-9a-f]{64})\.[a-z0-9]+$")
+
+
+def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
+    """A product's images: its one standardised photo when a published one exists (user 2026-11-01: one very good image
+    per listing is enough, shown in every view). Only photos the judge passed are published, one chosen per listing; the
+    lead is the first published photo in the product's order that shows a whole slab or an open book (it has a side
+    view), else the first published one. Its showroom image is the catalog thumbnail, then its white, side and close-up
+    views, whichever it has (a block: its showroom image only). The product's other photos are left out, their warehouse
+    would show next to the showroom; a product with no published photo keeps the images it had."""
+    found = []
+    for url in urls:
+        m = _HOSTED.search(url)
+        if m and m.group(2) in views.get("main", ()):
+            found.append((url[:m.start()], m.group(1), m.group(2)))     # (url up to /products, source, sha)
+    if not found:
+        return urls
+    base, src, sha = next((f for f in found if f[2] in views.get("studio", ())), found[0])
+    return [f"{base}/products/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
+            for view in imagestore.STANDARD_VIEWS if sha in views.get(view, ())]
+
+
+def _load_standard_views(cfg) -> dict[str, set[str]]:
+    """{view: shas} of the published standardised photos. Empty in local mode or when none are published. When the
+    pool cannot be read the products keep the images they had this run (today's images, never a guess) and it is
+    logged: the next produce links the standardised set."""
+    if getattr(cfg, "mode", None) == "local":
+        return {}
+    try:
+        return {view: _list_shas(imagestore.standard_prefix(view)) for view in imagestore.STANDARD_VIEWS}
+    except Exception as exc:
+        log.warning("standardised photos unreachable; products keep their images this run",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return {}
 
 
 def _finish_row(row: CanonicalRow, urls: list[str], srcs: int, n_discarded: int, n_held: int,
