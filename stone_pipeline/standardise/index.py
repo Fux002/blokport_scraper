@@ -20,7 +20,7 @@ def _size(row):
 def build(sheet_text):
     """{sha: {"source", "key", "format", "size"}} from the product sheet's text. Fails loud on an unknown category:
     a guessed format would put a tile on a slab's stand."""
-    formats = {c.pcat_id: c.name for c in settings.CATEGORIES if c.pcat_id}
+    formats = {c.pcat_id: c.name for c in settings.active_categories()}     # the live registry: refreshed from the export
     photos = {}
     for row in csv.DictReader(io.StringIO(sheet_text)):
         category = row["Product Category 1"]

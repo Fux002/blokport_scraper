@@ -78,13 +78,24 @@ def only(keys, wanted):
     return [k for k in keys if imagestore.sha_from_url(k) in wanted]
 
 
-def _photo_keys(client, src):
-    """The photos of this run: the known ones, stable order (slices rely on it), ONLY_KEY (an S3 JSON list of shas: a
-    run of chosen photos), SAMPLE and the slice applied."""
+def sheet_photos(client):
+    """{sha: {source, key, format, size}} of this environment's product sheet. Its categories are read from the
+    environment's CURRENT Medusa export first, as the produce does (fetch_inputs, then refresh_category_pcats): category
+    ids differ per environment, prod has no committed export, and a committed one can lag Medusa. A fetch that fails
+    keeps what is on disk, so a prod run without its export fails loud on its first category, never guesses."""
+    from deploy import fetch_inputs
+    from stone_pipeline.config import settings
+    fetch_inputs.fetch_attributes(client)
+    settings.refresh_category_pcats()
+    return index.build(_get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8"))
+
+
+def _photo_keys(client, src, photos):
+    """The photos of this run: those of `photos` (sheet_photos) scraped for src, stable order (slices rely on it),
+    ONLY_KEY (an S3 JSON list of shas: a run of chosen photos), SAMPLE and the slice applied."""
     sample = int(os.environ.get("SAMPLE", "0"))
     offset, count = int(os.environ.get("SLICE_OFFSET", "0")), int(os.environ.get("SLICE_COUNT", "0"))
     listed = os.environ.get("ONLY_KEY", "").strip()
-    photos = index.build(_get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8"))
     keys = []
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.scraped_prefix(src)):
         keys.extend(o["Key"] for o in page.get("Contents", []))
@@ -106,8 +117,8 @@ def main() -> int:
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
     client = boto3.client("s3", region_name=S3_REGION)
     out = run_prefix(src)
-    photos = index.build(_get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8"))
-    sliced = _photo_keys(client, src)
+    photos = sheet_photos(client)
+    sliced = _photo_keys(client, src, photos)
     print(f"==> standardise {src}: {len(sliced)} photos, survey={survey}", flush=True)
     m = models.load(survey_only=survey)
     tally = collections.Counter()

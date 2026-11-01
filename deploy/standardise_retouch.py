@@ -20,7 +20,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from deploy.standardise_source import _encode, _exists, _get, _photo_keys, finished, run_prefix
+from deploy.standardise_source import _encode, _exists, _get, _photo_keys, finished, run_prefix, sheet_photos
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import marks, outline, photo, retouch
@@ -113,7 +113,7 @@ def survey_note(packed):
 
 def _survey(client, src, out):
     """Note every photo of the slice not yet surveyed; a photo whose search failed gets no note (it is not 'no marks')."""
-    keys = [k for k in _photo_keys(client, src) if not _exists(client, f"{out}marks_survey/{imagestore.sha_from_url(k)}.json")]
+    keys = [k for k in _photo_keys(client, src, sheet_photos(client)) if not _exists(client, f"{out}marks_survey/{imagestore.sha_from_url(k)}.json")]
     found, failed = _find(client, keys, out)
     for key in keys:
         if key not in failed:
@@ -162,7 +162,7 @@ def main() -> int:
     out = run_prefix(src)
     if _surveying():
         return _survey(client, src, out)
-    keys = [k for k in _photo_keys(client, src)
+    keys = [k for k in _photo_keys(client, src, sheet_photos(client))
             if not finished(client, out, sha := imagestore.sha_from_url(k)) and not retouched(client, out, sha)]
     found, _ = _find(client, keys, out)
     print(f"==> retouch {src}: marks on {len(found)} of {len(keys)} photos", flush=True)

@@ -231,8 +231,8 @@ two,,,pcat_01M1GWN1V1E66J1NM1PTQ3ESAK,https://x/prod/products/improved/zucchi/{a
 @pytest.fixture
 def _active_slab(monkeypatch):
     from dataclasses import replace
-    slab = settings.category("slab")
-    monkeypatch.setattr(settings, "CATEGORIES", (replace(slab, pcat_id="pcat_01M1GWN1V1E66J1NM1PTQ3ESAK"),))
+    slab = replace(settings.category("slab"), pcat_id="pcat_01M1GWN1V1E66J1NM1PTQ3ESAK")
+    monkeypatch.setattr(settings, "_BY_NAME", {slab.name: slab})           # the live registry the helpers read
 
 
 def test_the_index_links_a_photo_to_its_first_product(_active_slab):

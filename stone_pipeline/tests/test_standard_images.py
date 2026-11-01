@@ -120,3 +120,26 @@ def test_a_run_can_be_limited_to_a_list_of_photos():
     keys = [f"dev/products/scraped/sentas/{s}.jpg" for s in (A, B, C_)]
     assert src.only(keys, None) == keys                                  # no list: every photo
     assert src.only(keys, [C_, A]) == [keys[0], keys[2]]                 # the listed ones, in the run's own order
+
+
+def test_a_run_reads_its_environment_s_current_categories_before_its_product_sheet(monkeypatch):
+    from deploy import fetch_inputs, standardise_source as src
+    from stone_pipeline.config import settings
+    calls = []
+    monkeypatch.setattr(fetch_inputs, "fetch_attributes", lambda client: calls.append("fetch") or True)
+    monkeypatch.setattr(settings, "refresh_category_pcats", lambda: calls.append("refresh"))
+    monkeypatch.setattr(src, "_get", lambda client, key: calls.append(f"sheet {key}") or b"")
+    monkeypatch.setattr(src.index, "build", lambda text: calls.append("index") or {})
+    assert src.sheet_photos(object()) == {}
+    assert calls == ["fetch", "refresh", f"sheet {settings.ENV_SEGMENT}/{src.C.SHEET_KEY}", "index"]   # prod has no committed export
+
+
+def test_the_product_index_follows_the_categories_refreshed_from_the_export(monkeypatch):
+    from dataclasses import replace
+    from stone_pipeline.config import settings
+    from stone_pipeline.standardise import index
+    slab = replace(settings.category("slab"), pcat_id="pcat_PROD_SLABS")             # the id prod's export carries
+    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
+    sheet = ("Product Handle,Product Category 1,Product Length,Product Width,Product Image 1\n"
+             f"h,pcat_PROD_SLABS,3.0,1.8,https://b.s3.amazonaws.com/prod/products/improved/sentas/{A}.jpg\n")
+    assert index.build(sheet)[A]["format"] == "slab"
