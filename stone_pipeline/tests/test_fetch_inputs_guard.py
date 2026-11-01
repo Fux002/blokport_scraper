@@ -68,3 +68,41 @@ def test_fetch_attributes_best_effort_on_s3_error(tmp_path):
     assert fetch_inputs.fetch_attributes(client=_FakeS3(None), target=target) is False   # download raises -> kept
     assert target.read_text() == before
     assert not target.with_suffix(".csv.incoming").exists()
+
+
+def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
+    # Medusa's export also lists other vendors' variants (dev 2026-11-01: non-stone test products, np-cattle-...,
+    # np-diesel-...): not ours to match, mint or sync, and the ledger refuses them, which aborted the produce
+    export = tmp_path / "variants_export.csv"
+    export.write_text("Id,Key,Name,Image,Aliases\n"
+                      "v1,slab_marble_carrara_0001,Carrara,,\n"
+                      "v2,np-cattle-heifer-limousin-430,Heifer,,\n"
+                      "v3,tile_marble_carrara_0001,Carrara,,\n"
+                      "v4,np-diesel-en590-summer,Diesel,,\n", encoding="utf-8")
+    assert fetch_inputs.own_variants(export) == 2
+    lines = export.read_text(encoding="utf-8").splitlines()
+    assert lines == ["Id,Key,Name,Image,Aliases", "v1,slab_marble_carrara_0001,Carrara,,", "v3,tile_marble_carrara_0001,Carrara,,"]
+    assert fetch_inputs.own_variants(export) == 0                     # already clean: nothing to drop, same file
+
+
+def test_both_variant_exports_are_kept_to_the_scraper_s_own_variants():
+    assert fetch_inputs._VARIANT_EXPORTS == {"variants_export.csv", "variants_export_base.csv"}
+
+
+def test_other_vendors_rows_never_make_a_thin_stone_export_look_full(tmp_path, monkeypatch):
+    # Medusa mid-reset: few stone rows plus many foreign rows. Counted before filtering it passes the thin-copy guard
+    # and replaces the full local export with an almost empty one; filtered first, the local export is kept.
+    local = tmp_path / "variants_export.csv"
+    local.write_text("Id,Key\n" + "".join(f"v{i},slab_x_{i:04d}\n" for i in range(10)), encoding="utf-8")
+    incoming = "Id,Key\nv1,slab_x_0001\n" + "".join(f"n{i},np-thing-{i}\n" for i in range(30))
+
+    class _Client:
+        def get_paginator(self, name):
+            return type("P", (), {"paginate": lambda self, **k: [{"Contents": [{"Key": f"{fetch_inputs.ENV_SEGMENT}/scraper/from_medusa/variants_export.csv"}]}]})()
+
+        def download_file(self, bucket, key, filename):
+            open(filename, "w", encoding="utf-8").write(incoming)
+    monkeypatch.setattr(fetch_inputs.boto3, "client", lambda *a, **k: _Client())
+    monkeypatch.setattr(fetch_inputs, "SETTINGS", type("S", (), {"paths": type("P", (), {"from_medusa_dir": tmp_path})()})())
+    fetch_inputs.main()
+    assert local.read_text(encoding="utf-8").count("slab_x_") == 10          # the full local export stays
