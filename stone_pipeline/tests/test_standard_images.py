@@ -113,3 +113,10 @@ def test_a_marks_survey_notes_whether_a_photo_carries_lamp_reflections():
     assert rt.survey_note(None) == {"marks": False, "flares": False}
     assert rt.survey_note(tuple(rt._pack(m) for m in (none, lamp, none, none, none))) == {"marks": True, "flares": True}
     assert rt.survey_note(tuple(rt._pack(m) for m in (lamp, none, none, none, none))) == {"marks": True, "flares": False}
+
+
+def test_a_run_can_be_limited_to_a_list_of_photos():
+    from deploy import standardise_source as src
+    keys = [f"dev/products/scraped/sentas/{s}.jpg" for s in (A, B, C_)]
+    assert src.only(keys, None) == keys                                  # no list: every photo
+    assert src.only(keys, [C_, A]) == [keys[0], keys[2]]                 # the listed ones, in the run's own order

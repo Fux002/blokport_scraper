@@ -1,8 +1,9 @@
 """Standardise a source's scraped photos (RUN_MODE=standardise), on the GPU: reads <env>/products/scraped/<src>/, writes
 finished images + the clean slab under <env>/standardise-test/<src>/, never into improved/ (going live is a later step).
 Env: SRC; SURVEY=true only classifies every photo and writes the counts; SAMPLE=<n> takes n photos, the same n on every
-run (the lowest hashes); SLICE_OFFSET / SLICE_COUNT as in deploy.reprocess_source. A photo already done is skipped, so a
-re-run is safe. One bad photo is recorded and never stops the slice.
+run (the lowest hashes); ONLY_KEY=<s3 key of a JSON list of shas> runs just those; SLICE_OFFSET / SLICE_COUNT as in
+deploy.reprocess_source. A photo already done is skipped, so a re-run is safe. One bad photo is recorded and never stops
+the slice.
 """
 
 from __future__ import annotations
@@ -69,16 +70,26 @@ def run_prefix(src):
     return f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag + '/' if tag else ''}{src}/"
 
 
+def only(keys, wanted):
+    """keys limited to the photos listed in `wanted` (shas), in the run's own order; all of them when there is no list."""
+    if wanted is None:
+        return keys
+    wanted = set(wanted)
+    return [k for k in keys if imagestore.sha_from_url(k) in wanted]
+
+
 def _photo_keys(client, src):
-    """The photos of this run: the known ones, stable order (slices rely on it), SAMPLE and the slice applied."""
+    """The photos of this run: the known ones, stable order (slices rely on it), ONLY_KEY (an S3 JSON list of shas: a
+    run of chosen photos), SAMPLE and the slice applied."""
     sample = int(os.environ.get("SAMPLE", "0"))
     offset, count = int(os.environ.get("SLICE_OFFSET", "0")), int(os.environ.get("SLICE_COUNT", "0"))
+    listed = os.environ.get("ONLY_KEY", "").strip()
     photos = index.build(_get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8"))
     keys = []
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.scraped_prefix(src)):
         keys.extend(o["Key"] for o in page.get("Contents", []))
     keys.sort()
-    known = [k for k in keys if imagestore.sha_from_url(k) in photos]
+    known = only([k for k in keys if imagestore.sha_from_url(k) in photos], json.loads(_get(client, listed)) if listed else None)
     if sample:
         known = known[:sample]
     return known[offset:offset + count] if count else known[offset:]
