@@ -1,6 +1,7 @@
 """Which open editing model removes straps, logos and sample cards best (RUN_MODE=standardise-edit-test, on the GPU, dev
-only): reads the list at <env>/standardise-test/edit-test.json ([{"src", "sha", "task"}]) and writes each model edit under
-<env>/standardise-test/edit-test/<model>/. A comparison for a person to judge: nothing here is published.
+only): reads the list at <env>/standardise-test/edit-test.json ([{"src", "sha", "task"}], or {"key", "name", "task"} for
+any image in the bucket, such as a showroom hall) and writes each model edit under <env>/standardise-test/edit-test/<model>/.
+For a person to judge: nothing here is published.
 """
 
 from __future__ import annotations
@@ -42,7 +43,8 @@ def main() -> int:
     pipe = Flux2KleinPipeline.from_pretrained(C.EDIT_DIR, text_encoder=None, tokenizer=None, torch_dtype=torch.float16, low_cpu_mem_usage=True).to("cuda")
     for item in items:
         started = time.time()
-        key = f"{imagestore.scraped_prefix(item['src'])}{item['sha']}.jpg"
+        key = item.get("key") or f"{imagestore.scraped_prefix(item['src'])}{item['sha']}.jpg"
+        name = item.get("name") or f"{item['task']}-{item['src']}-{item['sha'][:12]}"
         img = Image.open(io.BytesIO(client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())).convert("RGB")
         w, h = _size(img)
         out = pipe(prompt_embeds=embeds[item["task"]].to("cuda"), image=img.resize((w, h), Image.LANCZOS), width=w, height=h,
@@ -50,9 +52,8 @@ def main() -> int:
                    generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0]
         buf = io.BytesIO()
         out.save(buf, "JPEG", quality=92)
-        client.put_object(Bucket=S3_BUCKET, Key=f"{prefix}/edit-test/klein/{item['task']}-{item['src']}-{item['sha'][:12]}.jpg",
-                          Body=buf.getvalue(), ContentType="image/jpeg")
-        print(f"   {item['task']} {item['src']} {item['sha'][:12]} {w}x{h} {time.time() - started:.1f}s peak GPU {torch.cuda.max_memory_allocated() / 1e9:.1f} GB", flush=True)
+        client.put_object(Bucket=S3_BUCKET, Key=f"{prefix}/edit-test/klein/{name}.jpg", Body=buf.getvalue(), ContentType="image/jpeg")
+        print(f"   {name} {w}x{h} {time.time() - started:.1f}s peak GPU {torch.cuda.max_memory_allocated() / 1e9:.1f} GB", flush=True)
     print("==> edit test done", flush=True)
     return 0
 

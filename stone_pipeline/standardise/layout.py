@@ -274,25 +274,6 @@ def _stand(out, x, width, bottom):
         region[:] = region * sh[:h] * (1 - a[:h]) + r[:h] * a[:h]
 
 
-def _reflect(out, left, total, bottom):
-    """The hall's polished floor in front of the slab: it can only mirror the slab there (the slab hides the hall behind
-    it), so the hall's own mirrored lamps and racks give way to the floor's plain tone (the hall floor smoothed across)
-    with the slab mirrored at the floor's gloss, fading and blurring with the distance. Beside the slab the hall's floor
-    stays as photographed; the sides blend, as a reflection in a real floor has no hard vertical edge."""
-    rows = C.OUT_H - bottom
-    floor = out[bottom:, left:left + total]
-    tone = cv2.GaussianBlur(floor, (0, 0), sigmaX=C.FLOOR_TONE_SPREAD * C.OUT_W, sigmaY=C.FLOOR_TONE_ROWS)
-    mirrored = out[bottom - rows:bottom, left:left + total][::-1]
-    near = cv2.GaussianBlur(mirrored, (0, 0), C.REFLECT_BLUR[0])
-    far = cv2.GaussianBlur(mirrored, (0, 0), C.REFLECT_BLUR[1])
-    t = np.arange(rows, dtype=np.float32)[:, None, None]
-    spread = t / max(1, rows - 1)
-    strength = C.REFLECT * np.exp(-t / (C.REFLECT_FALL * C.OUT_H))
-    under = tone * (1 - strength) + (near * (1 - spread) + far * spread) * strength
-    edge = np.clip(np.minimum(np.arange(total), np.arange(total)[::-1]) / (C.REFLECT_SIDE * C.OUT_W), 0, 1)[None, :, None].astype(np.float32)
-    floor[:] = floor * (1 - edge) + under * edge
-
-
 def _ground(out, left, total, top, bottom):
     """What ties the slab to the floor: the stone's foot in less light, its bottom edge face, the dark floor under
     it, and the soft shadow spilling past its ends."""
@@ -347,7 +328,6 @@ def compose(slabs, key, room=None, stand=True):
         if i < len(slabs) - 1:
             out[top:bottom, x:x + joint] = C.JOINT_COLOUR
             x += joint
-    _reflect(out, left, total, bottom)
     _ground(out, left, total, top, bottom)
     for x, sw in placed:
         if stand:

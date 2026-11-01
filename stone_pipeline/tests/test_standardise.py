@@ -514,36 +514,15 @@ def test_a_marks_own_border_line_does_not_stay_at_the_fills_edge():
     assert np.abs(merged[:, 290:292].astype(np.float32) - clean[:, 290:292].astype(np.float32)).mean() < 4
 
 
-def _hall_with_slab(slab_grey):
-    """A canvas: a glossy hall floor mirroring lamps and racks as bright streaks, a slab standing on the floor line."""
-    h, w = C.OUT_H, C.OUT_W
-    out = np.full((h, w, 3), 120, np.float32)
-    streaks = np.zeros((h, w), np.float32)
-    for x in range(0, w, 128):
-        streaks[:, x:x + 30] = 110
-    out += cv2.GaussianBlur(streaks, (0, 0), 8)[..., None]
-    bottom = h - int(round(C.FLOOR_SHARE * h))
-    left, total = 400, 1200
-    out[:bottom, left:left + total] = slab_grey
-    return out, left, total, bottom
-
-
-def test_in_front_of_the_slab_the_floor_mirrors_the_slab_not_the_hall():
-    out, left, total, bottom = _hall_with_slab(40)                   # a dark slab
-    before = out.copy()
-    layout._reflect(out, left, total, bottom)
-    mid = slice(left + total // 4, left + 3 * total // 4)
-    near = out[bottom + 5:bottom + 40, mid, 0]
-    assert near.std(axis=1).max() < 0.3 * before[bottom + 5:bottom + 40, mid, 0].std(axis=1).max()   # the hall's streaks gone
-    assert near.mean() < before[bottom + 5:bottom + 40, mid, 0].mean() - 20                          # the dark slab mirrored
-
-
-def test_beside_the_slab_the_hall_floor_stays_as_photographed():
-    out, left, total, bottom = _hall_with_slab(40)
-    before = out.copy()
-    layout._reflect(out, left, total, bottom)
-    assert np.array_equal(out[:, :left], before[:, :left]) and np.array_equal(out[:, left + total:], before[:, left + total:])
-    assert np.array_equal(out[:bottom], before[:bottom])
+def test_the_matte_floor_never_mirrors_the_slab():
+    h, w = 900, 1400
+    stripes = np.zeros((h, w, 3), np.uint8)
+    stripes[:, ::40] = 255                                           # a slab with bold white veins every 40 px
+    room = np.full((C.OUT_H, C.OUT_W, 3), 128, np.float32)
+    out = layout.compose([(stripes, np.ones((h, w), np.float32))], "k", room=room, stand=False).astype(np.float32)
+    bottom = C.OUT_H - int(round(C.FLOOR_SHARE * C.OUT_H))
+    floor = out[bottom + 10:, C.OUT_W // 4:3 * C.OUT_W // 4, 0]
+    assert floor.std(axis=1).max() < 1.0                             # shaded evenly, no stripe of the slab in it
 
 
 def test_a_close_up_with_a_fan_of_cards_is_cropped_to_its_clear_stone():
