@@ -45,9 +45,10 @@ def slices(todo):
     return [(src, o, C.RUN_SLICE) for src, shas in sorted(todo.items()) for o in range(0, len(shas), C.RUN_SLICE)]
 
 
-def submit(batch, s3, queue, jobdef, tag, todo, watermarked):
-    """Store the round's photo list and submit its jobs: [job ids]. todo = {source: shas}; watermarked = {source: bool}."""
-    only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo.json"
+def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id):
+    """Store the round's photo list and submit its jobs: [job ids]. todo = {source: shas}; watermarked = {source: bool}.
+    The list is the run's own file (run_id), so no other run's round can ever replace it under running jobs."""
+    only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo-{run_id}.json"
     s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(sorted(s for v in todo.values() for s in v)).encode(),
                   ContentType="application/json")
     ids = []
@@ -76,11 +77,11 @@ def wait(batch, ids, sleep=time.sleep):
         sleep(C.RUN_POLL_SECONDS)
 
 
-def run_round(batch, s3, tag, todo, watermarked):
+def run_round(batch, s3, tag, todo, watermarked, run_id):
     """Every listed photo through retouch and standardise under `tag`: [(job name, why)] of failed jobs. No jobs, no
     ceiling change, when nothing is listed."""
     if not any(todo.values()):
         return []
     queue, jobdef = target()
     with raised(batch, pool(batch, queue)):
-        return wait(batch, submit(batch, s3, queue, jobdef, tag, todo, watermarked))
+        return wait(batch, submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id))

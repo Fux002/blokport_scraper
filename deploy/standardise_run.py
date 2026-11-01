@@ -9,7 +9,11 @@
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice.
 Env: RUN_TAG, CLEAN_TAG (the scraped and the cleaned run), SRC (space-separated sources), LISTINGS_KEY (optional:
 an S3 JSON list of listing keys), FAL_KEY, SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF.
-Exit 0 done; 1 some listings or photos failed (run again); 2 not configured; 3 the hosted spend cap was reached.
+One run at a time per environment: a run holds <env>/standardise-test/run.lock (written only if absent) and removes it
+when it ends; a second run refuses to start (its GPU rounds would change the shared GPU pool's ceiling under the first).
+A lock left by a run that was killed is removed by hand after checking no run is active.
+Exit 0 done; 1 some listings or photos failed (run again); 2 not configured; 3 the hosted spend cap was reached;
+4 another run is active.
 """
 
 from __future__ import annotations
@@ -17,14 +21,39 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import boto3
+from botocore.exceptions import ClientError
 
 from deploy import standardise_batch as gpu
 from deploy import standardise_select as select
 from deploy.standardise_source import sheet_listings
-from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.config.sources import load_source
+
+
+LOCK = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/run.lock"
+
+
+class RunActive(RuntimeError):
+    pass
+
+
+@contextmanager
+def exclusive(s3, owner):
+    """Hold the environment's run lock for the block; RunActive when another run holds it."""
+    try:
+        s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=json.dumps(owner).encode(), IfNoneMatch="*")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("PreconditionFailed", "ConditionalRequestConflict"):
+            raise RunActive(f"another standardise run holds s3://{S3_BUCKET}/{LOCK}") from exc
+        raise
+    try:
+        yield
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=LOCK)
 
 
 def listings(s3, sources, wanted_key):
@@ -33,10 +62,10 @@ def listings(s3, sources, wanted_key):
     return [l for l in sheet_listings(s3) if l["source"] in sources and (keep is None or l["key"] in keep)]
 
 
-def gpu_round(batch, sel, tag, todo):
+def gpu_round(batch, sel, tag, todo, run_id):
     """The GPU round for `todo`, then the stores re-read: [problems] (failed jobs, listed photos left without a result)."""
     watermarked = {src: load_source(src).watermarked for src in todo}
-    problems = [f"GPU job {name} failed: {why}" for name, why in gpu.run_round(batch, sel.client, tag, todo, watermarked)]
+    problems = [f"GPU job {name} failed: {why}" for name, why in gpu.run_round(batch, sel.client, tag, todo, watermarked, run_id)]
     sel.refresh()
     rnd = dict(sel.rounds)[tag]
     problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas
@@ -53,15 +82,15 @@ def hosted(step, sel, spend):
     return [f"{key}: {why}" for key, why in failures], capped
 
 
-def run(batch, sel, spend, say=print):
+def run(batch, sel, spend, run_id, say=print):
     """The six steps; (problems, cap reached). Stops at the cap: what is stored stays, the next run goes on."""
-    problems = gpu_round(batch, sel, sel.tags[0], sel.gpu_todo())
+    problems = gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id)
     for step in (select.judge_all, select.clean_all):
         found, capped = hosted(step, sel, spend)
         problems += found
         if capped:
             return problems, True
-    problems += gpu_round(batch, sel, sel.tags[1], sel.clean_todo())
+    problems += gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id)
     found, capped = hosted(select.judge_all, sel, spend)
     problems += found
     if capped:
@@ -81,10 +110,18 @@ def main() -> int:
         print("ERROR: RUN_TAG, CLEAN_TAG (a different tag) and SRC are required; aborting")
         return 2
     s3, batch = boto3.client("s3", region_name=S3_REGION), boto3.client("batch", region_name=S3_REGION)
-    sel = select.Selection(s3, listings(s3, sources, os.environ.get("LISTINGS_KEY", "").strip()), run_tag, clean_tag)
-    spend = select.Spend(C.SPEND_CAP_USD)
-    print(f"==> standardise run: {len(sel.listings)} listings of {', '.join(sel.sources)}; {run_tag} then {clean_tag}", flush=True)
-    problems, capped = run(batch, sel, spend)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    owner = {"run_id": run_id, "tags": [run_tag, clean_tag], "sources": sorted(sources)}
+    try:
+        with exclusive(s3, owner):
+            sel = select.Selection(s3, listings(s3, sources, os.environ.get("LISTINGS_KEY", "").strip()), run_tag, clean_tag)
+            spend = select.Spend(C.SPEND_CAP_USD)
+            print(f"==> standardise run {run_id}: {len(sel.listings)} listings of {', '.join(sel.sources)}; "
+                  f"{run_tag} then {clean_tag}", flush=True)
+            problems, capped = run(batch, sel, spend, run_id)
+    except RunActive as exc:
+        print(f"ERROR: {exc}; not started")
+        return 4
     print(f"==> hosted spend ${spend.spent:.2f}", flush=True)
     for p in problems:
         print(f"   {p}", flush=True)

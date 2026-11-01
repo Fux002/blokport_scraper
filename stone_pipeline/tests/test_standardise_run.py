@@ -69,14 +69,15 @@ def _listing(*photos, key="slab-1"):
 def test_each_source_is_sliced_and_each_slice_is_a_retouch_then_a_standardise(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 2)
     batch, s3 = _Batch(), _S3()
-    ids = gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True})
+    ids = gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True}, "R1")
     names = [j["jobName"] for j in batch.submitted]
     assert names == ["retouch-sentas-v9-0", "standardise-sentas-v9-0", "retouch-sentas-v9-2", "standardise-sentas-v9-2",
                      "retouch-varsha-v9-0", "standardise-varsha-v9-0"]
     assert batch.submitted[1]["dependsOn"] == [{"jobId": ids[0]}]                     # standardise waits for its retouch
     env = {e["name"]: e["value"] for e in batch.submitted[5]["containerOverrides"]["environment"]}
     assert env["RUN_MODE"] == "standardise" and env["WATERMARKED"] == "true" and env["RUN_TAG"] == "v9"
-    assert json.loads(s3.objects[env["ONLY_KEY"]]) == sorted([A, B, D, E])          # the round's photo list
+    assert env["ONLY_KEY"].endswith("/v9/gpu-todo-R1.json")                          # this run's own list
+    assert json.loads(s3.objects[env["ONLY_KEY"]]) == sorted([A, B, D, E])
 
 
 def test_waiting_asks_until_every_job_has_ended_and_names_the_failed(monkeypatch):
@@ -96,7 +97,7 @@ def test_the_pool_s_ceiling_is_set_back_even_when_the_round_fails():
 
 def test_a_round_with_nothing_listed_touches_nothing():
     batch = _Batch()
-    assert gpu.run_round(batch, _S3(), "v9", {"sentas": []}, {"sentas": False}) == []
+    assert gpu.run_round(batch, _S3(), "v9", {"sentas": []}, {"sentas": False}, "R1") == []
     assert batch.submitted == [] and batch.ceilings == []
 
 
@@ -131,19 +132,19 @@ def _steps(monkeypatch, cap_at=None):
     monkeypatch.setattr(runner.select, "judge_all", step("judge"))
     monkeypatch.setattr(runner.select, "clean_all", step("clean"))
     monkeypatch.setattr(runner.select, "report", lambda sel: done.append("report") or {"chosen": [], "tracked": [], "pending": []})
-    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo: done.append(f"gpu {tag}") or [])
+    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id: done.append(f"gpu {tag}") or [])
     return done
 
 
 def test_the_steps_run_in_order(monkeypatch):
     done = _steps(monkeypatch)
-    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), say=lambda m: None)
+    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", say=lambda m: None)
     assert done == ["gpu v9", "judge", "clean", "gpu v9-clean", "judge", "report"] and not problems and not capped
 
 
 def test_the_run_stops_at_the_spend_cap_and_says_so(monkeypatch):
     done = _steps(monkeypatch, cap_at="clean")
-    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), say=lambda m: None)
+    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", say=lambda m: None)
     assert capped and done == ["gpu v9", "judge", "clean"]
 
 
@@ -151,7 +152,7 @@ def test_a_listed_photo_left_without_a_result_is_a_problem(monkeypatch):
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: [])
     monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     s = _selection([_listing(A, B)], gpu_round=_round(finished={A}))
-    problems = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A, B]})
+    problems = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A, B]}, "R1")
     assert problems == [f"sentas {B[:12]}: no result after the GPU round"]
 
 
@@ -162,3 +163,35 @@ def test_a_failed_hosted_step_is_run_once_more():
         calls.append(1)
         return ([("slab-1", "timeout")] if len(calls) == 1 else []), False
     assert runner.hosted(flaky, None, None) == ([], False) and len(calls) == 2
+
+
+# --- one run at a time ------------------------------------------------------------------------------------------------
+class _LockS3:
+    """A bucket where a conditional write fails when the key exists, as S3 does."""
+
+    def __init__(self, held=False):
+        self.keys = {runner.LOCK} if held else set()
+
+    def put_object(self, Bucket, Key, Body, IfNoneMatch):
+        from botocore.exceptions import ClientError
+        if Key in self.keys:
+            raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
+        self.keys.add(Key)
+
+    def delete_object(self, Bucket, Key):
+        self.keys.discard(Key)
+
+
+def test_a_second_run_refuses_to_start_while_one_holds_the_lock():
+    with pytest.raises(runner.RunActive):
+        with runner.exclusive(_LockS3(held=True), {"run_id": "R2"}):
+            pytest.fail("ran alongside another run")
+
+
+def test_the_lock_is_released_even_when_the_run_fails():
+    s3 = _LockS3()
+    with pytest.raises(RuntimeError):
+        with runner.exclusive(s3, {"run_id": "R1"}):
+            assert runner.LOCK in s3.keys
+            raise RuntimeError("interrupted")
+    assert runner.LOCK not in s3.keys
