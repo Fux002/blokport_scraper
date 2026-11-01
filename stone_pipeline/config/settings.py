@@ -1093,7 +1093,9 @@ class STANDARDISE:
     STRAP_MAX_WIDTH = 0.25         # ... is at most this share of its width (else it is the slab itself) ...
     STRAP_ELONGATION = 6.0         # ... and its mask is at least this many times longer than wide
     STRAP_PIECE_MIN = 0.02         # slab pieces left beside the straps count when this share of the slab
-    FRAME_EDGE = 0.01              # a slab corner this close (share of the photo) to the frame edge: cut off, no composite
+    FRAME_EDGE = 0.01              # a slab corner this close (share of the photo) to a frame edge its stone runs into: cut off
+    FRAME_TOUCH = 0.02             # the stone runs into a frame edge when it covers this share of that edge's outermost line
+                                   # (measured 2026-11-01: cut off 3.8-74%, framed tightly 0%)
     # --- outline ---
     ROOM_COUNT = 3                     # rooms/<1..n>.jpg, and far_<1..n>.jpg (the same hall from twice as far, for an open book)
     FAR_ROOM_BLUR = 3.0                # px: the far hall softened like a background behind slabs in focus

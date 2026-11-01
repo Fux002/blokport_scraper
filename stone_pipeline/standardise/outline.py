@@ -130,20 +130,36 @@ def _ends(score, lo_at_frame, hi_at_frame):
     return None if lo is None or hi is None else (lo, hi)
 
 
-def _along(q, rgb):
+def frame_sides(mask):
+    """The photo edges the stone runs into: those with stone on their outermost line, over at least FRAME_TOUCH of
+    it. A slab framed tightly, its edge a few pixels inside the photo, runs into none (sen-3b0f048c: 27 px of 4000)."""
+    lines = {"left": mask[:, 0], "right": mask[:, -1], "top": mask[0], "bottom": mask[-1]}
+    return {side for side, line in lines.items() if (line > 0).sum() >= C.FRAME_TOUCH * line.size}
+
+
+def _near_frame(q, shape, sides):
+    """{side: whether q has a corner within FRAME_EDGE of that photo edge AND the stone runs into it}: only there may
+    the slab go on past the photo."""
+    h, w = shape[:2]
+    near = {"left": q[:, 0].min() < C.FRAME_EDGE * w, "right": q[:, 0].max() > (1 - C.FRAME_EDGE) * w,
+            "top": q[:, 1].min() < C.FRAME_EDGE * h, "bottom": q[:, 1].max() > (1 - C.FRAME_EDGE) * h}
+    return {side: bool(at) and side in sides for side, at in near.items()}
+
+
+def _along(q, rgb, sides):
     """The whole slabs side by side in outline q, or [] when one is cut off by the photo frame. Every end of
-    the outline at the frame edge is trimmed at its joint (_ends): left/right on the column profile, top/bottom
-    on the row profile. Then one joint splitting the rest into two equal halves is an open book (on an outline
-    narrower than two slabs its halves must also mirror); any other joint is a vein."""
+    the outline at the frame edge (_near_frame: the stone runs into it there) is trimmed at its joint (_ends):
+    left/right on the column profile, top/bottom on the row profile. Then one joint splitting the rest into two
+    equal halves is an open book (on an outline narrower than two slabs its halves must also mirror); any other
+    joint is a vein."""
     flat, H = _flat(rgb, q)
-    h, w = rgb.shape[:2]
-    rows = _ends(_joint_profile(np.ascontiguousarray(flat.transpose(1, 0, 2))),
-                 min(q[0][1], q[1][1]) < C.FRAME_EDGE * h, max(q[2][1], q[3][1]) > (1 - C.FRAME_EDGE) * h)
+    at = _near_frame(q, rgb.shape, sides)
+    rows = _ends(_joint_profile(np.ascontiguousarray(flat.transpose(1, 0, 2))), at["top"], at["bottom"])
     if rows is None:
         return []
     kept = flat[int(rows[0] * flat.shape[0]):int(rows[1] * flat.shape[0])]
     score = _joint_profile(kept)                       # columns: the same shares in kept and flat
-    across = _ends(score, min(q[0][0], q[3][0]) < C.FRAME_EDGE * w, max(q[1][0], q[2][0]) > (1 - C.FRAME_EDGE) * w)
+    across = _ends(score, at["left"], at["right"])
     if across is None:
         return []
     lo, hi = across
@@ -224,11 +240,10 @@ def _partner(rgb, q, neighbours):
     return None
 
 
-def _in_frame(q, shape):
-    """Every corner clear of the frame edge: the whole slab is in the photo (a cut-off slab's shape is unknown)."""
-    h, w = shape[:2]
-    return bool(((q[:, 0] >= C.FRAME_EDGE * w) & (q[:, 0] <= (1 - C.FRAME_EDGE) * w) &
-                 (q[:, 1] >= C.FRAME_EDGE * h) & (q[:, 1] <= (1 - C.FRAME_EDGE) * h)).all())
+def _in_frame(q, shape, sides):
+    """The whole slab is in the photo: no corner near a photo edge its stone runs into (a cut-off slab's shape is
+    unknown; a slab framed tightly, its stone stopping short of the edge, is whole)."""
+    return not any(_near_frame(q, shape, sides).values())
 
 
 def load_detector(device):
@@ -314,7 +329,7 @@ def find_slabs(seg, det, rgb):
     q = proto.four_corners(m)
     if q is None:
         return [], None, None, straps, "outline is not slab-shaped (several pieces, a rack, a rough shape)"
-    quads = _along(q, rgb)
+    quads = _along(q, rgb, frame_sides(m))
     if not quads:
         return [], None, None, straps, "slab cut off by the photo edge"
     beside = _neighbours(seg, rgb, quads[0], m, emb) if len(quads) == 1 else []
@@ -322,7 +337,7 @@ def find_slabs(seg, det, rgb):
         quads, partner = found
         m, raw = m | partner, raw | partner
         beside = []
-    if not all(_in_frame(x, rgb.shape) for x in quads):
+    if not all(_in_frame(x, rgb.shape, frame_sides(m)) for x in quads):
         return [], None, None, straps, "slab cut off by the photo edge"
     # The detector may box a slab and the separate slab beside it as one (sen-39212b82): the neighbour explains its box.
     if not _outline_whole(box, quads + [q2 for _, q2, _, _ in beside]):

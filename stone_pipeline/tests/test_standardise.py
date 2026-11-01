@@ -809,3 +809,41 @@ def test_a_slab_beside_another_in_one_detector_box_is_whole(monkeypatch):
 def test_a_detector_box_past_the_slab_with_nothing_beside_it_still_holds(monkeypatch):
     quads, _, _, _, reason = _two_slabs_one_box(monkeypatch, neighbour=False)     # only floor beside it: part of it unseen
     assert quads == [] and "continues past" in reason
+
+
+def _one_slab(monkeypatch, left):
+    """A photo of one slab whose left edge is at column `left` (0: it runs off the photo), boxed by the detector."""
+    from stone_pipeline.standardise import marks as proto
+    h, w = 1000, 2000
+    rgb = np.full((h, w, 3), 90, np.uint8)
+    slab = np.zeros((h, w), np.uint8)
+    slab[300:800, left:1500] = 1
+    rgb[slab > 0] = _stone(h, w, seed=3, base=170, var=1)[slab > 0]          # calm stone: no vein reads as an edge
+    monkeypatch.setattr(outline, "detect", lambda det, img, prompt=None, threshold=None: [] if prompt else [(float(left), 290.0, 1510.0, 810.0, 0.6)])
+    monkeypatch.setattr(proto, "embed", lambda seg, img: None)
+    monkeypatch.setattr(proto, "slab_mask", lambda seg, img, b, emb, widest=False: (slab.copy(), slab.copy()))
+    return outline.find_slabs(None, None, rgb)
+
+
+def test_a_slab_framed_tightly_its_edge_a_few_pixels_inside_the_photo_is_whole(monkeypatch):
+    quads, _, _, _, reason = _one_slab(monkeypatch, left=10)                       # 0.5% in, as sen-3b0f048c (27 of 4000 px)
+    assert reason == "" and len(quads) == 1
+
+
+def test_a_slab_whose_stone_runs_off_the_photo_is_cut_off(monkeypatch):
+    quads, _, _, _, reason = _one_slab(monkeypatch, left=0)                        # as sen-d1023341
+    assert quads == [] and "cut off" in reason
+
+
+def test_the_frame_edges_a_slab_runs_into_are_the_ones_its_stone_reaches():
+    m = np.zeros((1000, 2000), np.uint8); m[300:800, 0:1500] = 1
+    assert outline.frame_sides(m) == {"left"}
+    m[:, :] = 0; m[300:800, 10:1500] = 1
+    assert outline.frame_sides(m) == set()
+
+
+def test_a_whole_slab_framed_tightly_is_never_cropped_either():
+    h, w = 1500, 2000
+    stone = np.zeros((h, w), np.uint8); stone[150:1300, 8:1950] = 1          # its edge 8 px inside the photo
+    beside = np.zeros_like(stone); beside[0:1300, 0:330] = 1
+    assert retouch.crop_clear_of_wide_marks(beside, np.zeros_like(stone), stone) is None

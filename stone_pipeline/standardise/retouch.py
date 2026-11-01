@@ -259,11 +259,9 @@ def crop_clear_of_wide_marks(straps, cards, stone):
 
 
 def whole_in_frame(stone):
-    """The stone's outline clears every edge of the photo: a whole slab, not a close-up."""
-    h, w = stone.shape
-    x, y, bw, bh = cv2.boundingRect(stone)
-    mx, my = C.FRAME_EDGE * w, C.FRAME_EDGE * h
-    return bool(stone.any()) and x >= mx and y >= my and x + bw <= w - mx and y + bh <= h - my
+    """The stone runs into no edge of the photo (outline.frame_sides, the same test the slab search uses): a whole
+    slab, not a close-up, even framed tightly."""
+    return bool(stone.any()) and not outline.frame_sides(stone)
 
 
 def clear_crop(mask):
