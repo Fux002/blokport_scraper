@@ -211,9 +211,12 @@ def test_tombstone_done_retires_blocked_retries_and_dead_letters(tmp_path):
         assert ack(ledger, "removed", "AAA-1", status_="done") == 1
         assert {t["external_id"] for t in ready(ledger, "removed")} == {"AAA-2"}
 
-        # 'blocked' (open reservation) keeps it and re-serves, until it dead-letters after the cap
+        # 'blocked' (open reservation) keeps it and re-serves once its wait has passed, until it dead-letters after
+        # the cap
         for _ in range(_MAX_SYNC_ATTEMPTS - 1):
             ack(ledger, "removed", "AAA-2", status_="blocked", reason="reserved")
+            assert ready(ledger, "removed") == []                                        # waiting
+            ledger.execute("UPDATE removed SET retry_after = '2000-01-01T00:00:00+00:00' WHERE external_id = 'AAA-2'")
             assert {t["external_id"] for t in ready(ledger, "removed")} == {"AAA-2"}   # still retrying
         ack(ledger, "removed", "AAA-2", status_="blocked", reason="reserved")          # hits the cap
         assert ready(ledger, "removed") == []                                          # dead -> stops serving

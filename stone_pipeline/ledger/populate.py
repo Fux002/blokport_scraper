@@ -120,7 +120,10 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 # Medusa never acked and the row would stay in-flight instead of re-serving.
                 "updated_at = CASE WHEN variation.state = 'retiring' "
                 "OR variation.payload_hash != excluded.payload_hash THEN excluded.updated_at "
-                "ELSE variation.updated_at END",
+                "ELSE variation.updated_at END, "
+                # new content is served at once, not after the wait a failed apply of the old content set
+                "retry_after = CASE WHEN variation.payload_hash != excluded.payload_hash THEN NULL "
+                "ELSE variation.retry_after END",
                 (key, branch, "", name, json.dumps(aliases), image_url, image_sha256,
                  models.get(key), volume,
                  None, ph, "pending", now, None, now, now),
@@ -270,8 +273,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         # and thumbnail_key are served but outside the hash), only the timestamp is carried over.
         if prev is None:                                     # `prev` fetched above (variation_key fallback)
             record.update(medusa_id=None, state="pending", last_synced=None)
-        elif prev["payload_hash"] != ph:
-            record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"], state="dirty")
+        elif prev["payload_hash"] != ph:                     # new content is served at once, not after a failure's wait
+            record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"], state="dirty", retry_after=None)
         else:
             record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"],
                           state=prev["state"], updated_at=prev["updated_at"])
