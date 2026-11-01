@@ -16,7 +16,7 @@ from pathlib import Path
 
 import boto3
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, category
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, category_for_key
 
 # A thin/empty S3 copy (Medusa mid-reset, or an export not yet fully seeded) must never overwrite a fuller
 # local file, or the run silently starts from the wrong base:
@@ -43,7 +43,7 @@ def own_variants(path: Path) -> int:
     if not rows or "Key" not in rows[0]:
         return 0
     at = rows[0].index("Key")
-    kept = [r for r in rows[1:] if len(r) <= at or not r[at].strip() or category(r[at].split("_", 1)[0])]
+    kept = [r for r in rows[1:] if len(r) <= at or not r[at].strip() or category_for_key(r[at])]
     dropped = len(rows) - 1 - len(kept)
     if dropped:
         with path.open("w", encoding="utf-8", newline="") as h:
@@ -115,6 +115,8 @@ def main() -> int:
             if name in _PROTECTED_BASE and target.exists():
                 tmp = target.with_suffix(target.suffix + ".incoming")
                 client.download_file(S3_BUCKET, key, str(tmp))
+                # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
+                dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
                 incoming, current = _line_count(tmp), _line_count(target)
                 if _would_clobber(incoming, current):
                     print(f"   ! kept committed {name} (S3 copy looks thin: {incoming} vs {current} lines)")
@@ -123,7 +125,8 @@ def main() -> int:
                 tmp.replace(target)
             else:
                 client.download_file(S3_BUCKET, key, str(target))
-            if name in _VARIANT_EXPORTS and (dropped := own_variants(target)):
+                dropped = own_variants(target) if name in _VARIANT_EXPORTS else 0
+            if dropped:
                 print(f"   {name}: dropped {dropped} variants of other vendors (not a scraper category)")
             print(f"   {name}")
             n += 1

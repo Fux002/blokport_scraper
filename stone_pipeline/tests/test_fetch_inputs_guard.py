@@ -87,3 +87,22 @@ def test_only_the_scraper_s_own_variants_are_kept_from_the_export(tmp_path):
 
 def test_both_variant_exports_are_kept_to_the_scraper_s_own_variants():
     assert fetch_inputs._VARIANT_EXPORTS == {"variants_export.csv", "variants_export_base.csv"}
+
+
+def test_other_vendors_rows_never_make_a_thin_stone_export_look_full(tmp_path, monkeypatch):
+    # Medusa mid-reset: few stone rows plus many foreign rows. Counted before filtering it passes the thin-copy guard
+    # and replaces the full local export with an almost empty one; filtered first, the local export is kept.
+    local = tmp_path / "variants_export.csv"
+    local.write_text("Id,Key\n" + "".join(f"v{i},slab_x_{i:04d}\n" for i in range(10)), encoding="utf-8")
+    incoming = "Id,Key\nv1,slab_x_0001\n" + "".join(f"n{i},np-thing-{i}\n" for i in range(30))
+
+    class _Client:
+        def get_paginator(self, name):
+            return type("P", (), {"paginate": lambda self, **k: [{"Contents": [{"Key": f"{fetch_inputs.ENV_SEGMENT}/scraper/from_medusa/variants_export.csv"}]}]})()
+
+        def download_file(self, bucket, key, filename):
+            open(filename, "w", encoding="utf-8").write(incoming)
+    monkeypatch.setattr(fetch_inputs.boto3, "client", lambda *a, **k: _Client())
+    monkeypatch.setattr(fetch_inputs, "SETTINGS", type("S", (), {"paths": type("P", (), {"from_medusa_dir": tmp_path})()})())
+    fetch_inputs.main()
+    assert local.read_text(encoding="utf-8").count("slab_x_") == 10          # the full local export stays
