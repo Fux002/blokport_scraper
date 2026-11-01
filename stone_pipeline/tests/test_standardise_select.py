@@ -287,3 +287,42 @@ def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_list
     assert json.loads(s3.objects["r/chosen/one.json"])["sha"] == A                      # chosen: recorded
     assert "r/chosen/two.json" not in s3.objects                                        # now without a good photo
     assert s3.objects["r/chosen/other.json"] == b'{"key": "other"}'                     # outside this run: untouched
+
+
+
+def test_the_gpu_list_is_the_judge_s_candidates_when_a_listing_s_first_photo_is_excluded():
+    photos = [c * 64 for c in "12345"]
+    s = object.__new__(sel.Selection)
+    s.listings, s.exclude = [_listing(*photos)], {photos[0]}
+    s.sources, s.rounds = ["sentas"], [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})]
+    assert s.gpu_todo() == {"sentas": sel.candidates(_listing(*photos), {photos[0]})} == {"sentas": photos[1:4]}
+
+
+def test_a_stop_cancels_the_listings_that_have_not_started(monkeypatch):
+    monkeypatch.setattr(C, "SELECT_WORKERS", 1)
+    done = []
+
+    def work(listing):
+        done.append(listing["key"])
+        if listing["key"] == "l0":
+            raise SystemExit("stopped by signal 15")
+    with pytest.raises(SystemExit):
+        sel._each([_listing(A, key=f"l{i}") for i in range(20)], work)
+    assert len(done) < 20
+
+
+@pytest.mark.parametrize("failure", ["refused", "no image"])
+def test_an_edit_the_model_failed_for_good_is_a_failed_attempt_and_the_next_model_gets_its_turn(monkeypatch, failure):
+    import httpx
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    refused = httpx.HTTPStatusError("422", request=httpx.Request("GET", "https://q"), response=httpx.Response(422))
+    error = refused if failure == "refused" else sel.clean.NoImage("finished without an image")
+
+    def collect(job):
+        if job["model"] == "kontext":
+            raise error
+        return f"copy-{job['model']}".encode()
+    monkeypatch.setattr(sel.clean, "collect", collect)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == ["kontext", "nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
+    assert json.loads(s3.objects[f"{CL}attempts/{B}.kontext.json"])["passes"] is False

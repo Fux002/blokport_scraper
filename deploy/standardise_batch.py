@@ -10,6 +10,8 @@ import json
 import time
 from contextlib import contextmanager
 
+from botocore.exceptions import ClientError
+
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import env
 
@@ -48,10 +50,10 @@ def slices(todo):
             for n, i in enumerate(range(0, len(shas), C.RUN_SLICE))]
 
 
-def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id):
-    """Store each slice's photo list (the run's own files, run_id) and submit its two jobs: [job ids]. todo = {source:
-    shas}; watermarked = {source: bool}."""
-    ids = []
+def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
+    """Store each slice's photo list (the run's own files, run_id) and submit its two jobs, appending each job id to ids as
+    it is submitted (so a submit that fails part way still knows its jobs). todo = {source: shas}; watermarked =
+    {source: bool}."""
     for src, n, shas in slices(todo):
         only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo-{run_id}-{src}-{n}.json"
         s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(shas).encode(), ContentType="application/json")
@@ -60,12 +62,13 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id):
         retouch = batch.submit_job(jobName=f"retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
                                    timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT},
                                    containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise-retouch"}] + common})["jobId"]
+        ids.append(retouch)
         standardise = batch.submit_job(jobName=f"standardise-{name}", jobQueue=queue, jobDefinition=jobdef,
                                        dependsOn=[{"jobId": retouch}], timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT},
                                        containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise"},
                                                                            {"name": "WATERMARKED", "value": str(watermarked[src]).lower()}]
                                                            + common})["jobId"]
-        ids += [retouch, standardise]
+        ids.append(standardise)
     return ids
 
 
@@ -83,9 +86,16 @@ def wait(batch, ids, sleep=time.sleep, clock=time.monotonic):
 
 
 def stop(batch, ids, why):
-    """Stop every job of the round that has not ended (a run that fails or is stopped leaves no GPU work behind)."""
-    for job_id in ids:
-        batch.terminate_job(jobId=job_id, reason=why[:250])
+    """Stop every job of the round that has not ended (a run that fails or is stopped leaves no GPU work behind). A job
+    that cannot be stopped is reported and the others are still stopped."""
+    for i in range(0, len(ids), 100):
+        for job in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]:
+            if job["status"] in _DONE:
+                continue
+            try:
+                batch.terminate_job(jobId=job["jobId"], reason=why[:250])
+            except ClientError as exc:
+                print(f"   could not stop GPU job {job['jobName']}: {exc}", flush=True)
 
 
 def run_round(batch, s3, tag, todo, watermarked, run_id):
@@ -95,9 +105,9 @@ def run_round(batch, s3, tag, todo, watermarked, run_id):
         return []
     queue, jobdef = target()
     with raised(batch, pool(batch, queue)):
-        ids = submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id)
+        ids = []
         try:
-            return wait(batch, ids)
+            return wait(batch, submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids))
         except BaseException as exc:
             stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
             raise

@@ -11,6 +11,10 @@ from stone_pipeline.standardise.judge import data_uri, fal_key
 MODELS = {name: (endpoint, extra) for name, endpoint, extra in C.CLEAN_MODELS}
 
 
+class NoImage(RuntimeError):
+    """The queue finished the request without an image: the model failed this photo for good."""
+
+
 def request(name, encoded):
     """The model's input for this photo."""
     _, extra = MODELS[name]
@@ -41,7 +45,10 @@ def collect(job):
         time.sleep(C.CLEAN_POLL)
     res = httpx.get(job["response_url"], headers=_head(), timeout=60)
     res.raise_for_status()
-    img = httpx.get(res.json()["images"][0]["url"], timeout=C.CLEAN_TIMEOUT)
+    images = res.json().get("images") or []
+    if not images or not images[0].get("url"):
+        raise NoImage(f"{job['endpoint']}: finished without an image")
+    img = httpx.get(images[0]["url"], timeout=C.CLEAN_TIMEOUT)
     img.raise_for_status()
     return img.content
 

@@ -33,7 +33,7 @@ class _Batch:
 
     def describe_jobs(self, jobs):
         statuses = self.polls.pop(0) if len(self.polls) > 1 else self.polls[0]
-        return {"jobs": [{"jobName": j, "status": statuses[min(i, len(statuses) - 1)], "statusReason": "boom"}
+        return {"jobs": [{"jobId": j, "jobName": j, "status": statuses[min(i, len(statuses) - 1)], "statusReason": "boom"}
                          for i, j in enumerate(jobs)]}
 
 
@@ -69,7 +69,7 @@ def _listing(*photos, key="slab-1"):
 def test_each_slice_has_its_own_fixed_list_and_is_a_retouch_then_a_standardise(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 2)
     batch, s3 = _Batch(), _S3()
-    ids = gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True}, "R1")
+    ids = gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True}, "R1", [])
     names = [j["jobName"] for j in batch.submitted]
     assert names == ["retouch-sentas-v9-0", "standardise-sentas-v9-0", "retouch-sentas-v9-1", "standardise-sentas-v9-1",
                      "retouch-varsha-v9-0", "standardise-varsha-v9-0"]
@@ -90,12 +90,39 @@ def test_waiting_gives_up_after_the_deadline(monkeypatch):
 def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_back(monkeypatch):
     monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
-    batch, stopped = _Batch(), []
+    batch, stopped = _Batch(polls=[("RUNNING",)]), []
     batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
         gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1")
     assert stopped == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
+
+
+def test_a_submit_that_fails_part_way_still_stops_the_jobs_it_submitted(monkeypatch):
+    monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
+    monkeypatch.setattr(C, "RUN_SLICE", 1)
+    batch, stopped = _Batch(polls=[("RUNNING",)]), []
+    batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
+    submit_job = batch.submit_job
+    batch.submit_job = lambda **job: submit_job(**job) if len(batch.submitted) < 3 else (_ for _ in ()).throw(RuntimeError("throttled"))
+    with pytest.raises(RuntimeError):
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, {"sentas": False}, "R1")
+    assert stopped == ["job1", "job2", "job3"]
+
+
+def test_stopping_skips_ended_jobs_and_goes_on_past_one_that_cannot_be_stopped():
+    from botocore.exceptions import ClientError
+    batch, stopped = _Batch(polls=[("SUCCEEDED", "RUNNING", "RUNNING")]), []
+
+    def terminate(jobId, reason):
+        if jobId == "j2":
+            raise ClientError({"Error": {"Code": "ClientException"}}, "TerminateJob")
+        stopped.append(jobId)
+    batch.terminate_job = terminate
+    batch.describe_jobs = lambda jobs: {"jobs": [{"jobId": j, "jobName": j, "status": s} for j, s in zip(jobs, ("SUCCEEDED", "RUNNING", "RUNNING"))]}
+    gpu.stop(batch, ["j1", "j2", "j3"], "stopped")
+    assert stopped == ["j3"]
 
 
 def test_a_run_of_a_source_with_no_listings_refuses_to_start(monkeypatch):
@@ -136,7 +163,7 @@ def test_the_queue_and_job_definition_must_be_configured(monkeypatch):
 def test_only_each_listing_s_first_photos_not_yet_run_go_to_the_gpu():
     photos = [c * 64 for c in "123456"]
     s = _selection([_listing(*photos)], gpu_round=_round(finished={photos[0]}), exclude={photos[1]})
-    assert s.gpu_todo() == {"sentas": [photos[2]]}                  # 1 done, 2 excluded, 4+ beyond the judge's reach
+    assert s.gpu_todo() == {"sentas": [photos[2], photos[3]]}       # 1 done, 2 excluded (so 4 is a candidate), 5+ beyond
 
 
 def test_only_cleaned_copies_not_yet_run_go_to_the_gpu():

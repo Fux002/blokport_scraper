@@ -213,10 +213,16 @@ def _attempt(client, cl, sha, name, original, spend):
         try:
             copy = clean.collect(job)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (404, 410):
+            code = exc.response.status_code
+            if code in (404, 410):                     # the queue no longer has it: the next run sends it again
                 client.delete_object(Bucket=S3_BUCKET, Key=f"{att}.request.json")
                 cl.requested.discard(ident)
-            raise
+                raise
+            if 400 <= code < 500 and code != 429:      # the model refused or failed this photo for good: the next model
+                return _failed(client, cl, att, ident, name, f"the edit failed ({code})")
+            raise                                      # a passing error (5xx, 429): the next run collects it again
+        except clean.NoImage as exc:
+            return _failed(client, cl, att, ident, name, str(exc))
         _put(client, f"{att}.jpg", copy, "image/jpeg")
         cl.edited.add(ident)
     spend.reserve(C.JUDGE_PRICE_USD)
@@ -228,6 +234,14 @@ def _attempt(client, cl, sha, name, original, spend):
     _put_json(client, f"{att}.json", {**check, "edit_model": name, "check_cost": cost})
     cl.attempts.add(ident)
     return check
+
+def _failed(client, cl, att, ident, name, why):
+    """A hosted edit that failed for good, recorded as a failed attempt: the next model gets its turn, now and on re-runs."""
+    check = {"clean": False, "faithful": False, "passes": False, "problems": why, "edit_model": name, "check_cost": 0.0}
+    _put_json(client, f"{att}.json", check)
+    cl.attempts.add(ident)
+    return check
+
 
 def clean_listing(client, rounds, listing, exclude, spend):
     """A listing with no good photo from the standardiser: its first CLEAN_PHOTOS_PER_LISTING fixable photos are
@@ -287,11 +301,10 @@ class Selection:
         self.rounds = [(tag, {src: Round(self.client, tag, src) for src in self.sources}) for tag in self.tags]
 
     def gpu_todo(self):
-        """{source: shas} the standardiser has not run yet among each listing's first JUDGE_MAX_PER_LISTING photos (the
-        judge never looks further)."""
+        """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet."""
         gpu = self.rounds[0][1]
-        return _by_source((l["source"], sha) for l in self.listings for sha in l["photos"][:C.JUDGE_MAX_PER_LISTING]
-                          if sha not in self.exclude and sha not in gpu[l["source"]].finished | gpu[l["source"]].held)
+        return _by_source((l["source"], sha) for l in self.listings for sha in candidates(l, self.exclude)
+                          if sha not in gpu[l["source"]].finished | gpu[l["source"]].held)
 
     def clean_todo(self):
         """{source: shas} with a cleaned copy the standardiser has not run yet."""
@@ -360,6 +373,12 @@ def _each(listings, work):
             failures.append((listing["key"], str(exc)))
         except Exception as exc:                       # one listing never stops the others; the re-run retries it
             failures.append((listing["key"], f"{type(exc).__name__}: {exc}"))
-    with ThreadPoolExecutor(C.SELECT_WORKERS) as pool:
+    pool = ThreadPoolExecutor(C.SELECT_WORKERS)
+    try:
         list(pool.map(one, listings))
+    except BaseException:                              # stopped (a signal): nothing that has not started starts, or pays
+        stop.set()
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
     return failures, stop.is_set()

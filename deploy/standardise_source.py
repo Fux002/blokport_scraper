@@ -193,16 +193,20 @@ def main() -> int:
                     if res.slab:
                         client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
                     tally[res.kind] += 1
-        except Exception as exc:                       # one bad photo never stops the slice; recorded and counted
-            tally["failed"] += 1
+        except Exception as exc:                       # one bad photo never stops the slice: held with its error, so its
+            tally["failed"] += 1                       # listing moves on (and shows it on the tracked list)
             print(f"   FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
+            if not survey:
+                client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
+                                  Body=json.dumps({"reason": f"error: {type(exc).__name__}: {exc}"[:500], "kind": ""}).encode())
         spent.append(time.time() - started)
         if i % 10 == 0:
             print(f"   [{i + 1}/{len(sliced)}] {dict(tally)} median {np.median(spent):.1f}s per photo", flush=True)
     summary = {"source": src, "survey": survey, "counts": dict(tally), "photos": len(sliced),
                "median_seconds": round(float(np.median(spent)), 1) if spent else None}
     name = "survey" if survey else "run"
-    client.put_object(Bucket=S3_BUCKET, Key=f"{out}{name}-{offset}.json", Body=json.dumps(summary, sort_keys=True).encode(), ContentType="application/json")
+    part = os.path.basename(os.environ.get("ONLY_KEY", "")).removesuffix(".json") or str(offset)    # one summary per slice
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}{name}-{part}.json", Body=json.dumps(summary, sort_keys=True).encode(), ContentType="application/json")
     print(f"==> {src} done: {json.dumps(summary, sort_keys=True)}", flush=True)
     return 0
 
