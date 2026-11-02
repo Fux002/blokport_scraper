@@ -271,6 +271,52 @@ resource "aws_batch_job_definition" "this" {
   }
 }
 
+# --- Batch: the photo standardiser's job definition ---------------------------
+# The standardised-photo process (deploy.standardise_run, on the sync service) submits each GPU slice as a retouch job
+# then a standardise job on THIS queue, overriding RUN_MODE, SRC, RUN_TAG, ONLY_KEY and the timeout per submission. Its
+# own image (:standardise-edit-<sha>-x, the Dockerfile's standardise targets), pinned per env like the other images.
+# No retries: a slice that fails is retried by the next run, which skips every photo already done. No secrets: every
+# model is baked in the image. Created only once an image tag is set.
+resource "aws_batch_job_definition" "standardise" {
+  count                 = var.standardise_image_tag == "" ? 0 : 1
+  name                  = "${var.brand}-standardise-${var.target_env}"
+  type                  = "container"
+  platform_capabilities = ["EC2"]
+
+  container_properties = jsonencode({
+    image            = "${var.image_repo_url}:${var.standardise_image_tag}"
+    jobRoleArn       = aws_iam_role.job.arn
+    executionRoleArn = aws_iam_role.execution.arn
+    resourceRequirements = [
+      { type = "GPU", value = "1" },
+      { type = "VCPU", value = "4" },
+      { type = "MEMORY", value = "15000" },
+    ]
+    environment = [
+      { name = "SCRAPER_ENV", value = var.target_env },
+      { name = "SCRAPER_S3_BUCKET", value = var.staging_bucket },
+      { name = "SCRAPER_S3_REGION", value = var.region },
+      { name = "SCRAPER_BRAND", value = var.brand },
+      { name = "SCRAPER_DOMAIN_PACK", value = var.domain_pack },
+      { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
+      { name = "RUN_MODE", value = "standardise" },
+      { name = "WATERMARKED", value = "false" },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.this.name
+        "awslogs-region"        = data.aws_region.current.region
+        "awslogs-stream-prefix" = "standardise"
+      }
+    }
+  })
+
+  timeout {
+    attempt_duration_seconds = 3600 # each submission sets its own (STANDARDISE.RETOUCH_TIMEOUT / STANDARDISE_TIMEOUT)
+  }
+}
+
 # --- Failure alerting: notify when an auto-texture job FAILS ------------------
 # The variant-texture loop is fire-and-forget with a one-cycle hold, so a failed batch surfaces only as
 # products missing from Pull. An EventBridge rule on the Batch "FAILED" state change (scoped to THIS queue

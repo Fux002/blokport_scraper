@@ -90,3 +90,9 @@ variable "sales_channel_id" {
   default     = ""
   description = "SCRAPER_SALES_CHANNEL_ID for the GPU job's brand."
 }
+
+variable "standardise_image_tag" {
+  type        = string
+  default     = ""
+  description = "Image tag of the photo standardiser's GPU jobs (standardise-edit-<sha>-x). Empty = no standardise job definition (the photo process then reports itself not configured)."
+}

@@ -64,6 +64,16 @@ prod_require_enhanced = false
 # code's production default; dev sets it so dev shows what prod shows (owner 2026-11-02).
 dev_require_standard_photo = true
 
+# The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image both envs' standardise jobs run today (the job
+# definitions were registered by hand until now; this pins them here). The process runs after each produce only once
+# AUTO is on, and refuses to start without the month's hosted budget: both are the owner's call (no default spend).
+dev_standardise_image_tag   = "standardise-edit-cbc576cf9ebd-x"
+prod_standardise_image_tag  = "standardise-edit-cbc576cf9ebd-x"
+dev_standardise_auto        = false
+prod_standardise_auto       = false
+dev_standardise_budget_usd  = ""
+prod_standardise_budget_usd = ""
+
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
 fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                # de-watermark
 scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY" # residential proxy

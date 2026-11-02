@@ -205,6 +205,43 @@ variable "run_timeout_seconds" {
   default     = 14400
 }
 
+# --- The standardised-photo process (STANDARDISE_PROCESS.md) --------------------------------------------------------
+variable "dev_standardise_image_tag" {
+  type        = string
+  default     = ""
+  description = "Image tag of the dev photo standardiser's GPU jobs (standardise-edit-<sha>-x; ECR keeps the 3 newest standardise- tags). Empty = no standardise job definition."
+}
+
+variable "prod_standardise_image_tag" {
+  type        = string
+  default     = ""
+  description = "Image tag of the prod photo standardiser's GPU jobs, promoted from dev. Empty = no standardise job definition."
+}
+
+variable "dev_standardise_auto" {
+  type        = bool
+  default     = false
+  description = "SCRAPER_STANDARDISE_AUTO in dev: the photo process runs after each produce that published a product sheet."
+}
+
+variable "prod_standardise_auto" {
+  type        = bool
+  default     = false
+  description = "SCRAPER_STANDARDISE_AUTO in prod. Off until the owner switches it on."
+}
+
+variable "dev_standardise_budget_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_BUDGET_USD in dev: the month's hosted budget (USD). Empty = the process refuses to start."
+}
+
+variable "prod_standardise_budget_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_BUDGET_USD in prod: the month's hosted budget (USD), the owner's number. Empty = the process refuses to start."
+}
+
 variable "dev_enable_execute_command" {
   description = "Allow ECS Exec into the dev sync service (operator access to the live ledger). Prod deliberately has no equivalent."
   type        = bool
