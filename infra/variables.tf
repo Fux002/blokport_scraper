@@ -230,6 +230,18 @@ variable "prod_standardise_auto" {
   description = "SCRAPER_STANDARDISE_AUTO in prod. Off until the owner switches it on."
 }
 
+variable "dev_standardise_clean" {
+  type        = bool
+  default     = false
+  description = "SCRAPER_STANDARDISE_CLEAN in dev: the photo process may use the hosted clean-up edits (FAL). Off unless the owner switches it on."
+}
+
+variable "prod_standardise_clean" {
+  type        = bool
+  default     = false
+  description = "SCRAPER_STANDARDISE_CLEAN in prod: the photo process may use the hosted clean-up edits (FAL). Off unless the owner switches it on."
+}
+
 variable "dev_standardise_budget_usd" {
   type        = string
   default     = ""

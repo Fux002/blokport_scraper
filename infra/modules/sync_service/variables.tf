@@ -144,6 +144,12 @@ variable "standardise_enabled" {
   description = "SCRAPER_STANDARDISE_AUTO: run the photo process after each produce that published a product sheet."
 }
 
+variable "standardise_clean" {
+  type        = bool
+  default     = false
+  description = "SCRAPER_STANDARDISE_CLEAN: the photo process may use the hosted clean-up edits. Off: a listing whose photos all fail for a cleanable reason goes to the review list instead."
+}
+
 variable "standardise_budget_usd" {
   type        = string
   default     = ""

@@ -307,6 +307,7 @@ resource "aws_ecs_task_definition" "this" {
         # before the month's spend would pass the budget. An empty budget leaves the process not configured.
         { name = "SCRAPER_STANDARDISE_AUTO", value = tostring(var.standardise_enabled) },
         { name = "SCRAPER_STANDARDISE_BUDGET_USD", value = var.standardise_budget_usd },
+        { name = "SCRAPER_STANDARDISE_CLEAN", value = tostring(var.standardise_clean) },
         { name = "SCRAPER_STANDARDISE_JOBDEF", value = var.standardise_job_definition_name },
         # the GPU pool's ceiling while a round runs (always set back to 8 after): the size of a round's burst
         { name = "SCRAPER_STANDARDISE_GPU_VCPUS", value = tostring(var.standardise_gpu_vcpus) },

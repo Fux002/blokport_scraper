@@ -69,10 +69,14 @@ dev_require_standard_photo = true
 # image in ECR BEFORE applying (STANDARDISE_PROCESS.md, rollout). The process runs after each full produce only once
 # AUTO is on (off in both until a dev run is verified). The month's budget, hosted calls and GPU together, is the
 # owner's (2026-11-02): prod 100 USD, dev 20 USD.
-dev_standardise_image_tag   = "standardise-pin-cbc576cf9ebd"
-prod_standardise_image_tag  = "standardise-pin-cbc576cf9ebd"
-dev_standardise_auto        = false
-prod_standardise_auto       = false
+dev_standardise_image_tag  = "standardise-pin-cbc576cf9ebd"
+prod_standardise_image_tag = "standardise-pin-cbc576cf9ebd"
+dev_standardise_auto       = false
+prod_standardise_auto      = false
+# The hosted clean-up edits (FAL) stay off in both until the owner switches them on (owner 2026-11-02: no FAL spend now);
+# listings whose photos all fail for a cleanable reason go to the review list instead.
+dev_standardise_clean       = false
+prod_standardise_clean      = false
 dev_standardise_budget_usd  = "20"
 prod_standardise_budget_usd = "100"
 dev_standardise_gpu_vcpus   = 32
