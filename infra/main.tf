@@ -212,6 +212,7 @@ module "scraper_dev" {
   gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
   auto_enhance_enabled     = var.dev_auto_enhance
   require_enhanced_enabled = var.dev_require_enhanced
+  require_standard_photo   = var.dev_require_standard_photo
 }
 
 # --- PROD deployment (runs in blokport-prod, writes the prod bucket only) -----
@@ -373,6 +374,7 @@ module "sync_service_dev" {
   auto_enhance_enabled     = var.dev_auto_enhance
   auto_texture_enabled     = var.dev_auto_texture
   require_enhanced_enabled = var.dev_require_enhanced
+  require_standard_photo   = var.dev_require_standard_photo
 }
 
 # =============================================================================

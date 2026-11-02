@@ -117,6 +117,12 @@ variable "dev_require_enhanced" {
   description = "Enable BLOKPORT_REQUIRE_ENHANCED on dev produce + scheduled scrape: publish ONLY GPU-enhanced images. ON in dev: the enhanced/ markers are backfilled for the existing set. Prod uses its own var."
 }
 
+variable "dev_require_standard_photo" {
+  type        = bool
+  default     = null
+  description = "SCRAPER_REQUIRE_STANDARD_PHOTO on the dev produce: a product without a standardised photo is served qty 0 with reason no_photo (hidden). Unset (null) leaves the code's default (off outside production) and the task definition unchanged. Prod is not wired: it runs on the code's production default (on)."
+}
+
 # Prod auto-flags: default OFF so a freshly-provisioned prod stack is quiet until deliberately enabled.
 variable "prod_auto_enhance" {
   type        = bool
