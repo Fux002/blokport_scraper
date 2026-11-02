@@ -287,6 +287,27 @@ def test_the_photos_own_pixels_per_slab_pixel_come_from_the_squaring():
     assert lo < 1 <= hi                                                 # the near side keeps its pixels, the far side fewer
 
 
+def test_a_near_frontal_shot_s_close_up_keeps_its_finest_detail(monkeypatch):
+    # A 12 px skew: the near and far sides differ by about 1%, far too little to fold any stone into a false pattern.
+    # Squared straight to its stored size, as a square-on shot is; a reduce from a slightly denser grid would act as a
+    # blur of about 2 px and take a fifth of the finest detail.
+    monkeypatch.setattr(views, "fine_detail", lambda rgb, block=C.JPEG_BLOCK: 1.0)     # the bar is not what is tested
+    full, _ = _sharp_stone(2000, 3000)
+    h, w = full.shape[:2]
+
+    def close(skew):
+        q = np.float32([[20 + skew, 15], [w - 21 - skew, 15], [w - 21, h - 16], [20, h - 16]])
+        work = layout.fit_working(full)
+        flat, H = outline._flat(work, _corners_in_work_copy(q, w / work.shape[1]))
+        return views.close_up(layout.Flat(flat, np.ones(flat.shape[:2], np.float32), H, work), full)
+
+    def finest(img):
+        g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        return float((g - cv2.GaussianBlur(g, (0, 0), 1.0)).std())
+    square_on, skewed = close(0), close(12)
+    assert skewed.shape == square_on.shape and finest(skewed) > 0.97 * finest(square_on)
+
+
 def test_a_steep_shot_s_close_up_shows_no_false_pattern_from_its_near_side():
     # The far edge half as tall as the near one: the crop is stored at the far side's pixels, so the near side has about
     # twice as many as it keeps. A grating finer than the stored close-up can show, squared straight to that size, folds
@@ -575,21 +596,6 @@ def test_the_close_up_leaves_every_other_view_as_it_was(monkeypatch):
     # The close-only run makes the same close-up from the same photo.
     assert np.array_equal(photo.close_view(full, size=None, models=m), extra.images["close"])
 
-
-
-def test_the_close_only_run_takes_the_same_half_of_an_open_book_as_the_run_did(monkeypatch):
-    from stone_pipeline.standardise import photo
-    flats = [layout.Flat(np.zeros((80, 100, 3), np.uint8), np.ones((80, 100), np.float32), np.eye(3), None) for _ in "lr"]
-    flats[0].alpha[:20, :20] = 0                                     # the left half chipped: the right has more stone
-    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats)
-    monkeypatch.setattr(views, "close_up", lambda flat, full, edits: flat)
-
-    class _Models:
-        seg = det = lama = None
-    full = np.zeros((60, 90, 3), np.uint8)
-    assert photo.close_view(full, size=None, models=_Models()) is flats[1]
-    flats[0].alpha[:20, :20] = 1                                     # equal halves: the left, as the run takes it
-    assert photo.close_view(full, size=None, models=_Models()) is flats[0]
 
 
 SHEET = """Product Handle,Product Length,Product Width,Product Category 1,Front Image,Product Image 1
@@ -1221,14 +1227,14 @@ def test_a_whole_slab_framed_tightly_is_never_cropped_either():
 
 
 # --- the 3D slab of a photo -------------------------------------------------------------------------------------------
-def _standardised(monkeypatch, slabs, kind_found=None):
+def _standardised(monkeypatch, slabs, kind_found=None, drawn=None):
     """photo.standardise on found slabs (or a close-up), the models and the expensive steps stood in: (its result, the
-    slabs the close view was made from)."""
+    slabs the close view was made from). drawn: the slabs as enlarged draws them; the found ones when not given."""
     from stone_pipeline.standardise import closeup, photo
     monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.9))
     flats = None if slabs is None else [layout.Flat(rgb, alpha, np.eye(3), rgb) for rgb, alpha in slabs]
     monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats if kind_found is None else "no outline")
-    monkeypatch.setattr(layout, "enlarged", lambda flats, esr: slabs)   # the squared slab is its own enlarged one here
+    monkeypatch.setattr(layout, "enlarged", lambda flats, esr: slabs if drawn is None else drawn)
     monkeypatch.setattr(closeup, "closeup", lambda rgb, size, *m: kind_found)
     monkeypatch.setattr(photo, "_finished", lambda s, key, models, seed: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
     monkeypatch.setattr(studio, "place", lambda s: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
@@ -1251,7 +1257,61 @@ def test_each_half_of_an_open_book_is_a_whole_slab_and_the_one_with_more_stone_g
 def test_of_two_equal_halves_the_left_is_taken(monkeypatch):
     left, right = _slab(80, 100), _slab(80, 100)
     res, closed = _standardised(monkeypatch, [left, right])
-    assert res.slab is left and closed == [(id(left[0]), id(left[1]))]
+    assert res.slab is left and closed == [(id(left[0]), id(left[1]))] and res.chosen == (0, 2)
+
+
+def _near_tie():
+    """An open book's two flat halves, near-equal: on the flat slabs the left has more stone (its outer edge part
+    chipped: 99.3 of 100 columns, the right's seam edge all gone: 99), but the right's loss lies in the strip the layout
+    trims off at the seam, so as drawn the right has more."""
+    left, right = np.ones((80, 100), np.float32), np.ones((80, 100), np.float32)
+    left[:, 0], right[:, 0] = 0.3, 0.0
+    return [layout.Flat(_stone(80, 100, seed), a, np.eye(3), None) for seed, a in ((1, left), (2, right))]
+
+
+def test_the_outlines_as_drawn_come_from_the_flat_slabs_alone_as_enlarged_draws_them():
+    from stone_pipeline.standardise import photo
+    big = [layout.Flat(_stone(1300, 2400), np.ones((1300, 2400), np.float32), np.eye(3), None)]   # drawn as it is
+    for flats in (_near_tie(), _near_tie()[:1], big):
+        drawn = layout.enlarged(flats, _Esr())
+        assert all(np.array_equal(a, b) for a, (_, b) in zip(layout.drawn_alphas(flats), drawn))
+    tie = _near_tie()
+    assert photo.whole_index([f.alpha for f in tie], "open book") == 0          # on the flat slabs: the left
+    assert photo.whole_index(layout.drawn_alphas(tie), "open book") == 1       # as drawn: the right
+
+
+def test_the_half_chosen_is_the_one_with_more_stone_as_drawn_and_its_choice_is_recorded(monkeypatch):
+    tie = _near_tie()
+    drawn = [(np.zeros(a.shape + (3,), np.uint8), a) for a in layout.drawn_alphas(tie)]
+    res, closed = _standardised(monkeypatch, [(f.rgb, f.alpha) for f in tie], drawn=drawn)
+    assert res.slab is drawn[1] and res.chosen == (1, 2)                       # the 3D slab: the right half as drawn
+    assert closed == [(id(tie[1].rgb), id(tie[1].alpha))]                      # its close-up from that same half
+
+
+def _close_view_of(monkeypatch, flats, chosen):
+    from stone_pipeline.standardise import photo
+    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats)
+    monkeypatch.setattr(views, "close_up", lambda flat, full, edits: flat)
+
+    class _Models:
+        seg = det = lama = None
+    return photo.close_view(np.zeros((60, 90, 3), np.uint8), size=None, models=_Models(), chosen=chosen)
+
+
+def test_the_close_only_run_takes_the_half_its_run_recorded_never_choosing_again(monkeypatch):
+    from stone_pipeline.standardise import photo
+    tie = _near_tie()
+    monkeypatch.setattr(layout, "drawn_alphas", lambda flats: pytest.fail("chose again"))
+    assert _close_view_of(monkeypatch, tie, (0, 2)) is tie[0]
+    assert _close_view_of(monkeypatch, tie, (1, 2)) is tie[1]
+    with pytest.raises(photo.NoCloseUp, match="2 slabs"):
+        _close_view_of(monkeypatch, tie[:1], (1, 2))                           # its run squared two, now one
+
+
+def test_a_result_made_before_its_half_was_recorded_gets_the_close_up_of_the_half_its_3d_slab_shows(monkeypatch):
+    tie = _near_tie()
+    assert _close_view_of(monkeypatch, tie, None) is tie[1]                    # the rule as the run applied it: as drawn
+    assert _close_view_of(monkeypatch, tie[:1], None) is tie[0]
 
 
 def test_a_single_slab_keeps_its_own_slab_and_close_view(monkeypatch):

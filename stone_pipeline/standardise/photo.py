@@ -15,10 +15,11 @@ class Result:
     kind: str = ""                                     # what it was classified as
     images: dict = field(default_factory=dict)         # name -> RGB array at the canvas size
     slab: tuple = ()                                   # (squared RGB, alpha) of one whole slab: what a 3D viewer needs
+    chosen: tuple = ()                                 # (which, of how many) slabs found `slab` is: what its close-up is of
 
 
 class NoCloseUp(Exception):
-    """This photo has no close-up for a reason of its own: no whole single slab found in it now, its logo cannot be
+    """This photo has no close-up for a reason of its own: not the slabs its run found in it now, its logo cannot be
     trusted, its run refused it, it is off the product sheet, it cannot be decoded."""
 
 
@@ -66,8 +67,8 @@ def standardise(full, *, fmt, key, size=None, clean=None, watermarked=False, mod
     images["white"] = layout.on_white(slabs)
     if kind != "close-up":                              # Blokport's studio scene: the slab on its chrome feet
         images["studio"] = studio.place(slabs)
-    i = whole_index(flats, kind)
-    whole = () if i is None else slabs[i]
+    i = whole_index([a for _, a in slabs], kind)
+    whole, chosen = ((), ()) if i is None else (slabs[i], (i, len(slabs)))
     if extra_views and whole:
         try:
             up = views.close_up(flats[i], full, edits() if edits else None)   # the same slab, at the photo's own pixels
@@ -75,31 +76,38 @@ def standardise(full, *, fmt, key, size=None, clean=None, watermarked=False, mod
             up = None
         if up is not None:
             images["close"] = up
-    return Result(kind=kind, images=images, slab=whole)
+    return Result(kind=kind, images=images, slab=whole, chosen=chosen)
 
 
-def whole_index(flats, kind):
-    """Which of the squared slabs (layout.Flat) is the one whole real slab the 3D slab and the close view are made from: a
-    single slab's own; of an open book, one of its halves (each is a whole slab: the one with more stone in its outline,
-    the left on a tie); None for a close-up, which shows only part of a slab. Chosen on the squared slabs, so the
-    close-only run (close_view), which never enlarges them, takes the same half."""
+def whole_index(alphas, kind):
+    """Which of the slabs (their outlines as drawn: layout.drawn_alphas) is the one whole real slab the 3D slab and the
+    close view are made from: a single slab's own; of an open book, one of its halves (each is a whole slab: the one
+    with more stone in its outline, the left on a tie); None for a close-up, which shows only part of a slab."""
     if kind == "open book":
-        sums = [float(f.alpha.sum()) for f in flats]
+        sums = [float(a.sum()) for a in alphas]
         return sums.index(max(sums))                    # the first of equals: the left half
     return 0 if kind == "slab" else None
 
 
-def close_view(full, *, size, models, clean=None, watermarked=False, edits=None):
+def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen=None):
     """The close-up alone (views.close_up) of a photo its run made a whole slab of (a single slab, or an open book's whole
     half), or None when it gets none: the steps of standardise up to the squared slabs, none of what only the other views
-    need. NoCloseUp when its logo cannot be trusted or it no longer gives a whole slab."""
+    need. chosen: (which, of how many) slabs its run recorded (Result.chosen), so the close-up is of the slab its 3D slab
+    shows; None for a result made before that was recorded: the run's rule again, on the slabs as it drew them. NoCloseUp
+    when its logo cannot be trusted or it no longer gives the slabs its run found."""
     rgb, reason = _work_copy(full, clean, watermarked)
     if rgb is None:
         raise NoCloseUp(reason)
     flats = layout.flat_slabs(rgb, models.seg, models.det, models.lama, size=size)
     if isinstance(flats, str):
         raise NoCloseUp(f"no whole slab now: {flats}")
-    return views.close_up(flats[whole_index(flats, "open book" if len(flats) == 2 else "slab")], full, edits)
+    if chosen is None:
+        return views.close_up(flats[whole_index(layout.drawn_alphas(flats), "open book" if len(flats) == 2 else "slab")],
+                              full, edits)
+    i, of = chosen
+    if len(flats) != of:
+        raise NoCloseUp(f"its run found {of} slabs in it, now {len(flats)}")
+    return views.close_up(flats[i], full, edits)
 
 
 def retouch_fills(retouched, made_from):

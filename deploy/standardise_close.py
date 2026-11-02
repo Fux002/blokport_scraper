@@ -2,12 +2,13 @@
 submitted by deploy.standardise_run with CLOSE_ONLY=true, one job per slice of a source's chosen photos.
 
 For each chosen photo of SRC (deploy.standardise_select's records under <CLEAN_TAG>/chosen/), narrowed to the slice's
-fixed list (ONLY_KEY): a photo its run made a whole single slab of (<sha>.slab.png) goes, from the photo its run started
-from, through only what the close-up needs (logo, outline, detector, eraser: photo.close_view; no upscaler, inpainting,
-judge or hosted edit). The new close-up replaces <prefix><sha>.close.jpg in the run's own folder; the file is deleted
+fixed list (ONLY_KEY): a photo its run made a whole slab of (<sha>.slab.png: a single slab, or an open book's half,
+which <sha>.slab.json records; a result made before that was recorded gets the run's rule again) goes, from the photo
+its run started from, through only what the close-up needs (logo, outline, detector, eraser: photo.close_view; no
+upscaler, inpainting, judge or hosted edit). The new close-up replaces <prefix><sha>.close.jpg in the run's own folder; the file is deleted
 when the photo gets none: by the close-up rule, for a reason of its own (photo.NoCloseUp: its run refused it, it is off
-the product sheet, one of its own inputs is missing or no image, it is not one whole slab now, its logo cannot be
-trusted), because a storage error on it persisted over CLOSEUP_RETRY_MAX jobs, or because its run made no whole single
+the product sheet, one of its own inputs is missing or no image, it no longer gives the slabs its run found, its logo
+cannot be trusted), because a storage error on it persisted over CLOSEUP_RETRY_MAX jobs, or because its run made no whole single
 slab of it. Each photo done is recorded (with the reason when it has none) under <prefix>close_v<CLOSEUP_VERSION>/, so
 a re-run goes on where it stopped and a new close-up rule does every photo again; deploy.standardise_publish then
 publishes it, or takes the published one down.
@@ -34,8 +35,8 @@ from concurrent.futures import ThreadPoolExecutor
 import boto3
 
 from deploy.standardise_publish import _objects, chosen_prefix
-from deploy.standardise_source import (_encode, _get, gpu_error, own_input, passing_storage_error, sheet_photos, start,
-                                       start_edits)
+from deploy.standardise_source import (_encode, _get, gpu_error, own_input, passing_storage_error, sheet_photos,
+                                       slab_record_key, start, start_edits)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
@@ -93,8 +94,9 @@ def listed(records, src, wanted=None):
     return sorted(found.values(), key=lambda r: (r["sha"], r["prefix"]))
 
 
-def remake(client, record, photos, m, watermarked):
-    """The new close-up of one chosen photo, or None when it gets none; NoCloseUp for a reason of its own."""
+def remake(client, record, photos, m, watermarked, made):
+    """The new close-up of one chosen photo, or None when it gets none; NoCloseUp for a reason of its own. Of the slab its
+    run recorded (slab_record_key, in `made`: the run folder's keys); a result made before that was recorded has none."""
     src, sha, out = record["source"], record["sha"], record["prefix"]
     key = f"{imagestore.scraped_prefix(src)}{sha}.jpg"
     source_key, cleaned, refused = start(client, out, key, sha)
@@ -106,8 +108,12 @@ def remake(client, record, photos, m, watermarked):
     logo = watermarked and not cleaned                 # a cleaned copy has no logo left to take off
     clean = own_input(client, f"{imagestore.improved_prefix(src)}{sha}.jpg", photo.decode) if logo else None
     full = own_input(client, source_key)
+    chosen = None
+    if (slab_key := slab_record_key(out, sha)) in made:
+        recorded = json.loads(_get(client, slab_key))
+        chosen = (recorded["index"], recorded["of"])
     return photo.close_view(full, size=tuple(size) if size else None, clean=clean, watermarked=logo, models=m,
-                            edits=start_edits(client, out, key, source_key, cleaned, full))
+                            edits=start_edits(client, out, key, source_key, cleaned, full), chosen=chosen)
 
 
 def store(client, record, image, reason=""):
@@ -209,7 +215,7 @@ class _Slice:
             self.write(record, None, NO_SLAB, "no close-up")
             return
         try:
-            image = remake(self.client, record, photos, m, watermarked)
+            image = remake(self.client, record, photos, m, watermarked, self.made)
         except photo.NoCloseUp as exc:
             self.none_of_its_own(record, str(exc)[:500])
             return

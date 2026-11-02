@@ -1290,6 +1290,12 @@ Your whole answer is one JSON object and nothing else:
                                        # (Blokport's minimum, 2026-11-02) the frame would enlarge it, so it has none ...
     CLOSEUP_MAX_SHARE = 0.9            # ... up to this share of the slab on either axis; needing more: no close-up
     CLOSEUP_DENSITY_SAMPLES = 5        # the squaring's local scale is read on this many points per axis (corner to corner)
+    CLOSEUP_ALIAS_RATIO = 1.25         # a close-up whose near side has more than this many times its far side's photo pixels is
+                                       # squared at the near side's scale, then made smaller (else its finer stone folds into
+                                       # false bands: 9.1 at 2x); below it, straight at the far side's, as a square-on shot is: a
+                                       # reduce of a few % acts as a 2 px blur and takes a fifth of the finest detail (12 px
+                                       # skew, sen-1547ed34: 18.6 -> 14.5), while what folds at 1.25x lands near the finest
+                                       # scale, never in broad bands
     CLOSEUP_EDIT_MAX = 0.01            # a close-up more than this share not as shot (a logo, erased label, retouch fill, a hosted
                                        # model's cleaned copy) is none: a made-up patch shows at 1:1
     CLOSEUP_RETOUCH_DIFF = 8.0         # a retouched copy's pixel this much off the photo it was made from (8-bit luma, ...

@@ -41,6 +41,20 @@ def _slab_png(slab):
     return buf.tobytes()
 
 
+def slab_record_key(out, sha):
+    """Where it is recorded which of the slabs found in a photo its <sha>.slab.png is (photo.Result.chosen): what the
+    close-only run makes its close-up of."""
+    return f"{out}{sha}.slab.json"
+
+
+def _store_slab(client, out, sha, res):
+    """The photo's whole slab (<sha>.slab.png, written last of the two: it marks a whole slab) and, before it, which of
+    the slabs found it is."""
+    client.put_object(Bucket=S3_BUCKET, Key=slab_record_key(out, sha), ContentType="application/json",
+                      Body=json.dumps({"index": res.chosen[0], "of": res.chosen[1]}, sort_keys=True).encode())
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
+
+
 def _get(client, key):
     return client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
 
@@ -74,7 +88,7 @@ def complete(client, out, sha, res):
             if "close" in res.images:
                 client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg", Body=_encode(res.images["close"]),
                                   ContentType="image/jpeg")
-            client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
+            _store_slab(client, out, sha, res)
         except BaseException:
             if not _exists(client, f"{out}{sha}.slab.png"):
                 client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg")
@@ -326,7 +340,7 @@ def main() -> int:
                     tally["held"] += 1
                 else:
                     if res.slab:
-                        client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
+                        _store_slab(client, out, sha, res)
                     # Written last, so "main" means this photo is complete.
                     for name, img in sorted(res.images.items(), key=lambda kv: kv[0] == "main"):
                         client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{name}.jpg", Body=_encode(img), ContentType="image/jpeg")

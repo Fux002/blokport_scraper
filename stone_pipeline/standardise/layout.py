@@ -68,7 +68,7 @@ def upscale(rgb, esr, factor):
     """rgb enlarged by `factor` (> 1) with Real-ESRGAN's fine detail but the photo's OWN tone and colour: the
     smooth upscale gives every tone and colour (ESRGAN alone crushes near-black, washes faint colour, tints
     greys); ESRGAN adds only the detail finer than C.DETAIL_SCALE source pixels, on L* only."""
-    size = (int(round(rgb.shape[1] * factor)), int(round(rgb.shape[0] * factor)))
+    size = _drawn_size(rgb, factor)
     base = cv2.cvtColor(cv2.resize(rgb, size, interpolation=cv2.INTER_CUBIC).astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
     sharp = cv2.resize(cv2.cvtColor(esr.enhance(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)), cv2.COLOR_BGR2RGB), size,
                        interpolation=cv2.INTER_AREA)
@@ -166,23 +166,50 @@ def flat_slabs(rgb, seg, det, lama, size=None):
     return [Flat(f, a, H, rgb) for f, a, H in zip(flats, alphas, squares)]
 
 
+def _drawn_size(img, factor):
+    """(width, height) of img enlarged `factor` times."""
+    return int(round(img.shape[1] * factor)), int(round(img.shape[0] * factor))
+
+
+def _drawn_factor(slabs):
+    """How much the layout enlarges the flat slabs (flat_slabs): above 1 they are enlarged, else drawn as they are."""
+    return (C.OUT_W * (1 - 2 * C.MARGIN)) / sum(f.rgb.shape[1] for f in slabs)
+
+
+def _drawn_alphas(slabs, factor):
+    if factor <= 1:
+        return [f.alpha for f in slabs]
+    return [cv2.resize(f.alpha, _drawn_size(f.rgb, factor), interpolation=cv2.INTER_LINEAR) for f in slabs]
+
+
+def _trim_seam(images):
+    """An open book's two halves with each one's edge face at the seam cut off (JOINT_TRIM of its width: the polished
+    faces catch the light); a single slab as it is."""
+    if len(images) != 2:
+        return list(images)
+    l, r = images
+    kl, kr = max(1, int(C.JOINT_TRIM * l.shape[1])), max(1, int(C.JOINT_TRIM * r.shape[1]))
+    return [l[:, :-kl], r[:, kr:]]
+
+
+def drawn_alphas(slabs):
+    """The flat slabs' outlines exactly as enlarged draws them (enlarged, an open book's seam trimmed), made from the
+    flat slabs alone: no upscaler."""
+    return _trim_seam(_drawn_alphas(slabs, _drawn_factor(slabs)))
+
+
 def enlarged(slabs, esr):
     """The flat slabs (flat_slabs) at the size the layout draws them, lit as one set (a pair keeps one light), or the
     reason (str) they cannot be shown."""
-    flats, alphas = [f.rgb for f in slabs], [f.alpha for f in slabs]
-    factor = (C.OUT_W * (1 - 2 * C.MARGIN)) / sum(f.shape[1] for f in flats)    # how much the layout will enlarge them
-    if factor > 1:
-        flats = [upscale(f, esr, factor) for f in flats]
-        alphas = [cv2.resize(a, f.shape[1::-1], interpolation=cv2.INTER_LINEAR) for a, f in zip(alphas, flats)]
+    factor = _drawn_factor(slabs)
+    flats = [upscale(f.rgb, esr, factor) if factor > 1 else f.rgb for f in slabs]
+    alphas = _drawn_alphas(slabs, factor)
     joined = proto.even_light(np.concatenate(flats, axis=1), (np.concatenate(alphas, axis=1) > 0.5).astype(np.uint8))
-    out, x = [], 0
-    for f, a in zip(flats, alphas):
-        out.append((joined[:, x:x + f.shape[1]], a))
+    lit, x = [], 0
+    for f in flats:
+        lit.append(joined[:, x:x + f.shape[1]])
         x += f.shape[1]
-    if len(out) == 2:                                   # the polished edge faces at the seam catch the light
-        (l, la), (r, ra) = out
-        kl, kr = max(1, int(C.JOINT_TRIM * l.shape[1])), max(1, int(C.JOINT_TRIM * r.shape[1]))
-        out = [(l[:, :-kl], la[:, :-kl]), (r[:, kr:], ra[:, kr:])]
+    out = list(zip(_trim_seam(lit), _trim_seam(alphas)))
     if any(two_stones(f, a) for f, a in out):
         return "two stones in one outline (the slab behind it, seen past a broken corner?)"
     if (bite := max(hollow(a) for _, a in out)) > C.OUTLINE_HOLLOW_MAX:

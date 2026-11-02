@@ -50,8 +50,10 @@ higher JUDGE_MAX, a new clean instruction version) reaches it by itself.
 ## A whole slab before a close-up (the 3D slab)
 
 A result is a whole slab when its run saved `<sha>.slab.png`: a single slab, or an open book, whose slab is one of its
-two halves (each half is a whole real slab: the one with more stone in its outline, the left on a tie; its close view
-is made from that half too). Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
+two halves (each half is a whole real slab: the one with more stone in its outline as the layout draws it, the left on
+a tie; its close view is made from that half too). Which slab it is, is recorded beside it (`<sha>.slab.json`, written
+just before the slab), so a close-only run makes the close-up of that same half, never choosing again; a result made
+before that record existed gets the same rule again, on the outlines as drawn. Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
 close view, no 3D.
 
 A slab listing prefers a whole slab, within the same JUDGE_MAX candidates and their order. Once a close-up has passed

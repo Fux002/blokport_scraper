@@ -68,7 +68,7 @@ def _slab(*shas, prefix=RUN):
 
 def _remakes(monkeypatch, outcomes):
     """remake gives, per sha, an image, None, or raises the exception given."""
-    def remake(client, record, photos, m, watermarked):
+    def remake(client, record, photos, m, watermarked, made):
         out = outcomes[record["sha"]]
         if isinstance(out, BaseException):
             raise out
@@ -246,12 +246,23 @@ def test_the_run_makes_each_photos_close_up_from_the_photo_its_run_started_from(
     monkeypatch.setattr(close, "own_input", lambda client, key, read=photo.read: key)
     monkeypatch.setattr(close, "start_edits", lambda client, out, key, source_key, cleaned, full: f"fills of {source_key}")
 
-    def close_view(full, *, size, models, clean=None, watermarked=False, edits=None):
-        seen.append((full, size, watermarked, edits))
+    def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen=None):
+        seen.append((full, size, watermarked, edits, chosen))
         return None
     monkeypatch.setattr(close.photo, "close_view", close_view)
-    assert close.remake(_S3(), _record(A), {A: {"size": [3.0, 1.8]}}, None, False) is None
-    assert seen == [(f"{RUN}retouched/{A}.jpg", (3.0, 1.8), False, f"fills of {RUN}retouched/{A}.jpg")]
+    assert close.remake(_S3(), _record(A), {A: {"size": [3.0, 1.8]}}, None, False, _slab(A)) is None
+    assert seen == [(f"{RUN}retouched/{A}.jpg", (3.0, 1.8), False, f"fills of {RUN}retouched/{A}.jpg", None)]  # no record: older
+
+
+def test_the_run_takes_the_slab_its_run_recorded(monkeypatch):
+    seen = []
+    monkeypatch.setattr(close, "start", lambda client, out, key, sha: (f"{out}{sha}.jpg", False, ""))
+    monkeypatch.setattr(close, "own_input", lambda client, key, read=photo.read: key)
+    monkeypatch.setattr(close, "start_edits", lambda *a: None)
+    monkeypatch.setattr(close.photo, "close_view", lambda full, *, chosen=None, **k: seen.append(chosen))
+    s3 = _S3({f"{RUN}{A}.slab.json": json.dumps({"index": 1, "of": 2}).encode()})
+    close.remake(s3, _record(A), {A: {"size": None}}, None, False, _slab(A) | {f"{RUN}{A}.slab.json"})
+    assert seen == [(1, 2)]
 
 
 @pytest.mark.parametrize("started,photos,why", [((None, False, "retouch: refused"), {A: {"size": None}}, "refused"),
@@ -259,7 +270,7 @@ def test_the_run_makes_each_photos_close_up_from_the_photo_its_run_started_from(
 def test_a_photo_its_run_refused_or_off_the_sheet_has_none_of_its_own(monkeypatch, started, photos, why):
     monkeypatch.setattr(close, "start", lambda client, out, key, sha: started)
     with pytest.raises(photo.NoCloseUp, match=why):
-        close.remake(_S3(), _record(A), photos, None, False)
+        close.remake(_S3(), _record(A), photos, None, False, _slab(A))
 
 
 def _jpg(rgb):

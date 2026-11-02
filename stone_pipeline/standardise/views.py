@@ -116,16 +116,9 @@ def _not_as_shot(changed, edits, size):
     return np.maximum(changed, cv2.resize(edits.astype(np.float32), size, interpolation=cv2.INTER_AREA))
 
 
-def _crop(flat, photo, from_photo, changed, onto, dense, size):
-    """The crop of `size` of the slab squared again from `photo`; where the standardiser changed the work copy, its own
-    pixels. onto(size) maps the work copy's slab onto the crop at that size. The photo is squared at `dense` first, where
-    no photo pixel is more than one of the crop's (a steep shot's near side has more of them than its far side), then
-    made smaller with an area filter: warping straight to a smaller size samples without one, and stone finer than the
-    stored close-up shows folds into false patterns (moire). from_photo maps a pixel of `photo` onto the work copy."""
-    crop = cv2.warpPerspective(photo, onto(dense) @ flat.homography @ from_photo, dense, flags=cv2.INTER_CUBIC)
-    if dense != size:
-        crop = cv2.resize(crop, size, interpolation=cv2.INTER_AREA)
-    from_work = onto(size) @ flat.homography
+def _crop(flat, photo, changed, to_crop, from_work, size):
+    """The crop of the slab squared again from `photo`; where the standardiser changed the work copy, its own pixels."""
+    crop = cv2.warpPerspective(photo, to_crop, size, flags=cv2.INTER_CUBIC)
     k = cv2.warpPerspective(changed, from_work, size, flags=cv2.INTER_LINEAR)[..., None]
     if not k.any():
         return crop
@@ -144,8 +137,11 @@ def _close_up_at(flat, photo, changed, not_shot, light, block):
     None when the photo has too few pixels (closeup_box), the crop is not all stone, more of it than CLOSEUP_EDIT_MAX is
     not as shot, or it is too soft to show real detail (CLOSEUP_DETAIL_MIN, judged on the photo's own pixels under the
     crop; block: the source's JPEG block in `photo`'s pixels). The crop is stored at closeup_size (never more pixels than
-    the photo has at its sparsest point, at most the canvas's width), squared from the photo without folding its finer
-    stone into false patterns (_crop), and lit (the light was read on the whole slab)."""
+    the photo has at its sparsest point, at most the canvas's width) and lit (the light was read on the whole slab).
+    It is squared at the photo's own scale, then, when that is more than the stored size, made smaller with an area
+    filter: warping straight to a smaller size samples without one, and stone finer than the stored close-up shows
+    folds into false patterns (moire). A shot steep enough that its near side has more than CLOSEUP_ALIAS_RATIO times
+    the pixels of its far side is squared at the near side's scale instead (_scales), for the same reason."""
     work = flat.work
     s = photo.shape[1] / work.shape[1]                  # the work copy is the full photo made smaller, evenly
     size = (round(flat.rgb.shape[1] * s), round(flat.rgb.shape[0] * s))
@@ -158,16 +154,19 @@ def _close_up_at(flat, photo, changed, not_shot, light, block):
     x, y, cw, ch = box
     if flat.alpha[int(y / s):math.ceil((y + ch) / s), int(x / s):math.ceil((x + cw) / s)].min() < 0.5:
         return None, False
-    out = closeup_size(cw, density)[1]
-    dense = closeup_size(cw, max(density, _scales(to_slab, box)[1]))[0]   # one crop pixel per photo pixel even at its densest
+    native, out = closeup_size(cw, density)
     place = np.array([[1, 0, -x], [0, 1, -y], [0, 0, 1]], np.float64) @ layout.scaling(s, s)   # the work slab -> the box
     onto = lambda at: layout.scaling(at[0] / cw, at[1] / ch) @ place
-    from_work = onto(out) @ flat.homography             # the work slab -> the stored crop
-    if cv2.warpPerspective(not_shot, from_work, out, flags=cv2.INTER_LINEAR).mean() > C.CLOSEUP_EDIT_MAX:
+    from_work = onto(native) @ flat.homography          # the work slab -> the crop at the photo's own scale
+    if cv2.warpPerspective(not_shot, from_work, native, flags=cv2.INTER_LINEAR).mean() > C.CLOSEUP_EDIT_MAX:
         return None, False
-    if fine_detail(_own_pixels(photo, from_work @ from_photo, out), block) < C.CLOSEUP_DETAIL_MIN:
+    if fine_detail(_own_pixels(photo, from_work @ from_photo, native), block) < C.CLOSEUP_DETAIL_MIN:
         return None, True
-    return proto.apply_light(_crop(flat, photo, from_photo, changed, onto, dense, out), _light_on(light, onto(out), out)), False
+    most = _scales(to_slab, box)[1]
+    grid = closeup_size(cw, most)[0] if most > C.CLOSEUP_ALIAS_RATIO * density else native
+    from_work = onto(grid) @ flat.homography
+    lit = proto.apply_light(_crop(flat, photo, changed, from_work @ from_photo, from_work, grid), _light_on(light, onto(grid), grid))
+    return (lit if grid == out else cv2.resize(lit, out, interpolation=cv2.INTER_AREA)), False
 
 
 def close_up(flat, full, edits=None):
