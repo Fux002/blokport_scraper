@@ -144,7 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_combination_variation ON combination (variation_k
 --
 -- payload_hash covers: (variation_key, color, finish, quality, type, title, description,
 --   handle, weight, length, width, height, origin_country_code, product_image_keys,
---   oriented_image_keys, company_id, sales_channel_id, category, bundle_size, ports).
+--   oriented_image_keys, company_id, sales_channel_id, category, bundle_size, ports, model_3d_key).
 -- ---------------------------------------------------------------------------
 --
 -- Two groups of columns. The DESIGN fields (name-based: color/finish/quality/
@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS product (
     thumbnail_key        TEXT,
     oriented_image_keys  TEXT,                          -- JSON array, ordered (blocks: Front/Right/Back/Left)
     product_image_keys   TEXT,                          -- JSON array, ordered (slabs: Product Image 1..N)
+    model_3d_key         TEXT,                          -- the lead slab's 3D cut-out url; null = no 3D
     company_id           TEXT,
     sales_channel_id     TEXT,
     ports                TEXT,                          -- JSON array of port ids

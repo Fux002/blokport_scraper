@@ -29,7 +29,8 @@ from stone_pipeline.stages.product_state import inventory_str
 # links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
 # origin_country_code (which fanned every product out to all ports in its quarry country).
 # v4: height is the thickness, width the short face (every shape flat). v5: lot_code + lot_position.
-_PRODUCT_PAYLOAD_CONTRACT = "v5-lots"
+# v6: model_3d, the lead slab's 3D cut-out.
+_PRODUCT_PAYLOAD_CONTRACT = "v6-model-3d"
 
 
 def _image_models(path: str | Path | None = None) -> dict[str, str]:
@@ -236,6 +237,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "thumbnail_key": r.thumbnail_key,
             "oriented_image_keys": json.dumps(r.oriented_image_keys or []),
             "product_image_keys": json.dumps(r.product_image_keys or []),
+            "model_3d_key": r.model_3d_key,
             "company_id": r.company_id,   # already = source_cfg.company_id or the default (constants.py)
             "sales_channel_id": r.sales_channel_id,
             "ports": json.dumps(r.port_ids or []),
@@ -260,6 +262,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 r.collection_country_code, r.collection_city,
                 # a piece's lot membership: a re-cut lot or a moved position must re-serve the piece
                 r.lot_code, r.lot_position,
+                r.model_3d_key,   # a slab that gains, changes or loses its 3D re-serves
             ])),
             "created_at": now,
             "updated_at": now,

@@ -29,7 +29,7 @@ from stone_pipeline.core import env
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from stone_pipeline.config.settings import SETTINGS, Confidence
+from stone_pipeline.config.settings import SETTINGS, STANDARDISE, Confidence
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.io import download as dl
@@ -142,9 +142,9 @@ def _hosted_object_exists(backend, hosted_url: str) -> bool:
     return backend.exists(hosted_url[len(base):])
 
 
-def _list_shas(prefix: str) -> set[str]:
-    """The content sha256 embedded in every object key under an S3 pool prefix (discarded/, enhanced/).
-    Raises on any S3 failure: the callers decide the policy."""
+def _list_shas(prefix: str, suffix: str = "") -> set[str]:
+    """The content sha256 embedded in every object key under an S3 pool prefix (discarded/, enhanced/), only the keys
+    ending in `suffix` when given. Raises on any S3 failure: the callers decide the policy."""
     import boto3
 
     s3 = SETTINGS.s3
@@ -153,6 +153,8 @@ def _list_shas(prefix: str) -> set[str]:
     out: set[str] = set()
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
+            if not obj["Key"].endswith(suffix):
+                continue
             sha = imagestore.sha_from_url(obj["Key"])
             if sha:
                 out.add(sha)
@@ -281,6 +283,8 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     views = _load_standard_views(cfg)
     for row in rows:
         if row.image_keys:
+            # read from the product's own photos, before they are replaced by the standardised views
+            row.model_3d_key = model_3d(row.image_keys, views) if _is_3d_format(row) else None
             _slot_row(row, standardised(row.image_keys, views))
     return stats
 
@@ -295,16 +299,38 @@ def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
     view), else the first published one. Its showroom image is the catalog thumbnail, then its white, side and close-up
     views, whichever it has (a block: its showroom image only). The product's other photos are left out, their warehouse
     would show next to the showroom; a product with no published photo keeps the images it had."""
+    lead = _lead(urls, views)
+    if lead is None:
+        return urls
+    base, src, sha = lead
+    return [f"{base}/products/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
+            for view in imagestore.STANDARD_VIEWS if sha in views.get(view, ())]
+
+
+def model_3d(urls: list[str], views: dict[str, set[str]]) -> Optional[str]:
+    """The 3D slab's cut-out url of a product: its lead photo's (the slab the catalog thumbnail shows), when that photo is
+    a whole single slab with a published cut-out; None otherwise (an open book, a close-up, no published photo)."""
+    lead = _lead(urls, views)
+    if lead is None or lead[2] not in views.get(imagestore.CUTOUT_SUBDIR, ()):
+        return None
+    base, src, sha = lead
+    return f"{base}/products/{imagestore.STANDARD_SUBDIR}/{imagestore.CUTOUT_SUBDIR}/{src}/{sha}.webp"
+
+
+def _lead(urls: list[str], views: dict[str, set[str]]) -> Optional[tuple[str, str, str]]:
+    """(url up to /products, source, sha) of the product's lead published photo (standardised), or None."""
     found = []
     for url in urls:
         m = _HOSTED.search(url)
         if m and m.group(2) in views.get("main", ()):
-            found.append((url[:m.start()], m.group(1), m.group(2)))     # (url up to /products, source, sha)
+            found.append((url[:m.start()], m.group(1), m.group(2)))
     if not found:
-        return urls
-    base, src, sha = next((f for f in found if f[2] in views.get("studio", ())), found[0])
-    return [f"{base}/products/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
-            for view in imagestore.STANDARD_VIEWS if sha in views.get(view, ())]
+        return None
+    return next((f for f in found if f[2] in views.get("studio", ())), found[0])
+
+
+def _is_3d_format(row: CanonicalRow) -> bool:
+    return (row.format_value or "").casefold() == STANDARDISE.CUTOUT_FORMAT
 
 
 def _load_standard_views(cfg) -> dict[str, set[str]]:
@@ -314,7 +340,11 @@ def _load_standard_views(cfg) -> dict[str, set[str]]:
     if getattr(cfg, "mode", None) == "local":
         return {}
     try:
-        return {view: _list_shas(imagestore.standard_prefix(view)) for view in imagestore.STANDARD_VIEWS}
+        views = {view: _list_shas(imagestore.standard_prefix(view)) for view in imagestore.STANDARD_VIEWS}
+        # a 3D slab counts once both its files are there (the outline is written last)
+        views[imagestore.CUTOUT_SUBDIR] = (_list_shas(imagestore.cutout_prefix(), ".webp")
+                                           & _list_shas(imagestore.cutout_prefix(), ".json"))
+        return views
     except Exception as exc:
         log.warning("standardised photos unreachable; products keep their images this run",
                     extra={"extra_fields": {"error": str(exc)}})

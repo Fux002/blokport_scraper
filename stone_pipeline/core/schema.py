@@ -285,6 +285,7 @@ class CanonicalRow(BaseModel):
     thumbnail_key: Optional[str] = None
     oriented_image_keys: list[str] = Field(default_factory=list)
     product_image_keys: list[str] = Field(default_factory=list)
+    model_3d_key: Optional[str] = None                 # the lead slab's 3D cut-out (.webp; its outline .json beside it)
 
     # config constants (Stage 8)
     company_id: Optional[str] = None

@@ -172,7 +172,9 @@ Only products whose variation is synced and whose texture is live.
     "collection_country_code": "IT", "collection_city": "Verona",
     "bundle_size": 7,
     "lot_code": null, "lot_position": null,
-    "image_urls": ["https://.../products/improved/polonine/<sha>.jpg"]
+    "image_urls": ["https://.../products/improved/polonine/<sha>.jpg"],
+    "model_3d": {"cutout": "https://.../products/standard/cutout/polonine/<sha>.webp",
+                 "meta": "https://.../products/standard/cutout/polonine/<sha>.json"}
   }
 }
 ```
@@ -192,6 +194,13 @@ variation id from step 1 and **inherit its category and type** (and write the se
 Medusa id in the payload, set per source in :4200), else resolve by `vendor` name;
 resolve `origin_port` (UN/LOCODE) to the port id (falling back to `origin_country_code`);
 copy `image_urls` into your own storage. Ack with the product id.
+
+**3D slab** (`model_3d`, optional, additive): the lead slab's cut-out (RGBA WebP, alpha = the slab's own outline, long
+side at most 2048 px) and its meta JSON (`version` 1, `width_px`, `height_px`, `outline` = at most 64 `[u, v]` points
+from 0 to 1 measured from the cut-out's top-left, `edge_color` = the sawn edge's hex colour). Copy both like
+`image_urls` and keep them as `metadata.model_3d`; the viewer sizes the slab from `length`, `width` and `height`. It is
+`null` for a product with no 3D (a block, a tile, an open book, a close-up, a product without a standardised photo):
+remove `metadata.model_3d` then. Both files are named after the source photo, like the standardised views.
 
 **Collection location** (`collection_country_code`, `collection_city`) is where the product is
 physically **collected** before shipping (the supplier's warehouse). It is a distinct axis from

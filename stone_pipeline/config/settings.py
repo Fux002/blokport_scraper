@@ -1017,6 +1017,19 @@ class STANDARDISE:
     }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
+    # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole single slab
+    # (<sha>.slab.png) is published as a WebP cut-out and a JSON outline; Blokport's viewer extrudes the outline to the
+    # product's thickness with the photo on the face. Only a slab product gets one (not a block, tile, open book or close-up).
+    CUTOUT_VERSION = 1
+    CUTOUT_FORMAT = "slab"             # the product format (format_value, any case) that gets a 3D slab
+    CUTOUT_LONG_SIDE = 2048            # px, the contract's maximum
+    CUTOUT_WEBP_QUALITY = 86           # the quality the approved review viewer used
+    CUTOUT_ALPHA_CUT = 127             # alpha above this is stone
+    CUTOUT_MAX_POINTS = 64             # the contract's outline limit
+    # The outline is simplified to this share of its length (the approved viewer), coarser by CUTOUT_EPSILON_STEP until
+    # it has at most CUTOUT_MAX_POINTS points: a ragged natural edge keeps its shape, only finer.
+    CUTOUT_EPSILON, CUTOUT_EPSILON_STEP = 0.0015, 1.5
+    CUTOUT_EDGE_WHITE = 0.25           # the sawn edge: the stone's mean colour mixed with this much white (paler, duller)
     # The last check before a finished photo is published (user 2026-11-01: GPU first, a strict check, the hosted model for
     # the rest): a vision model sees the original and the catalog image and passes or fails it with reasons. Opus matched the
     # user's own labels best (23 of 25 defects, 6 of 6 flagged; Haiku 16, Sonnet 19). One good photo per listing is enough:
