@@ -49,7 +49,7 @@ def _listing(*photos, key="slab-1"):
 
 
 def _verdict(v, *kinds):
-    return json.dumps({"verdict": v, "problems": [{"kind": k, "where": "x"} for k in kinds]}).encode()
+    return json.dumps({"verdict": v, "problems": [{"kind": k, "where": "x"} for k in kinds], "version": C.JUDGE_VERSION}).encode()
 
 
 # --- the judge's answers -------------------------------------------------------------------------------------------
@@ -103,7 +103,7 @@ def test_the_first_photo_the_judge_passes_is_chosen_and_judging_stops_there(monk
     s3 = _S3({f"dev/products/scraped/sentas/{s}.jpg": b"o" for s in (A, B, D)} | {f"{GPU}{s}.main.jpg": b"m" for s in (A, B, D)})
     asked = []
     monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or ({"verdict": "pass" if len(asked) == 2 else "fail",
-                                                                                 "problems": []}, 0.02))
+                                                                                 "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D))}), ("v9-clean", {"sentas": _round(CL)})]
     picked, complete = sel.choose(s3, rounds, _listing(A, B, D), set(), sel.Spend(10))
     assert picked == ("v9", B) and complete and len(asked) == 2                          # D is never judged
@@ -121,7 +121,7 @@ def test_at_most_the_set_number_of_photos_is_judged_per_listing(monkeypatch):
     photos = [c * 64 for c in "123456"]
     s3 = _S3({f"dev/products/scraped/sentas/{s}.jpg": b"o" for s in photos} | {f"{GPU}{s}.main.jpg": b"m" for s in photos})
     asked = []
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or ({"verdict": "fail", "problems": []}, 0.0))
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or ({"verdict": "fail", "problems": [], "version": C.JUDGE_VERSION}, 0.0))
     rounds = [("v9", {"sentas": _round(GPU, finished=photos)}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(s3, rounds, _listing(*photos), set(), sel.Spend(10)) == (None, True)
     assert len(asked) == C.JUDGE_MAX_PER_LISTING
@@ -344,3 +344,43 @@ def test_an_auth_or_balance_error_from_the_queue_is_loud_never_a_failed_edit(mon
     with pytest.raises(httpx.HTTPStatusError):
         sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert f"{CL}attempts/{B}.kontext.json" not in s3.objects and edits == ["kontext"]   # retried next run, not given up
+
+
+
+def test_a_fail_under_an_older_stricter_bar_is_judged_again_and_a_pass_stays_a_pass(monkeypatch):
+    old_fail = json.dumps({"verdict": "fail", "problems": [{"kind": "leftover_mark"}], "version": 1}).encode()
+    old_pass = json.dumps({"verdict": "pass", "problems": [], "version": 1}).encode()
+    s3 = _S3({f"{GPU}judged/{A}.json": old_fail, f"{GPU}judged/{B}.json": old_pass,
+              f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    asked = []
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(s3, rounds, _listing(B), set(), sel.Spend(10)) == (("v9", B), True) and asked == []   # pass stands
+    assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (("v9", A), True) and asked == [1]  # judged again
+    assert json.loads(s3.objects[f"{GPU}judged/{A}.json"])["version"] == C.JUDGE_VERSION
+
+
+def test_without_spend_a_fail_under_an_older_bar_is_not_final():
+    old_fail = json.dumps({"verdict": "fail", "problems": [{"kind": "leftover_mark"}], "version": 1}).encode()
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set()) == (None, False)
+
+
+
+def test_a_listing_with_an_outdated_fail_is_never_cleaned_before_it_is_judged_again(monkeypatch):
+    monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned on an outdated verdict"))
+    old_fail = json.dumps({"verdict": "fail", "problems": [{"kind": "light_reflection"}], "version": 1}).encode()
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    with pytest.raises(RuntimeError, match="nothing is cleaned before they do"):
+        sel.clean_listing(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set(), sel.Spend(10))
+
+
+def test_an_attempt_that_failed_under_an_older_instruction_is_made_again_and_a_pass_stands(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    s3.objects[f"{CL}attempts/{B}.kontext.json"] = json.dumps({"passes": False, "clean_version": 1}).encode()
+    s3.objects[f"{CL}attempts/{B}.kontext.jpg"] = b"old-copy"
+    rounds[1][1]["sentas"].attempts.add(f"{B}.kontext")
+    rounds[1][1]["sentas"].edited.add(f"{B}.kontext")
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == ["kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"   # sent again, new copy used
+    assert json.loads(s3.objects[f"{CL}attempts/{B}.kontext.json"])["clean_version"] == C.CLEAN_VERSION

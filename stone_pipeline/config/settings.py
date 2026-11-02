@@ -1023,6 +1023,11 @@ class STANDARDISE:
     # its photos are judged in order and judging stops at the first pass, at most JUDGE_MAX_PER_LISTING of them.
     JUDGE_URL = "https://fal.run/openrouter/router/vision"
     JUDGE_MODEL = "anthropic/claude-opus-5.5"
+    # The bar the prompt sets. 2 (user 2026-11-02, Namib Bianco: "if the final result looks like the FAL image I would
+    # accept that, I rather keep the product"): a tiny remnant at the very edge no longer fails. A stored verdict carries
+    # the version it was made under; a FAIL made under a lower one is judged again (a pass stays a pass: the bar only
+    # moved towards passing, so nothing that passed before can fail now).
+    JUDGE_VERSION = 2
     JUDGE_REASONING = True             # the endpoint refuses this model without it
     JUDGE_MAX_TOKENS = 6000            # reasoning included
     JUDGE_LONG_SIDE, JUDGE_JPEG_QUALITY = 1024, 88   # each image is sent at this long side
@@ -1044,7 +1049,8 @@ FAIL image 2 if a buyer looking at it at catalog size would clearly notice any o
 - scene_reflection: windows, the hall, people or objects clearly mirrored in the stone
 - bad_fill: a patch, rectangle or smear whose tone, brightness or texture does not match the stone around it
   (where a label, logo, card or strap was removed)
-- leftover_mark: a label, sticker, card, logo, writing, tape or strap still on the stone
+- leftover_mark: a label, sticker, card, logo, writing, tape, protective film or strap still on the stone (a tiny
+  remnant at the very edge of the slab, hardly visible at catalog size, is not a problem)
 - not_one_slab: two or more slabs shown as one (stacked with an offset, a second slab's edge visible), or another
   stone taken in
 - wrong_shape: the product cut off, part of it missing, warped, or something in front of it cut into its outline
@@ -1065,9 +1071,13 @@ Your whole answer is one JSON object and nothing else:
     # nothing left to fill.
     CLEAN_INSTRUCTION = ("Remove only these from the polished stone slab: lifting straps, belts and their corner clamps or "
                          "protectors; reflections of lamps, light tubes, windows and the room mirrored on its surface; and any "
-                         "label, sticker, sample card, tape, writing or logo on it. Where they were, show the slab's own stone, "
+                         "label, sticker, sample card, tape, protective plastic film, writing or logo on it. Where they were, "
+                         "show the slab's own stone, "
                          "continuing its pattern. Keep the stone's colour, veins, pattern and texture exactly as they are, and keep "
                          "the slab's outline and the rest of the photo unchanged.")
+    # The instruction's version (2: protective film too). A stored attempt that failed under a lower one is made again with
+    # the current instruction; a passed one stands.
+    CLEAN_VERSION = 2
     CLEAN_MODELS = (                   # (name, endpoint, extra input); the photo goes in as image_url or image_urls
         ("kontext", "fal-ai/flux-pro/kontext", {"output_format": "jpeg", "seed": 1}),
         ("nano2", "fal-ai/nano-banana-2/edit", {"resolution": "2K", "output_format": "jpeg", "seed": 1}),
@@ -1083,7 +1093,7 @@ Your whole answer is one JSON object and nothing else:
     CLEAN_FAILED_CODES = (400, 422)    # a queued edit the model refused for good; any other error is loud and retried
     CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
 straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and
-foreign marks (labels, stickers, sample cards, tape, writing, logos) from the stone, and nothing else. Judge image 2
+foreign marks (labels, stickers, sample cards, tape, protective film, writing, logos) from the stone, and nothing else. Judge image 2
 on two questions:
 1. clean: are all such straps, clamps, reflections and marks gone from the stone in image 2? (true/false)
 2. faithful: is the stone itself the same stone as in image 1 (same colour, veins, pattern and texture, nothing

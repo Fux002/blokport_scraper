@@ -77,7 +77,12 @@ def judge(original, result, fmt):
     """(verdict dict, cost): is our catalog image `result` of the photo `original` fit to publish? fmt = slab | block | tile."""
     text, cost = ask(C.JUDGE_PROMPT, f"Product format: {fmt.upper()}. Image 1: original. Image 2: catalog image. Judge image 2.",
                      [original, result])
-    return {**parse_verdict(text), "model": C.JUDGE_MODEL}, cost
+    return {**parse_verdict(text), "model": C.JUDGE_MODEL, "version": C.JUDGE_VERSION}, cost
+
+
+def current(verdict):
+    """Whether a stored verdict still stands: a pass always does, a fail only when made under the current bar."""
+    return passed(verdict) or verdict.get("version", 1) >= C.JUDGE_VERSION
 
 
 def check_clean(original, cleaned):
