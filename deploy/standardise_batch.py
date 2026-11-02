@@ -59,11 +59,11 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
         s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(shas).encode(), ContentType="application/json")
         common = [{"name": k, "value": str(v)} for k, v in (("SRC", src), ("RUN_TAG", tag), ("ONLY_KEY", only))]
         name = f"{src}-{tag}-{n}"
-        retouch = batch.submit_job(jobName=f"retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
+        retouch = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
                                    timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT},
                                    containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise-retouch"}] + common})["jobId"]
         ids.append(retouch)
-        standardise = batch.submit_job(jobName=f"standardise-{name}", jobQueue=queue, jobDefinition=jobdef,
+        standardise = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-standardise-{name}", jobQueue=queue, jobDefinition=jobdef,
                                        dependsOn=[{"jobId": retouch}], timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT},
                                        containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise"},
                                                                            {"name": "WATERMARKED", "value": str(watermarked[src]).lower()}]
@@ -101,18 +101,74 @@ def wait_limit(n_slices):
     return C.RUN_MAX_WAIT_SECONDS * -(-n_slices // at_once)
 
 
-def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, clock=time.monotonic):
+def gpu_usd(seconds):
+    """What this many seconds of one GPU job cost (its vCPUs at GPU_VCPU_HOUR_USD)."""
+    return seconds / 3600 * C.GPU_JOB_VCPUS * C.GPU_VCPU_HOUR_USD
+
+
+def worst_seconds(n_slices, window):
+    """The most GPU-seconds a round of n slices can use: one GPU per slice at a time (its retouch job, then its
+    standardise job, each within its timeout), never past the work window, at most RUN_GPU_VCPUS worth at once."""
+    at_once = max(1, C.RUN_GPU_VCPUS // C.GPU_JOB_VCPUS)
+    return min(n_slices * min(C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, window), at_once * window)
+
+
+def ran_usd(batch, ids, reserved, now=time.time):
+    """What the round's jobs cost: each one's running time (startedAt to stoppedAt, or to now for one still stopping).
+    The reserved price when Batch cannot say (counted high, never low)."""
+    try:
+        jobs = [j for i in range(0, len(ids), 100) for j in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]]
+    except (BotoCoreError, ClientError) as exc:
+        print(f"   WARNING: GPU job times unreadable ({exc}); the round counts its reserved ${reserved:.2f}", flush=True)
+        return reserved
+    ran_ms = sum((j["stoppedAt"] if j.get("stoppedAt") is not None else now() * 1000) - j["startedAt"]
+                 for j in jobs if j.get("startedAt") is not None)
+    return gpu_usd(ran_ms / 1000)
+
+
+def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=time.monotonic, now=time.time):
     """Every listed photo through retouch and standardise under `tag`: [(job name, why)] of failed jobs. No jobs, no
-    ceiling change, when nothing is listed. The round waits until the process's deadline (its work window, on `clock`) at
-    most: then its jobs are stopped (TimeoutError), every photo they finished stays, the next run goes on."""
+    ceiling change, when nothing is listed. The round's worst case is reserved from the month's budget first
+    (SpendCapReached: nothing is submitted) and settled to what its jobs ran, however the round ends. It waits until the
+    process's deadline (its work window, on `clock`) at most: then its jobs are stopped (TimeoutError), every photo they
+    finished stays, the next run goes on."""
     if not any(todo.values()):
         return []
     queue, jobdef = target()
-    with raised(batch, pool(batch, queue)):
-        ids = []
-        try:
-            submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
-            return wait(batch, ids, min(wait_limit(len(slices(todo))), deadline - clock()))
-        except BaseException as exc:
-            stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
-            raise
+    window = max(0.0, deadline - clock())
+    reserved = gpu_usd(worst_seconds(len(slices(todo)), window))
+    spend.reserve(reserved)
+    ids = []
+    try:
+        with raised(batch, pool(batch, queue)):
+            try:
+                submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
+                return wait(batch, ids, min(wait_limit(len(slices(todo))), window))
+            except BaseException as exc:
+                stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
+                raise
+    finally:
+        spend.settle(reserved, ran_usd(batch, ids, reserved, now))
+
+
+def _listed(batch, queue):
+    """The process's jobs on the queue (named JOB_PREFIX...), every status, page by page."""
+    ask = {"jobQueue": queue, "filters": [{"name": "JOB_NAME", "values": [f"{C.JOB_PREFIX}*"]}]}
+    while True:
+        page = batch.list_jobs(**ask)
+        yield from page.get("jobSummaryList", [])
+        if not page.get("nextToken"):
+            return
+        ask["nextToken"] = page["nextToken"]
+
+
+def clear_leftovers(batch, run_id):
+    """Stop the jobs an earlier run left still active (its process was killed before it could) and set the GPU pool's
+    ceiling back to idle: [the stopped job ids]. Only one process runs at a time (the run lock), so every active job of
+    the process that is not this run's was left."""
+    queue, _ = target()
+    left = [j["jobId"] for j in _listed(batch, queue)
+            if j["status"] not in _DONE and not j["jobName"].startswith(f"{C.JOB_PREFIX}{run_id}-")]
+    stop(batch, left, f"left by an earlier standardise run; stopped by {run_id}")
+    _ceiling(batch, pool(batch, queue), C.IDLE_GPU_VCPUS)
+    return left

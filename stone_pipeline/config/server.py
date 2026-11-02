@@ -948,8 +948,11 @@ def shutdown(config_db, periodic) -> None:
     """SIGTERM path (ECS stops a task with SIGTERM, which never runs atexit): STOP the periodic snapshot
     thread and wait for an in-flight save, THEN save config.db once, then exit 0. Ordered this way so the
     final save never races interpreter teardown (the 'cannot schedule new futures after interpreter
-    shutdown' error every roll used to log). No atexit backstop: a second save at teardown was the race."""
+    shutdown' error every roll used to log). No atexit backstop: a second save at teardown was the race. A running run
+    gets the SIGTERM first and its grace to clean up (runner.stop_current), inside the container's stopTimeout."""
+    from stone_pipeline.config import runner
     from stone_pipeline.ledger import snapshot
+    runner.stop_current()
     if hasattr(periodic, "stop"):
         periodic.stop()
     else:

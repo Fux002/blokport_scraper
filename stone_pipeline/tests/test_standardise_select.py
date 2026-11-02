@@ -342,11 +342,11 @@ def test_no_listing_starts_after_the_work_window():
 
 
 def test_the_budget_counts_what_earlier_runs_of_the_month_spent():
-    spend = sel.Spend(1.0, before=0.9)
+    spend = sel.Spend(1.0, others=lambda: 0.9)
     with pytest.raises(sel.SpendCapReached):
         spend.reserve(0.14)
     assert spend.capped
-    assert not sel.Spend(1.0, before=0.5).capped
+    assert not sel.Spend(1.0, others=lambda: 0.5).capped
 
 
 def test_the_run_s_total_is_kept_after_every_change_a_reserve_counting_as_spent():
@@ -357,11 +357,76 @@ def test_the_run_s_total_is_kept_after_every_change_a_reserve_counting_as_spent(
     assert kept == [pytest.approx(0.14), pytest.approx(0.02)]
 
 
-def test_a_halted_spend_lets_no_call_start():
+def test_a_halted_spend_lets_no_call_start_and_says_why():
     spend = sel.Spend(10)
-    spend.halt()
-    with pytest.raises(sel.Halted):
+    spend.halt("the work window ended")
+    with pytest.raises(sel.Halted, match="the work window ended"):
         spend.reserve(0.01)
+
+
+def _judged_setup(monkeypatch, answer):
+    s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    monkeypatch.setattr(sel.judge, "judge", answer)
+    return s3, [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+
+
+def test_a_judge_call_that_fails_after_it_was_sent_counts_at_its_reserved_price(monkeypatch):
+    s3, rounds = _judged_setup(monkeypatch, lambda o, r, f: (_ for _ in ()).throw(TimeoutError("read timed out")))
+    spend = sel.Spend(10)
+    with pytest.raises(TimeoutError):
+        sel.choose(s3, rounds, _listing(A), set(), spend)
+    assert spend.spent == pytest.approx(C.JUDGE_PRICE_USD) and spend.reserved == 0
+
+
+def test_an_answer_without_its_cost_counts_at_the_reserved_price_and_says_so(monkeypatch, capsys):
+    s3, rounds = _judged_setup(monkeypatch, lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, None))
+    spend = sel.Spend(10)
+    sel.choose(s3, rounds, _listing(A), set(), spend)
+    assert spend.spent == pytest.approx(C.JUDGE_PRICE_USD)
+    assert "no usage.cost" in capsys.readouterr().out
+    assert json.loads(s3.objects[f"{GPU}judged/{A}.json"])["cost"] == pytest.approx(C.JUDGE_PRICE_USD)
+
+
+def test_the_judge_answer_s_missing_cost_is_none_never_free(monkeypatch):
+    import httpx
+    monkeypatch.setenv("FAL_KEY", "k")
+    monkeypatch.setattr(judge, "data_uri", lambda *a: "data:")
+    answer = httpx.Response(200, json={"output": "{}", "usage": {}}, request=httpx.Request("POST", C.JUDGE_URL))
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: answer)
+    assert judge.ask("s", "p", [b"x"]) == ("{}", None)
+
+
+def test_an_edit_whose_submit_failed_counts_at_its_price_it_may_have_been_accepted(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(TimeoutError("no answer")))
+    spend = sel.Spend(10)
+    with pytest.raises(TimeoutError):
+        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert spend.spent == pytest.approx(C.CLEAN_PRICE_USD["nano2"]) and spend.reserved == 0
+
+
+def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch):
+    import threading
+    import time
+    s3 = _S3({f"{GPU}judged/{s}.json": _verdict("pass") for s in (A, B, D, E)})
+    s = object.__new__(sel.Selection)
+    s.client, s.exclude, s.root = s3, set(), "r/"
+    s.listings = [_listing(x, key=k) for x, k in ((A, "one"), (B, "two"), (D, "three"), (E, "four"))]
+    s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D, E), judged=(A, B, D, E))}), ("v9-clean", {"sentas": _round(CL)})]
+    at_once, now, lock = [0], [0], threading.Lock()
+    choose = sel.choose
+
+    def slow(*a, **k):
+        with lock:
+            now[0] += 1
+            at_once[0] = max(at_once[0], now[0])
+        time.sleep(0.05)
+        with lock:
+            now[0] -= 1
+        return choose(*a, **k)
+    monkeypatch.setattr(sel, "choose", slow)
+    result = sel.report(s)
+    assert [c["key"] for c in result["chosen"]] == ["one", "two", "three", "four"] and at_once[0] > 1
 
 
 def test_an_auth_or_balance_error_from_the_queue_is_loud_never_a_failed_edit(monkeypatch):

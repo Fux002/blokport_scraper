@@ -16,15 +16,17 @@ Contract (matches the :4200 admin's expectations):
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 
-from stone_pipeline.core import env
-
+from stone_pipeline.config.settings import RUN_STOP_GRACE_SECONDS, RUN_TIMEOUT_SECONDS
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("config.runner")
@@ -32,6 +34,7 @@ log = logfmt.get_logger("config.runner")
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}      # run_id -> record (kept so GET /run/{id} works after it finishes)
 _current_id: str | None = None   # the in-flight run, if any
+_child: subprocess.Popen | None = None   # its subprocess while it runs (stop_current passes it a SIGTERM)
 _MAX_RUNS = 200                  # cap the in-memory history so a long-lived server never grows unbounded (M2)
 
 
@@ -52,8 +55,9 @@ def _now() -> str:
 # `photos` is this runner's own stage, not a produce: the standardised-photo process (deploy.standardise_run,
 # STANDARDISE_PROCESS.md) over the whole environment, which links what it published with a republish of its own.
 STAGES = ("scrape", "catalog", "republish", "inventory", "all", "photos")
-# The produce stages that publish a product sheet: with STANDARDISE.AUTO on, the photos run follows each of them.
-_PHOTOS_AFTER = ("catalog", "all", "republish")
+# With STANDARDISE.AUTO on, the photos run follows a full produce (the owner's button) and nothing else: never the
+# republish Blokport's Publish button runs and waits on, which must never find the run slot taken.
+_PHOTOS_AFTER = ("all",)
 
 
 def _public(rec: dict) -> dict:
@@ -131,15 +135,15 @@ def _resolve_sources(requested) -> list[str]:
 
 # -- launchers (injectable for tests) -----------------------------------------
 
-_RUN_TIMEOUT = int(env.getenv("BLOKPORT_RUN_TIMEOUT_SECONDS", "7200"))   # 2h: kill a wedged produce so
-                                                                            # a hung scraper never wedges the
-                                                                            # control plane (409s all runs/ops)
+_RUN_TIMEOUT = RUN_TIMEOUT_SECONDS     # kill a wedged produce so a hung scraper never wedges the
+                                       # control plane (409s all runs/ops)
 
 
 _TAIL_LINES = 40
 
 
 def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
+    global _child
     with _lock:
         rec["status"] = "running"
     # STREAM the produce's stderr (its structured logs + any traceback) line by line onto THIS process's
@@ -169,8 +173,11 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
             "run_id": rec["run_id"], "timeout_s": _RUN_TIMEOUT}})
         tail.append(f"produce run exceeded timeout ({_RUN_TIMEOUT}s); killed")
     tail_text = "\n".join(tail)
-    counts = _capture_counts()                          # ledger totals after the run
+    # ledger totals after a produce; a photos run's own summary (chosen, review, pending, spend)
+    counts = _photo_counts(rec) if rec.get("stage") == "photos" else _capture_counts()
     with _lock:
+        if _child is proc:
+            _child = None
         rec["status"] = "succeeded" if rc == 0 else "failed"
         rec["finished_at"] = _now()
         rec["counts"] = counts
@@ -191,9 +198,8 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
 
 
 def _follow_up(rec: dict) -> None:
-    """After a produce that published a product sheet, the photos run (with STANDARDISE.AUTO on): its own run, on the
-    sheet this produce just published. A run slot taken in between (an op claimed it) is logged; the next produce
-    starts it again."""
+    """After a full produce (stage all), the photos run (with STANDARDISE.AUTO on): its own run, on the sheet this produce
+    just published. A run slot taken in between (an op claimed it) is logged; the next produce starts it again."""
     from stone_pipeline.config.settings import STANDARDISE
     if not (STANDARDISE.AUTO and rec.get("status") == "succeeded" and rec.get("stage") in _PHOTOS_AFTER):
         return
@@ -218,18 +224,55 @@ def _build_command(rec: dict) -> list[str]:
     return cmd
 
 
+def _summary_path(rec: dict) -> Path:
+    """Where a photos run hands its summary back (SCRAPER_RUN_SUMMARY) for its run record."""
+    return Path(tempfile.gettempdir()) / f"photos-{rec['run_id']}.json"
+
+
+def _photo_counts(rec: dict) -> dict | None:
+    """A photos run's summary (chosen, review, pending, spend, ...), read once and removed; None when the process ended
+    without one (a crash: its tail says why)."""
+    path = _summary_path(rec)
+    try:
+        counts = json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    path.unlink()
+    return counts
+
+
 def _launch_local(rec: dict) -> None:
+    global _child
     photos = rec.get("stage") == "photos"
     proc = subprocess.Popen(
         _build_command(rec),
-        # the run id reaches the deliverables manifest produce publishes
-        env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1", "SCRAPER_RUN_ID": rec["run_id"]},
+        # the run id reaches the deliverables manifest produce publishes; a photos run hands its summary back in a file
+        env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1", "SCRAPER_RUN_ID": rec["run_id"],
+             **({"SCRAPER_RUN_SUMMARY": str(_summary_path(rec))} if photos else {})},
         # A produce's stdout is the image-progress print() noise (drop it); its stderr carries the structured logfmt
         # logs + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's cause. The photo
         # process reports on stdout, so its two streams are captured as one.
         stdout=subprocess.PIPE if photos else subprocess.DEVNULL,
         stderr=subprocess.STDOUT if photos else subprocess.PIPE, text=True)
+    with _lock:
+        _child = proc
     threading.Thread(target=_watch_local, args=(rec, proc), daemon=True).start()
+
+
+def stop_current(grace: float = RUN_STOP_GRACE_SECONDS) -> None:
+    """The service is stopping (ECS sent SIGTERM and kills the task after its stopTimeout): pass the SIGTERM on to the
+    running run's subprocess and wait up to `grace` for it to clean up (the photo process stops its GPU jobs, sets the
+    pool's ceiling back, keeps its spend and releases its lock). A child still running after it is left to the kill."""
+    with _lock:
+        child = _child
+    if child is None or child.poll() is not None:
+        return
+    child.terminate()
+    try:
+        child.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        log.error("the running run did not end within the stop grace; the task's kill ends it",
+                  extra={"extra_fields": {"grace_s": grace}})
 
 
 

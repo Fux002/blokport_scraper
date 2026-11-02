@@ -123,15 +123,19 @@ def _publish_cutout(client, slab, slab_key, etag):
     return True
 
 
+class NoChoiceRecords(RuntimeError):
+    """No listing has a choice record yet: publishing would empty the folder, so nothing is published or removed."""
+
+
 def publish(client, root, say=print):
     """Make the published folder match the choice records under `root` (the clean tag's root): {"listings", "copied",
     "made_3d", "removed", "changed"}; changed = the folder is not what it was (a produce must link it again).
-    ValueError when there are no choice records at all: the folder would be emptied."""
+    NoChoiceRecords when there are none at all."""
     records = list(_objects(client, chosen_prefix(root)))
     with ThreadPoolExecutor(WORKERS) as pool:
         chosen = list(pool.map(lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records))
     if not chosen:
-        raise ValueError(f"no choice records under {chosen_prefix(root)}: nothing published or removed")
+        raise NoChoiceRecords(f"no choice records under {chosen_prefix(root)}: nothing published or removed")
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
     exclude = read_exclude(EXCLUDE_PATH.read_text())
     plan, todo = copies(chosen, made, exclude), slabs(chosen, made, exclude)
@@ -145,8 +149,9 @@ def publish(client, root, say=print):
     with ThreadPoolExecutor(WORKERS) as pool:
         list(pool.map(lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
                                                     ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh))
-        made_3d = sum(pool.map(lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
         list(pool.map(lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone))
+    with ThreadPoolExecutor(C.CUTOUT_WORKERS) as pool:         # each holds a full-size slab in memory
+        made_3d = sum(pool.map(lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
     say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
         f"made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)} files no longer chosen")
     return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone),

@@ -62,7 +62,8 @@ def parse_clean(text):
 
 
 def ask(system, prompt, images):
-    """(the model's answer, what the call cost in USD) for these encoded images."""
+    """(the model's answer, what the call cost in USD) for these encoded images; the cost is None when the answer does not
+    carry it (the caller counts the call at its reserved price, never as free)."""
     body = {"model": C.JUDGE_MODEL, "system_prompt": system, "prompt": prompt, "max_tokens": C.JUDGE_MAX_TOKENS,
             "image_urls": [data_uri(i, C.JUDGE_LONG_SIDE, C.JUDGE_JPEG_QUALITY) for i in images]}
     if C.JUDGE_REASONING:
@@ -70,7 +71,8 @@ def ask(system, prompt, images):
     r = httpx.post(C.JUDGE_URL, json=body, headers={"Authorization": f"Key {fal_key()}"}, timeout=C.JUDGE_TIMEOUT)
     r.raise_for_status()
     res = r.json()
-    return res["output"], float((res.get("usage") or {}).get("cost") or 0.0)
+    cost = (res.get("usage") or {}).get("cost")
+    return res["output"], None if cost is None else float(cost)
 
 
 def judge(original, result, fmt):

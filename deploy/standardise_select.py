@@ -43,25 +43,28 @@ class Halted(RuntimeError):
 
 
 class Spend:
-    """Hosted spend against the month's budget: `before` is what the month's earlier runs spent, then this run's calls.
-    A call's price is reserved before it is made and settled to what it cost, so parallel calls can never together pass
-    the budget. save(total) keeps this run's total after every change, a reserve counting as spent until it is settled,
-    so a run that dies leaves an upper bound of what it spent, never too little."""
+    """Spend against the month's budget (hosted calls and GPU rounds): `before` is what the month's other runs spent
+    (others(), summed again at every settle, so a run written since is never missed), then this run's. A price is
+    reserved before the call or round and settled to what it cost, so parallel calls can never together pass the
+    budget. save(total) keeps this run's total after every change, a reserve counting as spent until it is settled, so
+    a run that dies leaves an upper bound of what it spent, never too little."""
 
-    def __init__(self, budget, before=0.0, save=None):
-        self.budget, self.before, self.save = budget, before, save
-        self.spent, self.reserved, self.halted, self.capped = 0.0, 0.0, False, False
+    def __init__(self, budget, others=None, save=None):
+        self.budget, self.others, self.save = budget, others, save
+        self.before = others() if others else 0.0
+        self.spent, self.reserved, self.capped, self.halted = 0.0, 0.0, False, None
         self._lock = threading.Lock()
 
-    def halt(self):
-        """No call may start any more (the run is stopping): listings already running stop at their next call."""
+    def halt(self, why="the run is stopping"):
+        """No call may start any more (a stop, the end of the work window, a lost lock): listings already running stop at
+        their next call."""
         with self._lock:
-            self.halted = True
+            self.halted = why
 
     def reserve(self, usd):
         with self._lock:
             if self.halted:
-                raise Halted("the run is stopping")
+                raise Halted(self.halted)
             if self.before + self.spent + self.reserved + usd > self.budget:
                 self.capped = True
                 raise SpendCapReached(f"hosted spend would pass the month's budget of ${self.budget:.2f} "
@@ -73,6 +76,8 @@ class Spend:
         with self._lock:
             self.reserved -= reserved
             self.spent += cost
+            if self.others:
+                self.before = self.others()
             self._keep()
 
     def _keep(self):
@@ -143,15 +148,28 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
                 return stored
         elif spend is None:
             return None
-        spend.reserve(C.JUDGE_PRICE_USD)
-        cost = 0.0
-        try:
-            found, cost = judge.judge(_original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg"), fmt)
-        finally:
-            spend.settle(C.JUDGE_PRICE_USD, cost)
+        original, result = _original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg")   # read before paying
+        found, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.judge(original, result, fmt), f"judge {src} {sha[:12]}")
         _put_json(client, key, {**found, "cost": cost})
         rnd.judged.add(sha)
         return found
+
+
+def paid(spend, price, call, what):
+    """(answer, cost) of one hosted call returning (answer, cost): its price reserved first, then settled to what it
+    cost. A call that fails may have been billed (sent, then lost), and an answer without its cost has one: both count at
+    the reserved price, never as free."""
+    spend.reserve(price)
+    try:
+        answer, cost = call()
+    except BaseException:
+        spend.settle(price, price)
+        raise
+    if cost is None:
+        print(f"   WARNING: {what}: the answer carries no usage.cost; counted at the reserved ${price:.2f}", flush=True)
+        cost = price
+    spend.settle(price, cost)
+    return answer, cost
 
 def candidates(listing, exclude):
     """The photos a listing is judged on: its first JUDGE_MAX_PER_LISTING photos, excluded ones left out first. The GPU
@@ -233,14 +251,8 @@ def _attempt(client, cl, sha, name, original, spend):
         if ident in cl.requested:
             job = _get_json(client, f"{att}.request.json")
         else:
-            price = C.CLEAN_PRICE_USD[name]
-            spend.reserve(price)
-            try:
-                job = clean.submit(name, original)
-            except BaseException:
-                spend.settle(price, 0.0)
-                raise
-            spend.settle(price, price)
+            price = C.CLEAN_PRICE_USD[name]                # an edit is billed at its list price once the queue has it
+            job, _ = paid(spend, price, lambda: (clean.submit(name, original), price), f"edit {name} {sha[:12]}")
             _put_json(client, f"{att}.request.json", job)
             cl.requested.add(ident)
         try:
@@ -258,12 +270,7 @@ def _attempt(client, cl, sha, name, original, spend):
             return _failed(client, cl, att, ident, name, str(exc))
         _put(client, f"{att}.jpg", copy, "image/jpeg")
         cl.edited.add(ident)
-    spend.reserve(C.JUDGE_PRICE_USD)
-    cost = 0.0
-    try:
-        check, cost = judge.check_clean(original, copy)
-    finally:
-        spend.settle(C.JUDGE_PRICE_USD, cost)
+    check, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.check_clean(original, copy), f"clean check {name} {sha[:12]}")
     _put_json(client, f"{att}.json", {**check, "edit_model": name, "check_cost": cost, "clean_version": C.CLEAN_VERSION})
     cl.attempts.add(ident)
     return check
@@ -369,21 +376,24 @@ def report(sel):
     """{"chosen", "tracked", "pending"} of this run's listings. Each listing with a good photo gets its choice record, a
     listing now without one loses its record (and is in tracked.csv, this run's list of listings with no good photo);
     a listing not fully judged is neither and its record is left as it is. Listings outside this run are untouched."""
-    chosen, tracked, pending = [], [], []
     prefix = chosen_prefix(sel.root)
-    for l in sel.listings:
+
+    def one(l):
+        """(outcome, what goes in its list) of one listing, from its stored answers only."""
         picked, complete = choose(sel.client, sel.rounds, l, sel.exclude)
         if picked:
             tag, sha = picked
             record = {"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])}
             _put_json(sel.client, f"{prefix}{l['key']}.json", record)
-            chosen.append(record)
-        elif complete:
+            return "chosen", record
+        if complete:
             sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")
-            tracked.append({"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
-                            "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)})
-        else:
-            pending.append(l["key"])
+            return "tracked", {"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
+                               "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)}
+        return "pending", l["key"]
+    with ThreadPoolExecutor(C.SELECT_WORKERS) as pool:          # a few S3 reads per listing, for every listing
+        outcomes = list(pool.map(one, sel.listings))            # in the listings' order
+    chosen, tracked, pending = ([item for kind, item in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
     writer.writeheader()

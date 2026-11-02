@@ -7,7 +7,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import math
 import subprocess
 import sys
 
@@ -42,6 +41,7 @@ class _S3:
     def put_object(self, Bucket, Key, Body, ContentType=None, Metadata=None, **condition):
         self.written.append(Key)
         self._store(Key, Body, Metadata)
+        return {"ETag": self.objects[Key]["ETag"]}
 
     def get_object(self, Bucket, Key):
         if Key not in self.objects:
@@ -55,7 +55,7 @@ class _S3:
         self.written.append(Key)
         self.objects[Key] = dict(self.objects[CopySource["Key"]], Metadata={})
 
-    def delete_object(self, Bucket, Key):
+    def delete_object(self, Bucket, Key, **condition):
         self.written.append(Key)
         self.objects.pop(Key, None)
 
@@ -94,9 +94,15 @@ def test_the_process_continues_in_the_tags_the_published_results_came_from():
 
 
 # --- one budget per month ---------------------------------------------------------------------------------------------
+def _spent(s3, month, run_id, usd):
+    s3._store(f"{proc.spend_prefix(month)}{run_id}.json", json.dumps({"usd": usd}).encode())
+
+
 def test_the_month_s_budget_counts_every_run_of_the_month(monkeypatch):
     monkeypatch.setattr(C, "BUDGET_USD", 1.0)
-    s3 = _S3({proc.spend_key("2026-11"): json.dumps({"runs": {"20261101T000000Z": 0.9}}).encode()})
+    s3 = _S3()
+    _spent(s3, "2026-11", "20261101T000000Z", 0.5)
+    _spent(s3, "2026-11", "20261101T060000Z", 0.4)
     spend = proc.month_spend(s3, "20261102T120000Z")
     with pytest.raises(select.SpendCapReached):
         spend.reserve(C.JUDGE_PRICE_USD)                                     # 0.90 + 0.14 would pass 1.00
@@ -105,35 +111,64 @@ def test_the_month_s_budget_counts_every_run_of_the_month(monkeypatch):
 
 def test_a_new_month_has_its_whole_budget(monkeypatch):
     monkeypatch.setattr(C, "BUDGET_USD", 1.0)
-    s3 = _S3({proc.spend_key("2026-10"): json.dumps({"runs": {"20261031T230000Z": 1.0}}).encode()})
+    s3 = _S3()
+    _spent(s3, "2026-10", "20261031T230000Z", 1.0)
     proc.month_spend(s3, "20261101T000100Z").reserve(0.5)
 
 
-def test_a_run_s_spend_is_kept_after_every_call_a_reserve_counting_until_it_is_settled(monkeypatch):
+def test_each_run_keeps_only_its_own_spend_a_reserve_counting_until_it_is_settled(monkeypatch):
     monkeypatch.setattr(C, "BUDGET_USD", 10.0)
-    key, run_id = proc.spend_key("2026-11"), "20261102T120000Z"
-    s3 = _S3({key: json.dumps({"runs": {"20261101T000000Z": 2.0}}).encode()})
+    run_id, other = "20261102T120000Z", "20261101T000000Z"
+    s3 = _S3()
+    _spent(s3, "2026-11", other, 2.0)
     spend = proc.month_spend(s3, run_id)
+    own = f"{proc.spend_prefix('2026-11')}{run_id}.json"
     spend.reserve(0.14)
-    runs = json.loads(s3.objects[key]["Body"])["runs"]
-    assert runs["20261101T000000Z"] == 2.0 and runs[run_id] == pytest.approx(0.14)   # a run that dies now still counts it
+    assert json.loads(s3.objects[own]["Body"])["usd"] == pytest.approx(0.14)        # a run that dies now still counts it
     spend.settle(0.14, 0.02)
-    assert json.loads(s3.objects[key]["Body"])["runs"][run_id] == pytest.approx(0.02)
+    assert json.loads(s3.objects[own]["Body"])["usd"] == pytest.approx(0.02)
+    assert json.loads(s3.objects[f"{proc.spend_prefix('2026-11')}{other}.json"]["Body"])["usd"] == 2.0   # never rewritten
+
+
+def test_the_month_is_summed_again_when_a_call_is_settled(monkeypatch):
+    monkeypatch.setattr(C, "BUDGET_USD", 3.0)
+    s3 = _S3()
+    spend = proc.month_spend(s3, "20261102T120000Z")
+    _spent(s3, "2026-11", "20261102T110000Z", 2.9)                           # written by another run since
+    spend.reserve(0.05)
+    spend.settle(0.05, 0.05)
+    assert spend.before == pytest.approx(2.9)
+    with pytest.raises(select.SpendCapReached):
+        spend.reserve(0.1)
+
+
+def _configured(monkeypatch):
+    for name, value in (("SCRAPER_GPU_QUEUE", "q"), ("SCRAPER_STANDARDISE_JOBDEF", "jd"), ("FAL_KEY", "k")):
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(C, "BUDGET_USD", 50.0)
+    monkeypatch.setattr(proc, "RUN_TIMEOUT_SECONDS", C.WORK_SECONDS + C.FINISH_SECONDS + 1)
 
 
 def test_without_a_budget_the_process_refuses_to_start(monkeypatch):
+    _configured(monkeypatch)
     monkeypatch.setattr(C, "BUDGET_USD", None)
-    for name, value in (("SCRAPER_GPU_QUEUE", "q"), ("SCRAPER_STANDARDISE_JOBDEF", "jd"), ("FAL_KEY", "k")):
-        monkeypatch.setenv(name, value)
     assert proc.unconfigured() == ["SCRAPER_STANDARDISE_BUDGET_USD"]
     assert proc.main() == 2
 
 
 def test_the_gpu_target_and_the_hosted_key_must_be_configured(monkeypatch):
-    monkeypatch.setattr(C, "BUDGET_USD", 50.0)
+    _configured(monkeypatch)
     for name in ("SCRAPER_GPU_QUEUE", "BLOKPORT_GPU_QUEUE", "SCRAPER_STANDARDISE_JOBDEF", "BLOKPORT_STANDARDISE_JOBDEF", "FAL_KEY"):
         monkeypatch.delenv(name, raising=False)
     assert proc.unconfigured() == ["SCRAPER_GPU_QUEUE", "SCRAPER_STANDARDISE_JOBDEF", "FAL_KEY"]
+
+
+def test_the_work_window_and_the_finish_must_fit_the_runner_s_ceiling(monkeypatch):
+    _configured(monkeypatch)
+    assert proc.unconfigured() == []
+    monkeypatch.setattr(proc, "RUN_TIMEOUT_SECONDS", C.WORK_SECONDS + C.FINISH_SECONDS)
+    assert proc.unconfigured() == [f"SCRAPER_STANDARDISE_WORK_SECONDS ({C.WORK_SECONDS}) + FINISH_SECONDS ({C.FINISH_SECONDS}) "
+                                   f"under SCRAPER_RUN_TIMEOUT_SECONDS ({C.WORK_SECONDS + C.FINISH_SECONDS})"]
 
 
 # --- publish: only what changed ---------------------------------------------------------------------------------------
@@ -167,8 +202,19 @@ def test_a_view_no_longer_chosen_is_removed_and_that_is_a_change():
     assert out["removed"] == 1 and imagestore.standard_key("sentas", B, "main") not in s3.objects
 
 
-def test_publish_without_any_choice_record_is_refused():
-    with pytest.raises(ValueError, match="no choice records"):
+def test_3d_slabs_are_cut_out_a_few_at_a_time_on_the_small_service(monkeypatch):
+    s3 = _published_bucket()
+    s3._store(f"{RUN}{A}.slab.png", b"png")
+    pools = []
+    real = pub.ThreadPoolExecutor
+    monkeypatch.setattr(pub, "ThreadPoolExecutor", lambda n: pools.append(n) or real(n))
+    monkeypatch.setattr(pub, "_publish_cutout", lambda client, s, key, etag: True)
+    assert pub.publish(s3, ROOT, say=lambda m: None)["made_3d"] == 1
+    assert C.CUTOUT_WORKERS in pools and C.CUTOUT_WORKERS <= 4
+
+
+def test_publish_without_any_choice_record_is_refused_with_its_own_error():
+    with pytest.raises(pub.NoChoiceRecords):
         pub.publish(_S3({f"{RUN}{A}.main.jpg": b"m"}), ROOT, say=lambda m: None)
 
 
@@ -176,17 +222,38 @@ def test_publish_without_any_choice_record_is_refused():
 def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_summary(monkeypatch):
     s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m"})
     monkeypatch.setattr(proc, "sheet_listings", lambda client: [_listing("done", A), _listing("new", D)])
-    worked = []
+    cleared, worked = [], []
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or [])
 
     def run(batch, sel, spend, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
         return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"]}
     monkeypatch.setattr(proc, "run", run)
-    summary = proc.process(s3, None, select.Spend(5.0, before=1.0), "R1", math.inf, say=lambda m: None)
-    assert worked == ["new"]
-    assert summary["listings"] == 1 and summary["pending"] == ["new"] and summary["problems"] == 1
+    import time
+    summary = proc.process(s3, None, select.Spend(5.0, others=lambda: 1.0), "R1", time.monotonic() + 3600, say=lambda m: None)
+    assert cleared == ["R1"] and worked == ["new"]                       # an earlier run's jobs are stopped first
+    assert summary["listings"] == 1 and summary["pending"] == 1 and summary["problems"] == 1
     assert summary["published"]["changed"] and summary["month_spent_usd"] == 1.0
-    assert json.loads(s3.objects[f"{ROOT}summary.json"]["Body"]) == summary
+    stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
+    assert stored["pending_listings"] == ["new"] and stored["problem_list"] == ["sentas d: no result after the GPU round"]
+
+
+def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
+    import time
+    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m"})
+    monkeypatch.setattr(proc, "sheet_listings", lambda client: [_listing("new", D)])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    seen = []
+
+    def run(batch, sel, spend, run_id, deadline, say=print):
+        time.sleep(0.2)                                                     # the window (0.05 s) ends while working
+        with pytest.raises(select.Halted, match="work window"):
+            spend.reserve(0.01)
+        seen.append(1)
+        return [], {"chosen": [], "tracked": [], "pending": []}
+    monkeypatch.setattr(proc, "run", run)
+    proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 0.05, say=lambda m: None)
+    assert seen == [1]
 
 
 class _Clients:
@@ -197,19 +264,23 @@ class _Clients:
         return self.s3 if name == "s3" else object()
 
 
-def _main(monkeypatch, changed=True, capped=False, problems=0, relink_rc=0, writethrough_on=True):
+def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, relink_rc=0, writethrough_on=True):
     """main() with the process stubbed: what it returns and the relinks it made."""
     monkeypatch.setattr(proc, "unconfigured", lambda: [])
     monkeypatch.setattr(proc, "stop_on_signal", lambda spend: None)
     monkeypatch.setattr(proc.boto3, "client", _Clients(_S3()))
     monkeypatch.setattr(C, "BUDGET_USD", 10.0)
     monkeypatch.setattr(writethrough, "enabled", lambda: writethrough_on)
+    if tmp_path is not None:
+        monkeypatch.setenv("SCRAPER_RUN_SUMMARY", str(tmp_path / "summary.json"))
+    else:
+        monkeypatch.delenv("SCRAPER_RUN_SUMMARY", raising=False)
     relinks = []
     monkeypatch.setattr(proc, "relink", lambda: relinks.append(1) or relink_rc)
 
     def process(s3, batch, spend, run_id, deadline, say=print):
         spend.capped = capped
-        return {"problems": problems, "published": {"changed": changed}}
+        return {"problems": problems, "pending": 0, "budget_reached": capped, "published": {"changed": changed}}
     monkeypatch.setattr(proc, "process", process)
     return proc.main(), relinks
 
@@ -226,17 +297,18 @@ def test_no_relink_where_there_is_no_ledger_to_link_into(monkeypatch):
     assert _main(monkeypatch, writethrough_on=False) == (0, [])
 
 
-def test_a_run_at_the_budget_still_relinks_what_it_published_and_says_so(monkeypatch):
-    assert _main(monkeypatch, capped=True) == (3, [1])
+def test_a_run_at_the_budget_or_with_problems_still_succeeds_its_summary_says_so(monkeypatch, tmp_path):
+    assert _main(monkeypatch, tmp_path, capped=True, problems=3) == (0, [1])
+    handed = json.loads((tmp_path / "summary.json").read_text())
+    assert handed["budget_reached"] and handed["problems"] == 3 and handed["relinked"]
 
 
-def test_a_run_with_problems_is_run_again_and_a_failed_relink_fails_the_run(monkeypatch):
-    assert _main(monkeypatch, problems=2) == (1, [1])
+def test_a_failed_relink_fails_the_run(monkeypatch):
     assert _main(monkeypatch, relink_rc=2) == (2, [1])
 
 
 def test_a_second_process_refuses_to_start_while_one_runs(monkeypatch):
-    monkeypatch.setattr(proc, "exclusive", lambda s3, owner: (_ for _ in ()).throw(proc.RunActive("held")))
+    monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: (_ for _ in ()).throw(proc.RunActive("held")))
     assert _main(monkeypatch)[0] == 4
 
 
@@ -254,7 +326,7 @@ def test_the_relink_is_the_produce_s_republish_in_this_process_with_its_progress
 
 
 # --- the trigger: the runner's photos stage ---------------------------------------------------------------------------
-def test_the_photos_run_follows_each_produce_that_published_a_product_sheet(monkeypatch):
+def test_the_photos_run_follows_only_a_full_produce_never_the_publish_button_s_republish(monkeypatch):
     from stone_pipeline.config import settings
     monkeypatch.setattr(settings.STANDARDISE, "AUTO", True)   # the class the runner reads at call time (a test reloads settings)
     started = []
@@ -262,7 +334,7 @@ def test_the_photos_run_follows_each_produce_that_published_a_product_sheet(monk
     for stage, status in (("all", "succeeded"), ("republish", "succeeded"), ("catalog", "succeeded"), ("all", "failed"),
                           ("scrape", "succeeded"), ("inventory", "succeeded"), ("photos", "succeeded")):
         runner._follow_up({"run_id": "r", "stage": stage, "status": status})
-    assert started == ["photos", "photos", "photos"]
+    assert started == ["photos"]
 
 
 def test_no_photos_run_follows_while_the_process_is_off(monkeypatch):
@@ -282,37 +354,106 @@ def test_the_photos_stage_is_one_run_over_the_whole_environment(monkeypatch):
     assert code == 400
 
 
-def test_the_photo_process_report_is_streamed_and_it_is_no_validated_produce(monkeypatch, capsys):
+class _Proc:
+    stderr = None
+
+    def __init__(self, lines, rc=0):
+        self.stdout, self.rc = iter(lines), rc
+
+    def wait(self):
+        return self.rc
+
+    def kill(self):
+        pass
+
+
+def _watch_quietly(monkeypatch):
     calls = []
-    for name in ("_capture_counts", "_stamp_last_run", "_persist_run", "_follow_up"):
+    for name in ("_stamp_last_run", "_persist_run", "_follow_up"):
         monkeypatch.setattr(runner, name, lambda *a, **k: None)
+    monkeypatch.setattr(runner, "_capture_counts", lambda: pytest.fail("a photos run reports its own counts"))
     for name in ("_persist_diagnostics", "_evaluate_admission"):
         monkeypatch.setattr(runner, name, lambda n=name: calls.append(n))
+    return calls
 
-    class _Proc:
-        stderr = None
-        stdout = iter(["==> 3 of 4 listings with a good photo\n"])
 
-        def wait(self):
-            return 0
-
-        def kill(self):
-            pass
+def test_a_photos_run_s_record_carries_its_summary_and_its_report_is_streamed(monkeypatch, capsys, tmp_path):
+    calls = _watch_quietly(monkeypatch)
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
     rec = {"run_id": "r", "stage": "photos"}
-    runner._watch_local(rec, _Proc())
-    assert rec["status"] == "succeeded" and calls == []
-    assert "3 of 4 listings" in capsys.readouterr().err
+    summary = {"chosen": 3, "review": 1, "pending": 2, "run_spent_usd": 1.5, "budget_reached": True}
+    runner._summary_path(rec).write_text(json.dumps(summary))
+    runner._watch_local(rec, _Proc(["==> 3 of 6 listings with a good photo\n"]))
+    assert rec["status"] == "succeeded" and rec["counts"] == summary and calls == []
+    assert not runner._summary_path(rec).exists()
+    assert "3 of 6 listings" in capsys.readouterr().err
 
 
-def test_the_photo_process_s_stdout_is_its_report_and_is_kept(monkeypatch):
+def test_a_photos_run_that_ended_without_a_summary_has_no_counts(monkeypatch, tmp_path):
+    _watch_quietly(monkeypatch)
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
+    rec = {"run_id": "r", "stage": "photos"}
+    runner._watch_local(rec, _Proc(["Traceback\n"], rc=1))
+    assert rec["status"] == "failed" and rec["counts"] is None
+
+
+def test_the_photo_process_s_stdout_is_its_report_and_its_summary_comes_back_in_a_file(monkeypatch, tmp_path):
     seen = {}
 
     def _popen(cmd, env=None, **kw):
-        seen.update(kw)
-        return object()
+        seen.update(kw, env=env)
+        return type("P", (), {"poll": lambda self: None})()
     monkeypatch.setattr(subprocess, "Popen", _popen)
     monkeypatch.setattr(runner.threading, "Thread", lambda target, args, daemon: type("T", (), {"start": lambda self: None})())
-    runner._launch_local({"run_id": "r", "stage": "photos", "status": "queued"})
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(runner, "_child", None)          # no watcher runs here to clear the launched child
+    rec = {"run_id": "r", "stage": "photos", "status": "queued"}
+    runner._launch_local(rec)
     assert seen["stdout"] == subprocess.PIPE and seen["stderr"] == subprocess.STDOUT
-    runner._launch_local({"run_id": "r", "stage": "all", "status": "queued"})
+    assert seen["env"]["SCRAPER_RUN_SUMMARY"] == str(runner._summary_path(rec))
+    runner._launch_local({"run_id": "r2", "stage": "all", "status": "queued"})
     assert seen["stdout"] == subprocess.DEVNULL and seen["stderr"] == subprocess.PIPE
+    assert "SCRAPER_RUN_SUMMARY" not in seen["env"]
+
+
+# --- a clean stop -----------------------------------------------------------------------------------------------------
+class _Child:
+    def __init__(self, ends):
+        self.ends, self.signals, self.waited = ends, [], None
+
+    def poll(self):
+        return None
+
+    def terminate(self):
+        self.signals.append("TERM")
+
+    def wait(self, timeout=None):
+        self.waited = timeout
+        if not self.ends:
+            raise subprocess.TimeoutExpired("x", timeout)
+        return 0
+
+
+def test_a_stopping_server_passes_sigterm_to_the_running_child_and_waits_for_it(monkeypatch):
+    child = _Child(ends=True)
+    monkeypatch.setattr(runner, "_child", child)
+    runner.stop_current(grace=5)
+    assert child.signals == ["TERM"] and child.waited == 5
+
+
+def test_a_child_that_does_not_end_in_time_is_left_to_the_task_s_kill(monkeypatch):
+    child = _Child(ends=False)
+    monkeypatch.setattr(runner, "_child", child)
+    runner.stop_current(grace=1)                                           # logged, never raised
+    assert child.signals == ["TERM"]
+
+
+def test_the_server_s_sigterm_stops_the_run_before_its_last_config_save(monkeypatch):
+    from stone_pipeline.config import server
+    from stone_pipeline.ledger import snapshot
+    order = []
+    monkeypatch.setattr(runner, "stop_current", lambda: order.append("stop run"))
+    monkeypatch.setattr(snapshot, "save_config", lambda db: order.append("save"))
+    with pytest.raises(SystemExit):
+        server.shutdown("config.db", type("P", (), {"stop": lambda self: order.append("periodic")})())
+    assert order == ["stop run", "periodic", "save"]

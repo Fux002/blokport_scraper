@@ -1,6 +1,7 @@
 """The standardised-photo process of an environment (STANDARDISE_PROCESS.md): every listing of the product sheet without
 a valid chosen photo ends with one good photo, published and linked, or on the review list with the reason. The
-runner's `photos` stage, started after each produce on the owner's button. In order:
+runner's `photos` stage, started after each full produce on the owner's button. In order:
+  0. clear: GPU jobs an earlier, killed run left are stopped and the GPU pool's ceiling is set back to idle
   1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's, or excluded)
   2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG
   3. judge: each listing's results in its own order until one passes
@@ -11,13 +12,17 @@ runner's `photos` stage, started after each produce on the owner's button. In or
   8. publish: the published folder made to match the choice records (deploy.standardise_publish)
   9. relink: when the folder changed, produce --stage republish, so the new photos are linked in this same run
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice. The
-GPU and hosted steps work at most STANDARDISE.WORK_SECONDS; hosted calls stop before the month's spend would pass
-STANDARDISE.BUDGET_USD (all runs of the month together, kept at <env>/standardise-test/spend/<YYYY-MM>.json).
-One process at a time per environment: it holds <env>/standardise-test/run.lock (written only if absent, taken over only
-when older than LOCK_STALE_SECONDS: its run was killed) and removes it when publish has ended.
-Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY, SCRAPER_STANDARDISE_BUDGET_USD (all required).
-Exit 0 done; 1 some listings or photos failed or the work window ended (the next run goes on); 2 not configured;
-3 the month's budget was reached; 4 another process is running; a failed relink exits with the produce's code.
+GPU and hosted steps work at most STANDARDISE.WORK_SECONDS: after it no hosted call and no GPU round starts. Hosted calls
+and GPU rounds together never take the month past STANDARDISE.BUDGET_USD (each run's spend of the month is its own file
+under <env>/standardise-test/spend/<YYYY-MM>/).
+One process at a time per environment: it holds <env>/standardise-test/run.lock (written only if absent, rewritten every
+LOCK_HEARTBEAT_SECONDS while it runs, taken over only when not rewritten for the runner's ceiling: its run was killed)
+and removes it, if it is still its own, when publish has ended. SIGTERM (the service stopping) unwinds the same way: the
+round's jobs are stopped, the ceiling set back, the spend kept, the lock released.
+Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY, SCRAPER_STANDARDISE_BUDGET_USD (all required);
+SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record.
+Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured;
+4 another process is running; a failed relink exits with the produce's code; any other failure is loud (a traceback).
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
@@ -39,7 +45,7 @@ from deploy import standardise_batch as gpu
 from deploy import standardise_publish as publish
 from deploy import standardise_select as select
 from deploy.standardise_source import sheet_listings
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core import env
 from stone_pipeline.ledger import writethrough
@@ -48,69 +54,121 @@ from stone_pipeline.standardise import judge
 ROOT = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/"
 LOCK = f"{ROOT}run.lock"
 _TAKEN = ("PreconditionFailed", "ConditionalRequestConflict")
+_MISSING = ("404", "NoSuchKey", "NotFound")
 
 
 class RunActive(RuntimeError):
     pass
 
 
-def _taken(exc):
-    return exc.response.get("Error", {}).get("Code") in _TAKEN
+def _code(exc):
+    return exc.response.get("Error", {}).get("Code")
 
 
+# --- the run lock -----------------------------------------------------------------------------------------------------
 @contextmanager
-def exclusive(s3, owner, now=None):
-    """Hold the environment's run lock for the block; RunActive when another process holds it."""
-    try:
-        s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=json.dumps(owner).encode(), IfNoneMatch="*")
-    except ClientError as exc:
-        if not _taken(exc):
-            raise
-        _take_over(s3, owner, now or datetime.now(timezone.utc))
+def exclusive(s3, owner, on_lost=None, now=None, beat=C.LOCK_HEARTBEAT_SECONDS):
+    """Hold the environment's run lock for the block, rewriting it every `beat` seconds (its sign of life); RunActive
+    when another process holds it. A lock taken over meanwhile calls on_lost and is never removed by this run."""
+    held = {"etag": _acquire(s3, owner, now)}
+    done = threading.Event()
+
+    def heartbeat():
+        while not done.wait(beat):
+            try:
+                held["etag"] = s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=json.dumps(owner).encode(),
+                                             IfMatch=held["etag"])["ETag"]
+            except ClientError as exc:
+                if _code(exc) not in _TAKEN:           # a passing storage error: the next beat tries again
+                    print(f"   WARNING: the run lock was not refreshed: {exc}", flush=True)
+                    continue
+                print("==> the run lock was taken over by another process: no paid call starts any more", flush=True)
+                held["etag"] = None
+                if on_lost:
+                    on_lost()
+                return
+    beating = threading.Thread(target=heartbeat, daemon=True)
+    beating.start()
     try:
         yield
     finally:
-        s3.delete_object(Bucket=S3_BUCKET, Key=LOCK)
+        done.set()
+        beating.join()
+        _release(s3, held["etag"])
 
 
-def _take_over(s3, owner, now):
-    """The lock is held: taken over only when older than LOCK_STALE_SECONDS (the runner ends every run long before, so its
-    run was killed), in one write conditional on the lock seen, so of two processes taking it over one does. RunActive
-    otherwise."""
-    held = s3.head_object(Bucket=S3_BUCKET, Key=LOCK)
-    since = held["LastModified"]
-    if (now - since).total_seconds() < C.LOCK_STALE_SECONDS:
-        raise RunActive(f"another standardise process holds s3://{S3_BUCKET}/{LOCK} (since {since:%Y-%m-%d %H:%M} UTC)")
+def _acquire(s3, owner, now):
+    """The lock's ETag once this process holds it. Held by another: taken over only when not rewritten for the runner's
+    ceiling (RUN_TIMEOUT_SECONDS; the runner ends every run before it, so its run was killed), in one write conditional on
+    the lock seen, so of two processes taking it over one does. A lock released between our write and our look is tried
+    once more."""
+    body = json.dumps(owner).encode()
+    for _ in range(2):
+        try:
+            return s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=body, IfNoneMatch="*")["ETag"]
+        except ClientError as exc:
+            if _code(exc) not in _TAKEN:
+                raise
+        try:
+            held = s3.head_object(Bucket=S3_BUCKET, Key=LOCK)
+        except ClientError as exc:
+            if _code(exc) in _MISSING:
+                continue
+            raise
+        since = held["LastModified"]
+        if ((now or datetime.now(timezone.utc)) - since).total_seconds() < RUN_TIMEOUT_SECONDS:
+            raise RunActive(f"another standardise process holds s3://{S3_BUCKET}/{LOCK} (alive at {since:%Y-%m-%d %H:%M} UTC)")
+        try:
+            etag = s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=body, IfMatch=held["ETag"])["ETag"]
+        except ClientError as exc:
+            if _code(exc) in _TAKEN:
+                raise RunActive(f"another standardise process took over s3://{S3_BUCKET}/{LOCK} first") from exc
+            raise
+        print(f"==> took over the lock of a killed run (last alive {since:%Y-%m-%d %H:%M} UTC)", flush=True)
+        return etag
+    raise RunActive(f"s3://{S3_BUCKET}/{LOCK} changed hands while starting; run again")
+
+
+def _release(s3, etag):
+    """Remove the lock only while it is still this run's (a delete conditional on its ETag)."""
+    if etag is None:
+        return
     try:
-        s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=json.dumps(owner).encode(), IfMatch=held["ETag"])
+        s3.delete_object(Bucket=S3_BUCKET, Key=LOCK, IfMatch=etag)
     except ClientError as exc:
-        if _taken(exc):
-            raise RunActive(f"another standardise process took over s3://{S3_BUCKET}/{LOCK} first") from exc
-        raise
-    print(f"==> took over the lock of a killed run (written {since:%Y-%m-%d %H:%M} UTC)", flush=True)
+        if _code(exc) not in _TAKEN + _MISSING:
+            raise
+        print("==> the run lock is no longer this run's: left as it is", flush=True)
 
 
 # --- the month's budget -----------------------------------------------------------------------------------------------
-def spend_key(month):
-    return f"{ROOT}{C.SPEND_DIR}/{month}.json"
+def spend_prefix(month):
+    return f"{ROOT}{C.SPEND_DIR}/{month}/"
 
 
 def month_spend(s3, run_id):
-    """This run's Spend against the month's budget: what the month's other runs spent, and this run's total kept in the
-    month's file after every change. The month is the run's start (UTC), from its id (YYYYMMDDTHHMMSSZ)."""
-    key = spend_key(f"{run_id[:4]}-{run_id[4:6]}")
-    try:
-        runs = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())["runs"]
-    except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") != "NoSuchKey":
-            raise
-        runs = {}                                      # the month's first run
-    others = {r: usd for r, usd in runs.items() if r != run_id}
+    """This run's Spend against the month's budget. Each run keeps only its own file (<run id>.json, {"usd"}), so no run
+    can overwrite another's; the month's other runs are summed from their files, read again only when changed (ETag).
+    The month is the run's start (UTC), from its id (YYYYMMDDTHHMMSSZ)."""
+    prefix = spend_prefix(f"{run_id[:4]}-{run_id[4:6]}")
+    own, seen = f"{prefix}{run_id}.json", {}
+
+    def others():
+        total = 0.0
+        for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix):
+            for o in page.get("Contents", []):
+                if o["Key"] == own:
+                    continue
+                if seen.get(o["Key"], (None,))[0] != o["ETag"]:
+                    usd = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=o["Key"])["Body"].read())["usd"]
+                    seen[o["Key"]] = (o["ETag"], usd)
+                total += seen[o["Key"]][1]
+        return total
 
     def save(total):
-        body = json.dumps({"runs": {**others, run_id: round(total, 6)}}, sort_keys=True).encode()
-        s3.put_object(Bucket=S3_BUCKET, Key=key, Body=body, ContentType="application/json")
-    return select.Spend(C.BUDGET_USD, sum(others.values()), save)
+        s3.put_object(Bucket=S3_BUCKET, Key=own, Body=json.dumps({"usd": round(total, 6)}).encode(),
+                      ContentType="application/json")
+    return select.Spend(C.BUDGET_USD, others, save)
 
 
 # --- what a run works on ----------------------------------------------------------------------------------------------
@@ -135,27 +193,32 @@ def todo(listings, records, exclude):
 
 # --- the steps --------------------------------------------------------------------------------------------------------
 def stop_on_signal(spend):
-    """SIGTERM (a stopped task) unwinds like an error: no hosted call may start any more, the round's jobs are stopped,
-    and the GPU pool's ceiling and the run lock are restored by their finally blocks (which a bare SIGTERM would skip)."""
+    """SIGTERM (the service stopping: the config server passes it on) unwinds like an error: no paid call may start any
+    more, the round's jobs are stopped, and the GPU pool's ceiling, the spend and the run lock are settled by their
+    finally blocks (which a bare SIGTERM would skip)."""
     def stopped(signum, frame):
-        spend.halt()
+        spend.halt(f"stopped by signal {signum}")
         raise SystemExit(f"stopped by signal {signum}")
     signal.signal(signal.SIGTERM, stopped)
 
 
-def gpu_round(batch, sel, tag, todo, run_id, deadline):
-    """The GPU round for `todo`, then the stores re-read: [problems] (failed jobs, a round stopped at the work window or
-    stuck, listed photos left without a result)."""
+def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
+    """The GPU round for `todo`, then the stores re-read: (problems, stopped). Problems: failed jobs, a round stopped at
+    the work window or stuck, listed photos left without a result; stopped: the budget cannot cover the round, or paid
+    work has ended (then nothing was submitted)."""
     watermarked = {src: load_source(src).watermarked for src in todo}
     try:
-        problems = [f"GPU job {name} failed: {why}" for name, why in gpu.run_round(batch, sel.client, tag, todo, watermarked, run_id, deadline)]
+        problems = [f"GPU job {name} failed: {why}"
+                    for name, why in gpu.run_round(batch, sel.client, tag, todo, watermarked, run_id, deadline, spend)]
+    except (select.SpendCapReached, select.Halted) as exc:
+        return [f"GPU round {tag} not started: {exc}"], True
     except TimeoutError as exc:                        # its jobs were stopped; what they finished stays
         problems = [f"GPU round {tag} stopped: {exc}"]
     sel.refresh()
     rnd = dict(sel.rounds)[tag]
     problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas
                  if sha not in rnd[src].finished | rnd[src].held]
-    return problems
+    return problems, False
 
 
 def hosted(step, sel, spend, deadline):
@@ -170,10 +233,10 @@ def hosted(step, sel, spend, deadline):
 def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
     """The GPU and hosted steps, then the report: (problems, report). A step starts only inside the work window and while
     the budget lasts; the report always runs, so what is chosen is recorded and published."""
-    steps = [lambda: (gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, deadline), False),
+    steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, deadline, spend),
              lambda: hosted(select.judge_all, sel, spend, deadline),
              *([lambda: hosted(select.clean_all, sel, spend, deadline)] if C.CLEAN_ENABLED else []),
-             lambda: (gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, deadline), False),
+             lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, deadline, spend),
              lambda: hosted(select.judge_all, sel, spend, deadline)]
     problems = []
     for step in steps:
@@ -194,42 +257,53 @@ def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
 
 
 def process(s3, batch, spend, run_id, deadline, say=print):
-    """Pick, work, report and publish (steps 1 to 8), inside the lock: the run's summary, also kept as summary.json under
-    the clean tag."""
+    """Clear, pick, work, report and publish (steps 0 to 8), inside the lock: the run's summary (counts), also kept with
+    the pending listings and the problems as summary.json under the clean tag. At the end of the work window paid work
+    stops (no hosted call or GPU round starts after it)."""
     root = f"{ROOT}{C.CLEAN_TAG}/"
+    if left := gpu.clear_leftovers(batch, run_id):
+        say(f"==> stopped {len(left)} GPU jobs an earlier run left")
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
     found = todo(sheet_listings(s3), choices(s3, root), exclude)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
     say(f"==> standardise process {run_id}: {len(found)} listings without a chosen photo; {C.RUN_TAG} then {C.CLEAN_TAG}")
-    problems, result = run(batch, sel, spend, run_id, deadline, say)
+    closing = threading.Timer(max(0.0, deadline - time.monotonic()), spend.halt, ("the work window ended",))
+    closing.daemon = True
+    closing.start()
+    try:
+        problems, result = run(batch, sel, spend, run_id, deadline, say)
+    finally:
+        closing.cancel()
     try:
         published = publish.publish(s3, root, say)
-    except ValueError as exc:                          # nothing chosen yet in this environment: nothing to publish
+    except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}
     for p in problems:
         say(f"   {p}")
     summary = {"run_id": run_id, "listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
-               "pending": result["pending"], "problems": len(problems), "published": published,
+               "pending": len(result["pending"]), "problems": len(problems), "published": published,
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
                "budget_usd": spend.budget, "budget_reached": spend.capped}
-    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}summary.json", Body=json.dumps(summary, sort_keys=True).encode(),
+    kept = {**summary, "pending_listings": result["pending"], "problem_list": problems}
+    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}summary.json", Body=json.dumps(kept, sort_keys=True).encode(),
                   ContentType="application/json")
     return summary
 
 
 def relink():
     """produce --stage republish, so the products link the photos just published (the image stage reads the published
-    folder). In this process, never a child: a run the runner stops at its ceiling takes its relink with it, so no produce
-    goes on outside the run slot. Its stdout is image-progress noise, dropped as the runner drops it for every produce;
-    its log goes to stderr. The pipeline is imported only when a relink is due."""
+    folder). In this process, never a child: a run the runner stops takes its relink with it, so no produce goes on
+    outside the run slot. Its stdout is image-progress noise, dropped as the runner drops it for every produce; its log
+    goes to stderr. The pipeline is imported only when a relink is due."""
     from stone_pipeline import produce
     with open(os.devnull, "w") as quiet, redirect_stdout(quiet):
         return produce.main(["--stage", "republish"])
 
 
 def unconfigured():
-    """The required settings that are missing (the GPU target, the hosted key, the month's budget)."""
+    """What is missing or wrong in the settings: the GPU target, the hosted key, the month's budget, and a work window
+    plus its finish that must end before the runner's ceiling."""
     missing = []
     for name in ("GPU_QUEUE", "STANDARDISE_JOBDEF"):          # what gpu.target() reads, each named when missing
         try:
@@ -242,7 +316,18 @@ def unconfigured():
         missing.append("FAL_KEY")
     if C.BUDGET_USD is None:
         missing.append("SCRAPER_STANDARDISE_BUDGET_USD")
+    if C.WORK_SECONDS + C.FINISH_SECONDS >= RUN_TIMEOUT_SECONDS:
+        missing.append(f"SCRAPER_STANDARDISE_WORK_SECONDS ({C.WORK_SECONDS}) + FINISH_SECONDS ({C.FINISH_SECONDS}) "
+                       f"under SCRAPER_RUN_TIMEOUT_SECONDS ({RUN_TIMEOUT_SECONDS})")
     return missing
+
+
+def hand_over(summary):
+    """The run's summary to the runner (SCRAPER_RUN_SUMMARY), for its run record; nothing when run by hand."""
+    path = env.getenv("RUN_SUMMARY")
+    if path:
+        with open(path, "w") as out:
+            json.dump(summary, out, sort_keys=True)
 
 
 def main() -> int:
@@ -254,30 +339,28 @@ def main() -> int:
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    # Read before the lock, so a stop at any point releases it: a run that held the lock wrote its last spend before its
-    # publish, which ends long before it releases the lock, so what is read here is final.
     spend = month_spend(s3, run_id)
-    stop_on_signal(spend)
+    stop_on_signal(spend)                              # before the lock: a stop at any point releases it
     try:
-        with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG]}):
+        with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG]},
+                       on_lost=lambda: spend.halt("the run lock was taken over")):
             summary = process(s3, batch, spend, run_id, deadline)
     except RunActive as exc:
         print(f"ERROR: {exc}; not started")
         return 4
-    print(f"==> hosted spend ${spend.spent:.2f} this run, ${spend.before + spend.spent:.2f} of ${spend.budget:.2f} this month",
+    print(f"==> spent ${spend.spent:.2f} this run, ${spend.before + spend.spent:.2f} of ${spend.budget:.2f} this month"
+          + ("; the month's budget is reached: the rest waits for next month or a higher budget" if spend.capped else ""),
           flush=True)
-    rc = 3 if spend.capped else 1 if summary["problems"] else 0
-    if spend.capped:
-        print("==> STOPPED at the month's budget: the rest waits for next month or a higher SCRAPER_STANDARDISE_BUDGET_USD",
-              flush=True)
+    rc, summary["relinked"] = 0, False
     if summary["published"]["changed"]:
         if not writethrough.enabled():
             print("==> published; no ledger here, the next produce links the new photos", flush=True)
-        elif (linked := relink()) != 0:
-            print(f"==> FAILED to link the new photos: the republish exited {linked}", flush=True)
-            return linked
+        elif (rc := relink()) != 0:
+            print(f"==> FAILED to link the new photos: the republish exited {rc}", flush=True)
         else:
+            summary["relinked"] = True
             print("==> the new photos are linked (republish done)", flush=True)
+    hand_over(summary)
     return rc
 
 
