@@ -346,6 +346,26 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
     assert spend.spent == 0 and s3.written == [f"{ROOT}tracked.csv"]   # the kept record is not written again
 
 
+def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_new_verdict_or_record(monkeypatch):
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), **{f"{RUN}{A}.{v}.jpg": v.encode() for v in ("main", "white", "studio")},
+              f"{RUN}judged/{A}.json": json.dumps({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}).encode()})
+    monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("judged again"))
+    records = proc.choices(s3, ROOT)
+    found = proc.todo([_listing("one", A)], records, set(), proc.whole_slabs(s3, records))
+    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
+    assert sel.gpu_todo() == {"sentas": [A]}                        # outdated: the GPU completes it
+    s3._store(f"{RUN}{A}.close.jpg", b"close")                     # what the GPU job adds (standardise_source.complete)
+    s3._store(f"{RUN}{A}.slab.png", _slab_png())
+    sel.refresh()
+    spend = select.Spend(5.0)
+    select.judge_all(sel, spend, float("inf"))
+    s3.written.clear()
+    assert [c["sha"] for c in select.report(sel)["chosen"]] == [A] and spend.spent == 0
+    assert f"{ROOT}chosen/one.json" not in s3.written                # the same choice: its record stays
+    out = pub.publish(s3, ROOT, say=lambda m: None)
+    assert out["made_3d"] == 1 and imagestore.standard_key("sentas", A, "close") in s3.objects
+
+
 class _Clients:
     def __init__(self, s3):
         self.s3 = s3

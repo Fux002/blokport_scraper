@@ -48,10 +48,34 @@ def _exists(client, prefix):
     return client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=1).get("KeyCount", 0) > 0
 
 
+def outdated(client, out, sha):
+    """A result made before an open book's halves had their slab: a side view (studio) and no <sha>.slab.png, and not
+    tried again before (noslab/). Every result made now that has a side view has its slab, so nothing else matches."""
+    return (_exists(client, f"{out}{sha}.studio.jpg") and not _exists(client, f"{out}{sha}.slab.png")
+            and not _exists(client, f"{out}noslab/{sha}.json"))
+
+
 def finished(client, out, sha):
     """This photo's run already ended, finished or held: a re-run, or results copied in from another environment's
-    run of the same photo, is never worked on again."""
-    return _exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")
+    run of the same photo, is never worked on again; only an outdated result is, once (complete)."""
+    if _exists(client, f"{out}held/{sha}.json"):
+        return True
+    return _exists(client, f"{out}{sha}.main.jpg") and not outdated(client, out, sha)
+
+
+def complete(client, out, sha, res):
+    """Complete an outdated open-book result from its re-run: its close view, then its slab (written last: the result is
+    complete). What was judged and published (main, white, studio) stays as it is, so its verdict and choice stand. A
+    re-run that is no open book this time adds nothing and is noted in noslab/, so it is never run again."""
+    if res.kind == "open book" and res.slab:
+        if "close" in res.images:
+            client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg", Body=_encode(res.images["close"]),
+                              ContentType="image/jpeg")
+        client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
+        return "completed"
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}noslab/{sha}.json", ContentType="application/json",
+                      Body=json.dumps({"reason": res.held or f"the re-run is a {res.kind}, no open book"}, sort_keys=True).encode())
+    return "no slab"
 
 
 def photo_source(client, out, key, sha):
@@ -223,11 +247,15 @@ def main() -> int:
                 rgb = photo.decode(_get(client, key))
                 tally[_survey(rgb, m) if info["format"] == "slab" else info["format"]] += 1
             else:
+                redo = _exists(client, f"{out}{sha}.main.jpg")     # made, yet not finished: outdated, to complete
                 source_key, cleaned, refused = start(client, out, key, sha)
                 if refused:
-                    client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
-                                      Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
-                    tally["held"] += 1
+                    if redo:
+                        tally[complete(client, out, sha, photo.Result(held=refused))] += 1
+                    else:
+                        client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
+                                          Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
+                        tally["held"] += 1
                     storage_in_a_row = 0
                     continue
                 rgb = photo.decode(_get(client, source_key))
@@ -235,7 +263,9 @@ def main() -> int:
                 clean = photo.decode(_get(client, f"{imagestore.improved_prefix(src)}{sha}.jpg")) if logo else None
                 res = photo.standardise(rgb, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
                                         clean=clean, watermarked=logo, models=m, extra_views=extra)
-                if res.held:
+                if redo:
+                    tally[complete(client, out, sha, res)] += 1
+                elif res.held:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": res.held, "kind": res.kind}, sort_keys=True).encode())
                     tally["held"] += 1

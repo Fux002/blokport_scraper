@@ -261,7 +261,7 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     sel.refresh()
     rnd = dict(sel.rounds)[tag]
     problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas
-                 if sha not in rnd[src].finished | rnd[src].held]
+                 if select.needs_gpu(rnd[src], sha)]
     return problems, False
 
 

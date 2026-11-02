@@ -120,6 +120,8 @@ class Round:
                 for o in page.get("Contents", [])]
         self.finished = {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
         self.slabs = {k[:64] for k in keys if k.endswith(".slab.png") and "/" not in k}     # whole slabs: a 3D slab each
+        self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
+        self.noslab = _shas(keys, "noslab/")
         self.held = _shas(keys, "held/")
         self.judged = _shas(keys, "judged/")
         self.cleaned = _shas(keys, "cleaned/")
@@ -127,6 +129,11 @@ class Round:
         self.edited = _attempts(keys, ".jpg")
         self.attempts = _attempts([k for k in keys if not k.endswith(".request.json")], ".json")
         self._locks, self._guard = {}, threading.Lock()
+
+    def outdated(self):
+        """The results made before an open book's halves had their slab (a side view, no slab, not tried again): the GPU
+        completes each once (deploy.standardise_source.complete)."""
+        return (self.finished & self.studio) - self.slabs - self.noslab - self.held
 
     def lock(self, sha):
         with self._guard:
@@ -375,16 +382,21 @@ class Selection:
         self.rounds = [(tag, {src: Round(self.client, tag, src) for src in self.sources}) for tag in self.tags]
 
     def gpu_todo(self):
-        """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet."""
+        """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet,
+        or whose result is outdated."""
         gpu = self.rounds[0][1]
         return _by_source((l["source"], sha) for l in self.listings for sha in candidates(l, self.exclude)
-                          if sha not in gpu[l["source"]].finished | gpu[l["source"]].held)
+                          if needs_gpu(gpu[l["source"]], sha))
 
     def clean_todo(self):
-        """{source: shas} with a cleaned copy the standardiser has not run yet."""
+        """{source: shas} with a cleaned copy the standardiser has not run yet, or whose result is outdated."""
         cl = self.rounds[1][1]
-        return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned
-                          if sha not in cl[src].finished | cl[src].held)
+        return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned if needs_gpu(cl[src], sha))
+
+
+def needs_gpu(rnd, sha):
+    """Whether the GPU works on this photo: no result yet, or an outdated one (Round.outdated)."""
+    return sha not in rnd.finished | rnd.held or sha in rnd.outdated()
 
 
 def _by_source(pairs):

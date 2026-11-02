@@ -631,3 +631,52 @@ def test_a_kept_close_up_with_nothing_better_is_still_chosen_and_its_record_not_
                            _listing(A, B, kept=("v9", A)), _round(GPU, finished=(A, B), judged=(A, B), slabs=(B,)))
     assert s3.objects["r/chosen/slab-1.json"] == kept and [c["sha"] for c in result["chosen"]] == [A]
     assert result["tracked"] == [] and result["pending"] == []
+
+
+# --- open books made before their halves had a slab -------------------------------------------------------------------
+class _Written(_Bucket):
+    def __init__(self, objects):
+        super().__init__(objects)
+        self.written = []
+
+    def put_object(self, Bucket, Key, Body, ContentType):
+        self.written.append(Key)
+        self.objects[Key] = Body
+
+
+def _open_book(*extra):
+    return {f"{GPU}{A}.{v}.jpg": b"" for v in ("main", "white", "studio")} | {k: b"" for k in extra}
+
+
+def test_an_open_book_without_its_slab_is_not_finished_until_completed_or_tried():
+    from deploy import standardise_source as src
+    assert not src.finished(_Bucket(_open_book()), GPU, A)
+    assert src.finished(_Bucket(_open_book(f"{GPU}{A}.slab.png")), GPU, A)
+    assert src.finished(_Bucket(_open_book(f"{GPU}noslab/{A}.json")), GPU, A)
+    assert src.finished(_Bucket({f"{GPU}{A}.main.jpg": b"", f"{GPU}{A}.white.jpg": b""}), GPU, A)    # a close-up
+    assert src.finished(_Bucket({f"{GPU}held/{A}.json": b""}), GPU, A)
+    assert not src.finished(_Bucket({}), GPU, A)
+
+
+def test_completing_an_open_book_adds_its_close_view_then_its_slab_and_leaves_what_was_judged():
+    import numpy as np
+    from deploy import standardise_source as src
+    from stone_pipeline.standardise.photo import Result
+    s3 = _Written(_open_book())
+    half = (np.zeros((20, 30, 3), np.uint8), np.ones((20, 30), np.float32))
+    img = np.zeros((20, 30, 3), np.uint8)
+    res = Result(kind="open book", images={"main": img, "white": img, "studio": img, "close": img}, slab=half)
+    assert src.complete(s3, GPU, A, res) == "completed"
+    assert s3.written == [f"{GPU}{A}.close.jpg", f"{GPU}{A}.slab.png"]          # the slab last: the result is complete
+
+
+@pytest.mark.parametrize("res", ["close-up", "held"])
+def test_an_open_book_that_is_no_open_book_on_its_rerun_is_marked_tried_and_never_rerun(res):
+    import numpy as np
+    from deploy import standardise_source as src
+    from stone_pipeline.standardise.photo import Result
+    s3 = _Written(_open_book())
+    img = np.zeros((20, 30, 3), np.uint8)
+    result = Result(kind="close-up", images={"main": img, "white": img}) if res == "close-up" else Result(held="no outline")
+    assert src.complete(s3, GPU, A, result) == "no slab"
+    assert s3.written == [f"{GPU}noslab/{A}.json"] and src.finished(s3, GPU, A)
