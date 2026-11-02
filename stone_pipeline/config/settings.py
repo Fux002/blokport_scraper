@@ -1058,8 +1058,9 @@ class STANDARDISE:
     JUDGE_PROMPT = """You are the last quality check before a natural-stone product photo is published in a marketplace catalog.
 Image 1 is the supplier's original photo. Image 2 is our processed catalog image of it.
 - For a SLAB (or two bookmatched slabs side by side): the slab is cut out of image 1, squared, cleaned and placed
-  upright in a showroom. Its chrome feet / supports at the bottom belong to the showroom stand. It is also scaled to
-  its real dimensions, so its width-to-height ratio may differ from image 1: that is correct and never wrong_shape.
+  upright in a showroom. Its chrome feet / supports at the bottom belong to the showroom stand. The whole slab is also
+  stretched or squeezed to its real dimensions, so its width-to-height ratio may differ from image 1: that alone is
+  never wrong_shape. But every edge and corner the slab has in image 1 must still be in image 2.
 - For a BLOCK or TILE: image 2 is the product cleaned in its own surroundings; there is no showroom. A quarry
   block's painted numbers and markings, its lifting cables and chains, and the quarry or yard around it are normal
   and never a problem.
@@ -1077,7 +1078,8 @@ clearly notice any of these on the stone:
 - not_one_slab: two or more slabs shown as one (stacked with an offset, a second slab's edge visible), or another
   stone taken in
 - wrong_shape: the product cut off, part of it missing, warped, or something in front of it cut into its outline
-  (a different width-to-height ratio from image 1 is the scaling to real dimensions, never wrong_shape)
+  (for a SLAB, the whole slab at a different width-to-height ratio is the scaling and never wrong_shape; an edge,
+  corner or strip of the slab in image 1 that is missing from image 2 is wrong_shape)
 - other: any other clear defect of the image (not of the stone itself)
 
 PASS when the stone looks clean and natural at catalog size. Natural features of the stone (veins, cracks, holes,

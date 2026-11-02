@@ -222,6 +222,8 @@ def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_
     assert C.JUDGE_VERSION == 3
     prompt = C.JUDGE_PROMPT.lower()
     assert "real dimensions" in prompt and "never wrong_shape" in prompt
+    assert "every edge and corner the slab has in image 1 must still be in image 2" in prompt   # a crop is not scaling
+    assert "for a slab, the whole slab at a different width-to-height ratio" in prompt          # blocks and tiles excluded
     assert "at catalog size" in prompt
 
 

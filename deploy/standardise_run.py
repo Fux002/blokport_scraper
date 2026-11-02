@@ -8,7 +8,8 @@
   6. report: one choice record per listing (what publish reads) + tracked.csv
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice.
 Env: RUN_TAG, CLEAN_TAG (the scraped and the cleaned run), SRC (space-separated sources), LISTINGS_KEY (optional:
-an S3 JSON list of listing keys), FAL_KEY, SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF.
+an S3 JSON list of listing keys), FAL_KEY, SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF,
+SCRAPER_STANDARDISE_CLEAN (false: no photo is sent to a hosted edit; step 3 is skipped).
 One run at a time per environment: a run holds <env>/standardise-test/run.lock (written only if absent) and removes it
 when it ends; a second run refuses to start (its GPU rounds would change the shared GPU pool's ceiling under the first).
 A lock left by a run that was killed is removed by hand after checking no run is active.
