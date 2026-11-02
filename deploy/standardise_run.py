@@ -135,11 +135,11 @@ def main() -> int:
     except ValueError as exc:
         print(f"ERROR: {exc}; aborting")
         return 2
+    spend = select.Spend(C.SPEND_CAP_USD)
+    stop_on_signal(spend)                              # before the lock: a stop at any point releases it
     try:
         with exclusive(s3, owner):
             sel = select.Selection(s3, found, run_tag, clean_tag)
-            spend = select.Spend(C.SPEND_CAP_USD)
-            stop_on_signal(spend)
             print(f"==> standardise run {run_id}: {len(sel.listings)} listings of {', '.join(sel.sources)}; "
                   f"{run_tag} then {clean_tag}", flush=True)
             problems, capped = run(batch, sel, spend, run_id)

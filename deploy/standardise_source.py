@@ -87,14 +87,34 @@ def _survey(rgb, m):
     return "open book" if len(quads) == 2 else "slab"
 
 
-def after_failure(exc, in_a_row):
+_GPU_ERRORS = ("cuda", "cudnn", "cublas", "cufft")     # a broken GPU fails every photo after it, in any of its libraries
+_PASSING_STORAGE = ("SlowDown", "Throttling", "ThrottlingException", "RequestTimeout", "ServiceUnavailable", "InternalError")
+
+
+def gpu_error(exc):
+    return type(exc).__name__ == "OutOfMemoryError" or any(word in str(exc).lower() for word in _GPU_ERRORS)
+
+
+def passing_storage_error(exc):
+    """A storage error that passes (throttling, a timeout, a 5xx, a connection error); a missing or forbidden object is
+    no passing error: it is the photo's own input that is wrong."""
+    if isinstance(exc, BotoCoreError):
+        return True
+    if isinstance(exc, ClientError):
+        err = exc.response.get("Error", {})
+        return err.get("Code") in _PASSING_STORAGE or exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode", 0) >= 500
+    return False
+
+
+def after_failure(exc, in_a_row, crashed_before):
     """What a slice does after a photo failed: "hold" it (the photo itself cannot be standardised: its listing moves on,
-    the tracked list shows why) or "stop" the slice (the machine or the storage failed, not the photo: the job fails
-    loud and the next run retries those photos). A CUDA error breaks the GPU for every photo after it; storage errors
-    stop the slice after SLICE_MAX_STORAGE_FAILURES in a row. in_a_row counts this one."""
-    if "CUDA" in str(exc) or type(exc).__name__ == "OutOfMemoryError":
-        return "stop"
-    if isinstance(exc, (BotoCoreError, ClientError)):
+    the tracked list shows why), "retry" it (a passing storage error: no record, the next run does it) or "stop" the
+    slice (the job fails loud and the next run retries its photos). A GPU error stops the slice, as it breaks the GPU
+    for every photo after it, unless the same photo crashed it before (then it is the photo: held). Passing storage
+    errors stop the slice after SLICE_MAX_STORAGE_FAILURES in a row. in_a_row counts this one."""
+    if gpu_error(exc):
+        return "hold" if crashed_before else "stop"
+    if passing_storage_error(exc):
         return "stop" if in_a_row >= C.SLICE_MAX_STORAGE_FAILURES else "retry"
     return "hold"
 
@@ -180,6 +200,7 @@ def main() -> int:
         try:
             if not survey and finished(client, out, sha):
                 tally["already done"] += 1
+                storage_in_a_row = 0
                 continue
             if survey:
                 rgb = photo.decode(_get(client, key))
@@ -190,6 +211,7 @@ def main() -> int:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
                     tally["held"] += 1
+                    storage_in_a_row = 0
                     continue
                 rgb = photo.decode(_get(client, source_key))
                 logo = watermarked and not cleaned             # a cleaned copy has no logo left to take off
@@ -210,10 +232,14 @@ def main() -> int:
             storage_in_a_row = 0
         except Exception as exc:                       # one bad photo never stops the slice (after_failure)
             tally["failed"] += 1
-            storage_in_a_row = storage_in_a_row + 1 if isinstance(exc, (BotoCoreError, ClientError)) else 0
-            action = after_failure(exc, storage_in_a_row)
+            storage_in_a_row = storage_in_a_row + 1 if passing_storage_error(exc) else 0
+            crashed = f"{out}crashed/{sha}.json"
+            action = after_failure(exc, storage_in_a_row, not survey and gpu_error(exc) and _exists(client, crashed))
             print(f"   FAILED {sha[:12]} ({action}): {type(exc).__name__}: {exc}", flush=True)
             if action == "stop":
+                if gpu_error(exc) and not survey:      # marked, so the same photo crashing it again is held, not retried
+                    client.put_object(Bucket=S3_BUCKET, Key=crashed, ContentType="application/json",
+                                      Body=json.dumps({"error": f"{type(exc).__name__}: {exc}"[:500]}).encode())
                 print(f"==> {src}: slice stopped, the next run retries its photos", flush=True)
                 return 1
             if action == "hold" and not survey:

@@ -1105,7 +1105,8 @@ Your whole answer is one JSON object and nothing else:
     RUN_MAX_WAIT_SECONDS = 12 * 3600   # ... and how long at most per wave of jobs (the slices that run at once) before it
     #                                    stops them and fails (jobs stuck, no GPU quota); above a healthy slice's longest
     RETOUCH_TIMEOUT, STANDARDISE_TIMEOUT = 14400, 21600   # s a Batch job may take before Batch stops it
-    GPU_JOB_VCPUS = 8                  # each GPU job's vCPUs: RUN_GPU_VCPUS // this jobs run at once
+    GPU_JOB_VCPUS = 4                  # each GPU job's vCPUs (the standardise job definition: 4 vCPU, 1 GPU, no retries):
+    #                                    RUN_GPU_VCPUS // this jobs run at once
     SLICE_MAX_STORAGE_FAILURES = 3     # storage errors in a row before a GPU slice stops (the next run retries)
     SELECT_WORKERS = 12                # listings worked on at once (hosted calls; no model runs here)
     # Per edit at the sizes above, an upper bound (fal.ai/pricing: Kontext per megapixel rounded up, Nano Banana 2 per image

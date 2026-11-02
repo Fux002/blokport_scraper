@@ -88,8 +88,8 @@ def test_waiting_gives_up_after_the_deadline():
 
 def test_the_deadline_grows_with_each_wave_of_slices_that_cannot_run_at_once(monkeypatch):
     monkeypatch.setattr(C, "RUN_GPU_VCPUS", 128)
-    monkeypatch.setattr(C, "GPU_JOB_VCPUS", 8)
-    assert gpu.wait_limit(16) == C.RUN_MAX_WAIT_SECONDS and gpu.wait_limit(17) == 2 * C.RUN_MAX_WAIT_SECONDS
+    monkeypatch.setattr(C, "GPU_JOB_VCPUS", 4)
+    assert gpu.wait_limit(32) == C.RUN_MAX_WAIT_SECONDS and gpu.wait_limit(33) == 2 * C.RUN_MAX_WAIT_SECONDS
 
 
 def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_back(monkeypatch):
@@ -129,14 +129,18 @@ def test_stopping_stops_every_job_and_goes_on_past_one_that_cannot_be_stopped():
     assert stopped == ["j1", "j3"]
 
 
-def test_a_photo_s_own_failure_is_held_but_a_broken_gpu_or_storage_stops_the_slice_for_a_retry():
+def test_a_photo_s_own_failure_is_held_but_a_broken_gpu_or_passing_storage_error_stops_the_slice_for_a_retry():
     from botocore.exceptions import ClientError
     from deploy import standardise_source as source
-    s3_error = ClientError({"Error": {"Code": "SlowDown"}}, "GetObject")
-    assert source.after_failure(ValueError("undecodable image"), 0) == "hold"
-    assert source.after_failure(RuntimeError("CUDA error: an illegal memory access"), 0) == "stop"
-    assert source.after_failure(s3_error, 1) == "retry"
-    assert source.after_failure(s3_error, C.SLICE_MAX_STORAGE_FAILURES) == "stop"
+    slow = ClientError({"Error": {"Code": "SlowDown"}}, "GetObject")
+    missing = ClientError({"Error": {"Code": "NoSuchKey"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "GetObject")
+    assert source.after_failure(ValueError("undecodable image"), 0, False) == "hold"
+    assert source.after_failure(missing, 0, False) == "hold"                         # its own input is missing: held
+    assert source.after_failure(RuntimeError("CUDA error: an illegal memory access"), 0, False) == "stop"
+    assert source.after_failure(RuntimeError("cuDNN error: CUDNN_STATUS_INTERNAL_ERROR"), 0, False) == "stop"
+    assert source.after_failure(RuntimeError("CUDA error: device-side assert"), 0, True) == "hold"   # crashed it twice
+    assert source.after_failure(slow, 1, False) == "retry"
+    assert source.after_failure(slow, C.SLICE_MAX_STORAGE_FAILURES, False) == "stop"
 
 
 def test_a_run_of_a_source_with_no_listings_refuses_to_start(monkeypatch):

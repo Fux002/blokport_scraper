@@ -388,8 +388,8 @@ def _each(listings, work):
     try:
         list(pool.map(one, listings))
     except BaseException:                              # stopped (a signal): nothing that has not started starts; running
-        stop.set()                                     # listings cannot pay any more (Spend.halt) and are not waited for
-        pool.shutdown(wait=False, cancel_futures=True)
+        stop.set()                                     # listings cannot pay any more (Spend.halt); the lock and the GPU
+        pool.shutdown(wait=False, cancel_futures=True)  # ceiling are released now, the process ends once they finish
         raise
     pool.shutdown(wait=True)
     return failures, stop.is_set()
