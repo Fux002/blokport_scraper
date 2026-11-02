@@ -152,19 +152,24 @@ def _clean_setup(monkeypatch, passes_at):
 
 
 def test_a_listing_with_no_good_photo_has_its_first_fixable_photo_cleaned_model_by_model(monkeypatch):
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert edits == ["kontext", "nano2"]                                       # A is stacked: not worth an edit
-    assert s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
-    assert json.loads(s3.objects[f"{CL}attempts/{B}.kontext.json"])["passes"] is False
+    assert edits == ["nano2", "kontext"]                                       # A is stacked: not worth an edit
+    assert s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
+    assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["passes"] is False
+
+
+def test_the_cheapest_and_most_successful_edit_model_is_tried_first():
+    # prod 2026-11-02: Nano Banana 2 ($0.12) passed 55% even on photos Kontext ($0.15) had failed, Kontext 31%, FLUX 3 37%
+    assert [name for name, _, _ in C.CLEAN_MODELS] == ["nano2", "kontext", "flux3"]
 
 
 def test_a_paid_edit_whose_check_was_not_made_is_reused(monkeypatch):
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
-    s3.objects[f"{CL}attempts/{B}.kontext.jpg"] = b"copy-kontext"
-    rounds[1][1]["sentas"].edited.add(f"{B}.kontext")
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{CL}attempts/{B}.nano2.jpg"] = b"copy-nano2"
+    rounds[1][1]["sentas"].edited.add(f"{B}.nano2")
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert edits == [] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
+    assert edits == [] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
 
 
 def test_a_listing_not_fully_judged_is_never_cleaned(monkeypatch):
@@ -253,26 +258,26 @@ def test_a_photo_two_listings_share_is_judged_once_even_in_parallel(monkeypatch)
 
 
 def test_a_sent_edit_is_paid_even_when_collecting_it_fails_and_a_rerun_collects_it_without_sending_again(monkeypatch):
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(TimeoutError("queue slow")))
     spend = sel.Spend(10)
     with pytest.raises(TimeoutError):
         sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
-    assert edits == ["kontext"] and spend.spent == pytest.approx(C.CLEAN_PRICE_USD["kontext"])   # counted when sent
-    assert f"{CL}attempts/{B}.kontext.request.json" in s3.objects
-    monkeypatch.setattr(sel.clean, "collect", lambda job: b"copy-kontext")
+    assert edits == ["nano2"] and spend.spent == pytest.approx(C.CLEAN_PRICE_USD["nano2"])   # counted when sent
+    assert f"{CL}attempts/{B}.nano2.request.json" in s3.objects
+    monkeypatch.setattr(sel.clean, "collect", lambda job: b"copy-nano2")
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert edits == ["kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"   # collected, not sent again
+    assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"   # collected, not sent again
 
 
 def test_a_request_the_queue_no_longer_has_is_forgotten_so_the_next_run_sends_it_again(monkeypatch):
     import httpx
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     gone = httpx.HTTPStatusError("gone", request=httpx.Request("GET", "https://q"), response=httpx.Response(404))
     monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(gone))
     with pytest.raises(httpx.HTTPStatusError):
         sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert f"{CL}attempts/{B}.kontext.request.json" not in s3.objects
+    assert edits == ["nano2"] and f"{CL}attempts/{B}.nano2.request.json" not in s3.objects
 
 
 def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_listings():
@@ -314,18 +319,18 @@ def test_a_stop_cancels_the_listings_that_have_not_started(monkeypatch):
 @pytest.mark.parametrize("failure", ["refused", "no image"])
 def test_an_edit_the_model_failed_for_good_is_a_failed_attempt_and_the_next_model_gets_its_turn(monkeypatch, failure):
     import httpx
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
     refused = httpx.HTTPStatusError("422", request=httpx.Request("GET", "https://q"), response=httpx.Response(422))
     error = refused if failure == "refused" else sel.clean.NoImage("finished without an image")
 
     def collect(job):
-        if job["model"] == "kontext":
+        if job["model"] == "nano2":
             raise error
         return f"copy-{job['model']}".encode()
     monkeypatch.setattr(sel.clean, "collect", collect)
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert edits == ["kontext", "nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
-    assert json.loads(s3.objects[f"{CL}attempts/{B}.kontext.json"])["passes"] is False
+    assert edits == ["nano2", "kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
+    assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["passes"] is False
 
 
 
@@ -343,7 +348,7 @@ def test_an_auth_or_balance_error_from_the_queue_is_loud_never_a_failed_edit(mon
     monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(locked))
     with pytest.raises(httpx.HTTPStatusError):
         sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert f"{CL}attempts/{B}.kontext.json" not in s3.objects and edits == ["kontext"]   # retried next run, not given up
+    assert f"{CL}attempts/{B}.nano2.json" not in s3.objects and edits == ["nano2"]   # retried next run, not given up
 
 
 
@@ -376,11 +381,11 @@ def test_a_listing_with_an_outdated_fail_is_never_cleaned_before_it_is_judged_ag
 
 
 def test_an_attempt_that_failed_under_an_older_instruction_is_made_again_and_a_pass_stands(monkeypatch):
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
-    s3.objects[f"{CL}attempts/{B}.kontext.json"] = json.dumps({"passes": False, "clean_version": 1}).encode()
-    s3.objects[f"{CL}attempts/{B}.kontext.jpg"] = b"old-copy"
-    rounds[1][1]["sentas"].attempts.add(f"{B}.kontext")
-    rounds[1][1]["sentas"].edited.add(f"{B}.kontext")
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{CL}attempts/{B}.nano2.json"] = json.dumps({"passes": False, "clean_version": 1}).encode()
+    s3.objects[f"{CL}attempts/{B}.nano2.jpg"] = b"old-copy"
+    rounds[1][1]["sentas"].attempts.add(f"{B}.nano2")
+    rounds[1][1]["sentas"].edited.add(f"{B}.nano2")
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert edits == ["kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"   # sent again, new copy used
-    assert json.loads(s3.objects[f"{CL}attempts/{B}.kontext.json"])["clean_version"] == C.CLEAN_VERSION
+    assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"   # sent again, new copy used
+    assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["clean_version"] == C.CLEAN_VERSION
