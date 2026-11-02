@@ -298,21 +298,30 @@ def _not_started(rec: dict, why: str) -> None:
     log.info("run not started", extra={"extra_fields": {"run_id": rec["run_id"], "why": why}})
 
 
-def _reap_photos() -> None:
-    """Clear what a killed photo process left (its GPU jobs, the pool's ceiling, its run lock). Its modules are imported
-    only on this rare path. A failure is logged and goes no further: the server's stop must still reach its last config
-    save, and the next photos run clears the same things (clear_leftovers, the stale lock taken over)."""
-    try:
-        from deploy import standardise_run
-        standardise_run.reap()
-    except Exception:
-        log.exception("could not clear what the killed photos run left; the next photos run clears it")
+def _reap_photos(run_id: str, deadline: float, clock=time.monotonic) -> None:
+    """Clear what the killed photos run `run_id` left: its GPU jobs and, while still its own, the pool's ceiling and its
+    run lock (standardise_run.reap). In its own thread, waited for until the deadline at most: the run that takes the
+    slot is never held past it, and the clearing finishes on its own. Its modules are imported only on this rare path.
+    A failure is logged and goes no further: the next photos run clears the same things (clear_leftovers, the stale
+    lock taken over)."""
+    def clear():
+        try:
+            from deploy import standardise_run
+            standardise_run.reap(run_id)
+        except Exception:
+            log.exception("could not clear what the killed photos run left; the next photos run clears it")
+    clearing = threading.Thread(target=clear, daemon=True)
+    clearing.start()
+    clearing.join(timeout=max(0.0, deadline - clock()))
+    if clearing.is_alive():
+        log.warning("clearing the killed photos run goes on past the deadline", extra={"extra_fields": {"run_id": run_id}})
 
 
-def _end_child(deadline: float, clock=time.monotonic) -> None:
+def _end_child(deadline: float, clock=time.monotonic, reap: bool = False) -> None:
     """End the running run's subprocess by `deadline` (on `clock`): SIGTERM, the time left to clean up (the photo process
-    stops its GPU jobs, sets the pool's ceiling back, keeps its spend and releases its lock), then killed (and, for a
-    photos run, what it left cleared); then the time left for its watcher to finish the run record."""
+    stops its GPU jobs, sets the pool's ceiling back, keeps its spend and releases its lock), then killed; with `reap`, a
+    killed photos run's leftovers are cleared within the deadline too; then the time left for its watcher to finish
+    the run record."""
     with _lock:
         child, run, watcher = _child, _child_run, _watcher
         signal_it = child is not None and child.poll() is None
@@ -325,8 +334,8 @@ def _end_child(deadline: float, clock=time.monotonic) -> None:
         except subprocess.TimeoutExpired:
             log.error("the running run did not end within the stop grace; killed")
             child.kill()
-            if run is not None and run.get("stage") == "photos":
-                _reap_photos()
+            if reap and run is not None and run.get("stage") == "photos":
+                _reap_photos(run["run_id"], deadline, clock)
     if watcher is not None:
         watcher.join(timeout=max(0.0, deadline - clock()))
 
@@ -334,7 +343,8 @@ def _end_child(deadline: float, clock=time.monotonic) -> None:
 def stop_current(clock=time.monotonic) -> None:
     """The service is stopping (ECS sent SIGTERM and kills the task after its stopTimeout): no run starts any more, and
     the running run ends (_end_child) within RUN_STOP_GRACE_SECONDS, which leaves the rest of the stopTimeout for the
-    server's last config save."""
+    server's last config save. What a killed photos run left is not cleared here (it could eat that save's time): the
+    next photos run clears it."""
     global _stopping
     with _lock:
         _stopping = True
@@ -359,7 +369,7 @@ def _launch(rec: dict, launch) -> tuple[dict, int]:
 
 def _give_way_then_launch(rec: dict, launch) -> None:
     """The photos run that held the slot gives way: ended (or, not launched yet, it never starts), then this run starts."""
-    _end_child(time.monotonic() + RUN_STOP_GRACE_SECONDS)
+    _end_child(time.monotonic() + RUN_STOP_GRACE_SECONDS, reap=True)
     _launch(rec, launch)
 
 

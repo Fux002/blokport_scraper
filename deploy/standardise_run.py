@@ -66,13 +66,15 @@ def _code(exc):
 
 # --- the run lock -----------------------------------------------------------------------------------------------------
 def _lost(s3, etag, exc):
-    """Whether a failed conditional write means the lock is no longer this run's. PreconditionFailed says so; a 409
-    (ConditionalRequestConflict: another write was in flight) is checked against the lock's ETag; any other failure is a
-    passing one."""
-    if not isinstance(exc, ClientError) or _code(exc) not in _TAKEN:
+    """Whether a failed conditional write means the lock is no longer this run's. A PreconditionFailed (replaced) and a
+    404 (gone) say so; a 409 (ConditionalRequestConflict: another write was in flight) is checked against the lock's
+    ETag; any other failure is a passing one."""
+    if not isinstance(exc, ClientError):
         return False
-    if _code(exc) == "PreconditionFailed":
+    if _code(exc) == "PreconditionFailed" or _code(exc) in _MISSING:
         return True
+    if _code(exc) != "ConditionalRequestConflict":
+        return False
     try:
         return s3.head_object(Bucket=S3_BUCKET, Key=LOCK)["ETag"] != etag
     except ClientError as missing:
@@ -158,7 +160,7 @@ def _release(s3, etag):
         except ClientError as exc:
             if _code(exc) not in _TAKEN + _MISSING:
                 raise
-            if _code(exc) in _MISSING or _lost(s3, etag, exc):
+            if _lost(s3, etag, exc):
                 print("==> the run lock is no longer this run's: left as it is", flush=True)
                 return
     print("==> the run lock could not be removed (writes in flight): it is taken over once stale", flush=True)
@@ -326,19 +328,28 @@ def relink():
         return produce.main(["--stage", "republish"])
 
 
-def reap():
-    """After the runner killed the process (it outlived its stop grace, so its own cleanup never ran): stop the GPU jobs
-    it left, set the pool's ceiling back and remove its run lock. The runner still holds the run slot, so no other
-    process can hold that lock; one rewritten meanwhile (another ETag) is left as it is."""
+def reap(run_id):
+    """After the runner killed the photo process of run `run_id` (it outlived the give-way's deadline, so its own cleanup
+    never ran): stop that run's GPU jobs and, only while the run lock is still that run's (its body names the run), set
+    the pool's ceiling back and remove the lock. Nothing of another process is touched: a rolling deploy's other task or
+    a process started by hand keeps its jobs, its lock and its ceiling."""
     retries = Config(retries={"mode": "standard", "max_attempts": 10})
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
-    left = gpu.clear_leftovers(boto3.client("batch", region_name=S3_REGION, config=retries), "")   # no run of its own
+    batch = boto3.client("batch", region_name=S3_REGION, config=retries)
+    stopped = gpu.stop_run(batch, run_id)
     try:
-        _release(s3, s3.head_object(Bucket=S3_BUCKET, Key=LOCK)["ETag"])
+        held = s3.get_object(Bucket=S3_BUCKET, Key=LOCK)
     except ClientError as exc:
         if _code(exc) not in _MISSING:
             raise
-    print(f"==> cleared what a killed standardise process left: {len(left)} GPU jobs stopped, its lock removed", flush=True)
+        held = None
+    ours = held is not None and json.loads(held["Body"].read()).get("run_id") == run_id
+    if ours:
+        gpu.set_idle(batch)
+        _release(s3, held["ETag"])
+    print(f"==> cleared what killed run {run_id} left: {len(stopped)} GPU jobs stopped"
+          + ("; its lock removed, the GPU pool back to idle" if ours else "; the lock is another process's, left as it is"),
+          flush=True)
 
 
 def unconfigured():
@@ -378,7 +389,9 @@ def main() -> int:
     retries = Config(retries={"mode": "standard", "max_attempts": 10})     # a throttled call is retried, never fatal
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    # The runner's run id names the lock and the GPU jobs, so the runner can clear exactly what this run left if it
+    # has to kill it; a process started by hand names itself.
+    run_id = env.getenv("RUN_ID") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     spend = month_spend(s3, run_id)
     stop_on_signal(spend)                              # before the lock: a stop at any point releases it
     try:

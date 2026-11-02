@@ -103,11 +103,11 @@ def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_ba
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
     batch, stopped = _Batch(polls=[("RUNNING",)]), []
     batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
         gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100),
                       sleep=lambda s: None)
-    assert stopped == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
+    assert sorted(stopped) == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
 
 
 def test_a_submit_that_fails_part_way_still_stops_the_jobs_it_submitted(monkeypatch):
@@ -121,7 +121,7 @@ def test_a_submit_that_fails_part_way_still_stops_the_jobs_it_submitted(monkeypa
     with pytest.raises(RuntimeError):
         gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100),
                       sleep=lambda s: None)
-    assert stopped == ["job1", "job2", "job3"]
+    assert sorted(stopped) == ["job1", "job2", "job3"]                             # stopped in parallel, any order
 
 
 def test_stopping_stops_every_job_and_goes_on_past_one_that_cannot_be_stopped():
@@ -134,7 +134,36 @@ def test_stopping_stops_every_job_and_goes_on_past_one_that_cannot_be_stopped():
         stopped.append(jobId)
     batch.terminate_job = terminate
     gpu.stop(batch, ["j1", "j2", "j3"], "stopped")
-    assert stopped == ["j1", "j3"]
+    assert sorted(stopped) == ["j1", "j3"]
+
+
+def test_a_round_s_jobs_are_stopped_in_parallel():
+    import threading
+    import time
+    batch, now, most, lock = _Batch(), [0], [0], threading.Lock()
+
+    def terminate(jobId, reason):
+        with lock:
+            now[0] += 1
+            most[0] = max(most[0], now[0])
+        time.sleep(0.02)
+        with lock:
+            now[0] -= 1
+    batch.terminate_job = terminate
+    gpu.stop(batch, [f"j{i}" for i in range(40)], "stopped")
+    assert most[0] > 1
+
+
+def test_only_the_named_run_s_active_jobs_are_stopped(monkeypatch):
+    monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
+    batch, stopped = _Batch(), []
+    batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
+    batch.list_jobs = lambda **kw: {"jobSummaryList": [
+        {"jobId": "mine", "jobName": f"{C.JOB_PREFIX}R1-retouch-sentas-v2-0", "status": "RUNNING"},
+        {"jobId": "mine-done", "jobName": f"{C.JOB_PREFIX}R1-standardise-sentas-v2-0", "status": "SUCCEEDED"},
+        {"jobId": "theirs", "jobName": f"{C.JOB_PREFIX}R2-retouch-sentas-v2-0", "status": "RUNNING"}]}
+    assert gpu.stop_run(batch, "R1") == ["mine"] and stopped == ["mine"] and batch.ceilings == []
 
 
 def test_a_photo_s_own_failure_is_held_but_a_broken_gpu_or_passing_storage_error_stops_the_slice_for_a_retry():
@@ -154,7 +183,7 @@ def test_a_photo_s_own_failure_is_held_but_a_broken_gpu_or_passing_storage_error
 def test_waiting_asks_until_every_job_has_ended_and_names_the_failed(monkeypatch):
     batch = _Batch(polls=[("RUNNING",), ("SUCCEEDED", "FAILED")])
     slept = []
-    assert gpu.wait(batch, ["j1", "j2"], 3600, sleep=slept.append) == [("j2", "boom")]
+    assert gpu.wait(batch, ["j1", "j2"], 3600, sleep=slept.append, clock=lambda: 0) == [("j2", "boom")]
     assert slept == [C.RUN_POLL_SECONDS]
 
 
@@ -299,13 +328,15 @@ def test_a_gpu_round_that_ended_paid_work_stops_the_run_s_steps(monkeypatch):
     assert stopped
 
 
-def test_a_gpu_round_waits_no_longer_than_the_work_window(monkeypatch):
+def test_a_gpu_round_waits_no_longer_than_the_window_it_reserved_for_however_long_submitting_took(monkeypatch):
     monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
-    limits = []
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: limits.append(limit) or [])
-    gpu.run_round(_Batch(), _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 4000, sel_mod.Spend(100), clock=lambda: 400)
-    assert limits == [3600]
+    untils = []
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: untils.append(until) or [])
+    times = iter([400] + [900] * 10)                                               # the round starts at 400; submit ends at 900
+    gpu.run_round(_Batch(), _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 4000, sel_mod.Spend(100),
+                  clock=lambda: next(times))
+    assert untils == [4000]                                                        # the deadline, as reserved at 400
 
 
 # --- the GPU's share of the month's budget ----------------------------------------------------------------------------
@@ -332,7 +363,7 @@ def test_a_round_never_settles_above_what_it_reserved(monkeypatch):
     _gpu_env(monkeypatch)
     monkeypatch.setattr(C, "RUN_SLICE", 1)
     monkeypatch.setattr(C, "RUN_GPU_VCPUS", 8)                                      # 2 GPUs at once
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: [])
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
     window = C.GPU_MIN_WINDOW_SECONDS
     batch, kept = _Batch(), []
     jobs = [f"job{i}" for i in range(1, 11)]                                       # 5 slices, 10 jobs
@@ -346,7 +377,7 @@ def test_a_round_never_settles_above_what_it_reserved(monkeypatch):
 
 def test_a_round_settles_what_its_jobs_ran_plus_each_job_s_allowance(monkeypatch):
     _gpu_env(monkeypatch)
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: [])
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
     batch = _Batch()
     batch.times = {"job1": {"startedAt": 0, "stoppedAt": 1_800_000}, "job2": {"startedAt": 1_800_000, "stoppedAt": 5_400_000}}
     kept = []
@@ -359,7 +390,7 @@ def test_a_round_settles_what_its_jobs_ran_plus_each_job_s_allowance(monkeypatch
 def test_a_round_is_sized_to_the_budget_left(monkeypatch):
     _gpu_env(monkeypatch)
     monkeypatch.setattr(C, "RUN_SLICE", 1)
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: [])
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
     batch, kept = _Batch(), []
     spend = sel_mod.Spend(5.0, save=kept.append)                                   # 2 slices of 2.40 fit, not 3
     gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B, D]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
@@ -387,7 +418,7 @@ def _stopping(batch, polls):
 
 def test_a_stopped_round_reads_its_jobs_times_once_they_have_stopped(monkeypatch):
     _gpu_env(monkeypatch)
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(SystemExit("stopped by signal 15")))
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: (_ for _ in ()).throw(SystemExit("stopped by signal 15")))
     batch, slept = _Batch(), []
     _stopping(batch, [{"status": "RUNNING", "startedAt": 0}, {"status": "FAILED", "startedAt": 0, "stoppedAt": 1_800_000}])
     spend = sel_mod.Spend(100)
@@ -400,7 +431,7 @@ def test_a_stopped_round_reads_its_jobs_times_once_they_have_stopped(monkeypatch
 
 def test_a_job_still_not_stopped_after_the_wait_counts_to_now(monkeypatch):
     _gpu_env(monkeypatch)
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(SystemExit("stopped by signal 15")))
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: (_ for _ in ()).throw(SystemExit("stopped by signal 15")))
     batch, tries = _Batch(), C.STOP_WAIT_SECONDS // C.STOP_POLL_SECONDS
     _stopping(batch, [{"status": "RUNNING", "startedAt": 0}] * (tries + 1))
     spend = sel_mod.Spend(100)
@@ -413,7 +444,7 @@ def test_a_job_still_not_stopped_after_the_wait_counts_to_now(monkeypatch):
 def test_when_batch_cannot_say_what_ran_the_round_counts_what_it_reserved(monkeypatch):
     from botocore.exceptions import ClientError
     _gpu_env(monkeypatch)
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: [])
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
     batch = _Batch()
     batch.describe_jobs = lambda jobs: (_ for _ in ()).throw(ClientError({"Error": {"Code": "ServerException"}}, "DescribeJobs"))
     spend = sel_mod.Spend(100)
@@ -433,7 +464,7 @@ def test_jobs_an_earlier_run_left_are_stopped_and_the_ceiling_set_back(monkeypat
                                  {"jobId": "old3", "jobName": f"{C.JOB_PREFIX}R0-standardise-sentas-v2-1", "status": "RUNNABLE"}]}]
     batch.list_jobs = lambda **kw: asked.append(kw) or pages[len(asked) - 1]
     assert gpu.clear_leftovers(batch, "R1") == ["old1", "old3"]
-    assert stopped == ["old1", "old3"] and batch.ceilings == [C.IDLE_GPU_VCPUS]
+    assert sorted(stopped) == ["old1", "old3"] and batch.ceilings == [C.IDLE_GPU_VCPUS]
     assert asked[0]["filters"] == [{"name": "JOB_NAME", "values": [f"{C.JOB_PREFIX}*"]}] and asked[1]["nextToken"] == "t"
 
 
@@ -561,6 +592,23 @@ def test_a_passing_storage_error_or_a_concurrent_write_never_loses_the_lock():
         time.sleep(0.2)
         assert s3.locks[runner.LOCK]["owner"] == "R1" and s3.writes >= 3            # refreshed on past both hiccups
     assert lost == [] and runner.LOCK not in s3.keys                               # still ours, released
+
+
+def test_a_lock_gone_from_under_the_heartbeat_is_lost_not_a_passing_error():
+    import time
+    from botocore.exceptions import ClientError
+    s3, lost = _LockS3(), []
+    put = s3.put_object
+
+    def missing(**kw):
+        if "IfMatch" in kw:                                         # S3 answers a conditional write to a deleted key 404
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "PutObject")
+        return put(**kw)
+    with runner.exclusive(s3, {"run_id": "R1"}, on_lost=lambda: lost.append(1), beat=0.02):
+        s3.put_object = missing
+        s3.locks.pop(runner.LOCK)
+        time.sleep(0.1)
+    assert lost == [1]
 
 
 def test_the_lock_is_refreshed_while_the_run_works_and_a_lost_lock_stops_its_paid_calls():

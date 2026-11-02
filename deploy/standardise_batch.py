@@ -12,6 +12,7 @@ from contextlib import contextmanager
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from deploy.standardise_publish import WORKERS, pool_map
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import env
 
@@ -72,27 +73,28 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
     return ids
 
 
-def wait(batch, ids, limit, sleep=time.sleep, clock=time.monotonic):
-    """Block until every job has ended: [(job name, why)] of the jobs that failed. TimeoutError after limit seconds
-    (jobs stuck waiting for GPUs never end on their own)."""
-    deadline = clock() + limit
+def wait(batch, ids, until, sleep=time.sleep, clock=time.monotonic):
+    """Block until every job has ended: [(job name, why)] of the jobs that failed. TimeoutError once `until` (on clock)
+    has passed (jobs stuck waiting for GPUs never end on their own)."""
     while True:
         jobs = [j for i in range(0, len(ids), 100) for j in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]]
         if all(j["status"] in _DONE for j in jobs):
             return [(j["jobName"], j.get("statusReason", "")) for j in jobs if j["status"] == "FAILED"]
-        if clock() > deadline:
-            raise TimeoutError(f"GPU jobs not done after {limit}s")
+        if clock() > until:
+            raise TimeoutError("GPU jobs not done by the round's deadline")
         sleep(C.RUN_POLL_SECONDS)
 
 
 def stop(batch, ids, why):
-    """Stop every job of the round (Batch ignores it for a job that has ended), each on its own: one that cannot be
-    stopped is reported and the others are still stopped (a run that fails or is stopped leaves no GPU work behind)."""
-    for job_id in ids:
+    """Stop every job (Batch ignores it for a job that has ended), all at once (a round has hundreds; a stop has seconds),
+    each on its own: one that cannot be stopped is reported and the others are still stopped (a run that fails or is
+    stopped leaves no GPU work behind)."""
+    def one(job_id):
         try:
             batch.terminate_job(jobId=job_id, reason=why[:250])
         except (BotoCoreError, ClientError) as exc:
             print(f"   could not stop GPU job {job_id}: {exc}", flush=True)
+    pool_map(WORKERS, one, ids)
 
 
 def wait_limit(n_slices):
@@ -179,7 +181,8 @@ def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=
     (TimeoutError), every photo they finished stays, the next run goes on."""
     if not any(todo.values()):
         return []
-    window = max(0.0, deadline - clock())
+    started = clock()                                  # the reservation's window and the wait's deadline both count from here
+    window = max(0.0, deadline - started)
     if window < C.GPU_MIN_WINDOW_SECONDS:
         raise Skipped(f"only {window:.0f}s of the work window left (a round needs {C.GPU_MIN_WINDOW_SECONDS}s)")
     queue, jobdef = target()
@@ -192,7 +195,7 @@ def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=
         with raised(batch, pool(batch, queue)):
             try:
                 submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
-                return wait(batch, ids, min(wait_limit(len(slices(todo))), window))
+                return wait(batch, ids, started + min(wait_limit(len(slices(todo))), window), clock=clock)
             except BaseException as exc:
                 stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
                 raise
@@ -211,13 +214,31 @@ def _listed(batch, queue):
         ask["nextToken"] = page["nextToken"]
 
 
+def _active(batch, run_id):
+    """[(job id, whether it is run_id's)] of the process's jobs on the queue that have not ended."""
+    queue, _ = target()
+    return [(j["jobId"], j["jobName"].startswith(f"{C.JOB_PREFIX}{run_id}-")) for j in _listed(batch, queue)
+            if j["status"] not in _DONE]
+
+
+def set_idle(batch):
+    """The GPU pool's ceiling back to idle."""
+    queue, _ = target()
+    _ceiling(batch, pool(batch, queue), C.IDLE_GPU_VCPUS)
+
+
 def clear_leftovers(batch, run_id):
     """Stop the jobs an earlier run left still active (its process was killed before it could) and set the GPU pool's
-    ceiling back to idle: [the stopped job ids]. Only one process runs at a time (the run lock), so every active job of
-    the process that is not this run's was left."""
-    queue, _ = target()
-    left = [j["jobId"] for j in _listed(batch, queue)
-            if j["status"] not in _DONE and not j["jobName"].startswith(f"{C.JOB_PREFIX}{run_id}-")]
+    ceiling back to idle: [the stopped job ids]. Called while holding the run lock, so no other process is running and
+    every active job of the process that is not this run's was left."""
+    left = [job_id for job_id, own in _active(batch, run_id) if not own]
     stop(batch, left, f"left by an earlier standardise run; stopped by {run_id}")
-    _ceiling(batch, pool(batch, queue), C.IDLE_GPU_VCPUS)
+    set_idle(batch)
     return left
+
+
+def stop_run(batch, run_id):
+    """Stop run_id's own jobs that are still active, and no other's: [their ids]."""
+    own = [job_id for job_id, mine in _active(batch, run_id) if mine]
+    stop(batch, own, f"standardise run {run_id} was killed")
+    return own

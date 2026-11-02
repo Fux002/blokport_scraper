@@ -46,7 +46,7 @@ class _S3:
     def get_object(self, Bucket, Key):
         if Key not in self.objects:
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
-        return {"Body": io.BytesIO(self.objects[Key]["Body"])}
+        return {"Body": io.BytesIO(self.objects[Key]["Body"]), "ETag": self.objects[Key]["ETag"]}
 
     def head_object(self, Bucket, Key):
         return {"ETag": self.objects[Key]["ETag"], "Metadata": self.objects[Key]["Metadata"]}
@@ -307,18 +307,44 @@ def test_a_failed_relink_fails_the_run(monkeypatch):
     assert _main(monkeypatch, relink_rc=2) == (2, [1])
 
 
+def test_the_process_is_named_by_the_runner_s_run_id_in_its_lock_and_its_jobs(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("SCRAPER_RUN_ID", "20261102120000123")
+    real = proc.exclusive
+    monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: seen.update(owner=owner) or real(s3, owner, on_lost))
+    _main(monkeypatch)
+    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, run_id, deadline, say=print: seen.update(run_id=run_id) or
+                        {"problems": 0, "pending": 0, "budget_reached": False, "published": {"changed": False}})
+    proc.main()
+    assert seen["owner"]["run_id"] == "20261102120000123" and seen["run_id"] == "20261102120000123"
+
+
 def test_a_second_process_refuses_to_start_while_one_runs(monkeypatch):
     monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: (_ for _ in ()).throw(proc.RunActive("held")))
     assert _main(monkeypatch)[0] == 4
 
 
-def test_reaping_a_killed_process_stops_its_jobs_and_removes_its_lock(monkeypatch):
-    s3 = _S3({proc.LOCK: b'{"run_id": "R0"}'})
+def _reaping(monkeypatch, lock_body):
+    s3 = _S3({proc.LOCK: lock_body})
     monkeypatch.setattr(proc.boto3, "client", _Clients(s3))
-    cleared = []
-    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or ["job1"])
-    proc.reap()
-    assert cleared == [""] and proc.LOCK not in s3.objects                          # no run of its own: every job left
+    done = []
+    monkeypatch.setattr(proc.gpu, "stop_run", lambda batch, run_id: done.append(("stopped", run_id)) or ["job1"])
+    monkeypatch.setattr(proc.gpu, "set_idle", lambda batch: done.append("idle"))
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda *a: pytest.fail("touched another run's jobs"))
+    return s3, done
+
+
+def test_reaping_a_killed_run_stops_its_jobs_and_removes_its_own_lock(monkeypatch):
+    s3, done = _reaping(monkeypatch, b'{"run_id": "R7", "tags": ["v2", "v2-clean"]}')
+    proc.reap("R7")
+    assert done == [("stopped", "R7"), "idle"] and proc.LOCK not in s3.objects
+
+
+def test_reaping_never_touches_another_process_s_lock_or_ceiling(monkeypatch):
+    # a rolling deploy's other task, or a process started by hand, holds the lock and the raised ceiling
+    s3, done = _reaping(monkeypatch, b'{"run_id": "R8"}')
+    proc.reap("R7")
+    assert done == [("stopped", "R7")] and proc.LOCK in s3.objects                 # only the killed run's own jobs
 
 
 def test_the_relink_is_the_produce_s_republish_in_this_process_with_its_progress_noise_dropped(monkeypatch, capsys):
@@ -461,24 +487,45 @@ def test_a_stopping_server_passes_sigterm_to_the_running_child_and_waits_for_it(
     assert child.signals == ["TERM"] and child.waited == 5 and run["signalled"]
 
 
-def test_a_photos_child_that_does_not_end_in_time_is_killed_and_what_it_left_is_cleared(monkeypatch):
+def test_a_stopping_server_kills_a_late_child_but_leaves_its_clearing_to_the_next_run(monkeypatch):
+    # the server's last save comes first: the next photos run's clear_leftovers and stale-lock takeover clear it
     child = _Child(ends=False)
     child.kill = lambda: child.signals.append("KILL")
     _child_of(monkeypatch, child)
     monkeypatch.setattr(runner, "_stopping", False)
-    reaped = []
-    monkeypatch.setattr(runner, "_reap_photos", lambda: reaped.append(1))
+    monkeypatch.setattr(runner, "_reap_photos", lambda *a: pytest.fail("cleared during the server's stop"))
     runner.stop_current()                                                  # logged, never raised
-    assert child.signals == ["TERM", "KILL"] and reaped == [1]
+    assert child.signals == ["TERM", "KILL"]
+
+
+def test_a_photos_run_killed_while_giving_way_has_what_it_left_cleared_by_its_run_id(monkeypatch):
+    child = _Child(ends=False)
+    child.kill = lambda: child.signals.append("KILL")
+    run = _child_of(monkeypatch, child)
+    reaped = []
+    monkeypatch.setattr(runner, "_reap_photos", lambda run_id, deadline, clock: reaped.append((run_id, deadline)))
+    runner._end_child(100.0, clock=lambda: 0, reap=True)
+    assert child.signals == ["TERM", "KILL"] and reaped == [(run["run_id"], 100.0)]
 
 
 def test_a_killed_produce_leaves_nothing_of_the_photo_process_to_clear(monkeypatch):
     child = _Child(ends=False)
     child.kill = lambda: child.signals.append("KILL")
     _child_of(monkeypatch, child, stage="all")
-    monkeypatch.setattr(runner, "_stopping", False)
-    monkeypatch.setattr(runner, "_reap_photos", lambda: pytest.fail("cleared a photo run that was not running"))
-    runner.stop_current()
+    monkeypatch.setattr(runner, "_reap_photos", lambda *a: pytest.fail("cleared a photo run that was not running"))
+    runner._end_child(100.0, clock=lambda: 0, reap=True)
+
+
+def test_clearing_a_killed_photos_run_never_outlasts_the_deadline(monkeypatch):
+    import threading
+    import time
+    from deploy import standardise_run
+    release, seen = threading.Event(), []
+    monkeypatch.setattr(standardise_run, "reap", lambda run_id: seen.append(run_id) or release.wait(5))
+    started = time.monotonic()
+    runner._reap_photos("R7", started + 0.1, time.monotonic)
+    assert time.monotonic() - started < 1 and seen == ["R7"]                # it goes on alone; the launch is not held
+    release.set()
 
 
 def test_one_deadline_bounds_the_child_s_grace_and_the_watcher_s_join(monkeypatch):

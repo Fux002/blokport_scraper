@@ -97,12 +97,17 @@ the boot, the image pull and the pool's idle tail, at `SCRAPER_STANDARDISE_GPU_V
   deadline, `SCRAPER_RUN_STOP_GRACE_SECONDS` (80 s), bounds the whole stop and leaves 40 s of the container's
   `stopTimeout` (120 s) for the last config save. The photo process stops its GPU jobs (waiting up to 60 s for them to
   stop, so their real times are counted), sets the pool's ceiling back, settles its spend and releases its lock; the
-  work left in its pools is cancelled. A run still going at the deadline is killed, and for a photos run the server
-  then clears what it left (its GPU jobs, the pool's ceiling, its lock). Hosted calls already in flight end with the
-  process; their reserves stay counted. The run record is finished before the server's last save.
+  work left in its pools is cancelled; its GPU jobs are stopped all at once. A run still going at the deadline is
+  killed; what a killed photos run left is cleared by the next photos run (clear_leftovers, the stale lock), never
+  during the stop, so the last save keeps its time. Hosted calls already in flight end with the process; their
+  reserves stay counted. The run record is finished before the server's last save.
 - Giving way (the owner's Publish during a photos run) uses the same deadline. A photos run marked to give way before
   its subprocess started never starts; one that ended on its own before the signal keeps its real status. Two runs are
-  never under way at once: the mark, the stop and the launch decision are taken under one lock.
+  never under way at once: the mark, the stop and the launch decision are taken under one lock. A photos run killed
+  while giving way has what it left cleared within the deadline, by its run id only: the runner's run id names its
+  lock and its GPU jobs, so its jobs are stopped and the lock and the pool's ceiling are reset only while the lock is
+  still its own (a rolling deploy's other task or a process started by hand is never touched).
+- A heartbeat that finds the lock gone or replaced stops the run's paid work: it no longer holds the lock.
 - The lock is taken over only when it has not been rewritten for the runner's ceiling (its process was killed). A lock
   taken over while a run works stops that run's paid calls; a run removes the lock only while it is still its own.
 
