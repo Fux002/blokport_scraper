@@ -67,13 +67,14 @@ dev_require_standard_photo = true
 # The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image both envs' standardise jobs run today
 # (standardise-edit-cbc576cf9ebd-x, registered by hand until now), under its protected pin tag: add the tag to that
 # image in ECR BEFORE applying (STANDARDISE_PROCESS.md, rollout). The process runs after each full produce only once
-# AUTO is on, and refuses to start without the month's budget (hosted calls + GPU): both the owner's call.
+# AUTO is on (off in both until a dev run is verified). The month's budget, hosted calls and GPU together, is the
+# owner's (2026-11-02): prod 100 USD, dev 20 USD.
 dev_standardise_image_tag   = "standardise-pin-cbc576cf9ebd"
 prod_standardise_image_tag  = "standardise-pin-cbc576cf9ebd"
 dev_standardise_auto        = false
 prod_standardise_auto       = false
-dev_standardise_budget_usd  = ""
-prod_standardise_budget_usd = ""
+dev_standardise_budget_usd  = "20"
+prod_standardise_budget_usd = "100"
 dev_standardise_gpu_vcpus   = 32
 prod_standardise_gpu_vcpus  = 128
 
