@@ -246,7 +246,7 @@ resource "aws_batch_job_definition" "this" {
       { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
       { name = "RUN_MODE", value = "reprocess" },
       { name = "SRC", value = "" }, # always overridden per submission (never a hardcoded source)
-      { name = "WATERMARKED", value = "false" },
+      # No WATERMARKED default: every submission sets it from the source's config, and one without it fails loud.
     ]
     secrets = [for k, v in var.ssm_secret_arns : { name = k, valueFrom = v }]
     logConfiguration = {

@@ -13,6 +13,9 @@ runner's `photos` stage, started after each full produce on the owner's button. 
   7. report: one choice record per listing, tracked.csv (the review list) and summary.json, under the clean tag
   8. publish: the published folder made to match the choice records (deploy.standardise_publish)
   9. relink: when the folder changed, produce --stage republish, so the new photos are linked in this same run
+With SCRAPER_STANDARDISE_CLOSE_ONLY on, steps 1 to 7 are one close-up round instead: every chosen photo's close-up made
+again from the photo its run started from (deploy.standardise_close, a GPU job per slice, under the same lock, budget,
+window and run id), then publish and relink as above; its summary is close-summary.json.
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice. The
 GPU and hosted steps work at most STANDARDISE.WORK_SECONDS: after it no hosted call and no GPU round starts. Hosted calls
 and GPU rounds together never take the month past STANDARDISE.BUDGET_USD (each run's spend of the month is its own file
@@ -21,8 +24,9 @@ One process at a time per environment: it holds <env>/standardise-test/run.lock 
 LOCK_HEARTBEAT_SECONDS while it runs, taken over only when not rewritten for the runner's ceiling: its run was killed)
 and removes it, if it is still its own, when publish has ended. SIGTERM (the service stopping) unwinds the same way: the
 round's jobs are stopped, the ceiling set back, the spend kept, the lock released.
-Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY, SCRAPER_STANDARDISE_BUDGET_USD (all required);
-SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record.
+Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY (not for a close-only run), SCRAPER_STANDARDISE_BUDGET_USD
+(all required); SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record;
+SCRAPER_STANDARDISE_CLOSE_ONLY (optional): the close-up round instead of steps 1 to 7.
 Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured,
 or no produce has stored the conflict set yet;
 4 another process is running; a failed relink exits with the produce's code; any other failure is loud (a traceback).
@@ -37,6 +41,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager, redirect_stdout
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import boto3
@@ -44,6 +49,7 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from deploy import standardise_batch as gpu
+from deploy import standardise_close as close
 from deploy import standardise_publish as publish
 from deploy import standardise_select as select
 from deploy.standardise_source import sheet_and_photos
@@ -355,33 +361,86 @@ def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
     return problems, result
 
 
-def process(s3, batch, spend, run_id, deadline, say=print):
-    """Clear, pick, work, report and publish (steps 0 to 8), inside the lock: the run's summary (counts), also kept with
-    the pending listings and the problems as summary.json under the clean tag. At the end of the work window paid work
-    stops (no hosted call or GPU round starts after it)."""
-    root = f"{ROOT}{C.CLEAN_TAG}/"
-    if left := gpu.clear_leftovers(batch, run_id):
-        say(f"==> stopped {len(left)} GPU jobs an earlier run left")
+@dataclass(frozen=True)
+class Decisions:
+    """What a run decides by, read once: the exclude list, the owner's choice records ({SKU: record}), the produce's
+    conflict set ({(source, sha): handles}: photos listings of several stones show), the run tags' stores, and the owner's choices that apply
+    ({listing key: (tag, sha)}, select.owner_choice). Both kinds of round and publish see the same."""
+    exclude: set
+    owner: dict
+    conflicts: dict
+    rounds: list
+    picks: dict
+
+
+def read_decisions(s3, root, listings):
+    """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
+    re-classified; none stored yet: publish.NoConflictSet, nothing done."""
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
-    sheet, photos = sheet_and_photos(s3)
-    listings, removed, owner = photo_listings(sheet, photos), removed_listings(s3), owner_records(s3, root)
-    # the produce's set (stages.images.link_standard), never re-classified; none stored yet: NoConflictSet, nothing done
+    owner = owner_records(s3, root)
     conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, exclude, conflicts, rounds)) is not None}
-    assigned, conflicted = assignments(listings, picks, conflicts)
-    records = choices(s3, root)
-    found = todo(listings, records, exclude, whole_slabs(s3, records), removed, conflicts, picks)
-    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, owner, conflicts, rounds)
-    kept = sum("kept" in l for l in found)
-    say(f"==> standardise process {run_id}: {len(found) - kept} listings without a chosen photo, {kept} whose chosen "
+    return Decisions(exclude, owner, conflicts, rounds, picks)
+
+
+def photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisions):
+    """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed), work on them and report:
+    (problems, counts, kept)."""
+    removed, records = removed_listings(s3), choices(s3, root)
+    found = todo(listings, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
+                 decisions.picks)
+    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds)
+    held_on = sum("kept" in l for l in found)
+    say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
+    problems, result = run(batch, sel, spend, run_id, deadline, say)
+    counts = {"listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
+              "pending": len(result["pending"]), "removed": sum(l["sku"] in removed for l in listings)}
+    return problems, counts, {"pending_listings": result["pending"]}
+
+
+def close_round(s3, batch, spend, run_id, deadline, root, say):
+    """Instead of steps 1 to 7 (SCRAPER_STANDARDISE_CLOSE_ONLY): every chosen photo's close-up made again, one close-only
+    GPU job per slice (gpu.CLOSE_ROUND: the same sizing to the budget, reservation and window as any round), the logo
+    setting from each source's config as for a standardise round: (problems, counts, kept)."""
+    records = close.chosen(s3, root)
+    todo = {src: sorted({r["sha"] for r in close.listed(records, src)}) for src in sorted({r["source"] for r in records})}
+    photos = sum(len(shas) for shas in todo.values())
+    say(f"==> close-up process {run_id}: {photos} chosen photos of {', '.join(todo) or 'no source'}")
+    watermarked = {src: load_source(src).watermarked for src in todo}
+    try:
+        problems = [f"GPU job {name} failed: {why}" for name, why in
+                    gpu.run_round(batch, s3, C.CLEAN_TAG, todo, watermarked, run_id, deadline, spend, work=gpu.CLOSE_ROUND)]
+    except (select.Halted, gpu.Skipped, select.SpendCapReached) as exc:
+        problems = [f"close-up round not started: {exc}"]
+    except TimeoutError as exc:                        # its jobs were stopped; what they finished stays
+        problems = [f"close-up round stopped: {exc}"]
+    return problems, {"close_only": True, "photos": photos}, {}
+
+
+def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
+    """Clear, work (photos_round, or close_round when close_only), report and publish (steps 0 to 8), inside the lock: the
+    run's summary (counts), also kept with what is pending and the problems under the clean tag (summary.json, or
+    close-summary.json for a close-only run). Both publish only the conflict photos the owner assigned (assignments):
+    a close-only run republishes the same choices, so it decides them the same way. At the end of the work window paid
+    work stops (no hosted call or GPU round starts after it)."""
+    root = f"{ROOT}{C.CLEAN_TAG}/"
+    if left := gpu.clear_leftovers(batch, run_id):
+        say(f"==> stopped {len(left)} GPU jobs an earlier run left")
+    sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
+    listings = photo_listings(sheet, photos)
+    decisions = read_decisions(s3, root, listings)
+    assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), spend.halt, ("the work window ended",))
     closing.daemon = True
     closing.start()
     try:
-        problems, result = run(batch, sel, spend, run_id, deadline, say)
+        if close_only:
+            problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say)
+        else:
+            problems, counts, kept = photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisions)
     finally:
         closing.cancel()
     problems += conflicted
@@ -394,13 +453,12 @@ def process(s3, batch, spend, run_id, deadline, say=print):
     problems += [f"tile {key}: {why}" for key, why in sorted(published.pop("tiles_problems", {}).items())]
     for p in problems:
         say(f"   {p}")
-    summary = {"run_id": run_id, "listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
-               "pending": len(result["pending"]), "removed": sum(l["sku"] in removed for l in listings),
-               "problems": len(problems), "published": published,
+    summary = {"run_id": run_id, **counts, "problems": len(problems), "published": published,
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
                "budget_usd": spend.budget, "budget_reached": spend.capped}
-    kept = {**summary, "pending_listings": result["pending"], "problem_list": problems, "tiles_hidden": hidden}
-    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}summary.json", Body=json.dumps(kept, sort_keys=True).encode(),
+    s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{'close-summary' if close_only else 'summary'}.json",
+                  Body=json.dumps({**summary, **kept, "problem_list": problems, "tiles_hidden": hidden},
+                                  sort_keys=True).encode(),
                   ContentType="application/json")
     return summary
 
@@ -439,9 +497,9 @@ def reap(run_id):
           flush=True)
 
 
-def unconfigured():
-    """What is missing or wrong in the settings: the GPU target, the hosted key, the month's budget, and a work window
-    plus its finish that must end before the runner's ceiling."""
+def unconfigured(close_only=False):
+    """What is missing or wrong in the settings: the GPU target, the hosted key (not for a close-only run: it makes no
+    hosted call), the month's budget, and a work window plus its finish that must end before the runner's ceiling."""
     missing = []
     for name in ("GPU_QUEUE", "STANDARDISE_JOBDEF"):          # what gpu.target() reads, each named when missing
         try:
@@ -449,7 +507,8 @@ def unconfigured():
         except KeyError as exc:
             missing.append(exc.args[0])
     try:
-        judge.fal_key()
+        if not close_only:
+            judge.fal_key()
     except RuntimeError:
         missing.append("FAL_KEY")
     if C.BUDGET_USD is None:
@@ -469,7 +528,8 @@ def hand_over(summary):
 
 
 def main() -> int:
-    if missing := unconfigured():
+    close_only = env.env_bool("STANDARDISE_CLOSE_ONLY")
+    if missing := unconfigured(close_only):
         print(f"ERROR: not configured: {', '.join(missing)}; aborting")
         return 2
     deadline = time.monotonic() + C.WORK_SECONDS
@@ -482,9 +542,9 @@ def main() -> int:
     spend = month_spend(s3, run_id)
     stop_on_signal(spend)                              # before the lock: a stop at any point releases it
     try:
-        with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG]},
+        with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG], "close_only": close_only},
                        on_lost=lambda: spend.halt("the run lock was taken over")):
-            summary = process(s3, batch, spend, run_id, deadline)
+            summary = process(s3, batch, spend, run_id, deadline, close_only=close_only)
     except RunActive as exc:
         print(f"ERROR: {exc}; not started")
         return 4

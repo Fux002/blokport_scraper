@@ -83,6 +83,14 @@ def test_main_requires_src(monkeypatch):
     assert rs.main() == 2
 
 
+def test_main_requires_the_watermark_setting(monkeypatch):
+    # Whether the source carries a logo comes from its config with every submission (deploy.enhance_trigger); a job
+    # submitted without it must fail loud, never guess (a guessed "true" would pay a hosted de-watermark for nothing).
+    monkeypatch.setenv("SRC", "zucchi")
+    monkeypatch.delenv("WATERMARKED", raising=False)
+    assert rs.main() == 2
+
+
 def test_retry_recovers():
     proc, client = FakeProc([_incomplete(), _complete()]), FakeClient()
     outcome, _, _ = _run(proc, client, max_attempts=2)

@@ -3,6 +3,7 @@ Every image is the same canvas: the slab(s) as large as fit, on the same floor l
 from stone_pipeline.config.settings import STANDARDISE as C
 import functools
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -40,6 +41,21 @@ def _room(name):
     if name.startswith("far_"):                        # out of focus behind slabs in focus, like the regular halls
         room = cv2.GaussianBlur(room, (0, 0), C.FAR_ROOM_BLUR)
     return room
+
+
+@dataclass(frozen=True)
+class Flat:
+    """One squared slab at the work copy's pixels, and what it was squared from: a close-up takes the same slab from the
+    photo at its full resolution (views.close_up)."""
+    rgb: np.ndarray
+    alpha: np.ndarray
+    homography: np.ndarray  # a pixel of the work copy -> the same point on this squared slab
+    work: np.ndarray        # the work copy it was squared from, its logo and marks already taken off
+
+
+def scaling(sx, sy):
+    """The homography of an image resized by (sx, sy), pixel centres mapped as cv2.resize maps them."""
+    return np.array([[sx, 0, (sx - 1) / 2], [0, sy, (sy - 1) / 2], [0, 0, 1]], np.float64)
 
 
 def fit_working(rgb):
@@ -106,10 +122,10 @@ def two_stones(rgb, alpha):
             and (ring & (labels == piece)).sum() >= C.TWO_STONES_BORDER * ring.sum())
 
 
-def squared_slabs(rgb, seg, det, lama, esr, size=None):
-    """One/two (squared slab RGB, its alpha) pairs, cleaned and lit as one set (a pair keeps one light), or the
-    reason (str) no whole slab was found. size = (length, width): a slab shot at a steep angle is squared to it.
-    The alpha is the slab's own outline: a chipped corner shows the plate, never the warehouse behind it."""
+def flat_slabs(rgb, seg, det, lama, size=None):
+    """One/two Flat slabs squared from the work copy rgb (a pair at one height), cleaned, or the reason (str) no whole
+    slab was found. size = (length, width): a slab shot at a steep angle is squared to it. The alpha is the slab's own
+    outline: a chipped corner shows the plate, never the warehouse behind it."""
     quads, mask, raw, straps, reason = openbook.find_slabs(seg, det, rgb)
     if not quads:
         return reason
@@ -136,16 +152,25 @@ def squared_slabs(rgb, seg, det, lama, esr, size=None):
         marks |= proto.foreign_objects(q, raw)
     rgb = proto.erase(rgb, marks, lama, hull)
     outline = outline_with_erased(outline, marks, inside)
-    flats, alphas = [], []
+    flats, alphas, squares = [], [], []
     for q, aspect in zip(quads, aspects):
         f, H = openbook._flat(rgb, q, aspect)
         flats.append(f)
+        squares.append(H)
         alphas.append(cv2.warpPerspective(outline.astype(np.float32), H, f.shape[1::-1], flags=cv2.INTER_LINEAR))
     h = min(f.shape[0] for f in flats)
     size = [(int(round(f.shape[1] * h / f.shape[0])), h) for f in flats]
+    squares = [scaling(s[0] / f.shape[1], h / f.shape[0]) @ H for f, s, H in zip(flats, size, squares)]
     flats = [cv2.resize(f, s, interpolation=cv2.INTER_AREA) for f, s in zip(flats, size)]
     alphas = [cv2.resize(a, s, interpolation=cv2.INTER_AREA) for a, s in zip(alphas, size)]
-    factor = (C.OUT_W * (1 - 2 * C.MARGIN)) / sum(s[0] for s in size)    # how much the layout will enlarge them
+    return [Flat(f, a, H, rgb) for f, a, H in zip(flats, alphas, squares)]
+
+
+def enlarged(slabs, esr):
+    """The flat slabs (flat_slabs) at the size the layout draws them, lit as one set (a pair keeps one light), or the
+    reason (str) they cannot be shown."""
+    flats, alphas = [f.rgb for f in slabs], [f.alpha for f in slabs]
+    factor = (C.OUT_W * (1 - 2 * C.MARGIN)) / sum(f.shape[1] for f in flats)    # how much the layout will enlarge them
     if factor > 1:
         flats = [upscale(f, esr, factor) for f in flats]
         alphas = [cv2.resize(a, f.shape[1::-1], interpolation=cv2.INTER_LINEAR) for a, f in zip(alphas, flats)]

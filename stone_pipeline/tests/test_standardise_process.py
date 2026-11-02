@@ -513,6 +513,42 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     assert out["made_3d"] == 1 and imagestore.standard_key("sentas", A, "close") in s3.objects
 
 
+def test_a_close_only_run_makes_the_close_ups_again_in_the_same_process_then_publishes(monkeypatch):
+    import time
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{ROOT}chosen/two.json": _record("two", B),
+              f"{RUN}{A}.main.jpg": b"m", f"{RUN}{B}.main.jpg": b"m"})
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc, "load_source", lambda src: type("S", (), {"watermarked": False})())
+    rounds = []
+    monkeypatch.setattr(proc.gpu, "run_round", lambda batch, client, tag, todo, watermarked, run_id, deadline, spend, work:
+                        rounds.append((tag, todo, watermarked, run_id, work)) or [])
+    monkeypatch.setattr(proc, "sheet_listings", lambda client: pytest.fail("a close-only run picks no listings"))
+    summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
+    assert rounds == [(C.CLEAN_TAG, {"sentas": [A, B]}, {"sentas": False}, "R1", proc.gpu.CLOSE_ROUND)]
+    assert summary["close_only"] and summary["photos"] == 2 and summary["published"]["changed"]
+    assert f"{ROOT}close-summary.json" in s3.objects and f"{ROOT}summary.json" not in s3.objects   # the photos run's stays
+
+
+def test_a_close_only_run_needs_no_hosted_key(monkeypatch):
+    _configured(monkeypatch)
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    assert proc.unconfigured(close_only=True) == [] and proc.unconfigured() == ["FAL_KEY"]
+
+
+def test_a_close_only_run_holds_the_same_lock_named_by_its_run_id(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("SCRAPER_RUN_ID", "20261102120000123")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_CLOSE_ONLY", "true")
+    real = proc.exclusive
+    monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: seen.update(owner=owner) or real(s3, owner, on_lost))
+    _main(monkeypatch)
+    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, run_id, deadline, say=print, close_only=False:
+                        seen.update(close_only=close_only) or
+                        {"problems": 0, "pending": 0, "budget_reached": False, "published": {"changed": False}})
+    proc.main()
+    assert seen["owner"]["close_only"] and seen["owner"]["run_id"] == "20261102120000123" and seen["close_only"]
+
+
 class _Clients:
     def __init__(self, s3):
         self.s3 = s3
@@ -525,7 +561,7 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
           keep_process=False):
     """main() with the process stubbed (unless the test stubbed it, keep_process): what it returns and the relinks it
     made."""
-    monkeypatch.setattr(proc, "unconfigured", lambda: [])
+    monkeypatch.setattr(proc, "unconfigured", lambda close_only=False: [])
     monkeypatch.setattr(proc, "stop_on_signal", lambda spend: None)
     monkeypatch.setattr(proc.boto3, "client", _Clients(_S3()))
     monkeypatch.setattr(C, "BUDGET_USD", 10.0)
@@ -537,7 +573,7 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
     relinks = []
     monkeypatch.setattr(proc, "relink", lambda: relinks.append(1) or relink_rc)
 
-    def process(s3, batch, spend, run_id, deadline, say=print):
+    def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
         spend.capped = capped
         return {"problems": problems, "pending": 0, "budget_reached": capped, "published": {"changed": changed}}
     if not keep_process:
@@ -573,7 +609,7 @@ def test_the_process_is_named_by_the_runner_s_run_id_in_its_lock_and_its_jobs(mo
     real = proc.exclusive
     monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: seen.update(owner=owner) or real(s3, owner, on_lost))
     _main(monkeypatch)
-    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, run_id, deadline, say=print: seen.update(run_id=run_id) or
+    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, run_id, deadline, say=print, close_only=False: seen.update(run_id=run_id) or
                         {"problems": 0, "pending": 0, "budget_reached": False, "published": {"changed": False}})
     proc.main()
     assert seen["owner"]["run_id"] == "20261102120000123" and seen["run_id"] == "20261102120000123"

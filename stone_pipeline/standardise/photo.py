@@ -17,27 +17,42 @@ class Result:
     slab: tuple = ()                                   # (squared RGB, alpha) of one whole slab: what a 3D viewer needs
 
 
+class NoCloseUp(Exception):
+    """This photo has no close-up for a reason of its own: no whole single slab found in it now, its logo cannot be
+    trusted, its run refused it, it is off the product sheet, it cannot be decoded."""
+
+
 def _finished(slabs, key, models, seed):
     solid, stand = layout.masks(slabs, key)
     return blend.blend(layout.compose(slabs, key), solid, stand, models.inpaint, seed)
 
 
-def standardise(rgb, *, fmt, key, size=None, clean=None, watermarked=False, models=None, extra_views=False):
-    """The finished images of one photo. fmt = slab | block | tile (the product's format); key = the product, it alone
-    chooses the room; size = (length, width) in metres; clean = the already-cleaned copy of a watermarked source."""
-    if watermarked:
-        if clean is None:
-            return Result(held="logo: no cleaned copy of this watermarked photo")
-        rgb, reason = logos.remove(rgb, clean)
-        if rgb is None:
-            return Result(held=reason)
+def _work_copy(full, clean, watermarked):
+    """(the photo at the working size, its logo taken off when it has one, "") or (None, why the logo cannot be)."""
+    rgb = layout.fit_working(full)
+    if not watermarked:
+        return rgb, ""
+    if clean is None:
+        return None, "logo: no cleaned copy of this watermarked photo"
+    return logos.remove(rgb, clean)
+
+
+def standardise(full, *, fmt, key, size=None, clean=None, watermarked=False, models=None, extra_views=False, edits=None):
+    """The finished images of one photo, `full` at its full resolution (read). fmt = slab | block | tile (the product's
+    format); key = the product, it alone chooses the room; size = (length, width) in metres; clean = the already-cleaned
+    copy of a watermarked source; edits = a function giving where `full` itself is not as shot (views.close_up), called
+    only when a close-up is made."""
+    rgb, reason = _work_copy(full, clean, watermarked)
+    if rgb is None:
+        return Result(held=reason)
     if fmt in ("block", "tile"):
         made = scene.block(rgb, *models.cleaners) if fmt == "block" else scene.tile(rgb, models.lama, models.esr)
         return Result(kind=fmt, images={"main": made[0]})
     kind, confidence = kinds.classify(models.clip, rgb)
     if kinds.is_skipped(kind, confidence):
         return Result(held=f"not a slab photo: {kind} ({confidence:.2f})", kind=kind)
-    slabs = layout.squared_slabs(rgb, *models.cleaners, size=size)
+    flats = layout.flat_slabs(rgb, models.seg, models.det, models.lama, size=size)
+    slabs = flats if isinstance(flats, str) else layout.enlarged(flats, models.esr)
     if isinstance(slabs, str):
         slabs_reason, slabs = slabs, closeup.closeup(rgb, size, *models.cleaners)
         if isinstance(slabs, str):
@@ -51,26 +66,62 @@ def standardise(rgb, *, fmt, key, size=None, clean=None, watermarked=False, mode
     images["white"] = layout.on_white(slabs)
     if kind != "close-up":                              # Blokport's studio scene: the slab on its chrome feet
         images["studio"] = studio.place(slabs)
-    whole = whole_slab(slabs, kind)
+    i = whole_index(flats, kind)
+    whole = () if i is None else slabs[i]
     if extra_views and whole:
-        up = views.close_up(whole[0], whole[1], models.esr)
+        try:
+            up = views.close_up(flats[i], full, edits() if edits else None)   # the same slab, at the photo's own pixels
+        except NoCloseUp:                               # the close-up's own input is missing: the other views stand
+            up = None
         if up is not None:
             images["close"] = up
     return Result(kind=kind, images=images, slab=whole)
 
 
-def whole_slab(slabs, kind):
-    """The one whole real slab the 3D slab and the close view are made from: a single slab's own; of an open book, one of
-    its halves (each is a whole slab: the one with more stone in its outline, the left on a tie); none of a close-up,
-    which shows only part of a slab."""
+def whole_index(flats, kind):
+    """Which of the squared slabs (layout.Flat) is the one whole real slab the 3D slab and the close view are made from: a
+    single slab's own; of an open book, one of its halves (each is a whole slab: the one with more stone in its outline,
+    the left on a tie); None for a close-up, which shows only part of a slab. Chosen on the squared slabs, so the
+    close-only run (close_view), which never enlarges them, takes the same half."""
     if kind == "open book":
-        return max(slabs, key=lambda s: float(s[1].sum()))     # max keeps the first of equals: the left half
-    return slabs[0] if kind == "slab" else ()
+        sums = [float(f.alpha.sum()) for f in flats]
+        return sums.index(max(sums))                    # the first of equals: the left half
+    return 0 if kind == "slab" else None
+
+
+def close_view(full, *, size, models, clean=None, watermarked=False, edits=None):
+    """The close-up alone (views.close_up) of a photo its run made a whole slab of (a single slab, or an open book's whole
+    half), or None when it gets none: the steps of standardise up to the squared slabs, none of what only the other views
+    need. NoCloseUp when its logo cannot be trusted or it no longer gives a whole slab."""
+    rgb, reason = _work_copy(full, clean, watermarked)
+    if rgb is None:
+        raise NoCloseUp(reason)
+    flats = layout.flat_slabs(rgb, models.seg, models.det, models.lama, size=size)
+    if isinstance(flats, str):
+        raise NoCloseUp(f"no whole slab now: {flats}")
+    return views.close_up(flats[whole_index(flats, "open book" if len(flats) == 2 else "slab")], full, edits)
+
+
+def retouch_fills(retouched, made_from):
+    """Where a retouched copy is not the photo it was made from (0/1 at its size): the retouch's fills, told from the JPEG
+    re-encoding's own small differences (CLOSEUP_RETOUCH_DIFF). A retouch that only cropped the photo clear of its marks
+    (another size) filled nothing."""
+    if retouched.shape != made_from.shape:
+        return np.zeros(retouched.shape[:2], np.uint8)
+    # Luma only: a re-encode's chroma subsampling moves colour along every vein, a fill changes the stone's own light.
+    luma = lambda rgb: cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    off = np.abs(luma(retouched) - luma(made_from))
+    return (cv2.GaussianBlur(off, (0, 0), C.CLOSEUP_RETOUCH_SMOOTH) > C.CLOSEUP_RETOUCH_DIFF).astype(np.uint8)
+
+
+def read(data):
+    """RGB of an encoded photo at its full resolution; raises ValueError on an undecodable one."""
+    bgr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ValueError("undecodable image")
+    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
 def decode(data):
     """RGB of an encoded photo, at the working size; raises ValueError on an undecodable one."""
-    bgr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise ValueError("undecodable image")
-    return layout.fit_working(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+    return layout.fit_working(read(data))

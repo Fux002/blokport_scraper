@@ -12,6 +12,7 @@ from stone_pipeline.config.settings import STANDARDISE as C
 import re
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -334,34 +335,76 @@ def _shoulder(lin: np.ndarray) -> np.ndarray:
     return np.where(lin > C.SHOULDER, C.SHOULDER + room * (1 - np.exp(-np.maximum(lin - C.SHOULDER, 0) / room)), lin)
 
 
+@dataclass(frozen=True)
+class Light:
+    """even_light's reading of one image: what turns it into studio light (apply_light). The two fields are smooth, so
+    they can be read on a small copy and applied, resized, to a part of a larger one."""
+    flat: np.ndarray        # per pixel, the gain evening out the illumination
+    cast: np.ndarray        # per channel, the gains neutralising the light's cast (ones: too little near-grey stone)
+    exposure: float         # one gain lifting the brightest stone near white (1: a dark stone, never dimmed)
+    surround: np.ndarray    # per pixel, the lit stone's L* at the clarity scale: what clarity lifts the stone against
+
+
+def _studio_linear(lin, flat, cast, exposure):
+    """Linear light with the gains applied in place, in the one order every reading and application uses."""
+    lin *= flat[:, :, None]
+    lin *= cast
+    lin *= exposure
+    return _shoulder(lin)
+
+
+def _lab(lin):
+    return cv2.cvtColor(_to_srgb(lin).astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
+
+
+def _finish(lab, surround):
+    """Clarity on L* against the surround, then vibrance that lifts dull colours only; 8-bit RGB."""
+    L = lab[:, :, 0]
+    lab[:, :, 0] = np.clip(L + C.CLARITY * (L - surround), 0, 100)
+    chroma = np.hypot(lab[:, :, 1], lab[:, :, 2])
+    lab[:, :, 1:] *= (1 + C.VIBRANCE * np.clip(1 - chroma / C.VIBRANCE_FULL, 0, 1))[:, :, None]
+    return np.clip(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB) * 255 + 0.5, 0, 255).astype(np.uint8)
+
+
+def _read_light(rgb: np.ndarray, slab: np.ndarray):
+    """(Light of rgb, rgb's lab with every gain applied, before clarity)."""
+    m = slab > 0
+    luma = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    lin = _to_linear(rgb)
+    illum = cv2.GaussianBlur(lin @ luma, (0, 0), C.FLAT_SIGMA * max(lin.shape[:2]))
+    flat = np.clip(float(illum[m].mean()) / np.maximum(illum, 1e-4), 0.75, 1.4) ** C.FLAT_STRENGTH
+    evened = lin * flat[:, :, None]
+    lab = _lab(evened)
+    cast = np.ones(3, np.float32)
+    neutral = (np.hypot(lab[:, :, 1], lab[:, :, 2]) <= C.WB_NEUTRAL_CHROMA) & m
+    if neutral.sum() >= C.WB_MIN_NEUTRAL * m.sum():
+        ref = neutral & (lab[:, :, 0] >= np.percentile(lab[:, :, 0][neutral], C.WHITE_PCT))
+        means = evened[ref].mean(axis=0)
+        cast = np.clip((means.mean() / np.maximum(means, 1e-4)) ** C.WB_STRENGTH, 1 - C.WB_MAX, 1 + C.WB_MAX).astype(np.float32)
+    bright = float(np.percentile(((evened * cast) @ luma)[m], C.WHITE_PCT))
+    exposure = 1.0
+    if _l_star(bright) >= C.DARK_STONE_L:
+        target = ((C.WHITE_TARGET_L + 16) / 116) ** 3
+        exposure = float(np.clip(target / bright, 1.0, C.EXPOSURE_MAX))     # lift only: a bright photo is never dimmed
+    lab = _lab(_studio_linear(lin, flat, cast, exposure))
+    surround = cv2.GaussianBlur(lab[:, :, 0], (0, 0), C.CLARITY_SIGMA * max(lab.shape[:2]))
+    return Light(flat, cast, exposure, surround), lab
+
+
+def read_light(rgb: np.ndarray, slab: np.ndarray) -> Light:
+    """What even_light does to rgb (slab: where the stone is), to apply to rgb or, resized, to part of a larger copy."""
+    return _read_light(rgb, slab)[0]
+
+
+def apply_light(rgb: np.ndarray, light: Light) -> np.ndarray:
+    """rgb in the studio light `light` read (its fields at rgb's size)."""
+    return _finish(_lab(_studio_linear(_to_linear(rgb), light.flat, light.cast, light.exposure)), light.surround)
+
+
 def even_light(rgb: np.ndarray, slab: np.ndarray) -> np.ndarray:
     """Studio light on the stone, faithful to its colour. In linear light: even out the illumination (one gain
     per pixel, all channels alike), neutralise the light's cast measured on near-grey stone (bounded per-channel
     gains), lift exposure so the brightest areas sit near white (one bounded gain, never down; a dark stone
     keeps its darkness), soft highlight roll-off. Then a little clarity on L* and vibrance that lifts dull colours only."""
-    m = slab > 0
-    luma = np.array([0.2126, 0.7152, 0.0722], np.float32)
-    lin = _to_linear(rgb)
-    y = lin @ luma
-    illum = cv2.GaussianBlur(y, (0, 0), C.FLAT_SIGMA * max(y.shape))
-    lin *= (np.clip(float(illum[m].mean()) / np.maximum(illum, 1e-4), 0.75, 1.4) ** C.FLAT_STRENGTH)[:, :, None]
-
-    lab = cv2.cvtColor(_to_srgb(lin).astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
-    neutral = (np.hypot(lab[:, :, 1], lab[:, :, 2]) <= C.WB_NEUTRAL_CHROMA) & m
-    if neutral.sum() >= C.WB_MIN_NEUTRAL * m.sum():
-        ref = neutral & (lab[:, :, 0] >= np.percentile(lab[:, :, 0][neutral], C.WHITE_PCT))
-        means = lin[ref].mean(axis=0)
-        lin *= np.clip((means.mean() / np.maximum(means, 1e-4)) ** C.WB_STRENGTH, 1 - C.WB_MAX, 1 + C.WB_MAX).astype(np.float32)
-
-    bright = float(np.percentile((lin @ luma)[m], C.WHITE_PCT))
-    if _l_star(bright) >= C.DARK_STONE_L:
-        target = ((C.WHITE_TARGET_L + 16) / 116) ** 3
-        lin *= float(np.clip(target / bright, 1.0, C.EXPOSURE_MAX))     # lift only: a bright photo is never dimmed
-    lin = _shoulder(lin)
-
-    lab = cv2.cvtColor(_to_srgb(lin).astype(np.float32) / 255, cv2.COLOR_RGB2LAB)
-    L = lab[:, :, 0]
-    lab[:, :, 0] = np.clip(L + C.CLARITY * (L - cv2.GaussianBlur(L, (0, 0), C.CLARITY_SIGMA * max(L.shape))), 0, 100)
-    chroma = np.hypot(lab[:, :, 1], lab[:, :, 2])
-    lab[:, :, 1:] *= (1 + C.VIBRANCE * np.clip(1 - chroma / C.VIBRANCE_FULL, 0, 1))[:, :, None]
-    return np.clip(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB) * 255 + 0.5, 0, 255).astype(np.uint8)
+    light, lab = _read_light(rgb, slab)
+    return _finish(lab, light.surround)

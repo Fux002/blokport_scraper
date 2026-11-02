@@ -142,6 +142,12 @@ The process is a stage of the config runner (`photos`), chained only after a suc
 owner's Run) when `SCRAPER_STANDARDISE_AUTO` is on, never after `republish` or `catalog`. It can also be started on its
 own: `POST /config/v1/run {"stage": "photos"}`. Nothing starts it otherwise (no schedule).
 
+When the close-up rule changes (`STANDARDISE.CLOSEUP_VERSION`), the chosen photos' close-ups are made again by the same
+process started by hand with `SCRAPER_STANDARDISE_CLOSE_ONLY=true` (never set on the svc: every photos run would then be
+one). It holds the same lock, budget, work window and run id, makes one close-only GPU job per slice of the chosen photos
+(`deploy.standardise_close`) instead of steps 1-7, then publishes and relinks as any run; its summary is
+`close-summary.json`, so the photos run's `summary.json` stays.
+
 The owner's Publish is never blocked: any other stage asked for while a photos run holds the run slot (Blokport's
 Publish button runs a republish) stops the photos run cleanly (the SIGTERM path below) and starts at once; the request
 gets its 202 straight away. The photos run ends `stopped`; everything it stored is kept and the next photos run goes on
@@ -250,7 +256,8 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 | GPU_VCPU_HOUR_USD | `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` | 0.147 (default) |
 | WORK_SECONDS | `SCRAPER_STANDARDISE_WORK_SECONDS` | 7200 (default) |
 | (job target) | `SCRAPER_GPU_QUEUE`, `SCRAPER_STANDARDISE_JOBDEF` | from the gpu_enhance module |
-| (hosted key) | `FAL_KEY` | already injected in both |
+| (hosted key) | `FAL_KEY` | already injected in both (not needed by a close-only run) |
+| CLOSE_ONLY | `SCRAPER_STANDARDISE_CLOSE_ONLY` | unset on the svc; a hand-started close-up run only |
 
 ## Failure modes
 

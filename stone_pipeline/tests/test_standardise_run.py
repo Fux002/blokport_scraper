@@ -282,6 +282,31 @@ def test_no_step_starts_after_the_work_window_and_the_report_still_runs(monkeypa
     assert problems == [f"the work window ({C.WORK_SECONDS}s) ended: the next run goes on"]
 
 
+def test_each_close_only_slice_has_its_own_fixed_list_and_is_named_by_the_run(monkeypatch):
+    monkeypatch.setattr(C, "RUN_SLICE", 2)
+    batch, s3 = _Batch(), _S3()
+    gpu.submit_close(batch, s3, "q", "jd", "v9-clean", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True}, "R1", [])
+    envs = [{e["name"]: e["value"] for e in j["containerOverrides"]["environment"]} for j in batch.submitted]
+    assert [j["jobName"] for j in batch.submitted] == [f"{C.JOB_PREFIX}R1-close-sentas-v9-clean-0", f"{C.JOB_PREFIX}R1-close-sentas-v9-clean-1",
+                                                       f"{C.JOB_PREFIX}R1-close-varsha-v9-clean-0"]          # cleared by run id
+    assert [json.loads(s3.objects[e["ONLY_KEY"]]) for e in envs] == [[A, B], [D], [E]]
+    assert all(e["RUN_MODE"] == "standardise-close" and e["CLEAN_TAG"] == "v9-clean" for e in envs)
+    assert [(e["SRC"], e["WATERMARKED"]) for e in envs] == [("sentas", "false"), ("sentas", "false"), ("varsha", "true")]
+
+
+def test_a_close_only_round_reserves_one_job_per_slice_and_submits_close_jobs(monkeypatch):
+    window = 3 * 3600
+    assert gpu.worst_seconds(4, window, gpu.CLOSE_ROUND) == 4 * min(C.STANDARDISE_TIMEOUT, window) + 4 * C.GPU_JOB_ALLOWANCE_SECONDS
+    assert gpu.worst_seconds(4, window) == 4 * min(C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, window) + 8 * C.GPU_JOB_ALLOWANCE_SECONDS
+    monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
+    monkeypatch.setattr(gpu, "ran_usd", lambda batch, ids, reserved, now, sleep: 0.0)
+    batch, s3 = _Batch(), _S3()
+    gpu.run_round(batch, s3, "v9-clean", {"sentas": [A]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100), work=gpu.CLOSE_ROUND)
+    assert [j["jobName"] for j in batch.submitted] == [f"{C.JOB_PREFIX}R1-close-sentas-v9-clean-0"]
+    assert batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
+
+
 def test_a_listed_photo_left_without_a_result_is_a_problem(monkeypatch):
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: [])
     monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())

@@ -20,6 +20,7 @@ import numpy as np
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import index, kinds, models, outline, photo
 
@@ -110,6 +111,32 @@ def start(client, out, key, sha):
         if not note["stays_as_shot"]:
             return None, source != key, note["reason"]
     return source, source != key, ""
+
+
+def own_input(client, key, read=photo.read):
+    """A photo's own input from storage, decoded (read: photo.read or photo.decode); photo.NoCloseUp when it is missing
+    or no image, that photo's outcome, not the run's. Any other storage error (denied, throttled) is raised as it is."""
+    try:
+        data = _get(client, key)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            raise photo.NoCloseUp(f"its input is missing: {key}") from exc
+        raise
+    try:
+        return read(data)
+    except ValueError as exc:                          # photo.read / decode: the bytes are no image
+        raise photo.NoCloseUp(f"its input is no image: {key}") from exc
+
+
+def start_edits(client, out, key, source_key, cleaned, full):
+    """Where the photo a run starts from (`full`, read from source_key) is not as shot (views.close_up's edits): all of a
+    hosted model's cleaned copy or a retouch of one, a retouch's fills (photo.retouch_fills against the work copy of the
+    scraped photo `key` it was made from), None for the scraped photo itself."""
+    if cleaned:
+        return np.ones(full.shape[:2], np.uint8)
+    if source_key.startswith(f"{out}retouched/"):
+        return photo.retouch_fills(full, own_input(client, key, photo.decode))
+    return None
 
 
 def _survey(rgb, m):
@@ -244,7 +271,11 @@ def main() -> int:
         print("ERROR: SRC is required; aborting")
         return 2
     survey = os.environ.get("SURVEY", "false").lower() in ("1", "true", "yes")
-    watermarked = os.environ.get("WATERMARKED", "false").lower() in ("1", "true", "yes")
+    try:
+        watermarked = env.job_flag("WATERMARKED")
+    except ValueError as exc:
+        print(f"ERROR: {exc}; aborting")
+        return 2
     extra = os.environ.get("EXTRA_VIEWS", "true").lower() in ("1", "true", "yes")
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
     client = boto3.client("s3", region_name=S3_REGION)
@@ -252,7 +283,7 @@ def main() -> int:
     photos = sheet_photos(client)
     sliced = _photo_keys(client, src, photos)
     print(f"==> standardise {src}: {len(sliced)} photos, survey={survey}", flush=True)
-    m = models.load(survey_only=survey)
+    m = models.load("survey" if survey else "all")
     tally = collections.Counter()
     spent = []
     storage_in_a_row = 0
@@ -281,11 +312,12 @@ def main() -> int:
                         tally["held"] += 1
                     storage_in_a_row = 0
                     continue
-                rgb = photo.decode(_get(client, source_key))
+                full = photo.read(_get(client, source_key))
                 logo = watermarked and not cleaned             # a cleaned copy has no logo left to take off
                 clean = photo.decode(_get(client, f"{imagestore.improved_prefix(src)}{sha}.jpg")) if logo else None
-                res = photo.standardise(rgb, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
-                                        clean=clean, watermarked=logo, models=m, extra_views=extra)
+                res = photo.standardise(full, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
+                                        clean=clean, watermarked=logo, models=m, extra_views=extra,
+                                        edits=lambda: start_edits(client, out, key, source_key, cleaned, full))
                 if redo:
                     tally[complete(client, out, sha, res)] += 1
                 elif res.held:

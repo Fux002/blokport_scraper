@@ -707,12 +707,13 @@ def _completing(monkeypatch, s3, standardise):
     from deploy import standardise_source as src
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.setenv("RUN_TAG", "v9")
+    monkeypatch.setenv("WATERMARKED", "false")
     monkeypatch.setattr(src.boto3, "client", lambda *a, **k: s3)
     monkeypatch.setattr(src, "sheet_photos", lambda client: {A: {"source": "sentas", "key": "k", "format": "slab", "size": None}})
     monkeypatch.setattr(src, "_photo_keys", lambda client, s, photos: [f"dev/products/scraped/sentas/{A}.jpg"])
-    monkeypatch.setattr(src.models, "load", lambda survey_only: None)
+    monkeypatch.setattr(src.models, "load", lambda need: None)
     monkeypatch.setattr(src, "_get", lambda client, key: b"jpg")
-    monkeypatch.setattr(src.photo, "decode", lambda data: np.zeros((20, 30, 3), np.uint8))
+    monkeypatch.setattr(src.photo, "read", lambda data: np.zeros((20, 30, 3), np.uint8))
     monkeypatch.setattr(src.photo, "standardise", standardise)
     return src.main()
 
