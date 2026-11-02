@@ -264,3 +264,14 @@ def test_the_lock_is_released_even_when_the_run_fails():
             assert runner.LOCK in s3.keys
             raise RuntimeError("interrupted")
     assert runner.LOCK not in s3.keys
+
+
+def test_a_run_s_size_is_set_per_run_and_a_malformed_value_fails_loud(monkeypatch):
+    from stone_pipeline.config import settings
+    monkeypatch.setenv("SCRAPER_STANDARDISE_GPU_VCPUS", "384")
+    assert settings._env_int("SCRAPER_STANDARDISE_GPU_VCPUS", 128) == 384
+    assert settings._env_int("SCRAPER_STANDARDISE_RUN_SLICE", 150) == 150          # unset: the default
+    monkeypatch.setenv("SCRAPER_STANDARDISE_RUN_SLICE", "forty")
+    with pytest.raises(ValueError, match="SCRAPER_STANDARDISE_RUN_SLICE"):
+        settings._env_int("SCRAPER_STANDARDISE_RUN_SLICE", 150)
+    assert C.IDLE_GPU_VCPUS == 8                                                    # always back to idle after a run

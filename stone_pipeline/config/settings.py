@@ -1091,7 +1091,7 @@ on two questions:
 Your whole answer is one JSON object and nothing else:
 {"clean": true|false, "faithful": true|false, "problems": "<short, empty if none>"}"""
     # Spend: each run stops loud before it would pass this many USD of hosted calls (judge as billed, edits at list price).
-    SPEND_CAP_USD = 60.0
+    SPEND_CAP_USD = _env_float("SCRAPER_STANDARDISE_SPEND_CAP_USD", 60.0)   # a bigger run states its own cap
     # A judge call's cost reserved before it is made: its worst case (JUDGE_MAX_TOKENS out at $20/M plus two images in at
     # $4/M, Opus 5.5), so parallel calls can never together pass the cap; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14
@@ -1099,8 +1099,11 @@ Your whole answer is one JSON object and nothing else:
     # A run (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
     # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
     # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
-    RUN_SLICE = 150
-    RUN_GPU_VCPUS, IDLE_GPU_VCPUS = 128, 8
+    # The size of a run's GPU burst is set per run (a full environment overnight wants more GPUs and smaller slices than
+    # a test): the ceiling is the account's G-instance quota at most, and is always set back to IDLE_GPU_VCPUS.
+    RUN_SLICE = _env_int("SCRAPER_STANDARDISE_RUN_SLICE", 150)
+    RUN_GPU_VCPUS = _env_int("SCRAPER_STANDARDISE_GPU_VCPUS", 128)
+    IDLE_GPU_VCPUS = 8
     RUN_POLL_SECONDS = 60              # how often a run asks Batch whether its jobs are done ...
     RUN_MAX_WAIT_SECONDS = 12 * 3600   # ... and how long at most per wave of jobs (the slices that run at once) before it
     #                                    stops them and fails (jobs stuck, no GPU quota); above a healthy slice's longest
@@ -1108,7 +1111,7 @@ Your whole answer is one JSON object and nothing else:
     GPU_JOB_VCPUS = 4                  # each GPU job's vCPUs (the standardise job definition: 4 vCPU, 1 GPU, no retries):
     #                                    RUN_GPU_VCPUS // this jobs run at once
     SLICE_MAX_STORAGE_FAILURES = 3     # storage errors in a row before a GPU slice stops (the next run retries)
-    SELECT_WORKERS = 12                # listings worked on at once (hosted calls; no model runs here)
+    SELECT_WORKERS = _env_int("SCRAPER_STANDARDISE_WORKERS", 12)   # listings worked on at once (hosted calls only)
     # Per edit at the sizes above, an upper bound (fal.ai/pricing: Kontext per megapixel rounded up, Nano Banana 2 per image
     # with 2K above base, FLUX 3 per megapixel), so the cap stops early rather than late.
     CLEAN_PRICE_USD = {"kontext": 0.15, "nano2": 0.12, "flux3": 0.15}
