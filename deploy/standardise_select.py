@@ -125,8 +125,10 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
     key = f"{rnd.prefix}judged/{sha}.json"
     with rnd.lock(sha):
         if sha in rnd.judged:
-            return _get_json(client, key)
-        if spend is None:
+            stored = _get_json(client, key)
+            if judge.current(stored) or spend is None:     # a fail under an older, stricter bar is judged again
+                return stored
+        elif spend is None:
             return None
         spend.reserve(C.JUDGE_PRICE_USD)
         cost = 0.0
@@ -162,7 +164,7 @@ def choose(client, rounds, listing, exclude, spend=None):
                 complete = False
                 continue
             found = verdict(client, r, src, sha, listing["format"], spend)
-            if found is None:
+            if found is None or not judge.current(found):    # no verdict, or a fail under an older bar: not final
                 complete = False
             elif judge.passed(found):
                 return (tag, sha), True
