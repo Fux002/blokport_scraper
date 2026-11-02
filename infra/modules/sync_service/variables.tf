@@ -137,6 +137,43 @@ variable "secrets_kms_key_arn" {
   description = "KMS key ARN for the SSM SecureStrings (grants kms:Decrypt on the execution role). Empty = AWS-managed aws/ssm key (implicit decrypt); set to the customer CMK in prod."
 }
 
+# --- The standardised-photo process (the runner's photos stage, STANDARDISE_PROCESS.md) ---------------------------
+variable "standardise_enabled" {
+  type        = bool
+  default     = false
+  description = "SCRAPER_STANDARDISE_AUTO: run the photo process after each produce that published a product sheet."
+}
+
+variable "standardise_budget_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_BUDGET_USD: the month's hosted budget (judge + clean-up edits), all runs together. Empty = not configured: the process refuses to start (no default spend)."
+}
+
+variable "standardise_job_definition_name" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_JOBDEF: the standardise job definition NAME (gpu_enhance module), submitted on gpu_job_queue_name."
+}
+
+variable "standardise_job_definition_arn" {
+  type        = string
+  default     = ""
+  description = "Revision-agnostic ARN (':*') of the standardise job definition. Scopes the process's Batch IAM. Empty = not granted."
+}
+
+variable "standardise_gpu_vcpus" {
+  type        = number
+  default     = 8
+  description = "SCRAPER_STANDARDISE_GPU_VCPUS: the GPU pool's ceiling while a photo round runs (4 vCPUs per job). Within the account's G-instance quota."
+}
+
+variable "gpu_compute_environment_arn" {
+  type        = string
+  default     = ""
+  description = "ARN of the GPU pool behind the queue: the process raises its ceiling for a round and sets it back."
+}
+
 # --- Brand + product-type selection (multi-brand / multi-material) ------------
 variable "brand" {
   type        = string

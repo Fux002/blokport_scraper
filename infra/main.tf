@@ -107,7 +107,13 @@ resource "aws_ecr_lifecycle_policy" "this" {
       { rulePriority = 4, description = "keep the pinned prod images (prod-<sha>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["prod-"], countType = "imageCountMoreThan", countNumber = 5 },
       action = { type = "expire" } },
-      { rulePriority = 5, description = "keep the standardise GPU images",
+      # A standardise GPU image pinned in the brand tfvars (*_standardise_image_tag) is tagged standardise-pin-<sha>:
+      # matched here first, so the build churn below (3 newest standardise-) can never expire an image a job
+      # definition runs. Pins are few (one per release); this keeps the last 20.
+      { rulePriority = 5, description = "keep the pinned standardise GPU images (standardise-pin-<sha>)",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-pin-"], countType = "imageCountMoreThan", countNumber = 20 },
+      action = { type = "expire" } },
+      { rulePriority = 6, description = "keep the standardise GPU images",
         selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-"], countType = "imageCountMoreThan", countNumber = 3 },
       action = { type = "expire" } },
       { rulePriority = 10, description = "expire the per-commit <sha> churn beyond the last ${var.keep_last_images}",
@@ -266,8 +272,9 @@ module "gpu_enhance_dev" {
   max_vcpus = 8
   # FAL_KEY for the FAL FLUX Fill de-watermarker (watermarked sources). Wired by convention to the known
   # dev SSM param, exactly like the scraper/produce secrets, so a plain apply can never strip it.
-  ssm_secret_arns = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
-  alert_email     = var.alert_email
+  ssm_secret_arns       = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
+  alert_email           = var.alert_email
+  standardise_image_tag = var.dev_standardise_image_tag
 }
 
 locals {
@@ -277,6 +284,8 @@ locals {
   # denial until every dependent module is re-applied. Match all revisions by NAME instead: strip the
   # trailing :<revision> and allow :*. Queue ARNs have no revision, so they are used as-is.
   dev_gpu_jobdef_iam_arn = local.dev_enabled ? replace(module.gpu_enhance_dev[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
+  # The same revision-agnostic form for the photo process's standardise job definition ("" when none is configured).
+  dev_standardise_jobdef_iam_arn = local.dev_enabled ? replace(module.gpu_enhance_dev[0].standardise_job_definition_arn, "/:[0-9]+$/", ":*") : ""
 }
 
 module "gpu_enhance_prod" {
@@ -299,8 +308,9 @@ module "gpu_enhance_prod" {
   alert_email = var.alert_email
   # FAL_KEY (+ proxy) for FLUX texture gen + FAL de-watermark, by convention like dev. Empty until the
   # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
-  ssm_secret_arns     = local.prod_ssm_secrets
-  secrets_kms_key_arn = local.prod_secrets_kms_key_arn
+  ssm_secret_arns       = local.prod_ssm_secrets
+  secrets_kms_key_arn   = local.prod_secrets_kms_key_arn
+  standardise_image_tag = var.prod_standardise_image_tag
 }
 
 # =============================================================================
@@ -375,6 +385,14 @@ module "sync_service_dev" {
   auto_texture_enabled     = var.dev_auto_texture
   require_enhanced_enabled = var.dev_require_enhanced
   require_standard_photo   = var.dev_require_standard_photo
+
+  # The standardised-photo process (the runner's photos stage) on the same GPU queue.
+  standardise_enabled             = var.dev_standardise_auto
+  standardise_budget_usd          = var.dev_standardise_budget_usd
+  standardise_gpu_vcpus           = var.dev_standardise_gpu_vcpus
+  standardise_job_definition_name = module.gpu_enhance_dev[0].standardise_job_definition
+  standardise_job_definition_arn  = local.dev_standardise_jobdef_iam_arn
+  gpu_compute_environment_arn     = module.gpu_enhance_dev[0].compute_environment_arn
 }
 
 # =============================================================================
@@ -417,7 +435,8 @@ locals {
   prod_secrets_kms_key_arn = local.prod_enabled ? data.aws_kms_key.prod_secrets[0].arn : ""
   # Revision-agnostic prod job-def ARN for the auto-enhance/texture SubmitJob IAM (see dev_gpu_jobdef_iam_arn).
   # Guarded by prod_enabled so the count-gated module index [0] is only reached when prod exists.
-  prod_gpu_jobdef_iam_arn = local.prod_enabled ? replace(module.gpu_enhance_prod[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
+  prod_gpu_jobdef_iam_arn         = local.prod_enabled ? replace(module.gpu_enhance_prod[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
+  prod_standardise_jobdef_iam_arn = local.prod_enabled ? replace(module.gpu_enhance_prod[0].standardise_job_definition_arn, "/:[0-9]+$/", ":*") : ""
 }
 
 module "sync_service_prod" {
@@ -455,4 +474,11 @@ module "sync_service_prod" {
   auto_enhance_enabled     = var.prod_auto_enhance
   auto_texture_enabled     = var.prod_auto_texture
   require_enhanced_enabled = var.prod_require_enhanced
+
+  standardise_enabled             = var.prod_standardise_auto
+  standardise_budget_usd          = var.prod_standardise_budget_usd
+  standardise_gpu_vcpus           = var.prod_standardise_gpu_vcpus
+  standardise_job_definition_name = module.gpu_enhance_prod[0].standardise_job_definition
+  standardise_job_definition_arn  = local.prod_standardise_jobdef_iam_arn
+  gpu_compute_environment_arn     = module.gpu_enhance_prod[0].compute_environment_arn
 }

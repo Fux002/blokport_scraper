@@ -76,6 +76,8 @@ def test_the_runner_hands_the_run_id_to_produce_and_publishes_nothing_itself(mon
         return _Proc()
     monkeypatch.setattr(subprocess, "Popen", _popen)
     monkeypatch.setattr(runner.threading, "Thread", lambda target, args, daemon: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(runner, "_child", None)          # no watcher runs here to clear the launched child
+    monkeypatch.setattr(runner, "_watcher", None)
     runner._launch_local({"run_id": "run-9", "stage": "all", "status": "queued"})
     assert seen["env"]["SCRAPER_RUN_ID"] == "run-9"
     assert not hasattr(runner, "_publish_deliverables")

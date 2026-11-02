@@ -7,25 +7,20 @@ gets its 3D slab, made here from that slab (stone_pipeline.standardise.cutout) i
 ETag, CUTOUT_VERSION), so a 3D slab is made again exactly when that changed: a listing's choice moved to another run of
 the same photo, a later run re-made the slab, or the cut-out itself changed.
 The folder is made to match the choice exactly: a view or 3D slab no longer chosen is removed, so a photo the judge or a
-person turned down never stays live. Views are server-side copies of the same bytes and a cut-out is deterministic, so a
-re-run is safe. A photo on the reviewed exclude list (EXCLUDE_PATH, one sha per line) is never published, whatever chose
-it. DRY_RUN=true prints the plan and changes nothing.
-No choice records at all is refused: the folder would be emptied.
-Env: CLEAN_TAG (the tag whose choice records are published), DRY_RUN.
+person turned down never stays live. Only a view that is missing or other than its run's is copied (server-side, same
+bytes) and a cut-out is deterministic, so a re-run is safe and changes nothing. A photo on the reviewed exclude list
+(EXCLUDE_PATH, one sha per line) is never published, whatever chose it. No choice records at all is refused: the folder
+would be emptied. The last step of the photo process (deploy.standardise_run), inside its lock.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import boto3
-
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
+from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import cutout
 
@@ -84,6 +79,13 @@ def outdated(todo, made, published, stamps):
                   if any(k not in published for k in cutout_keys(s)) or stamps.get(s) != made_from(slab, made[slab]))
 
 
+def unpublished(plan, made, published):
+    """The copies of `plan` whose published file is missing or other than the run's (ETag: a server-side copy keeps it).
+    An unchanged view is never written again: the versioned bucket would keep every rewrite, and nothing changes for the
+    produce. made, published = {key: ETag}."""
+    return [(src, dst) for src, dst in plan if published.get(dst) != made[src]]
+
+
 def stale(published, keep):
     """The published keys the choice no longer has: removed, so the folder matches the choice."""
     return sorted(set(published) - set(keep))
@@ -121,41 +123,47 @@ def _publish_cutout(client, slab, slab_key, etag):
     return True
 
 
-def main() -> int:
-    tag = os.environ.get("CLEAN_TAG", "").strip()
-    if not tag:
-        print("ERROR: CLEAN_TAG is required; aborting")
-        return 2
-    dry = os.environ.get("DRY_RUN", "false").lower() in ("1", "true", "yes")
-    client = boto3.client("s3", region_name=S3_REGION)
-    records = list(_objects(client, chosen_prefix(f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/")))
-    with ThreadPoolExecutor(WORKERS) as pool:
-        chosen = list(pool.map(lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records))
+def pool_map(workers, work, items):
+    """[work(item)] in the items' order, `workers` at a time. On any exception (a SIGTERM's SystemExit included) the
+    items not started are cancelled at once and the exception goes on, so a stopping run releases its lock within its
+    grace instead of finishing the whole list first."""
+    pool = ThreadPoolExecutor(workers)
+    try:
+        out = list(pool.map(work, items))
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return out
+
+
+class NoChoiceRecords(RuntimeError):
+    """No listing has a choice record yet: publishing would empty the folder, so nothing is published or removed."""
+
+
+def publish(client, root, say=print):
+    """Make the published folder match the choice records under `root` (the clean tag's root): {"listings", "copied",
+    "made_3d", "removed", "changed"}; changed = the folder is not what it was (a produce must link it again).
+    NoChoiceRecords when there are none at all."""
+    records = list(_objects(client, chosen_prefix(root)))
+    chosen = pool_map(WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records)
     if not chosen:
-        print(f"ERROR: no choice records under {chosen_prefix(f'{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/')}: nothing published or removed")
-        return 2
+        raise NoChoiceRecords(f"no choice records under {chosen_prefix(root)}: nothing published or removed")
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
     exclude = read_exclude(EXCLUDE_PATH.read_text())
     plan, todo = copies(chosen, made, exclude), slabs(chosen, made, exclude)
     published = {k: t for prefix in [*map(imagestore.standard_prefix, imagestore.STANDARD_VIEWS), imagestore.cutout_prefix()]
                  for k, t in _objects(client, prefix).items()}
+    fresh = unpublished(plan, made, published)
     gone = stale(published, [t for _, t in plan] + [k for s in todo for k in cutout_keys(s)])
-    with ThreadPoolExecutor(WORKERS) as pool:
-        stamps = dict(zip(todo, pool.map(lambda s: _stamp(client, s, published), todo)))
+    stamps = dict(zip(todo, pool_map(WORKERS, lambda s: _stamp(client, s, published), todo)))
     remake = outdated(todo, made, published, stamps)
-    photos = len({imagestore.sha_from_url(t) for _, t in plan})
-    print(f"==> {'DRY RUN: ' if dry else ''}{len(chosen)} listings chosen: {len(plan)} views of {photos} photos to publish, "
-          f"{len(todo)} 3D slabs ({len(remake)} to make), {len(gone)} published files no longer chosen", flush=True)
-    if dry:
-        return 0
-    with ThreadPoolExecutor(WORKERS) as pool:
-        list(pool.map(lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
-                                                    ContentType="image/jpeg", MetadataDirective="REPLACE"), plan))
-        made_3d = sum(pool.map(lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
-        list(pool.map(lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone))
-    print(f"==> published {len(plan)} views, made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)}", flush=True)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    pool_map(WORKERS, lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
+                                                    ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh)
+    pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
+    # each cut-out holds a full-size slab in memory
+    made_3d = sum(pool_map(C.CUTOUT_WORKERS, lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
+    say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
+        f"made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)} files no longer chosen")
+    return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone),
+            "changed": bool(fresh or remake or gone)}

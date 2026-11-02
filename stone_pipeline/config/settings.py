@@ -104,7 +104,7 @@ def _env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {raw!r}") from None
 
 
-def _env_float(name: str, default: float) -> float:
+def _env_float(name: str, default: float | None) -> float | None:
     """Read a float env var: the default ONLY when unset; a malformed override fails loud (see _env_int)."""
     raw = env.getenv(name)
     if raw is None:
@@ -145,6 +145,15 @@ if not _S3_BUCKET_ENV and not _is_blokport_dev():
         "SCRAPER_S3_BUCKET to this brand's own bucket.")
 S3_BUCKET = _S3_BUCKET_ENV or _DEV_S3_BUCKET
 S3_REGION = env.getenv("BLOKPORT_S3_REGION", "eu-west-1")
+
+# The config runner's ceiling on one run: it kills a run past it as wedged (Terraform sets 4 h on the service). The
+# photo process fits its work window inside it and treats a run lock not refreshed for this long as a killed run's.
+RUN_TIMEOUT_SECONDS = _env_int("SCRAPER_RUN_TIMEOUT_SECONDS", 7200)
+# On SIGTERM (ECS stops the task) the config server ends the running run within this one deadline: the child's grace to
+# clean up after its SIGTERM, a kill and the clearing of what a killed photo run left, and its watcher finishing the run
+# record. It leaves 40 s of the config container's stopTimeout (120 s, the Fargate maximum) for the last config save.
+# The same deadline bounds a photos run giving way to another stage.
+RUN_STOP_GRACE_SECONDS = _env_int("SCRAPER_RUN_STOP_GRACE_SECONDS", 80)
 
 # Brand<->bucket cross-check: the bucket must BELONG to this brand, so a bucket mis-set to ANOTHER brand's
 # store fails loud instead of crossing brands (and, since it runs before any snapshot restore, it also stops
@@ -1020,6 +1029,36 @@ class STANDARDISE:
                         "on their racks, the walls, windows, ceiling and lights exactly as they are. Do not add anything."),
     }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
+    # The photo process (deploy.standardise_run, STANDARDISE_PROCESS.md) continues in the run tags the published results
+    # came from, so no stored verdict, cleaned copy or choice record is orphaned: the standardiser's run over the scraped
+    # photos, and the run over the hosted edit's cleaned copies, which also keeps the choice records and the review list.
+    # Fixed here, not per deployment: a mistyped tag would re-pay every photo and unpublish the folder. Moving to new tags
+    # is a migration (copy the choice records), never a setting. Dev's live choice came from v2-clean, prod's from v2-clean2.
+    RUN_TAG = "v2"
+    CLEAN_TAGS = {"dev": "v2-clean", "prod": "v2-clean2"}
+    CLEAN_TAG = CLEAN_TAGS[ENV_SEGMENT]
+    # On: the runner starts the photo process after each full produce (stage all, the owner's button), never after the
+    # republish Blokport's Publish button runs (it must never find the run slot taken).
+    AUTO = _env_bool("SCRAPER_STANDARDISE_AUTO", False)
+    # The process works (GPU rounds, hosted calls) at most WORK_SECONDS, then reports, publishes and relinks in at most
+    # FINISH_SECONDS; it refuses to start unless both fit under the runner's ceiling (RUN_TIMEOUT_SECONDS), which kills
+    # a run without cleaning up.
+    WORK_SECONDS = _env_int("SCRAPER_STANDARDISE_WORK_SECONDS", 7200)
+    FINISH_SECONDS = 5400
+    LOCK_HEARTBEAT_SECONDS = 300       # the run lock is rewritten this often while the process runs (its sign of life)
+    SPEND_DIR = "spend"                # <env>/<TEST_PREFIX>/<this>/<YYYY-MM>/<run id>.json: each run's spend of the month
+    JOB_PREFIX = "photos-"             # the process's Batch jobs: <this><run id>-..., so a later run finds what one left
+    # The GPU's share of the month's budget: a job's running time at this price per vCPU-hour (g4dn.xlarge on demand in
+    # eu-west-1, about 0.59 USD/h for its 4 vCPUs). An instance's boot before its first job is not counted.
+    GPU_VCPU_HOUR_USD = _env_float("SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD", 0.147)
+    # ... plus this much per job, for what its running time leaves out: the instance's boot, the image pull and the
+    # pool's idle tail before it scales in (about 12 min on g4dn with the standardise image).
+    GPU_JOB_ALLOWANCE_SECONDS = 720
+    GPU_MIN_WINDOW_SECONDS = 1800      # no GPU round starts with less of the work window left (a boot alone takes minutes)
+    # A stopped round's jobs are asked every STOP_POLL_SECONDS, at most STOP_WAIT_SECONDS, until they have stopped, so
+    # their real stop times are counted; inside the 100 s stop grace on a SIGTERM.
+    STOP_WAIT_SECONDS, STOP_POLL_SECONDS = 60, 5
+    CUTOUT_WORKERS = 4                 # 3D cut-outs made at once by publish (full-size slabs in memory, on the 6 GB service)
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole single slab
     # (<sha>.slab.png) is published as a WebP cut-out and a JSON outline; Blokport's viewer extrudes the outline to the
@@ -1128,15 +1167,17 @@ on two questions:
    invented, nothing smeared or blurred, slab outline unchanged)? (true/false)
 Your whole answer is one JSON object and nothing else:
 {"clean": true|false, "faithful": true|false, "problems": "<short, empty if none>"}"""
-    # Spend: each run stops loud before it would pass this many USD of hosted calls (judge as billed, edits at list price).
-    SPEND_CAP_USD = _env_float("SCRAPER_STANDARDISE_SPEND_CAP_USD", 60.0)   # a bigger run states its own cap
+    # The month's (UTC) budget of an environment's photo process, all runs together: hosted calls (judge as billed, edits
+    # at list price) and GPU time (GPU_VCPU_HOUR_USD). A call or a GPU round that would take the month's total past it is
+    # not made. No default: unset, the process does not start.
+    BUDGET_USD = _env_float("SCRAPER_STANDARDISE_BUDGET_USD", None)
     # A judge call's cost reserved before it is made: its worst case (JUDGE_MAX_TOKENS out at $20/M plus two images in at
-    # $4/M, Opus 5.5), so parallel calls can never together pass the cap; Opus bills ~0.016 on average.
+    # $4/M, Opus 5.5), so parallel calls can never together pass the budget; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14
     CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
     # Off: a run sends no photo to a hosted edit (a judge-only round: GPU, judge, cleaned copies already made).
     CLEAN_ENABLED = _env_bool("SCRAPER_STANDARDISE_CLEAN", True)
-    # A run (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
+    # The process (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
     # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
     # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
     # The size of a run's GPU burst is set per run (a full environment overnight wants more GPUs and smaller slices than

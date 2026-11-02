@@ -4,6 +4,7 @@ and every answer is kept so a re-run never pays twice. No network: the hosted ca
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -312,7 +313,7 @@ def test_a_stop_cancels_the_listings_that_have_not_started(monkeypatch):
         if listing["key"] == "l0":
             raise SystemExit("stopped by signal 15")
     with pytest.raises(SystemExit):
-        sel._each([_listing(A, key=f"l{i}") for i in range(20)], work)
+        sel._each([_listing(A, key=f"l{i}") for i in range(20)], work, math.inf)
     assert len(done) < 20
 
 
@@ -334,11 +335,157 @@ def test_an_edit_the_model_failed_for_good_is_a_failed_attempt_and_the_next_mode
 
 
 
-def test_a_halted_spend_lets_no_call_start():
+def test_no_listing_starts_after_the_work_window():
+    started = []
+    failures, stopped = sel._each([_listing(A, key=f"l{i}") for i in range(3)], started.append, 10, clock=lambda: 11)
+    assert started == [] and failures == [] and not stopped                # not a stop: the listings are simply pending
+
+
+def test_the_budget_counts_what_earlier_runs_of_the_month_spent():
+    spend = sel.Spend(1.0, others=lambda: 0.9)
+    with pytest.raises(sel.SpendCapReached):
+        spend.reserve(0.14)
+    assert spend.capped
+    assert not sel.Spend(1.0, others=lambda: 0.5).capped
+
+
+def test_the_run_s_total_is_kept_after_every_change_a_reserve_counting_as_spent():
+    kept = []
+    spend = sel.Spend(1.0, save=kept.append)
+    spend.reserve(0.14)
+    spend.settle(0.14, 0.02)
+    assert kept == [pytest.approx(0.14), pytest.approx(0.02)]
+
+
+def test_a_halted_spend_lets_no_call_start_and_says_why():
     spend = sel.Spend(10)
-    spend.halt()
-    with pytest.raises(sel.Halted):
+    spend.halt("the work window ended")
+    with pytest.raises(sel.Halted, match="the work window ended"):
         spend.reserve(0.01)
+
+
+def test_a_stop_can_halt_the_spend_while_its_lock_is_held():
+    import threading
+    spend = sel.Spend(10)
+    with spend._lock:                                       # a signal arriving while a reserve holds the lock
+        t = threading.Thread(target=spend.halt, args=("stopped by signal 15",))
+        t.start()
+        t.join(timeout=2)
+        assert not t.is_alive()
+    with pytest.raises(sel.Halted, match="signal 15"):
+        spend.reserve(0.01)
+
+
+def test_the_spend_is_saved_and_the_month_summed_outside_its_lock():
+    held = []
+
+    def free():
+        got = spend._lock.acquire(blocking=False)           # nobody holds it while S3 is asked
+        if got:
+            spend._lock.release()
+        held.append(not got)
+        return 0.0
+    spend = sel.Spend(10, save=lambda total: free())
+    spend.others = free
+    spend.reserve(0.14)
+    spend.settle(0.14, 0.02)
+    assert held and not any(held)
+
+
+def test_the_last_total_saved_is_the_latest_even_when_saves_overlap():
+    import threading
+    saved, gate = [], threading.Event()
+
+    def save(total):
+        if not saved:
+            gate.wait(0.5)                                  # the first save is slow
+        saved.append(total)
+    spend = sel.Spend(10, save=save)
+    first = threading.Thread(target=spend.reserve, args=(1.0,))
+    first.start()
+    spend.reserve(2.0)
+    gate.set()
+    first.join()
+    assert saved[-1] == pytest.approx(3.0)
+
+
+def test_a_stop_cancels_the_pool_s_work_not_yet_started():
+    from deploy import standardise_publish as pub
+    done = []
+
+    def work(i):
+        done.append(i)
+        if i == 0:
+            raise SystemExit("stopped by signal 15")
+        return i
+    with pytest.raises(SystemExit):
+        pub.pool_map(1, work, range(50))
+    assert len(done) < 50
+
+
+def _judged_setup(monkeypatch, answer):
+    s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    monkeypatch.setattr(sel.judge, "judge", answer)
+    return s3, [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+
+
+def test_a_judge_call_that_fails_after_it_was_sent_counts_at_its_reserved_price(monkeypatch):
+    s3, rounds = _judged_setup(monkeypatch, lambda o, r, f: (_ for _ in ()).throw(TimeoutError("read timed out")))
+    spend = sel.Spend(10)
+    with pytest.raises(TimeoutError):
+        sel.choose(s3, rounds, _listing(A), set(), spend)
+    assert spend.spent == pytest.approx(C.JUDGE_PRICE_USD) and spend.reserved == 0
+
+
+def test_an_answer_without_its_cost_counts_at_the_reserved_price_and_says_so(monkeypatch, capsys):
+    s3, rounds = _judged_setup(monkeypatch, lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, None))
+    spend = sel.Spend(10)
+    sel.choose(s3, rounds, _listing(A), set(), spend)
+    assert spend.spent == pytest.approx(C.JUDGE_PRICE_USD)
+    assert "no usage.cost" in capsys.readouterr().out
+    assert json.loads(s3.objects[f"{GPU}judged/{A}.json"])["cost"] == pytest.approx(C.JUDGE_PRICE_USD)
+
+
+def test_the_judge_answer_s_missing_cost_is_none_never_free(monkeypatch):
+    import httpx
+    monkeypatch.setenv("FAL_KEY", "k")
+    monkeypatch.setattr(judge, "data_uri", lambda *a: "data:")
+    answer = httpx.Response(200, json={"output": "{}", "usage": {}}, request=httpx.Request("POST", C.JUDGE_URL))
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: answer)
+    assert judge.ask("s", "p", [b"x"]) == ("{}", None)
+
+
+def test_an_edit_whose_submit_failed_counts_at_its_price_it_may_have_been_accepted(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(TimeoutError("no answer")))
+    spend = sel.Spend(10)
+    with pytest.raises(TimeoutError):
+        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert spend.spent == pytest.approx(C.CLEAN_PRICE_USD["nano2"]) and spend.reserved == 0
+
+
+def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch):
+    import threading
+    import time
+    s3 = _S3({f"{GPU}judged/{s}.json": _verdict("pass") for s in (A, B, D, E)})
+    s = object.__new__(sel.Selection)
+    s.client, s.exclude, s.root = s3, set(), "r/"
+    s.listings = [_listing(x, key=k) for x, k in ((A, "one"), (B, "two"), (D, "three"), (E, "four"))]
+    s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D, E), judged=(A, B, D, E))}), ("v9-clean", {"sentas": _round(CL)})]
+    at_once, now, lock = [0], [0], threading.Lock()
+    choose = sel.choose
+
+    def slow(*a, **k):
+        with lock:
+            now[0] += 1
+            at_once[0] = max(at_once[0], now[0])
+        time.sleep(0.05)
+        with lock:
+            now[0] -= 1
+        return choose(*a, **k)
+    monkeypatch.setattr(sel, "choose", slow)
+    result = sel.report(s)
+    assert [c["key"] for c in result["chosen"]] == ["one", "two", "three", "four"] and at_once[0] > 1
 
 
 def test_an_auth_or_balance_error_from_the_queue_is_loud_never_a_failed_edit(monkeypatch):

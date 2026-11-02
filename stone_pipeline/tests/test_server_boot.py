@@ -55,6 +55,8 @@ def test_shutdown_stops_the_periodic_snapshot_before_the_final_save(monkeypatch,
     order: list[str] = []
     stop = threading.Event()
     monkeypatch.setattr(snapshot, "save_config", lambda *a, **k: order.append(("save", stop.is_set())))
+    from stone_pipeline.config import runner
+    monkeypatch.setattr(runner, "_stopping", False)        # shutdown marks the runner stopping; restored after
     with pytest.raises(SystemExit):
         server.shutdown(tmp_path / "config.db", stop)
     assert order == [("save", True)]                                      # stopped first, then saved once

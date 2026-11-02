@@ -9,7 +9,8 @@ reported and never stops the others.
           reflections or marks, or held by the retouch or logo step) are edited by each CLEAN_MODELS model in turn until
           a copy passes the clean check; that copy becomes <clean tag>/<src>/cleaned/<sha>.jpg
   report  from the stored answers only: each listing's choice record (<clean tag>/chosen/<listing>.json, what publish
-          reads) and <clean tag>/tracked.csv (this run's listings with no good photo, what happened to each photo)
+          reads) and <clean tag>/tracked.csv (this run's listings with no good photo, what happened to each photo;
+          the process works every listing without a choice, so this is the environment's whole review list)
 """
 
 from __future__ import annotations
@@ -19,11 +20,12 @@ import io
 import json
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
-from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, read_exclude
+from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, pool_map, read_exclude
 from deploy.standardise_source import round_prefix
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -41,30 +43,67 @@ class Halted(RuntimeError):
 
 
 class Spend:
-    """Hosted spend of this run: a call's price is reserved before it is made and settled to what it cost, so parallel
-    calls can never together pass the cap."""
+    """Spend against the month's budget (hosted calls and GPU rounds): `before` is what the month's other runs spent
+    (others(), summed again at every settle, so a run written since is never missed), then this run's. A price is
+    reserved before the call or round and settled to what it cost, so parallel calls can never together pass the
+    budget. save(total) keeps this run's total after every change, a reserve counting as spent until it is settled, so
+    a run that dies leaves an upper bound of what it spent, never too little. Storage is never asked while the spend's
+    lock is held (a slow write never blocks the other calls), and a stop halts it without taking that lock (a SIGTERM
+    may arrive while it is held)."""
 
-    def __init__(self, cap):
-        self.cap, self.spent, self.reserved, self.halted = cap, 0.0, 0.0, False
-        self._lock = threading.Lock()
+    def __init__(self, budget, others=None, save=None):
+        self.budget, self.others, self.save = budget, others, save
+        self.before = others() if others else 0.0
+        self.spent, self.reserved, self.capped = 0.0, 0.0, False
+        self._halt, self._why = threading.Event(), ""
+        self._lock, self._io = threading.Lock(), threading.Lock()
+        self._version = self._saved = 0               # changes made / the change the stored total is of
 
-    def halt(self):
-        """No call may start any more (the run is stopping): listings already running stop at their next call."""
+    def halt(self, why="the run is stopping"):
+        """No call may start any more (a stop, the end of the work window, a lost lock): listings already running stop at
+        their next call."""
+        self._why = why
+        self._halt.set()
+
+    def left(self):
+        """What the month's budget still covers, reserves counted."""
         with self._lock:
-            self.halted = True
+            return self.budget - self.before - self.spent - self.reserved
 
     def reserve(self, usd):
         with self._lock:
-            if self.halted:
-                raise Halted("the run is stopping")
-            if self.spent + self.reserved + usd > self.cap:
-                raise SpendCapReached(f"hosted spend would pass the cap of ${self.cap:.2f} (spent ${self.spent:.2f})")
+            if self._halt.is_set():
+                raise Halted(self._why)
+            if self.before + self.spent + self.reserved + usd > self.budget:
+                self.capped = True
+                raise SpendCapReached(f"spend would pass the month's budget of ${self.budget:.2f} "
+                                      f"(spent ${self.before + self.spent:.2f})")
             self.reserved += usd
+            self._version += 1
+        self._keep()
 
     def settle(self, reserved, cost):
         with self._lock:
             self.reserved -= reserved
             self.spent += cost
+            self._version += 1
+        if self.others:
+            before = self.others()
+            with self._lock:
+                self.before = before
+        self._keep()
+
+    def _keep(self):
+        """Store this run's total, outside the spend's lock: one write at a time, and only a total newer than the one
+        stored, so overlapping calls can never leave an older total last."""
+        if self.save is None:
+            return
+        with self._io:
+            with self._lock:
+                total, version = self.spent + self.reserved, self._version
+            if version > self._saved:
+                self.save(total)
+                self._saved = version
 
 
 class Round:
@@ -130,15 +169,28 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
                 return stored
         elif spend is None:
             return None
-        spend.reserve(C.JUDGE_PRICE_USD)
-        cost = 0.0
-        try:
-            found, cost = judge.judge(_original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg"), fmt)
-        finally:
-            spend.settle(C.JUDGE_PRICE_USD, cost)
+        original, result = _original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg")   # read before paying
+        found, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.judge(original, result, fmt), f"judge {src} {sha[:12]}")
         _put_json(client, key, {**found, "cost": cost})
         rnd.judged.add(sha)
         return found
+
+
+def paid(spend, price, call, what):
+    """(answer, cost) of one hosted call returning (answer, cost): its price reserved first, then settled to what it
+    cost. A call that fails may have been billed (sent, then lost), and an answer without its cost has one: both count at
+    the reserved price, never as free."""
+    spend.reserve(price)
+    try:
+        answer, cost = call()
+    except BaseException:
+        spend.settle(price, price)
+        raise
+    if cost is None:
+        print(f"   WARNING: {what}: the answer carries no usage.cost; counted at the reserved ${price:.2f}", flush=True)
+        cost = price
+    spend.settle(price, cost)
+    return answer, cost
 
 def candidates(listing, exclude):
     """The photos a listing is judged on: its first JUDGE_MAX_PER_LISTING photos, excluded ones left out first. The GPU
@@ -220,14 +272,8 @@ def _attempt(client, cl, sha, name, original, spend):
         if ident in cl.requested:
             job = _get_json(client, f"{att}.request.json")
         else:
-            price = C.CLEAN_PRICE_USD[name]
-            spend.reserve(price)
-            try:
-                job = clean.submit(name, original)
-            except BaseException:
-                spend.settle(price, 0.0)
-                raise
-            spend.settle(price, price)
+            price = C.CLEAN_PRICE_USD[name]                # an edit is billed at its list price once the queue has it
+            job, _ = paid(spend, price, lambda: (clean.submit(name, original), price), f"edit {name} {sha[:12]}")
             _put_json(client, f"{att}.request.json", job)
             cl.requested.add(ident)
         try:
@@ -245,12 +291,7 @@ def _attempt(client, cl, sha, name, original, spend):
             return _failed(client, cl, att, ident, name, str(exc))
         _put(client, f"{att}.jpg", copy, "image/jpeg")
         cl.edited.add(ident)
-    spend.reserve(C.JUDGE_PRICE_USD)
-    cost = 0.0
-    try:
-        check, cost = judge.check_clean(original, copy)
-    finally:
-        spend.settle(C.JUDGE_PRICE_USD, cost)
+    check, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.check_clean(original, copy), f"clean check {name} {sha[:12]}")
     _put_json(client, f"{att}.json", {**check, "edit_model": name, "check_cost": cost, "clean_version": C.CLEAN_VERSION})
     cl.attempts.add(ident)
     return check
@@ -341,35 +382,38 @@ def _by_source(pairs):
     return out
 
 
-def judge_all(sel, spend):
-    """(failures, cap reached): every listing judged until its first pass."""
-    return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.exclude, spend))
+def judge_all(sel, spend, deadline):
+    """(failures, stopped): every listing judged until its first pass, each started before the deadline."""
+    return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.exclude, spend), deadline)
 
 
-def clean_all(sel, spend):
-    """(failures, cap reached): every listing with no pass gets a cleaned copy where one can be made."""
-    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.exclude, spend))
+def clean_all(sel, spend, deadline):
+    """(failures, stopped): every listing with no pass gets a cleaned copy where one can be made, each started before the
+    deadline."""
+    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.exclude, spend), deadline)
 
 
 def report(sel):
     """{"chosen", "tracked", "pending"} of this run's listings. Each listing with a good photo gets its choice record, a
     listing now without one loses its record (and is in tracked.csv, this run's list of listings with no good photo);
     a listing not fully judged is neither and its record is left as it is. Listings outside this run are untouched."""
-    chosen, tracked, pending = [], [], []
     prefix = chosen_prefix(sel.root)
-    for l in sel.listings:
+
+    def one(l):
+        """(outcome, what goes in its list) of one listing, from its stored answers only."""
         picked, complete = choose(sel.client, sel.rounds, l, sel.exclude)
         if picked:
             tag, sha = picked
             record = {"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])}
             _put_json(sel.client, f"{prefix}{l['key']}.json", record)
-            chosen.append(record)
-        elif complete:
+            return "chosen", record
+        if complete:
             sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")
-            tracked.append({"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
-                            "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)})
-        else:
-            pending.append(l["key"])
+            return "tracked", {"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
+                               "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)}
+        return "pending", l["key"]
+    outcomes = pool_map(C.SELECT_WORKERS, one, sel.listings)   # a few S3 reads per listing, in the listings' order
+    chosen, tracked, pending = ([item for kind, item in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
     writer.writeheader()
@@ -378,14 +422,15 @@ def report(sel):
     return {"chosen": chosen, "tracked": tracked, "pending": pending}
 
 
-def _each(listings, work):
-    """work(listing) on every listing, WORKERS at a time: (failures, cap reached). A failure is reported and the rest go
-    on; reaching the spend cap stops what has not started."""
+def _each(listings, work, deadline, clock=time.monotonic):
+    """work(listing) on every listing, WORKERS at a time: (failures, stopped). A failure is reported and the rest go on;
+    reaching the budget (or a stop) stops what has not started. A listing not started by the deadline (the process's
+    work window, on `clock`) is left as it is: the report counts it pending and the next run goes on with it."""
     stop = threading.Event()
     failures = []
 
     def one(listing):
-        if stop.is_set():
+        if stop.is_set() or clock() >= deadline:
             return
         try:
             work(listing)

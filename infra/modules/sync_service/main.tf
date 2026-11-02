@@ -159,6 +159,44 @@ data "aws_iam_policy_document" "task" {
       distinct([var.gpu_job_definition_arn, replace(var.gpu_job_definition_arn, ":*", "")]))
     }
   }
+  # The photo process (the runner's photos stage) runs its GPU rounds on the same queue: it submits the standardise
+  # jobs, watches them, stops them when a round fails or its work window ends (and, at its start, the ones a killed run
+  # left, found by name), and raises the GPU pool's ceiling for the round (always set back). Describe and List calls have
+  # no resource-level scoping in Batch; TerminateJob is scoped to this account's jobs in the region (no name condition
+  # exists; see STANDARDISE_PROCESS.md).
+  dynamic "statement" {
+    for_each = var.standardise_job_definition_arn == "" ? [] : [1]
+    content {
+      sid     = "StandardiseSubmit"
+      actions = ["batch:SubmitJob"]
+      resources = concat([var.gpu_job_queue_arn],
+      distinct([var.standardise_job_definition_arn, replace(var.standardise_job_definition_arn, ":*", "")]))
+    }
+  }
+  dynamic "statement" {
+    for_each = var.standardise_job_definition_arn == "" ? [] : [1]
+    content {
+      sid       = "StandardiseStop"
+      actions   = ["batch:TerminateJob"]
+      resources = [replace(var.gpu_job_queue_arn, "/job-queue\\/.+$/", "job/*")]
+    }
+  }
+  dynamic "statement" {
+    for_each = var.standardise_job_definition_arn == "" ? [] : [1]
+    content {
+      sid       = "StandardisePoolCeiling"
+      actions   = ["batch:UpdateComputeEnvironment"]
+      resources = [var.gpu_compute_environment_arn]
+    }
+  }
+  dynamic "statement" {
+    for_each = var.standardise_job_definition_arn == "" ? [] : [1]
+    content {
+      sid       = "StandardiseDescribe"
+      actions   = ["batch:DescribeJobs", "batch:DescribeJobQueues", "batch:ListJobs"]
+      resources = ["*"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "task" {
@@ -264,12 +302,23 @@ resource "aws_ecs_task_definition" "this" {
         # Produce ceiling (the runner kills a run past it). 2026-09-14: a full live scrape with a fresh image
         # batch ran past the old 2 h default on a slow day and was killed as wedged.
         { name = "SCRAPER_RUN_TIMEOUT_SECONDS", value = tostring(var.run_timeout_seconds) },
+        # The standardised-photo process (the runner's photos stage, after each produce when AUTO is on): its GPU
+        # rounds go to SCRAPER_GPU_QUEUE with this job definition; its hosted calls (FAL_KEY, a produce secret) stop
+        # before the month's spend would pass the budget. An empty budget leaves the process not configured.
+        { name = "SCRAPER_STANDARDISE_AUTO", value = tostring(var.standardise_enabled) },
+        { name = "SCRAPER_STANDARDISE_BUDGET_USD", value = var.standardise_budget_usd },
+        { name = "SCRAPER_STANDARDISE_JOBDEF", value = var.standardise_job_definition_name },
+        # the GPU pool's ceiling while a round runs (always set back to 8 after): the size of a round's burst
+        { name = "SCRAPER_STANDARDISE_GPU_VCPUS", value = tostring(var.standardise_gpu_vcpus) },
         ],
         # No standardised photo -> served qty 0, reason no_photo (hidden, kept for review). Unset leaves the code's
         # env default (on in production), so an env that does not pass it keeps its task definition unchanged.
         var.require_standard_photo == null ? [] : [
           { name = "SCRAPER_REQUIRE_STANDARD_PHOTO", value = tostring(var.require_standard_photo) },
       ])
+      # On a stop (a roll), the server passes SIGTERM to the running run and waits for it to clean up (the photo
+      # process stops its GPU jobs and releases its lock) before its last config save: the Fargate maximum.
+      stopTimeout = 120
       # the config container runs the produce subprocess (fetch -> live scrape -> build), so it also
       # carries the scraper's runtime secrets (proxy, fal key) when configured.
       secrets = concat(
