@@ -147,13 +147,13 @@ def test_the_image_stage_says_whether_each_product_has_a_standardised_photo_or_t
     monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
     monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     images.run(rows, cfg=cfg)
-    images.link_standard(rows, rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)
     assert [r.standard_photo for r in rows] == [True, False]
     for pool in (None, {}, {"main": {}, "white": {}}):                    # unreadable; local mode; nothing published
         rows = [CanonicalRow(src_site="sentas", surrogate_key="3", format_value="Slab", image_keys=[_improved(A)])]
         monkeypatch.setattr(images, "_load_standard_views", lambda cfg, pool=pool: pool)
         images.run(rows, cfg=cfg)
-        images.link_standard(rows, rows, cfg=cfg)
+        images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)
         assert rows[0].standard_photo is None and rows[0].thumbnail_key == _improved(A)
 
 
@@ -169,7 +169,7 @@ def _stage(monkeypatch, rows, removed=frozenset(), assigned=None, emitted=None):
     monkeypatch.setattr(images, "_load_assigned", lambda cfg: {} if assigned is None else assigned)
     cfg = type("Cfg", (), {"mode": "passthrough"})()
     images.run(rows, cfg=cfg)
-    return images.link_standard(rows, rows if emitted is None else emitted, cfg=cfg)
+    return images.link_standard(rows, rows if emitted is None else emitted, cfg=cfg, image_pipeline=True)
 
 
 def _slabs(*keys, variety="v1", finish="f1"):
@@ -240,7 +240,7 @@ def test_a_run_that_cannot_read_the_removals_or_the_assignments_cannot_tell(monk
         monkeypatch.setattr(images, "_load_owner_removed", lambda cfg, r=removed: r)
         cfg = type("Cfg", (), {"mode": "passthrough"})()
         images.run(rows, cfg=cfg)
-        images.link_standard(rows, rows, cfg=cfg)
+        images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)
         assert rows[0].standard_photo is None
 
 
@@ -279,7 +279,8 @@ def test_the_conflict_set_is_classified_over_the_emitted_products_once_per_sourc
     mine, partner = _slabs("mine", variety="v1") + _slabs("partner", variety="v2")
     assert _stage(monkeypatch, [mine, partner]) == {"sentas": {A: ["mine-sen-mine", "partner-sen-partner"]}}
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: None)                # the pool unreadable
-    assert images.link_standard([mine, partner], [mine, partner], cfg=type("Cfg", (), {"mode": "passthrough"})()) is None
+    assert images.link_standard([mine, partner], [mine, partner], cfg=type("Cfg", (), {"mode": "passthrough"})(),
+                                image_pipeline=True) is None
 
 
 def _writes(monkeypatch, mode="s3", dry_run=False, stored=None):

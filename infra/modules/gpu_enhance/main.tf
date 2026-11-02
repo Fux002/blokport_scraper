@@ -295,7 +295,6 @@ resource "aws_batch_job_definition" "standardise" {
       { name = "SCRAPER_DOMAIN_PACK", value = var.domain_pack },
       { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
       { name = "RUN_MODE", value = "standardise" },
-      { name = "WATERMARKED", value = "false" },
     ]
     logConfiguration = {
       logDriver = "awslogs"

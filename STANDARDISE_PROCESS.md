@@ -316,6 +316,14 @@ a job's name; scoping to the process's own jobs would need tags on submit (`batc
 `aws:ResourceTag` condition on TerminateJob, which is not applied here: the process only stops jobs it named
 (`photos-<run id>-...`).
 
+### Rolling back past the image pipeline switch (config.db schema 9)
+
+The release that retired the old enhancer migrates config.db to schema 9: every source gets `image_pipeline` (on), and
+`enhance`, `fal_prompt` and `watermarked` are dropped. Older code cannot read a schema 9 config.db (it selects the dropped
+columns). Rolling back past it therefore means restoring the config.db snapshot taken before the deploy
+(`<env>/scraper/config/config.db` in the env's bucket, an earlier S3 version) together with the older image; the
+operator decisions made since that snapshot are then lost.
+
 ### Before prod: the judge catches a burned-in logo (once, on dev)
 
 The logo of a watermarked supplier (varsha) is no longer taken off by a step of its own: the judge must find it

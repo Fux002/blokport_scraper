@@ -1,7 +1,8 @@
-"""GET /config/v1/diagnostics enriches each source with an `images` block counted from the sync ledger at serve time:
-total products, ready (with a published standardised photo; for a source with its image pipeline off, with a hosted
-photo), hidden (served at stock 0 with reason no_photo), generating (a photos run is under way), and the last produce's
-held_for_image. The photo process relinks the products itself when it publishes, so the ledger is always current."""
+"""GET /config/v1/diagnostics enriches each source with an `images` block counted from the sync ledger at serve time,
+over its listable products (in stock, or hidden for want of a standardised photo; a sold-out product is not counted):
+total = ready + hidden + the rest. ready: listed with a published standardised photo (with the image pipeline off, with a
+hosted photo); hidden: served at stock 0 with reason no_photo; generating: a photos run is under way; and the last
+produce's held_for_image. The photo process relinks the products itself when it publishes, so the ledger is current."""
 
 from __future__ import annotations
 
@@ -24,11 +25,11 @@ def ledger_path(tmp_path, monkeypatch):
     return tmp_path / "ledger.db"
 
 
-def _product(ledger, sku, source, thumbnail, reason=None):
+def _product(ledger, sku, source, thumbnail, reason=None, qty=3):
     now = now_iso()
     ledger.upsert("product", {"sku": sku, "source": source, "state": "synced", "thumbnail_key": thumbnail,
                               "created_at": now, "updated_at": now}, pk=("sku",))
-    ledger.upsert("inventory", {"sku": sku, "qty": 0 if reason else 3, "reason": reason, "updated_at": now}, pk=("sku",))
+    ledger.upsert("inventory", {"sku": sku, "qty": 0 if reason else qty, "reason": reason, "updated_at": now}, pk=("sku",))
 
 
 def _fill(path):
@@ -36,6 +37,7 @@ def _fill(path):
         _product(ledger, "SEN-1", "sen", f"{BASE}/standard/main/sentas/{'a' * 64}.jpg")
         _product(ledger, "SEN-2", "sen", f"{BASE}/improved/sentas/{'b' * 64}.jpg", reason="no_photo")
         _product(ledger, "SEN-3", "sen", "")
+        _product(ledger, "SEN-4", "sen", f"{BASE}/standard/main/sentas/{'d' * 64}.jpg", qty=0)   # sold out: not counted
         _product(ledger, "VAR-1", "var", f"{BASE}/improved/varsha/{'c' * 64}.jpg")
         _product(ledger, "VAR-2", "var", "")
 

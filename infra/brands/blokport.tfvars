@@ -30,7 +30,7 @@ prod_home_env         = "prod"
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
 prod_image_tag     = "586939a745a40ee7fee96da59356b3e9eb55d221"     # + a stock-only refresh never rewrites a product, a failed source fails loud (#481)
-prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # enhance fits the input to the target before ESRGAN (#448): ~4x less GPU work on large originals
+prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
 # infra flags. prod gpu image (gpu-782f18c7) == dev's :gpu digest sha256:20767ddd -> carries ben2 + reads

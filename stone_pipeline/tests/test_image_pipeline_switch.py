@@ -18,10 +18,10 @@ import pytest
 from deploy import standardise_batch as gpu
 from deploy import standardise_run as proc
 from stone_pipeline.config import server, store
-from stone_pipeline.config.settings import ENV_SEGMENT, SETTINGS, STANDARDISE as C, ImageProcessingConfig, ImagesConfig
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, SETTINGS, STANDARDISE as C, ImageProcessingConfig, ImagesConfig
 from stone_pipeline.config.sources import SourceConfig, load_source
 from stone_pipeline.core.schema import CanonicalRow
-from stone_pipeline.ledger import populate
+from stone_pipeline.ledger import populate, writethrough
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.stages import emit, images
 from stone_pipeline.standardise import photo
@@ -85,10 +85,21 @@ def test_a_v8_store_turns_the_image_pipeline_on_for_every_source_and_drops_the_r
     assert store.read_sources(db)["varsha"].image_pipeline is False          # a later open keeps the admin's choice
 
 
-def test_sources_yaml_carries_no_retired_field():
+def test_the_committed_sources_yaml_carries_no_retired_field():
+    # the seed the store is built from: a retired key left in it would fail SourceConfig at load (fail loud)
+    import yaml
     from stone_pipeline.config.sources import load_yaml_sources
-    for cfg in load_yaml_sources(SETTINGS.paths.sources_yaml).values():
-        assert not set(_RETIRED) & {f.name for f in dataclasses.fields(cfg)}
+    raw = yaml.safe_load(SETTINGS.paths.sources_yaml.read_text(encoding="utf-8"))
+    assert raw and not [(src, key) for src, body in raw.items() for key in (body or {}) if key in _RETIRED]
+    assert set(load_yaml_sources(SETTINGS.paths.sources_yaml)) == set(raw)
+
+
+def test_a_retired_field_in_a_yaml_seed_fails_loud(tmp_path):
+    from stone_pipeline.config.sources import load_yaml_sources
+    seed = tmp_path / "sources.yaml"
+    seed.write_text("varsha:\n  source_code: var\n  watermarked: true\n", encoding="utf-8")
+    with pytest.raises(TypeError, match="watermarked"):
+        load_yaml_sources(seed)
 
 
 # --- off: the scraped photos, listed, never picked ---------------------------------------------------------------------
@@ -96,16 +107,46 @@ def _improved(sha, src):
     return f"{BASE}/improved/{src}/{sha}.png"
 
 
-def test_an_off_source_keeps_its_scraped_photos_while_an_on_source_gets_its_standardised_one(config_db, monkeypatch):
-    monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: [images._slot_row(r, r.image_keys) for r in rows])
+def _linking(monkeypatch, published):
+    """link_standard over a passthrough run with `published` the main views on the pool, no owner decision."""
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: {
-        "main": {A: "e1", B: "e2"}, "white": {}, "studio": {}, "close": {}, "cutout": {}})
-    on = CanonicalRow(src_site="sentas", surrogate_key="1", format_value="Slab", image_keys=[_improved(A, "sentas")])
-    off = CanonicalRow(src_site="varsha", surrogate_key="2", format_value="Slab", image_keys=[_improved(B, "varsha")])
-    images.run([on, off], cfg=type("Cfg", (), {"mode": "passthrough"})())
+        "main": {sha: "e" for sha in published}, "white": {}, "studio": {}, "close": {}, "cutout": {}})
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
+    return type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
+
+
+def _hosted_row(src, key, sha):
+    row = CanonicalRow(src_site=src, surrogate_key=key, format_value="Slab", image_keys=[_improved(sha, src)])
+    images._slot_row(row, row.image_keys)                        # as the hosting step leaves it
+    return row
+
+
+def test_an_off_source_keeps_its_scraped_photos_while_an_on_source_gets_its_standardised_one(config_db, monkeypatch):
+    cfg = _linking(monkeypatch, {A, B})
+    on, off = _hosted_row("sentas", "1", A), _hosted_row("sentas", "2", B)
+    images.link_standard([on], [on], cfg=cfg, image_pipeline=True)
+    images.link_standard([off], [off], cfg=cfg, image_pipeline=False)
     assert on.standard_photo is True and on.thumbnail_key == f"{BASE}/standard/main/sentas/{A}.jpg"
-    assert off.standard_photo is None and off.thumbnail_key == _improved(B, "varsha")
+    assert off.standard_photo is None and off.thumbnail_key == _improved(B, "sentas")
     assert off.standard_version is None and off.model_3d_key is None
+
+
+def test_an_off_source_s_products_are_in_the_photo_list_and_its_conflict_set_is_made(config_db, monkeypatch):
+    # the photo process stops loud on a sheet listing the photo list lacks and refuses a source without a stored conflict
+    # set, so an off source's products are listed and its set is made like any source's
+    cfg = _linking(monkeypatch, set())
+    row = _hosted_row("varsha", "1", B)
+    assert images.link_standard([row], [row], cfg=cfg, image_pipeline=False) == {"varsha": {}}
+    assert row.own_photo_keys == [_improved(B, "varsha")]
+
+
+def test_one_produce_uses_the_value_it_loaded_not_a_second_read_of_the_store(config_db, monkeypatch):
+    # the store says varsha is off; the produce loaded it on (one read per run): the linking follows the produce
+    cfg = _linking(monkeypatch, {B})
+    row = _hosted_row("varsha", "1", B)
+    images.link_standard([row], [row], cfg=cfg, image_pipeline=True)
+    assert row.standard_photo is True
 
 
 def _rule_on(monkeypatch):
@@ -113,28 +154,78 @@ def _rule_on(monkeypatch):
         SETTINGS, images=dataclasses.replace(SETTINGS.images, require_standard_photo=True)))
 
 
-def test_the_no_photo_rule_never_hides_a_product_of_an_off_source(config_db, tmp_path, monkeypatch):
-    _rule_on(monkeypatch)
-    cfg = load_source("varsha")
-    row = CanonicalRow(src_site="varsha", surrogate_key="x", inventory_quantity="3", standard_photo=False)
-    sku = emit._sku(row, cfg)
-    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+KEY = "slab_marble_carrara_0001"
+
+
+@pytest.fixture
+def ledger(tmp_path, monkeypatch):
+    """A ledger with a synced, textured variety, so its products are servable (the write-through's real product write)."""
+    monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
+    monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    path = tmp_path / "dev.ledger"
+    with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
         now = now_iso()
-        ledger.upsert("product", {"sku": sku, "source": "var", "state": "synced", "created_at": now, "updated_at": now},
-                      pk=("sku",))
-        ledger.upsert("inventory", {"sku": sku, "qty": 0, "reason": "no_photo", "updated_at": now}, pk=("sku",))
-        populate.populate_inventory(ledger, [row], cfg)                     # hidden while it was on: listed again
-        stock = ledger.get("inventory", "sku", sku)
-        assert (stock["qty"], stock["reason"]) == (3, None)
-        populate.populate_inventory(ledger, [row], dataclasses.replace(cfg, image_pipeline=True))
-        stock = ledger.get("inventory", "sku", sku)
-        assert (stock["qty"], stock["reason"]) == (0, "no_photo")              # on: the rule applies
+        lg.upsert("variation", {
+            "key": KEY, "branch": "slab", "type": "Marble", "name": "Carrara", "aliases": "[]",
+            "image_url": f"https://bucket/variations/{KEY}.png", "volume": "", "medusa_id": "V1",
+            "payload_hash": "", "state": "synced", "first_seen": now, "last_synced": now,
+            "created_at": now, "updated_at": now}, pk=("key",))
+    return path
+
+
+def _product(standard_photo):
+    return CanonicalRow(src_site="varsha", surrogate_key="X", variation_key=KEY, handle="h-x", title="Carrara",
+                        inventory_quantity="3", thumbnail_key="products/X/thumb.webp",
+                        product_image_keys=["products/X/1.webp"], standard_photo=standard_photo)
+
+
+def _written(path, row, cfg):
+    """(stored photo_ready, stock, stock reason) after the full produce's write of `row` (product, then its stock)."""
+    assert writethrough.record_source([row], [], cfg, inventory_only=False, path=path)
+    with Ledger.open(path, env=ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        sku = emit._sku(row, cfg)
+        product, stock = lg.get("product", "sku", sku), lg.get("inventory", "sku", sku)
+        return bool(product["photo_ready"]), stock["qty"], stock["reason"]
+
+
+def test_the_no_photo_rule_never_hides_a_product_of_an_off_source(config_db, ledger, monkeypatch):
+    _rule_on(monkeypatch)
+    off = load_source("varsha")
+    on = dataclasses.replace(off, image_pipeline=True)
+    assert _written(ledger, _product(False), on) == (False, 0, "no_photo")         # on: hidden without a photo
+    assert _written(ledger, _product(False), off) == (True, 3, None)               # off: shown on the next full produce
+    assert _written(ledger, _product(None), off) == (True, 3, None)                # a run that cannot tell: still shown
+
+
+def test_a_new_product_of_an_off_source_never_starts_hidden(config_db, ledger, monkeypatch):
+    # with the pipeline on, a new product in a run that cannot tell starts hidden; an off source is never in that state
+    _rule_on(monkeypatch)
+    assert _written(ledger, _product(None), load_source("varsha")) == (True, 3, None)
 
 
 def test_the_photo_process_never_picks_a_listing_of_an_off_source(config_db):
-    listings = [{"key": "s1", "source": "sentas", "format": "slab", "photos": [A]},
-                {"key": "v1", "source": "varsha", "format": "slab", "photos": [B]}]
-    assert [l["key"] for l in proc.todo(listings, {}, exclude=set())] == ["s1"]
+    listings = [{"key": "s1", "sku": "SEN-1", "source": "sentas", "format": "slab", "photos": [A]},
+                {"key": "v1", "sku": "VAR-1", "source": "varsha", "format": "slab", "photos": [B]}]
+    pick = dict(exclude=set(), slabs=set(), removed=set(), conflicts=set(), picks={})
+    assert [l["key"] for l in proc.todo(listings, {}, **pick)] == ["s1"]
+    # nor a chosen close-up of an off source (the whole-slab look-again, #486)
+    records = {"s1": {"sha": A, "tag": "v2", "prefix": "p/"}, "v1": {"sha": B, "tag": "v2", "prefix": "p/"}}
+    assert [l["key"] for l in proc.todo(listings, records, **pick)] == ["s1"]
+
+
+def test_the_close_only_run_never_works_an_off_source(config_db, monkeypatch):
+    import time
+    from deploy import standardise_select as select
+    records = [{"source": "sentas", "sha": A, "prefix": "p/", "tag": "v2", "key": "s1"},
+               {"source": "varsha", "sha": B, "prefix": "p/", "tag": "v2", "key": "v1"}]
+    monkeypatch.setattr(proc.close, "chosen", lambda s3, root: records)
+    monkeypatch.setattr(proc.close, "listed", lambda recs, src: [r for r in recs if r["source"] == src])
+    monkeypatch.setattr(proc.close, "undone", lambda s3, listed: listed)
+    rounds = []
+    monkeypatch.setattr(proc.gpu, "run_round", lambda batch, s3, tag, todo, run_id, deadline, spend, work:
+                        rounds.append(todo) or [])
+    proc.close_round(None, None, select.Spend(5.0), "R1", time.monotonic() + 3600, "root/", say=lambda m: None)
+    assert rounds == [{"sentas": [A]}]
 
 
 def _jpeg(w, h):

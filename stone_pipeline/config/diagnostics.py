@@ -118,10 +118,11 @@ _STANDARD_MARKER = f"/products/{imagestore.STANDARD_SUBDIR}/"   # a thumbnail un
 
 
 def ledger_image_counts() -> dict[str, dict[str, int]] | None:
-    """{source_code: {total, standard, hosted, hidden}} of the products in this environment's sync ledger: all of them,
-    those whose thumbnail is a published standardised photo, those with any thumbnail, and those served at stock 0 with
-    reason no_photo. None when there is no ledger (never created here) or it cannot be read: the caller then serves no
-    images block, and the failure is logged."""
+    """{source_code: {total, standard, hosted, hidden}} over the listable products of this environment's sync ledger: in
+    stock (qty > 0) or hidden for want of a standardised photo (reason no_photo); a sold-out or delisted product is not
+    counted. standard: listed with a published standardised photo as its thumbnail; hosted: listed with any thumbnail;
+    hidden: reason no_photo. None when there is no ledger (never created here) or it cannot be read: the caller then
+    serves no images block, and the failure is logged."""
     from stone_pipeline.config.settings import ENV_NAME
     from stone_pipeline.ledger import writethrough
     from stone_pipeline.ledger.db import Ledger, LedgerError
@@ -132,10 +133,12 @@ def ledger_image_counts() -> dict[str, dict[str, int]] | None:
         with Ledger.open(path, env=ENV_NAME) as ledger:
             rows = ledger.execute(
                 "SELECT p.source AS source, COUNT(*) AS total,"
-                " SUM(CASE WHEN p.thumbnail_key LIKE ? THEN 1 ELSE 0 END) AS standard,"
-                " SUM(CASE WHEN COALESCE(p.thumbnail_key, '') != '' THEN 1 ELSE 0 END) AS hosted,"
+                " SUM(CASE WHEN i.reason IS NOT 'no_photo' AND p.thumbnail_key LIKE ? THEN 1 ELSE 0 END) AS standard,"
+                " SUM(CASE WHEN i.reason IS NOT 'no_photo' AND COALESCE(p.thumbnail_key, '') != '' THEN 1 ELSE 0 END)"
+                " AS hosted,"
                 " SUM(CASE WHEN i.reason = 'no_photo' THEN 1 ELSE 0 END) AS hidden"
-                " FROM product p LEFT JOIN inventory i ON i.sku = p.sku GROUP BY p.source",
+                " FROM product p JOIN inventory i ON i.sku = p.sku"
+                " WHERE i.qty > 0 OR i.reason = 'no_photo' GROUP BY p.source",
                 (f"%{_STANDARD_MARKER}%",)).fetchall()
     except (sqlite3.Error, LedgerError):
         log.exception("images block: the ledger could not be read; no images block served")
@@ -144,9 +147,10 @@ def ledger_image_counts() -> dict[str, dict[str, int]] | None:
 
 
 def images_block(counts: dict[str, int], image_pipeline: bool, photos_running: bool, held: int) -> dict:
-    """A source's `images` block for the admin. ready: products with a published standardised photo, or, when the
-    source's image pipeline is off, products with a hosted photo (they show the scraped ones). hidden: products served
-    at stock 0 with reason no_photo. generating: a photos run is under way and works this source."""
+    """A source's `images` block for the admin, over its listable products (ledger_image_counts): total = ready + hidden
+    + the rest. ready: listed with a published standardised photo, or, when the source's image pipeline is off, listed
+    with a hosted photo (they show the scraped ones). hidden: served at stock 0 with reason no_photo. generating: a
+    photos run is under way and works this source."""
     return {"image_pipeline": image_pipeline, "total": counts["total"],
             "ready": counts["standard"] if image_pipeline else counts["hosted"],
             "hidden": counts["hidden"], "generating": photos_running and image_pipeline, "held_for_image": held}

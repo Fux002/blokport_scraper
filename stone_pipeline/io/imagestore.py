@@ -159,8 +159,8 @@ def assigned_photo(key: str) -> Optional[tuple[str, str]]:
 
 
 def sha_from_url(url: str) -> Optional[str]:
-    """The content sha256 embedded in a hosted image url/key (.../<site>/<sha>.<ext>), or None. Used by
-    Stage 7 to map a linked improved url back to its content identity for the discard-set lookup."""
+    """The content sha256 embedded in a hosted image url/key (.../<site>/<sha>.<ext>), or None: the photo's identity
+    across its scraped, improved and standardised copies (the photo process, variety colour)."""
     if not url:
         return None
     m = _SHA_RE.search(url)

@@ -666,7 +666,7 @@ def test_a_tile_product_links_the_set_named_after_it_and_its_3d_tile(monkeypatch
     rows = [_row("rb-tile"), _row("tb-flamed")]
     cfg = type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})()
     images.run(rows, cfg=cfg)
-    images.link_standard(rows, rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)
     shown, hidden = rows
     assert shown.standard_photo is True and hidden.standard_photo is False      # no set: hidden by the no-photo rule
     assert shown.thumbnail_key == f"{PUBLIC}standard/main/marenostone/{own}.jpg"
@@ -681,7 +681,7 @@ def _run(rows, views, monkeypatch):
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
     cfg = type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})()
     images.run(rows, cfg=cfg)
-    images.link_standard(rows, rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)
 
 
 def test_a_tile_whose_size_was_filled_from_the_pack_s_defaults_is_never_shown(monkeypatch):

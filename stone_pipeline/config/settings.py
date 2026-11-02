@@ -93,8 +93,9 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _env_int(name: str, default: int) -> int:
     """Read an integer env var: the default ONLY when unset. A set-but-malformed override fails loud at
-    config import, naming the variable: an operator who typed FAL_MAX_USD=abc meant a value, and silently
-    running on the default is the no_image incident class (a run proceeding on a value nobody set)."""
+    config import, naming the variable: an operator who typed SCRAPER_STANDARDISE_RUN_SLICE=abc meant a
+    value, and silently running on the default is the no_image incident class (a run proceeding on a value
+    nobody set)."""
     raw = env.getenv(name)
     if raw is None:
         return default

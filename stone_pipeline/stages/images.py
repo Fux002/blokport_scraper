@@ -87,6 +87,7 @@ class ImageStats:
     download_failed: int = 0
     bytes_uploaded: int = 0
     processed: int = 0  # source images size-reduced before re-host
+    size_reduce_failed: int = 0  # photos the size-reduce could not handle (degenerate shape): held, retried next run
 
 
 _MANIFEST_KEY = "_manifest.json"
@@ -216,14 +217,16 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     return stats
 
 
-def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=None) -> Optional[dict[str, dict[str, list[str]]]]:
+def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=None, *,
+                  image_pipeline: bool) -> Optional[dict[str, dict[str, list[str]]]]:
     """After validation: every product linked to its standardised photo, from the published pool, and the conflict set
     {source: {sha: [handles]}} of the emitted products (index.shared_photos, each with every photo it has: the products
     on the sheet, nothing validation rejected), returned to be stored (save_conflicts) as the one set the photo process
     and the review page read. A conflict photo is linked only to the product its assignment file names. None when the
-    pool cannot be read (nothing is stored then; the products keep their images and their listed state). A product of a
-    source whose image pipeline is off keeps its hosted scraped photos (standard_photo stays None; never hidden)."""
-    from stone_pipeline.config.sources import image_pipeline_off
+    pool cannot be read (nothing is stored then; the products keep their images and their listed state). The rows are one
+    source's; `image_pipeline` is its switch as the produce loaded it (one value for the whole run). Off: every product
+    keeps its hosted scraped photos (standard_photo stays None; populate never hides it), and the photo list and the
+    conflict set are made as for any source (the photo process refuses a source on the sheet without them)."""
     cfg = cfg or SETTINGS.images
     views = _load_standard_views(cfg)
     removed, assigned = _load_owner_removed(cfg), _load_assigned(cfg)
@@ -235,10 +238,9 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     conflicts = {(src, sha) for src, photos in by_source.items() for sha in photos}
     removed, assigned = removed or set(), assigned or {}
     skus = _skus(rows) if removed or conflicts else {}
-    off = image_pipeline_off()
     for row in rows:
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
-        if row.src_site in off:                        # its image pipeline is off: it keeps the hosted scraped photos
+        if not image_pipeline:                         # off: it keeps the hosted scraped photos
             continue
         seen = _seen_by(row, skus.get(id(row)), views or {}, removed, conflicts, assigned)
         lead = listing_lead(row, seen, cfg) if _is_tile(row) else photo_lead(row.image_keys, seen)
@@ -574,7 +576,8 @@ def _sample(new_urls: list[str]) -> list[str]:
 class _Stager:
     """Hosts one NEW source image per call: content-addressed dedup, placeholder drop, reuse of an already hosted
     object, else the raw bytes at the content key or (cfg.processing.enabled) the size-reduced photo under improved/
-    with the raw original kept under scraped/. Returns the public url, or None for a placeholder or a failed download."""
+    with the raw original kept under scraped/. Returns the public url, or None for a placeholder, a failed download or
+    a photo the size-reduce could not handle (held like a failed download, so one bad photo never stops the run)."""
 
     def __init__(self, cfg, backend, manifest: dict, url_to_site: dict[str, str], stats: ImageStats):
         self.cfg, self.backend, self.manifest = cfg, backend, manifest
@@ -603,10 +606,18 @@ class _Stager:
         if self.backend.exists(dest_key):
             public = self.backend.url_for(dest_key)          # hosted by this run or a prior one: reused as it is
         else:
-            body = _size_reduce(data, self.cfg.processing) if processing else data
             if processing:
+                try:
+                    body = _size_reduce(data, self.cfg.processing)
+                except (cv2.error, ValueError) as exc:     # a degenerate photo (e.g. 1 x 5000 px): this photo only
+                    self.stats.size_reduce_failed += 1
+                    log.error("photo could not be size-reduced; held this run",
+                              extra={"extra_fields": {"url": url, "error": str(exc)}})
+                    return None
                 self.stats.processed += 1
                 self._keep_scraped(ck, data)
+            else:
+                body = data
             public = self.backend.put(dest_key, body)
             self.stats.bytes_uploaded += len(body)
         self.hash_to_public[digest] = public
@@ -665,4 +676,5 @@ def _stage_and_link(rows: list[CanonicalRow], fetch: Optional[Fetcher], cfg, sta
         "no_image_source": stats.no_image_source,
         "download_failed": stats.download_failed, "placeholders": stats.placeholders,
         "bytes_uploaded": stats.bytes_uploaded, "processed": stats.processed,
+        "size_reduce_failed": stats.size_reduce_failed,
         "stale_manifest_pruned": stale_pruned}})

@@ -144,16 +144,20 @@ starts with `image_pipeline` on (config.db migration, schema 9); turning it off 
 }
 ```
 
-`images` (counted from the sync ledger when the diagnostic is served; absent when the source has no product in the
-ledger, render "-"):
+`images` (counted from the sync ledger when the diagnostic is served, over the source's **listable** products: in stock,
+or hidden for want of a standardised photo; a sold-out or delisted product is not counted. Absent when the source has
+no listable product in the ledger: render "-"). `total = ready + hidden + the rest`:
 - `image_pipeline`: the source's switch.
-- `total`: the source's products in the ledger.
-- `ready`: products with a published standardised photo; for a source with `image_pipeline` off, products with a
-  hosted photo (they show the scraped ones).
-- `hidden`: products served at stock 0 with reason `no_photo` (no standardised photo yet; always 0 when the switch
-  is off).
+- `total`: the source's listable products.
+- `ready`: listed (not hidden) with a published standardised photo as their thumbnail; for a source with
+  `image_pipeline` off, listed with a hosted photo (they show the scraped ones).
+- `hidden`: served at stock 0 with reason `no_photo` (no standardised photo yet; always 0 when the switch is off).
+- the rest (`total - ready - hidden`): listed without a standardised photo, which happens while the no_photo rule
+  cannot tell (a photo pool that could not be read) or where the rule is off (dev before #482), or, with the switch
+  off, listed without any photo.
 - `generating`: a photos run is under way and works this source.
-- `held_for_image`: products the last produce could not emit for want of a photo that a republish can still emit.
+- `held_for_image`: products the last produce could not emit for want of a photo that a republish can still emit
+  (from the last produce's run summary, counted apart from the ledger counts above).
 - Retired: `held` (the old enhancer's discard markers). `ready` no longer means "de-watermarked + enhanced".
 
 Render per source:

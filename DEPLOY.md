@@ -70,8 +70,7 @@ catalog → bundle to_upload/
 ```
 
 The produce (the sync service's runner, `POST /config/v1/run`) **stages** the CSV + images and stops; importing into Medusa is a
-separate step you run afterward (and after reviewing `images/reports/processed_preview.csv`),
-so "processing completes before load" holds by construction.
+separate step you run afterward, so "processing completes before load" holds by construction.
 
 **INVARIANT — do not break:** this only holds when the real run has
 `SCRAPER_S3_DRY_RUN=false` **and** `SCRAPER_IMAGE_MODE=s3`. With `dry_run=true` or

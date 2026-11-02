@@ -502,7 +502,8 @@ def run_source(
     # the standardised photos, once the emitted products are known: a photo emitted products of several stones show is
     # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
     # the review page read (stages.images.link_standard)
-    if not inventory_only and (conflicts := images.link_standard(rows, validation.emit)) is not None:
+    if not inventory_only and (conflicts := images.link_standard(rows, validation.emit,
+                                                                     image_pipeline=source_cfg.image_pipeline)) is not None:
         images.save_conflicts(conflicts)
     # row fingerprint: hash of the inputs that determine the output (section 11.2),
     # the basis for incremental runs (section 13A.5) and drift checks

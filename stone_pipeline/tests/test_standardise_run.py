@@ -297,8 +297,8 @@ def test_each_close_only_slice_has_its_own_fixed_list_and_is_named_by_the_run(mo
 def test_every_gpu_job_is_submitted_for_the_one_attempt_its_reservation_counts(monkeypatch):
     # a job that stops on purpose (photos left to the next run) exits 1; a second Batch attempt would run it again unpaid for
     batch, s3 = _Batch(), _S3()
-    gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A]}, {"sentas": False}, "R1", [])
-    gpu.submit_close(batch, s3, "q", "jd", "v9-clean", {"sentas": [A]}, {"sentas": False}, "R1", [])
+    gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A]}, "R1", [])
+    gpu.submit_close(batch, s3, "q", "jd", "v9-clean", {"sentas": [A]}, "R1", [])
     assert len(batch.submitted) == 3 and all(j["retryStrategy"] == {"attempts": 1} for j in batch.submitted)
 def test_a_close_only_round_reserves_one_job_per_slice_and_submits_close_jobs(monkeypatch):
     window = 3 * 3600
@@ -308,7 +308,7 @@ def test_a_close_only_round_reserves_one_job_per_slice_and_submits_close_jobs(mo
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
     monkeypatch.setattr(gpu, "ran_usd", lambda batch, ids, reserved, now, sleep: 0.0)
     batch, s3 = _Batch(), _S3()
-    gpu.run_round(batch, s3, "v9-clean", {"sentas": [A]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100), work=gpu.CLOSE_ROUND)
+    gpu.run_round(batch, s3, "v9-clean", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(100), work=gpu.CLOSE_ROUND)
     assert [j["jobName"] for j in batch.submitted] == [f"{C.JOB_PREFIX}R1-close-sentas-v9-clean-0"]
     assert batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
 

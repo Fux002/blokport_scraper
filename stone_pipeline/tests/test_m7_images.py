@@ -231,3 +231,20 @@ def test_rescrape_same_url_different_bytes_not_reprocessed(tmp_path):
     assert key1 == key2                    # same stored object reused
     stored = list((tmp_path / "s").rglob("*.jpg"))
     assert len(stored) == 1                # exactly one object, no duplicate
+
+
+def test_a_photo_that_cannot_be_size_reduced_is_held_and_the_others_are_hosted(tmp_path):
+    # a degenerate photo (1 x 5000: its scaled width rounds to 0) is held like a failed download, retried next produce,
+    # and never takes the source's run down
+    import cv2
+    import numpy as np
+    from stone_pipeline.config.settings import ImageProcessingConfig
+    cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
+                       processing=ImageProcessingConfig(enabled=True))
+    sliver = cv2.imencode(".png", np.full((5000, 1, 3), 120, dtype=np.uint8))[1].tobytes()
+    bad = CanonicalRow(src_site="x", surrogate_key="d1", raw_image_urls=["http://x/sliver.png"])
+    good = CanonicalRow(src_site="x", surrogate_key="d2", raw_image_urls=["http://x/a.jpg"])
+    stats = images.run([bad, good], fetch=_fake_fetch({"http://x/sliver.png": sliver, "http://x/a.jpg": _jpeg_bytes()}),
+                       cfg=cfg)
+    assert bad.image_keys == [] and any(f.code == FlagCode.no_image for f in bad.review_flags)
+    assert good.image_keys and stats.size_reduce_failed == 1 and stats.staged == 1

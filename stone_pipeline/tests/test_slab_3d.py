@@ -208,7 +208,7 @@ def test_a_slab_gets_its_photo_s_3d_a_block_none_and_a_tile_never_borrows_a_phot
             for k, f in (("1", "Slab"), ("2", "Block"), ("3", "Tile"))]
     cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
     images.run(rows, cfg=cfg)
-    images.link_standard(rows, rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg, image_pipeline=True)
     assert [r.model_3d_key for r in rows] == [f"{BASE}/standard/cutout/sentas/{A}.webp", None, None]
     assert [r.standard_version for r in rows] == ["m1 w1 s1 c1 t1+j1", "m1 w1 s1 c1", None]
     assert [r.standard_photo for r in rows] == [True, True, False]
