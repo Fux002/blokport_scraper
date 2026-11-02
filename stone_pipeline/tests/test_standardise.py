@@ -226,6 +226,7 @@ SHEET = """Product Handle,Product Length,Product Width,Product Category 1,Front 
 one,3.0,2.0,pcat_01M1GWN1V1E66J1NM1PTQ3ESAK,https://x/prod/products/improved/zucchi/{a}.jpg,https://x/prod/products/improved/zucchi/{b}.jpg
 two,,,pcat_01M1GWN1V1E66J1NM1PTQ3ESAK,https://x/prod/products/improved/zucchi/{a}.jpg,
 """.format(a="a" * 64, b="b" * 64)
+PHOTOS = {"one": [("zucchi", "a" * 64), ("zucchi", "b" * 64)], "two": [("zucchi", "a" * 64)]}
 
 
 @pytest.fixture
@@ -236,13 +237,13 @@ def _active_slab(monkeypatch):
 
 
 def test_the_index_links_a_photo_to_its_first_product(_active_slab):
-    photos = index.build(SHEET)
+    photos = index.build(SHEET, PHOTOS)
     assert photos["a" * 64]["key"] == "one" and photos["a" * 64]["size"] == (3.0, 2.0) and photos["b" * 64]["format"] == "slab"
 
 
 def test_an_unknown_category_fails_loud(_active_slab):
     with pytest.raises(ValueError, match="unknown product category"):
-        index.build(SHEET.replace("pcat_01M1GWN1V1E66J1NM1PTQ3ESAK", "pcat_new"))
+        index.build(SHEET.replace("pcat_01M1GWN1V1E66J1NM1PTQ3ESAK", "pcat_new"), PHOTOS)
 
 
 def _whole(shape=(800, 1200)):

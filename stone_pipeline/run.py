@@ -20,7 +20,7 @@ from typing import Optional
 from stone_pipeline import adapters as adapter_registry  # adapter_registry.REGISTRY (auto-discovered)
 from stone_pipeline.adapters.base import ACQ_LOAD_FRAME, AdapterBase, read_scrape_csv
 from stone_pipeline.config import contracts
-from stone_pipeline.config.settings import IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS
+from stone_pipeline.config.settings import IS_PRODUCTION, SALES_CHANNEL_ID, SETTINGS, STANDARDISE
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core import csvio
 from stone_pipeline.core import ids as ids_mod
@@ -590,6 +590,7 @@ def run_source(
     else:
         columns = emit.read_template_columns()
         emit.write_import_csv(validation.emit, source_cfg, layout.products_import / "medusa_import.csv", columns)
+        emit.write_photos_json(validation.emit, layout.products_import / STANDARDISE.PHOTOS_FILE)
         new_rows = [r for r in validation.emit if r.product_status == "new"]
         if known:  # only split when we know what exists
             emit.write_import_csv(new_rows, source_cfg, layout.products_import / "medusa_import_new.csv", columns)

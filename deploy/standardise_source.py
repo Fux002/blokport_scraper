@@ -149,14 +149,31 @@ def _sheet(client):
     return _get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8")
 
 
+def _photo_list(client):
+    """This environment's photo list (STANDARDISE.PHOTOS_KEY, beside the sheet: each listing's own photos in its order).
+    Missing or malformed, it fails loud: the sheet's image columns are never read instead (once a listing is published
+    they carry only its chosen photo's views)."""
+    key = f"{ENV_SEGMENT}/{C.PHOTOS_KEY}"
+    try:
+        text = _get(client, key).decode("utf-8")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            raise RuntimeError(f"no photo list at s3://{S3_BUCKET}/{key}: a full produce writes it beside the sheet") from exc
+        raise
+    try:
+        return index.parse_photos(text)
+    except ValueError as exc:
+        raise RuntimeError(f"the photo list s3://{S3_BUCKET}/{key} is malformed: {exc}") from exc
+
+
 def sheet_photos(client):
-    """{sha: {source, key, format, size}} of this environment's product sheet."""
-    return index.build(_sheet(client))
+    """{sha: {source, key, format, size}} of this environment's product sheet and its photo list."""
+    return index.build(_sheet(client), _photo_list(client))
 
 
 def sheet_listings(client):
-    """This environment's listings with their photos in order (index.listings)."""
-    return index.listings(_sheet(client))
+    """This environment's listings with their own photos in order (index.listings)."""
+    return index.listings(_sheet(client), _photo_list(client))
 
 
 def _photo_keys(client, src, photos):

@@ -1060,6 +1060,11 @@ class STANDARDISE:
     STOP_WAIT_SECONDS, STOP_POLL_SECONDS = 60, 5
     CUTOUT_WORKERS = 4                 # 3D cut-outs made at once by publish (full-size slabs in memory, on the 6 GB service)
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
+    # Each listing's own photos in its order ({Product Handle: [[source, sha], ...]}), written by the produce beside the
+    # sheet: the sheet's image columns carry only the chosen photo's views once it is published, so the photo process
+    # and its GPU job read the listing's photos from here.
+    PHOTOS_FILE = "3_products_photos.json"
+    PHOTOS_KEY = "scraper/to_upload/" + PHOTOS_FILE
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
     # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;
     # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. Only a slab product

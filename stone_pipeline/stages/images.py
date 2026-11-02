@@ -294,6 +294,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     # standardised photo: this run then never changes whether a product is listed.
     known, views = bool(views and views.get("main")), views or {}
     for row in rows:
+        row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
         row.standard_photo = _lead(row.image_keys, views) is not None if known else None
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views

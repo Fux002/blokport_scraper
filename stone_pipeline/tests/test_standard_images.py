@@ -130,54 +130,49 @@ def test_a_run_can_be_limited_to_a_list_of_photos():
     assert src.only(keys, [C_, A]) == [keys[0], keys[2]]                 # the listed ones, in the run's own order
 
 
-def test_a_run_reads_its_environment_s_current_categories_before_its_product_sheet(monkeypatch):
+def test_a_run_reads_its_environment_s_current_categories_before_its_product_sheet_and_photo_list(monkeypatch):
     from deploy import fetch_inputs, standardise_source as src
     from stone_pipeline.config import settings
     calls = []
     monkeypatch.setattr(fetch_inputs, "fetch_attributes", lambda client: calls.append("fetch") or True)
     monkeypatch.setattr(settings, "refresh_category_pcats", lambda: calls.append("refresh"))
-    monkeypatch.setattr(src, "_get", lambda client, key: calls.append(f"sheet {key}") or b"")
-    monkeypatch.setattr(src.index, "build", lambda text: calls.append("index") or {})
+    monkeypatch.setattr(src, "_get", lambda client, key: calls.append(key) or b"{}")
+    monkeypatch.setattr(src.index, "build", lambda text, photos: calls.append("index") or {})
     assert src.sheet_photos(object()) == {}
-    assert calls == ["fetch", "refresh", f"sheet {settings.ENV_SEGMENT}/{src.C.SHEET_KEY}", "index"]   # prod has no committed export
+    assert calls == ["fetch", "refresh", f"{settings.ENV_SEGMENT}/{src.C.SHEET_KEY}",        # prod has no committed export
+                     f"{settings.ENV_SEGMENT}/{src.C.PHOTOS_KEY}", "index"]
+
+
+def _slab_category(monkeypatch, pcat="pcat_S"):
+    from dataclasses import replace
+    from stone_pipeline.config import settings
+    slab = replace(settings.category("slab"), pcat_id=pcat)
+    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
 
 
 def test_the_product_index_follows_the_categories_refreshed_from_the_export(monkeypatch):
-    from dataclasses import replace
-    from stone_pipeline.config import settings
     from stone_pipeline.standardise import index
-    slab = replace(settings.category("slab"), pcat_id="pcat_PROD_SLABS")             # the id prod's export carries
-    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
-    sheet = ("Product Handle,Product Category 1,Product Length,Product Width,Product Image 1\n"
-             f"h,pcat_PROD_SLABS,3.0,1.8,https://b.s3.amazonaws.com/prod/products/improved/sentas/{A}.jpg\n")
-    assert index.build(sheet)[A]["format"] == "slab"
+    _slab_category(monkeypatch, "pcat_PROD_SLABS")                                        # the id prod's export carries
+    sheet = "Product Handle,Product Category 1,Product Length,Product Width\nh,pcat_PROD_SLABS,3.0,1.8\n"
+    assert index.build(sheet, {"h": [("sentas", A)]})[A]["format"] == "slab"
 
 
-def test_listings_keep_each_product_s_photos_in_its_own_order_once_each(monkeypatch):
-    from dataclasses import replace
-    from stone_pipeline.config import settings
+def test_listings_take_each_product_s_own_photos_in_its_order_from_the_photo_list(monkeypatch):
     from stone_pipeline.standardise import index
-    slab = replace(settings.category("slab"), pcat_id="pcat_S")
-    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
-    url = "https://b.s3.amazonaws.com/dev/products/improved/sentas/{}.jpg"
-    sheet = ("Product Handle,Product Category 1,Product Thumbnail,Product Image 1,Product Image 2\n"
-             f"one,pcat_S,,{url.format(B)},{url.format(A)}\n"
-             f"two,pcat_S,,{url.format(A)},{url.format(A)}\n"
-             "none,pcat_S,,,\n")
-    assert index.listings(sheet) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [B, A]},
-                                     {"key": "two", "source": "sentas", "format": "slab", "photos": [A]}]
+    _slab_category(monkeypatch)
+    sheet = "Product Handle,Product Category 1,Product Image 1\none,pcat_S,x\ntwo,pcat_S,\nnone,pcat_S,\n"
+    photos = {"one": [("sentas", B), ("sentas", A)], "two": [("sentas", A)], "none": []}
+    assert index.listings(sheet, photos) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [B, A]},
+                                             {"key": "two", "source": "sentas", "format": "slab", "photos": [A]}]
 
 
-def test_a_published_listing_keeps_its_photo_in_the_index(monkeypatch):
-    # once a listing's photo is published, the emitted sheet carries its standardised views, not the scraped photo:
-    # the index must still see that photo (the view's name is the photo's sha), or a later run loses the listing
-    from dataclasses import replace
-    from stone_pipeline.config import settings
+def test_a_published_listing_keeps_all_its_own_photos_whatever_the_sheet_shows(monkeypatch):
+    # once a listing's photo is published, the emitted sheet carries only that photo's standardised views: the photo
+    # list still has every photo of the listing, so a later run can try its further photos (a whole slab after a close-up)
     from stone_pipeline.standardise import index
-    slab = replace(settings.category("slab"), pcat_id="pcat_S")
-    monkeypatch.setattr(settings, "_BY_NAME", {**settings._BY_NAME, slab.name: slab})
-    std = "https://b.s3.amazonaws.com/dev/products/standard/{}/sentas/{}.jpg"
-    sheet = ("Product Handle,Product Category 1,Product Length,Product Width,Product Image 1,Product Image 2,Product Image 3\n"
-             f"one,pcat_S,3.0,1.8,{std.format('main', A)},{std.format('white', A)},{std.format('studio', A)}\n")
-    assert index.listings(sheet) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [A]}]
-    assert index.build(sheet)[A]["source"] == "sentas"
+    _slab_category(monkeypatch)
+    sheet = ("Product Handle,Product Category 1,Product Length,Product Width,Product Image 1,Product Image 2\n"
+             f"one,pcat_S,3.0,1.8,{_std('main', A)},{_std('white', A)}\n")
+    photos = {"one": [("sentas", A), ("sentas", B)]}
+    assert index.listings(sheet, photos) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [A, B]}]
+    assert set(index.build(sheet, photos)) == {A, B}                                      # the GPU job sees both

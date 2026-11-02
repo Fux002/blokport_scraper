@@ -4,9 +4,12 @@ produces the expected artifacts, with determinism (a second run is identical).
 
 from __future__ import annotations
 
+import csv
 import glob
+import json
+from pathlib import Path
 
-from stone_pipeline.config.settings import category
+from stone_pipeline.config.settings import STANDARDISE, category
 from stone_pipeline.io import staging
 from stone_pipeline.run import run_source
 
@@ -24,6 +27,11 @@ def test_polonine_spine_runs_and_is_deterministic(tmp_path, scrape_data_dir):
     rows_a = staging.read_canonical(parquet)
     emitted_a = (glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True)[0])
     csv_a = open(emitted_a, encoding="utf-8").read()
+    # the photo list beside it: one entry per product of the import, each its own photos (the photo process reads it)
+    photos_path = Path(emitted_a).parent / STANDARDISE.PHOTOS_FILE
+    photos_a = photos_path.read_bytes()
+    handles = {r["Product Handle"] for r in csv.DictReader(open(emitted_a, encoding="utf-8-sig"))}
+    assert set(json.loads(photos_a)) == handles and handles
 
     # Determinism: the emitted import CSV is byte-identical on a re-run (section
     # 11, 14A). The internal provenance method may shift from a fuzzy tier to an
@@ -32,6 +40,7 @@ def test_polonine_spine_runs_and_is_deterministic(tmp_path, scrape_data_dir):
     run_source("polonine", outputs_dir=out, state_dir=out, data_dir=scrape_data_dir)
     csv_b = open(glob.glob(str(out / "**" / "medusa_import.csv"), recursive=True)[0], encoding="utf-8").read()
     assert csv_a == csv_b
+    assert photos_path.read_bytes() == photos_a                       # the photo list too, byte for byte
     # the resolved variation ids are stable across the re-run too
     rows_b = staging.read_canonical(parquet)
     ids_a = sorted((r.surrogate_key, r.variation_id) for r in rows_a if r.variation_id)

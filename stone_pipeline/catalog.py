@@ -21,7 +21,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import SETTINGS, STANDARDISE
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.layout import write_sync_md
@@ -448,8 +448,10 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
     # 3_products_<gone>.csv lingering in the upload set (3_products_all is rewritten below).
     for old in to_upload.glob("3_products_*.csv"):
         old.unlink()
+    (to_upload / STANDARDISE.PHOTOS_FILE).unlink(missing_ok=True)
     header: list[str] | None = None
     all_rows: list[list[str]] = []
+    photos: dict[str, list] = {}
     counts: dict[str, int] = {}
     for run_dir in latest_run_dirs(outputs_root):          # newest run per source only
         src_csv = run_dir / "4_products_import" / "medusa_import.csv"
@@ -469,6 +471,14 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
             raise RuntimeError(
                 f"collect_products: source '{source}' product header differs from earlier sources -- "
                 "a column-schema mismatch would mis-align 3_products_all.csv; refusing to merge")
+        # the photo list beside the sheet (emit.write_photos_json): a run without one cannot be published, the photo
+        # process would read its listings' photos from nowhere
+        own = src_csv.parent / STANDARDISE.PHOTOS_FILE
+        if not own.exists():
+            raise RuntimeError(f"collect_products: source '{source}' has no photo list ({own}); re-run it")
+        for handle, refs in json.loads(own.read_text(encoding="utf-8")).items():
+            if photos.setdefault(handle, refs) != refs:
+                raise RuntimeError(f"collect_products: product handle {handle!r} has two different photo lists")
         counts[source] = len(body)
         # atomic (a half-written upload file would be read by verify_consistency right after); NOT
         # sanitized -- this is the Medusa IMPORT file, where a leading "'" would corrupt the data.
@@ -476,6 +486,8 @@ def collect_products(outputs_root: Path) -> dict[str, int]:
         all_rows += body
     if header is not None:
         csvio.write_rows(to_upload / "3_products_all.csv", header, all_rows)
+        body_json = json.dumps(photos, sort_keys=True, separators=(",", ":"))
+        csvio.atomic_write(to_upload / STANDARDISE.PHOTOS_FILE, lambda handle: handle.write(body_json))
     return counts
 
 

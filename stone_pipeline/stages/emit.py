@@ -22,6 +22,7 @@ from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.stages.product_state import inventory_str
+from stone_pipeline.standardise import index
 
 log = logfmt.get_logger("emit")
 
@@ -148,6 +149,21 @@ def write_import_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
     csvio.write_dicts(path, columns, cells, sanitize=False)
     log.info("emit done", extra={"extra_fields": {"rows": len(rows), "columns": len(columns)}})
     return path
+
+
+def write_photos_json(rows: list[CanonicalRow], path: Path) -> Path:
+    """The photo list of the rows the import carries: {Product Handle: [[source, sha], ...]}, each product's own photos in
+    its order (own_photo_keys: the import's image columns carry only its standardised views once one is published).
+    Sorted, compact and atomic: the same rows give the same bytes. One handle with two different photo lists is a
+    ValueError: the photo process would not know whose photos it judges."""
+    photos: dict[str, list] = {}
+    for row in rows:
+        handle, refs = row.handle or "", index.photo_refs(row.own_photo_keys)
+        if photos.setdefault(handle, refs) != refs:
+            raise ValueError(f"product handle {handle!r} has two different photo lists")
+    body = json.dumps(photos, sort_keys=True, separators=(",", ":"))
+    csvio.atomic_write(path, lambda handle: handle.write(body))
+    return Path(path)
 
 
 def write_review_csv(rows: list[CanonicalRow], path: Path) -> Path:

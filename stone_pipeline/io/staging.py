@@ -22,6 +22,7 @@ JSON_FIELDS: frozenset[str] = frozenset(
         "raw_image_urls",
         "port_ids",
         "image_keys",
+        "own_photo_keys",
         "oriented_image_keys",
         "product_image_keys",
         "review_flags",
