@@ -286,6 +286,8 @@ A zero may carry a `reason` (a closed set; an unknown reason is treated as a pla
 
 - none: the supplier no longer lists the product (sold out or dropped). Deactivate it, never delete.
 - `"delisted"`: an operator took the product offline (admin delist). Hide it.
+- `"no_photo"`: the product has no standardised photo yet; always sent with quantity 0. Hide it. It comes back with
+  quantity above 0 and no reason once its photo is published.
 - `"replaced_by_lot"`, with `"lot_code"`: a bundle replaced by its pieces (its lot).
   Deactivate the bundle (never delete: orders and documents reference it) and redirect its page to the
   lot. Served only once at least one piece of that lot exists in Medusa, so the redirect never lands on

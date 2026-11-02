@@ -763,11 +763,11 @@ def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None,
     if source_codes is not None:
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
-    # dead stock = a product whose inventory qty is 0 (populate_discontinued / a drop set it there). A hidden product
-    # (reason 'delisted': no standardised photo yet, or its vendor taken offline) is not dead stock: it comes back, so
-    # only the vendor removal (reason 'vendor_removed') deletes it.
+    # dead stock = a product whose inventory qty is 0 (populate_discontinued / a drop set it there). A product hidden
+    # only until its standardised photo is published (reason 'no_photo') is not dead stock: it comes back, so only the
+    # vendor removal (reason 'vendor_removed') deletes it.
     if reason != "vendor_removed":
-        scope += " AND i.reason IS NOT 'delisted'"
+        scope += " AND i.reason IS NOT 'no_photo'"
     rows = ledger.execute(
         f"SELECT p.sku AS sku, p.source AS source FROM product p JOIN inventory i ON i.sku = p.sku "
         f"WHERE i.qty = 0{scope}", params).fetchall()

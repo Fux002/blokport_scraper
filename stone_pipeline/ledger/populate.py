@@ -295,8 +295,10 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
     """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field).
     `last_synced_qty` is left null, so a freshly populated row is a delta to serve
     (design section 7). Products must be populated first (the sku FK). With images.require_standard_photo on, a product
-    without a standardised photo is delisted (stock 0, reason 'delisted'); one whose photo this run could not tell
-    (standard_photo None: the pool unread or empty, or the stock-only refresh) keeps the listed or delisted state it had.
+    without a standardised photo is hidden: stock 0, reason 'no_photo' (always with stock 0: Blokport hides on stock 0
+    and reads an unknown reason above 0 as a plain quantity; 'delisted' stays the vendor take-offline's, so the
+    dead-stock purge can tell them apart). One whose photo this run could not tell
+    (standard_photo None: the pool unread or empty, or the stock-only refresh) keeps the listed or hidden state it had.
     A change of reason is a delta like a change of stock: hiding or showing a product already at stock 0 is served."""
     rule = SETTINGS.images.require_standard_photo
     now = now_iso()
@@ -306,21 +308,22 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
         resolved = inventory_str(r)
         qty = int(resolved) if str(resolved).isdigit() else 0
         stored = ledger.get("inventory", "sku", sku)
-        was_delisted = bool(stored) and stored["reason"] == "delisted"
-        delisted = rule and (r.standard_photo is False or (r.standard_photo is None and was_delisted))
+        was_hidden = bool(stored) and stored["reason"] == "no_photo"
+        hidden = rule and (r.standard_photo is False or (r.standard_photo is None and was_hidden))
+        reason = "no_photo" if hidden else None
         # keep last_synced_qty on update: it is owned by the ack, not the write-through.
         # Overwriting it to NULL each run would re-serve every product as a delta forever.
         ledger.upsert("inventory", {
             "sku": sku,
-            "qty": 0 if delisted else qty,
+            "qty": 0 if hidden else qty,
             "last_synced_qty": None,   # only on insert (a never-synced row is a delta)
             # a normal scrape write clears any 'delisted' marker: re-scraping a re-enabled vendor republishes it
             # (restock delta, no reason), and a product whose standardised photo is now published comes back
-            "reason": "delisted" if delisted else None,
+            "reason": reason,
             "replaced_by_lot_code": None,   # listed again, so no longer replaced by a lot
             "updated_at": now,
         }, pk=("sku",), keep_on_update=("last_synced_qty",))
-        if stored and stored["reason"] != ("delisted" if delisted else None):
+        if stored and stored["reason"] != reason:
             ledger.execute("UPDATE inventory SET last_synced_qty = NULL WHERE sku = ?", (sku,))
         n += 1
     return n
