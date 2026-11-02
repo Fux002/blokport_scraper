@@ -104,7 +104,7 @@ def _env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer, got {raw!r}") from None
 
 
-def _env_float(name: str, default: float) -> float:
+def _env_float(name: str, default: float | None) -> float | None:
     """Read a float env var: the default ONLY when unset; a malformed override fails loud (see _env_int)."""
     raw = env.getenv(name)
     if raw is None:
@@ -1020,6 +1020,22 @@ class STANDARDISE:
                         "on their racks, the walls, windows, ceiling and lights exactly as they are. Do not add anything."),
     }
     TEST_PREFIX = "standardise-test"   # a test run writes under <env>/<this>/, never into improved/
+    # The photo process (deploy.standardise_run, STANDARDISE_PROCESS.md) continues in the run tags the published results
+    # came from, so no stored verdict, cleaned copy or choice record is orphaned: the standardiser's run over the scraped
+    # photos, and the run over the hosted edit's cleaned copies, which also keeps the choice records and the review list.
+    # Fixed here, not per deployment: a mistyped tag would re-pay every photo and unpublish the folder. Moving to new tags
+    # is a migration (copy the choice records), never a setting. Dev's live choice came from v2-clean, prod's from v2-clean2.
+    RUN_TAG = "v2"
+    CLEAN_TAGS = {"dev": "v2-clean", "prod": "v2-clean2"}
+    CLEAN_TAG = CLEAN_TAGS[ENV_SEGMENT]
+    # On: the runner starts the photo process after each produce that published a product sheet (the owner's button).
+    AUTO = _env_bool("SCRAPER_STANDARDISE_AUTO", False)
+    # The process works (GPU rounds, hosted calls) at most this long, then reports, publishes and relinks: keep it plus a
+    # republish under the runner's ceiling (SCRAPER_RUN_TIMEOUT_SECONDS, 4 h), which kills a run without cleaning up.
+    WORK_SECONDS = _env_int("SCRAPER_STANDARDISE_WORK_SECONDS", 9000)
+    # A run lock older than this belongs to a killed run (the runner stops every run within its 4 h ceiling): taken over.
+    LOCK_STALE_SECONDS = 6 * 3600
+    SPEND_DIR = "spend"                # <env>/<TEST_PREFIX>/<this>/<YYYY-MM>.json: the month's hosted spend per run
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole single slab
     # (<sha>.slab.png) is published as a WebP cut-out and a JSON outline; Blokport's viewer extrudes the outline to the
@@ -1128,15 +1144,16 @@ on two questions:
    invented, nothing smeared or blurred, slab outline unchanged)? (true/false)
 Your whole answer is one JSON object and nothing else:
 {"clean": true|false, "faithful": true|false, "problems": "<short, empty if none>"}"""
-    # Spend: each run stops loud before it would pass this many USD of hosted calls (judge as billed, edits at list price).
-    SPEND_CAP_USD = _env_float("SCRAPER_STANDARDISE_SPEND_CAP_USD", 60.0)   # a bigger run states its own cap
+    # The month's (UTC) hosted budget of an environment, all runs together (judge as billed, edits at list price): a run
+    # stops its hosted calls loud before the month's total would pass it. No default: unset, the process does not start.
+    BUDGET_USD = _env_float("SCRAPER_STANDARDISE_BUDGET_USD", None)
     # A judge call's cost reserved before it is made: its worst case (JUDGE_MAX_TOKENS out at $20/M plus two images in at
-    # $4/M, Opus 5.5), so parallel calls can never together pass the cap; Opus bills ~0.016 on average.
+    # $4/M, Opus 5.5), so parallel calls can never together pass the budget; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14
     CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
     # Off: a run sends no photo to a hosted edit (a judge-only round: GPU, judge, cleaned copies already made).
     CLEAN_ENABLED = _env_bool("SCRAPER_STANDARDISE_CLEAN", True)
-    # A run (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
+    # The process (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
     # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
     # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
     # The size of a run's GPU burst is set per run (a full environment overnight wants more GPUs and smaller slices than

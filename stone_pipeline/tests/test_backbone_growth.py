@@ -234,8 +234,9 @@ def test_put_unapproves_a_decided_leaf_end_to_end():
 
 def test_stages_lists_are_in_sync():
     """runner validates the trigger without importing the heavy pipeline, so it duplicates build.STAGES.
-    Lock the two together so they can never drift."""
-    assert runner.STAGES == build.STAGES
+    Lock the two together so they can never drift. `photos` is the runner's own stage (the standardised-photo process,
+    not a produce)."""
+    assert runner.STAGES == build.STAGES + ("photos",)
     assert "republish" in build.STAGES
 
 

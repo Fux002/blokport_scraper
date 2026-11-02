@@ -1,9 +1,12 @@
-"""A standardise run end to end, with AWS stand-ins: the GPU round is sliced, each retouch job is followed by its
-standardise job, the pool's ceiling is always set back, the steps run in order, a photo left without a result and the
-spend cap are reported, and only the listings' first photos the standardiser has not run go to the GPU."""
+"""The steps of the standardise process, with AWS stand-ins: the GPU round is sliced, each retouch job is followed by its
+standardise job, the pool's ceiling is always set back, the steps run in order inside the work window and the budget,
+a photo left without a result is reported, only the listings' first photos the standardiser has not run go to the GPU,
+and one process runs at a time (a killed one's lock is taken over)."""
 from __future__ import annotations
 
 import json
+import math
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -99,7 +102,7 @@ def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_ba
     batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1")
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", math.inf)
     assert stopped == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
 
 
@@ -112,7 +115,7 @@ def test_a_submit_that_fails_part_way_still_stops_the_jobs_it_submitted(monkeypa
     submit_job = batch.submit_job
     batch.submit_job = lambda **job: submit_job(**job) if len(batch.submitted) < 3 else (_ for _ in ()).throw(RuntimeError("throttled"))
     with pytest.raises(RuntimeError):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, {"sentas": False}, "R1")
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, {"sentas": False}, "R1", math.inf)
     assert stopped == ["job1", "job2", "job3"]
 
 
@@ -143,12 +146,6 @@ def test_a_photo_s_own_failure_is_held_but_a_broken_gpu_or_passing_storage_error
     assert source.after_failure(slow, C.SLICE_MAX_STORAGE_FAILURES, False) == "stop"
 
 
-def test_a_run_of_a_source_with_no_listings_refuses_to_start(monkeypatch):
-    monkeypatch.setattr(runner, "sheet_listings", lambda s3: [_listing(A)])
-    with pytest.raises(ValueError, match="no listings for sentsa"):
-        runner.listings(None, {"sentas", "sentsa"}, "")
-
-
 def test_waiting_asks_until_every_job_has_ended_and_names_the_failed(monkeypatch):
     batch = _Batch(polls=[("RUNNING",), ("SUCCEEDED", "FAILED")])
     slept = []
@@ -166,7 +163,7 @@ def test_the_pool_s_ceiling_is_set_back_even_when_the_round_fails():
 
 def test_a_round_with_nothing_listed_touches_nothing():
     batch = _Batch()
-    assert gpu.run_round(batch, _S3(), "v9", {"sentas": []}, {"sentas": False}, "R1") == []
+    assert gpu.run_round(batch, _S3(), "v9", {"sentas": []}, {"sentas": False}, "R1", math.inf) == []
     assert batch.submitted == [] and batch.ceilings == []
 
 
@@ -194,28 +191,28 @@ def _steps(monkeypatch, cap_at=None):
     done = []
 
     def step(name):
-        def run(sel, spend):
+        def run(sel, spend, deadline):
             done.append(name)
             return [], name == cap_at
         return run
     monkeypatch.setattr(runner.select, "judge_all", step("judge"))
     monkeypatch.setattr(runner.select, "clean_all", step("clean"))
     monkeypatch.setattr(runner.select, "report", lambda sel: done.append("report") or {"chosen": [], "tracked": [], "pending": []})
-    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id: done.append(f"gpu {tag}") or [])
+    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline: done.append(f"gpu {tag}") or [])
     return done
 
 
 def test_the_steps_run_in_order(monkeypatch):
     done = _steps(monkeypatch)
-    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", say=lambda m: None)
-    assert done == ["gpu v9", "judge", "clean", "gpu v9-clean", "judge", "report"] and not problems and not capped
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    assert done == ["gpu v9", "judge", "clean", "gpu v9-clean", "judge", "report"] and not problems
 
 
 def test_with_the_clean_up_off_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     done = _steps(monkeypatch)
-    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", say=lambda m: None)
-    assert done == ["gpu v9", "judge", "gpu v9-clean", "judge", "report"] and not capped
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    assert done == ["gpu v9", "judge", "gpu v9-clean", "judge", "report"]
 
 
 def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_not_see():
@@ -227,50 +224,112 @@ def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_
     assert "at catalog size" in prompt
 
 
-def test_the_run_stops_at_the_spend_cap_and_says_so(monkeypatch):
+def test_the_run_stops_its_steps_at_the_budget_and_still_reports_what_is_chosen(monkeypatch):
     done = _steps(monkeypatch, cap_at="clean")
-    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", say=lambda m: None)
-    assert capped and done == ["gpu v9", "judge", "clean"]
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    assert done == ["gpu v9", "judge", "clean", "report"]
+
+
+def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
+    _steps(monkeypatch)
+    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"]})
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    assert problems == ["2 listings not fully judged (listed in r/summary.json)"]
+
+
+def test_no_step_starts_after_the_work_window_and_the_report_still_runs(monkeypatch):
+    done = _steps(monkeypatch)
+    times = iter([0, 0, 100])                                       # the window (50 s) ends during the judge step
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", 50, say=lambda m: None,
+                             clock=lambda: next(times))
+    assert done == ["gpu v9", "judge", "report"]
+    assert problems == [f"the work window ({C.WORK_SECONDS}s) ended: the next run goes on"]
 
 
 def test_a_listed_photo_left_without_a_result_is_a_problem(monkeypatch):
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: [])
     monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     s = _selection([_listing(A, B)], gpu_round=_round(finished={A}))
-    problems = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A, B]}, "R1")
+    problems = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A, B]}, "R1", math.inf)
     assert problems == [f"sentas {B[:12]}: no result after the GPU round"]
+
+
+def test_a_gpu_round_stopped_at_the_window_is_a_problem_and_the_run_goes_on(monkeypatch):
+    def timed_out(*a):
+        raise TimeoutError("GPU jobs not done after 600s")
+    monkeypatch.setattr(runner.gpu, "run_round", timed_out)
+    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
+    s = _selection([_listing(A)], gpu_round=_round(finished={A}))
+    assert runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf) == ["GPU round v9 stopped: GPU jobs not done after 600s"]
+
+
+def test_a_gpu_round_waits_no_longer_than_the_work_window(monkeypatch):
+    monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
+    limits = []
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: limits.append(limit) or [])
+    gpu.run_round(_Batch(), _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 1000, clock=lambda: 400)
+    assert limits == [600]
 
 
 def test_a_failed_hosted_step_is_run_once_more():
     calls = []
 
-    def flaky(sel, spend):
+    def flaky(sel, spend, deadline):
         calls.append(1)
         return ([("slab-1", "timeout")] if len(calls) == 1 else []), False
-    assert runner.hosted(flaky, None, None) == ([], False) and len(calls) == 2
+    assert runner.hosted(flaky, None, None, math.inf) == ([], False) and len(calls) == 2
 
 
 # --- one run at a time ------------------------------------------------------------------------------------------------
+NOW = datetime(2026, 11, 2, 12, tzinfo=timezone.utc)
+
+
 class _LockS3:
-    """A bucket where a conditional write fails when the key exists, as S3 does."""
+    """A bucket with conditional writes as S3 does them: IfNoneMatch fails when the key exists, IfMatch when its ETag
+    is another. `age` = how long ago the held lock was written."""
 
-    def __init__(self, held=False):
-        self.keys = {runner.LOCK} if held else set()
+    def __init__(self, held=False, age=0):
+        self.locks = {runner.LOCK: {"owner": "R0", "etag": '"e0"', "at": NOW - timedelta(seconds=age)}} if held else {}
 
-    def put_object(self, Bucket, Key, Body, IfNoneMatch):
+    def put_object(self, Bucket, Key, Body, IfNoneMatch=None, IfMatch=None):
         from botocore.exceptions import ClientError
-        if Key in self.keys:
+        held = self.locks.get(Key)
+        if (IfNoneMatch and held) or (IfMatch and (not held or held["etag"] != IfMatch)):
             raise ClientError({"Error": {"Code": "PreconditionFailed"}}, "PutObject")
-        self.keys.add(Key)
+        self.locks[Key] = {"owner": json.loads(Body)["run_id"], "etag": f'"e{len(self.locks) + 1}"', "at": NOW}
+
+    def head_object(self, Bucket, Key):
+        return {"ETag": self.locks[Key]["etag"], "LastModified": self.locks[Key]["at"]}
 
     def delete_object(self, Bucket, Key):
-        self.keys.discard(Key)
+        self.locks.pop(Key, None)
+
+    @property
+    def keys(self):
+        return set(self.locks)
 
 
 def test_a_second_run_refuses_to_start_while_one_holds_the_lock():
     with pytest.raises(runner.RunActive):
-        with runner.exclusive(_LockS3(held=True), {"run_id": "R2"}):
+        with runner.exclusive(_LockS3(held=True, age=C.LOCK_STALE_SECONDS - 60), {"run_id": "R2"}, now=NOW):
             pytest.fail("ran alongside another run")
+
+
+def test_a_lock_left_by_a_killed_run_is_taken_over():
+    s3 = _LockS3(held=True, age=C.LOCK_STALE_SECONDS + 60)
+    with runner.exclusive(s3, {"run_id": "R2"}, now=NOW):
+        assert s3.locks[runner.LOCK]["owner"] == "R2"
+    assert runner.LOCK not in s3.keys
+
+
+def test_of_two_runs_taking_over_a_stale_lock_only_one_does():
+    s3 = _LockS3(held=True, age=C.LOCK_STALE_SECONDS + 60)
+    head = s3.head_object
+    s3.head_object = lambda Bucket, Key: dict(head(Bucket, Key), ETag='"taken-by-another"')   # it moved after we looked
+    with pytest.raises(runner.RunActive):
+        with runner.exclusive(s3, {"run_id": "R3"}, now=NOW):
+            pytest.fail("two runs took over the same lock")
 
 
 def test_the_lock_is_released_even_when_the_run_fails():

@@ -49,7 +49,11 @@ def _now() -> str:
 # Kept in sync with build.STAGES (a test locks the two together). Duplicated here on purpose: the config
 # server validates the :4200 trigger WITHOUT importing the heavy pipeline (build pulls catalog/run/inventory).
 # `republish` = re-run pipeline + catalog from the last scrape, no supplier re-fetch (release approved products).
-STAGES = ("scrape", "catalog", "republish", "inventory", "all")
+# `photos` is this runner's own stage, not a produce: the standardised-photo process (deploy.standardise_run,
+# STANDARDISE_PROCESS.md) over the whole environment, which links what it published with a republish of its own.
+STAGES = ("scrape", "catalog", "republish", "inventory", "all", "photos")
+# The produce stages that publish a product sheet: with STANDARDISE.AUTO on, the photos run follows each of them.
+_PHOTOS_AFTER = ("catalog", "all", "republish")
 
 
 def _public(rec: dict) -> dict:
@@ -152,7 +156,7 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     timer.daemon = True
     timer.start()
     try:
-        for line in proc.stderr:
+        for line in (proc.stdout if proc.stderr is None else proc.stderr):   # the photos run: one merged stream
             sys.stderr.write(line)
             sys.stderr.flush()
             tail.append(line.rstrip("\n"))
@@ -178,18 +182,36 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     _persist_run(rec)                                   # durable `last` across a restart
     # An inventory run is a stock refresh, NOT a validated produce, so it must not advance the admission
     # consistency streak nor overwrite the latest full-run diagnostic (matches produce._finalize_control_plane).
-    if rec.get("stage") != "inventory":
+    # Neither is a photos run (its own republish finalizes the control plane inside produce).
+    if rec.get("stage") not in ("inventory", "photos"):
         _persist_diagnostics()                          # per-source layer diagnostics -> config.db (for :4200)
         _evaluate_admission()                           # record consistency history + auto-demote on drift
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
+    _follow_up(rec)
+
+
+def _follow_up(rec: dict) -> None:
+    """After a produce that published a product sheet, the photos run (with STANDARDISE.AUTO on): its own run, on the
+    sheet this produce just published. A run slot taken in between (an op claimed it) is logged; the next produce
+    starts it again."""
+    from stone_pipeline.config.settings import STANDARDISE
+    if not (STANDARDISE.AUTO and rec.get("status") == "succeeded" and rec.get("stage") in _PHOTOS_AFTER):
+        return
+    follow, code = start_run(stage="photos")
+    if code != 202:
+        log.error("photos run not started after the produce", extra={"extra_fields": {
+            "after": rec["run_id"], "status": code, "error": follow.get("error")}})
 
 
 def _build_command(rec: dict) -> list[str]:
-    """The produce subprocess for this run. FULL produce = stone_pipeline.produce (fetch export inputs
+    """The subprocess for this run. A photos run is the standardised-photo process (unbuffered: its report is its
+    stdout). Every other stage is a produce: FULL produce = stone_pipeline.produce (fetch export inputs
     -> LIVE scrape -> build), NOT bare `stone_pipeline.build`: build assumes data/ is already scraped
     (the laptop path), so on a fresh host (a new ECS task with empty data/) it would produce nothing.
     produce guarantees the inputs first. `--stage` scopes HOW FAR (scrape / catalog / all) and
     `--sources` scopes WHICH scrapers (omitted -> every enabled source)."""
+    if rec.get("stage") == "photos":
+        return [sys.executable, "-u", "-m", "deploy.standardise_run"]
     cmd = [sys.executable, "-m", "stone_pipeline.produce", "--stage", rec.get("stage", "all")]
     if rec.get("scope"):
         cmd += ["--sources", ",".join(rec["scope"])]
@@ -197,13 +219,16 @@ def _build_command(rec: dict) -> list[str]:
 
 
 def _launch_local(rec: dict) -> None:
+    photos = rec.get("stage") == "photos"
     proc = subprocess.Popen(
         _build_command(rec),
         # the run id reaches the deliverables manifest produce publishes
         env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1", "SCRAPER_RUN_ID": rec["run_id"]},
-        # stdout is the image-progress print() noise (drop it); stderr carries the structured logfmt logs
-        # + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's cause.
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        # A produce's stdout is the image-progress print() noise (drop it); its stderr carries the structured logfmt
+        # logs + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's cause. The photo
+        # process reports on stdout, so its two streams are captured as one.
+        stdout=subprocess.PIPE if photos else subprocess.DEVNULL,
+        stderr=subprocess.STDOUT if photos else subprocess.PIPE, text=True)
     threading.Thread(target=_watch_local, args=(rec, proc), daemon=True).start()
 
 
@@ -219,6 +244,8 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
     stage = (stage or "all").strip().lower()
     if stage not in STAGES:
         return {"error": f"unknown stage {stage!r}; expected one of {', '.join(STAGES)}"}, 400
+    if stage == "photos" and sources:
+        return {"error": "the photos stage works on every listing without a chosen photo; it takes no sources"}, 400
     scope = None
     if sources:
         known = _resolve_sources(sources)
@@ -234,9 +261,11 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
         if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
             return _public(_runs[_current_id]), 409
         run_id = _now().translate({ord(c): None for c in ":-.T"})[:17]
+        # a photos run is the environment's, no source's: it stamps no source's 'last run'
+        shown = [] if stage == "photos" else scope if scope is not None else _resolve_sources(None)
         rec = {"run_id": run_id, "status": "queued",
                "started_at": _now(), "finished_at": None, "error": None,
-               "sources": scope if scope is not None else _resolve_sources(None),
+               "sources": shown,
                "stage": stage, "scope": scope, "progress": {}}
         _runs[run_id] = rec
         _current_id = run_id                       # claim the run slot FIRST -> run_in_progress() is now True

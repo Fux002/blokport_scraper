@@ -9,7 +9,8 @@ reported and never stops the others.
           reflections or marks, or held by the retouch or logo step) are edited by each CLEAN_MODELS model in turn until
           a copy passes the clean check; that copy becomes <clean tag>/<src>/cleaned/<sha>.jpg
   report  from the stored answers only: each listing's choice record (<clean tag>/chosen/<listing>.json, what publish
-          reads) and <clean tag>/tracked.csv (this run's listings with no good photo, what happened to each photo)
+          reads) and <clean tag>/tracked.csv (this run's listings with no good photo, what happened to each photo;
+          the process works every listing without a choice, so this is the environment's whole review list)
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import io
 import json
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -41,11 +43,14 @@ class Halted(RuntimeError):
 
 
 class Spend:
-    """Hosted spend of this run: a call's price is reserved before it is made and settled to what it cost, so parallel
-    calls can never together pass the cap."""
+    """Hosted spend against the month's budget: `before` is what the month's earlier runs spent, then this run's calls.
+    A call's price is reserved before it is made and settled to what it cost, so parallel calls can never together pass
+    the budget. save(total) keeps this run's total after every change, a reserve counting as spent until it is settled,
+    so a run that dies leaves an upper bound of what it spent, never too little."""
 
-    def __init__(self, cap):
-        self.cap, self.spent, self.reserved, self.halted = cap, 0.0, 0.0, False
+    def __init__(self, budget, before=0.0, save=None):
+        self.budget, self.before, self.save = budget, before, save
+        self.spent, self.reserved, self.halted, self.capped = 0.0, 0.0, False, False
         self._lock = threading.Lock()
 
     def halt(self):
@@ -57,14 +62,22 @@ class Spend:
         with self._lock:
             if self.halted:
                 raise Halted("the run is stopping")
-            if self.spent + self.reserved + usd > self.cap:
-                raise SpendCapReached(f"hosted spend would pass the cap of ${self.cap:.2f} (spent ${self.spent:.2f})")
+            if self.before + self.spent + self.reserved + usd > self.budget:
+                self.capped = True
+                raise SpendCapReached(f"hosted spend would pass the month's budget of ${self.budget:.2f} "
+                                      f"(spent ${self.before + self.spent:.2f})")
             self.reserved += usd
+            self._keep()
 
     def settle(self, reserved, cost):
         with self._lock:
             self.reserved -= reserved
             self.spent += cost
+            self._keep()
+
+    def _keep(self):
+        if self.save is not None:
+            self.save(self.spent + self.reserved)
 
 
 class Round:
@@ -341,14 +354,15 @@ def _by_source(pairs):
     return out
 
 
-def judge_all(sel, spend):
-    """(failures, cap reached): every listing judged until its first pass."""
-    return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.exclude, spend))
+def judge_all(sel, spend, deadline):
+    """(failures, stopped): every listing judged until its first pass, each started before the deadline."""
+    return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.exclude, spend), deadline)
 
 
-def clean_all(sel, spend):
-    """(failures, cap reached): every listing with no pass gets a cleaned copy where one can be made."""
-    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.exclude, spend))
+def clean_all(sel, spend, deadline):
+    """(failures, stopped): every listing with no pass gets a cleaned copy where one can be made, each started before the
+    deadline."""
+    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.exclude, spend), deadline)
 
 
 def report(sel):
@@ -378,14 +392,15 @@ def report(sel):
     return {"chosen": chosen, "tracked": tracked, "pending": pending}
 
 
-def _each(listings, work):
-    """work(listing) on every listing, WORKERS at a time: (failures, cap reached). A failure is reported and the rest go
-    on; reaching the spend cap stops what has not started."""
+def _each(listings, work, deadline, clock=time.monotonic):
+    """work(listing) on every listing, WORKERS at a time: (failures, stopped). A failure is reported and the rest go on;
+    reaching the budget (or a stop) stops what has not started. A listing not started by the deadline (the process's
+    work window, on `clock`) is left as it is: the report counts it pending and the next run goes on with it."""
     stop = threading.Event()
     failures = []
 
     def one(listing):
-        if stop.is_set():
+        if stop.is_set() or clock() >= deadline:
             return
         try:
             work(listing)

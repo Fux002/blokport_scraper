@@ -29,7 +29,7 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 ### Run (the "produce" trigger)
 | Method | Path | Purpose | Body / response |
 |---|---|---|---|
-| `POST` | `/config/v1/run` | trigger a produce | `{ "sources"?: [...], "stage"?: "scrape"\|"catalog"\|"republish"\|"inventory"\|"all" }` -> `202` + run record, or `409` in-flight |
+| `POST` | `/config/v1/run` | trigger a produce | `{ "sources"?: [...], "stage"?: "scrape"\|"catalog"\|"republish"\|"inventory"\|"all"\|"photos" }` -> `202` + run record, or `409` in-flight. `photos` (no sources) is the standardised-photo process (STANDARDISE_PROCESS.md); with it switched on it also follows every successful `catalog` / `all` / `republish` as its own run |
 | `GET` | `/config/v1/run` | current + last run | `{ "current": <run>\|null, "last": <run>\|null }` |
 | `GET` | `/config/v1/run/<run_id>` | one run by id | `<run>` or `404` |
 

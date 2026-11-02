@@ -28,8 +28,9 @@ owner presses Run (or Republish)            POST /config/v1/run {"stage": "all"}
        9. publish     the chosen photos' views and 3D slabs into <env>/products/standard/, copying only what
                       changed and removing what is no longer chosen
       10. unlock
-      11. relink      when step 9 changed anything: produce --stage republish, in the same run, so the new
-                      photos are linked and the listings go live in the same button press
+      11. relink      when step 9 changed anything: produce --stage republish, inside the same process (never a
+                      child, so a run the runner stops takes it along), so the new photos are linked and the
+                      listings go live in the same button press
 ```
 
 Every step reads back what earlier runs stored (verdicts, cleaned copies, paid edit requests, GPU results), so a run

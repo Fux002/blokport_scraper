@@ -101,9 +101,10 @@ def wait_limit(n_slices):
     return C.RUN_MAX_WAIT_SECONDS * -(-n_slices // at_once)
 
 
-def run_round(batch, s3, tag, todo, watermarked, run_id):
+def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, clock=time.monotonic):
     """Every listed photo through retouch and standardise under `tag`: [(job name, why)] of failed jobs. No jobs, no
-    ceiling change, when nothing is listed."""
+    ceiling change, when nothing is listed. The round waits until the process's deadline (its work window, on `clock`) at
+    most: then its jobs are stopped (TimeoutError), every photo they finished stays, the next run goes on."""
     if not any(todo.values()):
         return []
     queue, jobdef = target()
@@ -111,7 +112,7 @@ def run_round(batch, s3, tag, todo, watermarked, run_id):
         ids = []
         try:
             submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
-            return wait(batch, ids, wait_limit(len(slices(todo))))
+            return wait(batch, ids, min(wait_limit(len(slices(todo))), deadline - clock()))
         except BaseException as exc:
             stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
             raise

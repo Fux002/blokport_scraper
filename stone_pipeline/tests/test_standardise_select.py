@@ -4,6 +4,7 @@ and every answer is kept so a re-run never pays twice. No network: the hosted ca
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -312,7 +313,7 @@ def test_a_stop_cancels_the_listings_that_have_not_started(monkeypatch):
         if listing["key"] == "l0":
             raise SystemExit("stopped by signal 15")
     with pytest.raises(SystemExit):
-        sel._each([_listing(A, key=f"l{i}") for i in range(20)], work)
+        sel._each([_listing(A, key=f"l{i}") for i in range(20)], work, math.inf)
     assert len(done) < 20
 
 
@@ -332,6 +333,28 @@ def test_an_edit_the_model_failed_for_good_is_a_failed_attempt_and_the_next_mode
     assert edits == ["nano2", "kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
     assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["passes"] is False
 
+
+
+def test_no_listing_starts_after_the_work_window():
+    started = []
+    failures, stopped = sel._each([_listing(A, key=f"l{i}") for i in range(3)], started.append, 10, clock=lambda: 11)
+    assert started == [] and failures == [] and not stopped                # not a stop: the listings are simply pending
+
+
+def test_the_budget_counts_what_earlier_runs_of_the_month_spent():
+    spend = sel.Spend(1.0, before=0.9)
+    with pytest.raises(sel.SpendCapReached):
+        spend.reserve(0.14)
+    assert spend.capped
+    assert not sel.Spend(1.0, before=0.5).capped
+
+
+def test_the_run_s_total_is_kept_after_every_change_a_reserve_counting_as_spent():
+    kept = []
+    spend = sel.Spend(1.0, save=kept.append)
+    spend.reserve(0.14)
+    spend.settle(0.14, 0.02)
+    assert kept == [pytest.approx(0.14), pytest.approx(0.02)]
 
 
 def test_a_halted_spend_lets_no_call_start():
