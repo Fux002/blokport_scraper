@@ -213,17 +213,26 @@ def sheet_and_photos(client):
     return _sheet(client), _photo_list(client)
 
 
-def _photo_keys(client, src, photos):
-    """The photos of this run: those of `photos` (sheet_photos) scraped for src, stable order (slices rely on it),
-    ONLY_KEY (an S3 JSON list of shas: a run of chosen photos), SAMPLE and the slice applied."""
-    sample = int(os.environ.get("SAMPLE", "0"))
-    offset, count = int(os.environ.get("SLICE_OFFSET", "0")), int(os.environ.get("SLICE_COUNT", "0"))
-    listed = os.environ.get("ONLY_KEY", "").strip()
+def scraped_keys(client, src):
+    """Every scraped photo key of src, in a stable order (slices rely on it)."""
     keys = []
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.scraped_prefix(src)):
         keys.extend(o["Key"] for o in page.get("Contents", []))
-    keys.sort()
-    known = only([k for k in keys if imagestore.sha_from_url(k) in photos], json.loads(_get(client, listed)) if listed else None)
+    return sorted(keys)
+
+
+def listed_shas(client):
+    """The shas ONLY_KEY lists (an S3 JSON list of shas: a run of chosen photos), or None when it is not set."""
+    listed = os.environ.get("ONLY_KEY", "").strip()
+    return json.loads(_get(client, listed)) if listed else None
+
+
+def _photo_keys(client, src, photos):
+    """The photos of this run: those of `photos` (sheet_photos) scraped for src, stable order (slices rely on it),
+    ONLY_KEY, SAMPLE and the slice applied."""
+    sample = int(os.environ.get("SAMPLE", "0"))
+    offset, count = int(os.environ.get("SLICE_OFFSET", "0")), int(os.environ.get("SLICE_COUNT", "0"))
+    known = only([k for k in scraped_keys(client, src) if imagestore.sha_from_url(k) in photos], listed_shas(client))
     if sample:
         known = known[:sample]
     return known[offset:offset + count] if count else known[offset:]
