@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "92ae05f7d132e77c364cb00dc7f24a70778a07d8"     # delist guard counts live products only (#462) + safe review undo (#461)
+prod_image_tag     = "3d4b863a28b16429eb8750f98f6269af892f4288"     # standardised photos + 3D slab (#467 #470 #472 #473), own variants only (#471), sync retry backoff (#468)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # enhance fits the input to the target before ESRGAN (#448): ~4x less GPU work on large originals
 
 # Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
