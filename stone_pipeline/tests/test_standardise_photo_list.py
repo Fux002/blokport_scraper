@@ -133,13 +133,48 @@ def test_the_catalog_gathers_the_photo_lists_into_one_beside_the_product_sheet(t
     assert C.PHOTOS_KEY.rsplit("/", 1) == [C.SHEET_KEY.rsplit("/", 1)[0], C.PHOTOS_FILE]   # beside the sheet on S3
 
 
-def test_a_run_without_its_photo_list_stops_the_catalog(tmp_path, monkeypatch):
+def test_a_run_without_its_photo_list_never_blocks_the_catalog_and_is_named_loud(tmp_path, monkeypatch, caplog):
+    # a catalog-only run after the deploy, a scoped produce, a source whose scrape aborted: the other sources' sheet and
+    # photo list are still published; the photo process is the gate (a sheet listing missing from the list fails it)
+    import logging
     from stone_pipeline import catalog
     _to_upload(monkeypatch, tmp_path / "to_upload")
-    d = _run_dir(tmp_path / "out", "zucchi", ["z1"])
-    (d / "4_products_import" / C.PHOTOS_FILE).unlink()
-    with pytest.raises(RuntimeError, match="photo list"):
-        catalog.collect_products(tmp_path / "out")
+    old = _run_dir(tmp_path / "out", "zucchi", ["z1"])
+    (old / "4_products_import" / C.PHOTOS_FILE).unlink()
+    _run_dir(tmp_path / "out", "sentas", ["s1"])
+    with caplog.at_level(logging.WARNING):
+        counts = catalog.collect_products(tmp_path / "out")
+    assert counts == {"sentas": 1, "zucchi": 1}
+    assert json.loads((tmp_path / "to_upload" / C.PHOTOS_FILE).read_text()) == {"s1": [["sentas", A]]}
+    assert any("zucchi" in r.getMessage() and r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_the_photo_list_lives_outside_the_product_sheets_names():
+    assert C.PHOTOS_FILE == "standardise_photo_list.json" and not C.PHOTOS_FILE.startswith("3_products_")
+
+
+def test_a_reset_removes_the_photo_list_with_the_product_sheets_locally_and_on_s3(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import boto3
+    from stone_pipeline import lifecycle
+    from stone_pipeline.config import settings
+    up = tmp_path / "to_upload"
+    up.mkdir()
+    for name in ("3_products_all.csv", C.PHOTOS_FILE, "1_variants_full.csv"):
+        (up / name).write_text("x")
+    monkeypatch.setattr(settings, "SETTINGS", SimpleNamespace(paths=SimpleNamespace(to_upload_dir=up)))
+    deleted = []
+
+    class _Bucket:
+        def list_objects_v2(self, Bucket, Prefix):
+            return {"Contents": [{"Key": f"{Prefix}{n}"} for n in ("3_products_all.csv", C.PHOTOS_FILE, "1_variants_full.csv")]}
+
+        def delete_objects(self, Bucket, Delete):
+            deleted.extend(o["Key"].rsplit("/", 1)[-1] for o in Delete["Objects"])
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _Bucket())
+    out = lifecycle._prune_stale_product_exports()
+    assert sorted(p.name for p in up.iterdir()) == ["1_variants_full.csv"] and out["local"] == 2
+    assert sorted(deleted) == sorted(["3_products_all.csv", C.PHOTOS_FILE]) and out["s3"] == 2
 
 
 def test_one_handle_in_two_sources_stops_the_catalog(tmp_path, monkeypatch):

@@ -61,17 +61,21 @@ take their first pass as before.
 
 A listing's photos come from the photo list, never from the sheet's image columns: once a listing is published its
 sheet row carries only its chosen photo's views. The produce writes the list beside the sheet,
-`<env>/scraper/to_upload/3_products_photos.json` (`{Product Handle: [[source, sha], ...]}`, each product's own hosted
+`<env>/scraper/to_upload/standardise_photo_list.json` (`{Product Handle: [[source, sha], ...]}`, each product's own hosted
 photos in its order, kept by the image stage before the standardised views replace them; sorted, the same bytes on a
 re-run, listed in the deliverables manifest like every file there). The pick step and the GPU job both read it. A list
 that is missing or malformed, or a sheet listing it does not have, stops the run loud; there is no fallback to the
-sheet. The catalog refuses to publish a sheet when a source's run has no list.
+sheet. A source whose latest run has no list (a run made before the list existed, restored after a roll) never blocks
+the catalog: its source is left out of the list and named in a warning, and the photo process stops on its listings
+until a produce runs that source again. A reset removes the list with the product sheets.
 
 An open book made before its halves had a slab (a side view, no slab.png) is outdated: the next run sends it to the
 GPU once, which completes it from a re-run (its close view, then its slab, last). What was judged and published (main,
 white, studio) stays as it is, so its verdict and choice stand and no judge call is made; publish then adds its close
-view and 3D slab. A re-run that is no open book this time adds nothing and is noted in `noslab/<sha>.json`, so it is
-never run again. Nothing is removed by hand.
+view and 3D slab. A re-run that is no open book this time, or that fails for the photo itself, adds nothing and is
+noted in `noslab/<sha>.json`, so it is never run again; a judged result is never held. A completion cut short takes its
+close view off again while its slab is missing, and a passing storage error leaves it for the next run. Nothing is
+removed by hand.
 
 ## Trigger
 
@@ -197,7 +201,7 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
   it from the published folder and relinks; the listing is hidden until another of its photos passes (its other
   photos are in the photo list, so the same run can try them).
 - The photo list missing or malformed, or a sheet listing missing from it: the run fails loud before any paid step; a
-  full produce writes it again.
+  produce that runs the sources named in the catalog's warning writes it again.
 - A listing that left the sheet keeps its choice record and published files (harmless: products link only their own
   photos); housekeeping is an open item.
 

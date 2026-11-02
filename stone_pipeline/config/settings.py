@@ -1063,7 +1063,7 @@ class STANDARDISE:
     # Each listing's own photos in its order ({Product Handle: [[source, sha], ...]}), written by the produce beside the
     # sheet: the sheet's image columns carry only the chosen photo's views once it is published, so the photo process
     # and its GPU job read the listing's photos from here.
-    PHOTOS_FILE = "3_products_photos.json"
+    PHOTOS_FILE = "standardise_photo_list.json"      # outside 3_products_*: no importer glob or source name meets it
     PHOTOS_KEY = "scraper/to_upload/" + PHOTOS_FILE
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
     # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;

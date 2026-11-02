@@ -680,3 +680,74 @@ def test_an_open_book_that_is_no_open_book_on_its_rerun_is_marked_tried_and_neve
     result = Result(kind="close-up", images={"main": img, "white": img}) if res == "close-up" else Result(held="no outline")
     assert src.complete(s3, GPU, A, result) == "no slab"
     assert s3.written == [f"{GPU}noslab/{A}.json"] and src.finished(s3, GPU, A)
+
+
+# --- review D1: a failing completion never holds a judged, published result ---------------------------------------------
+class _Slice(_Written):
+    """A bucket in a dict as the GPU job sees it: list, get, put, delete; put_object fails for the keys in `failing`."""
+
+    def __init__(self, objects, failing=None):
+        super().__init__(objects)
+        self.failing = failing or {}
+
+    def put_object(self, Bucket, Key, Body, ContentType):
+        if Key in self.failing:
+            raise self.failing[Key]
+        super().put_object(Bucket, Key, Body, ContentType)
+
+    def delete_object(self, Bucket, Key):
+        self.written.append(f"delete {Key}")
+        self.objects.pop(Key, None)
+
+
+def _completing(monkeypatch, s3, standardise):
+    """main() over one old open book (A) of slice 0 of sentas, with the models and the photo steps stood in."""
+    import numpy as np
+    from deploy import standardise_source as src
+    monkeypatch.setenv("SRC", "sentas")
+    monkeypatch.setenv("RUN_TAG", "v9")
+    monkeypatch.setattr(src.boto3, "client", lambda *a, **k: s3)
+    monkeypatch.setattr(src, "sheet_photos", lambda client: {A: {"source": "sentas", "key": "k", "format": "slab", "size": None}})
+    monkeypatch.setattr(src, "_photo_keys", lambda client, s, photos: [f"dev/products/scraped/sentas/{A}.jpg"])
+    monkeypatch.setattr(src.models, "load", lambda survey_only: None)
+    monkeypatch.setattr(src, "_get", lambda client, key: b"jpg")
+    monkeypatch.setattr(src.photo, "decode", lambda data: np.zeros((20, 30, 3), np.uint8))
+    monkeypatch.setattr(src.photo, "standardise", standardise)
+    return src.main()
+
+
+def test_a_completion_that_crashes_is_noted_tried_never_held_over_the_published_result(monkeypatch):
+    s3 = _Slice(_open_book())
+
+    def crash(*a, **k):
+        raise ValueError("the outline went wrong")
+    assert _completing(monkeypatch, s3, crash) == 0
+    assert f"{GPU}held/{A}.json" not in s3.objects                                   # the judged result stays usable
+    assert "the outline went wrong" in json.loads(s3.objects[f"{GPU}noslab/{A}.json"])["reason"]
+    assert all(f"{GPU}{A}.{v}.jpg" in s3.objects for v in ("main", "white", "studio"))
+
+
+def test_a_completion_cut_short_by_a_passing_storage_error_leaves_no_half_and_is_retried(monkeypatch):
+    import numpy as np
+    from botocore.exceptions import ClientError
+    from stone_pipeline.standardise.photo import Result
+    slow = ClientError({"Error": {"Code": "SlowDown"}}, "PutObject")
+    s3 = _Slice(_open_book(), failing={f"{GPU}{A}.slab.png": slow})
+    img = np.zeros((20, 30, 3), np.uint8)
+    half = (img, np.ones((20, 30), np.float32))
+    book = lambda *a, **k: Result(kind="open book", images={"main": img, "white": img, "studio": img, "close": img}, slab=half)
+    assert _completing(monkeypatch, s3, book) == 0
+    assert f"{GPU}{A}.close.jpg" not in s3.objects                                   # never published half done
+    assert f"{GPU}noslab/{A}.json" not in s3.objects and f"{GPU}held/{A}.json" not in s3.objects   # the next run retries
+
+
+def test_a_completion_cut_short_removes_its_close_view_only_while_the_slab_is_missing():
+    import numpy as np
+    from deploy import standardise_source as src
+    from stone_pipeline.standardise.photo import Result
+    img = np.zeros((20, 30, 3), np.uint8)
+    res = Result(kind="open book", images={"close": img}, slab=(img, np.ones((20, 30), np.float32)))
+    s3 = _Slice(_open_book(), failing={f"{GPU}{A}.slab.png": TimeoutError("lost")})
+    with pytest.raises(TimeoutError):
+        src.complete(s3, GPU, A, res)
+    assert s3.written == [f"{GPU}{A}.close.jpg", f"delete {GPU}{A}.close.jpg"]

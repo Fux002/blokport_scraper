@@ -18,6 +18,7 @@ reported and never stops the others.
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import json
 import re
@@ -130,9 +131,10 @@ class Round:
         self.attempts = _attempts([k for k in keys if not k.endswith(".request.json")], ".json")
         self._locks, self._guard = {}, threading.Lock()
 
+    @functools.cached_property
     def outdated(self):
         """The results made before an open book's halves had their slab (a side view, no slab, not tried again): the GPU
-        completes each once (deploy.standardise_source.complete)."""
+        completes each once (deploy.standardise_source.complete). Worked out once per Round: none of its sets change."""
         return (self.finished & self.studio) - self.slabs - self.noslab - self.held
 
     def lock(self, sha):
@@ -396,7 +398,7 @@ class Selection:
 
 def needs_gpu(rnd, sha):
     """Whether the GPU works on this photo: no result yet, or an outdated one (Round.outdated)."""
-    return sha not in rnd.finished | rnd.held or sha in rnd.outdated()
+    return sha not in rnd.finished | rnd.held or sha in rnd.outdated
 
 
 def _by_source(pairs):

@@ -443,7 +443,7 @@ LAST, `manifest.json` next to them:
   against the hash you last loaded, never on timestamps.
 - The former `2_valid_combinations_update.csv` was the delta since the scraper's last BUILD,
   not since your last load, and is retired; ignore it until it stops being written.
-- `3_products_photos.json` (each product's own photos, for the scraper's photo process) is
+- `standardise_photo_list.json` (each product's own photos, for the scraper's photo process) is
   listed like every file there; it is not an import file, ignore it.
 
 ---

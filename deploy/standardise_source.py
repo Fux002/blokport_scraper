@@ -66,16 +66,28 @@ def finished(client, out, sha):
 def complete(client, out, sha, res):
     """Complete an outdated open-book result from its re-run: its close view, then its slab (written last: the result is
     complete). What was judged and published (main, white, studio) stays as it is, so its verdict and choice stand. A
-    re-run that is no open book this time adds nothing and is noted in noslab/, so it is never run again."""
+    completion cut short takes its close view off again while the slab is missing, so half of one is never published.
+    A re-run that is no open book this time adds nothing and is noted in noslab/, so it is never run again."""
     if res.kind == "open book" and res.slab:
-        if "close" in res.images:
-            client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg", Body=_encode(res.images["close"]),
-                              ContentType="image/jpeg")
-        client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
+        try:
+            if "close" in res.images:
+                client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg", Body=_encode(res.images["close"]),
+                                  ContentType="image/jpeg")
+            client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
+        except BaseException:
+            if not _exists(client, f"{out}{sha}.slab.png"):
+                client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg")
+            raise
         return "completed"
-    client.put_object(Bucket=S3_BUCKET, Key=f"{out}noslab/{sha}.json", ContentType="application/json",
-                      Body=json.dumps({"reason": res.held or f"the re-run is a {res.kind}, no open book"}, sort_keys=True).encode())
+    tried(client, out, sha, res.held or f"the re-run is a {res.kind}, no open book")
     return "no slab"
+
+
+def tried(client, out, sha, reason):
+    """Note that an outdated result was tried and gave no slab (noslab/<sha>.json), so it is never run again. Never
+    held/: the result is judged and may be published, and a hold would take it from every listing that has it."""
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}noslab/{sha}.json", ContentType="application/json",
+                      Body=json.dumps({"reason": reason}, sort_keys=True).encode())
 
 
 def photo_source(client, out, key, sha):
@@ -238,6 +250,7 @@ def main() -> int:
         sha = imagestore.sha_from_url(key)
         info = photos[sha]
         started = time.time()
+        redo = False                                   # this photo is an outdated result being completed
         try:
             if not survey and finished(client, out, sha):
                 tally["already done"] += 1
@@ -290,8 +303,12 @@ def main() -> int:
                 print(f"==> {src}: slice stopped, the next run retries its photos", flush=True)
                 return 1
             if action == "hold" and not survey:
-                client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
-                                  Body=json.dumps({"reason": f"error: {type(exc).__name__}: {exc}"[:500], "kind": ""}).encode())
+                why = f"error: {type(exc).__name__}: {exc}"[:500]
+                if redo:                               # a judged result is never held over: tried, not run again
+                    tried(client, out, sha, why)
+                else:
+                    client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
+                                      Body=json.dumps({"reason": why, "kind": ""}).encode())
         spent.append(time.time() - started)
         if i % 10 == 0:
             print(f"   [{i + 1}/{len(sliced)}] {dict(tally)} median {np.median(spent):.1f}s per photo", flush=True)

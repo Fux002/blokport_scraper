@@ -650,3 +650,9 @@ def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkey
     s = _selection([_listing(A)], gpu_round=_round(finished={A}, studio={A}))
     problems, _ = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10))
     assert problems == [f"sentas {A[:12]}: no result after the GPU round"]
+
+
+def test_a_round_s_outdated_results_are_worked_out_once_not_per_candidate():
+    r = sel_mod.Round.__new__(sel_mod.Round)
+    r.finished, r.studio, r.slabs, r.noslab, r.held = {A, B}, {A, B}, {B}, set(), set()
+    assert r.outdated == {A} and r.outdated is r.outdated
