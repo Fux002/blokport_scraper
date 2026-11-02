@@ -1045,7 +1045,9 @@ class STANDARDISE:
     JUDGE_MAX_TOKENS = 6000            # reasoning included
     JUDGE_LONG_SIDE, JUDGE_JPEG_QUALITY = 1024, 88   # each image is sent at this long side
     JUDGE_TIMEOUT = 300                # s per call
-    JUDGE_MAX_PER_LISTING = 3
+    # A run over the listings still without a good photo goes further down each listing (prod 2026-11-02: 365 such listings
+    # had 2,025 photos past the third, never tried): a photo costs a GPU pass and one judge call, far less than an edit.
+    JUDGE_MAX_PER_LISTING = _env_int("SCRAPER_STANDARDISE_JUDGE_MAX", 3)
     JUDGE_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark", "not_one_slab", "wrong_shape", "other")
     JUDGE_PROMPT = """You are the last quality check before a natural-stone product photo is published in a marketplace catalog.
 Image 1 is the supplier's original photo. Image 2 is our processed catalog image of it.
@@ -1075,9 +1077,10 @@ Your whole answer is one JSON object and nothing else:
 {"verdict": "pass" | "fail", "problems": [{"kind": "<one of the kinds>", "where": "<short>"}]}"""
     # A listing with no photo that passes: the hosted edit models clean ONE of its photos (the first that can be fixed by
     # cleaning) in turn until a copy passes the clean check; that copy then goes through the standardiser like any photo and
-    # the judge again. Order from the 20-photo test (user 2026-11-01): Kontext 12, Nano Banana 2 12, FLUX 3 edit 8 of 20
-    # clean and faithful; the three in turn 16. The queue, not the sync gateway: a slow model outlasts it (504) and the
-    # paid call is lost.
+    # the judge again. Order by cost per passed copy (prod run 2026-11-02, 1,013 photos): Nano Banana 2 ($0.12) passed 55%
+    # even on the photos Kontext had failed, Kontext ($0.15) 31% first, FLUX 3 ($0.15) 37% last; the cheapest and most
+    # successful goes first (the three in turn reach the same photos either way). The queue, not the sync gateway: a slow
+    # model outlasts it (504) and the paid call is lost.
     CLEAN_QUEUE_URL = "https://queue.fal.run"
     # Straps too (sample 2026-11-01: 27 of 42 failures were the GPU's own strap fills, light bands and clamp remnants, on
     # copies the hosted edit had otherwise cleaned): the hosted edit takes off everything foreign, so the retouch finds
@@ -1092,8 +1095,8 @@ Your whole answer is one JSON object and nothing else:
     # the current instruction; a passed one stands.
     CLEAN_VERSION = 2
     CLEAN_MODELS = (                   # (name, endpoint, extra input); the photo goes in as image_url or image_urls
-        ("kontext", "fal-ai/flux-pro/kontext", {"output_format": "jpeg", "seed": 1}),
         ("nano2", "fal-ai/nano-banana-2/edit", {"resolution": "2K", "output_format": "jpeg", "seed": 1}),
+        ("kontext", "fal-ai/flux-pro/kontext", {"output_format": "jpeg", "seed": 1}),
         ("flux3", "blackforestlabs/flux-3/edit-image", {"resolution": "1.5k", "output_format": "jpeg"}),
     )
     CLEAN_SINGLE_IMAGE = ("kontext",)  # these take one image_url; the others a list, image_urls
