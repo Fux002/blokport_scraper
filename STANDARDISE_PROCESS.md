@@ -316,6 +316,16 @@ a job's name; scoping to the process's own jobs would need tags on submit (`batc
 `aws:ResourceTag` condition on TerminateJob, which is not applied here: the process only stops jobs it named
 (`photos-<run id>-...`).
 
+### At the deploy that retired the logo step: mark its outdated open books (once per environment)
+
+An outdated open-book result is completed by a re-run that publishes its close view and 3D slab unjudged. The results
+the retired logo step made (RUN_TAG, a watermarked source) would be re-run without it. Before the first photos run of
+that release on an environment, mark them tried with `python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first,
+then `false`; the environment's usual `SCRAPER_` settings). It reads the watermarked sources from a config.db snapshot
+taken before the migration; for dev pass prod's too (`CONFIG_DB_SNAPSHOTS`, see the script), since dev's varsha results
+were made by prod's run. Dry run on 2026-11-02: 28 in prod, 29 in dev, all varsha. They keep their judged views and
+choices and get no close view and no 3D slab. Idempotent.
+
 ### Rolling back past the image pipeline switch (config.db schema 9)
 
 The release that retired the old enhancer migrates config.db to schema 9: every source gets `image_pipeline` (on), and
