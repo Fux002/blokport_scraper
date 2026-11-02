@@ -2,10 +2,11 @@
 a valid chosen photo ends with one good photo, published and linked, or on the review list with the reason. The
 runner's `photos` stage, started after each full produce on the owner's button. In order:
   0. clear: GPU jobs an earlier, killed run left are stopped and the GPU pool's ceiling is set back to idle
-  1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's, or excluded),
-     and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept
+  1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's or excluded,
+     not the owner's choice, or a photo listings of several stones show that the owner did not assign), never one the
+     owner removed; and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept
   2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG
-  3. judge: each listing's results in its own order until one passes
+  3. judge: the owner's choice of a listing, else its results in its own order until one passes
   4. clean: a hosted edit of one fixable photo of each listing still without a pass
   5. GPU: the cleaned copies, through every step a scraped photo takes, under STANDARDISE.CLEAN_TAG
   6. judge: the cleaned copies' results
@@ -22,7 +23,8 @@ and removes it, if it is still its own, when publish has ended. SIGTERM (the ser
 round's jobs are stopped, the ceiling set back, the spend kept, the lock released.
 Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY, SCRAPER_STANDARDISE_BUDGET_USD (all required);
 SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record.
-Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured;
+Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured,
+or no produce has stored the conflict set yet;
 4 another process is running; a failed relink exits with the produce's code; any other failure is loud (a traceback).
 """
 
@@ -48,6 +50,7 @@ from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core import env
+from stone_pipeline.io import imagestore
 from stone_pipeline.ledger import writethrough
 from stone_pipeline.standardise import index, judge
 
@@ -221,21 +224,67 @@ def photo_listings(sheet, photos):
     return [l for l in index.listings(sheet, photos) if l["format"] != C.TILE_FORMAT]
 
 
-def todo(listings, records, exclude, slabs):
-    """The listings a run works on, in sheet order. Those without a valid chosen photo: no record, or its photo is no
-    longer one of the listing's (the sheet changed) or is on the exclude list. A listing on the review list has no record,
-    so every run looks at it again (its stored answers cost nothing; a change that can help it reaches it). And a slab
-    listing whose chosen photo is no whole slab (no <sha>.slab.png in `slabs`: a close-up, no 3D slab), with that choice
-    as "kept": its further photos may show the whole slab, and the choice stays unless one of them passes. Its stored
-    answers cost nothing either, so it is simply looked at again by every run."""
+def removed_listings(s3):
+    """The SKUs of the listings the owner removed (deploy.standardise_decisions)."""
+    keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=imagestore.owner_removed_prefix())
+            for o in page.get("Contents", [])]
+    return imagestore.owner_removed_skus(keys)
+
+
+def owner_records(s3, root):
+    """{SKU: the owner's photo choice record} under the clean tag's root (deploy.standardise_decisions)."""
+    prefix = publish.owner_prefix(root)
+    keys = sorted(o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+                  for o in page.get("Contents", []))
+    records = publish.pool_map(publish.WORKERS, lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
+    return {imagestore.sku_of(k, prefix): record for k, record in zip(keys, records)}
+
+
+def valid_choice(l, r, exclude, conflicts, picks):
+    """Whether a listing's choice record `r` is valid: its photo is one of the listing's and not excluded, and it is the
+    owner's choice when the listing has one that applies (picks = {listing key: (tag, sha)}, select.owner_choice);
+    without one it may not name a photo listings of several stones show (`conflicts`): that was chosen before it was
+    one, and only the owner assigns it."""
+    if r is None or r["sha"] not in l["photos"] or r["sha"] in exclude:
+        return False
+    if l["key"] in picks:
+        return (r["tag"], r["sha"]) == picks[l["key"]]
+    return (l["source"], r["sha"]) not in conflicts
+
+
+def todo(listings, records, exclude, slabs, removed, conflicts, picks):
+    """The listings a run works on, in sheet order, never one the owner removed (its SKU in `removed`). Those without a
+    valid chosen photo (valid_choice). A listing on the review list has no record, so every run looks at it again (its stored
+    answers cost nothing; a change that can help it reaches it). And a slab listing whose chosen photo is no whole slab
+    (no <sha>.slab.png in `slabs`: a close-up, no 3D slab), with that choice as "kept": its further photos may show the
+    whole slab, and the choice stays unless one of them passes; never one the owner chose a photo for (it stands). Its
+    stored answers cost nothing either, so it is simply looked at again by every run."""
     out = []
     for l in listings:
+        if l["sku"] in removed:
+            continue
         r = records.get(l["key"])
-        if r is None or r["sha"] not in l["photos"] or r["sha"] in exclude:
+        if not valid_choice(l, r, exclude, conflicts, picks):
             out.append(l)
-        elif l["format"] == C.CUTOUT_FORMAT and f"{r['prefix']}{r['sha']}.slab.png" not in slabs:
+        elif (l["key"] not in picks and l["format"] == C.CUTOUT_FORMAT
+              and f"{r['prefix']}{r['sha']}.slab.png" not in slabs):
             out.append({**l, "kept": (r["tag"], r["sha"])})
     return out
+
+
+def assignments(listings, picks, conflicts):
+    """({(source, sha): SKUs} of every conflict photo, the problems): the one listing whose owner choice that applies names
+    it (picks, select.owner_choice). A conflict photo the owner's choices name for more than one listing (the applier
+    refuses that, so only an old or hand-made record) is linked to none, and said."""
+    claims = {photo: [] for photo in conflicts}
+    for l in listings:
+        pick = picks.get(l["key"])
+        if pick is not None and (l["source"], pick[1]) in claims:
+            claims[(l["source"], pick[1])].append(l)
+    problems = [f"photo {sha[:12]} ({C.CONFLICT_REASON}) is the owner's choice for "
+                f"{', '.join(sorted(l['key'] for l in claimed))}: linked to none until one decision is withdrawn"
+                for (_, sha), claimed in sorted(claims.items()) if len(claimed) > 1]
+    return {photo: [claimed[0]["sku"]] if len(claimed) == 1 else [] for photo, claimed in claims.items()}, problems
 
 
 # --- the steps --------------------------------------------------------------------------------------------------------
@@ -315,9 +364,16 @@ def process(s3, batch, spend, run_id, deadline, say=print):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
     sheet, photos = sheet_and_photos(s3)
+    listings, removed, owner = photo_listings(sheet, photos), removed_listings(s3), owner_records(s3, root)
+    # the produce's set (stages.images.link_standard), never re-classified; none stored yet: NoConflictSet, nothing done
+    conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
+    rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
+    picks = {l["key"]: pick for l in listings
+             if (pick := select.owner_choice(owner.get(l["sku"]), l, exclude, conflicts, rounds)) is not None}
+    assigned, conflicted = assignments(listings, picks, conflicts)
     records = choices(s3, root)
-    found = todo(photo_listings(sheet, photos), records, exclude, whole_slabs(s3, records))
-    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
+    found = todo(listings, records, exclude, whole_slabs(s3, records), removed, conflicts, picks)
+    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, owner, conflicts, rounds)
     kept = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - kept} listings without a chosen photo, {kept} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
@@ -328,8 +384,9 @@ def process(s3, batch, spend, run_id, deadline, say=print):
         problems, result = run(batch, sel, spend, run_id, deadline, say)
     finally:
         closing.cancel()
+    problems += conflicted
     try:
-        published = publish.publish(s3, root, sheet, photos, say)
+        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned)
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}
@@ -338,7 +395,8 @@ def process(s3, batch, spend, run_id, deadline, say=print):
     for p in problems:
         say(f"   {p}")
     summary = {"run_id": run_id, "listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
-               "pending": len(result["pending"]), "problems": len(problems), "published": published,
+               "pending": len(result["pending"]), "removed": sum(l["sku"] in removed for l in listings),
+               "problems": len(problems), "published": published,
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
                "budget_usd": spend.budget, "budget_reached": spend.capped}
     kept = {**summary, "pending_listings": result["pending"], "problem_list": problems, "tiles_hidden": hidden}
@@ -430,6 +488,9 @@ def main() -> int:
     except RunActive as exc:
         print(f"ERROR: {exc}; not started")
         return 4
+    except publish.NoConflictSet as exc:
+        print(f"ERROR: {exc}; nothing done")
+        return 2
     print(f"==> spent ${spend.spent:.2f} this run, ${spend.before + spend.spent:.2f} of ${spend.budget:.2f} this month"
           + ("; the month's budget is reached: the rest waits for next month or a higher budget" if spend.capped else ""),
           flush=True)

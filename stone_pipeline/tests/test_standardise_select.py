@@ -46,7 +46,8 @@ def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edi
 
 
 def _listing(*photos, key="slab-1", fmt="slab", kept=None):
-    return {"key": key, "source": "sentas", "format": fmt, "photos": list(photos), **({"kept": kept} if kept else {})}
+    return {"key": key, "sku": "SEN-1", "source": "sentas", "format": fmt, "photos": list(photos),
+            **({"kept": kept} if kept else {})}
 
 
 def _verdict(v, *kinds):
@@ -285,7 +286,7 @@ def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_list
     s3 = _S3({f"{GPU}judged/{A}.json": _verdict("pass"), f"{GPU}judged/{B}.json": _verdict("fail", "not_one_slab"),
               "r/chosen/other.json": b'{"key": "other"}', "r/chosen/two.json": b'{"key": "two"}'})
     s = object.__new__(sel.Selection)
-    s.client, s.exclude, s.root = s3, set(), "r/"
+    s.client, s.exclude, s.root, s.owner, s.conflicts = s3, set(), "r/", {}, {}
     s.listings = [_listing(A, key="one"), _listing(B, key="two")]
     s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
     result = sel.report(s)
@@ -299,7 +300,7 @@ def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_list
 def test_the_gpu_list_is_the_judge_s_candidates_when_a_listing_s_first_photo_is_excluded():
     photos = [c * 64 for c in "12345"]
     s = object.__new__(sel.Selection)
-    s.listings, s.exclude = [_listing(*photos)], {photos[0]}
+    s.client, s.listings, s.exclude, s.owner, s.conflicts = _S3(), [_listing(*photos)], {photos[0]}, {}, {}
     s.sources, s.rounds = ["sentas"], [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})]
     assert s.gpu_todo() == {"sentas": sel.candidates(_listing(*photos), {photos[0]})} == {"sentas": photos[1:4]}
 
@@ -469,7 +470,7 @@ def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch
     import time
     s3 = _S3({f"{GPU}judged/{s}.json": _verdict("pass") for s in (A, B, D, E)})
     s = object.__new__(sel.Selection)
-    s.client, s.exclude, s.root = s3, set(), "r/"
+    s.client, s.exclude, s.root, s.owner, s.conflicts = s3, set(), "r/", {}, {}
     s.listings = [_listing(x, key=k) for x, k in ((A, "one"), (B, "two"), (D, "three"), (E, "four"))]
     s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D, E), judged=(A, B, D, E))}), ("v9-clean", {"sentas": _round(CL)})]
     at_once, now, lock = [0], [0], threading.Lock()
@@ -613,7 +614,7 @@ def test_a_listing_with_a_close_up_pass_is_never_sent_to_a_hosted_edit(monkeypat
 def _reported(objects, listing, rnd):
     s3 = _S3(objects)
     s = object.__new__(sel.Selection)
-    s.client, s.exclude, s.root, s.listings = s3, set(), "r/", [listing]
+    s.client, s.exclude, s.root, s.listings, s.owner, s.conflicts = s3, set(), "r/", [listing], {}, {}
     s.rounds = [("v9", {"sentas": rnd}), ("v9-clean", {"sentas": _round(CL)})]
     return s3, sel.report(s)
 
@@ -751,3 +752,87 @@ def test_a_completion_cut_short_removes_its_close_view_only_while_the_slab_is_mi
     with pytest.raises(TimeoutError):
         src.complete(s3, GPU, A, res)
     assert s3.written == [f"{GPU}{A}.close.jpg", f"delete {GPU}{A}.close.jpg"]
+
+
+# --- the owner's choice (deploy.standardise_decisions) and shared photos -------------------------------------------
+def _selection(s3, listings, rounds, owner=None, conflicts=None, exclude=()):
+    s = object.__new__(sel.Selection)
+    s.client, s.listings, s.exclude, s.sources = s3, listings, set(exclude), ["sentas"]
+    s.owner, s.conflicts, s.rounds, s.tags = owner or {}, conflicts or {}, rounds, ("v9", "v9-clean")
+    return s
+
+
+def _owner_record(sha, tag="v9", at="2026-11-02T10:00:00Z"):
+    return {"tag": tag, "sha": sha, "at": at, "listing": "slab-1", "decided_on": "slab-1"}
+
+
+def test_the_owner_s_choice_is_the_listing_s_choice_and_nothing_of_it_is_judged(monkeypatch):
+    s3 = _S3({f"{GPU}judged/{A}.json": _verdict("fail", "light_reflection"), f"{GPU}judged/{B}.json": _verdict("fail", "bad_fill")})
+    monkeypatch.setattr(sel.judge, "judge", lambda *a: pytest.fail("judged a listing the owner decided"))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
+    s = _selection(s3, [_listing(D, A, B)], rounds, owner={"SEN-1": _owner_record(B)})
+    pick = s.owner_pick(s.listings[0])
+    assert pick == ("v9", B) and sel.choose(s3, rounds, s.listings[0], set(), sel.Spend(10), owner=pick) == (("v9", B), True)
+    assert s3.objects[f"{GPU}judged/{B}.json"] == _verdict("fail", "bad_fill")         # the judge's verdict untouched
+
+
+def test_the_owner_s_record_is_checked_every_run():
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
+    s = _selection(_S3(), [], rounds, owner={"SEN-1": _owner_record(B)}, exclude={A})
+    assert s.owner_pick(_listing(A, B)) == ("v9", B)
+    assert s.owner_pick({**_listing(A, B), "key": "rebound-handle"}) == ("v9", B)        # a re-bind keeps the SKU
+    assert s.owner_pick(_listing(A)) is None                                             # no longer the listing's photo
+    s.exclude = {B}
+    assert s.owner_pick(_listing(A, B)) is None                                          # excluded after review
+    s.exclude, s.owner = set(), {"SEN-1": _owner_record(D)}
+    assert s.owner_pick(_listing(A, D)) is None                                          # its result is gone
+    s.owner = {"SEN-1": _owner_record(A, tag="v1")}
+    assert s.owner_pick(_listing(A)) is None                                             # not one of the process's tags
+
+
+def test_only_the_owner_s_own_decision_on_a_listing_assigns_it_a_conflict_photo():
+    # a choice that reached the listing through a sibling of its stone (decided_on another listing) never assigns it a
+    # photo listings of another stone show: the stones may have changed since (a re-bind)
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    conflicts = {("sentas", A): ("slab-1", "other-stone")}
+    reached = {**_owner_record(A), "decided_on": "block-sibling"}
+    assert sel.owner_choice(reached, _listing(A), set(), conflicts, rounds) is None
+    assert sel.owner_choice(reached, _listing(A), set(), {}, rounds) == ("v9", A)        # no conflict: it stands
+    assert sel.owner_choice(_owner_record(A), _listing(A), set(), conflicts, rounds) == ("v9", A)
+
+
+def test_a_listing_the_owner_decided_gets_no_gpu_work_and_no_storage_read():
+    class _NoS3:
+        def __getattr__(self, name):
+            pytest.fail(f"read storage ({name}) to plan the GPU work")
+    photos = [c * 64 for c in "1234"]
+    rounds = [("v9", {"sentas": _round(GPU, finished=(photos[1],))}), ("v9-clean", {"sentas": _round(CL)})]
+    s = _selection(_NoS3(), [_listing(*photos[:3], key="decided"), {**_listing(photos[3], key="open"), "sku": "SEN-2"}],
+                   rounds, owner={"SEN-1": _owner_record(photos[1])})
+    assert s.gpu_todo() == {"sentas": [photos[3]]}
+
+
+def test_a_conflict_photo_is_never_chosen_by_itself_for_any_listing_that_shows_it(monkeypatch):
+    s3 = _S3({f"{GPU}judged/{A}.json": _verdict("pass"), f"{GPU}judged/{B}.json": _verdict("pass")})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
+    s = _selection(s3, [_listing(A, B)], rounds, conflicts={("sentas", A): ("slab-1", "other-stone")})
+    assert s.blocked(s.listings[0]) == {A}
+    assert sel.choose(s3, rounds, s.listings[0], s.blocked(s.listings[0])) == (("v9", B), True)
+    s.owner = {"SEN-1": _owner_record(A)}                                                # the owner may still assign it
+    assert s.owner_pick(s.listings[0]) == ("v9", A)
+
+
+def test_the_review_list_says_which_photo_is_held_for_a_conflict_and_with_whom():
+    s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "other")})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
+    s = _selection(s3, [_listing(A, B)], rounds, conflicts={("sentas", A): ("other-stone", "slab-1")})
+    s.root = "r/"
+    tracked = sel.report(s)["tracked"]
+    assert [t["listing"] for t in tracked] == ["slab-1"]
+    assert f"{A[:12]}: photo_conflict: also shown by other-stone" in tracked[0]["what_happened"]
+
+
+def test_a_listing_the_owner_decided_is_never_cleaned(monkeypatch):
+    monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned a listing the owner decided"))
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), owner=("v9", A))

@@ -264,7 +264,7 @@ def test_only_a_tile_s_size_is_rendered(size, ok):
 
 # --- the plan: never a guess -------------------------------------------------------------------------------------------
 _COLUMNS = ("Product Handle,Product Category 1,Product Length,Product Width,Product Height,STN Variation Id,STN Type Id,"
-            "STN Finish Id,Product Image 1")
+            "STN Finish Id,Product Image 1,Variant Sku")
 _IMG = "https://b.s3.amazonaws.com/{env}/products/improved/{src}/{sha}.jpg"
 
 
@@ -279,7 +279,8 @@ def _sheet(*rows):
     source, photo sha)."""
     lines, photos = [_COLUMNS], {}
     for h, fmt, L, W, H, var, typ, fin, src, sha in rows:
-        lines.append(f"{h},pcat_{fmt},{L},{W},{H},{var},{typ},{fin},{_IMG.format(env=ENV_SEGMENT, src=src, sha=sha)}")
+        lines.append(f"{h},pcat_{fmt},{L},{W},{H},{var},{typ},{fin},{_IMG.format(env=ENV_SEGMENT, src=src, sha=sha)},"
+                     f"SKU-{h.upper()}")
         photos[h] = [(src, sha)]
     return "\n".join(lines) + "\n", photos
 
@@ -414,7 +415,7 @@ def _bucket(slab_rgba):
 
 
 def _publish(s3):
-    return pub.publish(s3, ROOT, *_sheet(*SHEET_ROWS), say=lambda m: None)
+    return pub.publish(s3, ROOT, *_sheet(*SHEET_ROWS), say=lambda m: None, assigned={})
 
 
 def test_a_tile_listing_is_shown_from_its_variety_s_slab_stone_not_its_own_photo(categories, monkeypatch):
@@ -496,7 +497,7 @@ def test_a_tile_too_big_for_the_first_slab_is_cut_from_the_next(categories):
     s3 = _two_slab_bucket(cut_in_four, _stone_rgba(960, 672, seed=3))
     rows = (SHEET_ROWS[0], SHEET_ROWS[1], ("rb-tile", "tile", 1.5, 1.1, 0.02, "v_rb_tile", MARBLE, POLISHED, "marenostone", B),
             ("rb-slab2", "slab", 2.0, 1.4, 0.02, "v_rb_slab", MARBLE, POLISHED, "marenostone", E))
-    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None)
+    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={})
     record = json.loads(s3.objects[imagestore.tile_record_key("marenostone", imagestore.listing_sha("rb-tile"))]["Body"])
     assert out["tiles"]["shown"] == 1 and record["stone"]["sha"] == E
 
@@ -545,7 +546,7 @@ def test_an_unexpected_error_in_a_tile_step_fails_the_run_before_anything_is_rem
 def test_a_failed_tile_whose_stone_is_no_longer_its_to_cut_loses_its_files(categories, monkeypatch):
     s3 = _two_slab_bucket(_stone_rgba(960, 640), _stone_rgba(960, 672, seed=3))
     rows = SHEET_ROWS + (("rb-slab2", "slab", 2.0, 1.4, 0.02, "v_rb_slab", MARBLE, POLISHED, "marenostone", E),)
-    pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None)
+    pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={})
     record = imagestore.tile_record_key("marenostone", imagestore.listing_sha("rb-tile"))
     assert json.loads(s3.objects[record]["Body"])["stone"]["sha"] == A
     mesh = cv2.resize(_fixture("crosshatch_805cf5ac.webp"), (960, 640), interpolation=cv2.INTER_NEAREST)
@@ -554,7 +555,7 @@ def test_a_failed_tile_whose_stone_is_no_longer_its_to_cut_loses_its_files(categ
     def broken(*args):
         raise OSError("disk full")
     monkeypatch.setattr(tile_plan, "render", broken)
-    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None)
+    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={})
     assert out["tiles"]["failed_listings"] == ["rb-tile"]
     assert not any(imagestore.listing_sha("rb-tile") in k for k in s3.objects)     # hidden until it renders again
 
@@ -619,7 +620,7 @@ def test_only_one_slab_s_stone_is_decoded_at_a_time(categories, monkeypatch):
         live.append(weakref.ref(stone))
         return stone
     monkeypatch.setattr(pub, "_stone", counted)
-    out = pub.publish(s3, ROOT, *_sheet(*TWO_SLABS), say=lambda m: None)
+    out = pub.publish(s3, ROOT, *_sheet(*TWO_SLABS), say=lambda m: None, assigned={})
     assert out["tiles"]["rendered"] == 1
     assert len(most) == 3 and max(most) == 0                                       # two checks, then the pick again
 
@@ -633,7 +634,7 @@ def test_a_tile_s_problem_is_on_the_run_s_problem_list(monkeypatch):
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     monkeypatch.setattr(proc, "choices", lambda client, root: {})
     monkeypatch.setattr(proc, "run", lambda *a, **k: ([], {"chosen": [], "tracked": [], "pending": []}))
-    monkeypatch.setattr(proc.publish, "publish", lambda *a: {"changed": True, "tiles_hidden": {"x": "no slab"},
+    monkeypatch.setattr(proc.publish, "publish", lambda *a, **k: {"changed": True, "tiles_hidden": {"x": "no slab"},
                                                              "tiles_problems": {"t": "RuntimeError: boom"}})
     summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 60, say=lambda m: None)
     kept = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
@@ -659,9 +660,13 @@ def test_a_tile_product_links_the_set_named_after_it_and_its_3d_tile(monkeypatch
     views = {"main": {own: "m"}, "white": {own: "w"}, "studio": {own: "s"},
              imagestore.CUTOUT_SUBDIR: {own: "t+j"}}
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: views)
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
     rows = [_row("rb-tile"), _row("tb-flamed")]
-    images.run(rows, cfg=type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})())
+    cfg = type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})()
+    images.run(rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg)
     shown, hidden = rows
     assert shown.standard_photo is True and hidden.standard_photo is False      # no set: hidden by the no-photo rule
     assert shown.thumbnail_key == f"{PUBLIC}standard/main/marenostone/{own}.jpg"
@@ -671,8 +676,12 @@ def test_a_tile_product_links_the_set_named_after_it_and_its_3d_tile(monkeypatch
 
 def _run(rows, views, monkeypatch):
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: views)
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
-    images.run(rows, cfg=type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})())
+    cfg = type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})()
+    images.run(rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg)
 
 
 def test_a_tile_whose_size_was_filled_from_the_pack_s_defaults_is_never_shown(monkeypatch):

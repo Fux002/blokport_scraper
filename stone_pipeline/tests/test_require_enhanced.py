@@ -286,8 +286,10 @@ def test_discard_pool_unreachable_is_unknown_and_holds_every_image(tmp_path, mon
     # Unknown must fail closed (hold), the same rule as the enhanced-marker set; never a crash, never open.
     import boto3
 
+    from botocore.exceptions import EndpointConnectionError
+
     class _Boom:
-        def __init__(self, *a, **k): raise RuntimeError("s3 down")
+        def __init__(self, *a, **k): raise EndpointConnectionError(endpoint_url="https://s3")
     monkeypatch.setattr(boto3, "Session", _Boom)
     assert images._load_discard_set(ImagesConfig(mode="s3", public_base="https://cdn/x/", processing=_proc_cfg())) is None
     assert images._load_discard_set(ImagesConfig(mode="local", public_base="https://cdn/x/", processing=_proc_cfg())) == set()

@@ -282,27 +282,112 @@ def _readonly_manifest() -> dict[str, str]:
 def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> ImageStats:
     """Stage 7. passthrough links products to their TREATED S3 images through the read-only imageproc
     manifest; local/s3 fetch NEW source images, process them (when enabled) and host them, then link.
-    Either way a row ends in _finish_row: linked, held (transient, retried next produce) or terminal."""
+    Either way a row ends in _finish_row: linked, held (transient, retried next produce) or terminal. The standardised
+    photos are linked once validation has said which products are emitted (link_standard)."""
     cfg = cfg or SETTINGS.images
     stats = ImageStats()
     if cfg.mode == "passthrough":
         _link_from_manifest(rows, cfg, stats)
     else:
         _stage_and_link(rows, fetch, cfg, stats)
+    return stats
+
+
+def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=None) -> Optional[dict[str, dict[str, list[str]]]]:
+    """After validation: every product linked to its standardised photo, from the published pool, and the conflict set
+    {source: {sha: [handles]}} of the emitted products (index.shared_photos, each with every photo it has: the products
+    on the sheet, nothing validation rejected), returned to be stored (save_conflicts) as the one set the photo process
+    and the review page read. A conflict photo is linked only to the product its assignment file names. None when the
+    pool cannot be read (nothing is stored then; the products keep their images and their listed state)."""
+    cfg = cfg or SETTINGS.images
     views = _load_standard_views(cfg)
-    # A pool unread, or with nothing published (local mode, before any publish), cannot tell which products have a
-    # standardised photo: this run then never changes whether a product is listed.
-    known, views = bool(views and views.get("main")), views or {}
+    removed, assigned = _load_owner_removed(cfg), _load_assigned(cfg)
+    # A pool unread, or with nothing published (local mode, before any publish), or the owner's removals or the conflict
+    # assignments unread, cannot tell which products have a standardised photo: this run then never changes whether a
+    # product is listed.
+    known = bool(views and views.get("main")) and removed is not None and assigned is not None
+    by_source = {**{r.src_site: {} for r in rows}, **_conflicts(emitted)}   # every source of the run, even one with none
+    conflicts = {(src, sha) for src, photos in by_source.items() for sha in photos}
+    removed, assigned = removed or set(), assigned or {}
+    skus = _skus(rows) if removed or conflicts else {}
     for row in rows:
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
-        lead = listing_lead(row, views, cfg) if _is_tile(row) else photo_lead(row.image_keys, views)
+        seen = _seen_by(row, skus.get(id(row)), views or {}, removed, conflicts, assigned)
+        lead = listing_lead(row, seen, cfg) if _is_tile(row) else photo_lead(row.image_keys, seen)
         row.standard_photo = lead is not None if known else None
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views
-            row.model_3d_key = model_3d(views, lead) if _is_3d_format(row) else None
-            row.standard_version = standard_version(views, lead, with_3d=bool(row.model_3d_key))
-            _slot_row(row, standardised(row.image_keys, views, lead))
-    return stats
+            row.model_3d_key = model_3d(seen, lead) if _is_3d_format(row) else None
+            row.standard_version = standard_version(seen, lead, with_3d=bool(row.model_3d_key))
+            _slot_row(row, standardised(row.image_keys, seen, lead))
+    return None if views is None else by_source
+
+
+def save_conflicts(by_source: dict[str, dict[str, list[str]]]) -> None:
+    """Store the produce's conflict set, one file per source (imagestore.conflicts_key), each whole so a conflict that is
+    gone is gone, and only when it changed (the bucket is versioned: an identical write is a new version). Only a run
+    that writes the bucket stores it: s3 image mode without the s3 dry run, as the service's produce runs; a laptop run
+    (local or passthrough images, or the dry run) never overwrites an environment's set from its own data. Raises on any
+    S3 failure: the photo process must never work from a set this produce did not store."""
+    if SETTINGS.images.mode != "s3" or SETTINGS.s3.dry_run:
+        log.info("conflict set not stored: this run does not write the bucket", extra={"extra_fields": {
+            "image_mode": SETTINGS.images.mode, "s3_dry_run": SETTINGS.s3.dry_run, "sources": sorted(by_source)}})
+        return
+    for source, photos in sorted(by_source.items()):
+        key, body = imagestore.conflicts_key(source), json.dumps(photos, sort_keys=True).encode()
+        if _stored_object(key) != body:
+            _put_object(key, body)
+
+
+def _skus(rows: list[CanonicalRow]) -> dict[int, str]:
+    """{id(row): its product's SKU} (the key of the owner's removals and of the conflict assignments)."""
+    from stone_pipeline.config.sources import load_source
+    from stone_pipeline.stages import emit
+
+    cfgs = {src: load_source(src) for src in {r.src_site for r in rows}}
+    return {id(r): emit._sku(r, cfgs[r.src_site]) for r in rows}
+
+
+def _seen_by(row: CanonicalRow, sku: Optional[str], views: dict[str, dict[str, str]], removed: set[str],
+             conflicts: set[tuple[str, str]], assigned: dict[tuple[str, str], set[str]]) -> dict[str, dict[str, str]]:
+    """The published views as one product sees them, the one place that decides. A product the owner removed sees none:
+    no standardised thumbnail, gallery, 3D or version is linked to it, even a photo published for a sibling of its stone,
+    and with the pool known it has no standardised photo (hidden under the no_photo rule). A photo products of several
+    stones show (conflicts) is a product's only when its assignment file names it (deploy.standardise_publish); without
+    a file, nobody's."""
+    if sku in removed:
+        return {}
+    return _without(views, {sha for src, sha in _shown(row)
+                            if (src, sha) in conflicts and sku not in assigned.get((src, sha), ())})
+
+
+def _shown(row: CanonicalRow) -> list[tuple[str, str]]:
+    """(source, sha) of each hosted photo of a product, in its order, once each."""
+    return list(dict.fromkeys((m.group(1), m.group(2)) for u in row.image_keys if (m := _HOSTED.search(u))))
+
+
+def _conflicts(emitted: list[CanonicalRow]) -> dict[str, dict[str, list[str]]]:
+    """{source: {sha: [handles]}} of the photos emitted products of several stones show (index.shared_photos, each
+    product with every photo it has), with every source of the emitted products present (an empty set clears an old
+    one). A tile product never counts: it is shown only from the set rendered for itself (listing_lead), never a photo,
+    and it never enters the photo process (standardise_run.photo_listings)."""
+    from stone_pipeline.standardise import index
+
+    listings = [{"key": r.handle, "source": shown[0][0], "stone": (r.variation_id or "", r.finish_id or ""),
+                 "photos": [sha for _, sha in shown]}
+                for r in emitted if not _is_tile(r) and (shown := _shown(r))]
+    out = {l["source"]: {} for l in listings}
+    for (src, sha), shared in index.shared_photos(listings).items():
+        if shared.kind == "conflict":
+            out[src][sha] = list(shared.listings)
+    return out
+
+
+def _without(views: dict[str, dict[str, str]], shas: set[str]) -> dict[str, dict[str, str]]:
+    """The published views as one product sees them: without the photos in `shas`."""
+    if not shas:
+        return views
+    return {view: {sha: etag for sha, etag in published.items() if sha not in shas} for view, published in views.items()}
 
 
 _HOSTED = re.compile(r"/products/(?:[a-z]+/)?([a-z_]+)/([0-9a-f]{64})\.[a-z0-9]+$")
@@ -399,6 +484,67 @@ def _load_standard_views(cfg) -> Optional[dict[str, dict[str, str]]]:
         log.warning("standardised photos unreachable; products keep their images this run",
                     extra={"extra_fields": {"error": str(exc)}})
         return None
+
+
+def _load_owner_removed(cfg) -> Optional[set[str]]:
+    """The SKUs of the products the owner removed (imagestore.owner_removed_prefix, deploy.standardise_decisions): none in
+    local mode. None when storage cannot be read: like an unread photo pool, the run then cannot tell. Any other error is
+    a bug and fails loud: it must never quietly freeze which products are listed."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    if getattr(cfg, "mode", None) == "local":
+        return set()
+    try:
+        return imagestore.owner_removed_skus(_list_objects(imagestore.owner_removed_prefix()))
+    except (BotoCoreError, ClientError) as exc:
+        log.warning("the owner's removed listings unreadable; products keep their listed state this run",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return None
+
+
+def _load_assigned(cfg) -> Optional[dict[tuple[str, str], set[str]]]:
+    """{(source, sha): SKUs} of the published photos listings of several stones show, with the products the owner assigned
+    each to (deploy.standardise_publish): none in local mode. None when storage cannot be read (the run cannot tell); any
+    other error fails loud."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    if getattr(cfg, "mode", None) == "local":
+        return {}
+    try:
+        return {photo: set(json.loads(_get_object(key))) for key in sorted(_list_objects(imagestore.assigned_prefix()))
+                if (photo := imagestore.assigned_photo(key))}
+    except (BotoCoreError, ClientError) as exc:
+        log.warning("the conflict photos' assignments unreadable; products keep their listed state this run",
+                    extra={"extra_fields": {"error": str(exc)}})
+        return None
+
+
+def _put_object(key: str, body: bytes) -> None:
+    """Write one JSON object. Raises on any S3 failure: the callers decide the policy."""
+    import boto3
+
+    s3 = SETTINGS.s3
+    client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+    client.put_object(Bucket=s3.bucket, Key=key, Body=body, ContentType="application/json")
+
+
+def _stored_object(key: str) -> Optional[bytes]:
+    """One object's bytes, None when it does not exist. Raises on any other S3 failure."""
+    try:
+        return _get_object(key)
+    except Exception as exc:
+        if storage.s3_error_is_missing(exc):
+            return None
+        raise
+
+
+def _get_object(key: str) -> bytes:
+    """One object's bytes. Raises on any S3 failure: the callers decide the policy."""
+    import boto3
+
+    s3 = SETTINGS.s3
+    client = boto3.Session(profile_name=s3.credentials_profile or None, region_name=s3.region).client("s3")
+    return client.get_object(Bucket=s3.bucket, Key=key)["Body"].read()
 
 
 def _finish_row(row: CanonicalRow, urls: list[str], srcs: int, n_discarded: int, n_held: int,

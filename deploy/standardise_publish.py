@@ -44,6 +44,33 @@ def chosen_prefix(root):
     return f"{root}chosen/"
 
 
+def owner_prefix(root):
+    """Where the owner's photo choice of each listing is kept (deploy.standardise_decisions): <clean tag root>owner/<SKU>
+    .json, one record per listing by SKU (a variety re-bind moves the handle, never the SKU)."""
+    return f"{root}{C.OWNER_DIR}/"
+
+
+def owner_key(root, sku):
+    return f"{owner_prefix(root)}{imagestore.sku_file(sku)}"
+
+
+class NoConflictSet(RuntimeError):
+    """A source on the sheet has no stored conflict set: no produce has stored it yet (every produce stores one per
+    source, an empty one too), so nothing can tell which of its photos are conflicts."""
+
+
+def read_conflicts(client, sources):
+    """{(source, sha): listing handles} of the produce's stored conflict sets (imagestore.conflicts_key): the one set the
+    photo process, the owner's decisions and the review page work with. NoConflictSet when one of `sources` (the sheet's)
+    has none: never read as "no conflicts"."""
+    keys = sorted(k for k in _objects(client, imagestore.conflicts_prefix()) if imagestore.conflicts_source(k))
+    if missing := sorted(set(sources) - {imagestore.conflicts_source(k) for k in keys}):
+        raise NoConflictSet(f"no conflict set yet for {', '.join(missing)}: run a produce first")
+    sets = pool_map(WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
+    return {(imagestore.conflicts_source(k), sha): tuple(handles)
+            for k, photos in zip(keys, sets) for sha, handles in sorted(photos.items())}
+
+
 def read_exclude(text):
     """The shas on the exclude list: the first word of each line, comments and blank lines ignored."""
     return {m.group(1) for line in text.splitlines() if (m := _SHA.match(line.strip()))}
@@ -353,12 +380,25 @@ class NoChoiceRecords(RuntimeError):
     """No listing has a choice record yet: publishing would empty the folder, so nothing is published or removed."""
 
 
-def publish(client, root, sheet, photos, say=print):
+def assignment_changes(assigned, published, current):
+    """(writes {key: body}, removals [key]) that make the assignment files match `assigned` for the published photos:
+    {(source, sha): SKUs} of every conflict photo (index.shared_photos) with the SKUs the owner assigned it to. A file
+    is kept only for a published photo assigned to someone; current = {key: its stored body}."""
+    wanted = {imagestore.assigned_key(*photo): json.dumps(sorted(skus)).encode() for photo, skus in assigned.items()
+              if skus and imagestore.standard_key(*photo, "main") in published}
+    writes = {k: body for k, body in sorted(wanted.items()) if current.get(k) != body}
+    return writes, sorted(set(current) - set(wanted))
+
+
+def publish(client, root, sheet, photos, say=print, *, assigned):
     """Make the published folder match the choice records under `root` (the clean tag's root) and the tile listings of
     `sheet` (the product sheet's text, with its photo list `photos`): {"listings", "copied", "made_3d", "removed", "tiles" (counts), "tiles_hidden"
     ({listing: why it has no images}), "tiles_problems" ({listing: the error its tile step met}), "changed"}; changed =
     the folder is not what it was (a produce must link it again). NoChoiceRecords when no photo listing has one (the
-    folder would be emptied)."""
+    folder would be emptied). assigned = {(source, sha): SKUs} of every photo listings of several stones show (the
+    produce's conflict set): one is published only when the owner assigned it to someone, with a file naming who, so the
+    produce links it for those products only (a record that names it otherwise is a choice made before it was a
+    conflict: not published)."""
     records = list(_objects(client, chosen_prefix(root)))
     chosen = pool_map(WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records)
     if not chosen:
@@ -369,6 +409,7 @@ def publish(client, root, sheet, photos, say=print):
     if not chosen:
         raise NoChoiceRecords(f"no choice records of photo listings under {chosen_prefix(root)}: nothing published or "
                               f"removed")
+    chosen = [c for c in chosen if assigned.get((c["source"], c["sha"]), True)]
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
     exclude = read_exclude(EXCLUDE_PATH.read_text())
     plan, todo = copies(chosen, made, exclude), slabs(chosen, made, exclude)
@@ -377,6 +418,13 @@ def publish(client, root, sheet, photos, say=print):
     fresh = unpublished(plan, made, published)
     stamps = dict(zip(todo, pool_map(WORKERS, lambda s: _stamp(client, s, published), todo)))
     remake = outdated(todo, made, published, stamps)
+    files = list(_objects(client, imagestore.assigned_prefix()))
+    current = dict(zip(files, pool_map(WORKERS, lambda k: client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read(), files)))
+    writes, unassigned = assignment_changes(assigned, {t for _, t in plan}, current)
+    # A conflict photo's assignment file goes up before its views, and a stale one comes down after the views it covered:
+    # a publish stopped half way never leaves a conflict photo's view without the file that says whose it is.
+    for key, body in writes.items():
+        client.put_object(Bucket=S3_BUCKET, Key=key, Body=body, ContentType="application/json")
     pool_map(WORKERS, lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
                                                     ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh)
     # each cut-out holds a full-size slab in memory
@@ -386,11 +434,14 @@ def publish(client, root, sheet, photos, say=print):
     tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
     gone = stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"])
     pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
+    for key in unassigned:                             # only once the views it covered are gone
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
     say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
-        f"made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)} files no longer chosen")
+        f"made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)} files no longer chosen; "
+        f"{len(writes)} conflict photos assigned, {len(unassigned)} assignments removed")
     counts = ({k: tiles[k] for k in ("listings", "shown", "rendered", "unknown_variations")}
               | {"hidden": len(tiles["hidden"]), "failed": len(tiles["failed"]),
                  "failed_listings": tiles["failed"][:C.TILE_FAILED_LISTED]})
     return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone), "tiles": counts,
             "tiles_hidden": tiles["hidden"], "tiles_problems": tiles["problems"],
-            "changed": bool(fresh or remake or gone or tiles["rendered"])}
+            "changed": bool(fresh or remake or gone or tiles["rendered"] or writes or unassigned)}

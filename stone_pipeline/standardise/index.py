@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import re
+from typing import NamedTuple
 
 from stone_pipeline.config import settings
 from stone_pipeline.io import imagestore
@@ -75,7 +76,40 @@ def build(sheet_text, photos):
 
 
 def listings(sheet_text, photos):
-    """[{"key", "source", "format", "photos"}] in sheet order: each product with its own photos (shas) in its order, the
-    order a person sees them in, so the first good one is the one a listing is shown with."""
-    return [{"key": row["Product Handle"], "source": shown[0][0], "format": fmt, "photos": [sha for _, sha in shown]}
+    """[{"key", "sku", "source", "stone", "format", "photos"}] in sheet order: each product with its own photos (shas) in
+    its order, the order a person sees them in, so the first good one is the one a listing is shown with. The key is the
+    handle (it moves when a variety decision re-binds the product); the SKU never moves. stone = (variety id, finish id):
+    what a photo of the listing shows."""
+    return [{"key": row["Product Handle"], "sku": row["Variant Sku"], "source": shown[0][0],
+             "stone": (row["STN Variation Id"], row["STN Finish Id"]), "format": fmt, "photos": [sha for _, sha in shown]}
             for row, fmt, shown in rows(sheet_text, photos) if shown]
+
+
+class Shared(NamedTuple):
+    """A photo several listings show: "siblings" when they are all of one stone (slabs of one block or bundle, tile
+    sizes: the vendor's own practice, one decision is good for them all), "conflict" when they span varieties or finishes
+    (a photo shows one stone: it is never chosen by itself for any of them, only the owner assigns it, to one listing)."""
+    kind: str
+    listings: tuple
+
+
+def shared_photos(listings):
+    """{(source, sha): Shared} of every photo more than one listing of a source shows; the one place a shared photo is
+    classified. A listing's whole photo list counts: a photo belongs to the stone it shows, whichever slot it is in."""
+    by_photo = {}
+    for l in listings:
+        for sha in l["photos"]:
+            by_photo.setdefault((l["source"], sha), []).append(l)
+    return {photo: Shared("siblings" if len({l["stone"] for l in shown}) == 1 else "conflict",
+                          tuple(sorted(l["key"] for l in shown)))
+            for photo, shown in sorted(by_photo.items()) if len(shown) > 1}
+
+
+def groups(listings, conflicts):
+    """{(source, sha): Shared} the owner's decisions and their page work with: the produce's stored conflict set
+    (conflicts = {(source, sha): handles}, the one set every side sees), and for every other photo the sheet's listings
+    share, its sibling group."""
+    out = {photo: shared for photo, shared in shared_photos(listings).items()
+           if shared.kind == "siblings" and photo not in conflicts}
+    out.update({photo: Shared("conflict", tuple(keys)) for photo, keys in conflicts.items()})
+    return out

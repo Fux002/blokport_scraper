@@ -211,14 +211,18 @@ def candidates(listing, exclude):
     return [sha for sha in listing["photos"] if sha not in exclude][:C.JUDGE_MAX_PER_LISTING]
 
 
-def choose(client, rounds, listing, exclude, spend=None):
-    """((tag, sha) of the listing's photo to publish or None, whether the answer is final): the standardiser's results of
-    its candidates in order, then its cleaned copies' results, the first the judge passes. A slab listing prefers a whole
-    slab (its result has a 3D slab): a passing close-up is the answer only while no whole slab passes, and once one is had
-    (listing["kept"]: the choice a run made before, or the first close-up passed here) only whole results are judged.
-    A photo held by the standardiser is skipped; a photo with no result yet, or no verdict yet, leaves the answer open
-    (never read as "no good photo", which would send the listing to the hosted edit or the tracked list). rounds =
-    [(tag, {source: Round})], the scraped run first, then (optionally) the cleaned run."""
+def choose(client, rounds, listing, exclude, spend=None, owner=None):
+    """((tag, sha) of the listing's photo to publish or None, whether the answer is final): the owner's choice when it has
+    one (Selection.owner_pick: it overrides the judge, nothing of the listing is judged), else the standardiser's
+    results of its candidates in order, then its cleaned copies' results, the first the judge passes. A slab listing
+    prefers a whole slab (its result has a 3D slab): a passing close-up is the answer only while no whole slab passes,
+    and once one is had (listing["kept"]: the choice a run made before, or the first close-up passed here) only whole
+    results are judged. A photo held by the standardiser is skipped; a photo with no result yet, or no verdict yet,
+    leaves the answer open (never read as "no good photo", which would send the listing to the hosted edit or the
+    tracked list). rounds = [(tag, {source: Round})], the scraped run first, then (optionally) the cleaned run; exclude =
+    the photos never chosen by themselves (Selection.blocked)."""
+    if owner is not None:
+        return owner, True
     src = listing["source"]
     whole_wanted = listing["format"] == C.CUTOUT_FORMAT
     fallback, complete = listing.get("kept"), True
@@ -326,12 +330,13 @@ def _failed(client, cl, att, ident, name, why):
     return check
 
 
-def clean_listing(client, rounds, listing, exclude, spend):
+def clean_listing(client, rounds, listing, exclude, spend, owner=None):
     """A listing with no good photo from the standardiser: its first CLEAN_PHOTOS_PER_LISTING fixable photos are
-    cleaned (one is enough). Nothing to do when it already has a cleaned copy (its result is judged later)."""
+    cleaned (one is enough). Nothing to do when the owner chose its photo, or when it already has a cleaned copy (its
+    result is judged later)."""
     (_, gpu), (_, cl) = rounds
     src = listing["source"]
-    if any(sha in cl[src].cleaned for sha in listing["photos"]):
+    if owner is not None or any(sha in cl[src].cleaned for sha in listing["photos"]):
         return
     picked, complete = choose(client, rounds[:1], listing, exclude)
     if picked is not None:
@@ -342,12 +347,16 @@ def clean_listing(client, rounds, listing, exclude, spend):
         if clean_photo(client, cl[src], src, sha, spend):
             return
 
-def photo_notes(client, rounds, listing, exclude):
+def photo_notes(client, rounds, listing, exclude, conflicts):
     """What happened to each of a listing's photos, for a person reading the tracked list."""
     notes = []
     src = listing["source"]
     for sha in listing["photos"]:
         parts = []
+        if (src, sha) in conflicts:
+            partners = [k for k in conflicts[(src, sha)] if k != listing["key"]]
+            parts.append(f"{C.CONFLICT_REASON}: also shown by {', '.join(partners)} (another variety or finish): "
+                         "never chosen by itself, the owner assigns it")
         for tag, rnd in rounds:
             r = rnd[src]
             if sha in exclude:
@@ -368,27 +377,60 @@ def photo_notes(client, rounds, listing, exclude):
     return " | ".join(notes)
 
 
-class Selection:
-    """The listings one run works on and what the two run tags hold for them (re-read after each GPU round)."""
+def read_rounds(client, tags, sources):
+    """[(tag, {source: Round})] of the tags for the sources, each listed once."""
+    return [(tag, {src: Round(client, tag, src) for src in sources}) for tag in tags]
 
-    def __init__(self, client, listings, run_tag, clean_tag):
+
+def owner_choice(record, listing, exclude, conflicts, rounds):
+    """(tag, sha) of the owner's choice record of a listing (deploy.standardise_decisions; by SKU, so a re-bind that moves
+    the handle keeps it) while it still applies, else None; the one check, every run. It applies while its photo is one
+    of the listing's, not excluded, and the tag's result exists (a choice that can never be published is never picked
+    again and again). A photo listings of another stone show (conflicts) is the listing's only by the owner's own
+    decision on it: a choice that reached it through a sibling of its stone (decided_on another listing) assigns it
+    nothing, as the stones may have changed since. Stored answers only: nothing is read or paid."""
+    if record is None or record["sha"] not in listing["photos"] or record["sha"] in exclude:
+        return None
+    if (listing["source"], record["sha"]) in conflicts and record["decided_on"] != record["listing"]:
+        return None
+    by_tag = dict(rounds)
+    if record["tag"] not in by_tag or record["sha"] not in by_tag[record["tag"]][listing["source"]].finished:
+        return None
+    return record["tag"], record["sha"]
+
+
+class Selection:
+    """The listings one run works on and what the two run tags hold for them (rounds: read_rounds, re-read after each
+    GPU round). owner = {SKU: the owner's choice record} (deploy.standardise_decisions); conflicts = {(source, sha):
+    listing keys} of the photos listings of several stones show (index.shared_photos)."""
+
+    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds):
         if not run_tag or not clean_tag or run_tag == clean_tag:
             raise ValueError("two different run tags are required: the scraped photos' run and the cleaned copies' run")
         self.client, self.listings, self.tags = client, listings, (run_tag, clean_tag)
+        self.owner, self.conflicts, self.rounds = owner, conflicts, rounds
         self.sources = sorted({l["source"] for l in listings})
         self.exclude = read_exclude(EXCLUDE_PATH.read_text())
         self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
-        self.refresh()
 
     def refresh(self):
-        self.rounds = [(tag, {src: Round(self.client, tag, src) for src in self.sources}) for tag in self.tags]
+        self.rounds = read_rounds(self.client, self.tags, self.sources)
+
+    def owner_pick(self, listing):
+        """(tag, sha) of the owner's choice for this listing while it applies (owner_choice), else None."""
+        return owner_choice(self.owner.get(listing["sku"]), listing, self.exclude, self.conflicts, self.rounds)
+
+    def blocked(self, listing):
+        """The listing's photos never chosen by themselves: the reviewed exclude list and the photos it shares with a
+        listing of another stone (a conflict: only the owner assigns those)."""
+        return self.exclude | {sha for sha in listing["photos"] if (listing["source"], sha) in self.conflicts}
 
     def gpu_todo(self):
         """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet,
-        or whose result is outdated."""
+        or whose result is outdated; none of a listing the owner chose a photo for."""
         gpu = self.rounds[0][1]
-        return _by_source((l["source"], sha) for l in self.listings for sha in candidates(l, self.exclude)
-                          if needs_gpu(gpu[l["source"]], sha))
+        return _by_source((l["source"], sha) for l in self.listings if self.owner_pick(l) is None
+                          for sha in candidates(l, self.blocked(l)) if needs_gpu(gpu[l["source"]], sha))
 
     def clean_todo(self):
         """{source: shas} with a cleaned copy the standardiser has not run yet, or whose result is outdated."""
@@ -410,13 +452,14 @@ def _by_source(pairs):
 
 def judge_all(sel, spend, deadline):
     """(failures, stopped): every listing judged until its first pass, each started before the deadline."""
-    return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.exclude, spend), deadline)
+    return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.blocked(l), spend, sel.owner_pick(l)), deadline)
 
 
 def clean_all(sel, spend, deadline):
     """(failures, stopped): every listing with no pass gets a cleaned copy where one can be made, each started before the
     deadline."""
-    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.exclude, spend), deadline)
+    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.blocked(l), spend, sel.owner_pick(l)),
+                 deadline)
 
 
 def report(sel):
@@ -428,17 +471,18 @@ def report(sel):
 
     def one(l):
         """(outcome, what goes in its list) of one listing, from its stored answers only."""
-        picked, complete = choose(sel.client, sel.rounds, l, sel.exclude)
+        picked, complete = choose(sel.client, sel.rounds, l, sel.blocked(l), owner=sel.owner_pick(l))
         if picked:
             tag, sha = picked
-            record = {"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])}
+            record = {"source": l["source"], "key": l["key"], "sku": l["sku"], "sha": sha, "tag": tag,
+                      "prefix": round_prefix(tag, l["source"])}
             if picked != l.get("kept"):                # a kept choice is its record already: never written again
                 _put_json(sel.client, f"{prefix}{l['key']}.json", record)
             return "chosen", record
         if complete:
             sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")
             return "tracked", {"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
-                               "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)}
+                               "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude, sel.conflicts)}
         return "pending", l["key"]
     outcomes = pool_map(C.SELECT_WORKERS, one, sel.listings)   # a few S3 reads per listing, in the listings' order
     chosen, tracked, pending = ([item for kind, item in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
