@@ -1043,8 +1043,10 @@ class STANDARDISE:
     # The bar the prompt sets. 2 (user 2026-11-02, Namib Bianco: "if the final result looks like the FAL image I would
     # accept that, I rather keep the product"): a tiny remnant at the very edge no longer fails. A stored verdict carries
     # the version it was made under; a FAIL made under a lower one is judged again (a pass stays a pass: the bar only
-    # moved towards passing, so nothing that passed before can fail now).
-    JUDGE_VERSION = 2
+    # moved towards passing, so nothing that passed before can fail now). 3 (owner 2026-11-02, hidden listings whose
+    # results looked fine: black-queen 7029-27, bianco-river 7099, amasya 980): the slab's proportions are corrected to its
+    # real dimensions on purpose (never wrong_shape), and only what a buyer would see at catalog size fails.
+    JUDGE_VERSION = 3
     JUDGE_REASONING = True             # the endpoint refuses this model without it
     JUDGE_MAX_TOKENS = 6000            # reasoning included
     JUDGE_LONG_SIDE, JUDGE_JPEG_QUALITY = 1024, 88   # each image is sent at this long side
@@ -1056,14 +1058,17 @@ class STANDARDISE:
     JUDGE_PROMPT = """You are the last quality check before a natural-stone product photo is published in a marketplace catalog.
 Image 1 is the supplier's original photo. Image 2 is our processed catalog image of it.
 - For a SLAB (or two bookmatched slabs side by side): the slab is cut out of image 1, squared, cleaned and placed
-  upright in a showroom. Its chrome feet / supports at the bottom belong to the showroom stand.
+  upright in a showroom. Its chrome feet / supports at the bottom belong to the showroom stand. The whole slab is also
+  stretched or squeezed to its real dimensions, so its width-to-height ratio may differ from image 1: that alone is
+  never wrong_shape. But every edge and corner the slab has in image 1 must still be in image 2.
 - For a BLOCK or TILE: image 2 is the product cleaned in its own surroundings; there is no showroom. A quarry
   block's painted numbers and markings, its lifting cables and chains, and the quarry or yard around it are normal
   and never a problem.
 Judge ONLY the stone product in image 2 (its surface, its outline and what is on it), using image 1 to tell what is
 real stone and what is not. The showroom room, floor, stand and feet are fixed and never a problem.
 
-FAIL image 2 if a buyer looking at it at catalog size would clearly notice any of these on the stone:
+Look at image 2 as a buyer sees it at catalog size (a card about 400 pixels wide). FAIL it only if that buyer would
+clearly notice any of these on the stone:
 - light_reflection: lamp spots, rows of ceiling lights, light tubes or bright glare mirrored on the polished surface
 - scene_reflection: windows, the hall, people or objects clearly mirrored in the stone
 - bad_fill: a patch, rectangle or smear whose tone, brightness or texture does not match the stone around it
@@ -1073,10 +1078,13 @@ FAIL image 2 if a buyer looking at it at catalog size would clearly notice any o
 - not_one_slab: two or more slabs shown as one (stacked with an offset, a second slab's edge visible), or another
   stone taken in
 - wrong_shape: the product cut off, part of it missing, warped, or something in front of it cut into its outline
+  (for a SLAB, the whole slab at a different width-to-height ratio is the scaling and never wrong_shape; an edge,
+  corner or strip of the slab in image 1 that is missing from image 2 is wrong_shape)
 - other: any other clear defect of the image (not of the stone itself)
 
-PASS when the stone looks clean and natural. Natural features of the stone (veins, cracks, holes, colour changes,
-breccia, resin, sheen, rough or chipped edges) are not problems, nor is a faint soft sheen a buyer would not notice.
+PASS when the stone looks clean and natural at catalog size. Natural features of the stone (veins, cracks, holes,
+colour changes, breccia, resin, sheen, rough or chipped edges) are not problems, nor is a faint reflection, soft sheen
+or small faded spot a buyer would not notice at catalog size.
 Your whole answer is one JSON object and nothing else:
 {"verdict": "pass" | "fail", "problems": [{"kind": "<one of the kinds>", "where": "<short>"}]}"""
     # A listing with no photo that passes: the hosted edit models clean ONE of its photos (the first that can be fixed by
@@ -1126,6 +1134,8 @@ Your whole answer is one JSON object and nothing else:
     # $4/M, Opus 5.5), so parallel calls can never together pass the cap; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14
     CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
+    # Off: a run sends no photo to a hosted edit (a judge-only round: GPU, judge, cleaned copies already made).
+    CLEAN_ENABLED = _env_bool("SCRAPER_STANDARDISE_CLEAN", True)
     # A run (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
     # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
     # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
