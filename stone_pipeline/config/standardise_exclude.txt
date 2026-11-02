@@ -8,3 +8,5 @@ c9b5f0695447db96fe8dcff8805c9855b106f1873cbb53c3a1e33901f0529b69  # zucchi: pale
 37671cd546a52aa305ed8d52ba9eba2fccdb8891482f00699fd2dfd661faad8e  # marenostone: two slabs stacked with an offset shown as one (user 2026-11-01)
 1362666e9a2e18ec30488b0e7e2f3b0774019a05d8e6f2628b735d1c11a6efb3  # zucchi: white sample card left at the foot of the close-up
 035d936362e5b2a26b7b4d98d1d56eb58df0e40cf42818c40c7b085640460478  # varsha: darker patches where the label sheet was filled
+7aa254e16baa4139662604076be589f40436bbe873c47277f4607d5a4f1b0d9b  # sentas: cleaned copy with swirling dark edges left and right, reads as three slabs (user 2026-11-02)
+9e15685aabb0be7dec61494f60b6edab11299e934a59c86abbfdf301486cb4e9  # marenostone: dark notch of background at the top-left corner (user 2026-11-02)
