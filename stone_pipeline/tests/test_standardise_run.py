@@ -211,6 +211,20 @@ def test_the_steps_run_in_order(monkeypatch):
     assert done == ["gpu v9", "judge", "clean", "gpu v9-clean", "judge", "report"] and not problems and not capped
 
 
+def test_with_the_clean_up_off_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_ENABLED", False)
+    done = _steps(monkeypatch)
+    problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", say=lambda m: None)
+    assert done == ["gpu v9", "judge", "gpu v9-clean", "judge", "report"] and not capped
+
+
+def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_not_see():
+    assert C.JUDGE_VERSION == 3
+    prompt = C.JUDGE_PROMPT.lower()
+    assert "real dimensions" in prompt and "never wrong_shape" in prompt
+    assert "at catalog size" in prompt
+
+
 def test_the_run_stops_at_the_spend_cap_and_says_so(monkeypatch):
     done = _steps(monkeypatch, cap_at="clean")
     problems, capped = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", say=lambda m: None)

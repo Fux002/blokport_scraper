@@ -101,7 +101,7 @@ def hosted(step, sel, spend):
 def run(batch, sel, spend, run_id, say=print):
     """The six steps; (problems, cap reached). Stops at the cap: what is stored stays, the next run goes on."""
     problems = gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id)
-    for step in (select.judge_all, select.clean_all):
+    for step in (select.judge_all, select.clean_all) if C.CLEAN_ENABLED else (select.judge_all,):
         found, capped = hosted(step, sel, spend)
         problems += found
         if capped:
