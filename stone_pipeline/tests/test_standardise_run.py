@@ -80,11 +80,16 @@ def test_each_slice_has_its_own_fixed_list_and_is_a_retouch_then_a_standardise(m
     assert "SLICE_OFFSET" not in envs[0] and envs[5]["WATERMARKED"] == "true" and envs[5]["RUN_MODE"] == "standardise"
 
 
-def test_waiting_gives_up_after_the_deadline(monkeypatch):
-    monkeypatch.setattr(C, "RUN_MAX_WAIT_SECONDS", 100)
+def test_waiting_gives_up_after_the_deadline():
     times = iter([0, 50, 150])
     with pytest.raises(TimeoutError):
-        gpu.wait(_Batch(polls=[("RUNNING",)]), ["j1"], sleep=lambda s: None, clock=lambda: next(times))
+        gpu.wait(_Batch(polls=[("RUNNING",)]), ["j1"], 100, sleep=lambda s: None, clock=lambda: next(times))
+
+
+def test_the_deadline_grows_with_each_wave_of_slices_that_cannot_run_at_once(monkeypatch):
+    monkeypatch.setattr(C, "RUN_GPU_VCPUS", 128)
+    monkeypatch.setattr(C, "GPU_JOB_VCPUS", 8)
+    assert gpu.wait_limit(16) == C.RUN_MAX_WAIT_SECONDS and gpu.wait_limit(17) == 2 * C.RUN_MAX_WAIT_SECONDS
 
 
 def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_back(monkeypatch):
@@ -92,7 +97,7 @@ def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_ba
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
     batch, stopped = _Batch(polls=[("RUNNING",)]), []
     batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
-    monkeypatch.setattr(gpu, "wait", lambda batch, ids: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
         gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1")
     assert stopped == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
@@ -111,18 +116,27 @@ def test_a_submit_that_fails_part_way_still_stops_the_jobs_it_submitted(monkeypa
     assert stopped == ["job1", "job2", "job3"]
 
 
-def test_stopping_skips_ended_jobs_and_goes_on_past_one_that_cannot_be_stopped():
+def test_stopping_stops_every_job_and_goes_on_past_one_that_cannot_be_stopped():
     from botocore.exceptions import ClientError
-    batch, stopped = _Batch(polls=[("SUCCEEDED", "RUNNING", "RUNNING")]), []
+    batch, stopped = _Batch(), []
 
     def terminate(jobId, reason):
         if jobId == "j2":
             raise ClientError({"Error": {"Code": "ClientException"}}, "TerminateJob")
         stopped.append(jobId)
     batch.terminate_job = terminate
-    batch.describe_jobs = lambda jobs: {"jobs": [{"jobId": j, "jobName": j, "status": s} for j, s in zip(jobs, ("SUCCEEDED", "RUNNING", "RUNNING"))]}
     gpu.stop(batch, ["j1", "j2", "j3"], "stopped")
-    assert stopped == ["j3"]
+    assert stopped == ["j1", "j3"]
+
+
+def test_a_photo_s_own_failure_is_held_but_a_broken_gpu_or_storage_stops_the_slice_for_a_retry():
+    from botocore.exceptions import ClientError
+    from deploy import standardise_source as source
+    s3_error = ClientError({"Error": {"Code": "SlowDown"}}, "GetObject")
+    assert source.after_failure(ValueError("undecodable image"), 0) == "hold"
+    assert source.after_failure(RuntimeError("CUDA error: an illegal memory access"), 0) == "stop"
+    assert source.after_failure(s3_error, 1) == "retry"
+    assert source.after_failure(s3_error, C.SLICE_MAX_STORAGE_FAILURES) == "stop"
 
 
 def test_a_run_of_a_source_with_no_listings_refuses_to_start(monkeypatch):
@@ -134,7 +148,7 @@ def test_a_run_of_a_source_with_no_listings_refuses_to_start(monkeypatch):
 def test_waiting_asks_until_every_job_has_ended_and_names_the_failed(monkeypatch):
     batch = _Batch(polls=[("RUNNING",), ("SUCCEEDED", "FAILED")])
     slept = []
-    assert gpu.wait(batch, ["j1", "j2"], sleep=slept.append) == [("j2", "boom")]
+    assert gpu.wait(batch, ["j1", "j2"], 3600, sleep=slept.append) == [("j2", "boom")]
     assert slept == [C.RUN_POLL_SECONDS]
 
 

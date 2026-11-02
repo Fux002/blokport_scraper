@@ -36,16 +36,27 @@ class SpendCapReached(RuntimeError):
     pass
 
 
+class Halted(RuntimeError):
+    """The run was stopped: no hosted call may start any more."""
+
+
 class Spend:
     """Hosted spend of this run: a call's price is reserved before it is made and settled to what it cost, so parallel
     calls can never together pass the cap."""
 
     def __init__(self, cap):
-        self.cap, self.spent, self.reserved = cap, 0.0, 0.0
+        self.cap, self.spent, self.reserved, self.halted = cap, 0.0, 0.0, False
         self._lock = threading.Lock()
+
+    def halt(self):
+        """No call may start any more (the run is stopping): listings already running stop at their next call."""
+        with self._lock:
+            self.halted = True
 
     def reserve(self, usd):
         with self._lock:
+            if self.halted:
+                raise Halted("the run is stopping")
             if self.spent + self.reserved + usd > self.cap:
                 raise SpendCapReached(f"hosted spend would pass the cap of ${self.cap:.2f} (spent ${self.spent:.2f})")
             self.reserved += usd
@@ -218,9 +229,9 @@ def _attempt(client, cl, sha, name, original, spend):
                 client.delete_object(Bucket=S3_BUCKET, Key=f"{att}.request.json")
                 cl.requested.discard(ident)
                 raise
-            if 400 <= code < 500 and code != 429:      # the model refused or failed this photo for good: the next model
+            if code in C.CLEAN_FAILED_CODES:           # the model refused this photo for good: the next model
                 return _failed(client, cl, att, ident, name, f"the edit failed ({code})")
-            raise                                      # a passing error (5xx, 429): the next run collects it again
+            raise                                      # anything else (auth, balance, 5xx, 429): loud, collected again
         except clean.NoImage as exc:
             return _failed(client, cl, att, ident, name, str(exc))
         _put(client, f"{att}.jpg", copy, "image/jpeg")
@@ -368,7 +379,7 @@ def _each(listings, work):
             return
         try:
             work(listing)
-        except SpendCapReached as exc:
+        except (SpendCapReached, Halted) as exc:
             stop.set()
             failures.append((listing["key"], str(exc)))
         except Exception as exc:                       # one listing never stops the others; the re-run retries it
@@ -376,9 +387,9 @@ def _each(listings, work):
     pool = ThreadPoolExecutor(C.SELECT_WORKERS)
     try:
         list(pool.map(one, listings))
-    except BaseException:                              # stopped (a signal): nothing that has not started starts, or pays
-        stop.set()
-        pool.shutdown(wait=True, cancel_futures=True)
+    except BaseException:                              # stopped (a signal): nothing that has not started starts; running
+        stop.set()                                     # listings cannot pay any more (Spend.halt) and are not waited for
+        pool.shutdown(wait=False, cancel_futures=True)
         raise
     pool.shutdown(wait=True)
     return failures, stop.is_set()

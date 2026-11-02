@@ -17,6 +17,7 @@ import time
 import boto3
 import cv2
 import numpy as np
+from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -84,6 +85,18 @@ def _survey(rgb, m):
     if not quads:
         return f"no outline: {reason.split(' (')[0]}"
     return "open book" if len(quads) == 2 else "slab"
+
+
+def after_failure(exc, in_a_row):
+    """What a slice does after a photo failed: "hold" it (the photo itself cannot be standardised: its listing moves on,
+    the tracked list shows why) or "stop" the slice (the machine or the storage failed, not the photo: the job fails
+    loud and the next run retries those photos). A CUDA error breaks the GPU for every photo after it; storage errors
+    stop the slice after SLICE_MAX_STORAGE_FAILURES in a row. in_a_row counts this one."""
+    if "CUDA" in str(exc) or type(exc).__name__ == "OutOfMemoryError":
+        return "stop"
+    if isinstance(exc, (BotoCoreError, ClientError)):
+        return "stop" if in_a_row >= C.SLICE_MAX_STORAGE_FAILURES else "retry"
+    return "hold"
 
 
 def round_prefix(tag, src):
@@ -159,6 +172,7 @@ def main() -> int:
     m = models.load(survey_only=survey)
     tally = collections.Counter()
     spent = []
+    storage_in_a_row = 0
     for i, key in enumerate(sliced):
         sha = imagestore.sha_from_url(key)
         info = photos[sha]
@@ -187,16 +201,22 @@ def main() -> int:
                                       Body=json.dumps({"reason": res.held, "kind": res.kind}, sort_keys=True).encode())
                     tally["held"] += 1
                 else:
+                    if res.slab:
+                        client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
                     # Written last, so "main" means this photo is complete.
                     for name, img in sorted(res.images.items(), key=lambda kv: kv[0] == "main"):
                         client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{name}.jpg", Body=_encode(img), ContentType="image/jpeg")
-                    if res.slab:
-                        client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
                     tally[res.kind] += 1
-        except Exception as exc:                       # one bad photo never stops the slice: held with its error, so its
-            tally["failed"] += 1                       # listing moves on (and shows it on the tracked list)
-            print(f"   FAILED {sha[:12]}: {type(exc).__name__}: {exc}", flush=True)
-            if not survey:
+            storage_in_a_row = 0
+        except Exception as exc:                       # one bad photo never stops the slice (after_failure)
+            tally["failed"] += 1
+            storage_in_a_row = storage_in_a_row + 1 if isinstance(exc, (BotoCoreError, ClientError)) else 0
+            action = after_failure(exc, storage_in_a_row)
+            print(f"   FAILED {sha[:12]} ({action}): {type(exc).__name__}: {exc}", flush=True)
+            if action == "stop":
+                print(f"==> {src}: slice stopped, the next run retries its photos", flush=True)
+                return 1
+            if action == "hold" and not survey:
                 client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                   Body=json.dumps({"reason": f"error: {type(exc).__name__}: {exc}"[:500], "kind": ""}).encode())
         spent.append(time.time() - started)

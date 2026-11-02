@@ -68,10 +68,14 @@ def listings(s3, sources, wanted_key):
     return found
 
 
-def _stopped(signum, frame):
-    # SIGTERM (a stopped task or a closed terminal) unwinds like an error: the round's jobs are stopped, the GPU pool's
-    # ceiling and the run lock are restored by their finally blocks, which a bare SIGTERM would skip
-    raise SystemExit(f"stopped by signal {signum}")
+def stop_on_signal(spend):
+    """SIGTERM (a stopped task or a closed terminal) unwinds like an error: no hosted call may start any more, the round's
+    jobs are stopped, and the GPU pool's ceiling and the run lock are restored by their finally blocks (which a bare
+    SIGTERM would skip)."""
+    def stopped(signum, frame):
+        spend.halt()
+        raise SystemExit(f"stopped by signal {signum}")
+    signal.signal(signal.SIGTERM, stopped)
 
 
 def gpu_round(batch, sel, tag, todo, run_id):
@@ -121,7 +125,6 @@ def main() -> int:
     if not sources or not run_tag or not clean_tag or run_tag == clean_tag:
         print("ERROR: RUN_TAG, CLEAN_TAG (a different tag) and SRC are required; aborting")
         return 2
-    signal.signal(signal.SIGTERM, _stopped)
     retries = Config(retries={"mode": "standard", "max_attempts": 10})     # a throttled call is retried, never fatal
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
@@ -136,6 +139,7 @@ def main() -> int:
         with exclusive(s3, owner):
             sel = select.Selection(s3, found, run_tag, clean_tag)
             spend = select.Spend(C.SPEND_CAP_USD)
+            stop_on_signal(spend)
             print(f"==> standardise run {run_id}: {len(sel.listings)} listings of {', '.join(sel.sources)}; "
                   f"{run_tag} then {clean_tag}", flush=True)
             problems, capped = run(batch, sel, spend, run_id)

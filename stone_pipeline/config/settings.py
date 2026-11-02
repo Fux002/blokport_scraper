@@ -1080,6 +1080,7 @@ Your whole answer is one JSON object and nothing else:
     # find, stacked slabs) is not worth an edit.
     CLEAN_FIXES_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark")
     CLEAN_FIXES_HELD = ("retouch:", "logo:")   # held reasons (their start) a cleaned copy removes the cause of
+    CLEAN_FAILED_CODES = (400, 422)    # a queued edit the model refused for good; any other error is loud and retried
     CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
 straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and
 foreign marks (labels, stickers, sample cards, tape, writing, logos) from the stone, and nothing else. Judge image 2
@@ -1101,9 +1102,11 @@ Your whole answer is one JSON object and nothing else:
     RUN_SLICE = 150
     RUN_GPU_VCPUS, IDLE_GPU_VCPUS = 128, 8
     RUN_POLL_SECONDS = 60              # how often a run asks Batch whether its jobs are done ...
-    RUN_MAX_WAIT_SECONDS = 12 * 3600   # ... and how long at most before it stops them and fails (jobs stuck, no GPU quota);
-    #                                    above a healthy slice's longest (RETOUCH_TIMEOUT + STANDARDISE_TIMEOUT)
+    RUN_MAX_WAIT_SECONDS = 12 * 3600   # ... and how long at most per wave of jobs (the slices that run at once) before it
+    #                                    stops them and fails (jobs stuck, no GPU quota); above a healthy slice's longest
     RETOUCH_TIMEOUT, STANDARDISE_TIMEOUT = 14400, 21600   # s a Batch job may take before Batch stops it
+    GPU_JOB_VCPUS = 8                  # each GPU job's vCPUs: RUN_GPU_VCPUS // this jobs run at once
+    SLICE_MAX_STORAGE_FAILURES = 3     # storage errors in a row before a GPU slice stops (the next run retries)
     SELECT_WORKERS = 12                # listings worked on at once (hosted calls; no model runs here)
     # Per edit at the sizes above, an upper bound (fal.ai/pricing: Kontext per megapixel rounded up, Nano Banana 2 per image
     # with 2K above base, FLUX 3 per megapixel), so the cap stops early rather than late.

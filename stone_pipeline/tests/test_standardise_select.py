@@ -326,3 +326,21 @@ def test_an_edit_the_model_failed_for_good_is_a_failed_attempt_and_the_next_mode
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == ["kontext", "nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
     assert json.loads(s3.objects[f"{CL}attempts/{B}.kontext.json"])["passes"] is False
+
+
+
+def test_a_halted_spend_lets_no_call_start():
+    spend = sel.Spend(10)
+    spend.halt()
+    with pytest.raises(sel.Halted):
+        spend.reserve(0.01)
+
+
+def test_an_auth_or_balance_error_from_the_queue_is_loud_never_a_failed_edit(monkeypatch):
+    import httpx
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    locked = httpx.HTTPStatusError("403", request=httpx.Request("GET", "https://q"), response=httpx.Response(403))
+    monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(locked))
+    with pytest.raises(httpx.HTTPStatusError):
+        sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert f"{CL}attempts/{B}.kontext.json" not in s3.objects and edits == ["kontext"]   # retried next run, not given up

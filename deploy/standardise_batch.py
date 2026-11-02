@@ -10,7 +10,7 @@ import json
 import time
 from contextlib import contextmanager
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import env
@@ -72,30 +72,33 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
     return ids
 
 
-def wait(batch, ids, sleep=time.sleep, clock=time.monotonic):
-    """Block until every job has ended: [(job name, why)] of the jobs that failed. TimeoutError after
-    RUN_MAX_WAIT_SECONDS (jobs stuck waiting for GPUs never end on their own)."""
-    deadline = clock() + C.RUN_MAX_WAIT_SECONDS
+def wait(batch, ids, limit, sleep=time.sleep, clock=time.monotonic):
+    """Block until every job has ended: [(job name, why)] of the jobs that failed. TimeoutError after limit seconds
+    (jobs stuck waiting for GPUs never end on their own)."""
+    deadline = clock() + limit
     while True:
         jobs = [j for i in range(0, len(ids), 100) for j in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]]
         if all(j["status"] in _DONE for j in jobs):
             return [(j["jobName"], j.get("statusReason", "")) for j in jobs if j["status"] == "FAILED"]
         if clock() > deadline:
-            raise TimeoutError(f"GPU jobs not done after {C.RUN_MAX_WAIT_SECONDS}s")
+            raise TimeoutError(f"GPU jobs not done after {limit}s")
         sleep(C.RUN_POLL_SECONDS)
 
 
 def stop(batch, ids, why):
-    """Stop every job of the round that has not ended (a run that fails or is stopped leaves no GPU work behind). A job
-    that cannot be stopped is reported and the others are still stopped."""
-    for i in range(0, len(ids), 100):
-        for job in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]:
-            if job["status"] in _DONE:
-                continue
-            try:
-                batch.terminate_job(jobId=job["jobId"], reason=why[:250])
-            except ClientError as exc:
-                print(f"   could not stop GPU job {job['jobName']}: {exc}", flush=True)
+    """Stop every job of the round (Batch ignores it for a job that has ended), each on its own: one that cannot be
+    stopped is reported and the others are still stopped (a run that fails or is stopped leaves no GPU work behind)."""
+    for job_id in ids:
+        try:
+            batch.terminate_job(jobId=job_id, reason=why[:250])
+        except (BotoCoreError, ClientError) as exc:
+            print(f"   could not stop GPU job {job_id}: {exc}", flush=True)
+
+
+def wait_limit(n_slices):
+    """How long a round may take: RUN_MAX_WAIT_SECONDS per wave of slices that run at once."""
+    at_once = max(1, C.RUN_GPU_VCPUS // C.GPU_JOB_VCPUS)
+    return C.RUN_MAX_WAIT_SECONDS * -(-n_slices // at_once)
 
 
 def run_round(batch, s3, tag, todo, watermarked, run_id):
@@ -107,7 +110,8 @@ def run_round(batch, s3, tag, todo, watermarked, run_id):
     with raised(batch, pool(batch, queue)):
         ids = []
         try:
-            return wait(batch, submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids))
+            submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
+            return wait(batch, ids, wait_limit(len(slices(todo))))
         except BaseException as exc:
             stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
             raise
