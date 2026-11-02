@@ -290,9 +290,10 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     else:
         _stage_and_link(rows, fetch, cfg, stats)
     views = _load_standard_views(cfg)
-    known, views = views is not None, views or {}
+    # A pool unread, or with nothing published (local mode, before any publish), cannot tell which products have a
+    # standardised photo: this run then never changes whether a product is listed.
+    known, views = bool(views and views.get("main")), views or {}
     for row in rows:
-        # unknown when the pool could not be read: this run never changes whether a product is listed
         row.standard_photo = _lead(row.image_keys, views) is not None if known else None
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views

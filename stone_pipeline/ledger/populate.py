@@ -296,17 +296,18 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
     `last_synced_qty` is left null, so a freshly populated row is a delta to serve
     (design section 7). Products must be populated first (the sku FK). With images.require_standard_photo on, a product
     without a standardised photo is delisted (stock 0, reason 'delisted'); one whose photo this run could not tell
-    (standard_photo None: the pool unread, or the stock-only refresh) keeps the listed or delisted state it had."""
-    rows = list(rows)
-    hide = _without_standard_photo(rows, cfg)
+    (standard_photo None: the pool unread or empty, or the stock-only refresh) keeps the listed or delisted state it had.
+    A change of reason is a delta like a change of stock: hiding or showing a product already at stock 0 is served."""
+    rule = SETTINGS.images.require_standard_photo
     now = now_iso()
     n = 0
     for r in rows:
         sku = _sku(r, cfg)
         resolved = inventory_str(r)
         qty = int(resolved) if str(resolved).isdigit() else 0
-        delisted = sku in hide or (r.standard_photo is None and SETTINGS.images.require_standard_photo
-                                   and _delisted(ledger, sku))
+        stored = ledger.get("inventory", "sku", sku)
+        was_delisted = bool(stored) and stored["reason"] == "delisted"
+        delisted = rule and (r.standard_photo is False or (r.standard_photo is None and was_delisted))
         # keep last_synced_qty on update: it is owned by the ack, not the write-through.
         # Overwriting it to NULL each run would re-serve every product as a delta forever.
         ledger.upsert("inventory", {
@@ -319,25 +320,10 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
             "replaced_by_lot_code": None,   # listed again, so no longer replaced by a lot
             "updated_at": now,
         }, pk=("sku",), keep_on_update=("last_synced_qty",))
+        if stored and stored["reason"] != ("delisted" if delisted else None):
+            ledger.execute("UPDATE inventory SET last_synced_qty = NULL WHERE sku = ?", (sku,))
         n += 1
     return n
-
-
-def _without_standard_photo(rows: list[CanonicalRow], cfg: SourceConfig) -> set[str]:
-    """The skus the rule delists this run: products the image stage found without a standardised photo. Raises when
-    they are nearly all of the source's products (a broken run, never a real outcome): nothing is written then."""
-    if not SETTINGS.images.require_standard_photo:
-        return set()
-    hide = {_sku(r, cfg) for r in rows if r.standard_photo is False}
-    if rows and len(hide) > SETTINGS.images.max_hidden_share * len(rows):
-        raise RuntimeError(f"{cfg.source_code}: the standardised-photo rule would hide {len(hide)} of {len(rows)} products; "
-                           "refusing (a photo pool read as empty?)")
-    return hide
-
-
-def _delisted(ledger: Ledger, sku: str) -> bool:
-    stored = ledger.get("inventory", "sku", sku)
-    return bool(stored) and stored["reason"] == "delisted"
 
 
 def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:

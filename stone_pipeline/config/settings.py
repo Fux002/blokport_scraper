@@ -599,9 +599,6 @@ class ImagesConfig:
     # is fixed, one by one): without one it is served at stock 0 with reason 'delisted' (Blokport hides it) and comes back
     # on the first produce after its photo is published. On in production; dev has standardised only a test set.
     require_standard_photo: bool = _env_bool("SCRAPER_REQUIRE_STANDARD_PHOTO", IS_PRODUCTION)
-    # A source where the rule would hide more than this share of its products fails loud instead: that is a broken run
-    # (a photo pool read as empty), never a real outcome.
-    max_hidden_share: float = 0.9
     # Number of numbered "Product Image N" columns a slab/tile product can fill. The pipeline
     # fills as many as the product actually has; the rest stay blank. Shared by the image-slotting
     # stage, the emit columns and the scrapers' per-product photo cap so they can never drift (the

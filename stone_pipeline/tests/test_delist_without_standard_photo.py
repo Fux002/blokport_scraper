@@ -2,7 +2,9 @@
 fixed): with the rule on, a product the image stage found without one goes out at stock 0 with reason 'delisted'
 (Blokport hides it) and comes back on the first produce after its photo is published. A run that cannot tell (the photo
 pool unreadable, or the stock-only refresh, which skips the image stage) never changes whether a product is hidden, and a
-source where the rule would hide nearly everything fails loud instead."""
+pool that is empty or unreadable (local mode, nothing published, a failed read) means "cannot tell". Hiding and showing
+again are served to Blokport even when the stock stays 0; the dead-stock purge never deletes a hidden product, and a
+bundle never redirects to a lot whose pieces are all hidden."""
 from __future__ import annotations
 
 import dataclasses
@@ -14,7 +16,8 @@ from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger import populate
-from stone_pipeline.ledger.populate import populate_inventory
+from stone_pipeline.ledger.populate import populate_discontinued, populate_inventory
+from stone_pipeline.ledger.sync import purge_discontinued, ready
 from stone_pipeline.stages import emit, images
 
 A = "a" * 64
@@ -75,11 +78,40 @@ def test_the_rule_off_changes_nothing(tmp_path, monkeypatch):
         assert _stock(ledger, _row("x", False)) == (3, None)
 
 
-def test_a_source_the_rule_would_almost_empty_fails_loud(tmp_path, rule_on):
-    rows = [_row("1", True)] + [_row(str(i), False) for i in range(2, 21)]           # 19 of 20 would be hidden
+def test_hiding_a_product_already_at_stock_0_is_still_served_to_blokport(tmp_path, rule_on):
+    cfg = load_source("sentas")
+    sold = _row("x", True, qty="0")
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
-        with pytest.raises(RuntimeError, match="would hide"):
-            _stocked(ledger, rows, load_source("sentas"))
+        _stocked(ledger, [sold], cfg)
+        ledger.execute("UPDATE inventory SET last_synced_qty = 0")                    # its stock 0 was acked
+        assert ready(ledger, "inventory") == []
+        _stocked(ledger, [_row("x", False, qty="0")], cfg)
+        assert [r["payload"].get("reason") for r in ready(ledger, "inventory")] == ["delisted"]
+
+
+def test_the_dead_stock_purge_keeps_a_hidden_product_and_the_vendor_removal_still_removes_it(tmp_path, rule_on):
+    cfg = load_source("sentas")
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        _stocked(ledger, [_row("hidden", False), _row("live", True)], cfg)
+        populate_discontinued(ledger, [("SEN-GONE", "h")])
+        assert purge_discontinued(ledger)["external_ids"] == ["SEN-GONE"]           # dead stock only
+        assert purge_discontinued(ledger, reason="vendor_removed")["external_ids"] == [emit._sku(_row("hidden", False), cfg)]
+
+
+def test_a_bundle_never_redirects_to_a_lot_whose_pieces_are_all_hidden(tmp_path, rule_on):
+    cfg = load_source("sentas")
+    piece = _row("2555-4", False)
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        now = now_iso()
+        ledger.upsert("product", {"sku": "SEN-2555", "source": "sen", "state": "synced", "medusa_id": "m-b",
+                                  "created_at": now, "updated_at": now}, pk=("sku",))
+        ledger.upsert("inventory", {"sku": "SEN-2555", "qty": 9, "last_synced_qty": 9, "updated_at": now}, pk=("sku",))
+        _stocked(ledger, [piece], cfg)
+        ledger.execute("UPDATE product SET lot_code = 'L1', medusa_id = 'm-p' WHERE sku = ?", (emit._sku(piece, cfg),))
+        populate_discontinued(ledger, [("SEN-2555", "h")], replaced={"SEN-2555": "L1"})
+        assert "SEN-2555" not in [r["external_id"] for r in ready(ledger, "inventory")]
+        _stocked(ledger, [_row("2555-4", True)], cfg)                                   # its photo is published
+        assert "SEN-2555" in [r["external_id"] for r in ready(ledger, "inventory")]
 
 
 def _improved(sha):
@@ -94,7 +126,8 @@ def test_the_image_stage_says_whether_each_product_has_a_standardised_photo_or_t
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: {"main": {A: "e"}, "white": {}, "studio": {}, "close": {}})
     images.run(rows, cfg=cfg)
     assert [r.standard_photo for r in rows] == [True, False]
-    rows = [CanonicalRow(src_site="sentas", surrogate_key="3", format_value="Slab", image_keys=[_improved(A)])]
-    monkeypatch.setattr(images, "_load_standard_views", lambda cfg: None)                  # the pool could not be read
-    images.run(rows, cfg=cfg)
-    assert rows[0].standard_photo is None and rows[0].thumbnail_key == _improved(A)
+    for pool in (None, {}, {"main": {}, "white": {}}):                    # unreadable; local mode; nothing published
+        rows = [CanonicalRow(src_site="sentas", surrogate_key="3", format_value="Slab", image_keys=[_improved(A)])]
+        monkeypatch.setattr(images, "_load_standard_views", lambda cfg, pool=pool: pool)
+        images.run(rows, cfg=cfg)
+        assert rows[0].standard_photo is None and rows[0].thumbnail_key == _improved(A)
