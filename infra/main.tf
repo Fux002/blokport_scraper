@@ -101,6 +101,15 @@ resource "aws_ecr_lifecycle_policy" "this" {
       { rulePriority = 3, description = "keep :core",
         selection    = { tagStatus = "tagged", tagPrefixList = ["core"], countType = "imageCountMoreThan", countNumber = 2 },
       action = { type = "expire" } },
+      # The pinned prod images (tagged prod-<sha> when pinned: the current one and the ones to roll back to) and the
+      # standardise GPU image (standardise-edit-<sha>-x, rebuilt rarely) must never fall to the churn rule below: on
+      # 2026-11-02 it expired the GPU image mid-day (CannotPullImageManifestError) and the previous prod image.
+      { rulePriority = 4, description = "keep the pinned prod images (prod-<sha>)",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["prod-"], countType = "imageCountMoreThan", countNumber = 5 },
+      action = { type = "expire" } },
+      { rulePriority = 5, description = "keep the standardise GPU images",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-"], countType = "imageCountMoreThan", countNumber = 3 },
+      action = { type = "expire" } },
       { rulePriority = 10, description = "expire the per-commit <sha> churn beyond the last ${var.keep_last_images}",
         selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = var.keep_last_images },
       action = { type = "expire" } },
