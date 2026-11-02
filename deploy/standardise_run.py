@@ -2,7 +2,8 @@
 a valid chosen photo ends with one good photo, published and linked, or on the review list with the reason. The
 runner's `photos` stage, started after each full produce on the owner's button. In order:
   0. clear: GPU jobs an earlier, killed run left are stopped and the GPU pool's ceiling is set back to idle
-  1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's, or excluded)
+  1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's, or excluded),
+     and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept
   2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG
   3. judge: each listing's results in its own order until one passes
   4. clean: a hosted edit of one fixable photo of each listing still without a pass
@@ -205,14 +206,30 @@ def choices(s3, root):
     return {r["key"]: r for r in records}
 
 
-def todo(listings, records, exclude):
-    """The listings without a valid chosen photo: no record, or its photo is no longer one of the listing's (the sheet
-    changed) or is on the exclude list. A listing on the review list has no record, so every run looks at it again (its
-    stored answers cost nothing; a change that can help it reaches it)."""
-    def chosen(l):
+def whole_slabs(s3, records):
+    """The <sha>.slab.png keys in the run folders the choice records point at: which chosen photos are a whole slab."""
+    out = set()
+    for prefix in sorted({r["prefix"] for r in records.values()}):
+        for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix):
+            out.update(o["Key"] for o in page.get("Contents", []) if o["Key"].endswith(".slab.png"))
+    return out
+
+
+def todo(listings, records, exclude, slabs):
+    """The listings a run works on, in sheet order. Those without a valid chosen photo: no record, or its photo is no
+    longer one of the listing's (the sheet changed) or is on the exclude list. A listing on the review list has no record,
+    so every run looks at it again (its stored answers cost nothing; a change that can help it reaches it). And a slab
+    listing whose chosen photo is no whole slab (no <sha>.slab.png in `slabs`: a close-up, no 3D slab), with that choice
+    as "kept": its further photos may show the whole slab, and the choice stays unless one of them passes. Its stored
+    answers cost nothing either, so it is simply looked at again by every run."""
+    out = []
+    for l in listings:
         r = records.get(l["key"])
-        return r is not None and r["sha"] in l["photos"] and r["sha"] not in exclude
-    return [l for l in listings if not chosen(l)]
+        if r is None or r["sha"] not in l["photos"] or r["sha"] in exclude:
+            out.append(l)
+        elif l["format"] == C.CUTOUT_FORMAT and f"{r['prefix']}{r['sha']}.slab.png" not in slabs:
+            out.append({**l, "kept": (r["tag"], r["sha"])})
+    return out
 
 
 # --- the steps --------------------------------------------------------------------------------------------------------
@@ -244,7 +261,7 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     sel.refresh()
     rnd = dict(sel.rounds)[tag]
     problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas
-                 if sha not in rnd[src].finished | rnd[src].held]
+                 if select.needs_gpu(rnd[src], sha)]
     return problems, False
 
 
@@ -291,9 +308,12 @@ def process(s3, batch, spend, run_id, deadline, say=print):
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
-    found = todo(sheet_listings(s3), choices(s3, root), exclude)
+    records = choices(s3, root)
+    found = todo(sheet_listings(s3), records, exclude, whole_slabs(s3, records))
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
-    say(f"==> standardise process {run_id}: {len(found)} listings without a chosen photo; {C.RUN_TAG} then {C.CLEAN_TAG}")
+    kept = sum("kept" in l for l in found)
+    say(f"==> standardise process {run_id}: {len(found) - kept} listings without a chosen photo, {kept} whose chosen "
+        f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), spend.halt, ("the work window ended",))
     closing.daemon = True
     closing.start()

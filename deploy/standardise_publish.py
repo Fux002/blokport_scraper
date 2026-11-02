@@ -1,8 +1,8 @@
 """Publish the chosen photos (deploy.standardise_select: one record per listing under <CLEAN_TAG>/chosen/, together the
 complete choice whatever runs made them): each listing's one good photo, its views
 (showroom, white, side view, close-up) copied from the run that made it into <env>/products/standard/<view>/<src>/<sha>.jpg,
-where the image stage links products to them. A chosen photo of a whole single slab (its run saved <sha>.slab.png) also
-gets its 3D slab, made here from that slab (stone_pipeline.standardise.cutout) into
+where the image stage links products to them. A chosen photo of a whole slab (a single slab or one half of an open book:
+its run saved <sha>.slab.png) also gets its 3D slab, made here from that slab (stone_pipeline.standardise.cutout) into
 <env>/products/standard/cutout/<src>/<sha>.webp + .json. The outline carries what it was made from (the slab's key and
 ETag, CUTOUT_VERSION), so a 3D slab is made again exactly when that changed: a listing's choice moved to another run of
 the same photo, a later run re-made the slab, or the cut-out itself changed.
@@ -56,8 +56,8 @@ def copies(chosen, made, exclude=frozenset()):
 
 
 def slabs(chosen, made, exclude=frozenset()):
-    """{(source, sha): its run's slab key} for every chosen photo not on the exclude list whose run saved a whole single
-    slab: the photos that get a 3D slab."""
+    """{(source, sha): its run's slab key} for every chosen photo not on the exclude list whose run saved a whole slab:
+    the photos that get a 3D slab."""
     return {(c["source"], c["sha"]): key for c in chosen
             if c["sha"] not in exclude and (key := f"{c['prefix']}{c['sha']}.slab.png") in made}
 

@@ -4,7 +4,9 @@ standardiser's run over the scraped photos and its run over the copies a hosted 
 stored next to the image it is about, so a re-run reads it back and never pays twice; one listing's failure is
 reported and never stops the others.
   judge   per listing, its finished photos in its own order (the scraped run first, then the cleaned run) go to the
-          judge until one passes, at most JUDGE_MAX_PER_LISTING per tag; the verdict is kept at <tag>/<src>/judged/
+          judge until one passes, at most JUDGE_MAX_PER_LISTING per tag; the verdict is kept at <tag>/<src>/judged/.
+          A slab listing prefers a whole slab (a result with <sha>.slab.png, which gets a 3D slab): after a close-up
+          passes, only its whole results go on to the judge, and the first of those that passes is chosen instead
   clean   per listing with no pass, the first CLEAN_PHOTOS_PER_LISTING photos a cleaned copy can fix (failed only for
           reflections or marks, or held by the retouch or logo step) are edited by each CLEAN_MODELS model in turn until
           a copy passes the clean check; that copy becomes <clean tag>/<src>/cleaned/<sha>.jpg
@@ -16,6 +18,7 @@ reported and never stops the others.
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import json
 import re
@@ -107,15 +110,19 @@ class Spend:
 
 
 class Round:
-    """What one run tag holds for one source, its keys listed once: finished photos, held ones, verdicts, cleaned copies
-    and clean attempts ("<sha>.<model>": its check, its edited copy, its stored hosted request). One lock per photo: a
-    photo several listings share is judged and cleaned once, never by two threads at once."""
+    """What one run tag holds for one source, its keys listed once: finished photos, the whole slabs among them, held
+    ones, verdicts, cleaned copies and clean attempts ("<sha>.<model>": its check, its edited copy, its stored hosted
+    request). One lock per photo: a photo several listings share is judged and cleaned once, never by two threads at
+    once."""
 
     def __init__(self, client, tag, src):
         self.prefix = round_prefix(tag, src)
         keys = [o["Key"][len(self.prefix):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=self.prefix)
                 for o in page.get("Contents", [])]
         self.finished = {k[:64] for k in keys if k.endswith(".main.jpg") and "/" not in k}
+        self.slabs = {k[:64] for k in keys if k.endswith(".slab.png") and "/" not in k}     # whole slabs: a 3D slab each
+        self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
+        self.noslab = _shas(keys, "noslab/")
         self.held = _shas(keys, "held/")
         self.judged = _shas(keys, "judged/")
         self.cleaned = _shas(keys, "cleaned/")
@@ -123,6 +130,12 @@ class Round:
         self.edited = _attempts(keys, ".jpg")
         self.attempts = _attempts([k for k in keys if not k.endswith(".request.json")], ".json")
         self._locks, self._guard = {}, threading.Lock()
+
+    @functools.cached_property
+    def outdated(self):
+        """The results made before an open book's halves had their slab (a side view, no slab, not tried again): the GPU
+        completes each once (deploy.standardise_source.complete). Worked out once per Round: none of its sets change."""
+        return (self.finished & self.studio) - self.slabs - self.noslab - self.held
 
     def lock(self, sha):
         with self._guard:
@@ -200,12 +213,15 @@ def candidates(listing, exclude):
 
 def choose(client, rounds, listing, exclude, spend=None):
     """((tag, sha) of the listing's photo to publish or None, whether the answer is final): the standardiser's results of
-    its candidates in order, then its cleaned copies' results, the first the judge passes. A photo held by the
-    standardiser is skipped; a photo with no result yet, or no verdict yet, leaves the answer open (never read as "no
-    good photo", which would send the listing to the hosted edit or the tracked list). rounds = [(tag, {source:
-    Round})], the scraped run first, then (optionally) the cleaned run."""
+    its candidates in order, then its cleaned copies' results, the first the judge passes. A slab listing prefers a whole
+    slab (its result has a 3D slab): a passing close-up is the answer only while no whole slab passes, and once one is had
+    (listing["kept"]: the choice a run made before, or the first close-up passed here) only whole results are judged.
+    A photo held by the standardiser is skipped; a photo with no result yet, or no verdict yet, leaves the answer open
+    (never read as "no good photo", which would send the listing to the hosted edit or the tracked list). rounds =
+    [(tag, {source: Round})], the scraped run first, then (optionally) the cleaned run."""
     src = listing["source"]
-    complete = True
+    whole_wanted = listing["format"] == C.CUTOUT_FORMAT
+    fallback, complete = listing.get("kept"), True
     for i, (tag, rnd) in enumerate(rounds):
         r = rnd[src]
         shas = candidates(listing, exclude) if i == 0 else [sha for sha in listing["photos"] if sha in r.cleaned and sha not in exclude]
@@ -215,12 +231,17 @@ def choose(client, rounds, listing, exclude, spend=None):
             if sha not in r.finished:
                 complete = False
                 continue
+            whole = sha in r.slabs
+            if fallback is not None and not whole:      # another close-up: no better than the pass already had
+                continue
             found = verdict(client, r, src, sha, listing["format"], spend)
             if found is None or not judge.current(found):    # no verdict, or a fail under an older bar: not final
                 complete = False
             elif judge.passed(found):
-                return (tag, sha), True
-    return None, complete
+                if whole or not whole_wanted:
+                    return (tag, sha), True
+                fallback = (tag, sha)
+    return fallback, complete
 
 def fixable(client, rnd, sha, exclude):
     """Whether a cleaned copy of this photo could pass: the judge failed its result only for reflections, marks or fills,
@@ -363,16 +384,21 @@ class Selection:
         self.rounds = [(tag, {src: Round(self.client, tag, src) for src in self.sources}) for tag in self.tags]
 
     def gpu_todo(self):
-        """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet."""
+        """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet,
+        or whose result is outdated."""
         gpu = self.rounds[0][1]
         return _by_source((l["source"], sha) for l in self.listings for sha in candidates(l, self.exclude)
-                          if sha not in gpu[l["source"]].finished | gpu[l["source"]].held)
+                          if needs_gpu(gpu[l["source"]], sha))
 
     def clean_todo(self):
-        """{source: shas} with a cleaned copy the standardiser has not run yet."""
+        """{source: shas} with a cleaned copy the standardiser has not run yet, or whose result is outdated."""
         cl = self.rounds[1][1]
-        return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned
-                          if sha not in cl[src].finished | cl[src].held)
+        return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned if needs_gpu(cl[src], sha))
+
+
+def needs_gpu(rnd, sha):
+    """Whether the GPU works on this photo: no result yet, or an outdated one (Round.outdated)."""
+    return sha not in rnd.finished | rnd.held or sha in rnd.outdated
 
 
 def _by_source(pairs):
@@ -394,9 +420,10 @@ def clean_all(sel, spend, deadline):
 
 
 def report(sel):
-    """{"chosen", "tracked", "pending"} of this run's listings. Each listing with a good photo gets its choice record, a
-    listing now without one loses its record (and is in tracked.csv, this run's list of listings with no good photo);
-    a listing not fully judged is neither and its record is left as it is. Listings outside this run are untouched."""
+    """{"chosen", "tracked", "pending"} of this run's listings. Each listing with a good photo gets its choice record (a
+    kept close-up's stays as it is unless a whole slab passed), a listing now without one loses its record (and is in
+    tracked.csv, this run's list of listings with no good photo); a listing not fully judged is neither and its record
+    is left as it is. Listings outside this run are untouched."""
     prefix = chosen_prefix(sel.root)
 
     def one(l):
@@ -405,7 +432,8 @@ def report(sel):
         if picked:
             tag, sha = picked
             record = {"source": l["source"], "key": l["key"], "sha": sha, "tag": tag, "prefix": round_prefix(tag, l["source"])}
-            _put_json(sel.client, f"{prefix}{l['key']}.json", record)
+            if picked != l.get("kept"):                # a kept choice is its record already: never written again
+                _put_json(sel.client, f"{prefix}{l['key']}.json", record)
             return "chosen", record
         if complete:
             sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")

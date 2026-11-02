@@ -294,6 +294,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     # standardised photo: this run then never changes whether a product is listed.
     known, views = bool(views and views.get("main")), views or {}
     for row in rows:
+        row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
         row.standard_photo = _lead(row.image_keys, views) is not None if known else None
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views
@@ -323,7 +324,8 @@ def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
 
 def model_3d(urls: list[str], views: dict[str, set[str]]) -> Optional[str]:
     """The 3D slab's cut-out url of a product: its lead photo's (the slab the catalog thumbnail shows), when that photo is
-    a whole single slab with a published cut-out; None otherwise (an open book, a close-up, no published photo)."""
+    a whole slab (a single slab or one half of an open book) with a published cut-out; None otherwise (a close-up, no
+    published photo)."""
     lead = _lead(urls, views)
     if lead is None or lead[2] not in views.get(imagestore.CUTOUT_SUBDIR, ()):
         return None

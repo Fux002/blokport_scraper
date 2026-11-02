@@ -17,10 +17,14 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
        1. lock        <env>/standardise-test/run.lock, rewritten every 5 min while the process runs
        2. clear       GPU jobs a killed earlier run left (photos-<run id>-...) are stopped, the GPU pool's ceiling
                       set back to idle
-       3. pick        every listing of the sheet just published WITHOUT a valid choice record
-                      (record missing, or its photo no longer the listing's, or on the exclude list)
-       4. GPU         the listings' first JUDGE_MAX photos the standardiser has not run (RUN_TAG)
-       5. judge       each listing's results in its own order until one passes
+       3. pick        every listing of the sheet just published (its photos from the photo list beside it)
+                      WITHOUT a valid choice record
+                      (record missing, or its photo no longer the listing's, or on the exclude list), and every
+                      slab listing whose chosen photo is no whole slab (a close-up), its choice kept
+       4. GPU         the listings' first JUDGE_MAX photos the standardiser has not run, or whose result is
+                      outdated (RUN_TAG)
+       5. judge       each listing's results in its own order until one passes; a slab listing goes on past a
+                      passing close-up to its whole slabs only, and takes the first of those that passes
        6. clean       only for a listing whose every judged photo failed for a cleanable reason:
                       one photo, hosted edit models cheapest first (nano2, kontext, flux3) until a copy passes
        7. GPU         the cleaned copies (CLEAN_TAG)
@@ -38,6 +42,40 @@ Every step reads back what earlier runs stored (verdicts, cleaned copies, paid e
 that stops is simply run again, and nothing is paid twice. A listing on the review list is picked again by the next
 run at no hosted cost (its answers are stored), so the list is always complete, and a change that can help it (a
 higher JUDGE_MAX, a new clean instruction version) reaches it by itself.
+
+## A whole slab before a close-up (the 3D slab)
+
+A result is a whole slab when its run saved `<sha>.slab.png`: a single slab, or an open book, whose slab is one of its
+two halves (each half is a whole real slab: the one with more stone in its outline, the left on a tie; its close view
+is made from that half too). Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
+close view, no 3D.
+
+A slab listing prefers a whole slab, within the same JUDGE_MAX candidates and their order. Once a close-up has passed
+(in this run, or as the listing's choice from an earlier one, picked again as "kept"), only the listing's whole results
+are judged after it, and the first that passes becomes the choice; if none does, the close-up stays. What was already
+tried is read from the stored results and verdicts (no marker): a kept listing whose candidates all have a result and
+a verdict costs nothing again, and its record is not rewritten. It never goes to the hosted clean step (it has a
+passing photo). The GPU and the judge stay inside the month's budget and the round sizing like every listing. When the
+choice moves, publish removes the close-up's views and adds the whole slab's views and its 3D slab. Blocks and tiles
+take their first pass as before.
+
+A listing's photos come from the photo list, never from the sheet's image columns: once a listing is published its
+sheet row carries only its chosen photo's views. The produce writes the list beside the sheet,
+`<env>/scraper/to_upload/standardise_photo_list.json` (`{Product Handle: [[source, sha], ...]}`, each product's own hosted
+photos in its order, kept by the image stage before the standardised views replace them; sorted, the same bytes on a
+re-run, listed in the deliverables manifest like every file there). The pick step and the GPU job both read it. A list
+that is missing or malformed, or a sheet listing it does not have, stops the run loud; there is no fallback to the
+sheet. A source whose latest run has no list (a run made before the list existed, restored after a roll) never blocks
+the catalog: its source is left out of the list and named in a warning, and the photo process stops on its listings
+until a produce runs that source again. A reset removes the list with the product sheets.
+
+An open book made before its halves had a slab (a side view, no slab.png) is outdated: the next run sends it to the
+GPU once, which completes it from a re-run (its close view, then its slab, last). What was judged and published (main,
+white, studio) stays as it is, so its verdict and choice stand and no judge call is made; publish then adds its close
+view and 3D slab. A re-run that is no open book this time, or that fails for the photo itself, adds nothing and is
+noted in `noslab/<sha>.json`, so it is never run again; a judged result is never held. A completion cut short takes its
+close view off again while its slab is missing, and a passing storage error leaves it for the next run. Nothing is
+removed by hand.
 
 ## Trigger
 
@@ -127,7 +165,7 @@ deliberate code change and a migration (copy the choice records), never a settin
 ```
 run.lock                            the running process (rewritten every 5 min)
 spend/<YYYY-MM>/<run id>.json       each run's spend of the month
-<RUN_TAG>/<src>/...                 GPU results, held/, judged/ (unchanged)
+<RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated open book tried once)
 <CLEAN_TAG>/<src>/...               cleaned/, attempts/, GPU results of cleaned copies, judged/ (unchanged)
 <CLEAN_TAG>/chosen/<listing>.json   one record per listing with a good photo (what publish reads)
 <CLEAN_TAG>/tracked.csv             the review list: every listing no step could fix, what happened to each photo
@@ -160,8 +198,10 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 - svc stopped mid-run: clean stop as above; if it is killed regardless, the next run stops the jobs it left, resets the
   ceiling and takes the lock over once it is stale. Rolls during a run stay forbidden (as for the produce).
 - A photo added to the reviewed exclude list (`stone_pipeline/config/standardise_exclude.txt`): the next run removes
-  it from the published folder and relinks; the listing is hidden until another of its photos passes (the press after,
-  once its other photos are back in the sheet).
+  it from the published folder and relinks; the listing is hidden until another of its photos passes (its other
+  photos are in the photo list, so the same run can try them).
+- The photo list missing or malformed, or a sheet listing missing from it: the run fails loud before any paid step; a
+  produce that runs the sources named in the catalog's warning writes it again.
 - A listing that left the sheet keeps its choice record and published files (harmless: products link only their own
   photos); housekeeping is an open item.
 

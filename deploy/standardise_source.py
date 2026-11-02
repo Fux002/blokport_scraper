@@ -48,10 +48,46 @@ def _exists(client, prefix):
     return client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=1).get("KeyCount", 0) > 0
 
 
+def outdated(client, out, sha):
+    """A result made before an open book's halves had their slab: a side view (studio) and no <sha>.slab.png, and not
+    tried again before (noslab/). Every result made now that has a side view has its slab, so nothing else matches."""
+    return (_exists(client, f"{out}{sha}.studio.jpg") and not _exists(client, f"{out}{sha}.slab.png")
+            and not _exists(client, f"{out}noslab/{sha}.json"))
+
+
 def finished(client, out, sha):
     """This photo's run already ended, finished or held: a re-run, or results copied in from another environment's
-    run of the same photo, is never worked on again."""
-    return _exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")
+    run of the same photo, is never worked on again; only an outdated result is, once (complete)."""
+    if _exists(client, f"{out}held/{sha}.json"):
+        return True
+    return _exists(client, f"{out}{sha}.main.jpg") and not outdated(client, out, sha)
+
+
+def complete(client, out, sha, res):
+    """Complete an outdated open-book result from its re-run: its close view, then its slab (written last: the result is
+    complete). What was judged and published (main, white, studio) stays as it is, so its verdict and choice stand. A
+    completion cut short takes its close view off again while the slab is missing, so half of one is never published.
+    A re-run that is no open book this time adds nothing and is noted in noslab/, so it is never run again."""
+    if res.kind == "open book" and res.slab:
+        try:
+            if "close" in res.images:
+                client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg", Body=_encode(res.images["close"]),
+                                  ContentType="image/jpeg")
+            client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
+        except BaseException:
+            if not _exists(client, f"{out}{sha}.slab.png"):
+                client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg")
+            raise
+        return "completed"
+    tried(client, out, sha, res.held or f"the re-run is a {res.kind}, no open book")
+    return "no slab"
+
+
+def tried(client, out, sha, reason):
+    """Note that an outdated result was tried and gave no slab (noslab/<sha>.json), so it is never run again. Never
+    held/: the result is judged and may be published, and a hold would take it from every listing that has it."""
+    client.put_object(Bucket=S3_BUCKET, Key=f"{out}noslab/{sha}.json", ContentType="application/json",
+                      Body=json.dumps({"reason": reason}, sort_keys=True).encode())
 
 
 def photo_source(client, out, key, sha):
@@ -149,14 +185,31 @@ def _sheet(client):
     return _get(client, f"{ENV_SEGMENT}/{C.SHEET_KEY}").decode("utf-8")
 
 
+def _photo_list(client):
+    """This environment's photo list (STANDARDISE.PHOTOS_KEY, beside the sheet: each listing's own photos in its order).
+    Missing or malformed, it fails loud: the sheet's image columns are never read instead (once a listing is published
+    they carry only its chosen photo's views)."""
+    key = f"{ENV_SEGMENT}/{C.PHOTOS_KEY}"
+    try:
+        text = _get(client, key).decode("utf-8")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            raise RuntimeError(f"no photo list at s3://{S3_BUCKET}/{key}: a full produce writes it beside the sheet") from exc
+        raise
+    try:
+        return index.parse_photos(text)
+    except ValueError as exc:
+        raise RuntimeError(f"the photo list s3://{S3_BUCKET}/{key} is malformed: {exc}") from exc
+
+
 def sheet_photos(client):
-    """{sha: {source, key, format, size}} of this environment's product sheet."""
-    return index.build(_sheet(client))
+    """{sha: {source, key, format, size}} of this environment's product sheet and its photo list."""
+    return index.build(_sheet(client), _photo_list(client))
 
 
 def sheet_listings(client):
-    """This environment's listings with their photos in order (index.listings)."""
-    return index.listings(_sheet(client))
+    """This environment's listings with their own photos in order (index.listings)."""
+    return index.listings(_sheet(client), _photo_list(client))
 
 
 def _photo_keys(client, src, photos):
@@ -197,6 +250,7 @@ def main() -> int:
         sha = imagestore.sha_from_url(key)
         info = photos[sha]
         started = time.time()
+        redo = False                                   # this photo is an outdated result being completed
         try:
             if not survey and finished(client, out, sha):
                 tally["already done"] += 1
@@ -206,11 +260,15 @@ def main() -> int:
                 rgb = photo.decode(_get(client, key))
                 tally[_survey(rgb, m) if info["format"] == "slab" else info["format"]] += 1
             else:
+                redo = _exists(client, f"{out}{sha}.main.jpg")     # made, yet not finished: outdated, to complete
                 source_key, cleaned, refused = start(client, out, key, sha)
                 if refused:
-                    client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
-                                      Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
-                    tally["held"] += 1
+                    if redo:
+                        tally[complete(client, out, sha, photo.Result(held=refused))] += 1
+                    else:
+                        client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
+                                          Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
+                        tally["held"] += 1
                     storage_in_a_row = 0
                     continue
                 rgb = photo.decode(_get(client, source_key))
@@ -218,7 +276,9 @@ def main() -> int:
                 clean = photo.decode(_get(client, f"{imagestore.improved_prefix(src)}{sha}.jpg")) if logo else None
                 res = photo.standardise(rgb, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
                                         clean=clean, watermarked=logo, models=m, extra_views=extra)
-                if res.held:
+                if redo:
+                    tally[complete(client, out, sha, res)] += 1
+                elif res.held:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": res.held, "kind": res.kind}, sort_keys=True).encode())
                     tally["held"] += 1
@@ -243,8 +303,12 @@ def main() -> int:
                 print(f"==> {src}: slice stopped, the next run retries its photos", flush=True)
                 return 1
             if action == "hold" and not survey:
-                client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
-                                  Body=json.dumps({"reason": f"error: {type(exc).__name__}: {exc}"[:500], "kind": ""}).encode())
+                why = f"error: {type(exc).__name__}: {exc}"[:500]
+                if redo:                               # a judged result is never held over: tried, not run again
+                    tried(client, out, sha, why)
+                else:
+                    client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
+                                      Body=json.dumps({"reason": why, "kind": ""}).encode())
         spent.append(time.time() - started)
         if i % 10 == 0:
             print(f"   [{i + 1}/{len(sliced)}] {dict(tally)} median {np.median(spent):.1f}s per photo", flush=True)

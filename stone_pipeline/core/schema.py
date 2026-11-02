@@ -282,6 +282,8 @@ class CanonicalRow(BaseModel):
 
     # image stage (Stage 7)
     image_keys: list[str] = Field(default_factory=list)
+    own_photo_keys: list[str] = Field(default_factory=list)   # the product's own hosted photos in order, kept before
+    #                                                           the standardised views replace image_keys (photo list)
     thumbnail_key: Optional[str] = None
     oriented_image_keys: list[str] = Field(default_factory=list)
     product_image_keys: list[str] = Field(default_factory=list)

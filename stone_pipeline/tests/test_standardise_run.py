@@ -50,9 +50,10 @@ class _S3:
         self.objects[Key] = Body
 
 
-def _round(finished=(), held=(), cleaned=()):
+def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=()):
     r = object.__new__(sel_mod.Round)
     r.prefix, r.finished, r.held, r.cleaned = "p/", set(finished), set(held), set(cleaned)
+    r.slabs, r.studio, r.noslab = set(slabs), set(studio), set(noslab)
     r.judged, r.attempts, r.edited = set(), set(), set()
     return r
 
@@ -631,3 +632,27 @@ def test_a_run_s_size_is_set_per_run_and_a_malformed_value_fails_loud(monkeypatc
     with pytest.raises(ValueError, match="SCRAPER_STANDARDISE_RUN_SLICE"):
         settings._env_int("SCRAPER_STANDARDISE_RUN_SLICE", 150)
     assert C.IDLE_GPU_VCPUS == 8                                                    # always back to idle after a run
+
+
+# --- open books made before their halves had a slab -----------------------------------------------------------------
+def test_an_open_book_made_before_its_halves_had_a_slab_goes_to_the_gpu_again_once():
+    old, done, tried, close_up = A, B, D, E
+    gpu_round = _round(finished={old, done, tried, close_up}, studio={old, done, tried}, slabs={done}, noslab={tried})
+    s = _selection([_listing(old, done, tried, key="one"), _listing(close_up, key="two")], gpu_round=gpu_round,
+                   clean_round=_round(finished={old}, cleaned={old}, studio={old}))
+    assert s.gpu_todo() == {"sentas": [old]}                       # a side view and no slab, never completed before
+    assert s.clean_todo() == {"sentas": [old]}
+
+
+def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkeypatch):
+    monkeypatch.setattr(runner.gpu, "run_round", lambda *a: [])
+    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
+    s = _selection([_listing(A)], gpu_round=_round(finished={A}, studio={A}))
+    problems, _ = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10))
+    assert problems == [f"sentas {A[:12]}: no result after the GPU round"]
+
+
+def test_a_round_s_outdated_results_are_worked_out_once_not_per_candidate():
+    r = sel_mod.Round.__new__(sel_mod.Round)
+    r.finished, r.studio, r.slabs, r.noslab, r.held = {A, B}, {A, B}, {B}, set(), set()
+    assert r.outdated == {A} and r.outdated is r.outdated

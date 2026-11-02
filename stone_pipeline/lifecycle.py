@@ -293,13 +293,15 @@ def purge(sources=None) -> tuple[dict, int]:
 
 
 def _prune_stale_product_exports() -> dict:
-    """Delete the pre-reset per-source product export CSVs (to_upload/3_products_*.csv), local AND on S3, so a
-    pristine reset leaves no stale per-source emit behind. They refill on the next produce, and the admin reads
-    the ledger (not these files), so this is display/tidy-up only. Best-effort + LOUD: never fails the reset."""
-    from stone_pipeline.config.settings import SETTINGS
+    """Delete the pre-reset per-source product export CSVs (to_upload/3_products_*.csv) and the photo list beside
+    them (STANDARDISE.PHOTOS_FILE), local AND on S3, so a pristine reset leaves no stale per-source emit behind. They
+    refill on the next produce, and the admin reads the ledger (not these files), so this is display/tidy-up only.
+    Best-effort + LOUD: never fails the reset."""
+    from stone_pipeline.config import settings
     out: dict = {"local": 0, "s3": 0}
     try:
-        for f in SETTINGS.paths.to_upload_dir.glob("3_products_*.csv"):
+        up = settings.SETTINGS.paths.to_upload_dir
+        for f in [*up.glob("3_products_*.csv"), *up.glob(settings.STANDARDISE.PHOTOS_FILE)]:
             f.unlink()
             out["local"] += 1
     except Exception as exc:
@@ -311,8 +313,9 @@ def _prune_stale_product_exports() -> dict:
         s3 = boto3.client("s3", region_name=S3_REGION)
         prefix = f"{ENV_SEGMENT}/scraper/to_upload/"
         resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
-        keys = [{"Key": o["Key"]} for o in resp.get("Contents", [])
-                if o["Key"].rsplit("/", 1)[-1].startswith("3_products_") and o["Key"].endswith(".csv")]
+        def stale(name):
+            return name.startswith("3_products_") and name.endswith(".csv") or name == settings.STANDARDISE.PHOTOS_FILE
+        keys = [{"Key": o["Key"]} for o in resp.get("Contents", []) if stale(o["Key"].rsplit("/", 1)[-1])]
         if keys:
             s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": keys, "Quiet": True})
         out["s3"] = len(keys)
