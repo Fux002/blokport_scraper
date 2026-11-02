@@ -183,29 +183,32 @@ VIEWS = {"main": {A: "m1", B: "m2"}, "white": {A: "w1", B: "w2"}, "studio": {A: 
 
 
 def test_a_slab_product_carries_its_lead_photo_s_3d_slab():
-    assert images.model_3d([_improved(A), _improved(B)], VIEWS) == f"{BASE}/standard/cutout/sentas/{A}.webp"
+    assert images.model_3d(VIEWS, images.photo_lead([_improved(A), _improved(B)], VIEWS)) == f"{BASE}/standard/cutout/sentas/{A}.webp"
 
 
 def test_no_3d_when_the_lead_photo_has_none_even_if_another_photo_does():
     # B leads (first in the product's order, with a side view) but has no 3D slab: the 3D must show the lead slab
-    assert images.model_3d([_improved(B), _improved(A)], VIEWS) is None
-    assert images.model_3d([_improved(C3)], VIEWS) is None
+    assert images.model_3d(VIEWS, images.photo_lead([_improved(B), _improved(A)], VIEWS)) is None
+    assert images.model_3d(VIEWS, images.photo_lead([_improved(C3)], VIEWS)) is None
 
 
 def test_the_served_files_contents_are_the_product_s_standard_version():
-    assert images.standard_version([_improved(A)], VIEWS, with_3d=True) == "m1 w1 s1 c1 t1+j1"
-    assert images.standard_version([_improved(A)], VIEWS, with_3d=False) == "m1 w1 s1 c1"
-    assert images.standard_version([_improved(C3)], VIEWS, with_3d=False) is None
+    assert images.standard_version(VIEWS, images.photo_lead([_improved(A)], VIEWS), with_3d=True) == "m1 w1 s1 c1 t1+j1"
+    assert images.standard_version(VIEWS, images.photo_lead([_improved(A)], VIEWS), with_3d=False) == "m1 w1 s1 c1"
+    assert images.standard_version(VIEWS, images.photo_lead([_improved(C3)], VIEWS), with_3d=False) is None
 
 
-def test_only_a_slab_product_gets_a_3d_slab(monkeypatch):
+def test_a_slab_gets_its_photo_s_3d_a_block_none_and_a_tile_never_borrows_a_photo_s_set(monkeypatch):
+    # the tile shares photo A with the slab: it is shown only from its own rendered set (none here), never A's
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: VIEWS)
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
-    rows = [CanonicalRow(src_site="sentas", surrogate_key=k, format_value=f, image_keys=[_improved(A)])
+    rows = [CanonicalRow(src_site="sentas", surrogate_key=k, handle=f"h{k}", format_value=f, image_keys=[_improved(A)])
             for k, f in (("1", "Slab"), ("2", "Block"), ("3", "Tile"))]
-    images.run(rows, cfg=type("Cfg", (), {"mode": "passthrough"})())
+    images.run(rows, cfg=type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})())
     assert [r.model_3d_key for r in rows] == [f"{BASE}/standard/cutout/sentas/{A}.webp", None, None]
-    assert [r.standard_version for r in rows] == ["m1 w1 s1 c1 t1+j1", "m1 w1 s1 c1", "m1 w1 s1 c1"]
+    assert [r.standard_version for r in rows] == ["m1 w1 s1 c1 t1+j1", "m1 w1 s1 c1", None]
+    assert [r.standard_photo for r in rows] == [True, True, False]
+    assert rows[2].product_image_keys == [_improved(A)]                     # keeps its photo, hidden by the no-photo rule
     assert rows[0].thumbnail_key == f"{BASE}/standard/main/sentas/{A}.jpg"
 
 

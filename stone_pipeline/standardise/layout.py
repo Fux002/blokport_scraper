@@ -370,7 +370,8 @@ def _white_slabs(slabs):
     return rgb, cover
 
 
-def _on_white(rgb, cover):
+def shadowed_on_white(rgb, cover):
+    """The canvas-size RGB laid on white where `cover` (0..1) is, with the soft navy shadow under it."""
     out = np.full((C.OUT_H, C.OUT_W, 3), 255, np.float32)
     tint = np.array(C.WHITE_TINT, np.float32)
     for blur, drop, strength in C.WHITE_SHADOWS:
@@ -383,4 +384,4 @@ def _on_white(rgb, cover):
 def on_white(slabs):
     """The slab(s) on plain white with a soft shadow, no room and no stand (no room to clash with, nothing that can trace a
     vendor)."""
-    return _on_white(*_white_slabs(slabs))
+    return shadowed_on_white(*_white_slabs(slabs))

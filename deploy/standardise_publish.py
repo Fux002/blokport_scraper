@@ -11,6 +11,11 @@ person turned down never stays live. Only a view that is missing or other than i
 bytes) and a cut-out is deterministic, so a re-run is safe and changes nothing. A photo on the reviewed exclude list
 (EXCLUDE_PATH, one sha per line) is never published, whatever chose it. No choice records at all is refused: the folder
 would be emptied. The last step of the photo process (deploy.standardise_run), inside its lock.
+A tile listing is never shown from its own photos (owner 2026-11-02: warehouse racks): its views and 3D tile are rendered
+here from its variety's published slab stone (stone_pipeline.standardise.tile_plan), once the slabs' 3D cut-outs are
+made, under the listing's own name (imagestore.listing_sha), with a record of what they were made from written last
+(<env>/products/standard/tile/<src>/<listing>.json). They are rendered again exactly when that changed: the slab chosen or
+its content, the listing's size or finish, or TILE_RENDER_VERSION. A tile listing without such stone gets no files.
 """
 
 from __future__ import annotations
@@ -20,9 +25,12 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
+import cv2
+from botocore.exceptions import BotoCoreError, ClientError
+
+from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
-from stone_pipeline.standardise import cutout
+from stone_pipeline.standardise import cutout, tile_plan, tile_stone
 
 WORKERS = 32
 EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "stone_pipeline" / "config" / "standardise_exclude.txt"
@@ -137,33 +145,252 @@ def pool_map(workers, work, items):
     return out
 
 
+def _text(client, key):
+    return client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read().decode("utf-8-sig")
+
+
+def _stone(client, slab):
+    """The stone of a slab's published cut-out. tile_stone.Refused when it is not used (the reason)."""
+    rgba = tile_stone.decode(client.get_object(Bucket=S3_BUCKET, Key=slab.cutout)["Body"].read())
+    return tile_stone.from_cutout(rgba, *slab.size)
+
+
+def _check(client, slab):
+    """The usable stone (square metres) of a slab's published cut-out, or the tile_stone.Refused saying why it is not
+    used. The decoded stone is dropped: only the slab a tile is cut from is decoded again."""
+    try:
+        return tile_stone.usable_area(_stone(client, slab))
+    except tile_stone.Refused as exc:
+        return exc
+
+
+# What one tile listing's step may meet that is its alone (a cut-out or record that cannot be read or decoded, an image
+# that cannot be encoded): the listing is set aside and the run goes on. Anything else is a bug and fails the run.
+_TILE_ERRORS = (ClientError, BotoCoreError, cv2.error, ValueError, OSError)
+
+
+_MISSING = ("NoSuchKey", "404", "NotFound")
+
+
+def _record(client, key):
+    """A tile listing's record (what its files were made from), None when it is missing or is not one (corrupt): the
+    record is our own file, written last, so either means the set is not known to be complete. Any other read error
+    (S3 failing) is raised: then the record's state is unknown, which is not the same as gone."""
+    try:
+        body = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in _MISSING:
+            return None
+        raise
+    try:
+        record = json.loads(body.decode("utf-8-sig"))
+    except ValueError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _tile_current(client, files, published, stamp):
+    """(whether a tile listing's files are all published and its record says they were made from `stamp`, a note when
+    its record could not be read: the set is then out of date and is rendered again)."""
+    if any(k not in published for k in files):
+        return False, ""
+    try:
+        record = _record(client, files[-1])
+    except (ClientError, BotoCoreError):
+        record = None
+    if record is None:
+        return False, "its record could not be read: rendered again"
+    return record.get("stamp") == stamp, ""
+
+
+def _publish_tile(client, product, slab, stone, cuts):
+    """Render and write one tile listing's files. Its record and main view go first and come back last, so a set cut
+    short never looks complete (the image stage links a listing by its main view; this step by its record)."""
+    files = tile_plan.render(product, slab, stone, cuts)
+    record, main = list(files)[-1], list(files)[0]
+    for key in (record, main):
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
+    for key in [k for k in files if k not in (record, main)] + [main, record]:
+        body, kind = files[key]
+        client.put_object(Bucket=S3_BUCKET, Key=key, Body=body, ContentType=kind)
+
+
+class _OneStone:
+    """The decoded stone of one slab at a time (a slab is tens of MB): asking for another drops the one held first."""
+
+    def __init__(self, client):
+        self.client, self.slab, self.stone = client, None, None
+
+    def drop(self):
+        self.slab, self.stone = None, None
+
+    def __call__(self, slab):
+        if slab != self.slab:
+            self.drop()
+            self.stone, self.slab = _stone(self.client, slab), slab
+        return self.stone
+
+
+def _tile(client, product, ranked, stone_of, published):
+    """One tile listing: (its files, whether they were rendered now, a note), or (None, False, why it has none). Its
+    slab is the first of `ranked` on which a tile of its size fits."""
+    misfits = []
+    for slab in ranked:
+        stone = stone_of(slab)
+        try:
+            cuts = tile_plan.faces_of(product, stone)
+        except tile_stone.Refused as exc:
+            misfits.append(f"{slab.source}/{slab.sha[:12]}: {exc}")
+            continue
+        files = tile_plan.keys(product, tile_plan.views(len(cuts.origins)))
+        current, note = _tile_current(client, files, published, tile_plan.stamp(product, slab))
+        if current:
+            return files, False, ""
+        _publish_tile(client, product, slab, stone, cuts)
+        return files, True, note
+    return None, False, "; ".join(misfits)
+
+
+def _still_its_stone(client, product, published, slabs):
+    """The files a tile listing whose step failed keeps: those it has, while its record says they were cut from one of
+    `slabs` (the slabs of its variety and finish it may be cut from now), or while its record cannot be read for an S3
+    failure (unknown is not gone: an S3 outage must never remove every tile); none when its record is missing, corrupt
+    or names another stone, so it hides until it renders again."""
+    own = imagestore.listing_sha(product.key)
+    current = [k for k in published if own in k]
+    try:
+        record = _record(client, imagestore.tile_record_key(product.source, own))
+    except (ClientError, BotoCoreError):
+        return current
+    stone = (record or {}).get("stone")
+    if not isinstance(stone, dict) or stone.get("cutout") not in {s.cutout for s in slabs}:
+        return []
+    return current
+
+
+def publish_tiles(client, sheet, photos, chosen, cutouts, published, say=print):
+    """Render the tile listings of the sheet from their slab stone: {"keep", "listings", "shown", "rendered", "hidden",
+    "problems", "unknown_variations"}. sheet, photos = the product sheet's text and its photo list (index.rows); chosen
+    = {listing: choice record} of the photo listings; cutouts = {key: ETag} of the slabs' published cut-outs;
+    published = {key: ETag} under the standard folder. keep: every file a shown tile
+    listing has, and the files a tile listing whose step failed (_TILE_ERRORS) already had while their stone is still
+    one it may be cut from (the run goes on); hidden: {listing: why it gets none}; problems: {listing: what its step
+    met: an error, or a record it could not read (rendered again)}; failed: the listings whose step failed. One
+    (variety, finish) at a time and one decoded slab at a time. Listing the bucket is the caller's: a failed listing
+    stops publish before any removal; any other error fails the run."""
+    tiles = tile_plan.tiles(tile_plan.products(sheet, photos, {}))
+    if not tiles:
+        return {"keep": [], "listings": 0, "shown": 0, "rendered": 0, "hidden": {}, "problems": {}, "failed": [],
+                "unknown_variations": 0}
+    names = tile_plan.variety_names(_text(client, f"{ENV_SEGMENT}/{C.VARIANTS_KEY}"))
+    attributes = _text(client, f"{ENV_SEGMENT}/{C.ATTRIBUTES_KEY}")
+    finishes = tile_plan.finish_ids(attributes)
+    everything = tile_plan.products(sheet, photos, names)
+    unknown = sum(p.variety is None and p.fmt in (C.TILE_FORMAT, C.CUTOUT_FORMAT) for p in everything)
+    if unknown:
+        say(f"==> the variations export {'is empty' if not names else 'is stale'}: {unknown} tile and slab products' "
+            f"variations are not in it, so they are matched to no stone ({ENV_SEGMENT}/{C.VARIANTS_KEY})")
+    stone_of = tile_plan.slabs(everything, chosen, cutouts)
+    hidden, problems, keep, rendered, groups = {}, {}, [], 0, {}
+    for t in tile_plan.tiles(everything):
+        why = tile_plan.no_stone(t, everything, finishes)
+        if not why and not stone_of.get((t.variety, t.finish)):
+            why = "no published slab stone (3D cut-out) of this variety in this finish"
+        if why:
+            hidden[t.key] = why
+        else:
+            groups.setdefault((t.variety, t.finish), []).append(t)
+
+    failed = set()
+
+    def fail(t, exc, slabs):
+        # this listing's alone: it keeps the files it has while their stone is still one of `slabs`, and is listed
+        problems[t.key] = f"{type(exc).__name__}: {exc}"
+        failed.add(t.key)
+        keep.extend(_still_its_stone(client, t, published, slabs))
+
+    one = _OneStone(client)
+    for group in sorted(groups):
+        one.drop()                                     # the checks below decode each slab of the group in turn
+        try:
+            checks = {s: _check(client, s) for s in stone_of[group]}
+        except _TILE_ERRORS as exc:
+            # a cut-out of the group cannot be read: no ranking, so its tiles keep files cut from any of its slabs
+            for t in groups[group]:
+                fail(t, exc, stone_of[group])
+            continue
+        areas = {s.cutout: v for s, v in checks.items() if not isinstance(v, tile_stone.Refused)}
+        refused = "; ".join(f"{s.source}/{s.sha[:12]}: {v}" for s, v in checks.items() if isinstance(v, tile_stone.Refused))
+        ranked = {t: tile_plan.ranked(stone_of[group], t.source, areas) for t in groups[group]}
+        for t in sorted(groups[group], key=lambda t: ([s.cutout for s in ranked[t]], t.key)):
+            if not ranked[t]:
+                hidden[t.key] = f"every slab of this variety and finish was refused: {refused}"
+                continue
+            try:
+                files, now, note = _tile(client, t, ranked[t], one, published)
+            except _TILE_ERRORS as exc:
+                fail(t, exc, ranked[t])
+                continue
+            if files is None:
+                hidden[t.key] = f"no tile of this size fits on any usable slab: {note}"
+                continue
+            if note:
+                problems[t.key] = note
+            keep += files
+            rendered += now
+    for key in sorted(hidden):
+        say(f"   NO TILE IMAGES {key}: {hidden[key]}")
+    for key in sorted(problems):
+        say(f"   TILE {'FAILED' if key in failed else 'NOTE'} {key}: {problems[key]}")
+    shown = len(tiles) - len(hidden) - len(failed)
+    say(f"==> tiles: {shown} of {len(tiles)} listings shown from slab stone, {rendered} rendered (the rest unchanged), "
+        f"{len(hidden)} without stone, {len(failed)} failed")
+    return {"keep": keep, "listings": len(tiles), "shown": shown, "rendered": rendered, "hidden": hidden,
+            "problems": problems, "failed": sorted(failed), "unknown_variations": unknown}
+
+
 class NoChoiceRecords(RuntimeError):
     """No listing has a choice record yet: publishing would empty the folder, so nothing is published or removed."""
 
 
-def publish(client, root, say=print):
-    """Make the published folder match the choice records under `root` (the clean tag's root): {"listings", "copied",
-    "made_3d", "removed", "changed"}; changed = the folder is not what it was (a produce must link it again).
-    NoChoiceRecords when there are none at all."""
+def publish(client, root, sheet, photos, say=print):
+    """Make the published folder match the choice records under `root` (the clean tag's root) and the tile listings of
+    `sheet` (the product sheet's text, with its photo list `photos`): {"listings", "copied", "made_3d", "removed", "tiles" (counts), "tiles_hidden"
+    ({listing: why it has no images}), "tiles_problems" ({listing: the error its tile step met}), "changed"}; changed =
+    the folder is not what it was (a produce must link it again). NoChoiceRecords when no photo listing has one (the
+    folder would be emptied)."""
     records = list(_objects(client, chosen_prefix(root)))
     chosen = pool_map(WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records)
     if not chosen:
         raise NoChoiceRecords(f"no choice records under {chosen_prefix(root)}: nothing published or removed")
+    # a tile listing chosen before tiles were rendered is shown from its stone now, never from its own photo
+    tile_listings = {t.key for t in tile_plan.tiles(tile_plan.products(sheet, photos, {}))}
+    chosen = [c for c in chosen if c["key"] not in tile_listings]
+    if not chosen:
+        raise NoChoiceRecords(f"no choice records of photo listings under {chosen_prefix(root)}: nothing published or "
+                              f"removed")
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
     exclude = read_exclude(EXCLUDE_PATH.read_text())
     plan, todo = copies(chosen, made, exclude), slabs(chosen, made, exclude)
-    published = {k: t for prefix in [*map(imagestore.standard_prefix, imagestore.STANDARD_VIEWS), imagestore.cutout_prefix()]
-                 for k, t in _objects(client, prefix).items()}
+    folders = [*map(imagestore.standard_prefix, (*imagestore.STANDARD_VIEWS, imagestore.CUTOUT_SUBDIR, imagestore.TILE_SUBDIR))]
+    published = {k: t for prefix in folders for k, t in _objects(client, prefix).items()}
     fresh = unpublished(plan, made, published)
-    gone = stale(published, [t for _, t in plan] + [k for s in todo for k in cutout_keys(s)])
     stamps = dict(zip(todo, pool_map(WORKERS, lambda s: _stamp(client, s, published), todo)))
     remake = outdated(todo, made, published, stamps)
     pool_map(WORKERS, lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
                                                     ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh)
-    pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
     # each cut-out holds a full-size slab in memory
     made_3d = sum(pool_map(C.CUTOUT_WORKERS, lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
+    slab_3d = {k for s in todo for k in cutout_keys(s)}
+    cutouts = {k: t for k, t in _objects(client, imagestore.cutout_prefix()).items() if k in slab_3d}
+    tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
+    gone = stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"])
+    pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
     say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
         f"made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)} files no longer chosen")
-    return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone),
-            "changed": bool(fresh or remake or gone)}
+    counts = ({k: tiles[k] for k in ("listings", "shown", "rendered", "unknown_variations")}
+              | {"hidden": len(tiles["hidden"]), "failed": len(tiles["failed"]),
+                 "failed_listings": tiles["failed"][:C.TILE_FAILED_LISTED]})
+    return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone), "tiles": counts,
+            "tiles_hidden": tiles["hidden"], "tiles_problems": tiles["problems"],
+            "changed": bool(fresh or remake or gone or tiles["rendered"])}

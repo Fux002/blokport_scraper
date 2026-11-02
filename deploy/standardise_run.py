@@ -44,12 +44,12 @@ from botocore.exceptions import BotoCoreError, ClientError
 from deploy import standardise_batch as gpu
 from deploy import standardise_publish as publish
 from deploy import standardise_select as select
-from deploy.standardise_source import sheet_listings
+from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.core import env
 from stone_pipeline.ledger import writethrough
-from stone_pipeline.standardise import judge
+from stone_pipeline.standardise import index, judge
 
 ROOT = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/"
 LOCK = f"{ROOT}run.lock"
@@ -215,6 +215,12 @@ def whole_slabs(s3, records):
     return out
 
 
+def photo_listings(sheet, photos):
+    """The sheet's listings shown from their own photos (index.listings): every one but a tile listing, which is
+    rendered from its variety's slab stone at publish (deploy.standardise_publish), never through the GPU and judge."""
+    return [l for l in index.listings(sheet, photos) if l["format"] != C.TILE_FORMAT]
+
+
 def todo(listings, records, exclude, slabs):
     """The listings a run works on, in sheet order. Those without a valid chosen photo: no record, or its photo is no
     longer one of the listing's (the sheet changed) or is on the exclude list. A listing on the review list has no record,
@@ -308,8 +314,9 @@ def process(s3, batch, spend, run_id, deadline, say=print):
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
+    sheet, photos = sheet_and_photos(s3)
     records = choices(s3, root)
-    found = todo(sheet_listings(s3), records, exclude, whole_slabs(s3, records))
+    found = todo(photo_listings(sheet, photos), records, exclude, whole_slabs(s3, records))
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
     kept = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - kept} listings without a chosen photo, {kept} whose chosen "
@@ -322,17 +329,19 @@ def process(s3, batch, spend, run_id, deadline, say=print):
     finally:
         closing.cancel()
     try:
-        published = publish.publish(s3, root, say)
+        published = publish.publish(s3, root, sheet, photos, say)
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}
+    hidden = published.pop("tiles_hidden", {})
+    problems += [f"tile {key}: {why}" for key, why in sorted(published.pop("tiles_problems", {}).items())]
     for p in problems:
         say(f"   {p}")
     summary = {"run_id": run_id, "listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
                "pending": len(result["pending"]), "problems": len(problems), "published": published,
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
                "budget_usd": spend.budget, "budget_reached": spend.capped}
-    kept = {**summary, "pending_listings": result["pending"], "problem_list": problems}
+    kept = {**summary, "pending_listings": result["pending"], "problem_list": problems, "tiles_hidden": hidden}
     s3.put_object(Bucket=S3_BUCKET, Key=f"{root}summary.json", Body=json.dumps(kept, sort_keys=True).encode(),
                   ContentType="application/json")
     return summary
