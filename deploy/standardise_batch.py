@@ -110,24 +110,26 @@ def gpu_usd(seconds):
     return seconds / 3600 * C.GPU_JOB_VCPUS * C.GPU_VCPU_HOUR_USD
 
 
-def _slice_seconds(window):
-    """The most one slice can use: its retouch job then its standardise job, each within its timeout, never past the
-    window, plus each job's allowance (boot, image pull, the pool's idle tail)."""
-    return min(C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, window) + 2 * C.GPU_JOB_ALLOWANCE_SECONDS
-
-
 def worst_seconds(n_slices, window):
-    """The most GPU-seconds a round of n slices can use: one GPU per slice at a time, at most RUN_GPU_VCPUS worth at
-    once."""
+    """The most GPU-seconds a round of n slices can be charged: its running time, one GPU per slice at a time (its
+    retouch job, then its standardise job, each within its timeout), never past the window and at most RUN_GPU_VCPUS
+    worth at once; plus the allowance of every job that can start, which is each of its 2 jobs per slice. ran_usd
+    charges exactly these parts, so a round never settles above what it reserved."""
     at_once = max(1, C.RUN_GPU_VCPUS // C.GPU_JOB_VCPUS)
-    return min(n_slices * _slice_seconds(window), at_once * (window + 2 * C.GPU_JOB_ALLOWANCE_SECONDS))
+    running = min(n_slices * min(C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, window), at_once * window)
+    return running + 2 * n_slices * C.GPU_JOB_ALLOWANCE_SECONDS
 
 
 def fitting(n_slices, window, left):
-    """How many of the round's slices the budget left covers (their worst case): all, or as many whole slices as fit."""
-    if gpu_usd(worst_seconds(n_slices, window)) <= left:
-        return n_slices
-    return max(0, min(n_slices, int(left // gpu_usd(_slice_seconds(window)))))
+    """The most of the round's slices whose worst case the budget left covers (the cost only grows with the slices)."""
+    low, high = 0, n_slices
+    while low < high:
+        mid = (low + high + 1) // 2
+        if gpu_usd(worst_seconds(mid, window)) <= left:
+            low = mid
+        else:
+            high = mid - 1
+    return low
 
 
 def _first(plan):
@@ -154,16 +156,17 @@ def stopped_jobs(batch, ids, sleep=time.sleep):
 
 
 def ran_usd(batch, ids, reserved, now=time.time, sleep=time.sleep):
-    """What the round's jobs cost: each one's running time (startedAt to stoppedAt, or to now for one still not stopped),
-    plus each job's allowance. The reserved price when Batch cannot say (counted high, never low)."""
+    """What the round's jobs cost: each started job's running time (startedAt to stoppedAt, or to now for one still not
+    stopped) plus its allowance; a job that never started cost nothing. The reserved price when Batch cannot say
+    (counted high, never low)."""
     try:
         jobs = stopped_jobs(batch, ids, sleep)
     except (BotoCoreError, ClientError) as exc:
         print(f"   WARNING: GPU job times unreadable ({exc}); the round counts its reserved ${reserved:.2f}", flush=True)
         return reserved
-    ran_ms = sum((j["stoppedAt"] if j.get("stoppedAt") is not None else now() * 1000) - j["startedAt"]
-                 for j in jobs if j.get("startedAt") is not None)
-    return gpu_usd(ran_ms / 1000 + len(jobs) * C.GPU_JOB_ALLOWANCE_SECONDS)
+    started = [j for j in jobs if j.get("startedAt") is not None]
+    ran_ms = sum((j["stoppedAt"] if j.get("stoppedAt") is not None else now() * 1000) - j["startedAt"] for j in started)
+    return gpu_usd(ran_ms / 1000 + len(started) * C.GPU_JOB_ALLOWANCE_SECONDS)
 
 
 def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=time.monotonic, now=time.time,

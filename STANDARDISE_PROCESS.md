@@ -71,15 +71,16 @@ and the problems, is kept in `<clean root>/summary.json`.
 
 One budget per calendar month (UTC) per environment, `SCRAPER_STANDARDISE_BUDGET_USD`, for everything the process pays:
 hosted calls (judge as billed, edits at list price) and GPU time (each job's running time from Batch's start and stop
-times, read once the jobs have actually stopped, plus `GPU_JOB_ALLOWANCE_SECONDS` (12 min) per job for the boot, the image
-pull and the pool's idle tail, at `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` per vCPU-hour, default 0.147: g4dn.xlarge on
-demand). No default budget: unset, the process refuses to start.
+times, read once the jobs have actually stopped, plus `GPU_JOB_ALLOWANCE_SECONDS` (12 min) per job that started, for
+the boot, the image pull and the pool's idle tail, at `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` per vCPU-hour, default
+0.147: g4dn.xlarge on demand). No default budget: unset, the process refuses to start.
 
 - Each run keeps its own spend in `<env>/standardise-test/spend/<YYYY-MM>/<run id>.json`, so no run can overwrite
   another's. The month's other runs are summed at start and again at every settle.
 - A price is reserved before a call or GPU round and settled to what it cost. A GPU round reserves its worst case from
-  the slice plan (one GPU per slice at a time, never past the work window, at most the pool's ceiling at once, plus
-  each job's allowance). A round is sized to the budget left: as many whole slices as fit; if not even one fits, the
+  the slice plan (its running time: one GPU per slice at a time, never past the work window, at most the pool's
+  ceiling at once; plus the allowance of every job that can start, two per slice), so it never settles above what it
+  reserved. A round is sized to the budget left: as many whole slices as fit; if not even one fits, the
   GPU work waits and the hosted steps still judge the photos already finished, within their own reservations.
 - Storage is never asked while the spend's lock is held, and a stop halts paid work without taking that lock.
 - A call that fails after it may have been sent, an answer without its cost, and a GPU round whose job times cannot be
@@ -92,12 +93,16 @@ demand). No default budget: unset, the process refuses to start.
 - Work window `SCRAPER_STANDARDISE_WORK_SECONDS` (default 2 h): after it no hosted call and no GPU round starts and a
   running round's jobs are stopped. No GPU round starts with less than `GPU_MIN_WINDOW_SECONDS` (30 min) of it left. Report, publish and relink get `FINISH_SECONDS` (1.5 h). The process refuses to
   start unless both fit under the runner's ceiling (`SCRAPER_RUN_TIMEOUT_SECONDS`, 4 h on the svc).
-- A stop of the svc (a roll): the config server passes SIGTERM to the running run and waits up to
-  `SCRAPER_RUN_STOP_GRACE_SECONDS` (100 s) inside the container's `stopTimeout` (120 s). The photo process then stops its
-  GPU jobs (waiting up to 60 s for them to stop, so their real times are counted), sets the pool's ceiling back,
-  settles its spend and releases its lock; the work left in its pools is cancelled. A run still going after the grace
-  is killed. Hosted calls already in flight finish or end with the process; their reserves stay counted. No follow-up
-  run starts while the server stops, and the run record is finished before the server's last save.
+- A stop of the svc (a roll): no run starts any more, and the config server passes SIGTERM to the running run. One
+  deadline, `SCRAPER_RUN_STOP_GRACE_SECONDS` (80 s), bounds the whole stop and leaves 40 s of the container's
+  `stopTimeout` (120 s) for the last config save. The photo process stops its GPU jobs (waiting up to 60 s for them to
+  stop, so their real times are counted), sets the pool's ceiling back, settles its spend and releases its lock; the
+  work left in its pools is cancelled. A run still going at the deadline is killed, and for a photos run the server
+  then clears what it left (its GPU jobs, the pool's ceiling, its lock). Hosted calls already in flight end with the
+  process; their reserves stay counted. The run record is finished before the server's last save.
+- Giving way (the owner's Publish during a photos run) uses the same deadline. A photos run marked to give way before
+  its subprocess started never starts; one that ended on its own before the signal keeps its real status. Two runs are
+  never under way at once: the mark, the stop and the launch decision are taken under one lock.
 - The lock is taken over only when it has not been rewritten for the runner's ceiling (its process was killed). A lock
   taken over while a run works stops that run's paid calls; a run removes the lock only while it is still its own.
 

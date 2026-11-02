@@ -312,6 +312,15 @@ def test_a_second_process_refuses_to_start_while_one_runs(monkeypatch):
     assert _main(monkeypatch)[0] == 4
 
 
+def test_reaping_a_killed_process_stops_its_jobs_and_removes_its_lock(monkeypatch):
+    s3 = _S3({proc.LOCK: b'{"run_id": "R0"}'})
+    monkeypatch.setattr(proc.boto3, "client", _Clients(s3))
+    cleared = []
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or ["job1"])
+    proc.reap()
+    assert cleared == [""] and proc.LOCK not in s3.objects                          # no run of its own: every job left
+
+
 def test_the_relink_is_the_produce_s_republish_in_this_process_with_its_progress_noise_dropped(monkeypatch, capsys):
     from stone_pipeline import produce
     seen = []
@@ -435,21 +444,98 @@ class _Child:
         return 0
 
 
+def _child_of(monkeypatch, child, stage="photos"):
+    run = {"run_id": "r", "stage": stage}
+    monkeypatch.setattr(runner, "_child", child)
+    monkeypatch.setattr(runner, "_child_run", run)
+    monkeypatch.setattr(runner, "_watcher", None)
+    return run
+
+
 def test_a_stopping_server_passes_sigterm_to_the_running_child_and_waits_for_it(monkeypatch):
     child = _Child(ends=True)
-    monkeypatch.setattr(runner, "_child", child)
-    monkeypatch.setattr(runner, "_watcher", None)
-    runner.stop_current(grace=5)
-    assert child.signals == ["TERM"] and child.waited == 5
+    run = _child_of(monkeypatch, child)
+    monkeypatch.setattr(runner, "_stopping", False)
+    monkeypatch.setattr(runner, "RUN_STOP_GRACE_SECONDS", 5)
+    runner.stop_current(clock=lambda: 0)
+    assert child.signals == ["TERM"] and child.waited == 5 and run["signalled"]
 
 
-def test_a_child_that_does_not_end_in_time_is_killed(monkeypatch):
+def test_a_photos_child_that_does_not_end_in_time_is_killed_and_what_it_left_is_cleared(monkeypatch):
     child = _Child(ends=False)
     child.kill = lambda: child.signals.append("KILL")
-    monkeypatch.setattr(runner, "_child", child)
+    _child_of(monkeypatch, child)
+    monkeypatch.setattr(runner, "_stopping", False)
+    reaped = []
+    monkeypatch.setattr(runner, "_reap_photos", lambda: reaped.append(1))
+    runner.stop_current()                                                  # logged, never raised
+    assert child.signals == ["TERM", "KILL"] and reaped == [1]
+
+
+def test_a_killed_produce_leaves_nothing_of_the_photo_process_to_clear(monkeypatch):
+    child = _Child(ends=False)
+    child.kill = lambda: child.signals.append("KILL")
+    _child_of(monkeypatch, child, stage="all")
+    monkeypatch.setattr(runner, "_stopping", False)
+    monkeypatch.setattr(runner, "_reap_photos", lambda: pytest.fail("cleared a photo run that was not running"))
+    runner.stop_current()
+
+
+def test_one_deadline_bounds_the_child_s_grace_and_the_watcher_s_join(monkeypatch):
+    child = _Child(ends=True)
+    _child_of(monkeypatch, child)
+    monkeypatch.setattr(runner, "_stopping", False)
+    monkeypatch.setattr(runner, "RUN_STOP_GRACE_SECONDS", 80)
+    joined = []
+    monkeypatch.setattr(runner, "_watcher", type("W", (), {"join": lambda self, timeout: joined.append(timeout)})())
+    times = iter([0, 0, 30])                                                # the child took 30 s to end
+    runner.stop_current(clock=lambda: next(times))
+    assert child.waited == 80 and joined == [50]
+
+
+def test_a_run_marked_to_give_way_before_it_was_launched_never_starts(monkeypatch):
+    # the gap: the slot is claimed for photos (queued), the request to give way comes before its launch
+    for name in ("_stamp_last_run", "_persist_run"):
+        monkeypatch.setattr(runner, name, lambda *a, **k: None)
+    monkeypatch.setattr(runner, "_resolve_sources", lambda requested: sorted(requested or ["polonine"]))
+    monkeypatch.setattr(runner, "_child", None)
     monkeypatch.setattr(runner, "_watcher", None)
-    runner.stop_current(grace=1)                                           # logged, never raised
-    assert child.signals == ["TERM", "KILL"]
+    monkeypatch.setattr(runner, "_stopping", False)
+    pending, launched = [], []
+    photos, code = runner.start_run(None, "photos", launch=pending.append)          # claimed, launch still to come
+    publish, code = runner.start_run(None, "republish", launch=lambda r: launched.append(r["run_id"]))
+    try:
+        assert publish["run_id"] != photos["run_id"]                                # claimed in the same millisecond
+        assert code == 202 and runner._runs[photos["run_id"]]["preempted_by"]      # marked with the claim
+        monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("a run that gave way was launched"))
+        runner._launch_local(pending[0])                                            # its launch comes late
+        import time
+        for _ in range(100):
+            if launched:
+                break
+            time.sleep(0.02)
+        assert launched == [publish["run_id"]]
+        assert runner.get_run(photos["run_id"])["status"] == "stopped"
+    finally:
+        runner._runs[publish["run_id"]]["status"] = "succeeded"                      # free the slot for later tests
+
+
+def test_no_run_is_launched_once_the_server_is_stopping(monkeypatch):
+    monkeypatch.setattr(runner, "_stopping", True)
+    monkeypatch.setattr(runner, "_persist_run", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "_stamp_last_run", lambda *a, **k: None)
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("launched while the server stops"))
+    rec = {"run_id": "r", "stage": "republish", "status": "queued"}
+    runner._launch_local(rec)
+    assert rec["status"] == "failed" and "stopping" in rec["error"]
+
+
+def test_a_photos_run_that_ended_on_its_own_keeps_its_status_though_marked_to_give_way(monkeypatch, tmp_path):
+    _watch_quietly(monkeypatch)
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
+    rec = {"run_id": "r", "stage": "photos", "preempted_by": "republish run x"}     # marked, never signalled
+    runner._watch_local(rec, _Proc(["==> done\n"], rc=0))
+    assert rec["status"] == "succeeded"
 
 
 def test_a_stopping_server_starts_no_follow_up_run(monkeypatch):
@@ -505,7 +591,6 @@ def test_the_owner_s_publish_stops_a_photos_run_cleanly_and_runs_at_once(monkeyp
         if runner.get_run(photos["run_id"])["status"] == "running":
             break
         time.sleep(0.01)
-    time.sleep(0.01)                                # a Publish comes later (run ids are millisecond-precise)
     launched = []
     publish, code = runner.start_run(None, "republish", launch=lambda r: launched.append(r["run_id"]))
     assert code == 202 and publish["stage"] == "republish"

@@ -149,9 +149,11 @@ S3_REGION = env.getenv("BLOKPORT_S3_REGION", "eu-west-1")
 # The config runner's ceiling on one run: it kills a run past it as wedged (Terraform sets 4 h on the service). The
 # photo process fits its work window inside it and treats a run lock not refreshed for this long as a killed run's.
 RUN_TIMEOUT_SECONDS = _env_int("SCRAPER_RUN_TIMEOUT_SECONDS", 7200)
-# On SIGTERM (ECS stops the task) the config server passes the signal to the running child and waits this long for it
-# to clean up, inside the config container's stopTimeout (120 s, the Fargate maximum) with room for the last save.
-RUN_STOP_GRACE_SECONDS = _env_int("SCRAPER_RUN_STOP_GRACE_SECONDS", 100)
+# On SIGTERM (ECS stops the task) the config server ends the running run within this one deadline: the child's grace to
+# clean up after its SIGTERM, a kill and the clearing of what a killed photo run left, and its watcher finishing the run
+# record. It leaves 40 s of the config container's stopTimeout (120 s, the Fargate maximum) for the last config save.
+# The same deadline bounds a photos run giving way to another stage.
+RUN_STOP_GRACE_SECONDS = _env_int("SCRAPER_RUN_STOP_GRACE_SECONDS", 80)
 
 # Brand<->bucket cross-check: the bucket must BELONG to this brand, so a bucket mis-set to ANOTHER brand's
 # store fails loud instead of crossing brands (and, since it runs before any snapshot restore, it also stops

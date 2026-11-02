@@ -317,14 +317,31 @@ def _gpu_env(monkeypatch):
     monkeypatch.setattr(C, "GPU_JOB_ALLOWANCE_SECONDS", 720)                        # 0.20 USD per job
 
 
-def test_a_round_reserves_its_worst_case_one_gpu_per_slice_within_the_window_plus_each_job_s_allowance(monkeypatch):
+def test_a_round_reserves_its_worst_case_one_gpu_per_slice_within_the_window_plus_every_job_s_allowance(monkeypatch):
     _gpu_env(monkeypatch)
     monkeypatch.setattr(C, "RUN_GPU_VCPUS", 8)                                      # 2 GPUs at once
     longest, extra = C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, 2 * 720              # a slice's two jobs
     assert gpu.worst_seconds(1, 10 * longest) == longest + extra                   # one slice: its two jobs, in turn
     assert gpu.worst_seconds(1, 600) == 600 + extra                                # never past the window
-    assert gpu.worst_seconds(5, 600) == 2 * (600 + extra)                          # at most 2 GPUs at once
+    assert gpu.worst_seconds(5, 600) == 2 * 600 + 5 * extra                        # 2 GPUs at once; all 10 jobs may start
     assert gpu.gpu_usd(3600) == pytest.approx(1.0)
+
+
+def test_a_round_never_settles_above_what_it_reserved(monkeypatch):
+    # more slices than run at once, every job started, the pool busy the whole window: the most a round can cost
+    _gpu_env(monkeypatch)
+    monkeypatch.setattr(C, "RUN_SLICE", 1)
+    monkeypatch.setattr(C, "RUN_GPU_VCPUS", 8)                                      # 2 GPUs at once
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: [])
+    window = C.GPU_MIN_WINDOW_SECONDS
+    batch, kept = _Batch(), []
+    jobs = [f"job{i}" for i in range(1, 11)]                                       # 5 slices, 10 jobs
+    busy_ms = 2 * window * 1000 // len(jobs)                                        # 2 GPUs x the window, shared
+    batch.times = {j: {"startedAt": i * busy_ms, "stoppedAt": (i + 1) * busy_ms} for i, j in enumerate(jobs)}
+    spend = sel_mod.Spend(1000, save=kept.append)
+    photos = [c * 64 for c in "12345"]
+    gpu.run_round(batch, _S3(), "v9", {"sentas": photos}, {"sentas": False}, "R1", window, spend, clock=lambda: 0)
+    assert spend.spent <= kept[0] + 1e-9
 
 
 def test_a_round_settles_what_its_jobs_ran_plus_each_job_s_allowance(monkeypatch):
@@ -377,7 +394,7 @@ def test_a_stopped_round_reads_its_jobs_times_once_they_have_stopped(monkeypatch
     with pytest.raises(SystemExit):
         gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0,
                       now=lambda: 99_999, sleep=slept.append)
-    assert spend.spent == pytest.approx(0.9) and spend.reserved == 0               # 0.5 h + 2 allowances, not to now
+    assert spend.spent == pytest.approx(0.7) and spend.reserved == 0               # 0.5 h + its allowance, not to now
     assert slept == [C.STOP_POLL_SECONDS]
 
 
@@ -390,7 +407,7 @@ def test_a_job_still_not_stopped_after_the_wait_counts_to_now(monkeypatch):
     with pytest.raises(SystemExit):
         gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0,
                       now=lambda: 900, sleep=lambda s: None)
-    assert spend.spent == pytest.approx(0.25 + 0.4)
+    assert spend.spent == pytest.approx(0.25 + 0.2)                               # job2 never started: no allowance
 
 
 def test_when_batch_cannot_say_what_ran_the_round_counts_what_it_reserved(monkeypatch):

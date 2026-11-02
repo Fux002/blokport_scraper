@@ -326,6 +326,21 @@ def relink():
         return produce.main(["--stage", "republish"])
 
 
+def reap():
+    """After the runner killed the process (it outlived its stop grace, so its own cleanup never ran): stop the GPU jobs
+    it left, set the pool's ceiling back and remove its run lock. The runner still holds the run slot, so no other
+    process can hold that lock; one rewritten meanwhile (another ETag) is left as it is."""
+    retries = Config(retries={"mode": "standard", "max_attempts": 10})
+    s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
+    left = gpu.clear_leftovers(boto3.client("batch", region_name=S3_REGION, config=retries), "")   # no run of its own
+    try:
+        _release(s3, s3.head_object(Bucket=S3_BUCKET, Key=LOCK)["ETag"])
+    except ClientError as exc:
+        if _code(exc) not in _MISSING:
+            raise
+    print(f"==> cleared what a killed standardise process left: {len(left)} GPU jobs stopped, its lock removed", flush=True)
+
+
 def unconfigured():
     """What is missing or wrong in the settings: the GPU target, the hosted key, the month's budget, and a work window
     plus its finish that must end before the runner's ceiling."""
