@@ -78,6 +78,13 @@ def chosen(client, root):
         return list(pool.map(lambda k: json.loads(_get(client, k)), sorted(_objects(client, chosen_prefix(root)))))
 
 
+def undone(client, records):
+    """The records whose close-up is not made yet under the current rule (no done_key): one listing per run folder."""
+    done = {k for prefix in sorted({r["prefix"] for r in records})
+            for k in _objects(client, f"{prefix}close_v{C.CLOSEUP_VERSION}/")}
+    return [r for r in records if done_key(r) not in done]
+
+
 def listed(records, src, wanted=None):
     """The chosen photos of `src`, each once (listings can share a photo), in a stable order, in `wanted` (shas) when
     given: built on the choice alone, which this run never changes, so a list never shifts under it."""

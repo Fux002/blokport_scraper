@@ -278,11 +278,33 @@ def test_a_slab_stretched_by_its_squaring_needs_a_wider_crop():
 
 
 def test_the_photos_own_pixels_per_slab_pixel_come_from_the_squaring():
-    assert abs(views._density(layout.scaling(0.5, 0.5), (1000, 600)) - 2.0) < 1e-6    # squared smaller: 2 photo px each
-    assert abs(views._density(layout.scaling(1.6, 1.0), (1600, 600)) - 1 / 1.6) < 1e-6  # stretched across: fewer
+    least = lambda to_slab, size: views._scales(to_slab, views._widest(size))[0]
+    assert abs(least(layout.scaling(0.5, 0.5), (1000, 600)) - 2.0) < 1e-6           # squared smaller: 2 photo px each
+    assert abs(least(layout.scaling(1.6, 1.0), (1600, 600)) - 1 / 1.6) < 1e-6        # stretched across: fewer
     tilt = cv2.getPerspectiveTransform(np.float32([[0, 0], [999, 0], [999, 599], [0, 599]]),
                                        np.float32([[0, 0], [999, 60], [999, 540], [0, 599]]))     # the far side shortened
-    assert views._density(tilt, (1000, 600)) < 1
+    lo, hi = views._scales(tilt, views._widest((1000, 600)))
+    assert lo < 1 <= hi                                                 # the near side keeps its pixels, the far side fewer
+
+
+def test_a_steep_shot_s_close_up_shows_no_false_pattern_from_its_near_side():
+    # The far edge half as tall as the near one: the crop is stored at the far side's pixels, so the near side has about
+    # twice as many as it keeps. A grating finer than the stored close-up can show, squared straight to that size, folds
+    # into broad false bands there; squared at the near side's own pixels, then area-filtered, it averages away.
+    h, w = 3200, 4800
+    stone, _ = _sharp_stone(h, w)
+    grating = (40 * np.sin(2 * np.pi * 0.48 * np.arange(w, dtype=np.float32)))[None, :, None]
+    striped = np.clip(stone.astype(np.float32) + grating, 0, 255).astype(np.uint8)
+    q = np.float32([[40, 40], [w - 40, 820], [w - 40, h - 820], [40, h - 40]])
+
+    def close(full):
+        work = layout.fit_working(full)
+        flat, H = outline._flat(work, _corners_in_work_copy(q, full.shape[1] / work.shape[1]))
+        return views.close_up(layout.Flat(flat, np.ones(flat.shape[:2], np.float32), H, work), full)
+    plain, with_grating = close(stone), close(striped)
+    assert plain.shape[1] >= C.CLOSEUP_MIN_WIDTH
+    broad = lambda img: cv2.GaussianBlur(img.astype(np.float32), (0, 0), 3)
+    assert (broad(with_grating) - broad(plain)).std() < 3              # squared at the far side's pixels: 9.1; at the near: 0.4
 
 
 def test_a_slab_stretched_past_its_pixels_by_a_steep_shot_gets_no_close_up():

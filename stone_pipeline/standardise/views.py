@@ -16,7 +16,7 @@ from stone_pipeline.standardise import marks as proto
 
 def closeup_box(w, h, density=1.0):
     """(x, y, width, height) of the close-up in a w x h slab, or None when the photo has too few pixels for one. density:
-    the photo's own pixels per slab pixel at the close-up, the least along either axis (_density; under 1 where the
+    the photo's own pixels per slab pixel at the close-up, the least along either axis (_scales; under 1 where the
     squaring stretched a steep or foreshortened shot). As tight as CLOSEUP_SHARE of the slab's width, widened until it
     holds CLOSEUP_MIN_WIDTH of the photo's own pixels at CLOSEUP_MAX_ENLARGE (a lower-resolution photo shows more of its
     slab), at most CLOSEUP_MAX_SHARE of the slab on either axis: past that it is the whole slab the other views already
@@ -39,20 +39,26 @@ def closeup_size(cw, density=1.0):
     return shape(native), shape(min(C.OUT_W, native))
 
 
-def _density(to_slab, size):
-    """The photo's own pixels per slab pixel over the widest close-up (CLOSEUP_MAX_SHARE of the slab), the least along
-    either axis and at any of CLOSEUP_DENSITY_SAMPLES x CLOSEUP_DENSITY_SAMPLES points: to_slab maps a photo pixel to the
-    slab of `size`. The least over the widest crop holds for every crop inside it."""
+def _scales(to_slab, box):
+    """(least, most) of the photo's own pixels per slab pixel over box (x, y, width, height) of the slab, along either
+    axis, at CLOSEUP_DENSITY_SAMPLES x CLOSEUP_DENSITY_SAMPLES points from corner to corner: to_slab maps a photo pixel to
+    the slab. They differ where the shot was steep: its near side has more pixels than its far side."""
     back = np.linalg.inv(to_slab)
-    w, h = size
-    m = (1 - C.CLOSEUP_MAX_SHARE) / 2
-    u, v = np.meshgrid(np.linspace(m * w, (1 - m) * w, C.CLOSEUP_DENSITY_SAMPLES),
-                       np.linspace(m * h, (1 - m) * h, C.CLOSEUP_DENSITY_SAMPLES))
+    x, y, w, h = box
+    u, v = np.meshgrid(np.linspace(x, x + w, C.CLOSEUP_DENSITY_SAMPLES), np.linspace(y, y + h, C.CLOSEUP_DENSITY_SAMPLES))
     a, b, c = back @ np.stack([u.ravel(), v.ravel(), np.ones(u.size)])
     # The homography's derivative: how far a step of one slab pixel along u or v moves in the photo.
     along_u = np.hypot(back[0, 0] * c - a * back[2, 0], back[1, 0] * c - b * back[2, 0]) / c ** 2
     along_v = np.hypot(back[0, 1] * c - a * back[2, 1], back[1, 1] * c - b * back[2, 1]) / c ** 2
-    return float(min(along_u.min(), along_v.min()))
+    return float(min(along_u.min(), along_v.min())), float(max(along_u.max(), along_v.max()))
+
+
+def _widest(size):
+    """The widest close-up's box (CLOSEUP_MAX_SHARE of the slab of `size`, centred): the least density over it holds for
+    every crop inside it."""
+    w, h = size
+    m = (1 - C.CLOSEUP_MAX_SHARE) / 2
+    return m * w, m * h, (1 - 2 * m) * w, (1 - 2 * m) * h
 
 
 def _on_grid(f, block, n):
@@ -110,9 +116,16 @@ def _not_as_shot(changed, edits, size):
     return np.maximum(changed, cv2.resize(edits.astype(np.float32), size, interpolation=cv2.INTER_AREA))
 
 
-def _crop(flat, photo, changed, to_crop, from_work, size):
-    """The crop of the slab squared again from `photo`; where the standardiser changed the work copy, its own pixels."""
-    crop = cv2.warpPerspective(photo, to_crop, size, flags=cv2.INTER_CUBIC)
+def _crop(flat, photo, from_photo, changed, onto, dense, size):
+    """The crop of `size` of the slab squared again from `photo`; where the standardiser changed the work copy, its own
+    pixels. onto(size) maps the work copy's slab onto the crop at that size. The photo is squared at `dense` first, where
+    no photo pixel is more than one of the crop's (a steep shot's near side has more of them than its far side), then
+    made smaller with an area filter: warping straight to a smaller size samples without one, and stone finer than the
+    stored close-up shows folds into false patterns (moire). from_photo maps a pixel of `photo` onto the work copy."""
+    crop = cv2.warpPerspective(photo, onto(dense) @ flat.homography @ from_photo, dense, flags=cv2.INTER_CUBIC)
+    if dense != size:
+        crop = cv2.resize(crop, size, interpolation=cv2.INTER_AREA)
+    from_work = onto(size) @ flat.homography
     k = cv2.warpPerspective(changed, from_work, size, flags=cv2.INTER_LINEAR)[..., None]
     if not k.any():
         return crop
@@ -130,34 +143,31 @@ def _close_up_at(flat, photo, changed, not_shot, light, block):
     """(the close-up taken from `photo`, the full photo or the work copy, False), or (None, whether it was too soft):
     None when the photo has too few pixels (closeup_box), the crop is not all stone, more of it than CLOSEUP_EDIT_MAX is
     not as shot, or it is too soft to show real detail (CLOSEUP_DETAIL_MIN, judged on the photo's own pixels under the
-    crop; block: the source's JPEG block in `photo`'s pixels). The crop is squared straight from the photo at the size
-    it is stored at (closeup_size: never more pixels than the photo has there) and lit (the light was read on the whole
-    slab)."""
+    crop; block: the source's JPEG block in `photo`'s pixels). The crop is stored at closeup_size (never more pixels than
+    the photo has at its sparsest point, at most the canvas's width), squared from the photo without folding its finer
+    stone into false patterns (_crop), and lit (the light was read on the whole slab)."""
     work = flat.work
     s = photo.shape[1] / work.shape[1]                  # the work copy is the full photo made smaller, evenly
     size = (round(flat.rgb.shape[1] * s), round(flat.rgb.shape[0] * s))
     from_photo = np.linalg.inv(layout.scaling(photo.shape[1] / work.shape[1], photo.shape[0] / work.shape[0]))
     to_slab = layout.scaling(s, s) @ flat.homography @ from_photo        # a photo pixel -> the slab at the photo's scale
-    density = _density(to_slab, size)
+    density = _scales(to_slab, _widest(size))[0]
     box = closeup_box(*size, density=density)
     if box is None:
         return None, False
     x, y, cw, ch = box
     if flat.alpha[int(y / s):math.ceil((y + ch) / s), int(x / s):math.ceil((x + cw) / s)].min() < 0.5:
         return None, False
-    # Squared at the photo's own scale (as many pixels as the photo has there, at most 1:1), then, when that is more than
-    # the stored size, made smaller with an area filter: warping straight to a smaller size samples without one, and
-    # stone finer than the stored close-up shows folds into false patterns (moire).
-    native, out = closeup_size(cw, density)
-    onto = layout.scaling(native[0] / cw, native[1] / ch) @ np.array([[1, 0, -x], [0, 1, -y], [0, 0, 1]], np.float64) @ layout.scaling(s, s)
-    from_work = onto @ flat.homography                  # the work slab -> the crop at the photo's own scale
-    to_native = from_work @ from_photo
-    if cv2.warpPerspective(not_shot, from_work, native, flags=cv2.INTER_LINEAR).mean() > C.CLOSEUP_EDIT_MAX:
+    out = closeup_size(cw, density)[1]
+    dense = closeup_size(cw, max(density, _scales(to_slab, box)[1]))[0]   # one crop pixel per photo pixel even at its densest
+    place = np.array([[1, 0, -x], [0, 1, -y], [0, 0, 1]], np.float64) @ layout.scaling(s, s)   # the work slab -> the box
+    onto = lambda at: layout.scaling(at[0] / cw, at[1] / ch) @ place
+    from_work = onto(out) @ flat.homography             # the work slab -> the stored crop
+    if cv2.warpPerspective(not_shot, from_work, out, flags=cv2.INTER_LINEAR).mean() > C.CLOSEUP_EDIT_MAX:
         return None, False
-    if fine_detail(_own_pixels(photo, to_native, native), block) < C.CLOSEUP_DETAIL_MIN:
+    if fine_detail(_own_pixels(photo, from_work @ from_photo, out), block) < C.CLOSEUP_DETAIL_MIN:
         return None, True
-    lit = proto.apply_light(_crop(flat, photo, changed, to_native, from_work, native), _light_on(light, onto, native))
-    return (lit if native == out else cv2.resize(lit, out, interpolation=cv2.INTER_AREA)), False
+    return proto.apply_light(_crop(flat, photo, from_photo, changed, onto, dense, out), _light_on(light, onto(out), out)), False
 
 
 def close_up(flat, full, edits=None):

@@ -20,6 +20,10 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE a
 from stone_pipeline.core import env
 
 _DONE = ("SUCCEEDED", "FAILED")
+# Each job runs once, as its reservation counts (worst_seconds). A job that stops on purpose exits 1 (its photos are left
+# to the next run, recorded in S3); a second attempt would only repeat that unpaid for. Set on every submission, so the
+# job definition's own retry setting can never change what a round costs.
+ONE_ATTEMPT = {"attempts": 1}
 
 
 def target():
@@ -64,11 +68,12 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
         common = [{"name": k, "value": str(v)} for k, v in (("SRC", src), ("RUN_TAG", tag), ("ONLY_KEY", only))]
         name = f"{src}-{tag}-{n}"
         retouch = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
-                                   timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT},
+                                   timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT}, retryStrategy=ONE_ATTEMPT,
                                    containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise-retouch"}] + common})["jobId"]
         ids.append(retouch)
         standardise = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-standardise-{name}", jobQueue=queue, jobDefinition=jobdef,
                                        dependsOn=[{"jobId": retouch}], timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT},
+                                       retryStrategy=ONE_ATTEMPT,
                                        containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise"},
                                                                            {"name": "WATERMARKED", "value": str(watermarked[src]).lower()}]
                                                            + common})["jobId"]
@@ -86,7 +91,7 @@ def submit_close(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
         environment = (("RUN_MODE", "standardise-close"), ("SRC", src), ("CLEAN_TAG", tag), ("ONLY_KEY", only),
                        ("WATERMARKED", str(watermarked[src]).lower()))
         ids.append(batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-close-{src}-{tag}-{n}", jobQueue=queue, jobDefinition=jobdef,
-                                    timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT},
+                                    timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT}, retryStrategy=ONE_ATTEMPT,
                                     containerOverrides={"environment": [{"name": k, "value": v} for k, v in environment]})["jobId"])
     return ids
 

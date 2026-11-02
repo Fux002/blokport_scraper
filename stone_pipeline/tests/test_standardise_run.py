@@ -294,6 +294,12 @@ def test_each_close_only_slice_has_its_own_fixed_list_and_is_named_by_the_run(mo
     assert [(e["SRC"], e["WATERMARKED"]) for e in envs] == [("sentas", "false"), ("sentas", "false"), ("varsha", "true")]
 
 
+def test_every_gpu_job_is_submitted_for_the_one_attempt_its_reservation_counts(monkeypatch):
+    # a job that stops on purpose (photos left to the next run) exits 1; a second Batch attempt would run it again unpaid for
+    batch, s3 = _Batch(), _S3()
+    gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A]}, {"sentas": False}, "R1", [])
+    gpu.submit_close(batch, s3, "q", "jd", "v9-clean", {"sentas": [A]}, {"sentas": False}, "R1", [])
+    assert len(batch.submitted) == 3 and all(j["retryStrategy"] == {"attempts": 1} for j in batch.submitted)
 def test_a_close_only_round_reserves_one_job_per_slice_and_submits_close_jobs(monkeypatch):
     window = 3 * 3600
     assert gpu.worst_seconds(4, window, gpu.CLOSE_ROUND) == 4 * min(C.STANDARDISE_TIMEOUT, window) + 4 * C.GPU_JOB_ALLOWANCE_SECONDS

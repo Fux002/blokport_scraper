@@ -13,9 +13,10 @@ runner's `photos` stage, started after each full produce on the owner's button. 
   7. report: one choice record per listing, tracked.csv (the review list) and summary.json, under the clean tag
   8. publish: the published folder made to match the choice records (deploy.standardise_publish)
   9. relink: when the folder changed, produce --stage republish, so the new photos are linked in this same run
-With SCRAPER_STANDARDISE_CLOSE_ONLY on, steps 1 to 7 are one close-up round instead: every chosen photo's close-up made
-again from the photo its run started from (deploy.standardise_close, a GPU job per slice, under the same lock, budget,
-window and run id), then publish and relink as above; its summary is close-summary.json.
+With SCRAPER_STANDARDISE_CLOSE_ONLY on (the runner sets it for a close_only photos run), steps 1 to 7 are one close-up
+round instead: every chosen photo's close-up not made yet under the current rule made again from the photo its run
+started from (deploy.standardise_close, a GPU job per slice, under the same lock, budget, window and run id), then
+publish and relink as above; its summary is close-summary.json.
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice. The
 GPU and hosted steps work at most STANDARDISE.WORK_SECONDS: after it no hosted call and no GPU round starts. Hosted calls
 and GPU rounds together never take the month past STANDARDISE.BUDGET_USD (each run's spend of the month is its own file
@@ -26,7 +27,7 @@ and removes it, if it is still its own, when publish has ended. SIGTERM (the ser
 round's jobs are stopped, the ceiling set back, the spend kept, the lock released.
 Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY (not for a close-only run), SCRAPER_STANDARDISE_BUDGET_USD
 (all required); SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record;
-SCRAPER_STANDARDISE_CLOSE_ONLY (optional): the close-up round instead of steps 1 to 7.
+SCRAPER_STANDARDISE_CLOSE_ONLY (set by the runner, true only for a close_only run): the close-up round instead of 1 to 7.
 Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured,
 or no produce has stored the conflict set yet;
 4 another process is running; a failed relink exits with the produce's code; any other failure is loud (a traceback).
@@ -402,22 +403,31 @@ def photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisi
 
 
 def close_round(s3, batch, spend, run_id, deadline, root, say):
-    """Instead of steps 1 to 7 (SCRAPER_STANDARDISE_CLOSE_ONLY): every chosen photo's close-up made again, one close-only
-    GPU job per slice (gpu.CLOSE_ROUND: the same sizing to the budget, reservation and window as any round), the logo
-    setting from each source's config as for a standardise round: (problems, counts, kept)."""
+    """Instead of steps 1 to 7 (SCRAPER_STANDARDISE_CLOSE_ONLY): every chosen photo's close-up not made yet under the
+    current rule made again, one close-only GPU job per slice of those (gpu.CLOSE_ROUND: the same sizing to the budget,
+    reservation and window as any round; a photo already done never boots a GPU), the logo setting from each source's
+    config as for a standardise round: (problems, counts, kept)."""
     records = close.chosen(s3, root)
-    todo = {src: sorted({r["sha"] for r in close.listed(records, src)}) for src in sorted({r["source"] for r in records})}
-    photos = sum(len(shas) for shas in todo.values())
-    say(f"==> close-up process {run_id}: {photos} chosen photos of {', '.join(todo) or 'no source'}")
-    watermarked = {src: load_source(src).watermarked for src in todo}
-    try:
-        problems = [f"GPU job {name} failed: {why}" for name, why in
-                    gpu.run_round(batch, s3, C.CLEAN_TAG, todo, watermarked, run_id, deadline, spend, work=gpu.CLOSE_ROUND)]
-    except (select.Halted, gpu.Skipped, select.SpendCapReached) as exc:
-        problems = [f"close-up round not started: {exc}"]
-    except TimeoutError as exc:                        # its jobs were stopped; what they finished stays
-        problems = [f"close-up round stopped: {exc}"]
-    return problems, {"close_only": True, "photos": photos}, {}
+    photos, todo = 0, {}
+    for src in sorted({r["source"] for r in records}):
+        listed = close.listed(records, src)
+        photos += len({r["sha"] for r in listed})
+        if left := sorted({r["sha"] for r in close.undone(s3, listed)}):
+            todo[src] = left
+    to_do = sum(len(shas) for shas in todo.values())
+    say(f"==> close-up process {run_id}: {to_do} of {photos} chosen photos without a close-up v{C.CLOSEUP_VERSION}"
+        f"{' of ' + ', '.join(todo) if todo else ''}")
+    problems = []
+    if todo:
+        watermarked = {src: load_source(src).watermarked for src in todo}
+        try:
+            problems = [f"GPU job {name} failed: {why}" for name, why in
+                        gpu.run_round(batch, s3, C.CLEAN_TAG, todo, watermarked, run_id, deadline, spend, work=gpu.CLOSE_ROUND)]
+        except (select.Halted, gpu.Skipped, select.SpendCapReached) as exc:
+            problems = [f"close-up round not started: {exc}"]
+        except TimeoutError as exc:                    # its jobs were stopped; what they finished stays
+            problems = [f"close-up round stopped: {exc}"]
+    return problems, {"close_only": True, "photos": photos, "to_do": to_do}, {}
 
 
 def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):

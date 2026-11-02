@@ -1289,7 +1289,7 @@ Your whole answer is one JSON object and nothing else:
                                        # DPR3), 1148 (quick view), 1350-2700 (full-screen viewer): narrower than 1400 x 933
                                        # (Blokport's minimum, 2026-11-02) the frame would enlarge it, so it has none ...
     CLOSEUP_MAX_SHARE = 0.9            # ... up to this share of the slab on either axis; needing more: no close-up
-    CLOSEUP_DENSITY_SAMPLES = 5        # the squaring's local scale is read on this many points per axis of the widest close-up
+    CLOSEUP_DENSITY_SAMPLES = 5        # the squaring's local scale is read on this many points per axis (corner to corner)
     CLOSEUP_EDIT_MAX = 0.01            # a close-up more than this share not as shot (a logo, erased label, retouch fill, a hosted
                                        # model's cleaned copy) is none: a made-up patch shows at 1:1
     CLOSEUP_RETOUCH_DIFF = 8.0         # a retouched copy's pixel this much off the photo it was made from (8-bit luma, ...

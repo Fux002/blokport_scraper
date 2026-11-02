@@ -525,10 +525,39 @@ def test_a_close_only_run_makes_the_close_ups_again_in_the_same_process_then_pub
     monkeypatch.setattr(proc, "sheet_listings", lambda client: pytest.fail("a close-only run picks no listings"))
     summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert rounds == [(C.CLEAN_TAG, {"sentas": [A, B]}, {"sentas": False}, "R1", proc.gpu.CLOSE_ROUND)]
-    assert summary["close_only"] and summary["photos"] == 2 and summary["published"]["changed"]
+    assert summary["close_only"] and summary["photos"] == 2 and summary["to_do"] == 2 and summary["published"]["changed"]
     assert f"{ROOT}close-summary.json" in s3.objects and f"{ROOT}summary.json" not in s3.objects   # the photos run's stays
 
 
+def test_a_close_only_run_slices_only_the_photos_whose_close_up_is_not_made_yet(monkeypatch):
+    import time
+    from deploy import standardise_close as close
+    other = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/sentas/"
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{ROOT}chosen/two.json": _record("two", B),
+              f"{ROOT}chosen/three.json": _record("three", D), f"{ROOT}chosen/four.json": _record("four", D, other),
+              f"{RUN}close_v{C.CLOSEUP_VERSION}/{A}.json": b"{}",                      # A done in an earlier run
+              f"{RUN}close_v{C.CLOSEUP_VERSION}/retries/{B}.json": b"{}",              # B only left to a retry: not done
+              f"{RUN}close_v{C.CLOSEUP_VERSION - 1}/{B}.json": b"{}",                  # done under an older rule
+              f"{RUN}close_v{C.CLOSEUP_VERSION}/{D}.json": b"{}"})                     # D done in one folder, not the other
+    assert [(r["sha"], r["prefix"]) for r in close.undone(s3, close.listed(close.chosen(s3, ROOT), "sentas"))] == [
+        (B, RUN), (D, other)]
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc, "load_source", lambda src: type("S", (), {"watermarked": False})())
+    rounds = []
+    monkeypatch.setattr(proc.gpu, "run_round", lambda batch, client, tag, todo, watermarked, run_id, deadline, spend, work:
+                        rounds.append(todo) or [])
+    summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
+    assert rounds == [{"sentas": [B, D]}] and summary["photos"] == 3 and summary["to_do"] == 2
+
+
+def test_a_close_only_run_with_every_close_up_made_starts_no_gpu_job(monkeypatch):
+    import time
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{RUN}close_v{C.CLOSEUP_VERSION}/{A}.json": b"{}"})
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc, "load_source", lambda src: pytest.fail("a source with nothing to do was looked at"))
+    monkeypatch.setattr(proc.gpu, "run_round", lambda *a, **k: pytest.fail("a GPU round for photos already done"))
+    summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
+    assert summary["photos"] == 1 and summary["to_do"] == 0 and summary["problems"] == 0
 def test_a_close_only_run_needs_no_hosted_key(monkeypatch):
     _configured(monkeypatch)
     monkeypatch.delenv("FAL_KEY", raising=False)
@@ -685,6 +714,28 @@ def test_the_photos_stage_is_one_run_over_the_whole_environment(monkeypatch):
     assert code == 400
 
 
+
+def test_a_close_only_run_is_a_photos_run_the_operator_starts_through_the_runner(monkeypatch):
+    from stone_pipeline.config import server
+    monkeypatch.setattr(runner, "_stamp_last_run", lambda *a, **k: None)
+    launched = []
+    monkeypatch.setattr(runner, "_launch_local", lambda r: launched.append(r) or r.update(status="succeeded"))
+    code, rec = server.dispatch("POST", ["run"], {"stage": "photos", "close_only": True})
+    assert code == 202 and rec["stage"] == "photos" and rec["close_only"] is True and launched[0]["close_only"] is True
+    code, rec = server.dispatch("POST", ["run"], {"stage": "photos"})
+    assert code == 202 and rec["close_only"] is False
+
+
+def test_close_only_on_any_other_stage_or_not_a_boolean_is_refused(monkeypatch):
+    from stone_pipeline.config import server
+    monkeypatch.setattr(runner, "_launch_local", lambda r: pytest.fail("launched"))
+    for body in ({"stage": "all", "close_only": True}, {"close_only": True}, {"stage": "republish", "close_only": True},
+                 {"stage": "photos", "close_only": "true"}, {"stage": "photos", "close_only": 1}):
+        code, rec = server.dispatch("POST", ["run"], body)
+        assert code == 400 and "close_only" in rec["error"], body
+    assert runner.start_run(stage="all", close_only=False, launch=lambda r: r.update(status="succeeded"))[1] == 202
+
+
 class _Proc:
     stderr = None
 
@@ -739,13 +790,27 @@ def test_the_photo_process_s_stdout_is_its_report_and_its_summary_comes_back_in_
     monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(runner, "_child", None)          # no watcher runs here to clear the launched child
     monkeypatch.setattr(runner, "_watcher", None)
-    rec = {"run_id": "r", "stage": "photos", "status": "queued"}
+    rec = {"run_id": "r", "stage": "photos", "status": "queued", "close_only": False}
     runner._launch_local(rec)
     assert seen["stdout"] == subprocess.PIPE and seen["stderr"] == subprocess.STDOUT
     assert seen["env"]["SCRAPER_RUN_SUMMARY"] == str(runner._summary_path(rec))
-    runner._launch_local({"run_id": "r2", "stage": "all", "status": "queued"})
+    assert seen["env"]["SCRAPER_STANDARDISE_CLOSE_ONLY"] == "false"
+    runner._launch_local({"run_id": "r2", "stage": "all", "status": "queued", "close_only": False})
     assert seen["stdout"] == subprocess.DEVNULL and seen["stderr"] == subprocess.PIPE
     assert "SCRAPER_RUN_SUMMARY" not in seen["env"]
+
+
+def test_only_a_close_only_run_gets_the_close_only_switch_whatever_the_service_s_own_env_says(monkeypatch):
+    seen = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, env=None, **kw: seen.append(env) or type("P", (), {})())
+    monkeypatch.setattr(runner.threading, "Thread", lambda target, args, daemon: type("T", (), {"start": lambda self: None})())
+    monkeypatch.setattr(runner, "_child", None)
+    monkeypatch.setattr(runner, "_watcher", None)
+    monkeypatch.setenv("SCRAPER_STANDARDISE_CLOSE_ONLY", "true")              # set on the service by mistake
+    monkeypatch.setenv("BLOKPORT_STANDARDISE_CLOSE_ONLY", "true")
+    runner._launch_local({"run_id": "r", "stage": "photos", "status": "queued", "close_only": False})
+    runner._launch_local({"run_id": "r2", "stage": "photos", "status": "queued", "close_only": True})
+    assert [e["SCRAPER_STANDARDISE_CLOSE_ONLY"] for e in seen] == ["false", "true"]   # SCRAPER_ wins over BLOKPORT_
 
 
 # --- a clean stop -----------------------------------------------------------------------------------------------------

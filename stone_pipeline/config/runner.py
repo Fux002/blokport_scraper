@@ -73,7 +73,7 @@ _PHOTOS_AFTER = ("all",)
 def _public(rec: dict) -> dict:
     return {k: rec.get(k) for k in
             ("run_id", "status", "started_at", "finished_at",
-             "sources", "scope", "stage", "counts", "progress", "error")}
+             "sources", "scope", "stage", "close_only", "counts", "progress", "error")}
 
 
 def _capture_counts() -> dict | None:
@@ -271,8 +271,10 @@ def _launch_local(rec: dict) -> None:
             proc = subprocess.Popen(
                 _build_command(rec),
                 # the run id reaches the deliverables manifest produce publishes; a photos run hands its summary back
+                # and is told whether it is close-only by its own run alone, never by the service's env
                 env={**os.environ, "SCRAPER_LEDGER_WRITETHROUGH": "1", "SCRAPER_RUN_ID": rec["run_id"],
-                     **({"SCRAPER_RUN_SUMMARY": str(_summary_path(rec))} if photos else {})},
+                     **({"SCRAPER_RUN_SUMMARY": str(_summary_path(rec)),
+                         "SCRAPER_STANDARDISE_CLOSE_ONLY": "true" if rec["close_only"] else "false"} if photos else {})},
                 # A produce's stdout is the image-progress print() noise (drop it); its stderr carries the structured
                 # logfmt logs + any traceback, so CAPTURE it (see _watch_local) instead of discarding a failed run's
                 # cause. The photo process reports on stdout, so its two streams are captured as one.
@@ -375,16 +377,22 @@ def _give_way_then_launch(rec: dict, launch) -> None:
 
 # -- public API ---------------------------------------------------------------
 
-def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
+def start_run(sources=None, stage="all", launch=None, close_only=False) -> tuple[dict, int]:
     """Kick off a produce. `sources` None -> every enabled source, else an explicit subset; `stage`
     is scrape / catalog / all (how far to run). Returns (record, http_status): 202 started, 409 if a
     run is already in flight, 400 on a bad stage. `scope` (the explicit subset, internal) is what
-    actually scopes the subprocess; `sources` is the resolved list shown to the caller."""
+    actually scopes the subprocess; `sources` is the resolved list shown to the caller. `close_only`
+    (photos only, an operator's action): the photos run makes the chosen photos' close-ups again
+    instead of picking and judging (STANDARDISE_PROCESS.md)."""
     stage = (stage or "all").strip().lower()
     if stage not in STAGES:
         return {"error": f"unknown stage {stage!r}; expected one of {', '.join(STAGES)}"}, 400
     if stage == "photos" and sources:
         return {"error": "the photos stage works on every listing without a chosen photo; it takes no sources"}, 400
+    if not isinstance(close_only, bool):
+        return {"error": f"close_only must be true or false; got {close_only!r}"}, 400
+    if close_only and stage != "photos":
+        return {"error": f"close_only is a photos run's; the {stage} stage takes none"}, 400
     scope = None
     if sources:
         known = _resolve_sources(sources)
@@ -413,7 +421,7 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
         rec = {"run_id": run_id, "status": "queued",
                "started_at": _now(), "finished_at": None, "error": None,
                "sources": shown,
-               "stage": stage, "scope": scope, "progress": {}}
+               "stage": stage, "scope": scope, "close_only": close_only, "progress": {}}
         _runs[run_id] = rec
         _current_id = run_id                       # claim the run slot FIRST -> run_in_progress() is now True
         # M2: keep only the newest _MAX_RUNS in memory (durable history is in the run_log). Evict the

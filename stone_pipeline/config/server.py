@@ -172,10 +172,12 @@ def _sources_of(body):
 
 # -- run: the produce trigger ------------------------------------------------------------------------------
 def _post_run(params, body, query):
-    # Body (all optional): {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"}
-    # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate).
+    # Body (all optional): {"sources": ["zucchi", ...], "stage": "scrape"|"catalog"|"all"|..., "close_only": bool}
+    # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate); close_only
+    # (stage photos only, an operator's action) makes the chosen photos' close-ups again.
     from stone_pipeline.config import runner
-    rec, code = runner.start_run(_sources_of(body), _dict(body).get("stage") or "all")   # (record, status)
+    rec, code = runner.start_run(_sources_of(body), _dict(body).get("stage") or "all",
+                                 close_only=_dict(body).get("close_only", False))   # (record, status)
     return code, rec
 
 
