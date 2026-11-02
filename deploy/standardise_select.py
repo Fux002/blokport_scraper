@@ -176,7 +176,10 @@ def fixable(client, rnd, sha, exclude):
     if sha in exclude:
         return False
     if sha in rnd.finished:
-        return sha in rnd.judged and judge.fixable(_get_json(client, f"{rnd.prefix}judged/{sha}.json"))
+        if sha not in rnd.judged:
+            return False
+        found = _get_json(client, f"{rnd.prefix}judged/{sha}.json")
+        return judge.current(found) and judge.fixable(found)          # an outdated fail is judged again first
     if sha in rnd.held:
         return _get_json(client, f"{rnd.prefix}held/{sha}.json")["reason"].startswith(C.CLEAN_FIXES_HELD)
     return False
@@ -206,7 +209,11 @@ def _attempt(client, cl, sha, name, original, spend):
     next run sends it again."""
     att, ident = f"{cl.prefix}attempts/{sha}.{name}", f"{sha}.{name}"
     if ident in cl.attempts:
-        return _get_json(client, f"{att}.json")
+        stored = _get_json(client, f"{att}.json")
+        if stored.get("passes") or stored.get("clean_version", 1) >= C.CLEAN_VERSION:
+            return stored
+        cl.edited.discard(ident)                       # failed under an older instruction: made again with the current one
+        cl.requested.discard(ident)
     if ident in cl.edited:
         copy = _get(client, f"{att}.jpg")
     else:
@@ -244,13 +251,14 @@ def _attempt(client, cl, sha, name, original, spend):
         check, cost = judge.check_clean(original, copy)
     finally:
         spend.settle(C.JUDGE_PRICE_USD, cost)
-    _put_json(client, f"{att}.json", {**check, "edit_model": name, "check_cost": cost})
+    _put_json(client, f"{att}.json", {**check, "edit_model": name, "check_cost": cost, "clean_version": C.CLEAN_VERSION})
     cl.attempts.add(ident)
     return check
 
 def _failed(client, cl, att, ident, name, why):
     """A hosted edit that failed for good, recorded as a failed attempt: the next model gets its turn, now and on re-runs."""
-    check = {"clean": False, "faithful": False, "passes": False, "problems": why, "edit_model": name, "check_cost": 0.0}
+    check = {"clean": False, "faithful": False, "passes": False, "problems": why, "edit_model": name, "check_cost": 0.0,
+             "clean_version": C.CLEAN_VERSION}
     _put_json(client, f"{att}.json", check)
     cl.attempts.add(ident)
     return check

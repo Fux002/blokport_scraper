@@ -1075,6 +1075,9 @@ Your whole answer is one JSON object and nothing else:
                          "show the slab's own stone, "
                          "continuing its pattern. Keep the stone's colour, veins, pattern and texture exactly as they are, and keep "
                          "the slab's outline and the rest of the photo unchanged.")
+    # The instruction's version (2: protective film too). A stored attempt that failed under a lower one is made again with
+    # the current instruction; a passed one stands.
+    CLEAN_VERSION = 2
     CLEAN_MODELS = (                   # (name, endpoint, extra input); the photo goes in as image_url or image_urls
         ("kontext", "fal-ai/flux-pro/kontext", {"output_format": "jpeg", "seed": 1}),
         ("nano2", "fal-ai/nano-banana-2/edit", {"resolution": "2K", "output_format": "jpeg", "seed": 1}),

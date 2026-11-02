@@ -364,3 +364,23 @@ def test_without_spend_a_fail_under_an_older_bar_is_not_final():
     old_fail = json.dumps({"verdict": "fail", "problems": [{"kind": "leftover_mark"}], "version": 1}).encode()
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set()) == (None, False)
+
+
+
+def test_a_listing_with_an_outdated_fail_is_never_cleaned_before_it_is_judged_again(monkeypatch):
+    monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned on an outdated verdict"))
+    old_fail = json.dumps({"verdict": "fail", "problems": [{"kind": "light_reflection"}], "version": 1}).encode()
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    with pytest.raises(RuntimeError, match="nothing is cleaned before they do"):
+        sel.clean_listing(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set(), sel.Spend(10))
+
+
+def test_an_attempt_that_failed_under_an_older_instruction_is_made_again_and_a_pass_stands(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    s3.objects[f"{CL}attempts/{B}.kontext.json"] = json.dumps({"passes": False, "clean_version": 1}).encode()
+    s3.objects[f"{CL}attempts/{B}.kontext.jpg"] = b"old-copy"
+    rounds[1][1]["sentas"].attempts.add(f"{B}.kontext")
+    rounds[1][1]["sentas"].edited.add(f"{B}.kontext")
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == ["kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"   # sent again, new copy used
+    assert json.loads(s3.objects[f"{CL}attempts/{B}.kontext.json"])["clean_version"] == C.CLEAN_VERSION
