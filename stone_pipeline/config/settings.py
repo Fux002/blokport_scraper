@@ -1296,6 +1296,16 @@ Your whole answer is one JSON object and nothing else:
                                        # reduce of a few % acts as a 2 px blur and takes a fifth of the finest detail (12 px
                                        # skew, sen-1547ed34: 18.6 -> 14.5), while what folds at 1.25x lands near the finest
                                        # scale, never in broad bands
+    # A result made before its chosen slab was recorded (<sha>.slab.json) is decided against the <sha>.slab.png it saved:
+    CLOSEUP_SLAB_SIZE_TOL = 0.03       # a slab found now is its size as drawn within this share on either axis (a fresh outline
+                                       # moves a few px; a single slab and an open book's half differ about twice) ...
+    CLOSEUP_SLAB_MATCH_WIDTH = 64      # ... and shows its stone: both compared this many px across (coarse: a fresh outline's
+                                       # drift of 1% then moves it under a pixel) ...
+    CLOSEUP_SLAB_MATCH_SMOOTH = 4.0    # ... their light and broad shading taken off (a blur of this many px subtracted) ...
+    CLOSEUP_SLAB_MATCH_MIN = 0.5       # ... correlating at least this much ...
+    CLOSEUP_SLAB_MATCH_MARGIN = 0.2    # ... and by this much more than an open book's other half (its mirror image); else none.
+                                       # 12 real stones bookmatched, the outline drifted 1%: the same half 0.63 to 0.93, the
+                                       # mirrored one at most 0.34, the least gap 0.32
     CLOSEUP_EDIT_MAX = 0.01            # a close-up more than this share not as shot (a logo, erased label, retouch fill, a hosted
                                        # model's cleaned copy) is none: a made-up patch shows at 1:1
     CLOSEUP_RETOUCH_DIFF = 8.0         # a retouched copy's pixel this much off the photo it was made from (8-bit luma, ...

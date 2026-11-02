@@ -594,7 +594,7 @@ def test_the_close_up_leaves_every_other_view_as_it_was(monkeypatch):
     assert np.array_equal(extra.images["white"], layout.on_white(slabs))
     assert all(np.array_equal(a, b) for a, b in zip(extra.slab, slabs[0]))
     # The close-only run makes the same close-up from the same photo.
-    assert np.array_equal(photo.close_view(full, size=None, models=m), extra.images["close"])
+    assert np.array_equal(photo.close_view(full, size=None, models=m, chosen=extra.chosen, saved=None), extra.images["close"])
 
 
 
@@ -1288,14 +1288,19 @@ def test_the_half_chosen_is_the_one_with_more_stone_as_drawn_and_its_choice_is_r
     assert closed == [(id(tie[1].rgb), id(tie[1].alpha))]                      # its close-up from that same half
 
 
-def _close_view_of(monkeypatch, flats, chosen):
+def _close_view_of(monkeypatch, flats, chosen=None, saved=None):
     from stone_pipeline.standardise import photo
     monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats)
     monkeypatch.setattr(views, "close_up", lambda flat, full, edits: flat)
 
     class _Models:
         seg = det = lama = None
-    return photo.close_view(np.zeros((60, 90, 3), np.uint8), size=None, models=_Models(), chosen=chosen)
+    return photo.close_view(np.zeros((60, 90, 3), np.uint8), size=None, models=_Models(), chosen=chosen, saved=saved)
+
+
+def _saved(flats, i):
+    """What a run saved as <sha>.slab.png of slab i of these: as the layout drew it (enlarged, lit, the seam trimmed)."""
+    return layout.enlarged(flats, _Esr())[i]
 
 
 def test_the_close_only_run_takes_the_half_its_run_recorded_never_choosing_again(monkeypatch):
@@ -1308,10 +1313,33 @@ def test_the_close_only_run_takes_the_half_its_run_recorded_never_choosing_again
         _close_view_of(monkeypatch, tie[:1], (1, 2))                           # its run squared two, now one
 
 
-def test_a_result_made_before_its_half_was_recorded_gets_the_close_up_of_the_half_its_3d_slab_shows(monkeypatch):
-    tie = _near_tie()
-    assert _close_view_of(monkeypatch, tie, None) is tie[1]                    # the rule as the run applied it: as drawn
-    assert _close_view_of(monkeypatch, tie[:1], None) is tie[0]
+def test_an_unrecorded_open_book_gets_the_close_up_of_the_half_its_saved_slab_shows(monkeypatch):
+    tie = _near_tie()                                                          # the rule as drawn would take the right
+    assert _close_view_of(monkeypatch, tie, saved=_saved(tie, 0)) is tie[0]    # its run saved the left: the left
+    assert _close_view_of(monkeypatch, tie, saved=_saved(tie, 1)) is tie[1]
+    one = [layout.Flat(_stone(80, 200, 4), np.ones((80, 200), np.float32), np.eye(3), None)]
+    assert _close_view_of(monkeypatch, one, saved=_saved(one, 0)) is one[0]
+
+
+def test_an_unrecorded_single_slab_found_as_two_now_has_no_close_up(monkeypatch):
+    from stone_pipeline.standardise import photo
+    rgb = _stone(80, 200, 4)
+    one = [layout.Flat(rgb, np.ones((80, 200), np.float32), np.eye(3), None)]
+    two = [layout.Flat(np.ascontiguousarray(rgb[:, i:i + 100]), np.ones((80, 100), np.float32), np.eye(3), None) for i in (0, 100)]
+    with pytest.raises(photo.NoCloseUp, match="size"):
+        _close_view_of(monkeypatch, two, saved=_saved(one, 0))
+    with pytest.raises(photo.NoCloseUp, match="size"):                        # and an open book found as one slab
+        _close_view_of(monkeypatch, one, saved=_saved(two, 0))
+
+
+def test_an_unrecorded_result_is_never_given_a_half_its_saved_slab_does_not_tell(monkeypatch):
+    from stone_pipeline.standardise import photo
+    alike = [layout.Flat(_stone(80, 100, 1), np.ones((80, 100), np.float32), np.eye(3), None) for _ in "lr"]
+    with pytest.raises(photo.NoCloseUp, match="which"):                       # two halves alike: not told apart
+        _close_view_of(monkeypatch, alike, saved=_saved(alike, 0))
+    other = [layout.Flat(_stone(80, 100, 9), np.ones((80, 100), np.float32), np.eye(3), None) for _ in "lr"]
+    with pytest.raises(photo.NoCloseUp, match="stone"):                       # neither is the stone it saved
+        _close_view_of(monkeypatch, _near_tie(), saved=_saved(other, 0))
 
 
 def test_a_single_slab_keeps_its_own_slab_and_close_view(monkeypatch):

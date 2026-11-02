@@ -89,25 +89,65 @@ def whole_index(alphas, kind):
     return 0 if kind == "slab" else None
 
 
-def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen=None):
+def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen, saved):
     """The close-up alone (views.close_up) of a photo its run made a whole slab of (a single slab, or an open book's whole
     half), or None when it gets none: the steps of standardise up to the squared slabs, none of what only the other views
-    need. chosen: (which, of how many) slabs its run recorded (Result.chosen), so the close-up is of the slab its 3D slab
-    shows; None for a result made before that was recorded: the run's rule again, on the slabs as it drew them. NoCloseUp
-    when its logo cannot be trusted or it no longer gives the slabs its run found."""
+    need, the close-up of the slab its 3D slab shows (run_slab). NoCloseUp when its logo cannot be trusted or the slabs
+    found now do not tell which one that is."""
     rgb, reason = _work_copy(full, clean, watermarked)
     if rgb is None:
         raise NoCloseUp(reason)
     flats = layout.flat_slabs(rgb, models.seg, models.det, models.lama, size=size)
     if isinstance(flats, str):
         raise NoCloseUp(f"no whole slab now: {flats}")
-    if chosen is None:
-        return views.close_up(flats[whole_index(layout.drawn_alphas(flats), "open book" if len(flats) == 2 else "slab")],
-                              full, edits)
-    i, of = chosen
-    if len(flats) != of:
-        raise NoCloseUp(f"its run found {of} slabs in it, now {len(flats)}")
-    return views.close_up(flats[i], full, edits)
+    return views.close_up(flats[run_slab(flats, chosen, saved)], full, edits)
+
+
+def run_slab(flats, chosen, saved):
+    """Which of the slabs found now is the one the photo's run made its 3D slab of. chosen: (which, of how many) its run
+    recorded (Result.chosen); None for a result made before that was recorded, which is decided against saved, the
+    (RGB, alpha) of the <sha>.slab.png it saved: the one slab found now its size as drawn (CLOSEUP_SLAB_SIZE_TOL: a
+    single slab is drawn about twice an open book's half, so a slab count that changed shows) and showing its stone
+    (CLOSEUP_SLAB_MATCH_MIN, by CLOSEUP_SLAB_MATCH_MARGIN over an open book's other half, its mirror image). Never a
+    guess: NoCloseUp when the slabs found now do not tell."""
+    if chosen is not None:
+        i, of = chosen
+        if len(flats) != of:
+            raise NoCloseUp(f"its run found {of} slabs in it, now {len(flats)}")
+        return i
+    rgb, alpha = saved
+    tol = C.CLOSEUP_SLAB_SIZE_TOL
+    sized = [i for i, a in enumerate(layout.drawn_alphas(flats))
+             if abs(a.shape[1] / alpha.shape[1] - 1) <= tol and abs(a.shape[0] / alpha.shape[0] - 1) <= tol]
+    if not sized:
+        raise NoCloseUp(f"none of the {len(flats)} slabs found now is the size of the one its run saved")
+    shown = _structure(rgb, alpha, alpha.shape[1::-1])
+    scores = sorted(((_likeness(shown, _structure(flats[i].rgb, flats[i].alpha, alpha.shape[1::-1])), i) for i in sized),
+                    reverse=True)
+    best, i = scores[0]
+    if best < C.CLOSEUP_SLAB_MATCH_MIN:
+        raise NoCloseUp(f"no slab found now shows the stone its run saved (likeness {best:.2f})")
+    if len(scores) > 1 and best - scores[1][0] < C.CLOSEUP_SLAB_MATCH_MARGIN:
+        raise NoCloseUp(f"which half its run saved is not told apart (likeness {best:.2f} and {scores[1][0]:.2f})")
+    return i
+
+
+def _structure(rgb, alpha, like):
+    """The stone's structure (its veins and patches, not its light or finest detail) at CLOSEUP_SLAB_MATCH_WIDTH px across
+    in the shape of `like` (width, height), and where it is stone: what a squared slab and its lit, enlarged copy share."""
+    w = C.CLOSEUP_SLAB_MATCH_WIDTH
+    size = (w, max(1, round(w * like[1] / like[0])))
+    g = cv2.resize(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32), size, interpolation=cv2.INTER_AREA)
+    return g - cv2.GaussianBlur(g, (0, 0), C.CLOSEUP_SLAB_MATCH_SMOOTH), cv2.resize(alpha, size, interpolation=cv2.INTER_AREA) > 0.5
+
+
+def _likeness(a, b):
+    """The correlation of two structures (_structure) where both are stone; 0 when either shows none."""
+    (ga, ma), (gb, mb) = a, b
+    inside = ma & mb
+    x, y = ga[inside] - ga[inside].mean(), gb[inside] - gb[inside].mean()
+    norm = float(np.sqrt((x * x).sum() * (y * y).sum()))
+    return float((x * y).sum()) / norm if norm > 0 else 0.0
 
 
 def retouch_fills(retouched, made_from):

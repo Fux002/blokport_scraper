@@ -3,7 +3,7 @@ submitted by deploy.standardise_run with CLOSE_ONLY=true, one job per slice of a
 
 For each chosen photo of SRC (deploy.standardise_select's records under <CLEAN_TAG>/chosen/), narrowed to the slice's
 fixed list (ONLY_KEY): a photo its run made a whole slab of (<sha>.slab.png: a single slab, or an open book's half,
-which <sha>.slab.json records; a result made before that was recorded gets the run's rule again) goes, from the photo
+which <sha>.slab.json records; a result made before that was recorded is decided against that slab.png) goes, from the photo
 its run started from, through only what the close-up needs (logo, outline, detector, eraser: photo.close_view; no
 upscaler, inpainting, judge or hosted edit). The new close-up replaces <prefix><sha>.close.jpg in the run's own folder; the file is deleted
 when the photo gets none: by the close-up rule, for a reason of its own (photo.NoCloseUp: its run refused it, it is off
@@ -35,8 +35,8 @@ from concurrent.futures import ThreadPoolExecutor
 import boto3
 
 from deploy.standardise_publish import _objects, chosen_prefix
-from deploy.standardise_source import (_encode, _get, gpu_error, own_input, passing_storage_error, sheet_photos,
-                                       slab_record_key, start, start_edits)
+from deploy.standardise_source import (_encode, _get, gpu_error, own_input, passing_storage_error, read_slab,
+                                       sheet_photos, slab_record_key, start, start_edits)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
@@ -96,7 +96,8 @@ def listed(records, src, wanted=None):
 
 def remake(client, record, photos, m, watermarked, made):
     """The new close-up of one chosen photo, or None when it gets none; NoCloseUp for a reason of its own. Of the slab its
-    run recorded (slab_record_key, in `made`: the run folder's keys); a result made before that was recorded has none."""
+    run recorded (slab_record_key, in `made`: the run folder's keys); a result made before that was recorded is decided
+    against the <sha>.slab.png it saved (photo.run_slab)."""
     src, sha, out = record["source"], record["sha"], record["prefix"]
     key = f"{imagestore.scraped_prefix(src)}{sha}.jpg"
     source_key, cleaned, refused = start(client, out, key, sha)
@@ -108,12 +109,14 @@ def remake(client, record, photos, m, watermarked, made):
     logo = watermarked and not cleaned                 # a cleaned copy has no logo left to take off
     clean = own_input(client, f"{imagestore.improved_prefix(src)}{sha}.jpg", photo.decode) if logo else None
     full = own_input(client, source_key)
-    chosen = None
+    chosen = saved = None
     if (slab_key := slab_record_key(out, sha)) in made:
         recorded = json.loads(_get(client, slab_key))
         chosen = (recorded["index"], recorded["of"])
+    else:
+        saved = own_input(client, f"{out}{sha}.slab.png", read_slab)
     return photo.close_view(full, size=tuple(size) if size else None, clean=clean, watermarked=logo, models=m,
-                            edits=start_edits(client, out, key, source_key, cleaned, full), chosen=chosen)
+                            edits=start_edits(client, out, key, source_key, cleaned, full), chosen=chosen, saved=saved)
 
 
 def store(client, record, image, reason=""):

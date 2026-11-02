@@ -246,12 +246,31 @@ def test_the_run_makes_each_photos_close_up_from_the_photo_its_run_started_from(
     monkeypatch.setattr(close, "own_input", lambda client, key, read=photo.read: key)
     monkeypatch.setattr(close, "start_edits", lambda client, out, key, source_key, cleaned, full: f"fills of {source_key}")
 
-    def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen=None):
-        seen.append((full, size, watermarked, edits, chosen))
+    def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen, saved):
+        seen.append((full, size, watermarked, edits, chosen, saved))
         return None
     monkeypatch.setattr(close.photo, "close_view", close_view)
     assert close.remake(_S3(), _record(A), {A: {"size": [3.0, 1.8]}}, None, False, _slab(A)) is None
-    assert seen == [(f"{RUN}retouched/{A}.jpg", (3.0, 1.8), False, f"fills of {RUN}retouched/{A}.jpg", None)]  # no record: older
+    # no record (made before one was kept): decided against the slab its run saved (own_input stood in: its key)
+    assert seen == [(f"{RUN}retouched/{A}.jpg", (3.0, 1.8), False, f"fills of {RUN}retouched/{A}.jpg", None, f"{RUN}{A}.slab.png")]
+
+
+def test_a_saved_slab_reads_back_as_it_was_written():
+    from deploy import standardise_source as src
+    rgb = np.random.default_rng(1).integers(0, 256, (20, 30, 3), dtype=np.uint8)
+    alpha = np.linspace(0, 1, 600, dtype=np.float32).reshape(20, 30)
+    got_rgb, got_alpha = src.read_slab(src._slab_png((rgb, alpha)))
+    assert np.array_equal(got_rgb, rgb) and np.abs(got_alpha - alpha).max() <= 1 / 255 + 1e-6   # written truncated to 8 bits
+    with pytest.raises(ValueError):
+        src.read_slab(b"not a png")
+
+
+def test_an_unrecorded_result_whose_saved_slab_is_missing_has_no_close_up_of_its_own(monkeypatch):
+    monkeypatch.setattr(close, "start", lambda client, out, key, sha: (f"{out}{sha}.jpg", False, ""))
+    monkeypatch.setattr(close, "own_input", lambda client, key, read=photo.read: (_ for _ in ()).throw(photo.NoCloseUp(f"its input is missing: {key}")) if key.endswith(".png") else key)
+    monkeypatch.setattr(close, "start_edits", lambda *a: None)
+    with pytest.raises(photo.NoCloseUp, match="slab.png"):
+        close.remake(_S3(), _record(A), {A: {"size": None}}, None, False, _slab(A))
 
 
 def test_the_run_takes_the_slab_its_run_recorded(monkeypatch):
@@ -259,10 +278,10 @@ def test_the_run_takes_the_slab_its_run_recorded(monkeypatch):
     monkeypatch.setattr(close, "start", lambda client, out, key, sha: (f"{out}{sha}.jpg", False, ""))
     monkeypatch.setattr(close, "own_input", lambda client, key, read=photo.read: key)
     monkeypatch.setattr(close, "start_edits", lambda *a: None)
-    monkeypatch.setattr(close.photo, "close_view", lambda full, *, chosen=None, **k: seen.append(chosen))
+    monkeypatch.setattr(close.photo, "close_view", lambda full, *, chosen, saved, **k: seen.append((chosen, saved)))
     s3 = _S3({f"{RUN}{A}.slab.json": json.dumps({"index": 1, "of": 2}).encode()})
     close.remake(s3, _record(A), {A: {"size": None}}, None, False, _slab(A) | {f"{RUN}{A}.slab.json"})
-    assert seen == [(1, 2)]
+    assert seen == [((1, 2), None)]
 
 
 @pytest.mark.parametrize("started,photos,why", [((None, False, "retouch: refused"), {A: {"size": None}}, "refused"),

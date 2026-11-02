@@ -41,6 +41,14 @@ def _slab_png(slab):
     return buf.tobytes()
 
 
+def read_slab(data):
+    """(RGB, alpha 0..1) of a saved <sha>.slab.png (_slab_png); ValueError when it is no slab PNG."""
+    bgra = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+    if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
+        raise ValueError("no slab PNG: an image with an alpha channel")
+    return cv2.cvtColor(bgra[..., :3], cv2.COLOR_BGR2RGB), bgra[..., 3].astype(np.float32) / 255
+
+
 def slab_record_key(out, sha):
     """Where it is recorded which of the slabs found in a photo its <sha>.slab.png is (photo.Result.chosen): what the
     close-only run makes its close-up of."""
