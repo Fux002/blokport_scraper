@@ -36,17 +36,17 @@ class _S3:
         self.objects.pop(Key, None)
 
 
-def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=(), requested=()):
+def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=(), requested=(), slabs=()):
     import threading
     r = object.__new__(sel.Round)
-    r.prefix, r.finished, r.held, r.judged = prefix, set(finished), set(held), set(judged)
+    r.prefix, r.finished, r.held, r.judged, r.slabs = prefix, set(finished), set(held), set(judged), set(slabs)
     r.cleaned, r.attempts, r.edited, r.requested = set(cleaned), set(attempts), set(edited), set(requested)
     r._locks, r._guard = {}, threading.Lock()
     return r
 
 
-def _listing(*photos, key="slab-1"):
-    return {"key": key, "source": "sentas", "format": "slab", "photos": list(photos)}
+def _listing(*photos, key="slab-1", fmt="slab", kept=None):
+    return {"key": key, "source": "sentas", "format": fmt, "photos": list(photos), **({"kept": kept} if kept else {})}
 
 
 def _verdict(v, *kinds):
@@ -536,3 +536,98 @@ def test_an_attempt_that_failed_under_an_older_instruction_is_made_again_and_a_p
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"   # sent again, new copy used
     assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["clean_version"] == C.CLEAN_VERSION
+
+
+# --- a whole slab before a close-up (a 3D slab for the listing) ---------------------------------------------------------
+def _judged_in_turn(monkeypatch, answers):
+    """The judge stood in: answers[sha] = "pass" | "fail"; returns the shas it was asked about, in order."""
+    asked = []
+    monkeypatch.setattr(sel, "_original", lambda client, src, sha: sha.encode())
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(o.decode()) or (
+        {"verdict": answers[o.decode()], "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    return asked
+
+
+def _results(*shas):
+    return {f"{GPU}{s}.main.jpg": b"m" for s in shas}
+
+
+def test_a_close_up_pass_gives_way_to_the_first_whole_slab_the_judge_passes(monkeypatch):
+    asked = _judged_in_turn(monkeypatch, {A: "pass", B: "fail", D: "pass"})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D), slabs=(B, D))}), ("v9-clean", {"sentas": _round(CL)})]
+    s3 = _S3(_results(A, B, D))
+    assert sel.choose(s3, rounds, _listing(A, B, D), set(), sel.Spend(10)) == (("v9", D), True)
+    assert asked == [A, B, D]
+
+
+def test_after_a_close_up_pass_only_whole_results_are_judged(monkeypatch):
+    asked = _judged_in_turn(monkeypatch, {A: "pass", B: "pass", D: "fail"})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D), slabs=(D,))}), ("v9-clean", {"sentas": _round(CL)})]
+    s3 = _S3(_results(A, B, D))
+    assert sel.choose(s3, rounds, _listing(A, B, D), set(), sel.Spend(10)) == (("v9", A), True)
+    assert asked == [A, D]                                        # B is another close-up: no better, never judged
+
+
+def test_a_block_or_tile_takes_its_first_pass_as_before(monkeypatch):
+    asked = _judged_in_turn(monkeypatch, {A: "pass", B: "pass"})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
+    s3 = _S3(_results(A, B))
+    for fmt in ("block", "tile"):
+        assert sel.choose(s3, rounds, _listing(A, B, fmt=fmt), set(), sel.Spend(10)) == (("v9", A), True)
+    assert asked == [A]                                           # judged once, stored: B never
+
+
+def test_a_kept_close_up_stays_when_no_whole_slab_passes_and_a_rerun_costs_nothing(monkeypatch):
+    monkeypatch.setattr(sel.judge, "judge", lambda *a: pytest.fail("paid again"))
+    s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "not_one_slab")})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), held=(D,), judged=(A, B), slabs=(B,))}),
+              ("v9-clean", {"sentas": _round(CL)})]
+    spend = sel.Spend(10)
+    assert sel.choose(s3, rounds, _listing(A, B, D, kept=("v9", A)), set(), spend) == (("v9", A), True)
+    assert spend.spent == 0 and spend.reserved == 0
+
+
+def test_a_kept_close_up_is_never_given_up_for_a_whole_slab_the_judge_has_not_passed():
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A,), slabs=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(_S3(), rounds, _listing(A, B, D, kept=("v9", A)), set()) == (("v9", A), False)   # B unjudged, D no result
+
+
+def test_a_kept_close_up_moves_to_a_whole_slab_that_passes_in_the_cleaned_run(monkeypatch):
+    asked = _judged_in_turn(monkeypatch, {B: "pass"})
+    monkeypatch.setattr(sel, "_get", lambda client, key: b"m")
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}),
+              ("v9-clean", {"sentas": _round(CL, finished=(B,), cleaned=(B,), slabs=(B,))})]
+    assert sel.choose(_S3(), rounds, _listing(A, B, kept=("v9", A)), set(), sel.Spend(10)) == (("v9-clean", B), True)
+    assert asked == [B]
+
+
+def test_a_listing_with_a_close_up_pass_is_never_sent_to_a_hosted_edit(monkeypatch):
+    monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
+    s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection")})          # fixable, but A already passed
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B), slabs=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B, kept=("v9", A)), set(), spend)
+    assert spend.spent == 0
+
+
+def _reported(objects, listing, rnd):
+    s3 = _S3(objects)
+    s = object.__new__(sel.Selection)
+    s.client, s.exclude, s.root, s.listings = s3, set(), "r/", [listing]
+    s.rounds = [("v9", {"sentas": rnd}), ("v9-clean", {"sentas": _round(CL)})]
+    return s3, sel.report(s)
+
+
+def test_the_report_switches_a_kept_close_up_to_the_whole_slab_that_passed():
+    kept = json.dumps({"source": "sentas", "key": "slab-1", "sha": A, "tag": "v9", "prefix": GPU}).encode()
+    s3, result = _reported({"r/chosen/slab-1.json": kept, f"{GPU}judged/{B}.json": _verdict("pass")},
+                           _listing(A, B, kept=("v9", A)), _round(GPU, finished=(A, B), judged=(A, B), slabs=(B,)))
+    assert json.loads(s3.objects["r/chosen/slab-1.json"])["sha"] == B and [c["sha"] for c in result["chosen"]] == [B]
+
+
+def test_a_kept_close_up_with_nothing_better_is_still_chosen_and_its_record_not_written_again():
+    kept = b'{"as": "written before"}'
+    s3, result = _reported({"r/chosen/slab-1.json": kept, f"{GPU}judged/{B}.json": _verdict("fail", "not_one_slab")},
+                           _listing(A, B, kept=("v9", A)), _round(GPU, finished=(A, B), judged=(A, B), slabs=(B,)))
+    assert s3.objects["r/chosen/slab-1.json"] == kept and [c["sha"] for c in result["chosen"]] == [A]
+    assert result["tracked"] == [] and result["pending"] == []

@@ -18,9 +18,11 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
        2. clear       GPU jobs a killed earlier run left (photos-<run id>-...) are stopped, the GPU pool's ceiling
                       set back to idle
        3. pick        every listing of the sheet just published WITHOUT a valid choice record
-                      (record missing, or its photo no longer the listing's, or on the exclude list)
+                      (record missing, or its photo no longer the listing's, or on the exclude list), and every
+                      slab listing whose chosen photo is no whole slab (a close-up), its choice kept
        4. GPU         the listings' first JUDGE_MAX photos the standardiser has not run (RUN_TAG)
-       5. judge       each listing's results in its own order until one passes
+       5. judge       each listing's results in its own order until one passes; a slab listing goes on past a
+                      passing close-up to its whole slabs only, and takes the first of those that passes
        6. clean       only for a listing whose every judged photo failed for a cleanable reason:
                       one photo, hosted edit models cheapest first (nano2, kontext, flux3) until a copy passes
        7. GPU         the cleaned copies (CLEAN_TAG)
@@ -38,6 +40,28 @@ Every step reads back what earlier runs stored (verdicts, cleaned copies, paid e
 that stops is simply run again, and nothing is paid twice. A listing on the review list is picked again by the next
 run at no hosted cost (its answers are stored), so the list is always complete, and a change that can help it (a
 higher JUDGE_MAX, a new clean instruction version) reaches it by itself.
+
+## A whole slab before a close-up (the 3D slab)
+
+A result is a whole slab when its run saved `<sha>.slab.png`: a single slab, or an open book, whose slab is one of its
+two halves (each half is a whole real slab: the one with more stone in its outline, the left on a tie; its close view
+is made from that half too). Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
+close view, no 3D.
+
+A slab listing prefers a whole slab, within the same JUDGE_MAX candidates and their order. Once a close-up has passed
+(in this run, or as the listing's choice from an earlier one, picked again as "kept"), only the listing's whole results
+are judged after it, and the first that passes becomes the choice; if none does, the close-up stays. What was already
+tried is read from the stored results and verdicts (no marker): a kept listing whose candidates all have a result and
+a verdict costs nothing again, and its record is not rewritten. It never goes to the hosted clean step (it has a
+passing photo). The GPU and the judge stay inside the month's budget and the round sizing like every listing. When the
+choice moves, publish removes the close-up's views and adds the whole slab's views and its 3D slab. Blocks and tiles
+take their first pass as before.
+
+Open: a published listing's row in the product sheet carries only its chosen photo's views, so for a close-up already
+published the process sees no further photos (prod 2026-11-02: 217 such listings, every one a single photo on the
+sheet). They are picked and cost nothing, but they move to a whole slab only once the sheet (or another source the
+GPU job also reads) gives each listing its own photos. The 10 open books chosen before their halves had a slab.png
+get theirs when their photo is run again (its result files removed, `main.jpg` last); nothing else changes for them.
 
 ## Trigger
 

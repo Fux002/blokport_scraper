@@ -68,19 +68,39 @@ class _S3:
         return _Pages()
 
 
-def _listing(key, *photos):
-    return {"key": key, "source": "sentas", "format": "slab", "photos": list(photos)}
+def _listing(key, *photos, fmt="slab"):
+    return {"key": key, "source": "sentas", "format": fmt, "photos": list(photos)}
 
 
 def _record(key, sha, prefix=RUN):
     return json.dumps({"source": "sentas", "key": key, "sha": sha, "tag": C.RUN_TAG, "prefix": prefix}).encode()
 
 
+def _rec(sha):
+    return {"sha": sha, "tag": C.RUN_TAG, "prefix": RUN}
+
+
 # --- what a run works on ----------------------------------------------------------------------------------------------
 def test_the_process_picks_exactly_the_listings_without_a_valid_chosen_photo():
     listings = [_listing("done", A, B), _listing("new", D), _listing("moved", E), _listing("excluded", B)]
-    records = {"done": {"sha": A}, "moved": {"sha": D}, "excluded": {"sha": B}, "gone": {"sha": E}}
-    assert [l["key"] for l in proc.todo(listings, records, exclude={B})] == ["new", "moved", "excluded"]
+    records = {"done": _rec(A), "moved": _rec(D), "excluded": _rec(B), "gone": _rec(E)}
+    assert [l["key"] for l in proc.todo(listings, records, {B}, {f"{RUN}{A}.slab.png"})] == ["new", "moved", "excluded"]
+
+
+def test_a_slab_listing_whose_chosen_photo_has_no_3d_slab_is_picked_again_with_its_choice_kept():
+    listings = [_listing("whole", A, B), _listing("close-up", D, E), _listing("block", E, fmt="block"),
+                _listing("tile", E, fmt="tile")]
+    records = {"whole": _rec(A), "close-up": _rec(D), "block": _rec(E), "tile": _rec(E)}
+    found = proc.todo(listings, records, set(), {f"{RUN}{A}.slab.png"})
+    assert found == [{**_listing("close-up", D, E), "kept": (C.RUN_TAG, D)}]          # a block or tile has no 3D slab
+
+
+def test_which_chosen_photos_have_a_3d_slab_is_read_from_the_runs_the_records_point_at():
+    other = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/sentas/"
+    s3 = _S3({f"{RUN}{A}.slab.png": b"p", f"{RUN}{A}.main.jpg": b"m", f"{RUN}held/{B}.json": b"{}",
+              f"{other}{B}.slab.png": b"p", f"{ENV_SEGMENT}/standardise-test/v1/sentas/{D}.slab.png": b"p"})
+    records = {"one": {"sha": A, "prefix": RUN}, "two": {"sha": B, "prefix": other}}
+    assert proc.whole_slabs(s3, records) == {f"{RUN}{A}.slab.png", f"{other}{B}.slab.png"}
 
 
 def test_the_choice_records_are_read_from_the_clean_root():
@@ -213,6 +233,27 @@ def test_3d_slabs_are_cut_out_a_few_at_a_time_on_the_small_service(monkeypatch):
     assert C.CUTOUT_WORKERS in pools and C.CUTOUT_WORKERS <= 4
 
 
+def _slab_png():
+    import cv2
+    import numpy as np
+    ok, buf = cv2.imencode(".png", np.dstack([np.full((40, 60, 3), 120, np.uint8), np.full((40, 60), 255, np.uint8)]))
+    assert ok
+    return buf.tobytes()
+
+
+def test_a_choice_moved_from_a_close_up_to_a_whole_slab_publishes_its_views_and_its_3d_slab_and_drops_the_old(monkeypatch):
+    s3 = _S3({f"{RUN}{A}.main.jpg": b"ma", f"{RUN}{A}.white.jpg": b"wa", f"{ROOT}chosen/one.json": _record("one", A),
+              **{f"{RUN}{B}.{v}.jpg": f"{v}b".encode() for v in imagestore.STANDARD_VIEWS}, f"{RUN}{B}.slab.png": _slab_png()})
+    first = pub.publish(s3, ROOT, say=lambda m: None)
+    assert first["copied"] == 2 and first["made_3d"] == 0                              # the close-up: two views, no 3D
+    s3._store(f"{ROOT}chosen/one.json", _record("one", B))
+    moved = pub.publish(s3, ROOT, say=lambda m: None)
+    assert moved["changed"] and moved["copied"] == 4 and moved["made_3d"] == 1 and moved["removed"] == 2
+    assert {k for k in s3.objects if "/products/standard/" in k} == (
+        {imagestore.standard_key("sentas", B, v) for v in imagestore.STANDARD_VIEWS}
+        | {imagestore.cutout_key("sentas", B, ext) for ext in ("webp", "json")})
+
+
 def test_publish_without_any_choice_record_is_refused_with_its_own_error():
     with pytest.raises(pub.NoChoiceRecords):
         pub.publish(_S3({f"{RUN}{A}.main.jpg": b"m"}), ROOT, say=lambda m: None)
@@ -220,7 +261,7 @@ def test_publish_without_any_choice_record_is_refused_with_its_own_error():
 
 # --- the process end to end -------------------------------------------------------------------------------------------
 def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_summary(monkeypatch):
-    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m"})
+    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.slab.png": _slab_png()})
     monkeypatch.setattr(proc, "sheet_listings", lambda client: [_listing("done", A), _listing("new", D)])
     cleared, worked = [], []
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or [])
@@ -254,6 +295,55 @@ def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
     monkeypatch.setattr(proc, "run", run)
     proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 0.05, say=lambda m: None)
     assert seen == [1]
+
+
+def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a_rerun_costs_nothing(monkeypatch):
+    """The pick, the GPU list, the judge, the hosted edit and the report over stored results: a listing whose chosen photo
+    (A) is a close-up gets its whole slab (B) judged, the choice moves to it, and nothing is paid twice."""
+    scraped = f"{ENV_SEGMENT}/products/scraped/sentas/"
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{RUN}{A}.main.jpg": b"ma", f"{RUN}judged/{A}.json":
+              json.dumps({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}).encode(),
+              f"{RUN}{B}.main.jpg": b"mb", f"{RUN}{B}.slab.png": b"p", f"{RUN}held/{D}.json": b'{"reason": "x"}',
+              f"{scraped}{B}.jpg": b"ob"})
+    asked = []
+    monkeypatch.setattr(select.judge, "judge", lambda o, r, f: asked.append(r) or (
+        {"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
+
+    def picked():
+        records = proc.choices(s3, ROOT)
+        return proc.todo([_listing("one", A, B, D)], records, set(), proc.whole_slabs(s3, records))
+    found = picked()
+    assert [l["kept"] for l in found] == [(C.RUN_TAG, A)]
+    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
+    assert sel.gpu_todo() == {}                                     # every candidate has its result: no GPU
+    spend = select.Spend(5.0)
+    select.judge_all(sel, spend, float("inf"))
+    select.clean_all(sel, spend, float("inf"))
+    assert asked == [b"mb"] and spend.spent == pytest.approx(0.02)
+    result = select.report(sel)
+    assert [c["sha"] for c in result["chosen"]] == [B]
+    assert json.loads(s3.objects[f"{ROOT}chosen/one.json"]["Body"])["sha"] == B
+    assert picked() == []                                           # a whole slab now: never picked again
+
+
+def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(monkeypatch):
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{RUN}{A}.main.jpg": b"ma",
+              f"{RUN}{B}.main.jpg": b"mb", f"{RUN}{B}.slab.png": b"p",
+              f"{RUN}judged/{B}.json": json.dumps({"verdict": "fail", "problems": [{"kind": "light_reflection"}],
+                                                   "version": C.JUDGE_VERSION}).encode()})
+    monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("paid again"))
+    monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
+    records = proc.choices(s3, ROOT)
+    sel = select.Selection(s3, proc.todo([_listing("one", A, B)], records, set(), proc.whole_slabs(s3, records)),
+                           C.RUN_TAG, C.CLEAN_TAG)
+    spend = select.Spend(5.0)
+    assert sel.gpu_todo() == {}
+    assert select.judge_all(sel, spend, float("inf")) == ([], False)
+    assert select.clean_all(sel, spend, float("inf")) == ([], False)
+    s3.written.clear()
+    assert [c["sha"] for c in select.report(sel)["chosen"]] == [A]
+    assert spend.spent == 0 and s3.written == [f"{ROOT}tracked.csv"]   # the kept record is not written again
 
 
 class _Clients:
