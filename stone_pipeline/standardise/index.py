@@ -5,8 +5,12 @@ import io
 import re
 
 from stone_pipeline.config import settings
+from stone_pipeline.io import imagestore
 
-_URL = re.compile(r"/products/[a-z]+/([a-z_]+)/([0-9a-f]{64})\.")
+# A hosted photo (/products/<scraped|improved>/<source>/<sha>.<ext>) or a published standardised view of one
+# (/products/standard/<view>/<source>/<sha>.jpg, the photo's own sha): once a listing's photo is published the emitted
+# sheet carries its views, and the index must still see that photo.
+_URL = re.compile(r"/products/(?:" + re.escape(imagestore.STANDARD_SUBDIR) + r"/[a-z]+/|[a-z]+/)([a-z_]+)/([0-9a-f]{64})\.")
 
 
 def _size(row):

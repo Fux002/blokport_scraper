@@ -1,10 +1,12 @@
-"""Publish the chosen photos (deploy.standardise_select, <CLEAN_TAG>/chosen.json): each listing's one good photo, its views
+"""Publish the chosen photos (deploy.standardise_select: one record per listing under <CLEAN_TAG>/chosen/, together the
+complete choice whatever runs made them): each listing's one good photo, its views
 (showroom, white, side view, close-up) copied from the run that made it into <env>/products/standard/<view>/<src>/<sha>.jpg,
 where the image stage links products to them. The folder is made to match the choice exactly: a view no longer chosen is
 removed, so a photo the judge or a person turned down never stays live. Server-side copies, nothing downloaded; a copy is
 the same bytes, so a re-run is safe. A photo on the reviewed exclude list (EXCLUDE_PATH, one sha per line) is never
 published, whatever chose it. DRY_RUN=true prints the plan and changes nothing.
-Env: CLEAN_TAG (the tag whose chosen.json is published), DRY_RUN.
+No choice records at all is refused: the folder would be emptied.
+Env: CLEAN_TAG (the tag whose choice records are published), DRY_RUN.
 """
 
 from __future__ import annotations
@@ -24,6 +26,12 @@ from stone_pipeline.io import imagestore
 WORKERS = 32
 EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "stone_pipeline" / "config" / "standardise_exclude.txt"
 _SHA = re.compile(r"^([0-9a-f]{64})\b")
+
+
+def chosen_prefix(root):
+    """Where the choice of each listing is kept: <clean tag root>chosen/<listing>.json, one record per listing with a good
+    photo."""
+    return f"{root}chosen/"
 
 
 def read_exclude(text):
@@ -62,7 +70,12 @@ def main() -> int:
         return 2
     dry = os.environ.get("DRY_RUN", "false").lower() in ("1", "true", "yes")
     client = boto3.client("s3", region_name=S3_REGION)
-    chosen = json.loads(client.get_object(Bucket=S3_BUCKET, Key=f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/chosen.json")["Body"].read())
+    records = _keys(client, chosen_prefix(f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/"))
+    with ThreadPoolExecutor(WORKERS) as pool:
+        chosen = list(pool.map(lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records))
+    if not chosen:
+        print(f"ERROR: no choice records under {chosen_prefix(f'{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/')}: nothing published or removed")
+        return 2
     made = {k for prefix in sorted({c["prefix"] for c in chosen}) for k in _keys(client, prefix)}
     plan = copies(chosen, made, read_exclude(EXCLUDE_PATH.read_text()))
     published = [k for view in imagestore.STANDARD_VIEWS for k in _keys(client, imagestore.standard_prefix(view))]

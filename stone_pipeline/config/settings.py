@@ -1060,9 +1060,14 @@ Your whole answer is one JSON object and nothing else:
     # clean and faithful; the three in turn 16. The queue, not the sync gateway: a slow model outlasts it (504) and the
     # paid call is lost.
     CLEAN_QUEUE_URL = "https://queue.fal.run"
-    CLEAN_INSTRUCTION = ("Remove only these from the polished stone slab: reflections of lamps, light tubes, windows and the room "
-                         "mirrored on its surface, and any label, sticker, sample card, tape, writing or logo on it. Keep the stone's "
-                         "colour, veins, pattern and texture exactly as they are, and keep the rest of the photo unchanged.")
+    # Straps too (sample 2026-11-01: 27 of 42 failures were the GPU's own strap fills, light bands and clamp remnants, on
+    # copies the hosted edit had otherwise cleaned): the hosted edit takes off everything foreign, so the retouch finds
+    # nothing left to fill.
+    CLEAN_INSTRUCTION = ("Remove only these from the polished stone slab: lifting straps, belts and their corner clamps or "
+                         "protectors; reflections of lamps, light tubes, windows and the room mirrored on its surface; and any "
+                         "label, sticker, sample card, tape, writing or logo on it. Where they were, show the slab's own stone, "
+                         "continuing its pattern. Keep the stone's colour, veins, pattern and texture exactly as they are, and keep "
+                         "the slab's outline and the rest of the photo unchanged.")
     CLEAN_MODELS = (                   # (name, endpoint, extra input); the photo goes in as image_url or image_urls
         ("kontext", "fal-ai/flux-pro/kontext", {"output_format": "jpeg", "seed": 1}),
         ("nano2", "fal-ai/nano-banana-2/edit", {"resolution": "2K", "output_format": "jpeg", "seed": 1}),
@@ -1075,19 +1080,38 @@ Your whole answer is one JSON object and nothing else:
     # find, stacked slabs) is not worth an edit.
     CLEAN_FIXES_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark")
     CLEAN_FIXES_HELD = ("retouch:", "logo:")   # held reasons (their start) a cleaned copy removes the cause of
-    CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove reflections
-(lamps, light tubes, windows, the room mirrored on the polished stone) and foreign marks (labels, stickers, sample
-cards, tape, writing, logos) from the stone, and nothing else. Judge image 2 on two questions:
-1. clean: are all such reflections and marks gone from the stone in image 2? (true/false)
+    CLEAN_FAILED_CODES = (400, 422)    # a queued edit the model refused for good; any other error is loud and retried
+    CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
+straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and
+foreign marks (labels, stickers, sample cards, tape, writing, logos) from the stone, and nothing else. Judge image 2
+on two questions:
+1. clean: are all such straps, clamps, reflections and marks gone from the stone in image 2? (true/false)
 2. faithful: is the stone itself the same stone as in image 1 (same colour, veins, pattern and texture, nothing
    invented, nothing smeared or blurred, slab outline unchanged)? (true/false)
 Your whole answer is one JSON object and nothing else:
 {"clean": true|false, "faithful": true|false, "problems": "<short, empty if none>"}"""
     # Spend: each run stops loud before it would pass this many USD of hosted calls (judge as billed, edits at list price).
-    SPEND_CAP_USD = 60.0
-    JUDGE_PRICE_USD = 0.03             # a judge call's cost reserved before it is made (an upper bound; Opus bills ~0.016)
+    SPEND_CAP_USD = _env_float("SCRAPER_STANDARDISE_SPEND_CAP_USD", 60.0)   # a bigger run states its own cap
+    # A judge call's cost reserved before it is made: its worst case (JUDGE_MAX_TOKENS out at $20/M plus two images in at
+    # $4/M, Opus 5.5), so parallel calls can never together pass the cap; Opus bills ~0.016 on average.
+    JUDGE_PRICE_USD = 0.14
     CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
-    SELECT_WORKERS = 12                # listings worked on at once (hosted calls; no model runs here)
+    # A run (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
+    # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to
+    # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
+    # The size of a run's GPU burst is set per run (a full environment overnight wants more GPUs and smaller slices than
+    # a test): the ceiling is the account's G-instance quota at most, and is always set back to IDLE_GPU_VCPUS.
+    RUN_SLICE = _env_int("SCRAPER_STANDARDISE_RUN_SLICE", 150)
+    RUN_GPU_VCPUS = _env_int("SCRAPER_STANDARDISE_GPU_VCPUS", 128)
+    IDLE_GPU_VCPUS = 8
+    RUN_POLL_SECONDS = 60              # how often a run asks Batch whether its jobs are done ...
+    RUN_MAX_WAIT_SECONDS = 12 * 3600   # ... and how long at most per wave of jobs (the slices that run at once) before it
+    #                                    stops them and fails (jobs stuck, no GPU quota); above a healthy slice's longest
+    RETOUCH_TIMEOUT, STANDARDISE_TIMEOUT = 14400, 21600   # s a Batch job may take before Batch stops it
+    GPU_JOB_VCPUS = 4                  # each GPU job's vCPUs (the standardise job definition: 4 vCPU, 1 GPU, no retries):
+    #                                    RUN_GPU_VCPUS // this jobs run at once
+    SLICE_MAX_STORAGE_FAILURES = 3     # storage errors in a row before a GPU slice stops (the next run retries)
+    SELECT_WORKERS = _env_int("SCRAPER_STANDARDISE_WORKERS", 12)   # listings worked on at once (hosted calls only)
     # Per edit at the sizes above, an upper bound (fal.ai/pricing: Kontext per megapixel rounded up, Nano Banana 2 per image
     # with 2K above base, FLUX 3 per megapixel), so the cap stops early rather than late.
     CLEAN_PRICE_USD = {"kontext": 0.15, "nano2": 0.12, "flux3": 0.15}
