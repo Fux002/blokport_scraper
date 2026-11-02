@@ -203,10 +203,10 @@ def _tile_current(client, files, published, stamp):
     return record.get("stamp") == stamp, ""
 
 
-def _publish_tile(client, product, slab, stone, cuts, polished):
+def _publish_tile(client, product, slab, stone, cuts):
     """Render and write one tile listing's files. Its record and main view go first and come back last, so a set cut
     short never looks complete (the image stage links a listing by its main view; this step by its record)."""
-    files = tile_plan.render(product, slab, stone, cuts, polished)
+    files = tile_plan.render(product, slab, stone, cuts)
     record, main = list(files)[-1], list(files)[0]
     for key in (record, main):
         client.delete_object(Bucket=S3_BUCKET, Key=key)
@@ -231,7 +231,7 @@ class _OneStone:
         return self.stone
 
 
-def _tile(client, product, ranked, stone_of, published, polished):
+def _tile(client, product, ranked, stone_of, published):
     """One tile listing: (its files, whether they were rendered now, a note), or (None, False, why it has none). Its
     slab is the first of `ranked` on which a tile of its size fits."""
     misfits = []
@@ -243,10 +243,10 @@ def _tile(client, product, ranked, stone_of, published, polished):
             misfits.append(f"{slab.source}/{slab.sha[:12]}: {exc}")
             continue
         files = tile_plan.keys(product, tile_plan.views(len(cuts.origins)))
-        current, note = _tile_current(client, files, published, tile_plan.stamp(product, slab, polished))
+        current, note = _tile_current(client, files, published, tile_plan.stamp(product, slab))
         if current:
             return files, False, ""
-        _publish_tile(client, product, slab, stone, cuts, polished)
+        _publish_tile(client, product, slab, stone, cuts)
         return files, True, note
     return None, False, "; ".join(misfits)
 
@@ -284,7 +284,7 @@ def publish_tiles(client, sheet, photos, chosen, cutouts, published, say=print):
                 "unknown_variations": 0}
     names = tile_plan.variety_names(_text(client, f"{ENV_SEGMENT}/{C.VARIANTS_KEY}"))
     attributes = _text(client, f"{ENV_SEGMENT}/{C.ATTRIBUTES_KEY}")
-    finishes, polished = tile_plan.finish_ids(attributes), tile_plan.polished_finishes(attributes)
+    finishes = tile_plan.finish_ids(attributes)
     everything = tile_plan.products(sheet, photos, names)
     unknown = sum(p.variety is None and p.fmt in (C.TILE_FORMAT, C.CUTOUT_FORMAT) for p in everything)
     if unknown:
@@ -327,7 +327,7 @@ def publish_tiles(client, sheet, photos, chosen, cutouts, published, say=print):
                 hidden[t.key] = f"every slab of this variety and finish was refused: {refused}"
                 continue
             try:
-                files, now, note = _tile(client, t, ranked[t], one, published, t.finish in polished)
+                files, now, note = _tile(client, t, ranked[t], one, published)
             except _TILE_ERRORS as exc:
                 fail(t, exc, ranked[t])
                 continue

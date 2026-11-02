@@ -207,7 +207,10 @@ horizontal axis is the product's `length`, its aspect `length`:`width`, 2048 px 
 resampled), a whole rectangle (`outline` its four corners; the WebP may carry no alpha channel: opaque), and the meta
 adds `px_per_mm`: the stone's real resolution in source pixels per millimetre, measured before the resample to 2048 px
 (0.65 to 1.2); it says how much real detail the texture holds, not its scale on screen (that is `width_px` / `length`).
-A tile's files (views and 3D) are named after the listing, not a photo.
+A tile's files (views and 3D) are named after the listing, not a photo. A tile product's `image_urls` are, in order:
+the laid tiles seen from above at true scale (the catalog image), one tile face-on, and one tile at an angle showing
+its thickness; a tile whose slab gives too few distinct faces gets one tile face-on as its catalog image, then the
+angled view. Every view is drawn at the product's own `length` x `width` x `height`.
 
 **Collection location** (`collection_country_code`, `collection_city`) is where the product is
 physically **collected** before shipping (the supplier's warehouse). It is a distinct axis from

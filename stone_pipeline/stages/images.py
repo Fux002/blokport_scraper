@@ -313,8 +313,10 @@ def listing_lead(row: CanonicalRow, views: dict[str, set[str]], cfg) -> Optional
     """A tile product's lead: only the set rendered for the listing itself from its variety's slab stone
     (deploy.standardise_publish.publish_tiles names it after the listing's handle, imagestore.listing_sha); None when
     there is none. Never one of the row's photos: a tile without its own set stays hidden rather than borrow a photo it
-    shares with a slab (that slab's stone, possibly in another finish)."""
-    if not row.handle:
+    shares with a slab (that slab's stone, possibly in another finish). None too when a dimension of the row was filled
+    from the pack's defaults: the rendered tile would show a size the vendor never gave (the sheet carries only the
+    numbers, and the tile default 60 x 60 x 2 is a common real size, so publish cannot tell; this stage can)."""
+    if not row.handle or _defaulted_size(row):
         return None
     sha = imagestore.listing_sha(row.handle)
     return (cfg.public_base.rstrip("/"), row.src_site, sha) if sha in views.get("main", ()) else None
@@ -365,6 +367,11 @@ def standard_version(views: dict[str, dict[str, str]], lead: Optional[Lead], wit
     sha = lead[2]
     kinds = [*imagestore.STANDARD_VIEWS, *([imagestore.CUTOUT_SUBDIR] if with_3d else [])]
     return " ".join(views[k][sha] for k in kinds if sha in views.get(k, ()))
+
+
+def _defaulted_size(row: CanonicalRow) -> bool:
+    return any(f.code == FlagCode.dimension_defaulted and f.field in ("length", "width", "height")
+               for f in row.review_flags)
 
 
 def _is_tile(row: CanonicalRow) -> bool:

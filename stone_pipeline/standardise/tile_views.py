@@ -1,14 +1,13 @@
 """A tile listing's views and 3D tile, all drawn from real stone faces (tile_stone), on the standard canvas:
 
-  floor    the tiles laid at their listed size on a generic floor, seen from standing height in soft daylight (main)
+  close    the laid tiles from straight above at true scale, a few tiles and their joints, real pixels enlarged at most
+           TILE_CLOSE_MAX_UPSCALE (the main view: the catalog card)
   single   one tile, face-on, on white with the slab views' soft navy shadow (white; main when the faces are too few)
   side     one tile lying flat in a 3/4 view, its true thickness on two sawn edges (studio)
-  close    the laid tiles from straight above at true scale, real pixels enlarged at most TILE_CLOSE_MAX_UPSCALE (close)
   model    the 3D tile: the single face as a cut-out, its horizontal axis the listing's stored length
 
-Rendered: the laying, joints, eased edges, light, the window's reflection, shadows and the sawn edges. Every stone pixel
-is a face's own, at its real scale. Pure and deterministic: the same faces give the same bytes per build (the same
-OpenCV and NumPy).
+Rendered: the laying, joints, eased edges, shadows and the sawn edges. Every stone pixel is a face's own, at its real
+scale. Pure and deterministic: the same faces give the same bytes per build (the same OpenCV and NumPy).
 """
 from dataclasses import dataclass
 
@@ -29,7 +28,6 @@ class Tile:
     long_m: float          # the tile's long and short side and thickness (metres)
     short_m: float
     thick_m: float
-    polished: bool
 
 
 @dataclass(frozen=True)
@@ -105,65 +103,6 @@ def _surface(tile, atlas, x, y, footprint, row_span):
     return rgb * cover + np.float32(_joint_colour(tile)) * (1 - cover)
 
 
-def _floor_points(xs, ys, w, h):
-    """For drawn px (xs, ys) of the floor camera: (across, depth) on the floor, the pattern's (x, y) there, and the
-    metres one drawn px spans (the ray's spread at that distance, stretched by the grazing angle: both axes' mean)."""
-    f = C.TILE_FLOOR_FOCAL * C.TILE_SUPERSAMPLE
-    pitch, yaw = np.radians(C.TILE_FLOOR_PITCH_DEG), np.radians(C.TILE_FLOOR_YAW_DEG)
-    X, Y = ((xs + 0.5) - w / 2) / f, ((ys + 0.5) - h / 2) / f
-    down = np.cos(pitch) * Y + np.sin(pitch)          # the ray's fall per unit of its camera-space length
-    if (down <= 0).any():
-        raise ValueError("the floor camera sees the horizon: raise TILE_FLOOR_PITCH_DEG")
-    t = C.TILE_FLOOR_EYE_M / down
-    across, depth = t * X, t * (np.cos(pitch) - np.sin(pitch) * Y)
-    ray = np.sqrt(X ** 2 + Y ** 2 + 1)
-    px = np.cos(yaw) * across - np.sin(yaw) * depth - C.TILE_PATTERN_ORIGIN_M[0]
-    py = np.sin(yaw) * across + np.cos(yaw) * depth - C.TILE_PATTERN_ORIGIN_M[1]
-    return across, depth, px, py, (t * ray / f) / np.sqrt(down / ray)
-
-
-def floor(tile: Tile) -> np.ndarray:
-    """The tiles laid on a generic floor (no room, nothing to place it), seen from standing height and looking down, in
-    soft daylight from a window ahead on the left; the far floor softens; a polished floor mirrors the window's panes.
-    Drawn TILE_FLOOR_BAND_ROWS rows at a time (bounded memory), supersampled, then reduced."""
-    ss = C.TILE_SUPERSAMPLE
-    w, h = C.OUT_W * ss, C.OUT_H * ss
-    atlas = _atlas(tile)
-    # the drawing's rows: the floor seen is the image's corners projected (a convex quad), so its extremes are corners
-    corner_y = _floor_points(np.array([0.0, w - 1, 0.0, w - 1]), np.array([0.0, 0.0, h - 1, h - 1]), w, h)[3]
-    span = P.rows(P.for_tile(tile.long_m, tile.short_m), corner_y.min(), corner_y.max())
-    (lx, lz), reach, gain = C.TILE_FLOOR_LIGHT
-    colour, start, full, most = C.TILE_FLOOR_HAZE
-    big = np.empty((h, w, 3), np.float32)
-    for top in range(0, h, C.TILE_FLOOR_BAND_ROWS):
-        ys, xs = np.mgrid[top:min(h, top + C.TILE_FLOOR_BAND_ROWS), 0:w]
-        across, depth, px, py, metres = _floor_points(xs.ravel().astype(np.float64), ys.ravel().astype(np.float64), w, h)
-        rgb = _surface(tile, atlas, px, py, tile.ppm * metres, span)
-        light = 1 + gain * np.exp(-((across - lx) ** 2 + (depth - lz) ** 2) / (2 * reach ** 2))
-        rgb *= (light / (1 + gain / 2))[:, None].astype(np.float32)
-        haze = (np.clip((depth - start) / (full - start), 0, 1) * most)[:, None].astype(np.float32)
-        big[top:top + ys.shape[0]] = (rgb * (1 - haze) + np.float32(colour) * haze).reshape(ys.shape[0], w, 3)
-    out = cv2.resize(big, (C.OUT_W, C.OUT_H), interpolation=cv2.INTER_AREA)
-    gy, gx = np.mgrid[0:C.OUT_H, 0:C.OUT_W]
-    corner = ((gx / C.OUT_W - 0.5) ** 2 + (gy / C.OUT_H) ** 2) / 1.25
-    out *= (1 - C.TILE_FLOOR_FALLOFF * corner)[:, :, None].astype(np.float32)
-    if tile.polished:
-        out = _reflect(out)
-    return np.clip(out, 0, 255).astype(np.uint8)
-
-
-def _reflect(rgb):
-    """The window's panes mirrored in a polished floor: blurred, strongest far away, gone at the near edge; added as
-    light (screen blend), so dark stone shows them most, as a mirror does."""
-    panes = np.zeros((C.OUT_H, C.OUT_W), np.float32)
-    for x0, y0, x1, y1 in C.TILE_FLOOR_WINDOW:
-        panes[int(y0 * C.OUT_H):int(y1 * C.OUT_H), int(x0 * C.OUT_W):int(x1 * C.OUT_W)] = 1.0
-    panes = cv2.GaussianBlur(panes, (0, 0), C.TILE_FLOOR_REFLECT_BLUR)
-    fade = (1 - np.arange(C.OUT_H, dtype=np.float32) / C.OUT_H)[:, None]
-    a = (panes * fade * C.TILE_FLOOR_REFLECT)[:, :, None]
-    return 255 - (255 - rgb) * (1 - a)
-
-
 def _single_scale(face, cap):
     free = 1 - 2 * C.TILE_WHITE_MARGIN
     return min(C.OUT_W * free / face.shape[1], C.OUT_H * free / face.shape[0], cap)
@@ -208,6 +147,22 @@ def _camera(size):
     return project
 
 
+def side_projection(face: np.ndarray, size, ss: int):
+    """The studio view's camera: world points (metres: x along `face`'s horizontal axis, y away, z up) to px of the view
+    drawn `ss` times larger. The tile fills the frame within TILE_SIDE_MARGIN, its real pixels enlarged at most
+    TILE_MAX_UPSCALE."""
+    length_m, width_m, thick = size
+    project = _camera(size)
+    pts = project([(x, y, z) for x in (0, length_m) for y in (0, width_m) for z in (0, thick)])
+    span = pts.max(0) - pts.min(0)
+    front = project([(0, 0, thick), (length_m, 0, thick)])
+    W, H = C.OUT_W * ss, C.OUT_H * ss
+    k = min(W * (1 - 2 * C.TILE_SIDE_MARGIN) / span[0], H * (1 - 2 * C.TILE_SIDE_MARGIN) / span[1],
+            C.TILE_MAX_UPSCALE * face.shape[1] * ss / float(np.linalg.norm(front[1] - front[0])))
+    shift = np.array([W, H]) / 2 - k * (pts.max(0) + pts.min(0)) / 2
+    return lambda points: (project(points) * k + shift).astype(np.float32)
+
+
 def side(face: np.ndarray, size) -> np.ndarray:
     """One tile lying flat, seen from the front right and above: its face in perspective, its true thickness on the two
     sawn edges facing the camera (the face's own last row and column carried across them, in less light, as the slab's
@@ -216,17 +171,7 @@ def side(face: np.ndarray, size) -> np.ndarray:
     length_m, width_m, thick = size
     ss = C.TILE_SUPERSAMPLE
     W, H = C.OUT_W * ss, C.OUT_H * ss
-    project = _camera(size)
-    box = [(x, y, z) for x in (0, length_m) for y in (0, width_m) for z in (0, thick)]
-    pts = project(box)
-    span = pts.max(0) - pts.min(0)
-    front = project([(0, 0, thick), (length_m, 0, thick)])
-    k = min(W * (1 - 2 * C.TILE_SIDE_MARGIN) / span[0], H * (1 - 2 * C.TILE_SIDE_MARGIN) / span[1],
-            C.TILE_MAX_UPSCALE * face.shape[1] * ss / float(np.linalg.norm(front[1] - front[0])))
-    shift = np.array([W, H]) / 2 - k * (pts.max(0) + pts.min(0)) / 2
-
-    def to_px(p):
-        return (project(p) * k + shift).astype(np.float32)
+    to_px = side_projection(face, size, ss)
     out = np.full((H, W, 3), 255, np.float32)
     bottom = np.zeros((H, W), np.float32)
     cv2.fillPoly(bottom, [np.int32(to_px([(0, 0, 0), (length_m, 0, 0), (length_m, width_m, 0), (0, width_m, 0)]))], 1.0)
@@ -257,11 +202,15 @@ def side(face: np.ndarray, size) -> np.ndarray:
     return np.clip(cv2.resize(out, (C.OUT_W, C.OUT_H), interpolation=cv2.INTER_AREA), 0, 255).astype(np.uint8)
 
 
+def close_scale(tile: Tile) -> float:
+    """The close view's px per metre of floor: as wide as TILE_CLOSE_MIN_TILES tile lengths or more, the real pixels
+    enlarged at most TILE_CLOSE_MAX_UPSCALE."""
+    return C.OUT_W / max(C.OUT_W / (tile.ppm * C.TILE_CLOSE_MAX_UPSCALE), C.TILE_CLOSE_MIN_TILES * tile.long_m)
+
+
 def close(tile: Tile) -> np.ndarray:
-    """The laid tiles from straight above at true scale: as wide as TILE_CLOSE_MIN_TILES tile lengths or more, the real
-    pixels enlarged at most TILE_CLOSE_MAX_UPSCALE."""
-    width_view = max(C.OUT_W / (tile.ppm * C.TILE_CLOSE_MAX_UPSCALE), C.TILE_CLOSE_MIN_TILES * tile.long_m)
-    px_per_m = C.OUT_W / width_view
+    """The laid tiles from straight above at true scale (close_scale): each tile its own face, L x W with 3 mm joints."""
+    px_per_m = close_scale(tile)
     ys, xs = np.mgrid[0:C.OUT_H, 0:C.OUT_W]
     x = (xs.ravel() + 0.5) / px_per_m - C.TILE_PATTERN_ORIGIN_M[0]
     y = (C.OUT_H - ys.ravel() - 0.5) / px_per_m - C.TILE_PATTERN_ORIGIN_M[1]   # floor y runs up the image, seen from above

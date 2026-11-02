@@ -59,13 +59,6 @@ def variety_names(variants_csv: str) -> dict:
     return {r["Id"]: r["Name"] for r in csv.DictReader(io.StringIO(variants_csv)) if r.get("Id") and r.get("Name")}
 
 
-def polished_finishes(attributes_csv: str) -> set:
-    """The finish ids that reflect (TILE_POLISHED_FINISHES)."""
-    wanted = {f.casefold() for f in C.TILE_POLISHED_FINISHES}
-    return {r["sourceid"] for r in csv.DictReader(io.StringIO(attributes_csv))
-            if r.get("category") == "finish" and (r.get("value") or "").casefold() in wanted}
-
-
 def finish_ids(attributes_csv: str) -> set:
     return {r["sourceid"] for r in csv.DictReader(io.StringIO(attributes_csv)) if r.get("category") == "finish"}
 
@@ -105,6 +98,10 @@ def no_stone(product: Product, all_products: list, finishes: set) -> str:
     """Why a tile listing has no slab stone of its variety and finish ("" when it may have one)."""
     if product.size is None:
         return "no size: length, width and height must all be positive"
+    if not tile_size(product.size):
+        length, width, thick = product.size
+        return (f"not a tile's size: {length:g} x {width:g} x {thick:g} m (sides {C.TILE_SIDE_RANGE_M}, thickness "
+                f"{C.TILE_THICKNESS_RANGE_M} m)")
     if product.variety is None:
         return "its variation is not in the variations export"
     if product.finish not in finishes:
@@ -117,6 +114,13 @@ def no_stone(product: Product, all_products: list, finishes: set) -> str:
     return ""
 
 
+def tile_size(size: tuple) -> bool:
+    """Whether a listing's (length, width, height) is a tile's (TILE_SIDE_RANGE_M, TILE_THICKNESS_RANGE_M)."""
+    length, width, thick = size
+    (lo, hi), (t_lo, t_hi) = C.TILE_SIDE_RANGE_M, C.TILE_THICKNESS_RANGE_M
+    return lo <= length <= hi and lo <= width <= hi and t_lo <= thick <= t_hi
+
+
 def ranked(candidates: list, source: str, areas: dict) -> list:
     """The slabs a tile listing may be cut from, in the order they are tried: those whose stone was not refused
     (areas = {cut-out key: usable m2}), the tile's own vendor's first, then the most usable stone, then the cut-out key
@@ -125,18 +129,20 @@ def ranked(candidates: list, source: str, areas: dict) -> list:
     return sorted(usable, key=lambda s: (s.source != source, -areas[s.cutout], s.cutout))
 
 
-def stamp(product: Product, slab: Slab, polished: bool) -> str:
+def stamp(product: Product, slab: Slab) -> str:
     """What a tile listing's files are made from: the slab's cut-out and its content, the listing's size and finish, and
     the renderer's version. Any change re-renders them; nothing else does."""
     made = {"renderer": C.TILE_RENDER_VERSION, "listing": product.key, "stone": slab.cutout, "etag": slab.etag,
-            "size": [round(v, 6) for v in product.size], "finish": product.finish, "polished": polished}
+            "size": [round(v, 6) for v in product.size], "finish": product.finish}
     return hashlib.sha256(json.dumps(made, sort_keys=True).encode()).hexdigest()
 
 
 def views(n_faces: int) -> tuple:
-    """The views a tile with this many distinct faces gets: the laid floor and the close view need TILE_MIN_FACES (else
-    the floor visibly repeats); then the single tile is the main image and is not repeated as the white view."""
-    return ("main", "white", "studio", "close") if n_faces >= C.TILE_MIN_FACES else ("main", "studio")
+    """The views a tile with this many distinct faces gets (the owner's set, 2026-11-02): main = the laid tiles from
+    above at true scale, white = one tile face-on, studio = one tile at an angle (its thickness). The laid tiles need
+    TILE_MIN_FACES (else they repeat a face): with fewer, main is the single tile face-on and there is no white view,
+    so no image is shown twice. The close slot is never used: the main view is the close-up."""
+    return ("main", "white", "studio") if n_faces >= C.TILE_MIN_FACES else ("main", "studio")
 
 
 def keys(product: Product, view_names: tuple) -> list:
@@ -156,21 +162,19 @@ def faces_of(product: Product, stone: tile_stone.Stone) -> tile_stone.Cuts:
     return cuts
 
 
-def render(product: Product, slab: Slab, stone: tile_stone.Stone, cuts: tile_stone.Cuts, polished: bool) -> dict:
+def render(product: Product, slab: Slab, stone: tile_stone.Stone, cuts: tile_stone.Cuts) -> dict:
     """{key: (bytes, content type)} of a tile listing's files (keys order), its record last: what they were made from."""
     length, width, thick = product.size
     faces = tile_stone.faces(stone, cuts)
     tile = tile_views.Tile(tuple(faces), tile_stone.hero(stone, cuts), stone.ppm, max(length, width), min(length, width),
-                           thick, polished)
+                           thick)
     face = tile_views.oriented(tile, length, width)
     names = views(len(faces))
-    if "white" in names:
-        drawn = {"main": tile_views.floor(tile), "white": tile_views.single(face),
-                 "studio": tile_views.side(face, product.size), "close": tile_views.close(tile)}
-    else:
-        drawn = {"main": tile_views.single(face), "studio": tile_views.side(face, product.size)}
+    single = tile_views.single(face)
+    drawn = {"main": tile_views.close(tile) if "white" in names else single, "white": single,
+             "studio": tile_views.side(face, product.size)}
     webp, meta = tile_views.model(face, stone.ppm)
-    record = {"listing": product.key, "stamp": stamp(product, slab, polished), "renderer": C.TILE_RENDER_VERSION,
+    record = {"listing": product.key, "stamp": stamp(product, slab), "renderer": C.TILE_RENDER_VERSION,
               "stone": {"listing": slab.listing, "source": slab.source, "sha": slab.sha, "cutout": slab.cutout,
                         "etag": slab.etag, "px_per_mm": round(stone.ppm / 1000, 4)},
               "size_m": list(product.size), "faces": len(faces), "views": list(names)}

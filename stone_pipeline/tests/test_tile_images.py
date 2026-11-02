@@ -1,7 +1,8 @@
 """Tile listings' images (owner 2026-11-02): rendered from the same variety's judge-passed, published slab stone, never
 guessed. A tile listing without a published slab of its variety AND finish gets nothing; a slab cut-out with a
-crosshatch or at the wrong proportions is never used; one slab per variety, never a pool; the laid floor only with
-TILE_MIN_FACES distinct faces; the 3D tile at its listed length and proportions, CUTOUT_LONG_SIDE px; the tile step
+crosshatch or at the wrong proportions is never used; one slab per variety, never a pool; the laid tiles (main) only
+with TILE_MIN_FACES distinct faces; every view at the listing's own size (a tile's size, never a defaulted one); the 3D
+tile at its listed length and proportions, CUTOUT_LONG_SIDE px; the tile step
 renders exactly when its inputs change and writes byte-identical files; the photo process never takes a tile listing,
 and the image stage links a tile product to the set named after it."""
 from __future__ import annotations
@@ -145,7 +146,7 @@ def test_no_tile_shares_its_face_with_a_neighbour(size, faces):
         assert (index[1:, :-1] != index[:-1, 1:]).all()               # half-bond: the other tile it rests on
 
 
-def test_a_floor_drawn_in_bands_gives_every_tile_the_same_face():
+def test_a_tile_gets_the_same_face_whatever_part_of_the_floor_is_drawn():
     p = P.for_tile(0.6, 0.4)
     i, j = np.meshgrid(np.arange(-5, 5), np.arange(-5, 5))
     whole, _ = P.assign(p, i, j, 9, (-5, 4))
@@ -154,10 +155,10 @@ def test_a_floor_drawn_in_bands_gives_every_tile_the_same_face():
 
 
 # --- the 3D tile (Blokport's viewer) -----------------------------------------------------------------------------------
-def _tile(stone, long_m, short_m, thick=0.02, polished=True):
+def _tile(stone, long_m, short_m, thick=0.02):
     cuts = tile_stone.cuts(stone, long_m, short_m)
     return tile_views.Tile(tuple(tile_stone.faces(stone, cuts)), tile_stone.hero(stone, cuts), stone.ppm, long_m, short_m,
-                           thick, polished)
+                           thick)
 
 
 @pytest.mark.parametrize("stored,shape", [((0.6, 0.4), (1365, 2048)), ((0.4, 0.6), (2048, 1365)),
@@ -174,6 +175,91 @@ def test_the_3d_tile_runs_along_its_stored_length_at_its_proportions_and_the_vie
     assert (m["width_px"], m["height_px"]) == (shape[1], shape[0])
     assert sorted(map(tuple, m["outline"])) == [(0, 0), (0, 1), (1, 0), (1, 1)]
     assert m["px_per_mm"] == round(stone.ppm / 1000, 4)                # the stone's real resolution, not the resampled
+
+
+# --- every view at the listing's own size (the real prod tile sizes) ---------------------------------------------------
+REAL_SIZES = [(0.6, 0.4, 0.02), (0.6, 0.6, 0.02), (1.45, 0.35, 0.03), (1.2, 1.2, 0.018)]
+RED = (230.0, 20.0, 20.0)
+
+
+def _red_tile(size):
+    """A tile of the listed size whose faces are a flat red at 300 px/m (a 3 x 2 m stone): what is red in a view is
+    face, so its drawn shape can be measured."""
+    length, width, thick = size
+    long_m, short_m = max(length, width), min(length, width)
+    face = np.empty((int(round(short_m * 300)), int(round(long_m * 300)), 3), np.float32)
+    face[:] = RED
+    return tile_views.Tile((face, face.copy(), face.copy()), 0, 300.0, long_m, short_m, thick)
+
+
+def _red_box(rgb):
+    ys, xs = np.nonzero((rgb[:, :, 0] > 150) & (rgb[:, :, 1] < 90) & (rgb[:, :, 2] < 90))
+    return xs.min(), xs.max() + 1, ys.min(), ys.max() + 1
+
+
+@pytest.mark.parametrize("size", REAL_SIZES)
+def test_the_white_view_shows_the_tile_at_its_listed_proportions(size):
+    length, width, _ = size
+    tile = _red_tile(size)
+    face = tile_views.oriented(tile, length, width)
+    assert abs(face.shape[1] / face.shape[0] / (length / width) - 1) < 0.01  # the face the white and studio views draw
+    x0, x1, y0, y1 = _red_box(tile_views.single(face))
+    assert abs((x1 - x0) / (y1 - y0) / (length / width) - 1) < 0.01
+
+
+def _drawn(to_px, quad):
+    """The mask of a world quad as the studio view draws it (at the canvas's size)."""
+    mask = np.zeros((C.OUT_H, C.OUT_W), np.uint8)
+    cv2.fillPoly(mask, [np.int32(np.round(to_px(quad)))], 1)
+    return mask > 0
+
+
+@pytest.mark.parametrize("size", REAL_SIZES)
+def test_the_studio_view_shows_the_listed_face_and_its_thickness_where_the_camera_puts_l_w_h(size):
+    length, width, thick = size
+    face = tile_views.oriented(_red_tile(size), length, width)
+    rgb = tile_views.side(face, size).astype(np.float32)
+    to_px = tile_views.side_projection(face, size, 1)                    # the same camera at the canvas's size
+    red = (rgb[:, :, 0] > 120) & (rgb[:, :, 1] < 90) & (rgb[:, :, 2] < 90)
+    top = rgb[:, :, 0] > 0.9 * RED[0]                                  # the face in full light; the sawn edges in less
+    want_face = _drawn(to_px, [(0, width, thick), (length, width, thick), (length, 0, thick), (0, 0, thick)])
+    assert (want_face & red & top).sum() / (want_face | (red & top)).sum() > 0.95   # the drawn face is the L x W one
+    want_edge = _drawn(to_px, [(0, 0, thick), (length, 0, thick), (length, 0, 0), (0, 0, 0)]) & ~want_face
+    near_light = C.TILE_SIDE_EDGE_LIGHT[1] * RED[0]                     # the near sawn edge's red, told from the side's
+    near = red & (np.abs(rgb[:, :, 0] - near_light) < 12)
+    # the drawn near edge is the projection of the true thickness H: its area within 30% (it is a few px high), and
+    # twice the thickness would double it
+    assert abs(near.sum() / want_edge.sum() - 1) < 0.3
+
+
+@pytest.mark.parametrize("size", REAL_SIZES)
+def test_the_laid_tiles_are_l_by_w_at_the_stated_scale(size):
+    length, width, _ = size
+    tile = _red_tile(size)
+    scale = tile_views.close_scale(tile)                              # px per metre of floor
+    assert scale / tile.ppm <= C.TILE_CLOSE_MAX_UPSCALE + 1e-9          # real pixels enlarged at most 2x
+    rgb = tile_views.close(tile).astype(np.float32)
+    joint = ~((rgb[:, :, 0] > 150) & (rgb[:, :, 1] < 90))             # grout: anything that is not the red face
+    for along, step in ((joint.mean(axis=0) > 0.5, tile.long_m), (joint.mean(axis=1) > 0.5, tile.short_m)):
+        lines = np.nonzero(along)[0]
+        starts = lines[np.r_[True, np.diff(lines) > 1]]               # one start per joint line
+        if len(starts) >= 2:                                         # the joint lines are a tile plus a joint apart
+            assert np.allclose(np.diff(starts), (step + C.TILE_JOINT_M) * scale, atol=1.5)
+
+
+@pytest.mark.parametrize("size", REAL_SIZES)
+def test_the_3d_tile_of_a_real_size_runs_along_its_length_at_its_proportions(size):
+    length, width, _ = size
+    tile = _red_tile(size)
+    img = tile_stone.decode(tile_views.model(tile_views.oriented(tile, length, width), tile.ppm)[0])
+    assert abs(img.shape[1] / img.shape[0] / (length / width) - 1) < 0.01 and max(img.shape[:2]) == C.CUTOUT_LONG_SIDE
+
+
+@pytest.mark.parametrize("size,ok", [((0.6, 0.4, 0.02), True), ((1.45, 0.35, 0.03), True), ((1.2, 1.2, 0.018), True),
+                                     ((3.0, 1.8, 0.02), False), ((0.6, 0.6, 0.2), False), ((0.6, 0.05, 0.02), False),
+                                     ((0.6, 0.6, 0.005), False)])
+def test_only_a_tile_s_size_is_rendered(size, ok):
+    assert tile_plan.tile_size(size) is ok
 
 
 # --- the plan: never a guess -------------------------------------------------------------------------------------------
@@ -240,22 +326,28 @@ def test_slabs_are_tried_the_tile_s_own_vendor_s_first_then_the_most_stone_and_n
     assert tile_plan.ranked([own_small], "marenostone", {}) == []                         # every slab refused
 
 
-def test_the_laid_floor_needs_enough_distinct_faces():
-    assert tile_plan.views(C.TILE_MIN_FACES) == ("main", "white", "studio", "close")
-    assert tile_plan.views(C.TILE_MIN_FACES - 1) == ("main", "studio")               # main = the single tile
+def test_the_owner_s_view_set_and_the_single_tile_when_the_faces_are_too_few():
+    assert tile_plan.views(C.TILE_MIN_FACES) == ("main", "white", "studio")         # main: the laid tiles from above
+    assert tile_plan.views(C.TILE_MIN_FACES - 1) == ("main", "studio")               # main = the single tile, no white
+
+
+def test_a_listing_whose_size_is_no_tile_s_gets_no_stone(categories):
+    everything = _products(_sheet(("rb-slab", "slab", 2.4, 1.6, 0.02, "v_rb_slab", MARBLE, POLISHED, "marenostone", A),
+                                  ("rb-tile", "tile", 2.4, 1.6, 0.02, "v_rb_tile", MARBLE, POLISHED, "marenostone", B)))
+    assert tile_plan.no_stone(tile_plan.tiles(everything)[0], everything, {POLISHED}).startswith("not a tile's size")
 
 
 def test_a_tile_s_stamp_changes_exactly_with_its_slab_its_content_its_size_its_finish_and_the_renderer(monkeypatch):
     p = tile_plan.Product("t", "marenostone", "tile", ("x", "y"), POLISHED, (0.6, 0.4, 0.02))
     s = tile_plan.Slab("s", "marenostone", A, (2.4, 1.6), "k", "e1")
-    base = tile_plan.stamp(p, s, True)
-    assert tile_plan.stamp(p, s, True) == base
-    assert tile_plan.stamp(p, replace(s, etag="e2"), True) != base
-    assert tile_plan.stamp(p, replace(s, cutout="k2"), True) != base
-    assert tile_plan.stamp(replace(p, size=(0.6, 0.6, 0.02)), s, True) != base
-    assert tile_plan.stamp(replace(p, finish="f2"), s, True) != base
+    base = tile_plan.stamp(p, s)
+    assert tile_plan.stamp(p, s) == base
+    assert tile_plan.stamp(p, replace(s, etag="e2")) != base
+    assert tile_plan.stamp(p, replace(s, cutout="k2")) != base
+    assert tile_plan.stamp(replace(p, size=(0.6, 0.6, 0.02)), s) != base
+    assert tile_plan.stamp(replace(p, finish="f2"), s) != base
     monkeypatch.setattr(C, "TILE_RENDER_VERSION", C.TILE_RENDER_VERSION + 1)
-    assert tile_plan.stamp(p, s, True) != base
+    assert tile_plan.stamp(p, s) != base
 
 
 # --- the tile step on a bucket -----------------------------------------------------------------------------------------
@@ -330,7 +422,7 @@ def test_a_tile_listing_is_shown_from_its_variety_s_slab_stone_not_its_own_photo
     s3 = _bucket(_stone_rgba(960, 640))
     out = _publish(s3)
     sha = imagestore.listing_sha("rb-tile")
-    files = tile_plan.keys(tile_plan.Product("rb-tile", "marenostone", "tile", None, POLISHED, None), ("main", "white", "studio", "close"))
+    files = tile_plan.keys(tile_plan.Product("rb-tile", "marenostone", "tile", None, POLISHED, None), ("main", "white", "studio"))
     assert all(k in s3.objects for k in files)
     record = json.loads(s3.objects[imagestore.tile_record_key("marenostone", sha)]["Body"])
     assert record["stone"]["sha"] == A and record["faces"] >= C.TILE_MIN_FACES
@@ -360,8 +452,8 @@ def test_a_tile_renders_byte_identical_every_time():
     product = tile_plan.Product("t", "marenostone", "tile", ("x", "y"), POLISHED, (0.6, 0.4, 0.02))
     slab = tile_plan.Slab("s", "marenostone", A, (3.0, 2.0), "k", "e")
     cuts = tile_plan.faces_of(product, stone)
-    first = tile_plan.render(product, slab, stone, cuts, True)
-    assert tile_plan.render(product, slab, stone, cuts, True) == first
+    first = tile_plan.render(product, slab, stone, cuts)
+    assert tile_plan.render(product, slab, stone, cuts) == first
     assert list(first) == tile_plan.keys(product, tile_plan.views(len(cuts.origins)))
 
 
@@ -564,7 +656,7 @@ def _row(handle, fmt="Tile"):
 
 def test_a_tile_product_links_the_set_named_after_it_and_its_3d_tile(monkeypatch):
     own = imagestore.listing_sha("rb-tile")
-    views = {"main": {own: "m"}, "white": {own: "w"}, "studio": {own: "s"}, "close": {own: "c"},
+    views = {"main": {own: "m"}, "white": {own: "w"}, "studio": {own: "s"},
              imagestore.CUTOUT_SUBDIR: {own: "t+j"}}
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: views)
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
@@ -574,13 +666,26 @@ def test_a_tile_product_links_the_set_named_after_it_and_its_3d_tile(monkeypatch
     assert shown.standard_photo is True and hidden.standard_photo is False      # no set: hidden by the no-photo rule
     assert shown.thumbnail_key == f"{PUBLIC}standard/main/marenostone/{own}.jpg"
     assert shown.model_3d_key == f"{PUBLIC}standard/cutout/marenostone/{own}.webp"
-    assert shown.standard_version == "m w s c t+j"
+    assert shown.standard_version == "m w s t+j"
 
 
 def _run(rows, views, monkeypatch):
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: views)
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
     images.run(rows, cfg=type("Cfg", (), {"mode": "passthrough", "public_base": PUBLIC})())
+
+
+def test_a_tile_whose_size_was_filled_from_the_pack_s_defaults_is_never_shown(monkeypatch):
+    # 60 x 60 x 2 is the pack's tile default and a common real size: only the row's provenance tells them apart
+    from stone_pipeline.config.settings import Confidence
+    from stone_pipeline.core.schema import FlagCode, ReviewFlag
+    own = imagestore.listing_sha("rb-tile")
+    views = {"main": {own: "m"}, "studio": {own: "s"}}
+    real, defaulted = _row("rb-tile"), _row("rb-tile")
+    defaulted.add_flag(ReviewFlag(field="width", code=FlagCode.dimension_defaulted, confidence=Confidence.low,
+                                  method="pack_default"))
+    _run([real, defaulted], views, monkeypatch)
+    assert real.standard_photo is True and defaulted.standard_photo is False
 
 
 def test_a_tile_without_its_own_set_never_takes_its_photo_s_set(monkeypatch):

@@ -99,15 +99,21 @@ vendor's slab of that variety, never from its own photos (warehouse racks) and n
   publish carry it beside the cut-out; the tile step would then add it to the stone it never cuts.
 - **One slab, never a pool**: colour and texture statistics cannot tell a different stone from the same stone shot
   differently (Pietra Grey 902c4b, a brown quartzite, is within 1 L* of its pool; 8160c6, the same grey stone shot
-  darker, 17 L* off), and a pooled floor mixes lots. A variety's slabs are tried in one order: the tile's own
+  darker, 17 L* off), and pooled tiles mix lots. A variety's slabs are tried in one order: the tile's own
   vendor's first, then the most usable stone, then the cut-out key; a listing takes the first on which a tile of its
   size fits. One (variety, finish) at a time and one decoded slab at a time (the checks decode each slab in turn and
   keep only its usable area; the slab cut from is decoded again).
-- **Views** (the slab view set, the contract unchanged): main = the tiles laid at the listed size on a generic floor
-  (standing height, soft daylight, a polished finish reflects a window; no location, no photo asset); white = one tile;
-  studio = a 3/4 view at true thickness; close = from above at true scale, at most 2x. With fewer than
-  `TILE_MIN_FACES` distinct faces (non-overlapping cuts of the slab) a floor visibly repeats: main is then the single
-  tile and there is no white or close view.
+- **Size**: a tile is drawn only at its listing's own L x W x H, and only when that is a tile's size (each side in
+  `TILE_SIDE_RANGE_M`, the thickness in `TILE_THICKNESS_RANGE_M`); otherwise no images, the reason in `tiles_hidden`.
+  A size the produce filled from the pack's defaults (flagged `dimension_defaulted`) is never shown: the image stage
+  links no rendered set to that row (the sheet carries only the numbers, and the tile default 60 x 60 x 2 is also a
+  common real size, so publish cannot tell them apart).
+- **Views** (the owner's set, 2026-11-02; the slab view folders, the contract unchanged): main (the catalog card) = the
+  laid tiles from straight above at true scale, a few tiles and their 3 mm joints, real pixels enlarged at most 2x;
+  white = one tile face-on; studio = one tile at an angle, its three dimensions with the true thickness; the close
+  slot is not used (the main view is the close-up). With fewer than `TILE_MIN_FACES` distinct faces (non-overlapping
+  cuts of the slab) the laid tiles would repeat a face: main is then the single tile face-on and there is no separate
+  white view. No perspective floor or room is drawn.
 - **3D tile**: the same cut-out format as a slab's, the face at the listing's stored length along x, 2048 px on its
   long side (Lanczos). `px_per_mm` is the stone's real resolution in source pixels per millimetre, measured before the
   resample to 2048 px (0.65 to 1.2 on prod); the cut-out's own scale is `width_px` / (`length` in mm), which is
@@ -127,10 +133,6 @@ vendor's slab of that variety, never from its own photos (warehouse racks) and n
   problem list. Any other error fails the run, and a failed bucket listing stops publish, before anything is removed.
 - **Variations export**: a sheet product whose variation is missing from it is matched to no stone; the log says how
   many (the export is stale or empty) and the run record counts them (`tiles.unknown_variations`).
-- An interior scene (hotel lobby, living room) as the floor's setting needs licensed background photos with an empty
-  floor: per photo the floor polygon, the camera (horizon, focal length, eye height), an occlusion mask of what stands
-  on the floor, and the rights to modify and publish commercially. None is in the repo; the showroom halls
-  (`assets/rooms`) are the stone supplier's and were rejected for floors.
 
 ## Trigger
 

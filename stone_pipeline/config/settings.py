@@ -1353,7 +1353,13 @@ Your whole answer is one JSON object and nothing else:
     TILE_FORMAT = "tile"               # the format whose listings are rendered here, never sent through the photo process
     VARIANTS_KEY = "scraper/from_medusa/variants_export.csv"   # under <env>/: the Medusa variations (Id, Name) ...
     ATTRIBUTES_KEY = "scraper/from_medusa/attributes.csv"      # ... and attributes (category, value, sourceid)
-    TILE_RENDER_VERSION = 1            # part of every tile's made-from stamp: a new version re-renders every tile
+    TILE_RENDER_VERSION = 2            # part of every tile's made-from stamp: a new version re-renders every tile
+                                       # (2: the owner's view set, the laid tiles from above as the main view)
+    # A tile is rendered at its listing's own size only when that size is a tile's: each side and the thickness within
+    # these bounds (metres). Outside them the size is a data error, never drawn: no images, the reason in the summary.
+    # A size the produce filled from the pack's defaults (dimension_defaulted) is never shown either (the image stage).
+    TILE_SIDE_RANGE_M = (0.1, 1.6)
+    TILE_THICKNESS_RANGE_M = (0.008, 0.05)
     TILE_FAILED_LISTED = 20            # the run record names at most this many tile listings whose step failed
     TILE_JPEG_QUALITY = 92
     # The stone: the slab's outer rim (sawn edge, mixed edge pixels) and its lamp reflections are never cut. Its scale is
@@ -1373,8 +1379,8 @@ Your whole answer is one JSON object and nothing else:
     TILE_GRID_BAND = (4, 0.45)         # ... over the frequencies from this many cycles per window to this share of the window
     TILE_GRID_OFF_AXIS = (3, 6)        # an axis is compared with the frequencies this many bins beside it
     TILE_GRID_MAX = 4.0                # both axes this many times their neighbours: a crosshatch, the slab is not used
-    # The laid views (main floor and close) need this many distinct faces (non-overlapping cuts of the one slab): fewer
-    # and a floor visibly repeats, so the listing shows the single tile as its main image instead (and no close view).
+    # The laid tiles (the main view) need this many distinct faces (non-overlapping cuts of the one slab): fewer and the
+    # floor repeats a face, so the main view is the single tile face-on instead, and there is no separate white view.
     TILE_MIN_FACES = 6
     # Laying: 3 mm joints (the norm for natural stone floors), straight for a square, half-bond for a rectangle.
     TILE_JOINT_M = 0.003
@@ -1385,24 +1391,7 @@ Your whole answer is one JSON object and nothing else:
     TILE_PATTERN_ORIGIN_M = (0.37, 0.11)            # the pattern's offset, so no joint runs through the image's centre
     TILE_CUT_STEP, TILE_ROW_SEED = 7, 20261102      # neighbours along a row step by this many faces; rows by a hashed offset
     TILE_LEVELS = 6                    # texture pyramid levels for minified (far) tiles
-    TILE_SUPERSAMPLE = 2               # the floor and side views are drawn this many times larger, then reduced
-    TILE_FLOOR_BAND_ROWS = 256         # the floor is drawn this many (supersampled) rows at a time: bounded memory
-    # The floor (main view): a generic floor with no location (owner 2026-11-02: a stone supplier's hall looks fake),
-    # seen from standing height, soft daylight from a window ahead and to the left, a polished floor reflecting that
-    # window. Drawn here, no photo asset, so there is nothing to license.
-    TILE_FLOOR_FOCAL = 1600.0          # px at OUT_W (a 65 degree view)
-    TILE_FLOOR_EYE_M = 1.5             # camera height
-    TILE_FLOOR_PITCH_DEG = 33.0        # looking down this much: the horizon just above the frame
-    TILE_FLOOR_YAW_DEG = 24.0          # the joints turned this much from the frame, as a room is seen
-    TILE_FLOOR_LIGHT = ((-1.6, 7.0), 3.2, 0.38)     # the window light's centre on the floor (x, depth m), its reach (m), gain
-    TILE_FLOOR_FALLOFF = 0.10          # the floor darkens this much towards the frame's lower corners
-    TILE_FLOOR_HAZE = ((246.0, 243.0, 238.0), 4.0, 12.0, 0.35)   # far floor softens towards this colour from to depth (m), at most
-    # A polished floor mirrors the window: panes (x0, y0, x1, y1 as shares of the frame), blurred, this strong at the far
-    # floor fading to none at the near edge (a mirror reflects more at a grazing view). Honed, flamed: matte, none.
-    TILE_FLOOR_WINDOW = ((0.06, 0.0, 0.17, 0.46), (0.185, 0.0, 0.295, 0.46), (0.31, 0.0, 0.42, 0.46))
-    TILE_FLOOR_REFLECT_BLUR = 9.0      # px
-    TILE_FLOOR_REFLECT = 0.42
-    TILE_POLISHED_FINISHES = ("polished",)   # finish names (any case) that reflect
+    TILE_SUPERSAMPLE = 2               # the studio view is drawn this many times larger, then reduced
     # The single tile on white (white view; the main view when the faces are too few) and its 3/4 studio view.
     TILE_WHITE_MARGIN = 0.12
     TILE_MAX_UPSCALE = 2.5             # the single-tile views never enlarge the real pixels more than this
