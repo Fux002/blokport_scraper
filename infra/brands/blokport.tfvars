@@ -51,9 +51,14 @@ prod_image_upgrade_batch = 1000
 # passed 2 h on 2026-09-14 and was killed as wedged.
 run_timeout_seconds = 14400
 
-prod_auto_enhance     = true
+# The old enhancer (GPU upscale + FAL de-watermark) is OFF in both envs (owner 2026-11-02): the standardised photo
+# pipeline replaces its output, and a product is live on prod only with a standardised photo (no_photo rule). A
+# watermarked source's logo is taken off by the pipeline's hosted clean-up. Its code goes in a later clean-up.
+dev_auto_enhance      = false
+dev_require_enhanced  = false
+prod_auto_enhance     = false
 prod_auto_texture     = true
-prod_require_enhanced = true
+prod_require_enhanced = false
 
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
 fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                # de-watermark
