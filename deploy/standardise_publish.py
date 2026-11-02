@@ -3,7 +3,9 @@ complete choice whatever runs made them): each listing's one good photo, its vie
 (showroom, white, side view, close-up) copied from the run that made it into <env>/products/standard/<view>/<src>/<sha>.jpg,
 where the image stage links products to them. A chosen photo of a whole single slab (its run saved <sha>.slab.png) also
 gets its 3D slab, made here from that slab (stone_pipeline.standardise.cutout) into
-<env>/products/standard/cutout/<src>/<sha>.webp + .json; only a missing one or one older than its slab is made again.
+<env>/products/standard/cutout/<src>/<sha>.webp + .json. The outline carries what it was made from (the slab's key and
+ETag, CUTOUT_VERSION), so a 3D slab is made again exactly when that changed: a listing's choice moved to another run of
+the same photo, a later run re-made the slab, or the cut-out itself changed.
 The folder is made to match the choice exactly: a view or 3D slab no longer chosen is removed, so a photo the judge or a
 person turned down never stays live. Views are server-side copies of the same bytes and a cut-out is deterministic, so a
 re-run is safe. A photo on the reviewed exclude list (EXCLUDE_PATH, one sha per line) is never published, whatever chose
@@ -30,6 +32,7 @@ from stone_pipeline.standardise import cutout
 WORKERS = 32
 EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "stone_pipeline" / "config" / "standardise_exclude.txt"
 _SHA = re.compile(r"^([0-9a-f]{64})\b")
+_MADE_FROM = "made-from"                     # the outline's S3 metadata: what its 3D slab was made from (made_from)
 
 
 def chosen_prefix(root):
@@ -69,11 +72,16 @@ def cutout_keys(slab):
     return [imagestore.cutout_key(*slab, "webp"), imagestore.cutout_key(*slab, "json")]
 
 
-def outdated(todo, made, published):
-    """The (source, sha) of `todo` whose 3D slab is missing, half written or older than its run's slab (a later run made
-    the photo again), sorted. made, published = {key: last modified}."""
+def made_from(slab_key, etag):
+    """What a 3D slab is made from: the slab's key and content (ETag) and the cut-out's version."""
+    return f"{slab_key} {etag.strip(chr(34))} v{C.CUTOUT_VERSION}"
+
+
+def outdated(todo, made, published, stamps):
+    """The (source, sha) of `todo` whose 3D slab is missing, half written or made from something else than the slab now
+    chosen, sorted. made, published = {key: ETag}; stamps = {(source, sha): what its published outline was made from}."""
     return sorted(s for s, slab in todo.items()
-                  if any(k not in published or published[k] < made[slab] for k in cutout_keys(s)))
+                  if any(k not in published for k in cutout_keys(s)) or stamps.get(s) != made_from(slab, made[slab]))
 
 
 def stale(published, keep):
@@ -82,23 +90,34 @@ def stale(published, keep):
 
 
 def _objects(client, prefix):
-    """{key: last modified} under a prefix."""
-    return {o["Key"]: o["LastModified"] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+    """{key: ETag} under a prefix."""
+    return {o["Key"]: o["ETag"] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
             for o in page.get("Contents", [])}
 
 
-def _publish_cutout(client, slab, slab_key):
-    """Make and write one photo's 3D slab. A slab that is not one (ValueError) is reported and that photo's 3D slab, an
-    older one included, removed: that product simply has no 3D, the run goes on."""
+def _stamp(client, slab, published):
+    """What the published outline of one photo's 3D slab was made from, None when it is not published."""
+    meta_key = cutout_keys(slab)[1]
+    if meta_key not in published:
+        return None
+    return client.head_object(Bucket=S3_BUCKET, Key=meta_key)["Metadata"].get(_MADE_FROM)
+
+
+def _publish_cutout(client, slab, slab_key, etag):
+    """Make and write one photo's 3D slab. The outline goes first and comes back last, so a pair cut short never looks
+    complete. A slab that is not one (ValueError) is reported and that photo's 3D slab removed: that product simply has
+    no 3D, the run goes on."""
+    webp_key, meta_key = cutout_keys(slab)
+    client.delete_object(Bucket=S3_BUCKET, Key=meta_key)
     try:
-        files = cutout.make(client.get_object(Bucket=S3_BUCKET, Key=slab_key)["Body"].read())
+        webp, meta = cutout.make(client.get_object(Bucket=S3_BUCKET, Key=slab_key)["Body"].read())
     except ValueError as exc:
         print(f"   NO 3D {slab[0]}/{slab[1][:12]}: {exc}", flush=True)
-        for key in cutout_keys(slab):
-            client.delete_object(Bucket=S3_BUCKET, Key=key)
+        client.delete_object(Bucket=S3_BUCKET, Key=webp_key)
         return False
-    for key, body, kind in zip(cutout_keys(slab), files, ("image/webp", "application/json")):
-        client.put_object(Bucket=S3_BUCKET, Key=key, Body=body, ContentType=kind)
+    client.put_object(Bucket=S3_BUCKET, Key=webp_key, Body=webp, ContentType="image/webp")
+    client.put_object(Bucket=S3_BUCKET, Key=meta_key, Body=meta, ContentType="application/json",
+                      Metadata={_MADE_FROM: made_from(slab_key, etag)})
     return True
 
 
@@ -121,7 +140,9 @@ def main() -> int:
     published = {k: t for prefix in [*map(imagestore.standard_prefix, imagestore.STANDARD_VIEWS), imagestore.cutout_prefix()]
                  for k, t in _objects(client, prefix).items()}
     gone = stale(published, [t for _, t in plan] + [k for s in todo for k in cutout_keys(s)])
-    remake = outdated(todo, made, published)
+    with ThreadPoolExecutor(WORKERS) as pool:
+        stamps = dict(zip(todo, pool.map(lambda s: _stamp(client, s, published), todo)))
+    remake = outdated(todo, made, published, stamps)
     photos = len({imagestore.sha_from_url(t) for _, t in plan})
     print(f"==> {'DRY RUN: ' if dry else ''}{len(chosen)} listings chosen: {len(plan)} views of {photos} photos to publish, "
           f"{len(todo)} 3D slabs ({len(remake)} to make), {len(gone)} published files no longer chosen", flush=True)
@@ -130,7 +151,7 @@ def main() -> int:
     with ThreadPoolExecutor(WORKERS) as pool:
         list(pool.map(lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
                                                     ContentType="image/jpeg", MetadataDirective="REPLACE"), plan))
-        made_3d = sum(pool.map(lambda s: _publish_cutout(client, s, todo[s]), remake))
+        made_3d = sum(pool.map(lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
         list(pool.map(lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone))
     print(f"==> published {len(plan)} views, made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)}", flush=True)
     return 0

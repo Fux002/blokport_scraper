@@ -10,17 +10,33 @@ from stone_pipeline.config.settings import STANDARDISE as C
 
 
 def make(slab_png: bytes) -> tuple[bytes, bytes]:
-    """(the WebP cut-out, its meta JSON). Raises ValueError on a slab with no alpha or no stone in it."""
+    """(the WebP cut-out, its meta JSON). Raises ValueError on a slab that cannot be one: no alpha, no stone, unreadable."""
+    try:
+        return _make(slab_png)
+    except cv2.error as exc:
+        raise ValueError(f"opencv: {exc}") from exc
+
+
+def _make(slab_png):
     bgra = cv2.imdecode(np.frombuffer(slab_png, np.uint8), cv2.IMREAD_UNCHANGED)
     if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
         raise ValueError("the slab is not an RGBA image")
+    stone = bgra[:, :, 3] > C.CUTOUT_ALPHA_CUT
+    if not stone.any():
+        raise ValueError("no stone in the slab's alpha")
+    # Off the stone the colour is the stone's own: the resize and the lossy encode blend across the outline, and whatever
+    # lay under the alpha (black, the room) would rim the slab.
+    bgra[~stone, :3] = bgra[:, :, :3][stone].mean(0).astype(np.uint8)
     s = C.CUTOUT_LONG_SIDE / max(bgra.shape[:2])
     if s < 1:
         bgra = cv2.resize(bgra, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
     stone = (bgra[:, :, 3] > C.CUTOUT_ALPHA_CUT).astype(np.uint8)
     h, w = stone.shape
+    if min(h, w) < 2:
+        raise ValueError("the slab is too small to have an outline")
+    # The outer pixels' centres sit on the frame's edges, so a whole rectangle spans 0..1 like the texture it carries.
     meta = {"version": C.CUTOUT_VERSION, "width_px": w, "height_px": h,
-            "outline": [[round(float(x) / w, 4), round(float(y) / h, 4)] for x, y in outline(stone)],
+            "outline": [[round(float(x) / (w - 1), 4), round(float(y) / (h - 1), 4)] for x, y in outline(stone)],
             "edge_color": edge_color(bgra, stone)}
     ok, buf = cv2.imencode(".webp", bgra, [cv2.IMWRITE_WEBP_QUALITY, C.CUTOUT_WEBP_QUALITY])
     if not ok:
@@ -29,7 +45,7 @@ def make(slab_png: bytes) -> tuple[bytes, bytes]:
 
 
 def outline(stone: np.ndarray) -> np.ndarray:
-    """The stone's outer edge as at most CUTOUT_MAX_POINTS (x, y) pixel points in order. Raises ValueError on no stone."""
+    """The stone's outer edge as at most CUTOUT_MAX_POINTS (x, y) pixel points in order. Raises ValueError on no shape."""
     contours, _ = cv2.findContours(stone, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         raise ValueError("no stone in the slab's alpha")

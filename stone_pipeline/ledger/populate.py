@@ -263,6 +263,8 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 # a piece's lot membership: a re-cut lot or a moved position must re-serve the piece
                 r.lot_code, r.lot_position,
                 r.model_3d_key,   # a slab that gains, changes or loses its 3D re-serves
+                # the standardised files are re-made in place under the same names: their content re-serves them
+                r.standard_version,
             ])),
             "created_at": now,
             "updated_at": now,

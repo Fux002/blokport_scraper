@@ -142,23 +142,32 @@ def _hosted_object_exists(backend, hosted_url: str) -> bool:
     return backend.exists(hosted_url[len(base):])
 
 
-def _list_shas(prefix: str, suffix: str = "") -> set[str]:
-    """The content sha256 embedded in every object key under an S3 pool prefix (discarded/, enhanced/), only the keys
-    ending in `suffix` when given. Raises on any S3 failure: the callers decide the policy."""
+def _list_shas(prefix: str) -> set[str]:
+    """The content sha256 embedded in every object key under an S3 pool prefix (discarded/, enhanced/).
+    Raises on any S3 failure: the callers decide the policy."""
+    return set(_list_etags(prefix))
+
+
+def _list_etags(prefix: str) -> dict[str, str]:
+    """{content sha256: ETag} of the object keys under an S3 pool prefix. Raises on any S3 failure."""
+    return _by_sha(_list_objects(prefix))
+
+
+def _list_objects(prefix: str) -> dict[str, str]:
+    """{key: ETag} under an S3 prefix. Raises on any S3 failure: the callers decide the policy."""
     import boto3
 
     s3 = SETTINGS.s3
     client = boto3.Session(profile_name=s3.credentials_profile or None,
                            region_name=s3.region).client("s3")
-    out: set[str] = set()
-    for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            if not obj["Key"].endswith(suffix):
-                continue
-            sha = imagestore.sha_from_url(obj["Key"])
-            if sha:
-                out.add(sha)
-    return out
+    return {obj["Key"]: obj["ETag"].strip('"')
+            for page in client.get_paginator("list_objects_v2").paginate(Bucket=s3.bucket, Prefix=prefix)
+            for obj in page.get("Contents", [])}
+
+
+def _by_sha(objects: dict[str, str], suffix: str = "") -> dict[str, str]:
+    """{content sha256: ETag} of the keys ending in `suffix` that carry a sha."""
+    return {sha: etag for key, etag in objects.items() if key.endswith(suffix) and (sha := imagestore.sha_from_url(key))}
 
 
 def _load_discard_set(cfg=None) -> set[str] | None:
@@ -285,6 +294,7 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views
             row.model_3d_key = model_3d(row.image_keys, views) if _is_3d_format(row) else None
+            row.standard_version = standard_version(row.image_keys, views, with_3d=bool(row.model_3d_key))
             _slot_row(row, standardised(row.image_keys, views))
     return stats
 
@@ -317,6 +327,18 @@ def model_3d(urls: list[str], views: dict[str, set[str]]) -> Optional[str]:
     return f"{base}/products/{imagestore.STANDARD_SUBDIR}/{imagestore.CUTOUT_SUBDIR}/{src}/{sha}.webp"
 
 
+def standard_version(urls: list[str], views: dict[str, dict[str, str]], with_3d: bool) -> Optional[str]:
+    """The ETags of the files a product is served from its lead published photo (its views, its 3D slab when it has one),
+    None without one. A file is re-made in place under the same name (a listing's choice moved to another run of the
+    photo), so the names alone would never re-serve the product with it."""
+    lead = _lead(urls, views)
+    if lead is None:
+        return None
+    sha = lead[2]
+    kinds = [*imagestore.STANDARD_VIEWS, *([imagestore.CUTOUT_SUBDIR] if with_3d else [])]
+    return " ".join(views[k][sha] for k in kinds if sha in views.get(k, ()))
+
+
 def _lead(urls: list[str], views: dict[str, set[str]]) -> Optional[tuple[str, str, str]]:
     """(url up to /products, source, sha) of the product's lead published photo (standardised), or None."""
     found = []
@@ -333,17 +355,18 @@ def _is_3d_format(row: CanonicalRow) -> bool:
     return (row.format_value or "").casefold() == STANDARDISE.CUTOUT_FORMAT
 
 
-def _load_standard_views(cfg) -> dict[str, set[str]]:
-    """{view: shas} of the published standardised photos. Empty in local mode or when none are published. When the
+def _load_standard_views(cfg) -> dict[str, dict[str, str]]:
+    """{view: {sha: ETag}} of the published standardised photos, and of their 3D slabs under CUTOUT_SUBDIR (the pair's
+    two ETags, once both files are there: the outline is written last). Empty in local mode or when none are published. When the
     pool cannot be read the products keep the images they had this run (today's images, never a guess) and it is
     logged: the next produce links the standardised set."""
     if getattr(cfg, "mode", None) == "local":
         return {}
     try:
-        views = {view: _list_shas(imagestore.standard_prefix(view)) for view in imagestore.STANDARD_VIEWS}
-        # a 3D slab counts once both its files are there (the outline is written last)
-        views[imagestore.CUTOUT_SUBDIR] = (_list_shas(imagestore.cutout_prefix(), ".webp")
-                                           & _list_shas(imagestore.cutout_prefix(), ".json"))
+        views = {view: _list_etags(imagestore.standard_prefix(view)) for view in imagestore.STANDARD_VIEWS}
+        cutouts = _list_objects(imagestore.cutout_prefix())
+        webp, meta = (_by_sha(cutouts, ext) for ext in (".webp", ".json"))
+        views[imagestore.CUTOUT_SUBDIR] = {sha: f"{webp[sha]}+{meta[sha]}" for sha in webp.keys() & meta.keys()}
         return views
     except Exception as exc:
         log.warning("standardised photos unreachable; products keep their images this run",
