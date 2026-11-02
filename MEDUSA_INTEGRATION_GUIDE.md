@@ -198,8 +198,9 @@ copy `image_urls` into your own storage. Ack with the product id.
 **3D slab** (`model_3d`, optional, additive): the lead slab's cut-out (RGBA WebP, alpha = the slab's own outline, long
 side at most 2048 px) and its meta JSON (`version` 1, `width_px`, `height_px`, `outline` = at most 64 `[u, v]` points
 from 0 to 1 measured from the cut-out's top-left, `edge_color` = the sawn edge's hex colour). Copy both like
-`image_urls` and keep them as `metadata.model_3d`; the viewer sizes the slab from `length`, `width` and `height`. It is
-`null` for a product with no 3D (a block, a tile, an open book, a close-up, a product without a standardised photo):
+`image_urls` and keep them as `metadata.model_3d`; the viewer sizes the slab from `length`, `width` and `height`. A
+product shown by an open book (two bookmatched slabs) carries one of its two slabs, each a whole slab. It is
+`null` for a product with no 3D (a block, a tile, a close-up, a product without a standardised photo):
 remove `metadata.model_3d` then. Both files are named after the source photo, like the standardised views.
 
 **Collection location** (`collection_country_code`, `collection_city`) is where the product is

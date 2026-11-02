@@ -1,4 +1,4 @@
-"""The 3D slab across the boundaries (the "Slab 3D on Blokport" contract): a chosen photo of a whole single slab gets a
+"""The 3D slab across the boundaries (the "Slab 3D on Blokport" contract): a chosen photo of a whole slab gets a
 cut-out and its outline, published beside the views; a slab product whose lead photo has one carries it as model_3d,
 stored in the ledger, part of the change fingerprint, and pulled as {cutout, meta} or null."""
 from __future__ import annotations
@@ -108,7 +108,7 @@ T0 = datetime(2026, 11, 2, tzinfo=timezone.utc)
 def test_only_a_chosen_whole_slab_not_excluded_gets_a_3d_slab():
     from deploy import standardise_publish as pub
     run = f"{ENV_SEGMENT}/standardise-test/v2/sentas/"
-    made = {f"{run}{A}.main.jpg": T0, f"{run}{A}.slab.png": T0, f"{run}{B}.main.jpg": T0}        # B: an open book
+    made = {f"{run}{A}.main.jpg": T0, f"{run}{A}.slab.png": T0, f"{run}{B}.main.jpg": T0}        # B: a close-up
     chosen = [{"source": "sentas", "sha": A, "prefix": run}, {"source": "sentas", "sha": B, "prefix": run}]
     assert pub.slabs(chosen, made) == {("sentas", A): f"{run}{A}.slab.png"}
     assert pub.slabs(chosen, made, exclude={A}) == {}
@@ -187,7 +187,7 @@ def test_a_slab_product_carries_its_lead_photo_s_3d_slab():
 
 
 def test_no_3d_when_the_lead_photo_has_none_even_if_another_photo_does():
-    # B leads (first in the product's order, with a side view) but is an open book: the 3D must show the lead slab
+    # B leads (first in the product's order, with a side view) but has no 3D slab: the 3D must show the lead slab
     assert images.model_3d([_improved(B), _improved(A)], VIEWS) is None
     assert images.model_3d([_improved(C3)], VIEWS) is None
 

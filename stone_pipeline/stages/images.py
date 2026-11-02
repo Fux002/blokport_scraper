@@ -323,7 +323,8 @@ def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
 
 def model_3d(urls: list[str], views: dict[str, set[str]]) -> Optional[str]:
     """The 3D slab's cut-out url of a product: its lead photo's (the slab the catalog thumbnail shows), when that photo is
-    a whole single slab with a published cut-out; None otherwise (an open book, a close-up, no published photo)."""
+    a whole slab (a single slab or one half of an open book) with a published cut-out; None otherwise (a close-up, no
+    published photo)."""
     lead = _lead(urls, views)
     if lead is None or lead[2] not in views.get(imagestore.CUTOUT_SUBDIR, ()):
         return None

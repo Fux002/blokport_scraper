@@ -847,3 +847,48 @@ def test_a_whole_slab_framed_tightly_is_never_cropped_either():
     stone = np.zeros((h, w), np.uint8); stone[150:1300, 8:1950] = 1          # its edge 8 px inside the photo
     beside = np.zeros_like(stone); beside[0:1300, 0:330] = 1
     assert retouch.crop_clear_of_wide_marks(beside, np.zeros_like(stone), stone) is None
+
+
+# --- the 3D slab of a photo -------------------------------------------------------------------------------------------
+def _standardised(monkeypatch, slabs, kind_found=None):
+    """photo.standardise on found slabs (or a close-up), the models and the expensive steps stood in: (its result, the
+    slabs the close view was made from)."""
+    from stone_pipeline.standardise import closeup, photo
+    monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.9))
+    monkeypatch.setattr(layout, "squared_slabs", lambda rgb, *m, size=None: slabs if kind_found is None else "no outline")
+    monkeypatch.setattr(closeup, "closeup", lambda rgb, size, *m: kind_found)
+    monkeypatch.setattr(photo, "_finished", lambda s, key, models, seed: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
+    monkeypatch.setattr(studio, "place", lambda s: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
+    closed = []                                                      # the slabs given to the close view, by identity
+    monkeypatch.setattr(views, "close_up", lambda slab, alpha, esr: closed.append((id(slab), id(alpha))) or np.ones((4, 4, 3), np.uint8))
+
+    class _Models:
+        clip, cleaners, esr = None, (None, None, None, None), None
+    return photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models(), extra_views=True), closed
+
+
+def test_each_half_of_an_open_book_is_a_whole_slab_and_the_one_with_more_stone_gets_the_3d_and_the_close_view(monkeypatch):
+    left, right = _slab(80, 100), _slab(80, 100)
+    left[1][:20, :20] = 0                                            # a chipped corner: less stone in its outline
+    res, closed = _standardised(monkeypatch, [left, right])
+    assert res.kind == "open book" and res.slab is right
+    assert closed == [(id(right[0]), id(right[1]))] and set(res.images) == {"main", "white", "studio", "close"}
+
+
+def test_of_two_equal_halves_the_left_is_taken(monkeypatch):
+    left, right = _slab(80, 100), _slab(80, 100)
+    res, closed = _standardised(monkeypatch, [left, right])
+    assert res.slab is left and closed == [(id(left[0]), id(left[1]))]
+
+
+def test_a_single_slab_keeps_its_own_slab_and_close_view(monkeypatch):
+    one = _slab(80, 100)
+    res, closed = _standardised(monkeypatch, [one])
+    assert res.kind == "slab" and res.slab is one and closed == [(id(one[0]), id(one[1]))]
+    assert set(res.images) == {"main", "white", "studio", "close"}
+
+
+def test_a_close_up_shows_only_part_of_a_slab_so_it_has_no_3d_and_no_close_view(monkeypatch):
+    res, closed = _standardised(monkeypatch, None, kind_found=[_slab(80, 100)])
+    assert res.kind == "close-up" and res.slab == () and closed == []
+    assert set(res.images) == {"main", "white"}

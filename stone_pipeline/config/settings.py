@@ -1060,9 +1060,10 @@ class STANDARDISE:
     STOP_WAIT_SECONDS, STOP_POLL_SECONDS = 60, 5
     CUTOUT_WORKERS = 4                 # 3D cut-outs made at once by publish (full-size slabs in memory, on the 6 GB service)
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
-    # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole single slab
-    # (<sha>.slab.png) is published as a WebP cut-out and a JSON outline; Blokport's viewer extrudes the outline to the
-    # product's thickness with the photo on the face. Only a slab product gets one (not a block, tile, open book or close-up).
+    # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
+    # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;
+    # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. Only a slab product
+    # gets one (not a block, tile or close-up).
     CUTOUT_VERSION = 1
     CUTOUT_FORMAT = "slab"             # the product format (format_value, any case) that gets a 3D slab
     CUTOUT_LONG_SIDE = 2048            # px, the contract's maximum

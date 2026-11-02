@@ -14,7 +14,7 @@ class Result:
     held: str = ""                                     # why this photo is not published; empty = finished
     kind: str = ""                                     # what it was classified as
     images: dict = field(default_factory=dict)         # name -> RGB array at the canvas size
-    slab: tuple = ()                                   # (squared RGB, alpha) of one slab: what a 3D viewer needs
+    slab: tuple = ()                                   # (squared RGB, alpha) of one whole slab: what a 3D viewer needs
 
 
 def _finished(slabs, key, models, seed):
@@ -51,11 +51,21 @@ def standardise(rgb, *, fmt, key, size=None, clean=None, watermarked=False, mode
     images["white"] = layout.on_white(slabs)
     if kind != "close-up":                              # Blokport's studio scene: the slab on its chrome feet
         images["studio"] = studio.place(slabs)
-    if extra_views and kind == "slab":
-        up = views.close_up(slabs[0][0], slabs[0][1], models.esr)
+    whole = whole_slab(slabs, kind)
+    if extra_views and whole:
+        up = views.close_up(whole[0], whole[1], models.esr)
         if up is not None:
             images["close"] = up
-    return Result(kind=kind, images=images, slab=slabs[0] if kind == "slab" else ())
+    return Result(kind=kind, images=images, slab=whole)
+
+
+def whole_slab(slabs, kind):
+    """The one whole real slab the 3D slab and the close view are made from: a single slab's own; of an open book, one of
+    its halves (each is a whole slab: the one with more stone in its outline, the left on a tie); none of a close-up,
+    which shows only part of a slab."""
+    if kind == "open book":
+        return max(slabs, key=lambda s: float(s[1].sum()))     # max keeps the first of equals: the left half
+    return slabs[0] if kind == "slab" else ()
 
 
 def decode(data):
