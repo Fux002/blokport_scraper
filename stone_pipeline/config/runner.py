@@ -6,12 +6,15 @@ import pulls that ledger into the shop. ONE launcher: a produce subprocess on th
 container), streamed and watched here, with its exit code tracked. There is no second orchestrator (no
 cron task, no fire-and-forget Fargate dispatch): an unattended schedule is an EventBridge target on this
 API, so every produce goes through the same gates and the same ledger. Single-run
-guarded: a second trigger while one is in progress is refused (409). Run state is in-memory (one
-control-plane process); it resets if the server restarts, which is fine for a manual trigger.
+guarded: a second trigger while one is in progress is refused (409), except that a photos run (the
+standardised-photo process) gives way: any other stage asked for while it runs stops it cleanly and runs at
+once, so the owner's Publish is never blocked; the photos run's work is kept for the next photos run. Run
+state is in-memory (one control-plane process); it resets if the server restarts, which is fine for a manual
+trigger.
 
 Contract (matches the :4200 admin's expectations):
   run record = { run_id, status, mode, started_at, finished_at, sources, progress, error }
-  status     = queued -> running -> succeeded | failed
+  status     = queued -> running -> succeeded | failed | stopped (a photos run that gave way)
 """
 
 from __future__ import annotations
@@ -34,7 +37,9 @@ log = logfmt.get_logger("config.runner")
 _lock = threading.Lock()
 _runs: dict[str, dict] = {}      # run_id -> record (kept so GET /run/{id} works after it finishes)
 _current_id: str | None = None   # the in-flight run, if any
-_child: subprocess.Popen | None = None   # its subprocess while it runs (stop_current passes it a SIGTERM)
+_child: subprocess.Popen | None = None   # its subprocess while it runs (stopped with a SIGTERM, then killed)
+_watcher: threading.Thread | None = None  # the thread watching it (it finishes the run record)
+_stopping = False                        # the server is stopping: no follow-up run starts
 _MAX_RUNS = 200                  # cap the in-memory history so a long-lived server never grows unbounded (M2)
 
 
@@ -55,8 +60,9 @@ def _now() -> str:
 # `photos` is this runner's own stage, not a produce: the standardised-photo process (deploy.standardise_run,
 # STANDARDISE_PROCESS.md) over the whole environment, which links what it published with a republish of its own.
 STAGES = ("scrape", "catalog", "republish", "inventory", "all", "photos")
-# With STANDARDISE.AUTO on, the photos run follows a full produce (the owner's button) and nothing else: never the
-# republish Blokport's Publish button runs and waits on, which must never find the run slot taken.
+# With STANDARDISE.AUTO on, the photos run follows a full produce (the owner's button) and nothing else. A republish
+# (Blokport's Publish button) or any other stage asked for while a photos run holds the slot stops it and runs at once
+# (start_run), so the photos run never blocks the owner.
 _PHOTOS_AFTER = ("all",)
 
 
@@ -178,11 +184,15 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
     with _lock:
         if _child is proc:
             _child = None
-        rec["status"] = "succeeded" if rc == 0 else "failed"
         rec["finished_at"] = _now()
         rec["counts"] = counts
-        if rc != 0:
-            rec["error"] = f"pipeline exited {rc}" + (f":\n{tail_text}" if tail_text else "")
+        if rec.get("preempted_by"):                    # it gave way: not a failure, its work is kept
+            rec["status"] = "stopped"
+            rec["error"] = f"stopped for the {rec['preempted_by']}; its work is kept for the next photos run"
+        else:
+            rec["status"] = "succeeded" if rc == 0 else "failed"
+            if rc != 0:
+                rec["error"] = f"pipeline exited {rc}" + (f":\n{tail_text}" if tail_text else "")
     # the produce subprocess owns persisting the scrape trees and publishing the deliverables (its exit
     # code carries a publish failure, with the cause in the streamed tail above)
     _stamp_last_run(rec, rec["status"])
@@ -201,7 +211,7 @@ def _follow_up(rec: dict) -> None:
     """After a full produce (stage all), the photos run (with STANDARDISE.AUTO on): its own run, on the sheet this produce
     just published. A run slot taken in between (an op claimed it) is logged; the next produce starts it again."""
     from stone_pipeline.config.settings import STANDARDISE
-    if not (STANDARDISE.AUTO and rec.get("status") == "succeeded" and rec.get("stage") in _PHOTOS_AFTER):
+    if _stopping or not (STANDARDISE.AUTO and rec.get("status") == "succeeded" and rec.get("stage") in _PHOTOS_AFTER):
         return
     follow, code = start_run(stage="photos")
     if code != 202:
@@ -242,7 +252,7 @@ def _photo_counts(rec: dict) -> dict | None:
 
 
 def _launch_local(rec: dict) -> None:
-    global _child
+    global _child, _watcher
     photos = rec.get("stage") == "photos"
     proc = subprocess.Popen(
         _build_command(rec),
@@ -254,25 +264,57 @@ def _launch_local(rec: dict) -> None:
         # process reports on stdout, so its two streams are captured as one.
         stdout=subprocess.PIPE if photos else subprocess.DEVNULL,
         stderr=subprocess.STDOUT if photos else subprocess.PIPE, text=True)
+    watcher = threading.Thread(target=_watch_local, args=(rec, proc), daemon=True)
     with _lock:
-        _child = proc
-    threading.Thread(target=_watch_local, args=(rec, proc), daemon=True).start()
+        _child, _watcher = proc, watcher
+    watcher.start()
+
+
+def _end_child(grace: float) -> None:
+    """End the running run's subprocess: SIGTERM, up to `grace` to clean up (the photo process stops its GPU jobs, sets
+    the pool's ceiling back, keeps its spend and releases its lock), then killed; and wait for its watcher to finish
+    the run record."""
+    with _lock:
+        child, watcher = _child, _watcher
+    if child is not None and child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            log.error("the running run did not end within the stop grace; killed", extra={"extra_fields": {"grace_s": grace}})
+            child.kill()
+    if watcher is not None:
+        watcher.join(timeout=grace)
 
 
 def stop_current(grace: float = RUN_STOP_GRACE_SECONDS) -> None:
-    """The service is stopping (ECS sent SIGTERM and kills the task after its stopTimeout): pass the SIGTERM on to the
-    running run's subprocess and wait up to `grace` for it to clean up (the photo process stops its GPU jobs, sets the
-    pool's ceiling back, keeps its spend and releases its lock). A child still running after it is left to the kill."""
-    with _lock:
-        child = _child
-    if child is None or child.poll() is not None:
-        return
-    child.terminate()
+    """The service is stopping (ECS sent SIGTERM and kills the task after its stopTimeout): no follow-up run starts, and
+    the running run ends cleanly (_end_child) before the server's last save."""
+    global _stopping
+    _stopping = True
+    _end_child(grace)
+
+
+def _launch(rec: dict, launch) -> tuple[dict, int]:
+    """Start the run's subprocess: (record, 202), or (record, 500) for a launch that failed (a completed, failed run)."""
     try:
-        child.wait(timeout=grace)
-    except subprocess.TimeoutExpired:
-        log.error("the running run did not end within the stop grace; the task's kill ends it",
-                  extra={"extra_fields": {"grace_s": grace}})
+        (launch or _launch_local)(rec)
+    except Exception as exc:
+        with _lock:
+            rec["status"] = "failed"
+            rec["finished_at"] = _now()
+            rec["error"] = str(exc)
+        _stamp_last_run(rec, "failed")
+        _persist_run(rec)
+        log.exception("scraper run failed to launch")
+        return _public(rec), 500
+    return _public(rec), 202
+
+
+def _give_way_then_launch(rec: dict, launch) -> None:
+    """The photos run that held the slot gives way: ended cleanly, then this run starts."""
+    _end_child(RUN_STOP_GRACE_SECONDS)
+    _launch(rec, launch)
 
 
 
@@ -301,8 +343,12 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
     from stone_pipeline import lifecycle
     global _current_id
     with _lock:
-        if _current_id and _runs[_current_id]["status"] in ("queued", "running"):
-            return _public(_runs[_current_id]), 409
+        held = _runs.get(_current_id) if _current_id else None
+        if held and held["status"] not in ("queued", "running"):
+            held = None
+        # a photos run gives way to any other stage (the owner's Publish is never blocked); anything else is refused
+        if held and (held.get("stage") != "photos" or stage == "photos"):
+            return _public(held), 409
         run_id = _now().translate({ord(c): None for c in ":-.T"})[:17]
         # a photos run is the environment's, no source's: it stamps no source's 'last run'
         shown = [] if stage == "photos" else scope if scope is not None else _resolve_sources(None)
@@ -328,21 +374,14 @@ def start_run(sources=None, stage="all", launch=None) -> tuple[dict, int]:
             rec["status"] = "failed"
             rec["finished_at"] = _now()
             rec["error"] = f"a {busy} is in progress; refusing to run"
-            _current_id = None
+            _current_id = held["run_id"] if held else None    # a photos run that was to give way keeps the slot
         return {"error": f"a {busy} is in progress; refusing to run"}, 409
     _stamp_last_run(rec, "running")                # list shows this source as running immediately
-    try:
-        (launch or _launch_local)(rec)
-    except Exception as exc:                       # a failed launch is a completed (failed) run
-        with _lock:
-            rec["status"] = "failed"
-            rec["finished_at"] = _now()
-            rec["error"] = str(exc)
-        _stamp_last_run(rec, "failed")
-        _persist_run(rec)
-        log.exception("scraper run failed to launch")
-        return _public(rec), 500
-    return _public(rec), 202
+    if held:
+        held["preempted_by"] = f"{stage} run {run_id}"
+        threading.Thread(target=_give_way_then_launch, args=(rec, launch), daemon=True).start()
+        return _public(rec), 202
+    return _launch(rec, launch)
 
 
 def get_run(run_id: str) -> dict | None:

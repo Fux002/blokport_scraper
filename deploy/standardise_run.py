@@ -33,13 +33,12 @@ import signal
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
 from datetime import datetime, timezone
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from deploy import standardise_batch as gpu
 from deploy import standardise_publish as publish
@@ -66,6 +65,22 @@ def _code(exc):
 
 
 # --- the run lock -----------------------------------------------------------------------------------------------------
+def _lost(s3, etag, exc):
+    """Whether a failed conditional write means the lock is no longer this run's. PreconditionFailed says so; a 409
+    (ConditionalRequestConflict: another write was in flight) is checked against the lock's ETag; any other failure is a
+    passing one."""
+    if not isinstance(exc, ClientError) or _code(exc) not in _TAKEN:
+        return False
+    if _code(exc) == "PreconditionFailed":
+        return True
+    try:
+        return s3.head_object(Bucket=S3_BUCKET, Key=LOCK)["ETag"] != etag
+    except ClientError as missing:
+        return _code(missing) in _MISSING
+    except BotoCoreError:
+        return False
+
+
 @contextmanager
 def exclusive(s3, owner, on_lost=None, now=None, beat=C.LOCK_HEARTBEAT_SECONDS):
     """Hold the environment's run lock for the block, rewriting it every `beat` seconds (its sign of life); RunActive
@@ -78,8 +93,8 @@ def exclusive(s3, owner, on_lost=None, now=None, beat=C.LOCK_HEARTBEAT_SECONDS):
             try:
                 held["etag"] = s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=json.dumps(owner).encode(),
                                              IfMatch=held["etag"])["ETag"]
-            except ClientError as exc:
-                if _code(exc) not in _TAKEN:           # a passing storage error: the next beat tries again
+            except (BotoCoreError, ClientError) as exc:
+                if not _lost(s3, held["etag"], exc):   # a passing error: the next beat tries again
                     print(f"   WARNING: the run lock was not refreshed: {exc}", flush=True)
                     continue
                 print("==> the run lock was taken over by another process: no paid call starts any more", flush=True)
@@ -100,8 +115,8 @@ def exclusive(s3, owner, on_lost=None, now=None, beat=C.LOCK_HEARTBEAT_SECONDS):
 def _acquire(s3, owner, now):
     """The lock's ETag once this process holds it. Held by another: taken over only when not rewritten for the runner's
     ceiling (RUN_TIMEOUT_SECONDS; the runner ends every run before it, so its run was killed), in one write conditional on
-    the lock seen, so of two processes taking it over one does. A lock released between our write and our look is tried
-    once more."""
+    the lock seen, so of two processes taking it over one does. A lock released or rewritten while we looked (a 404, a
+    409) is tried once more."""
     body = json.dumps(owner).encode()
     for _ in range(2):
         try:
@@ -121,8 +136,10 @@ def _acquire(s3, owner, now):
         try:
             etag = s3.put_object(Bucket=S3_BUCKET, Key=LOCK, Body=body, IfMatch=held["ETag"])["ETag"]
         except ClientError as exc:
-            if _code(exc) in _TAKEN:
+            if _code(exc) == "PreconditionFailed":
                 raise RunActive(f"another standardise process took over s3://{S3_BUCKET}/{LOCK} first") from exc
+            if _code(exc) in _TAKEN:                   # a write was in flight: look again
+                continue
             raise
         print(f"==> took over the lock of a killed run (last alive {since:%Y-%m-%d %H:%M} UTC)", flush=True)
         return etag
@@ -130,15 +147,21 @@ def _acquire(s3, owner, now):
 
 
 def _release(s3, etag):
-    """Remove the lock only while it is still this run's (a delete conditional on its ETag)."""
+    """Remove the lock only while it is still this run's (a delete conditional on its ETag); a 409 while it is still
+    ours is tried once more."""
     if etag is None:
         return
-    try:
-        s3.delete_object(Bucket=S3_BUCKET, Key=LOCK, IfMatch=etag)
-    except ClientError as exc:
-        if _code(exc) not in _TAKEN + _MISSING:
-            raise
-        print("==> the run lock is no longer this run's: left as it is", flush=True)
+    for _ in range(2):
+        try:
+            s3.delete_object(Bucket=S3_BUCKET, Key=LOCK, IfMatch=etag)
+            return
+        except ClientError as exc:
+            if _code(exc) not in _TAKEN + _MISSING:
+                raise
+            if _code(exc) in _MISSING or _lost(s3, etag, exc):
+                print("==> the run lock is no longer this run's: left as it is", flush=True)
+                return
+    print("==> the run lock could not be removed (writes in flight): it is taken over once stale", flush=True)
 
 
 # --- the month's budget -----------------------------------------------------------------------------------------------
@@ -176,8 +199,7 @@ def choices(s3, root):
     """{listing key: its choice record} under the clean tag's root."""
     keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=publish.chosen_prefix(root))
             for o in page.get("Contents", [])]
-    with ThreadPoolExecutor(publish.WORKERS) as pool:
-        records = list(pool.map(lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys))
+    records = publish.pool_map(publish.WORKERS, lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
     return {r["key"]: r for r in records}
 
 
@@ -204,14 +226,17 @@ def stop_on_signal(spend):
 
 def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     """The GPU round for `todo`, then the stores re-read: (problems, stopped). Problems: failed jobs, a round stopped at
-    the work window or stuck, listed photos left without a result; stopped: the budget cannot cover the round, or paid
-    work has ended (then nothing was submitted)."""
+    the work window or stuck, a round skipped (too little window left, or the budget left covers not one slice: the
+    hosted steps still judge what is finished, within their own reservations), listed photos left without a result.
+    stopped: paid work has ended (the window, a stop, a lost lock), so no step after it starts."""
     watermarked = {src: load_source(src).watermarked for src in todo}
     try:
         problems = [f"GPU job {name} failed: {why}"
                     for name, why in gpu.run_round(batch, sel.client, tag, todo, watermarked, run_id, deadline, spend)]
-    except (select.SpendCapReached, select.Halted) as exc:
+    except select.Halted as exc:
         return [f"GPU round {tag} not started: {exc}"], True
+    except (gpu.Skipped, select.SpendCapReached) as exc:
+        return [f"GPU round {tag} not started: {exc}"], False
     except TimeoutError as exc:                        # its jobs were stopped; what they finished stays
         problems = [f"GPU round {tag} stopped: {exc}"]
     sel.refresh()

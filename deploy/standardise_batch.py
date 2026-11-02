@@ -101,43 +101,89 @@ def wait_limit(n_slices):
     return C.RUN_MAX_WAIT_SECONDS * -(-n_slices // at_once)
 
 
+class Skipped(RuntimeError):
+    """A round not started: too little of the work window is left for one to be worth its boot."""
+
+
 def gpu_usd(seconds):
-    """What this many seconds of one GPU job cost (its vCPUs at GPU_VCPU_HOUR_USD)."""
+    """What this many seconds of GPU job time cost (a job's vCPUs at GPU_VCPU_HOUR_USD)."""
     return seconds / 3600 * C.GPU_JOB_VCPUS * C.GPU_VCPU_HOUR_USD
 
 
+def _slice_seconds(window):
+    """The most one slice can use: its retouch job then its standardise job, each within its timeout, never past the
+    window, plus each job's allowance (boot, image pull, the pool's idle tail)."""
+    return min(C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, window) + 2 * C.GPU_JOB_ALLOWANCE_SECONDS
+
+
 def worst_seconds(n_slices, window):
-    """The most GPU-seconds a round of n slices can use: one GPU per slice at a time (its retouch job, then its
-    standardise job, each within its timeout), never past the work window, at most RUN_GPU_VCPUS worth at once."""
+    """The most GPU-seconds a round of n slices can use: one GPU per slice at a time, at most RUN_GPU_VCPUS worth at
+    once."""
     at_once = max(1, C.RUN_GPU_VCPUS // C.GPU_JOB_VCPUS)
-    return min(n_slices * min(C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, window), at_once * window)
+    return min(n_slices * _slice_seconds(window), at_once * (window + 2 * C.GPU_JOB_ALLOWANCE_SECONDS))
 
 
-def ran_usd(batch, ids, reserved, now=time.time):
-    """What the round's jobs cost: each one's running time (startedAt to stoppedAt, or to now for one still stopping).
-    The reserved price when Batch cannot say (counted high, never low)."""
+def fitting(n_slices, window, left):
+    """How many of the round's slices the budget left covers (their worst case): all, or as many whole slices as fit."""
+    if gpu_usd(worst_seconds(n_slices, window)) <= left:
+        return n_slices
+    return max(0, min(n_slices, int(left // gpu_usd(_slice_seconds(window)))))
+
+
+def _first(plan):
+    """{source: shas} of the slices in `plan`, so the round's own slicing gives back exactly these."""
+    todo = {}
+    for src, _, shas in plan:
+        todo.setdefault(src, []).extend(shas)
+    return todo
+
+
+def _jobs(batch, ids):
+    return [j for i in range(0, len(ids), 100) for j in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]]
+
+
+def stopped_jobs(batch, ids, sleep=time.sleep):
+    """The round's jobs once they have all ended (a stopped job takes a moment), asked every STOP_POLL_SECONDS for at
+    most STOP_WAIT_SECONDS; then as they are."""
+    for _ in range(C.STOP_WAIT_SECONDS // C.STOP_POLL_SECONDS):
+        jobs = _jobs(batch, ids)
+        if all(j["status"] in _DONE for j in jobs):
+            return jobs
+        sleep(C.STOP_POLL_SECONDS)
+    return _jobs(batch, ids)
+
+
+def ran_usd(batch, ids, reserved, now=time.time, sleep=time.sleep):
+    """What the round's jobs cost: each one's running time (startedAt to stoppedAt, or to now for one still not stopped),
+    plus each job's allowance. The reserved price when Batch cannot say (counted high, never low)."""
     try:
-        jobs = [j for i in range(0, len(ids), 100) for j in batch.describe_jobs(jobs=ids[i:i + 100])["jobs"]]
+        jobs = stopped_jobs(batch, ids, sleep)
     except (BotoCoreError, ClientError) as exc:
         print(f"   WARNING: GPU job times unreadable ({exc}); the round counts its reserved ${reserved:.2f}", flush=True)
         return reserved
     ran_ms = sum((j["stoppedAt"] if j.get("stoppedAt") is not None else now() * 1000) - j["startedAt"]
                  for j in jobs if j.get("startedAt") is not None)
-    return gpu_usd(ran_ms / 1000)
+    return gpu_usd(ran_ms / 1000 + len(jobs) * C.GPU_JOB_ALLOWANCE_SECONDS)
 
 
-def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=time.monotonic, now=time.time):
+def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=time.monotonic, now=time.time,
+              sleep=time.sleep):
     """Every listed photo through retouch and standardise under `tag`: [(job name, why)] of failed jobs. No jobs, no
-    ceiling change, when nothing is listed. The round's worst case is reserved from the month's budget first
-    (SpendCapReached: nothing is submitted) and settled to what its jobs ran, however the round ends. It waits until the
-    process's deadline (its work window, on `clock`) at most: then its jobs are stopped (TimeoutError), every photo they
-    finished stays, the next run goes on."""
+    ceiling change, when nothing is listed. Skipped when less than GPU_MIN_WINDOW_SECONDS of the work window (on `clock`)
+    is left. The round is sized to the month's budget left: as many whole slices as their worst case fits, the rest
+    waits (SpendCapReached when not one fits: nothing is submitted); that worst case is reserved first and settled to
+    what the jobs ran, however the round ends. It waits until the deadline at most: then its jobs are stopped
+    (TimeoutError), every photo they finished stays, the next run goes on."""
     if not any(todo.values()):
         return []
-    queue, jobdef = target()
     window = max(0.0, deadline - clock())
+    if window < C.GPU_MIN_WINDOW_SECONDS:
+        raise Skipped(f"only {window:.0f}s of the work window left (a round needs {C.GPU_MIN_WINDOW_SECONDS}s)")
+    queue, jobdef = target()
+    plan = slices(todo)
+    todo = _first(plan[:max(1, fitting(len(plan), window, spend.left()))])
     reserved = gpu_usd(worst_seconds(len(slices(todo)), window))
-    spend.reserve(reserved)
+    spend.reserve(reserved)                            # not even one slice fits: SpendCapReached, nothing submitted
     ids = []
     try:
         with raised(batch, pool(batch, queue)):
@@ -148,7 +194,7 @@ def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=
                 stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")
                 raise
     finally:
-        spend.settle(reserved, ran_usd(batch, ids, reserved, now))
+        spend.settle(reserved, ran_usd(batch, ids, reserved, now, sleep))
 
 
 def _listed(batch, queue):

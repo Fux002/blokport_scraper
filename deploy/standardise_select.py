@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
-from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, read_exclude
+from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, pool_map, read_exclude
 from deploy.standardise_source import round_prefix
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -47,42 +47,63 @@ class Spend:
     (others(), summed again at every settle, so a run written since is never missed), then this run's. A price is
     reserved before the call or round and settled to what it cost, so parallel calls can never together pass the
     budget. save(total) keeps this run's total after every change, a reserve counting as spent until it is settled, so
-    a run that dies leaves an upper bound of what it spent, never too little."""
+    a run that dies leaves an upper bound of what it spent, never too little. Storage is never asked while the spend's
+    lock is held (a slow write never blocks the other calls), and a stop halts it without taking that lock (a SIGTERM
+    may arrive while it is held)."""
 
     def __init__(self, budget, others=None, save=None):
         self.budget, self.others, self.save = budget, others, save
         self.before = others() if others else 0.0
-        self.spent, self.reserved, self.capped, self.halted = 0.0, 0.0, False, None
-        self._lock = threading.Lock()
+        self.spent, self.reserved, self.capped = 0.0, 0.0, False
+        self._halt, self._why = threading.Event(), ""
+        self._lock, self._io = threading.Lock(), threading.Lock()
+        self._version = self._saved = 0               # changes made / the change the stored total is of
 
     def halt(self, why="the run is stopping"):
         """No call may start any more (a stop, the end of the work window, a lost lock): listings already running stop at
         their next call."""
+        self._why = why
+        self._halt.set()
+
+    def left(self):
+        """What the month's budget still covers, reserves counted."""
         with self._lock:
-            self.halted = why
+            return self.budget - self.before - self.spent - self.reserved
 
     def reserve(self, usd):
         with self._lock:
-            if self.halted:
-                raise Halted(self.halted)
+            if self._halt.is_set():
+                raise Halted(self._why)
             if self.before + self.spent + self.reserved + usd > self.budget:
                 self.capped = True
-                raise SpendCapReached(f"hosted spend would pass the month's budget of ${self.budget:.2f} "
+                raise SpendCapReached(f"spend would pass the month's budget of ${self.budget:.2f} "
                                       f"(spent ${self.before + self.spent:.2f})")
             self.reserved += usd
-            self._keep()
+            self._version += 1
+        self._keep()
 
     def settle(self, reserved, cost):
         with self._lock:
             self.reserved -= reserved
             self.spent += cost
-            if self.others:
-                self.before = self.others()
-            self._keep()
+            self._version += 1
+        if self.others:
+            before = self.others()
+            with self._lock:
+                self.before = before
+        self._keep()
 
     def _keep(self):
-        if self.save is not None:
-            self.save(self.spent + self.reserved)
+        """Store this run's total, outside the spend's lock: one write at a time, and only a total newer than the one
+        stored, so overlapping calls can never leave an older total last."""
+        if self.save is None:
+            return
+        with self._io:
+            with self._lock:
+                total, version = self.spent + self.reserved, self._version
+            if version > self._saved:
+                self.save(total)
+                self._saved = version
 
 
 class Round:
@@ -391,8 +412,7 @@ def report(sel):
             return "tracked", {"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
                                "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude)}
         return "pending", l["key"]
-    with ThreadPoolExecutor(C.SELECT_WORKERS) as pool:          # a few S3 reads per listing, for every listing
-        outcomes = list(pool.map(one, sel.listings))            # in the listings' order
+    outcomes = pool_map(C.SELECT_WORKERS, one, sel.listings)   # a few S3 reads per listing, in the listings' order
     chosen, tracked, pending = ([item for kind, item in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])

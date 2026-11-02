@@ -42,9 +42,13 @@ higher JUDGE_MAX, a new clean instruction version) reaches it by itself.
 ## Trigger
 
 The process is a stage of the config runner (`photos`), chained only after a successful full produce (`all`, the
-owner's Run) when `SCRAPER_STANDARDISE_AUTO` is on. Never after `republish` or `catalog`: Blokport's Publish button runs
-a republish and waits on it, so it must never find the run slot taken by us. It can also be started on its own:
-`POST /config/v1/run {"stage": "photos"}`. Nothing starts it otherwise (no schedule).
+owner's Run) when `SCRAPER_STANDARDISE_AUTO` is on, never after `republish` or `catalog`. It can also be started on its
+own: `POST /config/v1/run {"stage": "photos"}`. Nothing starts it otherwise (no schedule).
+
+The owner's Publish is never blocked: any other stage asked for while a photos run holds the run slot (Blokport's
+Publish button runs a republish) stops the photos run cleanly (the SIGTERM path below) and starts at once; the request
+gets its 202 straight away. The photos run ends `stopped`; everything it stored is kept and the next photos run goes on
+from there. A photos run asked for while another run holds the slot is refused (409), as before.
 
 Why the runner, not a Batch or ECS task the produce submits: it needs the product sheet the produce just published and
 must not overlap a produce, which the runner's single run slot gives; the relink writes the ledger, which only the svc
@@ -57,7 +61,8 @@ AND a produce has linked it. The relink runs only when the published folder chan
 ## Run record
 
 A photos run ends `succeeded` whenever it went through, also with pending listings, problems or the budget reached;
-`failed` only on a real error (not configured, another process holding the lock, a crash, a failed relink). Its record
+`stopped` when it gave way to another stage; `failed` only on a real error (not configured, another process holding the
+lock, a crash, a failed relink). Its record
 (`GET /config/v1/run`, stage `photos`) carries the summary as `counts`: listings, chosen, review, pending, problems,
 published changes, run and month spend, budget, budget_reached, relinked. The same summary, with the pending listings
 and the problems, is kept in `<clean root>/summary.json`.
@@ -66,13 +71,17 @@ and the problems, is kept in `<clean root>/summary.json`.
 
 One budget per calendar month (UTC) per environment, `SCRAPER_STANDARDISE_BUDGET_USD`, for everything the process pays:
 hosted calls (judge as billed, edits at list price) and GPU time (each job's running time from Batch's start and stop
-times, at `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` per vCPU-hour, default 0.147: g4dn.xlarge on demand; an instance's boot
-before its first job is not counted). No default budget: unset, the process refuses to start.
+times, read once the jobs have actually stopped, plus `GPU_JOB_ALLOWANCE_SECONDS` (12 min) per job for the boot, the image
+pull and the pool's idle tail, at `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` per vCPU-hour, default 0.147: g4dn.xlarge on
+demand). No default budget: unset, the process refuses to start.
 
 - Each run keeps its own spend in `<env>/standardise-test/spend/<YYYY-MM>/<run id>.json`, so no run can overwrite
   another's. The month's other runs are summed at start and again at every settle.
 - A price is reserved before a call or GPU round and settled to what it cost. A GPU round reserves its worst case from
-  the slice plan (one GPU per slice at a time, never past the work window, at most the pool's ceiling at once).
+  the slice plan (one GPU per slice at a time, never past the work window, at most the pool's ceiling at once, plus
+  each job's allowance). A round is sized to the budget left: as many whole slices as fit; if not even one fits, the
+  GPU work waits and the hosted steps still judge the photos already finished, within their own reservations.
+- Storage is never asked while the spend's lock is held, and a stop halts paid work without taking that lock.
 - A call that fails after it may have been sent, an answer without its cost, and a GPU round whose job times cannot be
   read all count at the reserved price, never as free. A reserve counts as spent in the file until it is settled.
 - A call or round that would take the month past the budget is not made: paid work stops, the run still reports,
@@ -81,12 +90,14 @@ before its first job is not counted). No default budget: unset, the process refu
 ## Timing and stopping
 
 - Work window `SCRAPER_STANDARDISE_WORK_SECONDS` (default 2 h): after it no hosted call and no GPU round starts and a
-  running round's jobs are stopped. Report, publish and relink get `FINISH_SECONDS` (1.5 h). The process refuses to
+  running round's jobs are stopped. No GPU round starts with less than `GPU_MIN_WINDOW_SECONDS` (30 min) of it left. Report, publish and relink get `FINISH_SECONDS` (1.5 h). The process refuses to
   start unless both fit under the runner's ceiling (`SCRAPER_RUN_TIMEOUT_SECONDS`, 4 h on the svc).
 - A stop of the svc (a roll): the config server passes SIGTERM to the running run and waits up to
   `SCRAPER_RUN_STOP_GRACE_SECONDS` (100 s) inside the container's `stopTimeout` (120 s). The photo process then stops its
-  GPU jobs, sets the pool's ceiling back, settles its spend and releases its lock. Hosted calls already in flight
-  finish or are killed with the task; their reserves stay counted.
+  GPU jobs (waiting up to 60 s for them to stop, so their real times are counted), sets the pool's ceiling back,
+  settles its spend and releases its lock; the work left in its pools is cancelled. A run still going after the grace
+  is killed. Hosted calls already in flight finish or end with the process; their reserves stay counted. No follow-up
+  run starts while the server stops, and the run record is finished before the server's last save.
 - The lock is taken over only when it has not been rewritten for the runner's ceiling (its process was killed). A lock
   taken over while a run works stops that run's paid calls; a run removes the lock only while it is still its own.
 
@@ -121,7 +132,7 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 | setting | env | dev / prod |
 |---|---|---|
 | AUTO | `SCRAPER_STANDARDISE_AUTO` | off / off (owner's call) |
-| BUDGET_USD | `SCRAPER_STANDARDISE_BUDGET_USD` | unset / unset (owner's number, required) |
+| BUDGET_USD | `SCRAPER_STANDARDISE_BUDGET_USD` | 20 / 100 (owner, 2026-11-02; hosted + GPU, required) |
 | RUN_GPU_VCPUS | `SCRAPER_STANDARDISE_GPU_VCPUS` | 32 / 128 |
 | GPU_VCPU_HOUR_USD | `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` | 0.147 (default) |
 | WORK_SECONDS | `SCRAPER_STANDARDISE_WORK_SECONDS` | 7200 (default) |
@@ -155,7 +166,8 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
    GPU 1, memory 15000, job and execution roles, environment. Apply (Terraform registers a new revision of the same
    name), then deregister the hand-registered revisions. The hand scripts (`register_prod_jobdef.py`,
    `with_prod_env.sh`, `prod_run.sh`, the laptop `prod_review.py`) are retired.
-3. Set the budget and switch AUTO on, dev first, then prod after the owner's review of a dev run.
+3. The budgets are in the brand tfvars (dev 20 USD, prod 100 USD a month). Switch AUTO on in dev, verify a dev run, then
+   prod after the owner's review of it.
 
 TerminateJob scope: the svc task role may stop jobs `arn:aws:batch:<region>:<account>:job/*`. Batch has no condition on
 a job's name; scoping to the process's own jobs would need tags on submit (`batch:TagResource`) and an

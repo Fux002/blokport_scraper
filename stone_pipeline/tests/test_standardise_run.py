@@ -105,7 +105,8 @@ def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_ba
     batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100))
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100),
+                      sleep=lambda s: None)
     assert stopped == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
 
 
@@ -118,7 +119,8 @@ def test_a_submit_that_fails_part_way_still_stops_the_jobs_it_submitted(monkeypa
     submit_job = batch.submit_job
     batch.submit_job = lambda **job: submit_job(**job) if len(batch.submitted) < 3 else (_ for _ in ()).throw(RuntimeError("throttled"))
     with pytest.raises(RuntimeError):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100))
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100),
+                      sleep=lambda s: None)
     assert stopped == ["job1", "job2", "job3"]
 
 
@@ -267,14 +269,34 @@ def test_a_gpu_round_stopped_at_the_window_is_a_problem_and_the_run_goes_on(monk
         ["GPU round v9 stopped: GPU jobs not done after 600s"], False)
 
 
-def test_a_gpu_round_the_budget_cannot_cover_stops_the_run_s_steps(monkeypatch):
+def test_a_gpu_round_the_budget_cannot_cover_is_skipped_and_the_hosted_steps_go_on(monkeypatch):
     def capped(*a):
         raise sel_mod.SpendCapReached("hosted spend would pass the month's budget")
     monkeypatch.setattr(runner.gpu, "run_round", capped)
     monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     s = _selection([_listing(A)])
     problems, stopped = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10))
-    assert stopped and problems == ["GPU round v9 not started: hosted spend would pass the month's budget"]
+    assert not stopped and problems == ["GPU round v9 not started: hosted spend would pass the month's budget"]
+
+
+def test_a_gpu_round_with_too_little_window_left_is_skipped_and_the_hosted_steps_go_on(monkeypatch):
+    monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
+    monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
+    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
+    batch = _Batch()
+    s = _selection([_listing(A)])
+    import time
+    problems, stopped = runner.gpu_round(batch, s, "v9", {"sentas": [A]}, "R1", time.monotonic() + C.GPU_MIN_WINDOW_SECONDS - 60,
+                                         sel_mod.Spend(100))
+    assert not stopped and batch.submitted == [] and problems[0].startswith("GPU round v9 not started: only ")
+
+
+def test_a_gpu_round_that_ended_paid_work_stops_the_run_s_steps(monkeypatch):
+    monkeypatch.setattr(runner.gpu, "run_round", lambda *a: (_ for _ in ()).throw(sel_mod.Halted("the work window ended")))
+    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
+    problems, stopped = runner.gpu_round(_Batch(), _selection([_listing(A)]), "v9", {"sentas": [A]}, "R1", math.inf,
+                                         sel_mod.Spend(10))
+    assert stopped
 
 
 def test_a_gpu_round_waits_no_longer_than_the_work_window(monkeypatch):
@@ -282,8 +304,8 @@ def test_a_gpu_round_waits_no_longer_than_the_work_window(monkeypatch):
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
     limits = []
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: limits.append(limit) or [])
-    gpu.run_round(_Batch(), _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 1000, sel_mod.Spend(100), clock=lambda: 400)
-    assert limits == [600]
+    gpu.run_round(_Batch(), _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 4000, sel_mod.Spend(100), clock=lambda: 400)
+    assert limits == [3600]
 
 
 # --- the GPU's share of the month's budget ----------------------------------------------------------------------------
@@ -292,19 +314,20 @@ def _gpu_env(monkeypatch):
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
     monkeypatch.setattr(C, "GPU_VCPU_HOUR_USD", 0.25)
     monkeypatch.setattr(C, "GPU_JOB_VCPUS", 4)                                      # 1.00 USD per GPU-hour
+    monkeypatch.setattr(C, "GPU_JOB_ALLOWANCE_SECONDS", 720)                        # 0.20 USD per job
 
 
-def test_a_round_reserves_its_worst_case_one_gpu_per_slice_within_the_window(monkeypatch):
+def test_a_round_reserves_its_worst_case_one_gpu_per_slice_within_the_window_plus_each_job_s_allowance(monkeypatch):
     _gpu_env(monkeypatch)
     monkeypatch.setattr(C, "RUN_GPU_VCPUS", 8)                                      # 2 GPUs at once
-    longest = C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT
-    assert gpu.worst_seconds(1, 10 * longest) == longest                           # one slice: its two jobs, in turn
-    assert gpu.worst_seconds(1, 600) == 600                                        # never past the window
-    assert gpu.worst_seconds(5, 600) == 2 * 600                                    # at most 2 GPUs at once
+    longest, extra = C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, 2 * 720              # a slice's two jobs
+    assert gpu.worst_seconds(1, 10 * longest) == longest + extra                   # one slice: its two jobs, in turn
+    assert gpu.worst_seconds(1, 600) == 600 + extra                                # never past the window
+    assert gpu.worst_seconds(5, 600) == 2 * (600 + extra)                          # at most 2 GPUs at once
     assert gpu.gpu_usd(3600) == pytest.approx(1.0)
 
 
-def test_a_round_settles_what_its_jobs_ran_from_their_start_and_stop(monkeypatch):
+def test_a_round_settles_what_its_jobs_ran_plus_each_job_s_allowance(monkeypatch):
     _gpu_env(monkeypatch)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: [])
     batch = _Batch()
@@ -312,29 +335,62 @@ def test_a_round_settles_what_its_jobs_ran_from_their_start_and_stop(monkeypatch
     kept = []
     spend = sel_mod.Spend(100, save=kept.append)
     gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
-    assert kept[0] == pytest.approx(2.0)                                           # reserved: one slice, the 2 h window
-    assert spend.spent == pytest.approx(1.5) and spend.reserved == 0               # ran 0.5 h + 1 h
+    assert kept[0] == pytest.approx(2.4)                                           # reserved: the 2 h window + 2 allowances
+    assert spend.spent == pytest.approx(1.9) and spend.reserved == 0               # ran 0.5 h + 1 h, + 2 allowances
 
 
-def test_a_round_the_budget_cannot_cover_submits_nothing(monkeypatch):
+def test_a_round_is_sized_to_the_budget_left(monkeypatch):
     _gpu_env(monkeypatch)
-    batch = _Batch()
+    monkeypatch.setattr(C, "RUN_SLICE", 1)
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: [])
+    batch, kept = _Batch(), []
+    spend = sel_mod.Spend(5.0, save=kept.append)                                   # 2 slices of 2.40 fit, not 3
+    gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B, D]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
+    assert len(batch.submitted) == 4 and kept[0] == pytest.approx(4.8) and not spend.capped
+
+
+def test_a_round_the_budget_cannot_cover_even_one_slice_of_submits_nothing(monkeypatch):
+    _gpu_env(monkeypatch)
+    batch, spend = _Batch(), sel_mod.Spend(1.0)
     with pytest.raises(sel_mod.SpendCapReached):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, sel_mod.Spend(1.0), clock=lambda: 0)
-    assert batch.submitted == [] and batch.ceilings == []
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
+    assert batch.submitted == [] and batch.ceilings == [] and spend.capped
 
 
-def test_a_stopped_round_still_settles_counting_a_job_still_stopping_to_now(monkeypatch):
+def _stopping(batch, polls):
+    """describe_jobs answers in turn: job1 as given per poll, job2 never started."""
+    answers = iter(polls)
+
+    def describe(jobs):
+        job1 = next(answers)
+        return {"jobs": [{"jobId": "job1", "jobName": "job1", **job1}, {"jobId": "job2", "jobName": "job2", "status": "FAILED"}]}
+    batch.describe_jobs = describe
+    batch.terminate_job = lambda jobId, reason: None
+
+
+def test_a_stopped_round_reads_its_jobs_times_once_they_have_stopped(monkeypatch):
     _gpu_env(monkeypatch)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(SystemExit("stopped by signal 15")))
-    batch = _Batch()
-    batch.terminate_job = lambda jobId, reason: None
-    batch.times = {"job1": {"startedAt": 0}}                                       # running when it was told to stop
+    batch, slept = _Batch(), []
+    _stopping(batch, [{"status": "RUNNING", "startedAt": 0}, {"status": "FAILED", "startedAt": 0, "stoppedAt": 1_800_000}])
     spend = sel_mod.Spend(100)
     with pytest.raises(SystemExit):
         gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0,
-                      now=lambda: 900)
-    assert spend.spent == pytest.approx(0.25) and spend.reserved == 0
+                      now=lambda: 99_999, sleep=slept.append)
+    assert spend.spent == pytest.approx(0.9) and spend.reserved == 0               # 0.5 h + 2 allowances, not to now
+    assert slept == [C.STOP_POLL_SECONDS]
+
+
+def test_a_job_still_not_stopped_after_the_wait_counts_to_now(monkeypatch):
+    _gpu_env(monkeypatch)
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, limit: (_ for _ in ()).throw(SystemExit("stopped by signal 15")))
+    batch, tries = _Batch(), C.STOP_WAIT_SECONDS // C.STOP_POLL_SECONDS
+    _stopping(batch, [{"status": "RUNNING", "startedAt": 0}] * (tries + 1))
+    spend = sel_mod.Spend(100)
+    with pytest.raises(SystemExit):
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0,
+                      now=lambda: 900, sleep=lambda s: None)
+    assert spend.spent == pytest.approx(0.25 + 0.4)
 
 
 def test_when_batch_cannot_say_what_ran_the_round_counts_what_it_reserved(monkeypatch):
@@ -345,7 +401,7 @@ def test_when_batch_cannot_say_what_ran_the_round_counts_what_it_reserved(monkey
     batch.describe_jobs = lambda jobs: (_ for _ in ()).throw(ClientError({"Error": {"Code": "ServerException"}}, "DescribeJobs"))
     spend = sel_mod.Spend(100)
     gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
-    assert spend.spent == pytest.approx(2.0)
+    assert spend.spent == pytest.approx(2.4)
 
 
 # --- what an earlier run left -----------------------------------------------------------------------------------------
@@ -468,6 +524,26 @@ def test_a_lock_another_run_took_over_is_never_removed():
     with runner.exclusive(s3, {"run_id": "R1"}):
         s3.locks[runner.LOCK] = {"owner": "R9", "etag": '"theirs"', "at": NOW}
     assert s3.locks[runner.LOCK]["owner"] == "R9"
+
+
+def test_a_passing_storage_error_or_a_concurrent_write_never_loses_the_lock():
+    import time
+    from botocore.exceptions import ClientError, EndpointConnectionError
+    s3, lost = _LockS3(), []
+    put, hiccups = s3.put_object, iter([EndpointConnectionError(endpoint_url="https://s3"),
+                                        ClientError({"Error": {"Code": "ConditionalRequestConflict"}}, "PutObject")])
+
+    def flaky(**kw):
+        if "IfMatch" in kw:                                         # a heartbeat
+            failure = next(hiccups, None)
+            if failure is not None:
+                raise failure
+        return put(**kw)
+    s3.put_object = flaky
+    with runner.exclusive(s3, {"run_id": "R1"}, on_lost=lambda: lost.append(1), beat=0.02):
+        time.sleep(0.2)
+        assert s3.locks[runner.LOCK]["owner"] == "R1" and s3.writes >= 3            # refreshed on past both hiccups
+    assert lost == [] and runner.LOCK not in s3.keys                               # still ours, released
 
 
 def test_the_lock_is_refreshed_while_the_run_works_and_a_lost_lock_stops_its_paid_calls():

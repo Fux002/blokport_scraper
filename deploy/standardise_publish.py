@@ -123,6 +123,20 @@ def _publish_cutout(client, slab, slab_key, etag):
     return True
 
 
+def pool_map(workers, work, items):
+    """[work(item)] in the items' order, `workers` at a time. On any exception (a SIGTERM's SystemExit included) the
+    items not started are cancelled at once and the exception goes on, so a stopping run releases its lock within its
+    grace instead of finishing the whole list first."""
+    pool = ThreadPoolExecutor(workers)
+    try:
+        out = list(pool.map(work, items))
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return out
+
+
 class NoChoiceRecords(RuntimeError):
     """No listing has a choice record yet: publishing would empty the folder, so nothing is published or removed."""
 
@@ -132,8 +146,7 @@ def publish(client, root, say=print):
     "made_3d", "removed", "changed"}; changed = the folder is not what it was (a produce must link it again).
     NoChoiceRecords when there are none at all."""
     records = list(_objects(client, chosen_prefix(root)))
-    with ThreadPoolExecutor(WORKERS) as pool:
-        chosen = list(pool.map(lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records))
+    chosen = pool_map(WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records)
     if not chosen:
         raise NoChoiceRecords(f"no choice records under {chosen_prefix(root)}: nothing published or removed")
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
@@ -143,15 +156,13 @@ def publish(client, root, say=print):
                  for k, t in _objects(client, prefix).items()}
     fresh = unpublished(plan, made, published)
     gone = stale(published, [t for _, t in plan] + [k for s in todo for k in cutout_keys(s)])
-    with ThreadPoolExecutor(WORKERS) as pool:
-        stamps = dict(zip(todo, pool.map(lambda s: _stamp(client, s, published), todo)))
+    stamps = dict(zip(todo, pool_map(WORKERS, lambda s: _stamp(client, s, published), todo)))
     remake = outdated(todo, made, published, stamps)
-    with ThreadPoolExecutor(WORKERS) as pool:
-        list(pool.map(lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
-                                                    ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh))
-        list(pool.map(lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone))
-    with ThreadPoolExecutor(C.CUTOUT_WORKERS) as pool:         # each holds a full-size slab in memory
-        made_3d = sum(pool.map(lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
+    pool_map(WORKERS, lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
+                                                    ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh)
+    pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
+    # each cut-out holds a full-size slab in memory
+    made_3d = sum(pool_map(C.CUTOUT_WORKERS, lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
     say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
         f"made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)} files no longer chosen")
     return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone),

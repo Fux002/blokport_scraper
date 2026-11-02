@@ -364,6 +364,65 @@ def test_a_halted_spend_lets_no_call_start_and_says_why():
         spend.reserve(0.01)
 
 
+def test_a_stop_can_halt_the_spend_while_its_lock_is_held():
+    import threading
+    spend = sel.Spend(10)
+    with spend._lock:                                       # a signal arriving while a reserve holds the lock
+        t = threading.Thread(target=spend.halt, args=("stopped by signal 15",))
+        t.start()
+        t.join(timeout=2)
+        assert not t.is_alive()
+    with pytest.raises(sel.Halted, match="signal 15"):
+        spend.reserve(0.01)
+
+
+def test_the_spend_is_saved_and_the_month_summed_outside_its_lock():
+    held = []
+
+    def free():
+        got = spend._lock.acquire(blocking=False)           # nobody holds it while S3 is asked
+        if got:
+            spend._lock.release()
+        held.append(not got)
+        return 0.0
+    spend = sel.Spend(10, save=lambda total: free())
+    spend.others = free
+    spend.reserve(0.14)
+    spend.settle(0.14, 0.02)
+    assert held and not any(held)
+
+
+def test_the_last_total_saved_is_the_latest_even_when_saves_overlap():
+    import threading
+    saved, gate = [], threading.Event()
+
+    def save(total):
+        if not saved:
+            gate.wait(0.5)                                  # the first save is slow
+        saved.append(total)
+    spend = sel.Spend(10, save=save)
+    first = threading.Thread(target=spend.reserve, args=(1.0,))
+    first.start()
+    spend.reserve(2.0)
+    gate.set()
+    first.join()
+    assert saved[-1] == pytest.approx(3.0)
+
+
+def test_a_stop_cancels_the_pool_s_work_not_yet_started():
+    from deploy import standardise_publish as pub
+    done = []
+
+    def work(i):
+        done.append(i)
+        if i == 0:
+            raise SystemExit("stopped by signal 15")
+        return i
+    with pytest.raises(SystemExit):
+        pub.pool_map(1, work, range(50))
+    assert len(done) < 50
+
+
 def _judged_setup(monkeypatch, answer):
     s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     monkeypatch.setattr(sel.judge, "judge", answer)

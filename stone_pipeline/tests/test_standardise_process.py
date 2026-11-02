@@ -407,6 +407,7 @@ def test_the_photo_process_s_stdout_is_its_report_and_its_summary_comes_back_in_
     monkeypatch.setattr(runner.threading, "Thread", lambda target, args, daemon: type("T", (), {"start": lambda self: None})())
     monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(runner, "_child", None)          # no watcher runs here to clear the launched child
+    monkeypatch.setattr(runner, "_watcher", None)
     rec = {"run_id": "r", "stage": "photos", "status": "queued"}
     runner._launch_local(rec)
     assert seen["stdout"] == subprocess.PIPE and seen["stderr"] == subprocess.STDOUT
@@ -437,15 +438,103 @@ class _Child:
 def test_a_stopping_server_passes_sigterm_to_the_running_child_and_waits_for_it(monkeypatch):
     child = _Child(ends=True)
     monkeypatch.setattr(runner, "_child", child)
+    monkeypatch.setattr(runner, "_watcher", None)
     runner.stop_current(grace=5)
     assert child.signals == ["TERM"] and child.waited == 5
 
 
-def test_a_child_that_does_not_end_in_time_is_left_to_the_task_s_kill(monkeypatch):
+def test_a_child_that_does_not_end_in_time_is_killed(monkeypatch):
     child = _Child(ends=False)
+    child.kill = lambda: child.signals.append("KILL")
     monkeypatch.setattr(runner, "_child", child)
+    monkeypatch.setattr(runner, "_watcher", None)
     runner.stop_current(grace=1)                                           # logged, never raised
-    assert child.signals == ["TERM"]
+    assert child.signals == ["TERM", "KILL"]
+
+
+def test_a_stopping_server_starts_no_follow_up_run(monkeypatch):
+    from stone_pipeline.config import settings
+    monkeypatch.setattr(settings.STANDARDISE, "AUTO", True)
+    monkeypatch.setattr(runner, "_stopping", True)
+    monkeypatch.setattr(runner, "start_run", lambda **kw: pytest.fail("a run started while the server stops"))
+    runner._follow_up({"run_id": "r", "stage": "all", "status": "succeeded"})
+
+
+class _Running:
+    """A photos process that runs until it gets SIGTERM, then cleans up and exits."""
+
+    def __init__(self):
+        import threading
+        self.stopped, self.signals, self.stderr = threading.Event(), [], None
+
+    @property
+    def stdout(self):
+        yield "==> standardise process R1\n"
+        self.stopped.wait(5)
+
+    def poll(self):
+        return -15 if self.stopped.is_set() else None
+
+    def terminate(self):
+        self.signals.append("TERM")
+        self.stopped.set()
+
+    def wait(self, timeout=None):
+        self.stopped.wait(timeout if timeout is not None else 5)
+        return -15
+
+    def kill(self):
+        self.signals.append("KILL")
+        self.stopped.set()
+
+
+def test_the_owner_s_publish_stops_a_photos_run_cleanly_and_runs_at_once(monkeypatch, tmp_path):
+    import time
+    for name in ("_stamp_last_run", "_persist_run", "_persist_diagnostics", "_evaluate_admission"):
+        monkeypatch.setattr(runner, name, lambda *a, **k: None)
+    monkeypatch.setattr(runner, "_capture_counts", lambda: None)
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(runner, "_resolve_sources", lambda requested: sorted(requested or ["polonine"]))
+    monkeypatch.setattr(runner, "_child", None)
+    monkeypatch.setattr(runner, "_watcher", None)
+    child = _Running()
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: child)
+    photos, code = runner.start_run(None, "photos")
+    assert code == 202
+    for _ in range(100):                                                            # the photos run is under way
+        if runner.get_run(photos["run_id"])["status"] == "running":
+            break
+        time.sleep(0.01)
+    time.sleep(0.01)                                # a Publish comes later (run ids are millisecond-precise)
+    launched = []
+    publish, code = runner.start_run(None, "republish", launch=lambda r: launched.append(r["run_id"]))
+    assert code == 202 and publish["stage"] == "republish"
+    try:
+        for _ in range(100):
+            if launched:
+                break
+            time.sleep(0.05)
+        assert child.signals == ["TERM"] and launched == [publish["run_id"]]       # the photos run ended first
+        record = runner.get_run(photos["run_id"])
+        assert record["status"] == "stopped" and "republish" in record["error"]
+    finally:
+        runner._runs[publish["run_id"]]["status"] = "succeeded"                     # free the slot for later tests
+
+
+def test_a_second_photos_run_or_a_produce_over_a_produce_is_still_refused(monkeypatch):
+    monkeypatch.setattr(runner, "_stamp_last_run", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "_resolve_sources", lambda requested: sorted(requested or ["polonine"]))
+    held = []
+    rec, code = runner.start_run(None, "photos", launch=lambda r: held.append(r))
+    try:
+        assert runner.start_run(None, "photos", launch=lambda r: pytest.fail("ran twice"))[1] == 409
+    finally:
+        held[0]["status"] = "succeeded"
+    rec, code = runner.start_run(None, "republish", launch=lambda r: held.append(r))
+    try:
+        assert runner.start_run(None, "all", launch=lambda r: pytest.fail("ran twice"))[1] == 409
+    finally:
+        held[1]["status"] = "succeeded"
 
 
 def test_the_server_s_sigterm_stops_the_run_before_its_last_config_save(monkeypatch):

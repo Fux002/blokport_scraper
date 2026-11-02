@@ -1049,6 +1049,13 @@ class STANDARDISE:
     # The GPU's share of the month's budget: a job's running time at this price per vCPU-hour (g4dn.xlarge on demand in
     # eu-west-1, about 0.59 USD/h for its 4 vCPUs). An instance's boot before its first job is not counted.
     GPU_VCPU_HOUR_USD = _env_float("SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD", 0.147)
+    # ... plus this much per job, for what its running time leaves out: the instance's boot, the image pull and the
+    # pool's idle tail before it scales in (about 12 min on g4dn with the standardise image).
+    GPU_JOB_ALLOWANCE_SECONDS = 720
+    GPU_MIN_WINDOW_SECONDS = 1800      # no GPU round starts with less of the work window left (a boot alone takes minutes)
+    # A stopped round's jobs are asked every STOP_POLL_SECONDS, at most STOP_WAIT_SECONDS, until they have stopped, so
+    # their real stop times are counted; inside the 100 s stop grace on a SIGTERM.
+    STOP_WAIT_SECONDS, STOP_POLL_SECONDS = 60, 5
     CUTOUT_WORKERS = 4                 # 3D cut-outs made at once by publish (full-size slabs in memory, on the 6 GB service)
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole single slab
