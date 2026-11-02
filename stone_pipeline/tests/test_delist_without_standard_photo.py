@@ -89,6 +89,15 @@ def test_hiding_a_product_already_at_stock_0_is_still_served_to_blokport(tmp_pat
         assert [r["payload"].get("reason") for r in ready(ledger, "inventory")] == ["delisted"]
 
 
+def test_a_hidden_product_its_supplier_drops_becomes_plain_dead_stock(tmp_path, rule_on):
+    cfg = load_source("sentas")
+    with Ledger.open(tmp_path / "l.db", env="development") as ledger:
+        _stocked(ledger, [_row("x", False)], cfg)
+        sku = emit._sku(_row("x", False), cfg)
+        populate_discontinued(ledger, [(sku, "h")])
+        assert ledger.get("inventory", "sku", sku)["reason"] is None and purge_discontinued(ledger)["external_ids"] == [sku]
+
+
 def test_the_dead_stock_purge_keeps_a_hidden_product_and_the_vendor_removal_still_removes_it(tmp_path, rule_on):
     cfg = load_source("sentas")
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
@@ -98,7 +107,7 @@ def test_the_dead_stock_purge_keeps_a_hidden_product_and_the_vendor_removal_stil
         assert purge_discontinued(ledger, reason="vendor_removed")["external_ids"] == [emit._sku(_row("hidden", False), cfg)]
 
 
-def test_a_bundle_never_redirects_to_a_lot_whose_pieces_are_all_hidden(tmp_path, rule_on):
+def test_a_bundle_never_redirects_to_a_lot_with_no_piece_on_sale(tmp_path, rule_on):
     cfg = load_source("sentas")
     piece = _row("2555-4", False)
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
@@ -108,8 +117,12 @@ def test_a_bundle_never_redirects_to_a_lot_whose_pieces_are_all_hidden(tmp_path,
         ledger.upsert("inventory", {"sku": "SEN-2555", "qty": 9, "last_synced_qty": 9, "updated_at": now}, pk=("sku",))
         _stocked(ledger, [piece], cfg)
         ledger.execute("UPDATE product SET lot_code = 'L1', medusa_id = 'm-p' WHERE sku = ?", (emit._sku(piece, cfg),))
+        now = now_iso()
+        ledger.upsert("product", {"sku": "SEN-2555-1", "source": "sen", "state": "synced", "lot_code": "L1",
+                                  "medusa_id": "m-sold", "created_at": now, "updated_at": now}, pk=("sku",))
+        ledger.upsert("inventory", {"sku": "SEN-2555-1", "qty": 0, "last_synced_qty": 0, "updated_at": now}, pk=("sku",))
         populate_discontinued(ledger, [("SEN-2555", "h")], replaced={"SEN-2555": "L1"})
-        assert "SEN-2555" not in [r["external_id"] for r in ready(ledger, "inventory")]
+        assert "SEN-2555" not in [r["external_id"] for r in ready(ledger, "inventory")]   # one hidden, one sold
         _stocked(ledger, [_row("2555-4", True)], cfg)                                   # its photo is published
         assert "SEN-2555" in [r["external_id"] for r in ready(ledger, "inventory")]
 

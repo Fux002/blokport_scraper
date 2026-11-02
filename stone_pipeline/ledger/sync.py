@@ -315,14 +315,15 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
 def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
     """Stock deltas to push: rows whose qty moved since the last sync, for products
     that are already synced (a product must exist in Medusa before its stock loads).
-    A bundle replaced by its lot waits until a piece of that lot exists in Medusa and is not
-    hidden, so the redirect Blokport derives from it never points at an empty lot page."""
+    A bundle replaced by its lot waits until a piece of that lot exists in Medusa and is on sale
+    (stock above 0: Blokport hides a sold or delisted piece), so the redirect Blokport derives from
+    it never points at an empty lot page."""
     rows = ledger.execute(
         "SELECT i.sku AS sku, i.qty AS qty, i.reason AS reason, i.replaced_by_lot_code AS lot_code "
         "FROM inventory i JOIN product p ON p.sku = i.sku "
         "WHERE p.state = 'synced' AND (i.last_synced_qty IS NULL OR i.last_synced_qty != i.qty) "
         "AND (i.reason IS NOT 'replaced_by_lot' OR EXISTS (SELECT 1 FROM product q LEFT JOIN inventory j ON j.sku = q.sku "
-        "     WHERE q.lot_code = i.replaced_by_lot_code AND q.medusa_id IS NOT NULL AND j.reason IS NOT 'delisted')) "
+        "     WHERE q.lot_code = i.replaced_by_lot_code AND q.medusa_id IS NOT NULL AND (j.qty IS NULL OR j.qty > 0))) "
         "ORDER BY i.sku" + _sub_limit(limit))
     out = []
     for r in rows:

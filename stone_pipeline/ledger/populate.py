@@ -366,7 +366,8 @@ def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
         )
         # keep last_synced_qty on update (ack-owned), so a still-discontinued product
         # is not re-served as a delist on every run (same fix as populate_inventory).
-        record = {"sku": sku, "qty": 0, "last_synced_qty": None, "updated_at": now}
+        # a plain drop is dead stock, whatever hid it before (a photo-hidden product its supplier drops is purgeable)
+        record = {"sku": sku, "qty": 0, "last_synced_qty": None, "reason": None, "updated_at": now}
         if sku in replaced:
             record.update(reason="replaced_by_lot", replaced_by_lot_code=replaced[sku])
         ledger.upsert("inventory", record, pk=("sku",), keep_on_update=("last_synced_qty",))
