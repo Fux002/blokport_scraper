@@ -81,6 +81,7 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
         thumbnail_key=p["thumbnail_key"],
         oriented_image_keys=json.loads(p["oriented_image_keys"] or "[]"),
         product_image_keys=json.loads(p["product_image_keys"] or "[]"),
+        model_3d_key=p["model_3d_key"],
         company_id=p["company_id"], sales_channel_id=p["sales_channel_id"],
         port_ids=json.loads(p["ports"] or "[]"),
         visibility=p["visibility"], discountable=p["discountable"],

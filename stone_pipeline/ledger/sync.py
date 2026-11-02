@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 
 from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core import logfmt
+from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import Ledger, now_iso
 
 log = logfmt.get_logger("ledger.sync")
@@ -303,6 +304,10 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             "thumbnail": p["thumbnail_key"] or "",
             "oriented_images": json.loads(p["oriented_image_keys"] or "[]"),
             "image_urls": json.loads(p["product_image_keys"] or "[]"),
+            # The 3D slab (the "Slab 3D on Blokport" contract): the lead slab's cut-out and its outline, ingestion
+            # sources like the images; null when the product has none (an open book, a close-up, a block or tile).
+            "model_3d": ({"cutout": p["model_3d_key"], "meta": imagestore.cutout_meta_url(p["model_3d_key"])}
+                         if p["model_3d_key"] else None),
         },
     })
 

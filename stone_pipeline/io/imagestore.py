@@ -12,6 +12,7 @@ Layout (under the env segment, e.g. dev/):
     products/improved/<src>/<hash>.jpg      the TREATED image (enhance + upscale + compress; de-wm)
     products/standard/<view>/<src>/<hash>.jpg  a STANDARDISED image of that photo (deploy.standardise_publish):
                                             view = main (showroom), white, studio (side view), close
+    products/standard/cutout/<src>/<hash>.webp|.json  the 3D slab of that photo: the cut-out and its outline
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ DISCARDED_SUBDIR = "discarded"               # non-stone images the classifier r
 ENHANCED_SUBDIR = "enhanced"                 # per-image "done" markers the GPU reprocess writes (see below)
 STANDARD_SUBDIR = "standard"                 # the standardised photos, one folder per view
 STANDARD_VIEWS = ("main", "white", "studio", "close")
+CUTOUT_SUBDIR = "cutout"                     # under standard/: the 3D slab files, beside the views
 
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
@@ -88,6 +90,20 @@ def standard_prefix(view: str) -> str:
 def standard_key(source: str, sha256: str, view: str) -> str:
     """A standardised view of one photo. The view is a folder, so the key still ends <sha>.<ext> like every image key."""
     return f"{standard_prefix(view)}{source}/{sha256}.jpg"
+
+
+def cutout_prefix() -> str:
+    return standard_prefix(CUTOUT_SUBDIR)
+
+
+def cutout_key(source: str, sha256: str, ext: str) -> str:
+    """One of the two 3D slab files of a photo: ext = webp (the cut-out) or json (its outline)."""
+    return f"{cutout_prefix()}{source}/{sha256}.{ext}"
+
+
+def cutout_meta_url(cutout_url: str) -> str:
+    """The outline file beside a cut-out: same name, .json."""
+    return cutout_url[:-len(".webp")] + ".json"
 
 
 def sha_from_url(url: str) -> Optional[str]:

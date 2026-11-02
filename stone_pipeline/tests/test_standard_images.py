@@ -62,7 +62,7 @@ def test_only_the_chosen_photos_are_published_each_with_the_views_its_run_made()
 def test_a_published_view_no_longer_chosen_is_removed():
     from deploy import standardise_publish as pub
     keep, old = imagestore.standard_key("sentas", A, "main"), imagestore.standard_key("sentas", B, "main")
-    assert pub.stale([keep, old], [("run/a.main.jpg", keep)]) == [old]
+    assert pub.stale([keep, old], [keep]) == [old]
 
 
 class _Bucket:
