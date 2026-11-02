@@ -291,6 +291,13 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
     return n
 
 
+def ledger_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> list[CanonicalRow]:
+    """The rows whose product the ledger already holds, in input order: the ones a stock-only run may move
+    the stock of (the inventory row references the product)."""
+    held = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
+    return [r for r in rows if _sku(r, cfg) in held]
+
+
 def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
     """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field).
     `last_synced_qty` is left null, so a freshly populated row is a delta to serve

@@ -249,8 +249,9 @@ def run_source(
 ) -> Manifest:
     # inventory_only: a lightweight stock refresh for EXISTING products. Runs the same scrape ->
     # match -> classify path, then emits ONLY inventory_update.csv (Variant Sku + Inventory
-    # Quantity). Skips the image stage and the product-import/canonical writes entirely, so it
-    # never re-imports products or regenerates images. See stone_pipeline.inventory.
+    # Quantity). Skips the image stage and the product-import/canonical writes entirely, and records
+    # only stock in the ledger, so it never re-imports products or regenerates images. See
+    # stone_pipeline.inventory.
     adapter: AdapterBase = adapter_registry.REGISTRY.get(source)
     if adapter is None:
         raise SystemExit(
@@ -608,7 +609,7 @@ def run_source(
     ledger_failed = False
     if writethrough.enabled():
         if not writethrough.record_source(validation.emit, tuple(discontinued), source_cfg,
-                                          replaced={sku: code for sku, (code, _) in replaced.items()}):
+                                          inventory_only=inventory_only, replaced={sku: code for sku, (code, _) in replaced.items()}):
             # the ledger is the live sync source; a failed write-through means Medusa will not receive this
             # source until a successful re-run. Surface it on the run and FAIL it (below, once the CSVs,
             # diagnostics and steps are written so the operator can read why): run_all then omits this

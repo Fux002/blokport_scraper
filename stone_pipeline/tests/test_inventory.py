@@ -74,6 +74,20 @@ def test_inventory_only_run_skips_images_products_and_canonical(tmp_path, scrape
     assert (run_dir / "diagnostics" / "manifest.json").exists()  # but it did run
 
 
+def test_inventory_only_run_records_the_ledger_in_stock_only_mode(tmp_path, scrape_data_dir, monkeypatch):
+    # the stock refresh skips the image stage, so its rows carry no photos: the ledger write must know it is a
+    # stock-only run, or it would rewrite every product without its photos and 3D.
+    from stone_pipeline.ledger import writethrough
+    monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
+    monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    modes: list = []
+    monkeypatch.setattr(writethrough, "record_source",
+                        lambda *a, **k: (modes.append(k.get("inventory_only")), True)[1])
+    run_source("marenostone", inventory_only=True, outputs_dir=tmp_path, state_dir=tmp_path, data_dir=scrape_data_dir,
+               known_products_path=_known_products_export(tmp_path))
+    assert modes == [True]
+
+
 def test_inventory_only_aborts_loud_when_the_export_is_missing(tmp_path, scrape_data_dir, caplog):
     # F9: no Medusa export => no delta can be computed. A silent '0 changed' would mask a failed export
     # fetch and drop real stock moves, so the refresh must fail loud instead.

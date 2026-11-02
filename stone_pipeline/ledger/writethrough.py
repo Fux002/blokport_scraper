@@ -6,7 +6,8 @@ the CSVs are written, so the ledger is a shadow mirror and the live CSV flow is
 unchanged. A ledger error is caught and logged, never failing the run.
 
 A run records its emitted products, the changed-stock inventory delta, and the
-discontinued delist. The id foundation plus the known product set are seeded on
+discontinued delist; a stock-only run records the stock and the delist but never a
+product (record_source). The id foundation plus the known product set are seeded on
 first use, so inventory and discontinued FKs resolve even for products not in this
 run's emit. The inventory and discontinued lanes are dormant until products_export
 exists (no known products to diff against). No em dashes (design principle 2).
@@ -67,13 +68,19 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
 
 
 def record_source(emit_rows: Sequence[CanonicalRow],
-                  discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *,
-                  replaced: dict[str, str] | None = None, path: str | Path | None = None) -> None:
+                  discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, inventory_only: bool,
+                  replaced: dict[str, str] | None = None, path: str | Path | None = None) -> bool:
     """Record one source's emitted products, their stock, and the discontinued delist into the ledger.
     No-op (returns True) when the flag is off. Never RAISES, but returns False if the write failed so the
     caller can surface it -- the ledger is the live sync source, so a swallowed failure would silently drop
-    a catalog/stock change. Recorded the same in full and inventory-only runs: the emitted rows are valid
-    products in both. `replaced` (sku -> lot_code): discontinued bundles that were replaced by their lot.
+    a catalog/stock change. `replaced` (sku -> lot_code): discontinued bundles that were replaced by their lot.
+
+    `inventory_only` (the stock-only refresh) records stock only. That run skips the image stage, so its
+    rows carry no photos, gallery or 3D: written as products they would strip every product's images and
+    re-serve it without them. So it never writes a product row; it moves the stock of the products the
+    ledger already holds, and leaves a product new to the ledger (and its stock) to the full run that
+    creates it with its images. The delist and the withdrawal of unsent products run the same in both modes.
+    The mode is required, so no caller can record a stock-only run as a full one by omission.
 
     Inventory is seeded from the FULL emit set (every product's current stock), not a
     pre-computed delta. The ledger tracks `last_synced_qty` per sku, so it derives the
@@ -84,13 +91,19 @@ def record_source(emit_rows: Sequence[CanonicalRow],
         return True
     try:
         with open_ledger(path) as ledger:
-            n_products = populate.populate_products(ledger, emit_rows, cfg)
-            n_stock = populate.populate_inventory(ledger, emit_rows, cfg)
+            if inventory_only:
+                n_products = 0
+                stock_rows = populate.ledger_products(ledger, emit_rows, cfg)
+            else:
+                n_products = populate.populate_products(ledger, emit_rows, cfg)
+                stock_rows = emit_rows
+            n_stock = populate.populate_inventory(ledger, stock_rows, cfg)
             n_withdrawn = populate.withdraw_unsent(ledger, emit_rows, cfg)
             n_gone = populate.populate_discontinued(ledger, discontinued, replaced)
         log.info("ledger write-through recorded source", extra={"extra_fields": {
-            "source": cfg.source_code, "products": n_products,
-            "inventory": n_stock, "withdrawn_unsent": n_withdrawn, "discontinued": n_gone}})
+            "source": cfg.source_code, "inventory_only": inventory_only, "products": n_products,
+            "inventory": n_stock, "left_to_full_run": len(emit_rows) - len(stock_rows),
+            "withdrawn_unsent": n_withdrawn, "discontinued": n_gone}})
         return True
     except Exception:
         # NOT "shadow only" anymore: the ledger IS the live sync source (Medusa pulls it). A failure here
