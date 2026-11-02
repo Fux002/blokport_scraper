@@ -162,6 +162,12 @@ variable "standardise_job_definition_arn" {
   description = "Revision-agnostic ARN (':*') of the standardise job definition. Scopes the process's Batch IAM. Empty = not granted."
 }
 
+variable "standardise_gpu_vcpus" {
+  type        = number
+  default     = 8
+  description = "SCRAPER_STANDARDISE_GPU_VCPUS: the GPU pool's ceiling while a photo round runs (4 vCPUs per job). Within the account's G-instance quota."
+}
+
 variable "gpu_compute_environment_arn" {
   type        = string
   default     = ""

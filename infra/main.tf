@@ -107,7 +107,13 @@ resource "aws_ecr_lifecycle_policy" "this" {
       { rulePriority = 4, description = "keep the pinned prod images (prod-<sha>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["prod-"], countType = "imageCountMoreThan", countNumber = 5 },
       action = { type = "expire" } },
-      { rulePriority = 5, description = "keep the standardise GPU images",
+      # A standardise GPU image pinned in the brand tfvars (*_standardise_image_tag) is tagged standardise-pin-<sha>:
+      # matched here first, so the build churn below (3 newest standardise-) can never expire an image a job
+      # definition runs. Pins are few (one per release); this keeps the last 20.
+      { rulePriority = 5, description = "keep the pinned standardise GPU images (standardise-pin-<sha>)",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-pin-"], countType = "imageCountMoreThan", countNumber = 20 },
+      action = { type = "expire" } },
+      { rulePriority = 6, description = "keep the standardise GPU images",
         selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-"], countType = "imageCountMoreThan", countNumber = 3 },
       action = { type = "expire" } },
       { rulePriority = 10, description = "expire the per-commit <sha> churn beyond the last ${var.keep_last_images}",
@@ -383,6 +389,7 @@ module "sync_service_dev" {
   # The standardised-photo process (the runner's photos stage) on the same GPU queue.
   standardise_enabled             = var.dev_standardise_auto
   standardise_budget_usd          = var.dev_standardise_budget_usd
+  standardise_gpu_vcpus           = var.dev_standardise_gpu_vcpus
   standardise_job_definition_name = module.gpu_enhance_dev[0].standardise_job_definition
   standardise_job_definition_arn  = local.dev_standardise_jobdef_iam_arn
   gpu_compute_environment_arn     = module.gpu_enhance_dev[0].compute_environment_arn
@@ -470,6 +477,7 @@ module "sync_service_prod" {
 
   standardise_enabled             = var.prod_standardise_auto
   standardise_budget_usd          = var.prod_standardise_budget_usd
+  standardise_gpu_vcpus           = var.prod_standardise_gpu_vcpus
   standardise_job_definition_name = module.gpu_enhance_prod[0].standardise_job_definition
   standardise_job_definition_arn  = local.prod_standardise_jobdef_iam_arn
   gpu_compute_environment_arn     = module.gpu_enhance_prod[0].compute_environment_arn

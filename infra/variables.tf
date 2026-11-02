@@ -209,7 +209,7 @@ variable "run_timeout_seconds" {
 variable "dev_standardise_image_tag" {
   type        = string
   default     = ""
-  description = "Image tag of the dev photo standardiser's GPU jobs (standardise-edit-<sha>-x; ECR keeps the 3 newest standardise- tags). Empty = no standardise job definition."
+  description = "Image tag of the dev photo standardiser's GPU jobs: its protected pin tag (standardise-pin-<sha>, kept by the ECR lifecycle). Empty = no standardise job definition."
 }
 
 variable "prod_standardise_image_tag" {
@@ -240,6 +240,18 @@ variable "prod_standardise_budget_usd" {
   type        = string
   default     = ""
   description = "SCRAPER_STANDARDISE_BUDGET_USD in prod: the month's hosted budget (USD), the owner's number. Empty = the process refuses to start."
+}
+
+variable "dev_standardise_gpu_vcpus" {
+  type        = number
+  default     = 32
+  description = "SCRAPER_STANDARDISE_GPU_VCPUS in dev: the GPU pool's ceiling during a photo round (8 jobs at once)."
+}
+
+variable "prod_standardise_gpu_vcpus" {
+  type        = number
+  default     = 128
+  description = "SCRAPER_STANDARDISE_GPU_VCPUS in prod: the GPU pool's ceiling during a photo round (32 jobs at once)."
 }
 
 variable "dev_enable_execute_command" {
