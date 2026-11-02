@@ -287,6 +287,7 @@ class CanonicalRow(BaseModel):
     product_image_keys: list[str] = Field(default_factory=list)
     model_3d_key: Optional[str] = None                 # the lead slab's 3D cut-out (.webp; its outline .json beside it)
     standard_version: Optional[str] = None             # ETags of the standardised files served (fingerprint only)
+    standard_photo: Optional[bool] = None              # has a published standardised photo; None = not known this run
 
     # config constants (Stage 8)
     company_id: Optional[str] = None

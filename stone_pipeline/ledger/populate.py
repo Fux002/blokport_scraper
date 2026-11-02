@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from stone_pipeline.config.settings import category
+from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import match_key
@@ -294,24 +294,37 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
 def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
     """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field).
     `last_synced_qty` is left null, so a freshly populated row is a delta to serve
-    (design section 7). Products must be populated first (the sku FK)."""
+    (design section 7). Products must be populated first (the sku FK). With images.require_standard_photo on, a product
+    without a standardised photo is hidden: stock 0, reason 'no_photo' (always with stock 0: Blokport hides on stock 0
+    and reads an unknown reason above 0 as a plain quantity; 'delisted' stays the vendor take-offline's, so the
+    dead-stock purge can tell them apart). One whose photo this run could not tell
+    (standard_photo None: the pool unread or empty, or the stock-only refresh) keeps the listed or hidden state it had.
+    A change of reason is a delta like a change of stock: hiding or showing a product already at stock 0 is served."""
+    rule = SETTINGS.images.require_standard_photo
     now = now_iso()
     n = 0
     for r in rows:
         sku = _sku(r, cfg)
         resolved = inventory_str(r)
         qty = int(resolved) if str(resolved).isdigit() else 0
+        stored = ledger.get("inventory", "sku", sku)
+        was_hidden = bool(stored) and stored["reason"] == "no_photo"
+        hidden = rule and (r.standard_photo is False or (r.standard_photo is None and was_hidden))
+        reason = "no_photo" if hidden else None
         # keep last_synced_qty on update: it is owned by the ack, not the write-through.
         # Overwriting it to NULL each run would re-serve every product as a delta forever.
         ledger.upsert("inventory", {
             "sku": sku,
-            "qty": qty,
+            "qty": 0 if hidden else qty,
             "last_synced_qty": None,   # only on insert (a never-synced row is a delta)
-            "reason": None,            # a normal scrape write clears any 'delisted' marker: re-scraping a
-                                       # re-enabled vendor republishes it (restock delta, no reason).
+            # a normal scrape write clears any 'delisted' marker: re-scraping a re-enabled vendor republishes it
+            # (restock delta, no reason), and a product whose standardised photo is now published comes back
+            "reason": reason,
             "replaced_by_lot_code": None,   # listed again, so no longer replaced by a lot
             "updated_at": now,
         }, pk=("sku",), keep_on_update=("last_synced_qty",))
+        if stored and stored["reason"] != reason:
+            ledger.execute("UPDATE inventory SET last_synced_qty = NULL WHERE sku = ?", (sku,))
         n += 1
     return n
 
@@ -356,7 +369,8 @@ def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
         )
         # keep last_synced_qty on update (ack-owned), so a still-discontinued product
         # is not re-served as a delist on every run (same fix as populate_inventory).
-        record = {"sku": sku, "qty": 0, "last_synced_qty": None, "updated_at": now}
+        # a plain drop is dead stock, whatever hid it before (a photo-hidden product its supplier drops is purgeable)
+        record = {"sku": sku, "qty": 0, "last_synced_qty": None, "reason": None, "updated_at": now}
         if sku in replaced:
             record.update(reason="replaced_by_lot", replaced_by_lot_code=replaced[sku])
         ledger.upsert("inventory", record, pk=("sku",), keep_on_update=("last_synced_qty",))
