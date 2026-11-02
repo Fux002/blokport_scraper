@@ -88,6 +88,48 @@ def test_inventory_only_run_records_the_ledger_in_stock_only_mode(tmp_path, scra
     assert modes == [True]
 
 
+def _stub_stock_refresh(monkeypatch, produced):
+    """The stock refresh with its per-source runs stubbed: only the sources in `produced` come back in the
+    results (run_all omits a source that aborted or whose ledger write failed)."""
+    from types import SimpleNamespace
+
+    from stone_pipeline import inventory
+    monkeypatch.setattr(inventory, "run_all",
+                        lambda sources, **k: {s: SimpleNamespace(run_id=f"{s}_run") for s in produced})
+    monkeypatch.setattr(catalog, "consolidate_inventory", lambda paths: 0)
+    monkeypatch.setattr(catalog, "collect_discontinued", lambda root: 0)
+    return inventory
+
+
+def test_stock_refresh_fails_loud_when_a_source_drops_out(monkeypatch, caplog):
+    # A source missing from the results never reached the ledger: its stock did not move. Like `run all`, the
+    # refresh must exit non-zero and name it, so the stage and the /run record show a failure, not a clean run.
+    inventory = _stub_stock_refresh(monkeypatch, produced=["marenostone"])
+    assert inventory.main(["marenostone", "polonine"]) == 1
+    failed = [r for r in caplog.records if r.levelname == "ERROR" and "stock refresh" in r.getMessage()]
+    assert failed and failed[0].extra_fields["failed"] == ["polonine"]
+
+
+def test_a_failed_stock_refresh_fails_the_produce_the_run_record_reads(monkeypatch):
+    # The /run runner marks a run failed from the produce's exit code (runner._watch_local); the stock stage's
+    # failure must reach it through build and produce, and a failed produce persists and publishes nothing.
+    from stone_pipeline import produce
+    from stone_pipeline.ledger import snapshot
+    _stub_stock_refresh(monkeypatch, produced=["marenostone"])
+    monkeypatch.setattr(produce, "_fetch_inputs", lambda: None)
+    monkeypatch.setattr(produce, "_live_scrape", lambda sources: 0)
+    persisted = []
+    monkeypatch.setattr(snapshot, "save_artifacts", lambda *a, **k: persisted.append("artifacts"))
+    monkeypatch.setattr(snapshot, "save_state", lambda *a, **k: persisted.append("state"))
+    assert produce.main(["--stage", "inventory", "--sources", "marenostone,polonine"]) == 1
+    assert persisted == []
+
+
+def test_stock_refresh_succeeds_when_every_source_produces(monkeypatch):
+    inventory = _stub_stock_refresh(monkeypatch, produced=["marenostone", "polonine"])
+    assert inventory.main(["marenostone", "polonine"]) == 0
+
+
 def test_inventory_only_aborts_loud_when_the_export_is_missing(tmp_path, scrape_data_dir, caplog):
     # F9: no Medusa export => no delta can be computed. A silent '0 changed' would mask a failed export
     # fetch and drop real stock moves, so the refresh must fail loud instead.

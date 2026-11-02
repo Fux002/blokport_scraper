@@ -710,6 +710,19 @@ def print_summary(manifest: Manifest) -> None:
     print("\n".join(lines))
 
 
+def expected_sources(sources: Optional[list[str]] = None) -> list[str]:
+    """The sources a multi-source run must produce, so one missing from run_all's results is a failure.
+    An explicit subset is expected as named. Otherwise every source with data this run: a scraper source
+    with a scrape file on disk, OR a load_frame source (API/DB/feed) which acquires its own frame and so has
+    no file to gate on; a scraper adapter with no scrape file is absent, not failed (don't alert). A DISABLED
+    source is never expected: run_all skips it, so counting it would flag every disabled source as failed."""
+    from stone_pipeline.config import store
+    enabled = store.enabled_names()
+    candidates = sources or [s for s in adapter_registry.REGISTRY
+                             if find_scrape_file(s) or adapter_registry.REGISTRY[s].acquires_via() == ACQ_LOAD_FRAME]
+    return [s for s in candidates if enabled is None or s in enabled]
+
+
 def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = None,
             state_dir: Optional[Path] = None, inventory_only: bool = False,
             data_dir: Optional[Path] = None) -> dict[str, Manifest]:
@@ -759,16 +772,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
     try:
         if target == "all":
-            # sources expected to produce this run: a scraper source with a scrape file on disk, OR a
-            # load_frame source (API/DB/feed) which acquires its own frame and so has no file to gate on.
-            # A scraper adapter with no scrape file is absent, not failed (don't alert). A DISABLED source
-            # is also not expected -- run_all skips it, so exclude it here too or the missing-check below
-            # would flag every disabled-but-has-data source as a failure (exit 1).
-            from stone_pipeline.config import store
-            _enabled = store.enabled_names()
-            requested = [s for s in adapter_registry.REGISTRY
-                         if (find_scrape_file(s) or adapter_registry.REGISTRY[s].acquires_via() == ACQ_LOAD_FRAME)
-                         and (_enabled is None or s in _enabled)]
+            requested = expected_sources()
             results = run_all(requested)
             for manifest in results.values():
                 print_summary(manifest)
