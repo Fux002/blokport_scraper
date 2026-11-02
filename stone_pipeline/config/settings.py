@@ -1067,10 +1067,16 @@ class STANDARDISE:
     PHOTOS_KEY = "scraper/to_upload/" + PHOTOS_FILE
     # The 3D slab (the "Slab 3D on Blokport" contract, version 1): the clean slab a run saved for a whole slab (<sha>.slab.png:
     # a single slab, or one half of an open book, each half a whole slab) is published as a WebP cut-out and a JSON outline;
-    # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. Only a slab product
-    # gets one (not a block, tile or close-up).
+    # Blokport's viewer extrudes the outline to the product's thickness with the photo on the face. A slab product gets one
+    # from its photo, a tile product one rendered from its slab stone (deploy.standardise_publish.publish_tiles); a block
+    # or a close-up gets none.
+    # The 3D tile (Blokport's viewer, 2026-11-02): the cut-out's horizontal axis is the listing's stored Length, its aspect
+    # Length:Width, at least CUTOUT_LONG_SIDE px on its long side (the viewer zooms 4x): the real face resampled
+    # (Lanczos), never generated; its meta also records px_per_mm: the stone's real source pixels per millimetre before
+    # that resample (0.65 to 1.2 on prod), i.e. how much real detail the texture holds, not the cut-out's own scale.
     CUTOUT_VERSION = 1
-    CUTOUT_FORMAT = "slab"             # the product format (format_value, any case) that gets a 3D slab
+    CUTOUT_FORMAT = "slab"             # the product format (format_value, any case) that gets a 3D slab from its photo,
+                                       # and whose published 3D slabs are the stone tiles are cut from
     CUTOUT_LONG_SIDE = 2048            # px, the contract's maximum
     CUTOUT_WEBP_QUALITY = 86           # the quality the approved review viewer used
     CUTOUT_ALPHA_CUT = 127             # alpha above this is stone
@@ -1341,3 +1347,70 @@ Your whole answer is one JSON object and nothing else:
     CABLE_MAX_SHARE = 0.04             # ... and no larger than this share of the photo (not the block itself)
     CROP_NOTE_MIN = 0.01               # the log says so when the canvas crop cuts more than this share of a block
     # --- scene ---
+    # --- tiles (deploy.standardise_publish.publish_tiles: a tile listing's views and 3D tile, from its slab stone) ---
+    # The owner (2026-11-02): a tile listing is shown from the same variety's judge-passed, published slab stone (its 3D
+    # cut-out), never from the vendor's tile photos (warehouse racks), never generated; CPU only, no judge per tile.
+    TILE_FORMAT = "tile"               # the format whose listings are rendered here, never sent through the photo process
+    VARIANTS_KEY = "scraper/from_medusa/variants_export.csv"   # under <env>/: the Medusa variations (Id, Name) ...
+    ATTRIBUTES_KEY = "scraper/from_medusa/attributes.csv"      # ... and attributes (category, value, sourceid)
+    TILE_RENDER_VERSION = 1            # part of every tile's made-from stamp: a new version re-renders every tile
+    TILE_FAILED_LISTED = 20            # the run record names at most this many tile listings whose step failed
+    TILE_JPEG_QUALITY = 92
+    # The stone: the slab's outer rim (sawn edge, mixed edge pixels) and its lamp reflections are never cut. Its scale is
+    # the listed size over the cut-out's px, so the cut-out must be at the listed proportions within this share (a tile
+    # then shows within about half of it of its real size); else the scale would be a guess and the slab is not used.
+    # A cut-out keeps the proportions its photo measured (SIDE_RATIO_MEASURED): prod 2026-11-02, 544 published slabs,
+    # 62 off by more than 5%, 24 by more than 10%.
+    TILE_STONE_INSET_M = 0.03
+    TILE_ASPECT_TOLERANCE = 0.05
+    # The cut-out check: a regular crosshatch (a mesh, a screen) over the face prints onto every tile, with no judge to
+    # catch it. Straight lines along BOTH of the cut-out's axes put the face's fine detail on both axes of its spectrum;
+    # stone is never like that (veins and grooves run one way). Measured 2026-11-02 on 510 prod cut-outs: Tiger Black
+    # 805cf5ac (mesh over the whole face) 17.6; every other cut-out at most 1.97, linear and grooved stone included.
+    TILE_GRID_WINDOW, TILE_GRID_STEP = 128, 64   # px: the spectrum is averaged over windows this big, this far apart ...
+    TILE_GRID_INSET_PX = 20            # ... lying wholly this far inside the stone ...
+    TILE_GRID_DETAIL_SIGMA = 3.0       # ... of the detail finer than this (px) ...
+    TILE_GRID_BAND = (4, 0.45)         # ... over the frequencies from this many cycles per window to this share of the window
+    TILE_GRID_OFF_AXIS = (3, 6)        # an axis is compared with the frequencies this many bins beside it
+    TILE_GRID_MAX = 4.0                # both axes this many times their neighbours: a crosshatch, the slab is not used
+    # The laid views (main floor and close) need this many distinct faces (non-overlapping cuts of the one slab): fewer
+    # and a floor visibly repeats, so the listing shows the single tile as its main image instead (and no close view).
+    TILE_MIN_FACES = 6
+    # Laying: 3 mm joints (the norm for natural stone floors), straight for a square, half-bond for a rectangle.
+    TILE_JOINT_M = 0.003
+    TILE_JOINT_GREY = (205.0, 70.0)    # grout grey for a light / a dark stone, mixed with the stone's own mean ...
+    TILE_JOINT_STONE_SHARE = 0.35      # ... this much
+    TILE_JOINT_DARK_STONE_L = 45.0     # a stone darker than this L* gets the dark grout
+    TILE_BEVEL_M, TILE_BEVEL_DARK = 0.0015, 0.18   # each tile's eased edge darkens this much over this distance
+    TILE_PATTERN_ORIGIN_M = (0.37, 0.11)            # the pattern's offset, so no joint runs through the image's centre
+    TILE_CUT_STEP, TILE_ROW_SEED = 7, 20261102      # neighbours along a row step by this many faces; rows by a hashed offset
+    TILE_LEVELS = 6                    # texture pyramid levels for minified (far) tiles
+    TILE_SUPERSAMPLE = 2               # the floor and side views are drawn this many times larger, then reduced
+    TILE_FLOOR_BAND_ROWS = 256         # the floor is drawn this many (supersampled) rows at a time: bounded memory
+    # The floor (main view): a generic floor with no location (owner 2026-11-02: a stone supplier's hall looks fake),
+    # seen from standing height, soft daylight from a window ahead and to the left, a polished floor reflecting that
+    # window. Drawn here, no photo asset, so there is nothing to license.
+    TILE_FLOOR_FOCAL = 1600.0          # px at OUT_W (a 65 degree view)
+    TILE_FLOOR_EYE_M = 1.5             # camera height
+    TILE_FLOOR_PITCH_DEG = 33.0        # looking down this much: the horizon just above the frame
+    TILE_FLOOR_YAW_DEG = 24.0          # the joints turned this much from the frame, as a room is seen
+    TILE_FLOOR_LIGHT = ((-1.6, 7.0), 3.2, 0.38)     # the window light's centre on the floor (x, depth m), its reach (m), gain
+    TILE_FLOOR_FALLOFF = 0.10          # the floor darkens this much towards the frame's lower corners
+    TILE_FLOOR_HAZE = ((246.0, 243.0, 238.0), 4.0, 12.0, 0.35)   # far floor softens towards this colour from to depth (m), at most
+    # A polished floor mirrors the window: panes (x0, y0, x1, y1 as shares of the frame), blurred, this strong at the far
+    # floor fading to none at the near edge (a mirror reflects more at a grazing view). Honed, flamed: matte, none.
+    TILE_FLOOR_WINDOW = ((0.06, 0.0, 0.17, 0.46), (0.185, 0.0, 0.295, 0.46), (0.31, 0.0, 0.42, 0.46))
+    TILE_FLOOR_REFLECT_BLUR = 9.0      # px
+    TILE_FLOOR_REFLECT = 0.42
+    TILE_POLISHED_FINISHES = ("polished",)   # finish names (any case) that reflect
+    # The single tile on white (white view; the main view when the faces are too few) and its 3/4 studio view.
+    TILE_WHITE_MARGIN = 0.12
+    TILE_MAX_UPSCALE = 2.5             # the single-tile views never enlarge the real pixels more than this
+    TILE_SIDE_ANGLES = (32.0, 24.0)    # azimuth, elevation (degrees) of the 3/4 view of one tile lying flat
+    TILE_SIDE_DISTANCE = 6.0           # camera distance in tile lengths: a long lens, little perspective
+    TILE_SIDE_MARGIN = 0.14
+    TILE_SIDE_EDGE_LIGHT = (0.62, 0.78)   # the two visible sawn edges, this bright relative to the face
+    TILE_SIDE_EDGE_PX = 64             # px across the thickness of the stretched edge strip
+    TILE_SIDE_SHADOW = ((40, 18, 0.30), (6, 4, 0.30))   # blur, drop (px), strength: soft + contact shadow
+    TILE_CLOSE_MAX_UPSCALE = 2.0       # the close view never enlarges the real pixels more than this ...
+    TILE_CLOSE_MIN_TILES = 1.6         # ... and shows at least this many tile lengths (a joint for scale)

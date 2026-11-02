@@ -24,6 +24,7 @@ from stone_pipeline.ledger import writethrough
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
 RUN = f"{ENV_SEGMENT}/standardise-test/{C.RUN_TAG}/sentas/"
 ROOT = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/"
+NO_TILES = "Product Handle,Product Category 1\n"            # a product sheet without tile listings
 
 
 class _S3:
@@ -198,19 +199,19 @@ def _published_bucket():
 
 def test_publish_copies_only_what_changed_and_says_whether_the_folder_changed():
     s3 = _published_bucket()
-    first = pub.publish(s3, ROOT, say=lambda m: None)
+    first = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     assert first["copied"] == 2 and first["changed"]
     assert s3.objects[imagestore.standard_key("sentas", A, "main")]["Body"] == b"m"
     s3.written.clear()
-    second = pub.publish(s3, ROOT, say=lambda m: None)
+    second = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     assert not second["changed"] and s3.written == []                      # nothing rewritten: no new versions, no re-serve
 
 
 def test_a_view_its_run_made_again_is_published_again():
     s3 = _published_bucket()
-    pub.publish(s3, ROOT, say=lambda m: None)
+    pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     s3._store(f"{RUN}{A}.main.jpg", b"m2")
-    again = pub.publish(s3, ROOT, say=lambda m: None)
+    again = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     assert again["copied"] == 1 and again["changed"]
     assert s3.objects[imagestore.standard_key("sentas", A, "main")]["Body"] == b"m2"
 
@@ -218,7 +219,7 @@ def test_a_view_its_run_made_again_is_published_again():
 def test_a_view_no_longer_chosen_is_removed_and_that_is_a_change():
     s3 = _published_bucket()
     s3._store(imagestore.standard_key("sentas", B, "main"), b"old")
-    out = pub.publish(s3, ROOT, say=lambda m: None)
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     assert out["removed"] == 1 and imagestore.standard_key("sentas", B, "main") not in s3.objects
 
 
@@ -229,7 +230,7 @@ def test_3d_slabs_are_cut_out_a_few_at_a_time_on_the_small_service(monkeypatch):
     real = pub.ThreadPoolExecutor
     monkeypatch.setattr(pub, "ThreadPoolExecutor", lambda n: pools.append(n) or real(n))
     monkeypatch.setattr(pub, "_publish_cutout", lambda client, s, key, etag: True)
-    assert pub.publish(s3, ROOT, say=lambda m: None)["made_3d"] == 1
+    assert pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)["made_3d"] == 1
     assert C.CUTOUT_WORKERS in pools and C.CUTOUT_WORKERS <= 4
 
 
@@ -244,10 +245,10 @@ def _slab_png():
 def test_a_choice_moved_from_a_close_up_to_a_whole_slab_publishes_its_views_and_its_3d_slab_and_drops_the_old(monkeypatch):
     s3 = _S3({f"{RUN}{A}.main.jpg": b"ma", f"{RUN}{A}.white.jpg": b"wa", f"{ROOT}chosen/one.json": _record("one", A),
               **{f"{RUN}{B}.{v}.jpg": f"{v}b".encode() for v in imagestore.STANDARD_VIEWS}, f"{RUN}{B}.slab.png": _slab_png()})
-    first = pub.publish(s3, ROOT, say=lambda m: None)
+    first = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     assert first["copied"] == 2 and first["made_3d"] == 0                              # the close-up: two views, no 3D
     s3._store(f"{ROOT}chosen/one.json", _record("one", B))
-    moved = pub.publish(s3, ROOT, say=lambda m: None)
+    moved = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     assert moved["changed"] and moved["copied"] == 4 and moved["made_3d"] == 1 and moved["removed"] == 2
     assert {k for k in s3.objects if "/products/standard/" in k} == (
         {imagestore.standard_key("sentas", B, v) for v in imagestore.STANDARD_VIEWS}
@@ -256,13 +257,14 @@ def test_a_choice_moved_from_a_close_up_to_a_whole_slab_publishes_its_views_and_
 
 def test_publish_without_any_choice_record_is_refused_with_its_own_error():
     with pytest.raises(pub.NoChoiceRecords):
-        pub.publish(_S3({f"{RUN}{A}.main.jpg": b"m"}), ROOT, say=lambda m: None)
+        pub.publish(_S3({f"{RUN}{A}.main.jpg": b"m"}), ROOT, NO_TILES, {}, say=lambda m: None)
 
 
 # --- the process end to end -------------------------------------------------------------------------------------------
 def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_summary(monkeypatch):
     s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.slab.png": _slab_png()})
-    monkeypatch.setattr(proc, "sheet_listings", lambda client: [_listing("done", A), _listing("new", D)])
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("done", A), _listing("new", D)])
     cleared, worked = [], []
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or [])
 
@@ -282,7 +284,8 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
 def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
     import time
     s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m"})
-    monkeypatch.setattr(proc, "sheet_listings", lambda client: [_listing("new", D)])
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("new", D)])
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     seen = []
 
@@ -362,7 +365,7 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     s3.written.clear()
     assert [c["sha"] for c in select.report(sel)["chosen"]] == [A] and spend.spent == 0
     assert f"{ROOT}chosen/one.json" not in s3.written                # the same choice: its record stays
-    out = pub.publish(s3, ROOT, say=lambda m: None)
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
     assert out["made_3d"] == 1 and imagestore.standard_key("sentas", A, "close") in s3.objects
 
 

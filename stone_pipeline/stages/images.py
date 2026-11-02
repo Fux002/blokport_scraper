@@ -295,49 +295,71 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     known, views = bool(views and views.get("main")), views or {}
     for row in rows:
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
-        row.standard_photo = _lead(row.image_keys, views) is not None if known else None
+        lead = listing_lead(row, views, cfg) if _is_tile(row) else photo_lead(row.image_keys, views)
+        row.standard_photo = lead is not None if known else None
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views
-            row.model_3d_key = model_3d(row.image_keys, views) if _is_3d_format(row) else None
-            row.standard_version = standard_version(row.image_keys, views, with_3d=bool(row.model_3d_key))
-            _slot_row(row, standardised(row.image_keys, views))
+            row.model_3d_key = model_3d(views, lead) if _is_3d_format(row) else None
+            row.standard_version = standard_version(views, lead, with_3d=bool(row.model_3d_key))
+            _slot_row(row, standardised(row.image_keys, views, lead))
     return stats
 
 
 _HOSTED = re.compile(r"/products/(?:[a-z]+/)?([a-z_]+)/([0-9a-f]{64})\.[a-z0-9]+$")
+Lead = tuple[str, str, str]                            # (products base url, source, name) of a published set
 
 
-def standardised(urls: list[str], views: dict[str, set[str]]) -> list[str]:
-    """A product's images: its one standardised photo when a published one exists (user 2026-11-01: one very good image
-    per listing is enough, shown in every view). Only photos the judge passed are published, one chosen per listing; the
-    lead is the first published photo in the product's order that shows a whole slab or an open book (it has a side
-    view), else the first published one. Its showroom image is the catalog thumbnail, then its white, side and close-up
-    views, whichever it has (a block: its showroom image only). The product's other photos are left out, their warehouse
-    would show next to the showroom; a product with no published photo keeps the images it had."""
-    lead = _lead(urls, views)
+def listing_lead(row: CanonicalRow, views: dict[str, set[str]], cfg) -> Optional[Lead]:
+    """A tile product's lead: only the set rendered for the listing itself from its variety's slab stone
+    (deploy.standardise_publish.publish_tiles names it after the listing's handle, imagestore.listing_sha); None when
+    there is none. Never one of the row's photos: a tile without its own set stays hidden rather than borrow a photo it
+    shares with a slab (that slab's stone, possibly in another finish)."""
+    if not row.handle:
+        return None
+    sha = imagestore.listing_sha(row.handle)
+    return (cfg.public_base.rstrip("/"), row.src_site, sha) if sha in views.get("main", ()) else None
+
+
+def photo_lead(urls: list[str], views: dict[str, set[str]]) -> Optional[Lead]:
+    """Any other product's lead: its first published photo that shows a whole slab or an open book (it has a side view),
+    else its first published photo; None without one. Only photos the judge passed are published, one chosen per
+    listing. A set named after a listing is never a photo's, so it is never found here."""
+    found = []
+    for url in urls:
+        m = _HOSTED.search(url)
+        if m and m.group(2) in views.get("main", ()):
+            found.append((url[:m.start()] + "/products", m.group(1), m.group(2)))
+    if not found:
+        return None
+    return next((f for f in found if f[2] in views.get("studio", ())), found[0])
+
+
+def standardised(urls: list[str], views: dict[str, set[str]], lead: Optional[Lead]) -> list[str]:
+    """A product's images: its lead's standardised views when it has a lead (user 2026-11-01: one very good image per
+    listing is enough, shown in every view): the showroom image is the catalog thumbnail, then the white, side and
+    close-up views, whichever it has (a block: its showroom image only). The product's other photos are left out, their
+    warehouse would show next to the showroom; a product without a lead keeps the images it had (`urls`)."""
     if lead is None:
         return urls
     base, src, sha = lead
-    return [f"{base}/products/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
+    return [f"{base}/{imagestore.STANDARD_SUBDIR}/{view}/{src}/{sha}.jpg"
             for view in imagestore.STANDARD_VIEWS if sha in views.get(view, ())]
 
 
-def model_3d(urls: list[str], views: dict[str, set[str]]) -> Optional[str]:
-    """The 3D slab's cut-out url of a product: its lead photo's (the slab the catalog thumbnail shows), when that photo is
-    a whole slab (a single slab or one half of an open book) with a published cut-out; None otherwise (a close-up, no
-    published photo)."""
-    lead = _lead(urls, views)
+def model_3d(views: dict[str, set[str]], lead: Optional[Lead]) -> Optional[str]:
+    """The 3D model's cut-out url of a product: its lead's (the stone the catalog thumbnail shows), when the lead has a
+    published cut-out (a whole slab: a single slab or one half of an open book; a rendered tile); None otherwise (a
+    close-up, no lead)."""
     if lead is None or lead[2] not in views.get(imagestore.CUTOUT_SUBDIR, ()):
         return None
     base, src, sha = lead
-    return f"{base}/products/{imagestore.STANDARD_SUBDIR}/{imagestore.CUTOUT_SUBDIR}/{src}/{sha}.webp"
+    return f"{base}/{imagestore.STANDARD_SUBDIR}/{imagestore.CUTOUT_SUBDIR}/{src}/{sha}.webp"
 
 
-def standard_version(urls: list[str], views: dict[str, dict[str, str]], with_3d: bool) -> Optional[str]:
-    """The ETags of the files a product is served from its lead published photo (its views, its 3D slab when it has one),
-    None without one. A file is re-made in place under the same name (a listing's choice moved to another run of the
-    photo), so the names alone would never re-serve the product with it."""
-    lead = _lead(urls, views)
+def standard_version(views: dict[str, dict[str, str]], lead: Optional[Lead], with_3d: bool) -> Optional[str]:
+    """The ETags of the files a product is served from its lead (its views, its 3D model when it has one), None without
+    one. A file is re-made in place under the same name (a listing's choice moved to another run of the photo, a tile
+    rendered again), so the names alone would never re-serve the product with it."""
     if lead is None:
         return None
     sha = lead[2]
@@ -345,20 +367,12 @@ def standard_version(urls: list[str], views: dict[str, dict[str, str]], with_3d:
     return " ".join(views[k][sha] for k in kinds if sha in views.get(k, ()))
 
 
-def _lead(urls: list[str], views: dict[str, set[str]]) -> Optional[tuple[str, str, str]]:
-    """(url up to /products, source, sha) of the product's lead published photo (standardised), or None."""
-    found = []
-    for url in urls:
-        m = _HOSTED.search(url)
-        if m and m.group(2) in views.get("main", ()):
-            found.append((url[:m.start()], m.group(1), m.group(2)))
-    if not found:
-        return None
-    return next((f for f in found if f[2] in views.get("studio", ())), found[0])
+def _is_tile(row: CanonicalRow) -> bool:
+    return (row.format_value or "").casefold() == STANDARDISE.TILE_FORMAT
 
 
 def _is_3d_format(row: CanonicalRow) -> bool:
-    return (row.format_value or "").casefold() == STANDARDISE.CUTOUT_FORMAT
+    return (row.format_value or "").casefold() in (STANDARDISE.CUTOUT_FORMAT, STANDARDISE.TILE_FORMAT)
 
 
 def _load_standard_views(cfg) -> Optional[dict[str, dict[str, str]]]:

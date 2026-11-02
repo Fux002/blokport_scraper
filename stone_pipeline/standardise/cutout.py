@@ -11,16 +11,22 @@ from stone_pipeline.config.settings import STANDARDISE as C
 
 def make(slab_png: bytes) -> tuple[bytes, bytes]:
     """(the WebP cut-out, its meta JSON). Raises ValueError on a slab that cannot be one: no alpha, no stone, unreadable."""
+    bgra = cv2.imdecode(np.frombuffer(slab_png, np.uint8), cv2.IMREAD_UNCHANGED)
+    if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
+        raise ValueError("the slab is not an RGBA image")
+    return encode(bgra)
+
+
+def encode(bgra: np.ndarray, **extra) -> tuple[bytes, bytes]:
+    """(the WebP cut-out, its meta JSON) of a BGRA image whose alpha is the stone's outline, at most CUTOUT_LONG_SIDE px;
+    `extra` adds keys to the meta (a tile's px_per_mm). Raises ValueError on one that cannot be a cut-out."""
     try:
-        return _make(slab_png)
+        return _encode(bgra.copy(), extra)
     except cv2.error as exc:
         raise ValueError(f"opencv: {exc}") from exc
 
 
-def _make(slab_png):
-    bgra = cv2.imdecode(np.frombuffer(slab_png, np.uint8), cv2.IMREAD_UNCHANGED)
-    if bgra is None or bgra.ndim != 3 or bgra.shape[2] != 4:
-        raise ValueError("the slab is not an RGBA image")
+def _encode(bgra, extra):
     stone = bgra[:, :, 3] > C.CUTOUT_ALPHA_CUT
     if not stone.any():
         raise ValueError("no stone in the slab's alpha")
@@ -37,7 +43,7 @@ def _make(slab_png):
     # The outer pixels' centres sit on the frame's edges, so a whole rectangle spans 0..1 like the texture it carries.
     meta = {"version": C.CUTOUT_VERSION, "width_px": w, "height_px": h,
             "outline": [[round(float(x) / (w - 1), 4), round(float(y) / (h - 1), 4)] for x, y in outline(stone)],
-            "edge_color": edge_color(bgra, stone)}
+            "edge_color": edge_color(bgra, stone), **extra}
     ok, buf = cv2.imencode(".webp", bgra, [cv2.IMWRITE_WEBP_QUALITY, C.CUTOUT_WEBP_QUALITY])
     if not ok:
         raise ValueError("could not encode the cut-out")

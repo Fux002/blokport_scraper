@@ -20,7 +20,8 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
        3. pick        every listing of the sheet just published (its photos from the photo list beside it)
                       WITHOUT a valid choice record
                       (record missing, or its photo no longer the listing's, or on the exclude list), and every
-                      slab listing whose chosen photo is no whole slab (a close-up), its choice kept
+                      slab listing whose chosen photo is no whole slab (a close-up), its choice kept; never a
+                      tile listing (rendered at step 10, see Tile listings)
        4. GPU         the listings' first JUDGE_MAX photos the standardiser has not run, or whose result is
                       outdated (RUN_TAG)
        5. judge       each listing's results in its own order until one passes; a slab listing goes on past a
@@ -32,7 +33,8 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
        9. report      choice records (<clean root>/chosen/<listing>.json), the review list
                       (<clean root>/tracked.csv) and the run summary (<clean root>/summary.json)
       10. publish     the chosen photos' views and 3D slabs into <env>/products/standard/, copying only what
-                      changed and removing what is no longer chosen
+                      changed; then every tile listing's views and 3D tile rendered from its variety's slab
+                      stone (CPU, only what changed); then what is no longer chosen or rendered is removed
       11. unlock      only if the lock is still this run's
       12. relink      when step 10 changed anything: produce --stage republish, inside the same process (never a
                       child, so a run the runner stops takes it along), so the new photos go live in the same press
@@ -56,8 +58,8 @@ are judged after it, and the first that passes becomes the choice; if none does,
 tried is read from the stored results and verdicts (no marker): a kept listing whose candidates all have a result and
 a verdict costs nothing again, and its record is not rewritten. It never goes to the hosted clean step (it has a
 passing photo). The GPU and the judge stay inside the month's budget and the round sizing like every listing. When the
-choice moves, publish removes the close-up's views and adds the whole slab's views and its 3D slab. Blocks and tiles
-take their first pass as before.
+choice moves, publish removes the close-up's views and adds the whole slab's views and its 3D slab. Blocks take
+their first pass as before.
 
 A listing's photos come from the photo list, never from the sheet's image columns: once a listing is published its
 sheet row carries only its chosen photo's views. The produce writes the list beside the sheet,
@@ -76,6 +78,59 @@ view and 3D slab. A re-run that is no open book this time, or that fails for the
 noted in `noslab/<sha>.json`, so it is never run again; a judged result is never held. A completion cut short takes its
 close view off again while its slab is missing, and a passing storage error leaves it for the next run. Nothing is
 removed by hand.
+
+## Tile listings
+
+The owner (2026-11-02): a tile listing is shown from the same variety's judge-passed, published slab stone, from any
+vendor's slab of that variety, never from its own photos (warehouse racks) and never generated. Publish renders them
+(`stone_pipeline/standardise/tile_plan.py`, `tile_stone.py`, `tile_views.py`), on the CPU, with no judge per tile.
+
+- **Stone, never a guess**: a slab listing of the same variety (stone type and name, through the variations export;
+  the tile's source from the photo list)
+  AND the same finish whose chosen photo has a published 3D cut-out. None: the listing gets no files and stays hidden
+  by the no-photo rule, with its reason in `summary.json` (`tiles_hidden`): no slab of the variety, none in this
+  finish (Tiger Black Flamed), none with a published 3D cut-out, or every one refused.
+- **Refused cut-outs**: a crosshatch over the face (straight lines along both axes: `TILE_GRID_*`; Tiger Black
+  805cf5ac scores 17.6, every other of 510 prod cut-outs at most 1.97), or proportions more than
+  `TILE_ASPECT_TOLERANCE` from the slab's listed size (its scale would be a guess). Lamp reflections
+  (`marks.flare_mask`) and a 3 cm rim are never cut. The slab job's fills (labels, straps, flares it painted over) are
+  not saved, so they cannot be avoided yet: the job would have to save a fill mask beside `<sha>.slab.png`
+  (`<sha>.fill.png`, 8-bit, the squared slab's frame, 255 where it painted or a hosted edit changed the stone) and
+  publish carry it beside the cut-out; the tile step would then add it to the stone it never cuts.
+- **One slab, never a pool**: colour and texture statistics cannot tell a different stone from the same stone shot
+  differently (Pietra Grey 902c4b, a brown quartzite, is within 1 L* of its pool; 8160c6, the same grey stone shot
+  darker, 17 L* off), and a pooled floor mixes lots. A variety's slabs are tried in one order: the tile's own
+  vendor's first, then the most usable stone, then the cut-out key; a listing takes the first on which a tile of its
+  size fits. One (variety, finish) at a time and one decoded slab at a time (the checks decode each slab in turn and
+  keep only its usable area; the slab cut from is decoded again).
+- **Views** (the slab view set, the contract unchanged): main = the tiles laid at the listed size on a generic floor
+  (standing height, soft daylight, a polished finish reflects a window; no location, no photo asset); white = one tile;
+  studio = a 3/4 view at true thickness; close = from above at true scale, at most 2x. With fewer than
+  `TILE_MIN_FACES` distinct faces (non-overlapping cuts of the slab) a floor visibly repeats: main is then the single
+  tile and there is no white or close view.
+- **3D tile**: the same cut-out format as a slab's, the face at the listing's stored length along x, 2048 px on its
+  long side (Lanczos). `px_per_mm` is the stone's real resolution in source pixels per millimetre, measured before the
+  resample to 2048 px (0.65 to 1.2 on prod); the cut-out's own scale is `width_px` / (`length` in mm), which is
+  higher. Model_3d flows as for a slab.
+- **Names**: a tile's files are named after the listing (`imagestore.listing_sha(handle)`), not a photo (one photo can
+  show six sizes), under `standard/<view>|cutout/<src>/`, plus `standard/tile/<src>/<name>.json`: what they were made
+  from (the slab's cut-out and ETag, the size, the finish, `TILE_RENDER_VERSION`), written last. The image stage links
+  a tile product only to the set named after it (never to one of its photos); any other product ignores such a set.
+- **Rendered again** exactly when that record's stamp changes; the output is byte-identical for the same inputs per
+  build (the same OpenCV and NumPy).
+- **One tile never stops the run**: a read, decode or encode error in one tile listing's step (S3, OpenCV, a value
+  or file error) puts it on the run's problem list (`summary.json`) and names it in the run record
+  (`published.tiles.failed_listings`, at most `TILE_FAILED_LISTED`); it keeps the files it had while its record's
+  stone is still one of the slabs it may be cut from, or while S3 fails to return its record (unknown is not gone);
+  when the record is missing, corrupt or names another stone they are removed and it hides until it renders again. A
+  record that cannot be read (our own file, written last) only means out of date: the tile renders again, noted on the
+  problem list. Any other error fails the run, and a failed bucket listing stops publish, before anything is removed.
+- **Variations export**: a sheet product whose variation is missing from it is matched to no stone; the log says how
+  many (the export is stale or empty) and the run record counts them (`tiles.unknown_variations`).
+- An interior scene (hotel lobby, living room) as the floor's setting needs licensed background photos with an empty
+  floor: per photo the floor polygon, the camera (horizon, focal length, eye height), an occlusion mask of what stands
+  on the floor, and the rights to modify and publish commercially. None is in the repo; the showroom halls
+  (`assets/rooms`) are the stone supplier's and were rejected for floors.
 
 ## Trigger
 
@@ -204,6 +259,7 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
   produce that runs the sources named in the catalog's warning writes it again.
 - A listing that left the sheet keeps its choice record and published files (harmless: products link only their own
   photos); housekeeping is an open item.
+- A tile listing without slab stone of its variety and finish: no files; listed in `summary.json` (`tiles_hidden`).
 
 ## Rollout (once, per environment)
 

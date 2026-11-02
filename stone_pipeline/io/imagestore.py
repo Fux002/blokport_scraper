@@ -13,10 +13,16 @@ Layout (under the env segment, e.g. dev/):
     products/standard/<view>/<src>/<hash>.jpg  a STANDARDISED image of that photo (deploy.standardise_publish):
                                             view = main (showroom), white, studio (side view), close
     products/standard/cutout/<src>/<hash>.webp|.json  the 3D slab of that photo: the cut-out and its outline
+    products/standard/<view>|cutout/<src>/<listing hash>.*  a TILE listing's views and 3D tile, rendered from its
+                                            variety's slab stone (standardise_publish.publish_tiles), named after
+                                            the listing itself (listing_sha), not a photo: one photo can show several
+                                            tile sizes
+    products/standard/tile/<src>/<listing hash>.json  what that listing's files were made from (written last)
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Optional
 
@@ -29,6 +35,7 @@ ENHANCED_SUBDIR = "enhanced"                 # per-image "done" markers the GPU 
 STANDARD_SUBDIR = "standard"                 # the standardised photos, one folder per view
 STANDARD_VIEWS = ("main", "white", "studio", "close")
 CUTOUT_SUBDIR = "cutout"                     # under standard/: the 3D slab files, beside the views
+TILE_SUBDIR = "tile"                         # under standard/: what each rendered tile listing was made from
 
 _PRODUCTS = f"{ENV_SEGMENT}/products"
 MANIFEST_KEY = f"{_PRODUCTS}/_manifest.json"
@@ -99,6 +106,16 @@ def cutout_prefix() -> str:
 def cutout_key(source: str, sha256: str, ext: str) -> str:
     """One of the two 3D slab files of a photo: ext = webp (the cut-out) or json (its outline)."""
     return f"{cutout_prefix()}{source}/{sha256}.{ext}"
+
+
+def listing_sha(handle: str) -> str:
+    """The name a listing's own standardised files carry (a rendered tile's): a hash of its handle, shaped like a photo's
+    content hash so every key still ends <sha>.<ext>, and apart from every photo's (the 'listing:' prefix)."""
+    return hashlib.sha256(f"listing:{handle}".encode()).hexdigest()
+
+
+def tile_record_key(source: str, sha256: str) -> str:
+    return f"{standard_prefix(TILE_SUBDIR)}{source}/{sha256}.json"
 
 
 def cutout_meta_url(cutout_url: str) -> str:

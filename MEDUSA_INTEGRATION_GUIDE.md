@@ -200,8 +200,14 @@ side at most 2048 px) and its meta JSON (`version` 1, `width_px`, `height_px`, `
 from 0 to 1 measured from the cut-out's top-left, `edge_color` = the sawn edge's hex colour). Copy both like
 `image_urls` and keep them as `metadata.model_3d`; the viewer sizes the slab from `length`, `width` and `height`. A
 product shown by an open book (two bookmatched slabs) carries one of its two slabs, each a whole slab. It is
-`null` for a product with no 3D (a block, a tile, a close-up, a product without a standardised photo):
+`null` for a product with no 3D (a block, a close-up, a product without a standardised photo):
 remove `metadata.model_3d` then. Both files are named after the source photo, like the standardised views.
+A **tile** product's `model_3d` is one tile rendered from its variety's slab stone, the same two files: the cut-out's
+horizontal axis is the product's `length`, its aspect `length`:`width`, 2048 px on its long side (the real stone
+resampled), a whole rectangle (`outline` its four corners; the WebP may carry no alpha channel: opaque), and the meta
+adds `px_per_mm`: the stone's real resolution in source pixels per millimetre, measured before the resample to 2048 px
+(0.65 to 1.2); it says how much real detail the texture holds, not its scale on screen (that is `width_px` / `length`).
+A tile's files (views and 3D) are named after the listing, not a photo.
 
 **Collection location** (`collection_country_code`, `collection_city`) is where the product is
 physically **collected** before shipping (the supplier's warehouse). It is a distinct axis from

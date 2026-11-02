@@ -207,9 +207,10 @@ def sheet_photos(client):
     return index.build(_sheet(client), _photo_list(client))
 
 
-def sheet_listings(client):
-    """This environment's listings with their own photos in order (index.listings)."""
-    return index.listings(_sheet(client), _photo_list(client))
+def sheet_and_photos(client):
+    """(this environment's product sheet text, its photo list): what the photo process reads, for its listings
+    (index.listings) and for publish (the tile listings)."""
+    return _sheet(client), _photo_list(client)
 
 
 def _photo_keys(client, src, photos):

@@ -51,7 +51,7 @@ def test_a_missing_photo_list_fails_loud(monkeypatch):
     monkeypatch.setattr(src, "_get", get)
     monkeypatch.setattr(src, "_sheet", lambda client: "Product Handle,Product Category 1\n")
     with pytest.raises(RuntimeError, match="photo list"):
-        src.sheet_listings(object())
+        src.sheet_and_photos(object())
     with pytest.raises(RuntimeError, match="photo list"):
         src.sheet_photos(object())
 

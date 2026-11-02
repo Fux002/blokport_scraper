@@ -15,6 +15,10 @@ def _improved(sha, src="sentas"):
     return f"{BASE}/improved/{src}/{sha}.png"
 
 
+def _shown(urls, views):
+    return images.standardised(urls, views, images.photo_lead(urls, views))
+
+
 def _std(view, sha, src="sentas"):
     return f"{BASE}/standard/{view}/{src}/{sha}.jpg"
 
@@ -27,24 +31,24 @@ def test_the_standard_key_carries_the_sha_like_every_image_key():
 
 def test_a_product_shows_one_photo_in_all_its_views_even_when_more_are_published():
     views = {"main": {A, B}, "white": {A, B}, "studio": {A, B}, "close": {A, B}}     # B: chosen for another listing
-    out = images.standardised([_improved(A), _improved(B)], views)
+    out = _shown([_improved(A), _improved(B)], views)
     assert out == [_std("main", A), _std("white", A), _std("studio", A), _std("close", A)]
 
 
 def test_an_unstandardised_photo_is_dropped_when_others_are_standardised():
     views = {"main": {B}, "white": {B}, "studio": set(), "close": set()}
-    out = images.standardised([_improved(A), _improved(B)], views)
+    out = _shown([_improved(A), _improved(B)], views)
     assert out == [_std("main", B), _std("white", B)]
 
 
 def test_a_product_with_no_standardised_photo_keeps_its_images():
     urls = [_improved(A), _improved(C_)]
-    assert images.standardised(urls, {"main": {B}, "white": set(), "studio": set(), "close": set()}) == urls
+    assert _shown(urls, {"main": {B}, "white": set(), "studio": set(), "close": set()}) == urls
 
 
 def test_a_close_up_lead_shows_the_views_it_has():
     views = {"main": {A, B}, "white": {A}, "studio": set(), "close": set()}
-    out = images.standardised([_improved(A, "zucchi"), _improved(B, "zucchi")], views)
+    out = _shown([_improved(A, "zucchi"), _improved(B, "zucchi")], views)
     assert out == [_std("main", A, "zucchi"), _std("white", A, "zucchi")]
 
 
@@ -104,13 +108,13 @@ def test_the_exclude_list_reads_one_sha_per_line_with_comments():
 
 def test_a_whole_slab_leads_even_when_a_close_up_comes_first():
     views = {"main": {A, B}, "white": {A, B}, "studio": {B}, "close": {B}}     # A is a close-up: no side view
-    out = images.standardised([_improved(A), _improved(B)], views)
+    out = _shown([_improved(A), _improved(B)], views)
     assert out == [_std("main", B), _std("white", B), _std("studio", B), _std("close", B)]
 
 
 def test_a_lead_block_is_shown_once():
     views = {"main": {A}, "white": set(), "studio": set(), "close": set()}
-    assert images.standardised([_improved(A)], views) == [_std("main", A)]
+    assert _shown([_improved(A)], views) == [_std("main", A)]
 
 
 def test_a_marks_survey_notes_whether_a_photo_carries_lamp_reflections():

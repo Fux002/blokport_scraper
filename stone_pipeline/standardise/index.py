@@ -48,7 +48,7 @@ def parse_photos(text):
     return out
 
 
-def _rows(sheet_text, photos):
+def rows(sheet_text, photos):
     """(row, format, [(source, sha)] of the product's own photos in its order) per product row, the photos from the
     photo list (parse_photos). Fails loud on an unknown category (a guessed format would put a tile on a slab's stand)
     and on a product the photo list does not have (its photos are never read from the sheet's image columns)."""
@@ -67,7 +67,7 @@ def _rows(sheet_text, photos):
 def build(sheet_text, photos):
     """{sha: {"source", "key", "format", "size"}} from the product sheet's text and its photo list."""
     found = {}
-    for row, fmt, shown in _rows(sheet_text, photos):
+    for row, fmt, shown in rows(sheet_text, photos):
         for src, sha in shown:
             if sha not in found:
                 found[sha] = {"source": src, "key": row["Product Handle"], "format": fmt, "size": _size(row)}
@@ -78,4 +78,4 @@ def listings(sheet_text, photos):
     """[{"key", "source", "format", "photos"}] in sheet order: each product with its own photos (shas) in its order, the
     order a person sees them in, so the first good one is the one a listing is shown with."""
     return [{"key": row["Product Handle"], "source": shown[0][0], "format": fmt, "photos": [sha for _, sha in shown]}
-            for row, fmt, shown in _rows(sheet_text, photos) if shown]
+            for row, fmt, shown in rows(sheet_text, photos) if shown]
