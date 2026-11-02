@@ -80,7 +80,7 @@ def test_record_source_disabled_is_a_noop(tmp_path, monkeypatch):
     monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
     monkeypatch.setattr(writethrough, "open_ledger",
                         lambda *a, **k: pytest.fail("open_ledger called while disabled"))
-    assert writethrough.record_source(_rows(), [], load_source("polonine"),
+    assert writethrough.record_source(_rows(), [], load_source("polonine"), inventory_only=False,
                                       path=tmp_path / "dev.ledger") is True
 
 
@@ -90,7 +90,7 @@ def test_record_source_enabled_records_products(tmp_path, monkeypatch):
     ledger_path = tmp_path / "dev.ledger"
     _open_seeded(ledger_path).close()          # pre-seed the linked variation, matching fingerprint
 
-    ok = writethrough.record_source(_rows(), [], load_source("polonine"), path=ledger_path)
+    ok = writethrough.record_source(_rows(), [], load_source("polonine"), inventory_only=False, path=ledger_path)
     assert ok is True
 
     with Ledger.open(ledger_path, env=ENV_NAME,
@@ -112,7 +112,7 @@ def test_record_source_returns_false_on_failure_without_raising(tmp_path, monkey
         raise RuntimeError("simulated ledger failure")
     monkeypatch.setattr(writethrough, "open_ledger", _boom)
 
-    result = writethrough.record_source(_rows(), [], load_source("polonine"),
+    result = writethrough.record_source(_rows(), [], load_source("polonine"), inventory_only=False,
                                         path=tmp_path / "dev.ledger")
     assert result is False, "a write failure must return False, not raise and not report success"
 
@@ -127,7 +127,7 @@ def test_record_source_withdraws_unsent_products_the_run_no_longer_produces(tmp_
     _open_seeded(ledger_path).close()
     first = [*_rows(), CanonicalRow(src_site="polonine", surrogate_key="DDD", variation_key=_VARIATION_KEY,
                                     handle="h-ddd", title="Carrara Three")]
-    assert writethrough.record_source(first, [], load_source("polonine"), path=ledger_path)
+    assert writethrough.record_source(first, [], load_source("polonine"), inventory_only=False, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_b' WHERE sku = 'POL-BBB'")
         ledger.execute("UPDATE product SET state = 'syncing' WHERE sku = 'POL-DDD'")
@@ -137,9 +137,94 @@ def test_record_source_withdraws_unsent_products_the_run_no_longer_produces(tmp_
 
     later = [CanonicalRow(src_site="polonine", surrogate_key="EEE", variation_key=_VARIATION_KEY,
                           handle="h-eee", title="Carrara Four")]
-    assert writethrough.record_source(later, [], load_source("polonine"), path=ledger_path)
+    assert writethrough.record_source(later, [], load_source("polonine"), inventory_only=False, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         skus = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
         stock = {r["sku"] for r in ledger.execute("SELECT sku FROM inventory")}
     assert skus == {"POL-BBB", "POL-DDD", "POL-EEE", "MAR-1"}             # POL-AAA withdrawn
     assert "POL-AAA" not in stock
+
+
+def _photographed(surrogate, qty):
+    """A full-run row: the image stage stamped its standardised photos, gallery and 3D cut-out."""
+    return CanonicalRow(src_site="polonine", surrogate_key=surrogate, variation_key=_VARIATION_KEY,
+                        handle=f"h-{surrogate.lower()}", title="Carrara", inventory_quantity=qty,
+                        thumbnail_key=f"products/{surrogate}/thumb.webp",
+                        product_image_keys=[f"products/{surrogate}/1.webp", f"products/{surrogate}/2.webp"],
+                        model_3d_key=f"products/{surrogate}/cutout.webp",
+                        standard_version="etag-1", standard_photo=True)
+
+
+def _stock_only(surrogate, qty):
+    """The same product as a stock-only refresh sees it: the image stage is skipped, so no image field is set."""
+    return CanonicalRow(src_site="polonine", surrogate_key=surrogate, variation_key=_VARIATION_KEY,
+                        handle=f"h-{surrogate.lower()}", title="Carrara", inventory_quantity=qty)
+
+
+def _enable_writethrough(monkeypatch):
+    monkeypatch.delenv("BLOKPORT_LEDGER_WRITETHROUGH", raising=False)
+    monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+
+
+def test_stock_only_record_keeps_the_product_and_moves_only_its_stock(tmp_path, monkeypatch):
+    # A stock-only refresh skips the image stage, so its rows carry no photos and no 3D. Writing them as
+    # products would strip every synced product's photos and re-serve it without them. It must move the stock
+    # and leave the product row (content, hash, sync state) exactly as the last full run left it.
+    _enable_writethrough(monkeypatch)
+    ledger_path = tmp_path / "dev.ledger"
+    _open_seeded(ledger_path).close()
+    cfg = load_source("polonine")
+    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, inventory_only=False, path=ledger_path)
+    with _open_seeded(ledger_path) as ledger:
+        ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_a' WHERE sku = 'POL-AAA'")
+        ledger.execute("UPDATE inventory SET last_synced_qty = qty WHERE sku = 'POL-AAA'")
+        ledger.conn.commit()
+        before = dict(ledger.get("product", "sku", "POL-AAA"))
+
+    assert writethrough.record_source([_stock_only("AAA", 9)], [], cfg, inventory_only=True, path=ledger_path)
+    with _open_seeded(ledger_path) as ledger:
+        after = dict(ledger.get("product", "sku", "POL-AAA"))
+        stock = dict(ledger.get("inventory", "sku", "POL-AAA"))
+    assert after == before, "a stock-only refresh must never rewrite a product"
+    assert (stock["qty"], stock["last_synced_qty"]) == (9, 5), "the stock move is a delta to serve"
+
+
+def test_stock_only_record_leaves_a_product_new_to_the_ledger_to_the_full_run(tmp_path, monkeypatch):
+    # A row the ledger has no product for (new since the last produce, or held there for want of an image) has
+    # no catalog content in a stock-only run. It is not created and its stock waits for the full run that
+    # creates it; the rest of the source still records.
+    _enable_writethrough(monkeypatch)
+    ledger_path = tmp_path / "dev.ledger"
+    _open_seeded(ledger_path).close()
+    cfg = load_source("polonine")
+    assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, inventory_only=False, path=ledger_path)
+
+    assert writethrough.record_source([_stock_only("AAA", 9), _stock_only("NEW", 3)], [], cfg,
+                                      inventory_only=True, path=ledger_path)
+    with _open_seeded(ledger_path) as ledger:
+        products = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
+        stock = {r["sku"]: r["qty"] for r in ledger.execute("SELECT sku, qty FROM inventory")}
+    assert products == {"POL-AAA"}
+    assert stock == {"POL-AAA": 9}
+
+
+def test_stock_only_record_still_delists_and_withdraws(tmp_path, monkeypatch):
+    # Stock-only still owns the stock lifecycle: a product the supplier dropped goes to stock 0, and a product
+    # never sent to Medusa that the run no longer produces is withdrawn.
+    _enable_writethrough(monkeypatch)
+    ledger_path = tmp_path / "dev.ledger"
+    _open_seeded(ledger_path).close()
+    cfg = load_source("polonine")
+    full = [_photographed("AAA", 5), _photographed("BBB", 4), _photographed("CCC", 2)]
+    assert writethrough.record_source(full, [], cfg, inventory_only=False, path=ledger_path)
+    with _open_seeded(ledger_path) as ledger:
+        ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_' || sku WHERE sku != 'POL-CCC'")
+        ledger.conn.commit()
+
+    assert writethrough.record_source([_stock_only("AAA", 5)], [("POL-BBB", "h-bbb")], cfg,
+                                      inventory_only=True, path=ledger_path)
+    with _open_seeded(ledger_path) as ledger:
+        products = {r["sku"] for r in ledger.execute("SELECT sku FROM product")}
+        stock = {r["sku"]: r["qty"] for r in ledger.execute("SELECT sku, qty FROM inventory")}
+    assert products == {"POL-AAA", "POL-BBB"}                                # POL-CCC withdrawn
+    assert stock == {"POL-AAA": 5, "POL-BBB": 0}                             # POL-BBB delisted

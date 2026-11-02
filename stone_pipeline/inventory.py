@@ -26,17 +26,21 @@ from pathlib import Path
 from stone_pipeline import catalog
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
-from stone_pipeline.run import run_all
+from stone_pipeline.run import expected_sources, run_all
 
 log = logfmt.get_logger("inventory")
 
 
-def run(sources: list[str] | None = None, outputs_dir: Path | None = None) -> tuple[Path, int]:
-    """Refresh inventory for the given sources (all by default). Returns (deliverable, sku_count)."""
+def run(sources: list[str] | None = None, outputs_dir: Path | None = None) -> tuple[Path, int, list[str]]:
+    """Refresh inventory for the given sources (all with data by default). Returns (deliverable, sku_count,
+    failed): `failed` names the expected sources missing from the results (aborted, or their ledger write
+    failed), whose stock did not move."""
     # a dedicated output root so inventory runs never mix with full-run folders and stay invisible
     # to the catalog glob (outputs/*/...), which is one level shallower than outputs/_inventory/<run>/
     out_root = Path(outputs_dir) if outputs_dir else SETTINGS.paths.outputs_dir / "_inventory"
-    results = run_all(sources, outputs_dir=out_root, inventory_only=True)
+    requested = expected_sources(sources)
+    results = run_all(requested, outputs_dir=out_root, inventory_only=True)
+    failed = [s for s in requested if s not in results]
     inv_csvs = [out_root / m.run_id / "4_products_import" / "inventory_update.csv"
                 for m in results.values()]
     count = catalog.consolidate_inventory(inv_csvs)
@@ -45,15 +49,22 @@ def run(sources: list[str] | None = None, outputs_dir: Path | None = None) -> tu
     log.info("inventory consolidated", extra={"extra_fields": {
         "sources": sorted(results), "changed_skus": count, "discontinued": discontinued,
         "file": str(path)}})
-    return path, count
+    return path, count, failed
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     positional = [a for a in argv if not a.startswith("-")]
     sources = None if (not positional or positional == ["all"]) else positional
-    path, count = run(sources)
+    path, count, failed = run(sources)
     print(f"inventory update: {path}  ({count} variant(s) with changed stock)")
+    # fail loud like `run all`: the other sources' stock is recorded, but a scheduler or the /run record must
+    # see that these sources' stock did not move
+    if failed:
+        log.error("stock refresh: source(s) failed, their stock did not reach the ledger",
+                  extra={"extra_fields": {"failed": failed}})
+        print(f"stock refresh FAILED for: {', '.join(failed)}")
+        return 1
     return 0
 
 
