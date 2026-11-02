@@ -264,6 +264,11 @@ resource "aws_ecs_task_definition" "this" {
         # Produce ceiling (the runner kills a run past it). 2026-09-14: a full live scrape with a fresh image
         # batch ran past the old 2 h default on a slow day and was killed as wedged.
         { name = "SCRAPER_RUN_TIMEOUT_SECONDS", value = tostring(var.run_timeout_seconds) },
+        ],
+        # No standardised photo -> served qty 0, reason no_photo (hidden, kept for review). Unset leaves the code's
+        # env default (on in production), so an env that does not pass it keeps its task definition unchanged.
+        var.require_standard_photo == null ? [] : [
+          { name = "SCRAPER_REQUIRE_STANDARD_PHOTO", value = tostring(var.require_standard_photo) },
       ])
       # the config container runs the produce subprocess (fetch -> live scrape -> build), so it also
       # carries the scraper's runtime secrets (proxy, fal key) when configured.

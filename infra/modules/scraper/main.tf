@@ -192,7 +192,7 @@ resource "aws_ecs_task_definition" "this" {
     essential = true
     # No runtime toggle: BLOKPORT_ENV is fixed to this instance's target env and the
     # bucket is its own. (The prod instance therefore can never default to dev.)
-    environment = [
+    environment = concat([
       { name = "SCRAPER_ENV", value = var.target_env },
       { name = "SCRAPER_S3_BUCKET", value = var.staging_bucket },
       { name = "SCRAPER_S3_REGION", value = var.region },
@@ -218,7 +218,12 @@ resource "aws_ecs_task_definition" "this" {
       # HARD publish gate: only images the GPU actually enhanced (enhanced/ marker) may be linked. Ships OFF
       # -- flip on ONLY after the markers are backfilled for the already-enhanced set, else every image holds.
       { name = "SCRAPER_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
-    ]
+      ],
+      # No standardised photo -> served qty 0, reason no_photo (hidden, kept for review). Unset leaves the code's
+      # env default (on in production), so an env that does not pass it keeps its task definition unchanged.
+      var.require_standard_photo == null ? [] : [
+        { name = "SCRAPER_REQUIRE_STANDARD_PHOTO", value = tostring(var.require_standard_photo) },
+    ])
     secrets = [for k, v in var.ssm_secret_arns : { name = k, valueFrom = v }]
     logConfiguration = {
       logDriver = "awslogs"

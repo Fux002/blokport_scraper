@@ -112,6 +112,12 @@ variable "require_enhanced_enabled" {
   description = "BLOKPORT_REQUIRE_ENHANCED: hard publish gate -- only GPU-enhanced images (enhanced/ marker) are linked. Ships false; enable only after markers are backfilled, else all images hold."
 }
 
+variable "require_standard_photo" {
+  type        = bool
+  default     = null
+  description = "SCRAPER_REQUIRE_STANDARD_PHOTO: a product without a standardised photo is served qty 0 with reason no_photo (hidden, kept for review). Unset (null) leaves the code's env default (on in production); prod does not pass it."
+}
+
 # --- Brand + product-type selection (multi-brand / multi-material) ------------
 # These make the deployment brand- and product-agnostic: the product type is a SETUP CHOICE (the domain
 # pack), and the brand names its store. The blokport-stone stack keeps the defaults, so nothing changes;
