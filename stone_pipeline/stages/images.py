@@ -290,7 +290,10 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     else:
         _stage_and_link(rows, fetch, cfg, stats)
     views = _load_standard_views(cfg)
+    known, views = views is not None, views or {}
     for row in rows:
+        # unknown when the pool could not be read: this run never changes whether a product is listed
+        row.standard_photo = _lead(row.image_keys, views) is not None if known else None
         if row.image_keys:
             # read from the product's own photos, before they are replaced by the standardised views
             row.model_3d_key = model_3d(row.image_keys, views) if _is_3d_format(row) else None
@@ -355,11 +358,11 @@ def _is_3d_format(row: CanonicalRow) -> bool:
     return (row.format_value or "").casefold() == STANDARDISE.CUTOUT_FORMAT
 
 
-def _load_standard_views(cfg) -> dict[str, dict[str, str]]:
+def _load_standard_views(cfg) -> Optional[dict[str, dict[str, str]]]:
     """{view: {sha: ETag}} of the published standardised photos, and of their 3D slabs under CUTOUT_SUBDIR (the pair's
-    two ETags, once both files are there: the outline is written last). Empty in local mode or when none are published. When the
-    pool cannot be read the products keep the images they had this run (today's images, never a guess) and it is
-    logged: the next produce links the standardised set."""
+    two ETags, once both files are there: the outline is written last). Empty in local mode or when none are published.
+    None when the pool cannot be read: the products keep the images they had this run (today's images, never a guess),
+    it is logged, and the next produce links the standardised set."""
     if getattr(cfg, "mode", None) == "local":
         return {}
     try:
@@ -371,7 +374,7 @@ def _load_standard_views(cfg) -> dict[str, dict[str, str]]:
     except Exception as exc:
         log.warning("standardised photos unreachable; products keep their images this run",
                     extra={"extra_fields": {"error": str(exc)}})
-        return {}
+        return None
 
 
 def _finish_row(row: CanonicalRow, urls: list[str], srcs: int, n_discarded: int, n_held: int,

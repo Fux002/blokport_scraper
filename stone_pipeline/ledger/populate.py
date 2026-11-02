@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from stone_pipeline.config.settings import category
+from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import match_key
@@ -294,26 +294,50 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
 def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
     """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field).
     `last_synced_qty` is left null, so a freshly populated row is a delta to serve
-    (design section 7). Products must be populated first (the sku FK)."""
+    (design section 7). Products must be populated first (the sku FK). With images.require_standard_photo on, a product
+    without a standardised photo is delisted (stock 0, reason 'delisted'); one whose photo this run could not tell
+    (standard_photo None: the pool unread, or the stock-only refresh) keeps the listed or delisted state it had."""
+    rows = list(rows)
+    hide = _without_standard_photo(rows, cfg)
     now = now_iso()
     n = 0
     for r in rows:
         sku = _sku(r, cfg)
         resolved = inventory_str(r)
         qty = int(resolved) if str(resolved).isdigit() else 0
+        delisted = sku in hide or (r.standard_photo is None and SETTINGS.images.require_standard_photo
+                                   and _delisted(ledger, sku))
         # keep last_synced_qty on update: it is owned by the ack, not the write-through.
         # Overwriting it to NULL each run would re-serve every product as a delta forever.
         ledger.upsert("inventory", {
             "sku": sku,
-            "qty": qty,
+            "qty": 0 if delisted else qty,
             "last_synced_qty": None,   # only on insert (a never-synced row is a delta)
-            "reason": None,            # a normal scrape write clears any 'delisted' marker: re-scraping a
-                                       # re-enabled vendor republishes it (restock delta, no reason).
+            # a normal scrape write clears any 'delisted' marker: re-scraping a re-enabled vendor republishes it
+            # (restock delta, no reason), and a product whose standardised photo is now published comes back
+            "reason": "delisted" if delisted else None,
             "replaced_by_lot_code": None,   # listed again, so no longer replaced by a lot
             "updated_at": now,
         }, pk=("sku",), keep_on_update=("last_synced_qty",))
         n += 1
     return n
+
+
+def _without_standard_photo(rows: list[CanonicalRow], cfg: SourceConfig) -> set[str]:
+    """The skus the rule delists this run: products the image stage found without a standardised photo. Raises when
+    they are nearly all of the source's products (a broken run, never a real outcome): nothing is written then."""
+    if not SETTINGS.images.require_standard_photo:
+        return set()
+    hide = {_sku(r, cfg) for r in rows if r.standard_photo is False}
+    if rows and len(hide) > SETTINGS.images.max_hidden_share * len(rows):
+        raise RuntimeError(f"{cfg.source_code}: the standardised-photo rule would hide {len(hide)} of {len(rows)} products; "
+                           "refusing (a photo pool read as empty?)")
+    return hide
+
+
+def _delisted(ledger: Ledger, sku: str) -> bool:
+    stored = ledger.get("inventory", "sku", sku)
+    return bool(stored) and stored["reason"] == "delisted"
 
 
 def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
