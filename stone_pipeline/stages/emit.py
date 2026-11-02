@@ -108,8 +108,8 @@ def _add_product_image_columns(column_map: dict, slots: int) -> None:
     def _mapper(index: int) -> Callable[[CanonicalRow, SourceConfig], str]:
         return lambda r, c: _slot(r.product_image_keys, index)
 
-    for index in range(slots):
-        column_map[f"Product Image {index + 1}"] = _mapper(index)
+    for slot in range(slots):
+        column_map[f"Product Image {slot + 1}"] = _mapper(slot)
 
 
 _add_product_image_columns(COLUMN_MAP, SETTINGS.images.product_image_slots)
