@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 from stone_pipeline.config.settings import STANDARDISE as C
-from stone_pipeline.standardise import blend, closeup, kinds, layout, logos, scene, studio, views
+from stone_pipeline.standardise import blend, closeup, kinds, layout, scene, studio, views
 
 
 @dataclass
@@ -28,24 +28,13 @@ def _finished(slabs, key, models, seed):
     return blend.blend(layout.compose(slabs, key), solid, stand, models.inpaint, seed)
 
 
-def _work_copy(full, clean, watermarked):
-    """(the photo at the working size, its logo taken off when it has one, "") or (None, why the logo cannot be)."""
-    rgb = layout.fit_working(full)
-    if not watermarked:
-        return rgb, ""
-    if clean is None:
-        return None, "logo: no cleaned copy of this watermarked photo"
-    return logos.remove(rgb, clean)
-
-
-def standardise(full, *, fmt, key, size=None, clean=None, watermarked=False, models=None, extra_views=False, edits=None):
+def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, edits=None):
     """The finished images of one photo, `full` at its full resolution (read). fmt = slab | block | tile (the product's
-    format); key = the product, it alone chooses the room; size = (length, width) in metres; clean = the already-cleaned
-    copy of a watermarked source; edits = a function giving where `full` itself is not as shot (views.close_up), called
-    only when a close-up is made."""
-    rgb, reason = _work_copy(full, clean, watermarked)
-    if rgb is None:
-        return Result(held=reason)
+    format); key = the product, it alone chooses the room; size = (length, width) in metres; edits = a function giving
+    where `full` itself is not as shot (views.close_up), called only when a close-up is made. A logo or overlay left on
+    the stone is the judge's finding (leftover_mark) on the result, which the hosted clean step removes from the photo;
+    no step here looks for one."""
+    rgb = layout.fit_working(full)
     if fmt in ("block", "tile"):
         made = scene.block(rgb, *models.cleaners) if fmt == "block" else scene.tile(rgb, models.lama, models.esr)
         return Result(kind=fmt, images={"main": made[0]})
@@ -89,14 +78,12 @@ def whole_index(alphas, kind):
     return 0 if kind == "slab" else None
 
 
-def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen, saved):
+def close_view(full, *, size, models, edits=None, chosen, saved):
     """The close-up alone (views.close_up) of a photo its run made a whole slab of (a single slab, or an open book's whole
     half), or None when it gets none: the steps of standardise up to the squared slabs, none of what only the other views
-    need, the close-up of the slab its 3D slab shows (run_slab). NoCloseUp when its logo cannot be trusted or the slabs
-    found now do not tell which one that is."""
-    rgb, reason = _work_copy(full, clean, watermarked)
-    if rgb is None:
-        raise NoCloseUp(reason)
+    need, the close-up of the slab its 3D slab shows (run_slab). NoCloseUp when the slabs found now do not tell which one
+    that is."""
+    rgb = layout.fit_working(full)
     flats = layout.flat_slabs(rgb, models.seg, models.det, models.lama, size=size)
     if isinstance(flats, str):
         raise NoCloseUp(f"no whole slab now: {flats}")

@@ -39,7 +39,7 @@ Status key: TODO / INVESTIGATING / IN-PR (#) / MERGED / DEPLOYED / DEFERRED
 - [ ] No per-row exception isolation in match/reconcile/derive (derive.py:620)
 - [ ] Retired varieties still get combinations (tree_build.py:399) — test retired KEYS not vid
 - [ ] Variety vanishes when dedup survivor independently excluded (loaders.py:300)
-- [ ] De-watermark inpaints pink/red veining (image_processing.py:170)
+- [x] De-watermark inpaints pink/red veining (image_processing.py:170) -- retired with the old enhancer (2026-11-02)
 - [ ] Served product type/category from product row while gate checks variation (sync.py:254)
 - [ ] inventory_for prefers bundle_size over explicit raw_inventory_quantity (folds into F1)
 - [ ] _env_int crashes on `--3` (settings.py:76); non-ASCII Authorization→TypeError not 401 (server.py:375); migration parity hand-mirrored (store.py:74)
@@ -48,7 +48,7 @@ Status key: TODO / INVESTIGATING / IN-PR (#) / MERGED / DEPLOYED / DEFERRED
 - [ ] See FULL_CODEBASE_REVIEW.md "LOW findings". Sequence after Tiers 1-3.
 
 ## F13 — FAL breaker global not per-process (with F5)
-- [ ] reprocess_source.py:109 + no ceiling on Stage-7 :core path (images.py:411)
+- [x] reprocess_source.py:109 + no ceiling on Stage-7 :core path (images.py:411) -- retired with the old enhancer (2026-11-02): no hosted call is left in Stage 7
 
 ## Do NOT regress (verified correct-by-design) — see AUDIT_2026-07-31.md bottom list
 SSRF revalidation; parameterized SQL + constant-time token; content-addressing on source bytes; HOLD-never-guess

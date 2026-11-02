@@ -80,49 +80,31 @@ variable "produce_secret_arns" {
 variable "gpu_job_queue_name" {
   type        = string
   default     = ""
-  description = "Batch job-queue NAME the produce auto-enhance trigger submits to (from the gpu_enhance module). Empty = auto-enhance never submits."
+  description = "Batch job-queue NAME the texture trigger and the photo process submit to (from the gpu_enhance module). Empty = the texture trigger never submits."
 }
 
 variable "gpu_job_definition_name" {
   type        = string
   default     = ""
-  description = "Batch job-definition NAME for the enhance reprocess (from the gpu_enhance module)."
+  description = "Batch job-definition NAME for the texture job (from the gpu_enhance module)."
 }
 
 variable "gpu_job_queue_arn" {
   type        = string
   default     = ""
-  description = "ARN of the enhance job queue. Scopes the task role's batch:SubmitJob. Empty = the permission is not granted."
+  description = "ARN of the GPU job queue. Scopes the task role's batch:SubmitJob. Empty = the permission is not granted."
 }
 
 variable "gpu_job_definition_arn" {
   type        = string
   default     = ""
-  description = "ARN of the enhance job definition. Scopes the task role's batch:SubmitJob."
-}
-
-variable "auto_enhance_enabled" {
-  type        = bool
-  default     = false
-  description = "BLOKPORT_AUTO_ENHANCE on the produce container. Ships false (dark); flip to true to auto-fire the GPU reprocess on new images."
-}
-
-variable "enhance_max_jobs" {
-  type        = number
-  default     = 40
-  description = "SCRAPER_ENHANCE_MAX_JOBS: max GPU enhance jobs one produce dispatches (over-cap windows ride the next produce). The code default is 8, which starves a big source when another comes first; 40 clears a full scrape's pending windows in one pass. Same on dev + prod."
+  description = "ARN of the texture job definition. Scopes the task role's batch:SubmitJob."
 }
 
 variable "auto_texture_enabled" {
   type        = bool
   default     = false
-  description = "BLOKPORT_AUTO_TEXTURE on the produce container. Ships false (dark); flip to true ONLY after the :gpu image is rebuilt with ben2, else the dispatched texture job fails at background-removal. Reuses the same GPU queue/jobdef as auto-enhance (RUN_MODE=generate-textures)."
-}
-
-variable "require_enhanced_enabled" {
-  type        = bool
-  default     = false
-  description = "BLOKPORT_REQUIRE_ENHANCED: hard publish gate -- only GPU-enhanced images (enhanced/ marker) are linked. Ships false; enable only after markers are backfilled, else all images hold."
+  description = "BLOKPORT_AUTO_TEXTURE on the produce container. Ships false (dark); flip to true ONLY after the :gpu image is rebuilt with ben2, else the dispatched texture job fails at background-removal. Runs on the gpu_enhance queue/jobdef (RUN_MODE=generate-textures)."
 }
 
 variable "require_standard_photo" {

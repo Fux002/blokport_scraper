@@ -112,41 +112,19 @@ BLOKPORT_REFRESH_APPLY=1 python -m stone_pipeline.refresh_images   # generate + 
 
 ---
 
-# Scraped PRODUCT photos — faithful enhancement + de-watermark (separate pipeline)
+# Scraped PRODUCT photos (separate pipeline)
 
 Everything above is about the generated **variant** texture image (`{Key}.png`).
 This is a different concern: the **product** photos a scraper captures — the real
-slabs a customer buys, usually shot in a storage unit under poor, uneven light,
-and on some sources (varsha) carrying a burned-in watermark.
+slabs a customer buys, usually shot in a storage unit under poor, uneven light.
 
 Where it runs: **Stage 7**, `stone_pipeline/stages/images.py`, in the `local`/`s3`
-image modes (passthrough never downloads bytes, so it can't process them). Each
-source image is, on first sight, **de-watermarked (flagged sources only) → faithfully
-enhanced → faithfully upscaled**, then re-hosted. It is keyed on the *source* bytes'
-hash, so a re-run reprocesses and re-uploads nothing.
+image modes (passthrough never downloads bytes). With `SCRAPER_IMAGE_PROCESSING=true`
+each new source image is size-reduced (long edge capped, never enlarged; CPU) and
+re-hosted under `improved/`, its raw original kept under `scraped/`. It is keyed on the
+*source* bytes' hash, so a re-run re-uploads nothing.
 
-Faithful = no invented detail (it must stay a true record of the stone):
-- **Lighting / colour:** gray-world white balance + CLAHE local contrast (OpenCV).
-- **Noise / softness:** light non-local-means denoise + measured unsharp mask.
-- **Upscale:** Lanczos resampling (NOT generative SR), capped at `upscale_max_scale`
-  and `upscale_target_long_edge`.
-- **De-watermark** (sources with `watermarked: true` in `config/sources.yaml`, e.g.
-  varsha): Florence-2 detects the mark per-image, LaMa inpaints it — self-hosted,
-  free, runs on the AWS stack. Needs the optional `requirements-imageproc.txt`
-  stack; if absent the step is skipped (a warning) and enhancement still runs.
-
-Enable it (off by default — until then Stage 7 is unchanged):
-```python
-# SETTINGS.images.processing  (config/settings.py: ImageProcessingConfig)
-enabled = True            # turn the whole step on
-dewatermark = True        # only affects sources flagged watermarked: true
-upscale = True            # Lanczos, faithful
-```
-Only the enhancement/upscale chain (OpenCV/numpy/Pillow) is a core dep; the
-de-watermark backend lives in `stone_pipeline/requirements-imageproc.txt` and is
-meant to run in the AWS image-processing container/job.
-
-Audit: with `write_preview` on, each processed image is logged to
-`images/reports/processed_preview.csv` (source URL → processed URL, what ran) so
-you can eyeball results before they go live — de-watermarking is detect-then-inpaint,
-not infallible.
+A source with its `image_pipeline` on (admin, default) then gets one standardised photo
+per listing from the photo process (`STANDARDISE_PROCESS.md`): a GPU standardise, a
+hosted judge, and a hosted clean of reflections, marks and burned-in logos the judge
+finds. With it off, its products show the re-hosted scraped photos.

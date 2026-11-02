@@ -70,48 +70,6 @@ variable "log_retention_days" {
   default = 30
 }
 
-variable "gpu_job_queue_name" {
-  type        = string
-  default     = ""
-  description = "Batch job-queue NAME the auto-enhance trigger submits to (from the gpu_enhance module). Empty = never submits."
-}
-
-variable "gpu_job_definition_name" {
-  type        = string
-  default     = ""
-  description = "Batch job-definition NAME for the enhance reprocess (from the gpu_enhance module)."
-}
-
-variable "gpu_job_queue_arn" {
-  type        = string
-  default     = ""
-  description = "ARN of the enhance job queue; scopes the task role's batch:SubmitJob. Empty = permission not granted."
-}
-
-variable "gpu_job_definition_arn" {
-  type        = string
-  default     = ""
-  description = "ARN of the enhance job definition; scopes the task role's batch:SubmitJob."
-}
-
-variable "auto_enhance_enabled" {
-  type        = bool
-  default     = false
-  description = "BLOKPORT_AUTO_ENHANCE on the scheduled scraper. Ships false (dark); flip to auto-fire the GPU reprocess on new images."
-}
-
-variable "enhance_max_jobs" {
-  type        = number
-  default     = 40
-  description = "SCRAPER_ENHANCE_MAX_JOBS: max GPU enhance jobs one produce dispatches (over-cap windows ride the next produce). The code default is 8, which starves a big source when another comes first; 40 clears a full scrape's pending windows in one pass. Same on dev + prod."
-}
-
-variable "require_enhanced_enabled" {
-  type        = bool
-  default     = false
-  description = "BLOKPORT_REQUIRE_ENHANCED: hard publish gate -- only GPU-enhanced images (enhanced/ marker) are linked. Ships false; enable only after markers are backfilled, else all images hold."
-}
-
 variable "require_standard_photo" {
   type        = bool
   default     = null

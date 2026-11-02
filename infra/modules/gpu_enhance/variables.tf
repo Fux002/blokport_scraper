@@ -1,15 +1,15 @@
 variable "target_env" {
-  description = "development | production - the env this Batch enhancer belongs to (fixes BLOKPORT_ENV + bucket)."
+  description = "development | production - the env this GPU Batch belongs to (fixes BLOKPORT_ENV + bucket)."
   type        = string
 }
 
 variable "home_env" {
-  description = "Which platform VPC/cluster to run in (dev enhancer runs in the dev VPC). Usually == target_env."
+  description = "Which platform VPC/cluster to run in (dev GPU Batch runs in the dev VPC). Usually == target_env."
   type        = string
 }
 
 variable "staging_bucket" {
-  description = "The S3 staging bucket for THIS env (scraped/ in, improved/ out). Scoped: the job role can touch only this."
+  description = "The S3 staging bucket for THIS env. Scoped: the job role can touch only this."
   type        = string
 }
 
@@ -70,7 +70,7 @@ variable "alert_email" {
   default     = ""
 }
 
-# Brand + product-type selection. The GPU jobs run pipeline code (de-watermark / generate-textures) that
+# Brand + product-type selection. The GPU jobs run pipeline code (generate-textures) that
 # reads active_pack() from DOMAIN_PACK -- without these, a wudport/wood GPU job would default to the STONE
 # pack and generate stone textures/densities. Defaults keep this the blokport-stone stack.
 variable "brand" {

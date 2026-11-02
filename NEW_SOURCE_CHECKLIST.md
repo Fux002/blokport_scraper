@@ -44,14 +44,11 @@ a shared stage. Lock these in on the scraper/adapter class + config:
   - **Trust / safety** (always): `mode: review` (always start in review), `min_expected_rows` (catastrophic-
     scrape floor), `emit_on_review`.
   - **Images** (IF APPLICABLE -- this is the easy-to-forget group):
-    - `watermarked: true` if the supplier burns a logo into its photos; **and when true you SHOULD set
-      `fal_prompt`** -- the source-specific de-watermark instruction naming THAT supplier's mark (colour +
-      text) for the best removal. Empty falls back to a GENERIC, source-agnostic instruction (safe for any
-      source, just less tuned; a note is logged) -- never another supplier's prompt.
-    - `enhance` (default on) -- Real-ESRGAN upscale; turn off for a source whose photos should not be upscaled.
+    - `image_pipeline` (default on) -- the standardised-photo process (STANDARDISE_PROCESS.md) and the no_photo
+      rule; off shows the scraped photos and spends nothing (testing a source). A logo or watermark burned into
+      the supplier's photos needs no setting: the judge finds it per photo and the clean step removes it.
 - Rule: NO order-dependent heuristics and NO silent unit/format guesses. Declare the source's rule; if the
-  source genuinely varies, declare that too. (This is the D/E lesson.) A watermarked source that omits
-  `fal_prompt` is the image-equivalent of that mistake -- declare the mark, don't inherit another's.
+  source genuinely varies, declare that too. (This is the D/E lesson.)
 
 ## 1. Golden fixture (offline lock)
 

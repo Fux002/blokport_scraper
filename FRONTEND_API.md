@@ -26,6 +26,22 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 | `PUT` | `/config/v1/sources/<name>` | create OR update (full object; missing fields fall to defaults). **Also the promote-to-auto action: PUT with `"mode":"auto"`.** | body `<source>` -> saved `<source>`; `400` on a bad/duplicate/adapterless source |
 | `DELETE` | `/config/v1/sources/<name>` | remove permanently (purge qty-0 products + drop config) | `409` if the source still has LIVE products (delist first) |
 
+#### Image pipeline switch (`image_pipeline`, 2026-11-02)
+`<source>` carries **`image_pipeline`** (bool, default `true`): suggested label **"Image pipeline"**, a toggle on the
+source edit page and a column/badge in the list.
+- **on**: the photo process (STANDARDISE_PROCESS.md) works the source's listings; a product is listed only with a
+  standardised photo (without one it is served at stock 0 with reason `no_photo` and kept for review). A logo,
+  watermark or overlay text on a photo is found per photo by the judge and removed by the hosted clean step; there
+  is no per-source watermark setting any more.
+- **off**: the products show the scraped photos (re-hosted, size-reduced; no GPU, no hosted call), stay listed, and
+  the photo process never picks them (nothing is spent on them). Handy for testing a source.
+
+**Retired fields (remove from the admin):** `enhance` (the "Enhance (upscale)" toggle, its form default
+`enhance=true`, the "Enhance on (billable)" badge, `enhance` in the source type), `watermarked` (the "remove
+watermark" / "de-watermark" toggle) and `fal_prompt`. They are no longer returned; a PUT that still sends them is
+saved without them (ignored with a server-side warning, as every unknown field is). Every existing source
+starts with `image_pipeline` on (config.db migration, schema 9); turning it off is a deliberate admin choice.
+
 ### Run (the "produce" trigger)
 | Method | Path | Purpose | Body / response |
 |---|---|---|---|
@@ -41,7 +57,7 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 | `POST` | `/config/v1/delist` | take offline (stock 0 + disable) -- reversible |
 | `POST` | `/config/v1/purge` | hard-delete the qty-0 (dead-stock) products; returns external_ids to delete in Medusa |
 | `POST` | `/config/v1/clean` | prune superseded scrapes/runs; `{sources}` deletes those sources' raw scraped data |
-| `POST` | `/config/v1/reset` | clean-start the ledger sync state; `{ "hard"?: bool, "sources"?: [...] }` |
+| `POST` | `/config/v1/reset` | clean-start the ledger sync state; `{ "hard"?: bool, "sources"?: [...] }`; factory reset `{ "pristine": true, "keep_images"?: bool, "keep_scrape"?: bool }` |
 | `POST` | `/config/v1/variations/<key>/retire` | remove a variety; `{ "force"?: bool }` |
 | `POST` | `/config/v1/variations/<key>/un_retire` | reverse a retire |
 
@@ -65,8 +81,12 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 | `POST` | `/config/v1/review/backbone/approve_all` | `{ "verdict"?: "likely_real" }` bulk-approve |
 | `PUT` | `/config/v1/review/backbone/<ref>` | `{ "action":"approve"\|"reject"\|"clear" }` |
 
-> The bad-image discard reason (`no_publishable_image`) surfaces on a product's review flags in the normal
-> review data -- no new endpoint; just render the flag reason.
+> **Reset option "Keep hosted images" (`keep_images`, factory reset only).** On: the hosted product images stay
+> (everything under `<env>/products/`: the scraped originals, the re-hosted photos, the published standardised views
+> and 3D slabs), so the products link their standardised photos at once. Off: all of them are wiped and the next
+> scrape re-hosts the photos; the photo process's stored results are never wiped, so its next run publishes the
+> chosen standardised photos again without paying. Suggested label: "Keep hosted images" (was "Keep enhanced
+> images").
 
 ---
 
@@ -118,9 +138,23 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
                "detail":"...", "likely_rename":"..." }, ... ],
   "row_count":303, "row_baseline":303, "updated_at":"<iso>",
   "admission": { "state":"review"|"eligible"|"auto"|"demoted", "streak":3, "required":3,
-                 "certified":true, "eligible":true, "mode":"review", "last_drift":["fill_drop",...] }
+                 "certified":true, "eligible":true, "mode":"review", "last_drift":["fill_drop",...] },
+  "images": { "image_pipeline":true, "total":412, "ready":388, "hidden":24, "generating":false,
+              "held_for_image":0 }
 }
 ```
+
+`images` (counted from the sync ledger when the diagnostic is served; absent when the source has no product in the
+ledger, render "-"):
+- `image_pipeline`: the source's switch.
+- `total`: the source's products in the ledger.
+- `ready`: products with a published standardised photo; for a source with `image_pipeline` off, products with a
+  hosted photo (they show the scraped ones).
+- `hidden`: products served at stock 0 with reason `no_photo` (no standardised photo yet; always 0 when the switch
+  is off).
+- `generating`: a photos run is under way and works this source.
+- `held_for_image`: products the last produce could not emit for want of a photo that a republish can still emit.
+- Retired: `held` (the old enhancer's discard markers). `ready` no longer means "de-watermarked + enhanced".
 
 Render per source:
 - a **layer strip**: `health` + `gates` + each `stages[].status`, colour-coded (green OK / amber DEGRADED /
@@ -135,8 +169,7 @@ Render per source:
 - Any call to a `/config/v1/...` or `/sync/v1/...` path NOT listed above is stale -- delete it.
 - There is **no** dedicated "promote"/"demote" endpoint: promotion is `PUT /config/v1/sources/<name>` with
   `mode:auto`; demotion is automatic (the admission rule) and surfaces via the diagnostics `admission.state`.
-- There is **no** endpoint that returns pixels or the image discard set -- the discard reason arrives only as
-  a review flag.
+- There is **no** endpoint that returns pixels.
 - Ports are `8724` (config) and `8723` (sync); do not hardcode `:4200` as a backend -- that is the frontend
   host that proxies to these two.
 

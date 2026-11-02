@@ -68,7 +68,7 @@ def _slab(*shas, prefix=RUN):
 
 def _remakes(monkeypatch, outcomes):
     """remake gives, per sha, an image, None, or raises the exception given."""
-    def remake(client, record, photos, m, watermarked, made):
+    def remake(client, record, photos, m, made):
         out = outcomes[record["sha"]]
         if isinstance(out, BaseException):
             raise out
@@ -77,7 +77,7 @@ def _remakes(monkeypatch, outcomes):
 
 
 def _redo(s3, records, made, job=JOB):
-    return close.redo(s3, records, made, {}, None, False, job)
+    return close.redo(s3, records, made, {}, None, job)
 
 
 IMAGE = np.full((C.OUT_H, C.OUT_W, 3), 128, np.uint8)
@@ -246,13 +246,13 @@ def test_the_run_makes_each_photos_close_up_from_the_photo_its_run_started_from(
     monkeypatch.setattr(close, "own_input", lambda client, key, read=photo.read: key)
     monkeypatch.setattr(close, "start_edits", lambda client, out, key, source_key, cleaned, full: f"fills of {source_key}")
 
-    def close_view(full, *, size, models, clean=None, watermarked=False, edits=None, chosen, saved):
-        seen.append((full, size, watermarked, edits, chosen, saved))
+    def close_view(full, *, size, models, edits=None, chosen, saved):
+        seen.append((full, size, edits, chosen, saved))
         return None
     monkeypatch.setattr(close.photo, "close_view", close_view)
-    assert close.remake(_S3(), _record(A), {A: {"size": [3.0, 1.8]}}, None, False, _slab(A)) is None
+    assert close.remake(_S3(), _record(A), {A: {"size": [3.0, 1.8]}}, None, _slab(A)) is None
     # no record (made before one was kept): decided against the slab its run saved (own_input stood in: its key)
-    assert seen == [(f"{RUN}retouched/{A}.jpg", (3.0, 1.8), False, f"fills of {RUN}retouched/{A}.jpg", None, f"{RUN}{A}.slab.png")]
+    assert seen == [(f"{RUN}retouched/{A}.jpg", (3.0, 1.8), f"fills of {RUN}retouched/{A}.jpg", None, f"{RUN}{A}.slab.png")]
 
 
 def test_a_saved_slab_reads_back_as_it_was_written():
@@ -270,7 +270,7 @@ def test_an_unrecorded_result_whose_saved_slab_is_missing_has_no_close_up_of_its
     monkeypatch.setattr(close, "own_input", lambda client, key, read=photo.read: (_ for _ in ()).throw(photo.NoCloseUp(f"its input is missing: {key}")) if key.endswith(".png") else key)
     monkeypatch.setattr(close, "start_edits", lambda *a: None)
     with pytest.raises(photo.NoCloseUp, match="slab.png"):
-        close.remake(_S3(), _record(A), {A: {"size": None}}, None, False, _slab(A))
+        close.remake(_S3(), _record(A), {A: {"size": None}}, None, _slab(A))
 
 
 def test_the_run_takes_the_slab_its_run_recorded(monkeypatch):
@@ -280,7 +280,7 @@ def test_the_run_takes_the_slab_its_run_recorded(monkeypatch):
     monkeypatch.setattr(close, "start_edits", lambda *a: None)
     monkeypatch.setattr(close.photo, "close_view", lambda full, *, chosen, saved, **k: seen.append((chosen, saved)))
     s3 = _S3({f"{RUN}{A}.slab.json": json.dumps({"index": 1, "of": 2}).encode()})
-    close.remake(s3, _record(A), {A: {"size": None}}, None, False, _slab(A) | {f"{RUN}{A}.slab.json"})
+    close.remake(s3, _record(A), {A: {"size": None}}, None, _slab(A) | {f"{RUN}{A}.slab.json"})
     assert seen == [((1, 2), None)]
 
 
@@ -289,7 +289,7 @@ def test_the_run_takes_the_slab_its_run_recorded(monkeypatch):
 def test_a_photo_its_run_refused_or_off_the_sheet_has_none_of_its_own(monkeypatch, started, photos, why):
     monkeypatch.setattr(close, "start", lambda client, out, key, sha: started)
     with pytest.raises(photo.NoCloseUp, match=why):
-        close.remake(_S3(), _record(A), photos, None, False, _slab(A))
+        close.remake(_S3(), _record(A), photos, None, _slab(A))
 
 
 def _jpg(rgb):
@@ -311,19 +311,6 @@ def test_a_photos_missing_or_broken_input_is_its_own_outcome_and_a_denied_one_is
         runner.own_input(_Denied(), key)
     shot = np.random.default_rng(3).integers(60, 200, (400, 600, 3), dtype=np.uint8)
     assert np.array_equal(runner.own_input(_S3({key: _jpg(shot)}), key).shape, shot.shape)
-
-
-def test_the_watermark_setting_is_required_from_the_launcher(monkeypatch):
-    from stone_pipeline.core import env
-    for missing in (None, "", "yes"):
-        if missing is None:
-            monkeypatch.delenv("WATERMARKED", raising=False)
-        else:
-            monkeypatch.setenv("WATERMARKED", missing)
-        with pytest.raises(ValueError, match="WATERMARKED"):
-            env.job_flag("WATERMARKED")
-    monkeypatch.setenv("WATERMARKED", "true")
-    assert env.job_flag("WATERMARKED") is True
 
 
 def test_what_of_the_start_photo_is_not_as_shot():

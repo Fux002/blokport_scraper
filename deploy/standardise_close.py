@@ -4,11 +4,10 @@ submitted by deploy.standardise_run with CLOSE_ONLY=true, one job per slice of a
 For each chosen photo of SRC (deploy.standardise_select's records under <CLEAN_TAG>/chosen/), narrowed to the slice's
 fixed list (ONLY_KEY): a photo its run made a whole slab of (<sha>.slab.png: a single slab, or an open book's half,
 which <sha>.slab.json records; a result made before that was recorded is decided against that slab.png) goes, from the photo
-its run started from, through only what the close-up needs (logo, outline, detector, eraser: photo.close_view; no
+its run started from, through only what the close-up needs (outline, detector, eraser: photo.close_view; no
 upscaler, inpainting, judge or hosted edit). The new close-up replaces <prefix><sha>.close.jpg in the run's own folder; the file is deleted
 when the photo gets none: by the close-up rule, for a reason of its own (photo.NoCloseUp: its run refused it, it is off
-the product sheet, one of its own inputs is missing or no image, it no longer gives the slabs its run found, its logo
-cannot be trusted), because a storage error on it persisted over CLOSEUP_RETRY_MAX jobs, or because its run made no whole single
+the product sheet, one of its own inputs is missing or no image, it no longer gives the slabs its run found), because a storage error on it persisted over CLOSEUP_RETRY_MAX jobs, or because its run made no whole single
 slab of it. Each photo done is recorded (with the reason when it has none) under <prefix>close_v<CLOSEUP_VERSION>/, so
 a re-run goes on where it stopped and a new close-up rule does every photo again; deploy.standardise_publish then
 publishes it, or takes the published one down.
@@ -19,7 +18,7 @@ other error stops the slice loud, and so do CLOSEUP_HOLD_STREAK_MAX photos in a 
 reason (a cause outside the photos, not those photos; none of them is written; photos off the product sheet are a
 legitimate outcome en masse and never count). The bookkeeping that bounds this (retry records, crash markers) stops the
 slice when it cannot be read or written. Exit 1 when photos are left to the next run.
-Env: CLEAN_TAG, SRC, WATERMARKED (required: env.job_flag), ONLY_KEY (an S3 JSON list of shas); AWS_BATCH_JOB_ID names
+Env: CLEAN_TAG, SRC, ONLY_KEY (an S3 JSON list of shas); AWS_BATCH_JOB_ID names
 the job (the same over Batch's attempts at it).
 """
 
@@ -38,7 +37,6 @@ from deploy.standardise_publish import _objects, chosen_prefix
 from deploy.standardise_source import (_encode, _get, gpu_error, own_input, passing_storage_error, read_slab,
                                        sheet_photos, slab_record_key, start, start_edits)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
-from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import models, photo
 
@@ -94,7 +92,7 @@ def listed(records, src, wanted=None):
     return sorted(found.values(), key=lambda r: (r["sha"], r["prefix"]))
 
 
-def remake(client, record, photos, m, watermarked, made):
+def remake(client, record, photos, m, made):
     """The new close-up of one chosen photo, or None when it gets none; NoCloseUp for a reason of its own. Of the slab its
     run recorded (slab_record_key, in `made`: the run folder's keys); a result made before that was recorded is decided
     against the <sha>.slab.png it saved (photo.run_slab)."""
@@ -106,8 +104,6 @@ def remake(client, record, photos, m, watermarked, made):
     if sha not in photos:
         raise photo.NoCloseUp(OFF_SHEET)
     size = photos[sha]["size"]
-    logo = watermarked and not cleaned                 # a cleaned copy has no logo left to take off
-    clean = own_input(client, f"{imagestore.improved_prefix(src)}{sha}.jpg", photo.decode) if logo else None
     full = own_input(client, source_key)
     chosen = saved = None
     if (slab_key := slab_record_key(out, sha)) in made:
@@ -115,7 +111,7 @@ def remake(client, record, photos, m, watermarked, made):
         chosen = (recorded["index"], recorded["of"])
     else:
         saved = own_input(client, f"{out}{sha}.slab.png", read_slab)
-    return photo.close_view(full, size=tuple(size) if size else None, clean=clean, watermarked=logo, models=m,
+    return photo.close_view(full, size=tuple(size) if size else None, models=m,
                             edits=start_edits(client, out, key, source_key, cleaned, full), chosen=chosen, saved=saved)
 
 
@@ -212,13 +208,13 @@ class _Slice:
                                                                       ContentType="application/json"))
         raise _Stop(f"broken GPU: {type(exc).__name__}: {exc}") from exc
 
-    def one(self, record, photos, m, watermarked):
+    def one(self, record, photos, m):
         if f"{record['prefix']}{record['sha']}.slab.png" not in self.made:
             self.flush()
             self.write(record, None, NO_SLAB, "no close-up")
             return
         try:
-            image = remake(self.client, record, photos, m, watermarked, self.made)
+            image = remake(self.client, record, photos, m, self.made)
         except photo.NoCloseUp as exc:
             self.none_of_its_own(record, str(exc)[:500])
             return
@@ -232,7 +228,7 @@ class _Slice:
         self.write(record, image, "" if image is not None else NO_CLOSE_UP, "close-up" if image is not None else "no close-up")
 
 
-def redo(client, records, made, photos, m, watermarked, job):
+def redo(client, records, made, photos, m, job):
     """Every listed photo's close-up made again, those done already skipped: {outcome: count}; with "stopped" when the
     slice stopped (what it had not written stays as it was)."""
     run = _Slice(client, made, job)
@@ -241,7 +237,7 @@ def redo(client, records, made, photos, m, watermarked, job):
             if done_key(record) in made:
                 run.tally["already done"] += 1
                 continue
-            run.one(record, photos, m, watermarked)
+            run.one(record, photos, m)
             if i % PROGRESS_EVERY == 0:
                 print(f"   [{i + 1}/{len(records)}] {dict(run.tally)}", flush=True)
         run.flush()
@@ -256,11 +252,6 @@ def main() -> int:
     if not tag or not src:
         print("ERROR: CLEAN_TAG and SRC are required; aborting")
         return 2
-    try:
-        watermarked = env.job_flag("WATERMARKED")
-    except ValueError as exc:
-        print(f"ERROR: {exc}; aborting")
-        return 2
     only = os.environ.get("ONLY_KEY", "").strip()
     job = os.environ.get("AWS_BATCH_JOB_ID", "").strip() or f"local-{uuid.uuid4()}"     # outside Batch: one job per run
     client = boto3.client("s3", region_name=S3_REGION)
@@ -273,7 +264,7 @@ def main() -> int:
     made = {k for prefix in sorted({r["prefix"] for r in whole}) for k in _objects(client, prefix)}
     todo = sum(done_key(r) not in made for r in whole)
     print(f"==> close-ups v{C.CLOSEUP_VERSION} of {tag}/{src} (job {job}): {len(whole)} photos, {todo} to do", flush=True)
-    tally = redo(client, whole, made, sheet_photos(client), models.load("close"), watermarked, job) if todo else {"already done": len(whole)}
+    tally = redo(client, whole, made, sheet_photos(client), models.load("close"), job) if todo else {"already done": len(whole)}
     summary = {"tag": tag, "source": src, "version": C.CLOSEUP_VERSION, "job": job, "photos": len(whole), "counts": tally}
     client.put_object(Bucket=S3_BUCKET, Key=summary_key(root, src, only), Body=json.dumps(summary, sort_keys=True).encode(),
                       ContentType="application/json")

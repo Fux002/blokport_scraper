@@ -1,8 +1,8 @@
 """Standardise a source's scraped photos (RUN_MODE=standardise), on the GPU: reads <env>/products/scraped/<src>/, writes
 finished images + the clean slab under <env>/standardise-test/<src>/, never into improved/ (going live is a later step).
 Env: SRC; SURVEY=true only classifies every photo and writes the counts; SAMPLE=<n> takes n photos, the same n on every
-run (the lowest hashes); ONLY_KEY=<s3 key of a JSON list of shas> runs just those; SLICE_OFFSET / SLICE_COUNT as in
-deploy.reprocess_source. A photo already done is skipped, so a re-run is safe. One bad photo is recorded and never stops
+run (the lowest hashes); ONLY_KEY=<s3 key of a JSON list of shas> runs just those; SLICE_OFFSET / SLICE_COUNT run that
+contiguous slice of the source's photos. A photo already done is skipped, so a re-run is safe. One bad photo is recorded and never stops
 the slice.
 """
 
@@ -20,7 +20,6 @@ import numpy as np
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
-from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import index, kinds, models, outline, photo
 
@@ -114,9 +113,9 @@ def tried(client, out, sha, reason):
 
 
 def photo_source(client, out, key, sha):
-    """The photo a run works from: its cleaned copy when a hosted edit made one (deploy.standardise_select: reflections and
-    marks off), else the scraped photo. A cleaned copy goes through every step a scraped photo does (the hosted edit
-    leaves the straps, which the retouch takes off), except the logo step: it has no logo left."""
+    """The photo a run works from: its cleaned copy when a hosted edit made one (deploy.standardise_select: reflections,
+    marks and logos off), else the scraped photo. A cleaned copy goes through every step a scraped photo does (the hosted
+    edit leaves the straps, which the retouch takes off)."""
     cleaned = f"{out}cleaned/{sha}.jpg"
     return cleaned if _exists(client, cleaned) else key
 
@@ -293,11 +292,6 @@ def main() -> int:
         print("ERROR: SRC is required; aborting")
         return 2
     survey = os.environ.get("SURVEY", "false").lower() in ("1", "true", "yes")
-    try:
-        watermarked = env.job_flag("WATERMARKED")
-    except ValueError as exc:
-        print(f"ERROR: {exc}; aborting")
-        return 2
     extra = os.environ.get("EXTRA_VIEWS", "true").lower() in ("1", "true", "yes")
     offset = int(os.environ.get("SLICE_OFFSET", "0"))
     client = boto3.client("s3", region_name=S3_REGION)
@@ -335,10 +329,8 @@ def main() -> int:
                     storage_in_a_row = 0
                     continue
                 full = photo.read(_get(client, source_key))
-                logo = watermarked and not cleaned             # a cleaned copy has no logo left to take off
-                clean = photo.decode(_get(client, f"{imagestore.improved_prefix(src)}{sha}.jpg")) if logo else None
                 res = photo.standardise(full, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
-                                        clean=clean, watermarked=logo, models=m, extra_views=extra,
+                                        models=m, extra_views=extra,
                                         edits=lambda: start_edits(client, out, key, source_key, cleaned, full))
                 if redo:
                     tally[complete(client, out, sha, res)] += 1

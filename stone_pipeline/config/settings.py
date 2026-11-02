@@ -465,108 +465,17 @@ class S3Config:
     dry_run: bool = _env_bool("BLOKPORT_S3_DRY_RUN", not IS_PRODUCTION)
 
 
-# The active domain's generic material noun ('stone'/'wood'/'lime'), used to keep the de-watermark and
-# image-classify prompts MATERIAL-neutral -- a wood pack must not instruct FAL to reconstruct a STONE
-# pattern, nor score wood photos against a "natural stone slab" prompt. Resolved once at import from the
-# deployment's DOMAIN_PACK.
-_MATERIAL = active_pack().generic_material_word
-
-
 @dataclass(frozen=True)
 class ImageProcessingConfig:
-    """Enhancement + de-watermark applied to scraped product photos during
-    re-host (the local/s3 image modes; passthrough never downloads bytes so it
-    cannot process them).
-
-    These are photos of the ACTUAL slabs a customer buys, usually shot in a
-    storage unit under poor, uneven light. Enhancement is Real-ESRGAN (learned
-    clean + sharpen + 4x), then a gentle exposure lift + vibrance -- brighter and
-    crisper while keeping the stone's true colour and vein pattern. It needs the
-    torch stack (requirements-imageproc.txt); if that is unavailable the step is
-    skipped with a warning (the image passes through un-enhanced -- no fallback).
-
-    De-watermark runs ONLY on sources flagged `watermarked: true` in sources.yaml
-    (e.g. varsha burns a visible mark into its photos): the logo crop is sent to FAL
-    FLUX Fill (hosted) and composited back. Needs fal-client + FAL_KEY, not a local model.
-
-    Disabled by default: until `enabled` is true the image stage behaves exactly
-    as before (no processing, no new deps loaded). Enable per deployment with
-    BLOKPORT_IMAGE_PROCESSING=true (the AWS image-processing container)."""
+    """The re-host of each newly scraped photo (local/s3 image modes; passthrough never downloads bytes): the photo is
+    size-reduced (its long edge capped, never enlarged; CPU only) and re-encoded into improved/, and its raw original
+    is kept under scraped/ (keep_scraped), the photo process's input. Off (the default) hosts the raw bytes at the
+    content key as they came. Enable per deployment with SCRAPER_IMAGE_PROCESSING=true."""
 
     enabled: bool = _env_bool("BLOKPORT_IMAGE_PROCESSING", False)
-    # --- enhancement (Real-ESRGAN learned clean+sharpen+4x, then faithful beautify) ---
-    esrgan_model: str = env.getenv("BLOKPORT_ESRGAN_MODEL", "RealESRGAN_x4plus")
-    esrgan_weights: str = env.getenv("BLOKPORT_ESRGAN_WEIGHTS", "")  # path override; else models/<model>.pth
-    esrgan_tile: int = 512            # per-tile input for large images (0 = whole image)
-    target_long_edge: int = 2048      # cap the 4x output at this long edge (INTER_AREA downscale)
-    # The tone steps after the model (exposure lift + vibrance), on by default (the slab-photo recipe).
-    # Off = detail only: Real-ESRGAN 4x + the long-edge cap, the photo's own tones kept (a bright studio
-    # render on white would be darkened by the percentile stretch). SCRAPER_IMAGE_TONE=false turns it off.
-    tone: bool = _env_bool("BLOKPORT_IMAGE_TONE", True)
-    levels_lo_pct: float = 0.5        # exposure lift: black-point percentile
-    levels_hi_pct: float = 99.6       # exposure lift: white-point percentile
-    vibrance: float = 0.20            # restore colour muted by bad light (0 = off)
-    # --- de-watermark (flagged sources only; needs the GPU imageproc extras) ---
-    # De-watermark runs in the GPU reprocess (needs network + FAL_KEY, not a local model); FAL is billed
-    # per megapixel ($0.05, 1 MP floor, rounds up) on the RAW image (before the ESRGAN upscale).
-    dewatermark: bool = True
-    # De-watermark is an INSTRUCTION edit (FAL FLUX Kontext), not a masked inpaint: Kontext edits the whole
-    # image from the prompt and reconstructs the stone under the logo without the mask-fill's hallucinations.
-    fal_model: str = env.getenv("BLOKPORT_FAL_MODEL", "fal-ai/flux-pro/kontext")
-    # GENERIC fallback de-watermark instruction, used when a watermarked source has no per-source prompt
-    # (SourceConfig.fal_prompt). It is source-AGNOSTIC on purpose -- it names no supplier -- so it is always
-    # safe for any source (it removes whatever logo is present, never another supplier's specifically). Each
-    # watermarked source SHOULD still set its own tuned prompt for best removal; this is the safe default.
-    fal_prompt: str = (f"Remove any supplier watermark logo and any overlaid brand text from the surface of "
-                       f"the {_MATERIAL} product, seamlessly reconstructing the natural {_MATERIAL} texture "
-                       f"underneath. Keep the {_MATERIAL} colour, pattern, the size/label card and everything "
-                       f"else in the photo identical to the original.")
-    fal_seed: int = 0                 # fixed for best-effort reproducibility across re-runs
-    fal_price_per_mp: float = 0.05    # USD per billed megapixel (rounds up, 1 MP floor)
-    fal_max_usd: float = _env_float("BLOKPORT_FAL_MAX_USD", 150.0)  # per-run cost circuit breaker
-    # Bounded attempts in the GPU reprocess before an image is TERMINALLY held. A completing image is
-    # published (enhanced marker); one that still cannot complete after this many tries is written to the
-    # discarded pool as a terminal HELD state, so every scraped image ends ready-or-held and the pipeline
-    # always converges (ready + held == total) -- an unprocessable image never spins the indicator forever.
-    enhance_max_attempts: int = 2
-    # --- output / audit ---
-    jpeg_quality: int = 85  # 85 is visually identical to 92 for photos at ~30-40% smaller files
-    write_preview: bool = True        # images/reports/processed_preview.csv (source -> processed)
-    # Improved and raw-scraped images are kept in two sibling folders under the
-    # products prefix, so the upgraded set is cleanly separated from the originals:
-    #   <products>/improved/<site>/<hash>.jpg   the enhanced image (Medusa uses this)
-    #   <products>/scraped/<site>/<hash>.jpg    the raw download (audit / re-tuning)
-    # Downloads are in-memory; the scraped copy is only persisted when keep_scraped
-    # is on (the untouched original also still lives at the supplier URL). Handy in
-    # dev while testing, optional in prod. The improved/ + scraped/ folder names are
-    # part of the S3 layout and live in io.imagestore (single source of truth).
+    target_long_edge: int = 2048      # cap the hosted photo's long edge at this (INTER_AREA downscale)
+    jpeg_quality: int = 85            # visually identical to 92 for photos at ~30-40% smaller files
     keep_scraped: bool = _env_bool("BLOKPORT_KEEP_SCRAPED", False)
-    # --- non-stone image discard (CLIP zero-shot; needs the same torch stack) ---
-    # A scraped image is sometimes NOT a photo of the stone: a spec sheet, a price list, or a plain
-    # vendor logo. CLIP scores each image against a "stone photo" prompt set vs a "document / logo" set;
-    # an image the non-stone class wins with probability >= classify_margin is DISCARDED -- not enhanced,
-    # not published -- and recorded in the discarded/ pool (io.imagestore). A variant whose EVERY image is
-    # discarded emits the terminal no_publishable_image review flag (it publishes imageless, is not retried
-    # as lost). Whole-image semantic score, NEVER text density: a slab photo WITH printed sizes, or a stone
-    # photo carrying a small vendor logo, is still a stone photo and is KEPT. Reuses transformers (already a
-    # dewatermark dep); the CLIP weights are baked into the imageproc/gpu images. Runs in the GPU reprocess
-    # (deploy.reprocess_source); Stage 7 only reads the resulting pool, so :core stays torch-free.
-    # Off by default (a discard is destructive): enable only once the margin is validated on a real sample.
-    classify: bool = _env_bool("BLOKPORT_IMAGE_CLASSIFY", False)
-    classify_model: str = env.getenv("BLOKPORT_CLIP_MODEL", "openai/clip-vit-base-patch32")
-    classify_margin: float = 0.85  # discard iff P(non-stone) >= this; conservative, keep when unsure
-    classify_stone_prompts: tuple = (
-        f"a photograph of natural {_MATERIAL}",
-        f"a close-up photo of a {_MATERIAL} surface",
-        f"a photo of {_MATERIAL} texture",
-        f"a {_MATERIAL} product in a warehouse",
-    )
-    classify_nonstone_prompts: tuple = (
-        "a document or technical spec sheet",
-        "a price list or printed catalogue page",
-        "a plain company logo on a blank background",
-        "a screenshot of text or a table",
-    )
 
 
 IMAGE_MODES = ("passthrough", "local", "s3")
@@ -597,13 +506,6 @@ class ImagesConfig:
     require_images: bool = True  # a product with no image is rejected (Stage 9) -- we only list
     # products that have a picture, so 3_products_*.csv (and the inventory delta derived from the
     # same emitted set) never carry an imageless product.
-    # HARD publish gate: link an image ONLY if the GPU actually enhanced it (an `enhanced/<sha>` marker
-    # exists). Produce on the torch-free :core writes a RAW re-encode into improved/ without enhancing, so
-    # improved/ presence alone is NOT proof of processing -- without this gate a raw, watermarked image can
-    # reach the catalog. With it, an un-enhanced image is HELD (product publishes imageless) until the GPU
-    # reprocess enhances it and writes the marker. Ships OFF: the markers must be backfilled for the already
-    # enhanced set before flipping on, else every image holds. Enable with BLOKPORT_REQUIRE_ENHANCED=true.
-    require_enhanced: bool = _env_bool("BLOKPORT_REQUIRE_ENHANCED", False)
     # A product is live only with a standardised photo (owner 2026-11-02: whatever has no good image is delisted until it
     # is fixed, one by one): without one it is served at stock 0 with reason 'no_photo' and photo_ready false on the product
     # (Blokport hides it) and comes back on the first produce after its photo is published. On in production; dev has standardised only a test set.
@@ -826,37 +728,13 @@ def refresh_category_pcats() -> None:
 
 
 @dataclass(frozen=True)
-class AutoEnhanceConfig:
-    """After a produce stages new raw images, auto-submit the GPU reprocess for just the new ones, so
-    enhancement/de-watermark happens without a manual step (the Batch compute env spins a GPU up on demand
-    and back to zero when idle). Fire-and-forget: produce submits and returns; the enhanced images land in
-    improved/ and the NEXT produce links them (the existing one-cycle hold). See deploy/enhance_trigger.
-
-    Off by default (BLOKPORT_AUTO_ENHANCE): ships dark, enabled per deployment. queue/job_definition name
-    the Batch target (from the gpu_enhance module, injected as env on the produce task). slice_size caps a
-    single job's image count so a big cold-start fans out across GPUs. The submitted reprocess always runs
-    CLASSIFY=false -- auto-enhance never auto-discards (that needs a calibrated margin, enabled separately)."""
-
-    enabled: bool = _env_bool("BLOKPORT_AUTO_ENHANCE", False)
-    queue: str = env.getenv("BLOKPORT_GPU_QUEUE", "")
-    job_definition: str = env.getenv("BLOKPORT_GPU_JOBDEF", "")
-    slice_size: int = _env_int("BLOKPORT_ENHANCE_SLICE", 200)
-    # Global fan-out cap: at most this many Batch jobs per trigger. Each job carries its OWN per-process
-    # fal_max_usd ceiling, so without a cap a large backlog fans out one job per window (unbounded jobs) and
-    # multiplies the FAL ceiling N-fold. With the cap, the worst-case FAL exposure per trigger is bounded at
-    # max_jobs * fal_max_usd; deferred windows stay un-done and ride the next trigger. <=0 disables the cap.
-    max_jobs: int = _env_int("BLOKPORT_ENHANCE_MAX_JOBS", 8)
-
-
-@dataclass(frozen=True)
 class AutoTextureConfig:
     """After a produce queues NEW-variant textures the lean :core cannot generate (no fal_client/torch),
     auto-submit ONE on-demand GPU Batch job to generate + upload them (deploy/texture_trigger). Part of the
-    produce (Republish), NOT a cron: it fires only when a produce actually queued textures. The job reuses
-    the SAME GPU queue/job-definition as auto_enhance (the :gpu image runs both, selected by RUN_MODE=
-    generate-textures -> prepare_variant_images, the unchanged FLUX.2 -> BEN2 -> upload pipeline); a separate
-    flag so textures and photo-enhance enable independently. Fire-and-forget; the next produce stamps the
-    images (the same one-cycle hold as auto_enhance). Off by default (BLOKPORT_AUTO_TEXTURE)."""
+    produce (Republish), NOT a cron: it fires only when a produce actually queued textures. The job runs on the
+    gpu_enhance module's queue and job definition (the :gpu image, RUN_MODE=generate-textures ->
+    prepare_variant_images, the FLUX.2 -> BEN2 -> upload pipeline). Fire-and-forget; the next produce stamps the
+    images (a one-cycle hold). Off by default (BLOKPORT_AUTO_TEXTURE)."""
 
     enabled: bool = _env_bool("BLOKPORT_AUTO_TEXTURE", False)
     queue: str = env.getenv("BLOKPORT_GPU_QUEUE", "")
@@ -888,7 +766,6 @@ class Settings:
     backend: BackendConstants = field(default_factory=BackendConstants)
     s3: S3Config = field(default_factory=S3Config)
     images: ImagesConfig = field(default_factory=ImagesConfig)
-    auto_enhance: AutoEnhanceConfig = field(default_factory=AutoEnhanceConfig)
     auto_texture: AutoTextureConfig = field(default_factory=AutoTextureConfig)
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     curation: CurationConfig = field(default_factory=CurationConfig)
@@ -1193,7 +1070,10 @@ Your whole answer is one JSON object and nothing else:
     # Problems a cleaned copy can fix; a photo held or failed for anything else (an outline the standardiser could not
     # find, stacked slabs) is not worth an edit.
     CLEAN_FIXES_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark")
-    CLEAN_FIXES_HELD = ("retouch:", "logo:")   # held reasons (their start) a cleaned copy removes the cause of
+    # Held reasons (their start) a cleaned copy removes the cause of. "logo:" is no longer written (the logo step is
+    # retired: a logo is the judge's leftover_mark now), but holds the retired step stored stay on S3 per photo (prod
+    # v2: 100 varsha photos, 2026-11-02) and a cleaned copy fixes them, so they stay cleanable.
+    CLEAN_FIXES_HELD = ("retouch:", "logo:")
     CLEAN_FAILED_CODES = (400, 422)    # a queued edit the model refused for good; any other error is loud and retried
     CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
 straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and
@@ -1265,19 +1145,6 @@ Your whole answer is one JSON object and nothing else:
     }
     SKIP_KINDS = ("pile", "hangar", "interior", "other")
     SKIP_MIN_CONFIDENCE = 0.6          # only a sure one is skipped here; the outline's checks catch what is left
-    LOGO_BOX = (0.6055, 0.2051)        # the logo is searched in this box round the photo's centre, shares of its width
-    LOGO_EDGE = 30                     # the box's outer px count as stone around the logo
-    LOGO_ECC_STEPS, LOGO_ECC_EPS = 150, 1e-5   # alignment
-    LOGO_ALIGN_MIN = 0.80              # below this correlation the copies do not line up: held
-    LOGO_DIFF_MIN = 16.0               # the logo differs from the cleaned copy by this much (Lab) once tone is matched
-    LOGO_TONE_SIGMA = 75.0             # broad tone of the cleaned copy matched to the original at this scale (px)
-    LOGO_JOIN = 41                     # its parts join across gaps this wide (px)
-    LOGO_PAD = 8                       # the rectangle is widened by this on every side (px)
-    LOGO_FULL, LOGO_RIGHT = 3.2, 1.2   # narrower than this many times its height: the grey word was missed, reach this share further right
-    LOGO_MAX_SHARE = 0.85              # a rectangle covering more of the box than this: the copies differ everywhere, held
-    LOGO_FEATHER = 2.0
-    LOGO_HUE, LOGO_MIN_SAT, LOGO_MIN_VAL = (160, 3), 110, 110   # the logo's pink (HSV, 0..180 / 0..255)
-    LOGO_MAX_LEFT = 40                 # more pink pixels than this left after removal: held
     CLOSEUP_SHARE = 0.45               # a close-up shows this share of the slab's width when the photo has the pixels for it ...
     CLOSEUP_MAX_ENLARGE = 1.0          # ... else it widens: at most 1:1 of the photo's own pixels, never enlarged (the owner,
                                        # 2026-11-02, only real detail; any enlargement, ours or a viewer's, shows the

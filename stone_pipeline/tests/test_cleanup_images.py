@@ -1,5 +1,8 @@
 """wipe_all_product_images: the 'fresh images' half of the factory (pristine) reset. Deletes EVERY hosted
-product image + marker under <env>/products/, and NEVER the variant textures under <env>/variations/."""
+product image under <env>/products/ (the scraped originals, the re-hosted photos, the published standardised views,
+anything else there such as the retired enhancer's markers, and the manifest), and NEVER the variant textures under
+<env>/variations/ nor the photo process's stored results under <env>/standardise-test/, from which its next run
+publishes the chosen photos again at no cost."""
 
 from __future__ import annotations
 
@@ -33,10 +36,12 @@ class _FakeS3:
 def _seed_keys(seg):
     return [
         f"{seg}/products/scraped/varsha/aaa.jpg",       # raw
-        f"{seg}/products/improved/varsha/aaa.jpg",      # treated
-        f"{seg}/products/enhanced/varsha/aaa.txt",      # marker
-        f"{seg}/products/discarded/zucchi/bbb.json",    # marker
+        f"{seg}/products/improved/varsha/aaa.jpg",      # re-hosted
+        f"{seg}/products/standard/main/varsha/aaa.jpg", # published standardised view
+        f"{seg}/products/enhanced/varsha/aaa.txt",      # the retired enhancer's marker
+        f"{seg}/products/discarded/zucchi/bbb.json",    # the retired enhancer's marker
         f"{seg}/products/_manifest.json",               # manifest
+        f"{seg}/standardise-test/v2/varsha/aaa.main.jpg",   # the photo process's result -- must survive
         f"{seg}/variations/tile_travertine.png",        # TEXTURE -- must survive
         f"{seg}/variations/slab_carrara.png",           # TEXTURE -- must survive
     ]
@@ -51,7 +56,8 @@ def test_wipe_deletes_all_products_and_keeps_variations():
     # the variant textures are UNTOUCHED
     assert f"{seg}/variations/tile_travertine.png" in fake.keys
     assert f"{seg}/variations/slab_carrara.png" in fake.keys
-    assert counts["scraped"] == counts["improved"] == counts["enhanced"] == counts["discarded"] == 1
+    assert f"{seg}/standardise-test/v2/varsha/aaa.main.jpg" in fake.keys
+    assert counts["scraped"] == counts["improved"] == counts["standard"] == 1 and counts["other"] == 2
 
 
 def test_wipe_dry_run_reports_but_deletes_nothing():
@@ -63,7 +69,7 @@ def test_wipe_dry_run_reports_but_deletes_nothing():
 
 
 def test_wipe_all_also_deletes_raw_root_objects():
-    # raw-root layout (products/<source>/<sha>.jpg, processor-less s3 staging) is also wiped
+    # raw-root layout (products/<source>/<sha>.jpg, s3 staging without processing) is also wiped
     seg = ENV_SEGMENT
     fake = _FakeS3([
         f"{seg}/products/varsha/rawroot.jpg",
@@ -73,7 +79,7 @@ def test_wipe_all_also_deletes_raw_root_objects():
     counts = cleanup_images.wipe_all_product_images(client=fake)
     assert not any(k.startswith(f"{seg}/products/") for k in fake.keys)   # every product image gone
     assert f"{seg}/variations/x.png" in fake.keys                        # texture kept
-    assert counts["raw_root"] == 1
+    assert counts["other"] == 1
 
 
 def test_scoped_wipe_no_longer_exists():

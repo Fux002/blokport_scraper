@@ -32,10 +32,9 @@ prod_home_env         = "prod"
 prod_image_tag     = "586939a745a40ee7fee96da59356b3e9eb55d221"     # + a stock-only refresh never rewrites a product, a failed source fails loud (#481)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # enhance fits the input to the target before ESRGAN (#448): ~4x less GPU work on large originals
 
-# Image processing = DEV PARITY (all on). Enhancing/de-watermarking is toggled per-source LIVE via the
-# :4200 admin UI (source.enhance / source.watermarked), NOT these infra flags -- these just make prod's
-# task config identical to dev so the UI behaves the same. prod gpu image (gpu-782f18c7) == dev's :gpu
-# digest sha256:20767ddd -> carries ben2 + reads SCRAPER_ env, so auto_texture + prod bucket are safe.
+# The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
+# infra flags. prod gpu image (gpu-782f18c7) == dev's :gpu digest sha256:20767ddd -> carries ben2 + reads
+# SCRAPER_ env, so auto_texture + prod bucket are safe.
 # Texture quality drip: per produce, re-make up to N legacy textures on the current best model, ONLY for
 # variants a product actually links to, once each (durable S3 marker). 257 product-backed textures are on
 # the old model today, so 300 clears the backlog in one produce and then idles at ~0 (each Key once).
@@ -51,14 +50,7 @@ prod_image_upgrade_batch = 1000
 # passed 2 h on 2026-09-14 and was killed as wedged.
 run_timeout_seconds = 14400
 
-# The old enhancer (GPU upscale + FAL de-watermark) is OFF in both envs (owner 2026-11-02): the standardised photo
-# pipeline replaces its output, and a product is live on prod only with a standardised photo (no_photo rule). A
-# watermarked source's logo is taken off by the pipeline's hosted clean-up. Its code goes in a later clean-up.
-dev_auto_enhance      = false
-dev_require_enhanced  = false
-prod_auto_enhance     = false
-prod_auto_texture     = true
-prod_require_enhanced = false
+prod_auto_texture = true
 
 # A product without a standardised photo is hidden (qty 0, reason no_photo) and kept for review. Prod has it by the
 # code's production default; dev sets it so dev shows what prod shows (owner 2026-11-02).
@@ -83,7 +75,7 @@ dev_standardise_gpu_vcpus   = 32
 prod_standardise_gpu_vcpus  = 128
 
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
-fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                # de-watermark
+fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                # texture generation + the photo process
 scraper_proxy_ssm_name = "/blokport-prod/BLOKPORT_SCRAPER_PROXY" # residential proxy
 
 # --- shared / ops -----------------------------------------------------------

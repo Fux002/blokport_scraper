@@ -58,12 +58,12 @@ and the product CSV links to that full https URL. See `config/settings.py` +
 `aws ecs run-task --cluster <env_cluster> --task-definition blokport-scraper-<env>`.
 
 ## Sequencing guarantee: images are ready before products load
-Image cleanup/upscale runs **synchronously inside the run, before the product CSV
+The image re-host (download + size-reduce) runs **synchronously inside the run, before the product CSV
 exists** — there is no async path, so a product can never be loaded referencing an
 unprocessed or not-yet-uploaded image:
 
 ```
-run all → Stage 7: download → process (clean / upscale / de-watermark) → UPLOAD to S3
+run all → Stage 7: download → size-reduce → UPLOAD to S3
         → only THEN emit the product CSV, with image URLs pointing at the uploaded files
 catalog → bundle to_upload/
 [separate, later, you] → import the CSV into Medusa   ← you trigger this; the task does not
@@ -145,11 +145,10 @@ aws ecs run-task --cluster blokport-prod --launch-type FARGATE \
 terraform apply -var prod_staging_bucket=...
 ```
 
-## Enabling de-watermarking (varsha) later
-Default `core` = enhancement + Lanczos upscale (CPU). To also strip supplier
-watermarks: set `image_tag = "imageproc"` + raise `memory` (~8192), and have CI
-build/push the `imageproc` target. Runs on CPU (no GPU); review
-`images/reports/processed_preview.csv`.
+## Standardised photos
+Supplier logos and watermarks are taken off per photo by the standardised-photo process
+(STANDARDISE_PROCESS.md: the judge finds them, the hosted clean step removes them). A source opts
+out of the process with its `image_pipeline` switch in the admin.
 
 ## Adding & certifying a source (scraper or any product connection)
 Every source — a web scraper or any other product data connection — is onboarded
@@ -214,7 +213,7 @@ designed boundary, not an accident of naming — each prefix is owned by a diffe
 
 ```
 dev/          (ENV_SEGMENT = dev|prod)  -- REGENERABLE data + the Blokport/Medusa integration surface
-  products/          hosted product images (scraped/ improved/ enhanced/ markers) -- wiped by a factory reset
+  products/          hosted product images (scraped/ improved/ standard/) -- wiped by a factory reset unless keep_images
   variations/        variant textures (kept across a factory reset)
   scraper/
     from_medusa/     INPUT  the Medusa export the matcher reads

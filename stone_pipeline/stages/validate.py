@@ -5,9 +5,8 @@ finish, quality), variation_id null, an unresolved leaf (a tree gap present),
 category not the branch's valid category, handle or slug not globally unique, a
 lot whose pieces disagree (identity, position or quantity; the whole lot is held), a
 missing owner (company_id / sales_channel_id, required at all times), or no image
-when images are required by config -- EXCEPT a row Stage 7 marked no_publishable_image,
-a terminal known-good empty that publishes without an image. Soft issues (review
-flags, no hard failure) emit or hold per the emit_on_review switch.
+when images are required by config. Soft issues (review flags, no hard failure) emit
+or hold per the emit_on_review switch.
 
 Hard rejects never reach the import CSV regardless of the switch.
 """
@@ -84,15 +83,6 @@ def no_image_detail(row: CanonicalRow) -> str:
     return "" if any((u or "").strip() for u in (row.raw_image_urls or [])) else "no_source"
 
 
-def _no_publishable_image(row: CanonicalRow) -> bool:
-    """True when Stage 7 (the image pipeline) classified every scraped image as non-stone and discarded
-    them -- a TERMINAL known-good empty, not a transient no_image. Such a product is a real stone with no
-    usable photo: it publishes WITHOUT an image (like a legitimately imageless variant), the discard reason
-    surfaces in review, and it is never rejected/retried/alarmed as broken. The pixel decision + the discard
-    memory live entirely in Stage 7 (source-isolation preserved); the full pipeline only reacts to the flag."""
-    return any(f.code == FlagCode.no_publishable_image for f in row.review_flags)
-
-
 @dataclass
 class ValidationResult:
     emit: list[CanonicalRow] = field(default_factory=list)
@@ -128,10 +118,8 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     # process gate also surfaces a missing origin early, but only as a soft batch diagnostic, not a reject.
     if not (row.origin_country_code or "").strip():
         row.add_reject(RejectReason(rule="origin_missing", detail="origin_country_code"))
-    # No usable image + images required -> reject as a transient no_image (retry next scrape). EXCEPTION:
-    # a row Stage 7 marked no_publishable_image is a terminal known-good empty -- it publishes WITHOUT an
-    # image instead of being rejected, so a real stone whose only photos were spec sheets/logos is not lost.
-    if require_images and not row.image_keys and not _no_publishable_image(row):
+    # No usable image + images required -> reject as a transient no_image (retry next scrape).
+    if require_images and not row.image_keys:
         row.add_reject(RejectReason(rule="no_image", detail=no_image_detail(row)))
     # A dimension whose source FETCH FAILED (recoverable) is HELD as a distinct TRANSIENT reject -- "retry
     # me next scrape", not "bad data" -- and is exempt from the dimension_invalid check below so the hold

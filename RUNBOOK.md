@@ -198,7 +198,7 @@ Dev and prod keep SEPARATE `from_medusa/<env>/` and `to_upload/<env>/` (Medusa i
 
 Image links in the upload files are ALWAYS S3 staging-bucket URLs, never raw supplier URLs, for both
 dev and prod. Scraping does NOT stage images — it only records the supplier URLs. The image stage
-(`SCRAPER_IMAGE_MODE=s3`) downloads each source image, de-watermarks/upscales it, uploads it to
+(`SCRAPER_IMAGE_MODE=s3`) downloads each source image, size-reduces it, uploads it to
 `<env>/products/improved/<source>/`, and records the source->improved mapping in
 `<env>/products/_manifest.json`. A `build` maps product images through that manifest; an image the
 imageproc hasn't processed yet is DROPPED (left blank), never defaulted to its scrape URL. So a

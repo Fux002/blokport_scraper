@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-11-02: the CLIP non-stone discard and its no_publishable_image flag were retired with the old enhancer. A photo that is not a slab is now held by the standardiser (STANDARDISE_PROCESS.md).
+
 # Bad-image discard: the full-pipeline / image-pipeline seam
 
 The image pipeline (Stage 7 / GPU reprocess) may classify every scraped image of a variant as non-stone

@@ -128,8 +128,8 @@ def run(outputs_root: Path | None = None) -> Path:
     sync = write_sync_md(counts=result.counts, sources=sorted(set(sources)),
                          products=products, inventory=inventory, discontinued=discontinued)
     images_queued = _auto_queue_images()          # new variants -> prompts_to_generate.json (auto)
-    # Give each colour-less variety a real colour read from its REAL PRODUCT IMAGE (the de-watermarked
-    # scraped photo, keyed by variation_key), then propagate to mirrors, so a no-colour source like
+    # Give each colour-less variety a real colour read from its REAL PRODUCT IMAGE (the hosted
+    # product photo, keyed by variation_key), then propagate to mirrors, so a no-colour source like
     # varsha/zucchi never nulls colour_id; 'Natural' only if no photo. NOT the generated variant icon --
     # an icon can be a stale/placeholder render that diverges from the actual stone.
     from stone_pipeline.stages import variety_color

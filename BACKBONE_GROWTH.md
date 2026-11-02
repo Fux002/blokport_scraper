@@ -61,7 +61,7 @@ a suggestion       the confident ones            a leaf-decision            it o
 The blocked products are already scraped; releasing them must not re-scrape. But of the run stages,
 `catalog` only re-consolidates already-emitted outputs (it does not re-run the reconcile/validate that
 releases parked rows), while `scrape`/`all` re-run the pipeline but force a costly supplier fetch (HTTP +
-de-watermark). `republish` is the missing cheap path: at the build level it is identical to `all` (build
+image download). `republish` is the missing cheap path: at the build level it is identical to `all` (build
 never fetches -- that is produce's job), and produce simply skips the live scrape for it. So:
 
 > **approve (bulk) -> run `republish` once (seconds, no re-scrape) -> Medusa's next pull lists them.**

@@ -144,13 +144,13 @@ data "aws_iam_policy_document" "task" {
     actions   = ["s3:ListBucket"]
     resources = ["arn:aws:s3:::${var.staging_bucket}"]
   }
-  # Auto-enhance: let the produce subprocess submit the GPU reprocess for newly-staged images. Scoped to
-  # ONLY this env's enhance queue + job-definition (never any other Batch resource). Present only when the
-  # GPU module is wired in (dev); a produce with no queue configured simply never submits (no-op).
+  # Auto-texture: let the produce subprocess submit the texture job. Scoped to ONLY this env's GPU queue +
+  # job-definition (never any other Batch resource). Present only when the GPU module is wired in; a produce
+  # with no queue configured simply never submits (no-op).
   dynamic "statement" {
     for_each = var.gpu_job_queue_arn == "" ? [] : [1]
     content {
-      sid     = "SubmitEnhanceJobs"
+      sid     = "SubmitTextureJobs"
       actions = ["batch:SubmitJob"]
       # SubmitJob by NAME (what the triggers do) authorizes against the BARE job-definition ARN
       # (.../name), while submit-by-revision authorizes against .../name:<n>. The passed ARN is the ':*'
@@ -266,8 +266,8 @@ resource "aws_ecs_task_definition" "this" {
       # The produce subprocess (fetch -> scrape -> build) runs in THIS container, so its image stage
       # needs s3 mode: download + re-host to improved/ and fill _manifest.json so products carry a
       # linked image and emit. Without it the stage defaults to passthrough, which only reads the
-      # manifest and holds every product no_image. On :core (no torch) the enhancement passes the
-      # image through un-enhanced; the GPU Batch reprocess (:gpu) de-watermarks/upscales after.
+      # manifest and holds every product no_image. Each new photo is size-reduced (CPU) and its raw
+      # original kept under scraped/, the photo process's input.
       environment = concat(local.common_env, [
         { name = "SCRAPER_BIND_HOST", value = "0.0.0.0" },
         { name = "SCRAPER_IMAGE_MODE", value = "s3" },
@@ -277,28 +277,16 @@ resource "aws_ecs_task_definition" "this" {
         # stage then derives keys/urls and logs bytes but never put_object's, so processed images never
         # land and every product holds no_image. The produce runs here and MUST write, so turn it off.
         { name = "SCRAPER_S3_DRY_RUN", value = "false" },
-        # Auto-enhance: after produce stages new raw images, submit the GPU reprocess for the delta so the
-        # GPU spins up on demand and back to zero. Ships OFF (flag false); the queue/job-def names let the
-        # trigger reach Batch once enabled. CLASSIFY stays false in the auto path (no uncalibrated discards).
-        { name = "SCRAPER_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
-        # Fan-out cap: max GPU enhance jobs a single produce dispatches (windows over the cap ride the NEXT
-        # produce). The default 8 starves a big source when another comes first in the order -- so raise it
-        # enough that one produce dispatches every source's pending windows in one pass. Actual FAL spend is
-        # still bounded by real pending images (each job keeps its own fal_max_usd ceiling).
-        { name = "SCRAPER_ENHANCE_MAX_JOBS", value = tostring(var.enhance_max_jobs) },
         # Texture quality drip: per produce, re-make up to N legacy textures on the current best model,
         # ONLY for variants a product actually links to, once each (durable marker). Bounded spend per
         # run while the backlog drains. 0 = off.
         { name = "SCRAPER_IMAGE_UPGRADE_BATCH", value = tostring(var.image_upgrade_batch) },
         # Auto-texture: after produce QUEUES new-variant textures, submit ONE GPU job (RUN_MODE=generate-
-        # textures) to generate + upload them -- reusing the SAME queue/jobdef below. Ships OFF; flip on only
+        # textures) to generate + upload them, on the queue/jobdef below. Ships OFF; flip on only
         # after the :gpu image carries ben2 (else the job fails at background-removal).
         { name = "SCRAPER_AUTO_TEXTURE", value = tostring(var.auto_texture_enabled) },
         { name = "SCRAPER_GPU_QUEUE", value = var.gpu_job_queue_name },
         { name = "SCRAPER_GPU_JOBDEF", value = var.gpu_job_definition_name },
-        # HARD publish gate: only GPU-enhanced images (enhanced/ marker) may be linked. Ships OFF -- flip on
-        # ONLY after the markers are backfilled for the already-enhanced set, else every image holds.
-        { name = "SCRAPER_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
         # Produce ceiling (the runner kills a run past it). 2026-09-14: a full live scrape with a fresh image
         # batch ran past the old 2 h default on a slow day and was killed as wedged.
         { name = "SCRAPER_RUN_TIMEOUT_SECONDS", value = tostring(var.run_timeout_seconds) },

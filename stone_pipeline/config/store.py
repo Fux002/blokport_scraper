@@ -27,6 +27,9 @@ from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("config.store")
 
+# The retired enhancer's per-source settings (owner 2026-11-02): dropped from config.db, ignored when an admin sends them.
+_RETIRED_FIELDS = frozenset({"enhance", "fal_prompt", "watermarked"})
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS source (
     source              TEXT PRIMARY KEY,
@@ -40,9 +43,7 @@ CREATE TABLE IF NOT EXISTS source (
     collection_city     TEXT NOT NULL DEFAULT '',      -- supplier collection city
     ports               TEXT,                          -- JSON array of port names / LOCODEs
     mode                TEXT NOT NULL DEFAULT 'review',
-    watermarked         INTEGER NOT NULL DEFAULT 0,     -- de-watermark this source's photos (FAL)
-    fal_prompt          TEXT NOT NULL DEFAULT '',       -- per-source de-watermark instruction (empty = global fallback)
-    enhance             INTEGER NOT NULL DEFAULT 1,     -- upscale this source's photos (Real-ESRGAN, GPU)
+    image_pipeline      INTEGER NOT NULL DEFAULT 1,     -- the photo process + no_photo rule (off: scraped photos)
     emit_on_review      INTEGER NOT NULL DEFAULT 1,
     default_bundle_size INTEGER NOT NULL DEFAULT 6,
     min_expected_rows   INTEGER NOT NULL DEFAULT 0,
@@ -66,8 +67,9 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 8     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
-#                        6: source.lots (a per-vendor lot switch); 7: lot_sold_answer; 8: source.lots dropped
+SCHEMA_VERSION = 9     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+#                        6: source.lots (a per-vendor lot switch); 7: lot_sold_answer; 8: source.lots dropped;
+#                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -119,11 +121,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "lifecycle" not in cols:   # active | paused | delisted -- the label Medusa reads (NULL == active)
         conn.execute("ALTER TABLE source ADD COLUMN lifecycle TEXT")
         conn.commit()
-    if "enhance" not in cols:   # per-source GPU upscale switch; DBs created before it default ON
-        conn.execute("ALTER TABLE source ADD COLUMN enhance INTEGER NOT NULL DEFAULT 1")
+    if "image_pipeline" not in cols:   # per-source switch of the photo process: ON for every existing source (owner
+        # 2026-11-02; the retired enhance is NOT carried over: its zeros only stopped the old enhancer's spend)
+        conn.execute("ALTER TABLE source ADD COLUMN image_pipeline INTEGER NOT NULL DEFAULT 1")
         conn.commit()
-    if "fal_prompt" not in cols:   # per-source de-watermark instruction; older rows default to the global fallback
-        conn.execute("ALTER TABLE source ADD COLUMN fal_prompt TEXT NOT NULL DEFAULT ''")
+    for retired in sorted(_RETIRED_FIELDS & cols):   # the retired enhancer's settings (owner 2026-11-02)
+        conn.execute(f"ALTER TABLE source DROP COLUMN {retired}")
         conn.commit()
     if "primary_origin" not in cols:   # vendor primary quarry country (opt-in origin gate); older rows blank
         conn.execute("ALTER TABLE source ADD COLUMN primary_origin TEXT NOT NULL DEFAULT ''")
@@ -395,8 +398,7 @@ def _row_to_cfg(r: sqlite3.Row) -> SourceConfig:
         primary_origin=r["primary_origin"],
         collection_country_default=r["collection_country"], collection_city_default=r["collection_city"],
         ports_default=json.loads(r["ports"] or "[]"), mode=r["mode"],
-        watermarked=bool(r["watermarked"]), enhance=bool(r["enhance"]), emit_on_review=bool(r["emit_on_review"]),
-        fal_prompt=r["fal_prompt"],
+        image_pipeline=bool(r["image_pipeline"]), emit_on_review=bool(r["emit_on_review"]),
         default_bundle_size=r["default_bundle_size"], min_expected_rows=r["min_expected_rows"],
     )
 
@@ -409,8 +411,7 @@ def _params(cfg: SourceConfig, enabled: bool) -> dict:
         "origin_default": cfg.origin_default, "primary_origin": cfg.primary_origin,
         "ports": json.dumps(cfg.ports_default or []),
         "collection_country": cfg.collection_country_default, "collection_city": cfg.collection_city_default,
-        "mode": cfg.mode, "watermarked": 1 if cfg.watermarked else 0, "enhance": 1 if cfg.enhance else 0,
-        "fal_prompt": cfg.fal_prompt,
+        "mode": cfg.mode, "image_pipeline": 1 if cfg.image_pipeline else 0,
         "emit_on_review": 1 if cfg.emit_on_review else 0,
         "default_bundle_size": cfg.default_bundle_size, "min_expected_rows": cfg.min_expected_rows,
         "updated_at": _now(),
@@ -434,8 +435,7 @@ def _row_dict(r: sqlite3.Row) -> dict:
         "origin_default": r["origin_default"], "primary_origin": r["primary_origin"],
         "ports": json.loads(r["ports"] or "[]"),
         "collection_country": r["collection_country"], "collection_city": r["collection_city"],
-        "mode": r["mode"], "watermarked": bool(r["watermarked"]), "enhance": bool(r["enhance"]),
-        "fal_prompt": r["fal_prompt"],
+        "mode": r["mode"], "image_pipeline": bool(r["image_pipeline"]),
         "emit_on_review": bool(r["emit_on_review"]),
         "default_bundle_size": r["default_bundle_size"], "min_expected_rows": r["min_expected_rows"],
         # last run (for the admin list's "last run" label); null until this source has ever been produced.
@@ -458,7 +458,10 @@ def get_row(source: str, path: str | Path | None = None) -> dict | None:
 
 
 def upsert_row(data: dict, path: str | Path | None = None) -> None:
-    """Upsert from an admin-UI payload dict (the inverse of _row_dict)."""
+    """Upsert from an admin-UI payload dict (the inverse of _row_dict). The retired enhancer's fields an admin built before
+    their removal still sends are ignored, as every unknown field is, and named in a warning so the leftover is seen."""
+    if retired := sorted(_RETIRED_FIELDS & set(data)):
+        log.warning(f"source {data.get('source')!r}: ignored the retired field(s) {', '.join(retired)}")
     cfg = SourceConfig(
         source=data["source"],
         source_code=data.get("source_code", ""), vendor=data.get("vendor", ""),
@@ -467,9 +470,7 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
         ports_default=data.get("ports") or [],
         collection_country_default=data.get("collection_country", ""),
         collection_city_default=data.get("collection_city", ""),
-        mode=data.get("mode", "review"), watermarked=bool(data.get("watermarked", False)),
-        enhance=bool(data.get("enhance", True)),
-        fal_prompt=data.get("fal_prompt", ""),
+        mode=data.get("mode", "review"), image_pipeline=bool(data.get("image_pipeline", True)),
         emit_on_review=bool(data.get("emit_on_review", True)),
         default_bundle_size=int(data.get("default_bundle_size", 6)),
         min_expected_rows=int(data.get("min_expected_rows", 0)),

@@ -76,7 +76,7 @@ def _listing(*photos, key="slab-1"):
 def test_each_slice_has_its_own_fixed_list_and_is_a_retouch_then_a_standardise(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 2)
     batch, s3 = _Batch(), _S3()
-    ids = gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True}, "R1", [])
+    ids = gpu.submit(batch, s3, "q", "jd", "v9", {"sentas": [A, B, D], "varsha": [E]}, "R1", [])
     names = [j["jobName"].removeprefix(f"{C.JOB_PREFIX}R1-") for j in batch.submitted]   # named by their run
     assert names == ["retouch-sentas-v9-0", "standardise-sentas-v9-0", "retouch-sentas-v9-1", "standardise-sentas-v9-1",
                      "retouch-varsha-v9-0", "standardise-varsha-v9-0"]
@@ -85,7 +85,7 @@ def test_each_slice_has_its_own_fixed_list_and_is_a_retouch_then_a_standardise(m
     envs = [{e["name"]: e["value"] for e in j["containerOverrides"]["environment"]} for j in batch.submitted]
     assert envs[0]["ONLY_KEY"] == envs[1]["ONLY_KEY"] != envs[2]["ONLY_KEY"]            # one list per slice, both jobs
     assert [json.loads(s3.objects[e["ONLY_KEY"]]) for e in envs[::2]] == [[A, B], [D], [E]]
-    assert "SLICE_OFFSET" not in envs[0] and envs[5]["WATERMARKED"] == "true" and envs[5]["RUN_MODE"] == "standardise"
+    assert "SLICE_OFFSET" not in envs[0] and envs[5]["RUN_MODE"] == "standardise"
 
 
 def test_waiting_gives_up_after_the_deadline():
@@ -107,7 +107,7 @@ def test_a_round_that_fails_while_waiting_stops_its_jobs_and_sets_the_ceiling_ba
     batch.terminate_job = lambda jobId, reason: stopped.append(jobId)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: (_ for _ in ()).throw(KeyboardInterrupt()))
     with pytest.raises(KeyboardInterrupt):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100),
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(100),
                       sleep=lambda s: None)
     assert sorted(stopped) == ["job1", "job2"] and batch.ceilings == [C.RUN_GPU_VCPUS, C.IDLE_GPU_VCPUS]
 
@@ -121,7 +121,7 @@ def test_a_submit_that_fails_part_way_still_stops_the_jobs_it_submitted(monkeypa
     submit_job = batch.submit_job
     batch.submit_job = lambda **job: submit_job(**job) if len(batch.submitted) < 3 else (_ for _ in ()).throw(RuntimeError("throttled"))
     with pytest.raises(RuntimeError):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(100),
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B]}, "R1", math.inf, sel_mod.Spend(100),
                       sleep=lambda s: None)
     assert sorted(stopped) == ["job1", "job2", "job3"]                             # stopped in parallel, any order
 
@@ -199,7 +199,7 @@ def test_the_pool_s_ceiling_is_set_back_even_when_the_round_fails():
 
 def test_a_round_with_nothing_listed_touches_nothing():
     batch = _Batch()
-    assert gpu.run_round(batch, _S3(), "v9", {"sentas": []}, {"sentas": False}, "R1", math.inf, sel_mod.Spend(0)) == []
+    assert gpu.run_round(batch, _S3(), "v9", {"sentas": []}, "R1", math.inf, sel_mod.Spend(0)) == []
     assert batch.submitted == [] and batch.ceilings == []
 
 
@@ -285,13 +285,13 @@ def test_no_step_starts_after_the_work_window_and_the_report_still_runs(monkeypa
 def test_each_close_only_slice_has_its_own_fixed_list_and_is_named_by_the_run(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 2)
     batch, s3 = _Batch(), _S3()
-    gpu.submit_close(batch, s3, "q", "jd", "v9-clean", {"sentas": [A, B, D], "varsha": [E]}, {"sentas": False, "varsha": True}, "R1", [])
+    gpu.submit_close(batch, s3, "q", "jd", "v9-clean", {"sentas": [A, B, D], "varsha": [E]}, "R1", [])
     envs = [{e["name"]: e["value"] for e in j["containerOverrides"]["environment"]} for j in batch.submitted]
     assert [j["jobName"] for j in batch.submitted] == [f"{C.JOB_PREFIX}R1-close-sentas-v9-clean-0", f"{C.JOB_PREFIX}R1-close-sentas-v9-clean-1",
                                                        f"{C.JOB_PREFIX}R1-close-varsha-v9-clean-0"]          # cleared by run id
     assert [json.loads(s3.objects[e["ONLY_KEY"]]) for e in envs] == [[A, B], [D], [E]]
     assert all(e["RUN_MODE"] == "standardise-close" and e["CLEAN_TAG"] == "v9-clean" for e in envs)
-    assert [(e["SRC"], e["WATERMARKED"]) for e in envs] == [("sentas", "false"), ("sentas", "false"), ("varsha", "true")]
+    assert [e["SRC"] for e in envs] == ["sentas", "sentas", "varsha"] and not any("WATERMARKED" in e for e in envs)
 
 
 def test_every_gpu_job_is_submitted_for_the_one_attempt_its_reservation_counts(monkeypatch):
@@ -315,7 +315,6 @@ def test_a_close_only_round_reserves_one_job_per_slice_and_submits_close_jobs(mo
 
 def test_a_listed_photo_left_without_a_result_is_a_problem(monkeypatch):
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: [])
-    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     s = _selection([_listing(A, B)], gpu_round=_round(finished={A}))
     problems, stopped = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A, B]}, "R1", math.inf, sel_mod.Spend(10))
     assert problems == [f"sentas {B[:12]}: no result after the GPU round"] and not stopped
@@ -325,7 +324,6 @@ def test_a_gpu_round_stopped_at_the_window_is_a_problem_and_the_run_goes_on(monk
     def timed_out(*a):
         raise TimeoutError("GPU jobs not done after 600s")
     monkeypatch.setattr(runner.gpu, "run_round", timed_out)
-    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     s = _selection([_listing(A)], gpu_round=_round(finished={A}))
     assert runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10)) == (
         ["GPU round v9 stopped: GPU jobs not done after 600s"], False)
@@ -335,7 +333,6 @@ def test_a_gpu_round_the_budget_cannot_cover_is_skipped_and_the_hosted_steps_go_
     def capped(*a):
         raise sel_mod.SpendCapReached("hosted spend would pass the month's budget")
     monkeypatch.setattr(runner.gpu, "run_round", capped)
-    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     s = _selection([_listing(A)])
     problems, stopped = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10))
     assert not stopped and problems == ["GPU round v9 not started: hosted spend would pass the month's budget"]
@@ -344,7 +341,6 @@ def test_a_gpu_round_the_budget_cannot_cover_is_skipped_and_the_hosted_steps_go_
 def test_a_gpu_round_with_too_little_window_left_is_skipped_and_the_hosted_steps_go_on(monkeypatch):
     monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
     monkeypatch.setenv("SCRAPER_STANDARDISE_JOBDEF", "jd")
-    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     batch = _Batch()
     s = _selection([_listing(A)])
     import time
@@ -355,7 +351,6 @@ def test_a_gpu_round_with_too_little_window_left_is_skipped_and_the_hosted_steps
 
 def test_a_gpu_round_that_ended_paid_work_stops_the_run_s_steps(monkeypatch):
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: (_ for _ in ()).throw(sel_mod.Halted("the work window ended")))
-    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     problems, stopped = runner.gpu_round(_Batch(), _selection([_listing(A)]), "v9", {"sentas": [A]}, "R1", math.inf,
                                          sel_mod.Spend(10))
     assert stopped
@@ -367,7 +362,7 @@ def test_a_gpu_round_waits_no_longer_than_the_window_it_reserved_for_however_lon
     untils = []
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: untils.append(until) or [])
     times = iter([400] + [900] * 10)                                               # the round starts at 400; submit ends at 900
-    gpu.run_round(_Batch(), _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 4000, sel_mod.Spend(100),
+    gpu.run_round(_Batch(), _S3(), "v9", {"sentas": [A]}, "R1", 4000, sel_mod.Spend(100),
                   clock=lambda: next(times))
     assert untils == [4000]                                                        # the deadline, as reserved at 400
 
@@ -404,7 +399,7 @@ def test_a_round_never_settles_above_what_it_reserved(monkeypatch):
     batch.times = {j: {"startedAt": i * busy_ms, "stoppedAt": (i + 1) * busy_ms} for i, j in enumerate(jobs)}
     spend = sel_mod.Spend(1000, save=kept.append)
     photos = [c * 64 for c in "12345"]
-    gpu.run_round(batch, _S3(), "v9", {"sentas": photos}, {"sentas": False}, "R1", window, spend, clock=lambda: 0)
+    gpu.run_round(batch, _S3(), "v9", {"sentas": photos}, "R1", window, spend, clock=lambda: 0)
     assert spend.spent <= kept[0] + 1e-9
 
 
@@ -415,7 +410,7 @@ def test_a_round_settles_what_its_jobs_ran_plus_each_job_s_allowance(monkeypatch
     batch.times = {"job1": {"startedAt": 0, "stoppedAt": 1_800_000}, "job2": {"startedAt": 1_800_000, "stoppedAt": 5_400_000}}
     kept = []
     spend = sel_mod.Spend(100, save=kept.append)
-    gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
+    gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", 7200, spend, clock=lambda: 0)
     assert kept[0] == pytest.approx(2.4)                                           # reserved: the 2 h window + 2 allowances
     assert spend.spent == pytest.approx(1.9) and spend.reserved == 0               # ran 0.5 h + 1 h, + 2 allowances
 
@@ -426,7 +421,7 @@ def test_a_round_is_sized_to_the_budget_left(monkeypatch):
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
     batch, kept = _Batch(), []
     spend = sel_mod.Spend(5.0, save=kept.append)                                   # 2 slices of 2.40 fit, not 3
-    gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B, D]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
+    gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B, D]}, "R1", 7200, spend, clock=lambda: 0)
     assert len(batch.submitted) == 4 and kept[0] == pytest.approx(4.8) and not spend.capped
 
 
@@ -434,7 +429,7 @@ def test_a_round_the_budget_cannot_cover_even_one_slice_of_submits_nothing(monke
     _gpu_env(monkeypatch)
     batch, spend = _Batch(), sel_mod.Spend(1.0)
     with pytest.raises(sel_mod.SpendCapReached):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", 7200, spend, clock=lambda: 0)
     assert batch.submitted == [] and batch.ceilings == [] and spend.capped
 
 
@@ -456,7 +451,7 @@ def test_a_stopped_round_reads_its_jobs_times_once_they_have_stopped(monkeypatch
     _stopping(batch, [{"status": "RUNNING", "startedAt": 0}, {"status": "FAILED", "startedAt": 0, "stoppedAt": 1_800_000}])
     spend = sel_mod.Spend(100)
     with pytest.raises(SystemExit):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0,
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", 7200, spend, clock=lambda: 0,
                       now=lambda: 99_999, sleep=slept.append)
     assert spend.spent == pytest.approx(0.7) and spend.reserved == 0               # 0.5 h + its allowance, not to now
     assert slept == [C.STOP_POLL_SECONDS]
@@ -469,7 +464,7 @@ def test_a_job_still_not_stopped_after_the_wait_counts_to_now(monkeypatch):
     _stopping(batch, [{"status": "RUNNING", "startedAt": 0}] * (tries + 1))
     spend = sel_mod.Spend(100)
     with pytest.raises(SystemExit):
-        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0,
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", 7200, spend, clock=lambda: 0,
                       now=lambda: 900, sleep=lambda s: None)
     assert spend.spent == pytest.approx(0.25 + 0.2)                               # job2 never started: no allowance
 
@@ -481,7 +476,7 @@ def test_when_batch_cannot_say_what_ran_the_round_counts_what_it_reserved(monkey
     batch = _Batch()
     batch.describe_jobs = lambda jobs: (_ for _ in ()).throw(ClientError({"Error": {"Code": "ServerException"}}, "DescribeJobs"))
     spend = sel_mod.Spend(100)
-    gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, {"sentas": False}, "R1", 7200, spend, clock=lambda: 0)
+    gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", 7200, spend, clock=lambda: 0)
     assert spend.spent == pytest.approx(2.4)
 
 
@@ -678,7 +673,6 @@ def test_an_open_book_made_before_its_halves_had_a_slab_goes_to_the_gpu_again_on
 
 def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkeypatch):
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: [])
-    monkeypatch.setattr(runner, "load_source", lambda src: type("S", (), {"watermarked": False})())
     s = _selection([_listing(A)], gpu_round=_round(finished={A}, studio={A}))
     problems, _ = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10))
     assert problems == [f"sentas {A[:12]}: no result after the GPU round"]

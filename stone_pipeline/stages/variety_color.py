@@ -1,7 +1,7 @@
 """Infer a variety's colour from its real PRODUCT IMAGE when the source supplied none.
 
 A source like varsha/zucchi has no colour column and exotic names with no colour word, so a variety would
-be born colourless and null its products' colour_id. Its de-watermarked product photo is the honest stone,
+be born colourless and null its products' colour_id. Its hosted product photo is the honest stone,
 so we classify that photo's perceived colour, map it to a real Medusa colour, and propagate it to the
 variety's tile/block mirrors (same stone). The colour re-derives when the product image changes (sha
 differs), so a corrected/regenerated photo updates it instead of staying stuck. Only when there is no
@@ -163,7 +163,7 @@ def fill_colors(backbone_paths: list[Path] | None = None,
                 product_images: dict[str, str] | None = None,
                 fetch=None) -> dict:
     """Seed every variety's colour from its real PRODUCT IMAGE (`product_images`: backbone key ->
-    de-watermarked product-photo url), then propagate by (type, name) to same-stone mirrors, leaving the
+    hosted product-photo url), then propagate by (type, name) to same-stone mirrors, leaving the
     pack's generic colour ('Natural') only where nothing is known. A variety RE-DERIVES when its product
     image changes (the image sha differs from the one last used), so a corrected/regenerated photo updates
     the colour instead of staying stuck. Edits `backbone_paths` in place; `reference_paths` widen the

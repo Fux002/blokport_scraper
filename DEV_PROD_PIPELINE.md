@@ -41,7 +41,7 @@ reproduce dev-staging, so an unset environment behaves exactly as before.
 | `SCRAPER_AWS_PROFILE` | `default` | Credentials profile (use the task IAM role on AWS) |
 | `SCRAPER_S3_DRY_RUN` | `true` in development, `false` in production | the ECS task sets `false`; a laptop never writes the bucket by default |
 | `SCRAPER_IMAGE_MODE` | `passthrough` | `s3` to download → process → re-host product photos |
-| `SCRAPER_IMAGE_PROCESSING` | `false` | `true` to enhance/de-watermark before re-host |
+| `SCRAPER_IMAGE_PROCESSING` | `false` | `true` to size-reduce into improved/ (raw kept in scraped/) before re-host |
 | `SCRAPER_IMAGE_TONE` | `true` | `false` = detail-only enhance: Real-ESRGAN 4x + the long-edge cap, without the exposure lift and vibrance |
 | `SCRAPER_KEEP_SCRAPED` | `false` | `true` to also keep the raw download in the sibling `scraped/` folder |
 | `SCRAPER_VARIANT_IMAGE_BASE` | dev variations URL | The variant `{Key}.png` base stamped into the catalog |
@@ -57,9 +57,8 @@ in two sibling folders so the upgraded set is cleanly separated:
 Note this is distinct from the variant texture images at `{env}/variations/{Key}.png`.
 
 Plan: wire to **development** first, test end to end, then set the production env
-vars and re-run. The faithful enhancement runs anywhere (CPU); the de-watermark
-torch stack (`requirements-imageproc.txt`) belongs in an **ECS/Batch container**
-(GPU optional) — too heavy for vanilla Lambda.
+vars and re-run. The size-reduce runs anywhere (CPU); the photo process's models run
+on Batch GPU (STANDARDISE_PROCESS.md).
 
 ## What is identical across dev and prod
 - **Variant Key** (`{branch}_{type}_{name}_{uuid}`) — lives in the upload file,

@@ -181,7 +181,8 @@ def test_a_listing_not_fully_judged_is_never_cleaned(monkeypatch):
         sel.clean_listing(_S3(), rounds, _listing(A), set(), sel.Spend(10))
 
 
-def test_a_photo_held_by_the_retouch_or_logo_step_is_worth_cleaning_one_held_for_its_outline_is_not():
+def test_a_photo_held_by_the_retouch_or_the_retired_logo_step_is_worth_cleaning_one_held_for_its_outline_is_not():
+    # "logo:" holds are no longer written, but the retired logo step's stored ones stay cleanable per photo
     s3 = _S3({f"{GPU}held/{A}.json": json.dumps({"reason": "logo: still visible after removal"}).encode(),
               f"{GPU}held/{B}.json": json.dumps({"reason": "slab cut off by the photo edge"}).encode()})
     rnd = _round(GPU, held=(A, B))
@@ -212,7 +213,7 @@ class _Bucket:
 
 
 def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
-    # the hosted edit leaves the straps: the cleaned copy is retouched like any photo, only its logo step is skipped
+    # the hosted edit leaves the straps: the cleaned copy is retouched like any photo
     from deploy import standardise_source as src
     key = f"dev/products/scraped/sentas/{A}.jpg"
     cleaned, retouched = f"{CL}cleaned/{A}.jpg", f"{CL}retouched/{A}.jpg"
@@ -721,7 +722,6 @@ def _completing(monkeypatch, s3, standardise):
     from deploy import standardise_source as src
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.setenv("RUN_TAG", "v9")
-    monkeypatch.setenv("WATERMARKED", "false")
     monkeypatch.setattr(src.boto3, "client", lambda *a, **k: s3)
     monkeypatch.setattr(src, "sheet_photos", lambda client: {A: {"source": "sentas", "key": "k", "format": "slab", "size": None}})
     monkeypatch.setattr(src, "_photo_keys", lambda client, s, photos: [f"dev/products/scraped/sentas/{A}.jpg"])

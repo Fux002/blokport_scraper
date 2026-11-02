@@ -28,9 +28,9 @@ def device():
 
 
 def _esrgan():
-    from stone_pipeline.io.image_processing import _ESRGANEnhancer
+    from stone_pipeline.standardise.esrgan import ESRGAN
     weights = os.environ.get("BLOKPORT_ESRGAN_WEIGHTS", "")
-    esr = _ESRGANEnhancer("RealESRGAN_x4plus", weights, C.ESRGAN_TILE)
+    esr = ESRGAN("RealESRGAN_x4plus", weights, C.ESRGAN_TILE)
     if not esr.available():
         raise RuntimeError(f"Real-ESRGAN did not load from {weights!r}")
     return esr

@@ -1,6 +1,6 @@
 """Variety colour: the perceptual classifier and product-image seeding.
 
-Colour comes from a variety's REAL product image (the de-watermarked scraped photo), not the generated
+Colour comes from a variety's REAL product image (the hosted scraped photo), not the generated
 variant icon (which can be a stale/placeholder render). These tests lock: (1) the classifier names a stone
 by its saturated accent, not its washed-out median; (2) fill_colors seeds a variety from its product photo,
 re-derives ONLY when the photo changes (sha), and floors to the pack default when there is no photo.

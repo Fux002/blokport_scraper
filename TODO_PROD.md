@@ -34,7 +34,7 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
       `gpu_enhance_prod`, `sync_service_prod` + prod data sources). ONLY set it AFTER the platform apply exists,
       else the count-gated `platform_prod` remote-state + `/blokport-prod/` token data sources fail.
 - [ ] Set the prod flags as desired: `prod_image_tag`, `prod_gpu_image_tag`,
-      `prod_auto_enhance` / `prod_auto_texture` / `prod_require_enhanced` (all default OFF for a quiet start).
+      `prod_auto_texture` (default OFF for a quiet start; the enhancer flags were retired 2026-11-02).
 - [ ] `alert_email` in `terraform.tfvars` (also makes the DEV alert persistent -- a full apply otherwise
       removes the dev SNS alert created by the earlier targeted apply).
 - [ ] IAM parity: the prod scrape + produce roles get the `batch:SubmitJob` bare+`:*` allowance from the
@@ -54,9 +54,8 @@ CROSS-TEAM PREREQUISITE (do first): `sync_service_prod` runs INSIDE Blokport's p
       committed dev default; prod MUST set this.
 - [ ] `SCRAPER_S3_DRY_RUN` -- **defaults to `false` in prod now** (dev defaults `true`). Only set it
       explicitly if you deliberately want a dry prod run.
-- [ ] `FAL_KEY` on the prod produce/GPU tasks (SSM secret), for FLUX texture gen + FAL de-watermark.
-- [ ] `SCRAPER_AUTO_TEXTURE=true` / `SCRAPER_AUTO_ENHANCE=true` for prod if you want the automated
-      texture + enhance loops (default off for prod).
+- [ ] `FAL_KEY` on the prod produce/GPU tasks (SSM secret), for FLUX texture gen + the photo process.
+- [ ] `SCRAPER_AUTO_TEXTURE=true` for prod if you want the automated texture loop (default off for prod).
 
 ## 3. Per-scraper config (in the :4200 config admin, per env)
 - [ ] **`company_id` is set PER SCRAPER** (each source's Medusa company id, ENV-SPECIFIC), NOT globally.

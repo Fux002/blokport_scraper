@@ -1,9 +1,9 @@
 # =============================================================================
-# GPU image enhancer - AWS Batch, on-demand, scales to ZERO.
+# GPU Batch - AWS Batch, on-demand, scales to ZERO.
 # A managed EC2 compute env (min_vcpus=0, so $0 when idle) launches a g4dn GPU only
-# while a job runs, then terminates. The job runs the SAME container image as the
-# scraper (:gpu target), reading <env>/products/scraped/ and writing improved/ via
-# Real-ESRGAN. HARD-WIRED to this env's bucket + BLOKPORT_ENV, so dev/prod never cross.
+# while a job runs, then terminates. Its queue runs the variant-texture job (the :gpu
+# image, RUN_MODE=generate-textures) and the photo process's standardise jobs (their own
+# job definition below). HARD-WIRED to this env's bucket + BLOKPORT_ENV, so dev/prod never cross.
 # =============================================================================
 
 locals {
@@ -150,8 +150,7 @@ resource "aws_iam_role_policy" "job" {
   policy = data.aws_iam_policy_document.job.json
 }
 
-# The GPU image is ~4 GB (CUDA base + baked Real-ESRGAN; de-watermark is the hosted FAL API, no baked
-# weights). The launch template enlarges the ECS_AL2023_NVIDIA AMI's default 30 GB root volume anyway, as
+# The GPU image is ~4 GB (CUDA base + baked weights). The launch template enlarges the ECS_AL2023_NVIDIA AMI's default 30 GB root volume anyway, as
 # safe headroom: docker needs ~2.5x the image size to pull + decompress, and a future baked model would
 # otherwise reintroduce the "no space left on device" pull failure that stalls GPU jobs.
 resource "aws_launch_template" "this" {
@@ -219,9 +218,9 @@ resource "aws_batch_job_queue" "this" {
   }
 }
 
-# --- Batch: the enhancement job definition -----------------------------------
-# RUN_MODE=reprocess -> deploy.reprocess_source reads scraped/<SRC> -> improved/<SRC>
-# on the GPU. SRC (and SLICE_*) are overridden per submission for parallel array jobs.
+# --- Batch: the texture job definition ---------------------------------------
+# RUN_MODE=generate-textures -> stone_pipeline.prepare_variant_images (deploy/texture_trigger submits it,
+# one job for the whole queue of new-variant textures).
 resource "aws_batch_job_definition" "this" {
   name                  = local.name
   type                  = "container"
@@ -240,13 +239,11 @@ resource "aws_batch_job_definition" "this" {
       { name = "SCRAPER_ENV", value = var.target_env },
       { name = "SCRAPER_S3_BUCKET", value = var.staging_bucket },
       { name = "SCRAPER_S3_REGION", value = var.region },
-      # pack/brand so GPU pipeline code (de-watermark, generate-textures) runs THIS material, not stone
+      # pack/brand so the texture generation runs THIS material, not stone
       { name = "SCRAPER_BRAND", value = var.brand },
       { name = "SCRAPER_DOMAIN_PACK", value = var.domain_pack },
       { name = "SCRAPER_SALES_CHANNEL_ID", value = var.sales_channel_id },
-      { name = "RUN_MODE", value = "reprocess" },
-      { name = "SRC", value = "" }, # always overridden per submission (never a hardcoded source)
-      # No WATERMARKED default: every submission sets it from the source's config, and one without it fails loud.
+      { name = "RUN_MODE", value = "generate-textures" },
     ]
     secrets = [for k, v in var.ssm_secret_arns : { name = k, valueFrom = v }]
     logConfiguration = {
@@ -263,10 +260,8 @@ resource "aws_batch_job_definition" "this" {
     attempts = 2
   }
   timeout {
-    # 5h ceiling. Per-image cost varies widely by source: enhance-only is ~30s but the de-watermark
-    # sources (FAL round-trip on top of ESRGAN) run ~50-65s, so a ~220-image slice can take ~4h. A generous
-    # cap is the robust fix (the reprocess is idempotent + on-demand instances are stable) -- fragile
-    # per-source slice sizing to fit a tight timeout is what let the slow slices breach the old 2h.
+    # 5h ceiling: one texture job generates the whole queue of new-variant textures; generation is
+    # idempotent (a re-run skips what is done), so a generous cap only bounds a stuck job.
     attempt_duration_seconds = 18000
   }
 }

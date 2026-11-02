@@ -8,7 +8,7 @@ import pytest
 
 from stone_pipeline.config import settings
 from stone_pipeline.config.settings import STANDARDISE as C
-from stone_pipeline.standardise import blend, index, kinds, layout, logos, marks, outline, retouch, studio, views
+from stone_pipeline.standardise import blend, index, kinds, layout, marks, outline, retouch, studio, views
 
 
 def _stone(h, w, seed=1, base=170, var=18):
@@ -190,26 +190,6 @@ def test_many_white_pieces_are_the_stone_not_flares():
     for x in range(100, 1400, 90):
         cv2.rectangle(stone, (x, 300), (x + 40, 340), (255, 255, 255), -1)
     assert marks.flare_mask(stone, np.ones((1000, 1500), np.uint8)).sum() == 0
-
-
-def _stamped():
-    clean = _stone(600, 1024, seed=3, base=175, var=12)
-    raw = clean.copy()
-    cv2.putText(raw, "LOGO", (400, 320), cv2.FONT_HERSHEY_SIMPLEX, 2.5, (235, 40, 130), 8)
-    return raw, clean
-
-
-def test_a_logo_is_removed_and_the_rest_stays_the_originals():
-    raw, clean = _stamped()
-    out, reason = logos.remove(raw, clean)
-    assert reason == "" and logos._pink_left(out) <= C.LOGO_MAX_LEFT and logos._pink_left(raw) > C.LOGO_MAX_LEFT
-    assert np.array_equal(out[:60], raw[:60])
-
-
-def test_a_copy_that_does_not_line_up_is_held_never_guessed():
-    raw, _ = _stamped()
-    out, reason = logos.remove(raw, _stone(600, 1024, seed=9, base=90, var=30))
-    assert out is None and reason.startswith("logo:")
 
 
 @pytest.mark.parametrize("kind,conf,skipped", [("pile", 0.9, True), ("hangar", 0.7, True), ("interior", 0.8, True),

@@ -54,6 +54,14 @@ def run_in_progress() -> bool:
         return _current_id is not None and _runs.get(_current_id, {}).get("status") in ("queued", "running")
 
 
+def photos_in_progress() -> bool:
+    """True while a photos run (the standardised-photo process) is queued or running: the admin's images block reads
+    it as `generating`."""
+    with _lock:
+        rec = _runs.get(_current_id) if _current_id else None
+        return rec is not None and rec.get("stage") == "photos" and rec.get("status") in ("queued", "running")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
