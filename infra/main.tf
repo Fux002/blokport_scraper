@@ -389,6 +389,7 @@ module "sync_service_dev" {
   # The standardised-photo process (the runner's photos stage) on the same GPU queue.
   standardise_enabled             = var.dev_standardise_auto
   standardise_budget_usd          = var.dev_standardise_budget_usd
+  standardise_clean               = var.dev_standardise_clean
   standardise_gpu_vcpus           = var.dev_standardise_gpu_vcpus
   standardise_job_definition_name = module.gpu_enhance_dev[0].standardise_job_definition
   standardise_job_definition_arn  = local.dev_standardise_jobdef_iam_arn
@@ -477,6 +478,7 @@ module "sync_service_prod" {
 
   standardise_enabled             = var.prod_standardise_auto
   standardise_budget_usd          = var.prod_standardise_budget_usd
+  standardise_clean               = var.prod_standardise_clean
   standardise_gpu_vcpus           = var.prod_standardise_gpu_vcpus
   standardise_job_definition_name = module.gpu_enhance_prod[0].standardise_job_definition
   standardise_job_definition_arn  = local.prod_standardise_jobdef_iam_arn
