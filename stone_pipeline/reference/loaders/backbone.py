@@ -162,5 +162,8 @@ def load_backbone(path: Path | None = None) -> Backbone:
         )
         backbone.by_norm_name.setdefault(norm(variant_name), []).append(variety)
         for alias in variety.aliases:
-            backbone.by_norm_alias.setdefault(norm(alias), []).append(variety)
+            # an alias that folds to an empty key (a non-Latin script only) is no usable name: under ""
+            # it would pool every such variety into one bucket
+            if key := norm(alias):
+                backbone.by_norm_alias.setdefault(key, []).append(variety)
     return backbone
