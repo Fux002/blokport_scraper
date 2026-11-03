@@ -522,7 +522,8 @@ def test_a_close_only_run_makes_the_close_ups_again_in_the_same_process_then_pub
     rounds = []
     monkeypatch.setattr(proc.gpu, "run_round", lambda batch, client, tag, todo, watermarked, run_id, deadline, spend, work:
                         rounds.append((tag, todo, watermarked, run_id, work)) or [])
-    monkeypatch.setattr(proc, "sheet_listings", lambda client: pytest.fail("a close-only run picks no listings"))
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: pytest.fail("a close-only run picks no listings"))
     summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert rounds == [(C.CLEAN_TAG, {"sentas": [A, B]}, {"sentas": False}, "R1", proc.gpu.CLOSE_ROUND)]
     assert summary["close_only"] and summary["photos"] == 2 and summary["to_do"] == 2 and summary["published"]["changed"]
@@ -546,6 +547,7 @@ def test_a_close_only_run_slices_only_the_photos_whose_close_up_is_not_made_yet(
     rounds = []
     monkeypatch.setattr(proc.gpu, "run_round", lambda batch, client, tag, todo, watermarked, run_id, deadline, spend, work:
                         rounds.append(todo) or [])
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
     summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert rounds == [{"sentas": [B, D]}] and summary["photos"] == 3 and summary["to_do"] == 2
 
@@ -556,6 +558,7 @@ def test_a_close_only_run_with_every_close_up_made_starts_no_gpu_job(monkeypatch
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     monkeypatch.setattr(proc, "load_source", lambda src: pytest.fail("a source with nothing to do was looked at"))
     monkeypatch.setattr(proc.gpu, "run_round", lambda *a, **k: pytest.fail("a GPU round for photos already done"))
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
     summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert summary["photos"] == 1 and summary["to_do"] == 0 and summary["problems"] == 0
 def test_a_close_only_run_needs_no_hosted_key(monkeypatch):
