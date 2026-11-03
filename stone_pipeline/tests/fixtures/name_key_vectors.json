@@ -267,6 +267,51 @@
       "expected": "ssss"
     },
     {
+      "group": "translit_with_mark",
+      "input": "Ǣ",
+      "expected": "ae"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "ǣ",
+      "expected": "ae"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "Ǽ",
+      "expected": "ae"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "ǽ",
+      "expected": "ae"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "Ǿ",
+      "expected": "o"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "ǿ",
+      "expected": "o"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "Ǣgean",
+      "expected": "aegean"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "Ǿstfold",
+      "expected": "ostfold"
+    },
+    {
+      "group": "translit_with_mark",
+      "input": "Blǿy",
+      "expected": "bloy"
+    },
+    {
       "group": "accents",
       "input": "Rosa Porriño",
       "expected": "rosa porrino"
