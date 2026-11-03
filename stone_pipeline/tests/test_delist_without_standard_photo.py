@@ -317,3 +317,13 @@ def test_a_source_with_no_hosted_photo_has_an_empty_set_so_missing_means_not_pro
     rows = [CanonicalRow(src_site="sentas", surrogate_key="1", format_value="Slab", handle="h1", variation_id="v1",
                          image_keys=["https://supplier.example/x.jpg"])]
     assert _stage(monkeypatch, rows) == {"sentas": {}}
+
+
+def test_a_tile_product_never_makes_a_conflict_it_is_shown_from_its_own_rendered_set(monkeypatch):
+    # a tile listing keeps the vendor's photo of a slab in another finish: it is rendered from its variety's slab stone
+    # (standardise_publish.publish_tiles) and never shows that photo, so the slab keeps its photo
+    slab = _slabs("slab", variety="v1", finish="polished")[0]
+    tile = CanonicalRow(src_site="sentas", surrogate_key="tile", format_value="Tile", handle="tile-sen-tile",
+                        variation_id="v1", finish_id="honed", image_keys=[_improved(A)])
+    assert _stage(monkeypatch, [slab, tile]) == {"sentas": {}}
+    assert slab.standard_photo is True
