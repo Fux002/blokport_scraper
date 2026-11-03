@@ -14,10 +14,12 @@ So a silent source format change surfaces per source in the :4200 UI: a red stag
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
+from stone_pipeline.io import imagestore
 
 log = logfmt.get_logger("config.diagnostics")
 
@@ -112,14 +114,55 @@ def pending_apply(path: str | Path | None = None) -> dict | None:
         return None
 
 
+_STANDARD_MARKER = f"/products/{imagestore.STANDARD_SUBDIR}/"   # a thumbnail under it is a standardised photo
+
+
+def ledger_image_counts() -> dict[str, dict[str, int]] | None:
+    """{source_code: {total, standard, hosted, hidden}} over the listable products of this environment's sync ledger: in
+    stock (qty > 0) or hidden for want of a standardised photo (reason no_photo); a sold-out or delisted product is not
+    counted. standard: listed with a published standardised photo as its thumbnail; hosted: listed with any thumbnail;
+    hidden: reason no_photo. None when there is no ledger (never created here) or it cannot be read: the caller then
+    serves no images block, and the failure is logged."""
+    from stone_pipeline.config.settings import ENV_NAME
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger, LedgerError
+    path = writethrough.ledger_path()
+    if not path.exists():
+        return None
+    try:
+        with Ledger.open(path, env=ENV_NAME) as ledger:
+            rows = ledger.execute(
+                "SELECT p.source AS source, COUNT(*) AS total,"
+                " SUM(CASE WHEN i.reason IS NOT 'no_photo' AND p.thumbnail_key LIKE ? THEN 1 ELSE 0 END) AS standard,"
+                " SUM(CASE WHEN i.reason IS NOT 'no_photo' AND COALESCE(p.thumbnail_key, '') != '' THEN 1 ELSE 0 END)"
+                " AS hosted,"
+                " SUM(CASE WHEN i.reason = 'no_photo' THEN 1 ELSE 0 END) AS hidden"
+                " FROM product p JOIN inventory i ON i.sku = p.sku"
+                " WHERE i.qty > 0 OR i.reason = 'no_photo' GROUP BY p.source",
+                (f"%{_STANDARD_MARKER}%",)).fetchall()
+    except (sqlite3.Error, LedgerError):
+        log.exception("images block: the ledger could not be read; no images block served")
+        return None
+    return {r["source"]: {k: r[k] for k in ("total", "standard", "hosted", "hidden")} for r in rows}
+
+
+def images_block(counts: dict[str, int], image_pipeline: bool, photos_running: bool, held: int) -> dict:
+    """A source's `images` block for the admin, over its listable products (ledger_image_counts): total = ready + hidden
+    + the rest. ready: listed with a published standardised photo, or, when the source's image pipeline is off, listed
+    with a hosted photo (they show the scraped ones). hidden: served at stock 0 with reason no_photo. generating: a
+    photos run is under way and works this source."""
+    return {"image_pipeline": image_pipeline, "total": counts["total"],
+            "ready": counts["standard"] if image_pipeline else counts["hosted"],
+            "hidden": counts["hidden"], "generating": photos_running and image_pipeline, "held_for_image": held}
+
+
 def held_for_image(summary: dict) -> int:
     """Products the last produce could NOT emit but a republish CAN still emit once their image lands -- the
     REPUBLISHABLE subset of the images stage `no_image` count: rows that have a usable source image which is
-    not linked/enhanced yet. It EXCLUDES `no_image_source` (rows with no usable source url at all): those are
+    not linked yet. It EXCLUDES `no_image_source` (rows with no usable source url at all): those are
     permanent rejects a republish can never fix, so they must not drive a "republish" prompt (they already
-    show as rejected in the funnel). So this clears to 0 when nothing is genuinely republishable. Read WITH
-    the live `images` block (ready/total/generating): the admin shows "N held for image, M of T textures
-    ready -> republish", honest without a gate the scraper cannot cheaply compute at serve time. 0 when the
+    show as rejected in the funnel). So this clears to 0 when nothing is genuinely republishable. Carried in
+    the `images` block (images_block). 0 when the
     summary carries no images stage. Back-compat: a summary predating no_image_source subtracts 0 (old
     behaviour)."""
     if not isinstance(summary, dict):

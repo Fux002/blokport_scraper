@@ -9,13 +9,13 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 ## Stack
 - Python >=3.11 (CI + Docker run on 3.12). No argparse; config-driven, not interactive.
 - Core libs: polars, pyarrow, pydantic v2, rapidfuzz, jellyfish, httpx, curl_cffi (Cloudflare TLS impersonation), boto3 (S3), pyyaml.
-- Image stage: opencv-python-headless, numpy, pillow (core, CPU); optional torch + spandrel (Real-ESRGAN) for enhance; FAL FLUX Fill (fal-client, hosted API) for de-watermark.
+- Image stage: opencv-python-headless, numpy, pillow (core, CPU: download, size-reduce, re-host). The standardised-photo process (STANDARDISE_PROCESS.md) runs its models on Batch GPU (its own `standardise` image, Real-ESRGAN among them) and hosted judge/clean calls (FAL_KEY); a source opts out with its `image_pipeline` switch.
 - Persistence: SQLite — `config.db` (scraper control plane) and per-env sync ledger DB.
 - Deploy target: AWS (the sync service on Fargate runs the produce via /run; an ad-hoc Fargate task for the RUN_MODE tools; on-demand Batch GPU), image in shared ECR, infra in Terraform.
 
 ## Environment and dependencies
 - Virtualenv at `.venv/`. Install: `pip install -r stone_pipeline/requirements.txt`.
-- Optional GPU/de-watermark extras: `pip install -r stone_pipeline/requirements-imageproc.txt` (needs the pytorch CPU index; see Dockerfile).
+- Optional GPU extras (variant textures): `pip install -r stone_pipeline/requirements-imageproc.txt` (needs the pytorch CPU index; see Dockerfile).
 - No lockfile / package manager beyond pip + `pyproject.toml` (name `stone-pipeline`).
 - Behavior is env-var driven (neutral `SCRAPER_` prefix; the legacy `BLOKPORT_` prefix is still read, `SCRAPER_` wins). `SCRAPER_ENV` (development|production) selects S3 bucket, key namespace, dry-run, image mode. Prod refuses to fall back to dev bucket / dev owner ids — it fails loud. Other keys: `SCRAPER_S3_BUCKET`, `SCRAPER_S3_REGION`, `SCRAPER_SALES_CHANNEL_ID`, `SCRAPER_COMPANY_ID`, `SCRAPER_IMAGE_MODE`, `SCRAPER_IMAGE_PROCESSING`, `SCRAPER_SYNC_TOKEN`, `SCRAPER_CONFIG_TOKEN`, `SCRAPER_CONFIG_DB`.
 
@@ -34,12 +34,13 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 - Scraper config store: `python -m stone_pipeline.config.store seed|list`
 - Config admin API (UI): `SCRAPER_CONFIG_TOKEN=<t> python -m stone_pipeline.config.server`
 - Sync ledger server: `SCRAPER_SYNC_TOKEN=<t> python -m stone_pipeline.ledger.server` (routes `/sync/v1/*`)
-- Container entrypoint (scrape→pipeline→catalog→upload to S3): `deploy/run_pipeline.sh` (RUN_MODE: pipeline|validate-dewatermark|reprocess)
+- Container entrypoint (the GPU jobs and the ad-hoc task): `deploy/run_pipeline.sh` (RUN_MODE: standardise|standardise-retouch|standardise-edit-test|generate-textures; `pipeline` is refused: the produce runs in the sync service)
 
 ### Docker
-- `docker build --target core -t blokport-scraper:core .` — scrape + pipeline + CPU image enhance (the sync service + the ad-hoc task).
-- `docker build --target imageproc ...` — core + CPU torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark (local/CPU).
-- `docker build --target gpu ...` — CUDA torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark (AWS Batch). ESRGAN weights baked + pinned by SHA-256; de-watermark is the hosted FAL API (FAL_KEY, no baked model).
+- `docker build --target core -t blokport-scraper:core .`: scrape + pipeline + CPU image re-host (the sync service + the ad-hoc task).
+- `docker build --target imageproc ...`: core + the CPU torch variant-texture stack (local/CPU).
+- `docker build --target gpu ...`: CUDA torch variant-texture job (AWS Batch, RUN_MODE=generate-textures). Weights baked + pinned.
+- `docker build --target standardise ...`: the photo standardiser's GPU jobs (AWS Batch, RUN_MODE=standardise / standardise-retouch).
 
 ## Conventions
 - **Binding invariants** (plan section 0): no argparse, no em dashes anywhere, deterministic + idempotent (same input → byte-identical output, safe to re-run), NEVER guess a value into output (below-floor → review queue or tree gap), provenance on every derived value, fail loud and isolated (one dead row/image flags that row, never crashes the run).

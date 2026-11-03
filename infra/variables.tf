@@ -43,13 +43,13 @@ variable "prod_image_tag" {
 variable "gpu_image_tag" {
   type        = string
   default     = "gpu"
-  description = "ECR tag the DEV GPU Batch enhancer runs (:gpu tracks the latest build)."
+  description = "ECR tag the DEV GPU Batch texture job runs (:gpu tracks the latest build)."
 }
 
 variable "prod_gpu_image_tag" {
   type        = string
   default     = "gpu"
-  description = "ECR tag the PROD GPU Batch enhancer runs. Promote the dev-proven :gpu-<sha> here."
+  description = "ECR tag the PROD GPU Batch texture job runs. Promote the dev-proven :gpu-<sha> here."
 }
 
 # --- Sizing ------------------------------------------------------------------
@@ -61,7 +61,7 @@ variable "cpu" {
 variable "memory" {
   type        = number
   default     = 4096
-  description = "Fargate task memory (MiB). Raise to 8192 for the imageproc (de-watermark) image."
+  description = "Fargate task memory (MiB). Raise to 8192 for the imageproc image."
 }
 
 variable "keep_scraped" {
@@ -99,22 +99,10 @@ variable "scraper_proxy_ssm_name" {
   description = "SSM SecureString name for the residential proxy URL. Empty = not injected."
 }
 
-variable "dev_auto_enhance" {
-  type        = bool
-  default     = true
-  description = "Enable BLOKPORT_AUTO_ENHANCE on the dev produce + scheduled scrape: auto-submit the GPU reprocess for newly-staged images. ON in dev: the cold-start cycle is validated. Prod uses its own var."
-}
-
 variable "dev_auto_texture" {
   type        = bool
   default     = true
   description = "Enable BLOKPORT_AUTO_TEXTURE on the dev produce: after a produce queues new-variant textures, auto-submit the GPU job (RUN_MODE=generate-textures) to generate + upload them. ON in dev: the :gpu image now carries ben2 + the baked BEN2 model, and the flag was applied + validated (2026-07-17). Prod uses its own var."
-}
-
-variable "dev_require_enhanced" {
-  type        = bool
-  default     = true
-  description = "Enable BLOKPORT_REQUIRE_ENHANCED on dev produce + scheduled scrape: publish ONLY GPU-enhanced images. ON in dev: the enhanced/ markers are backfilled for the existing set. Prod uses its own var."
 }
 
 variable "dev_require_standard_photo" {
@@ -124,22 +112,10 @@ variable "dev_require_standard_photo" {
 }
 
 # Prod auto-flags: default OFF so a freshly-provisioned prod stack is quiet until deliberately enabled.
-variable "prod_auto_enhance" {
-  type        = bool
-  default     = false
-  description = "Enable BLOKPORT_AUTO_ENHANCE on the PROD produce (auto-submit the GPU reprocess for newly-staged images). Off until prod is validated."
-}
-
 variable "prod_auto_texture" {
   type        = bool
   default     = false
   description = "Enable BLOKPORT_AUTO_TEXTURE on the PROD produce (auto-submit the GPU texture job for new-variant textures). Off until the prod :gpu image + FAL_KEY are wired and validated."
-}
-
-variable "prod_require_enhanced" {
-  type        = bool
-  default     = false
-  description = "Enable BLOKPORT_REQUIRE_ENHANCED on the PROD produce (publish ONLY GPU-enhanced images). Off until the prod enhanced/ markers are backfilled."
 }
 
 variable "alert_email" {

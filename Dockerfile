@@ -1,12 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# Two build targets:
-#   core       - scrape + pipeline + faithful image enhancement/upscale (CPU,
-#                no torch). This is what the scheduled Fargate task runs.
-#   imageproc  - core + the Real-ESRGAN enhance + CLIP classify stack on CPU torch
-#                (fp32). Same local models as `gpu` but far slower; for local/CPU use.
-#   gpu        - same stack on CUDA torch (fp16). What the on-demand AWS Batch GPU runs.
-#                (De-watermarking on both is FAL FLUX Fill -- hosted, no local model.)
+# Build targets:
+#   core         - scrape + pipeline + the image re-host (CPU, no torch). The sync service and the
+#                  ad-hoc Fargate task run it.
+#   imageproc    - core + the variant-texture stack on CPU torch (fp32); for local/CPU use.
+#   gpu          - the variant-texture job on CUDA torch (fp16), on the on-demand AWS Batch GPU.
+#   standardise  - the photo standardiser's GPU jobs (STANDARDISE_PROCESS.md).
 #
 #   docker build --target core      -t blokport-scraper:core .
 #   docker build --target imageproc -t blokport-scraper:imageproc .
@@ -47,9 +46,8 @@ ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 
 
 # --- imageproc variant (optional, CPU torch) --------------------------------
-# Same enhancement + classify stack as the GPU target, but CPU torch (fp32). Far slower
-# than the GPU batch - kept for local runs / CPU-only environments. For a full catalogue
-# use the `gpu` target. (De-watermarking is FAL FLUX Fill, hosted -- no torch, no bake.)
+# The GPU target's stack on CPU torch (fp32). Far slower than the GPU batch - kept for
+# local runs / CPU-only environments.
 FROM core AS imageproc
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -84,10 +82,11 @@ ENV BLOKPORT_ESRGAN_WEIGHTS=/app/models/RealESRGAN_x4plus.pth \
     HF_HUB_DOWNLOAD_TIMEOUT=15
 
 
-# --- GPU enhancement variant (CUDA torch + Real-ESRGAN + CLIP) ----------------
-# For the on-demand GPU batch (AWS Batch). Real-ESRGAN (enhancement) + CLIP (classify) run on
-# the GPU here; de-watermarking is FAL FLUX Fill (hosted). The CPU 'core' image keeps
-# scrape+catalog. Pinned CUDA base + pinned weights so dev and prod produce identical output.
+# --- GPU variant (CUDA torch) -------------------------------------------------
+# For the on-demand GPU batch (AWS Batch): the variant-texture job (RUN_MODE=generate-textures).
+# The CPU 'core' image keeps scrape+catalog. Pinned CUDA base + pinned weights so dev and prod
+# produce identical output. The Real-ESRGAN + CLIP weights baked below were the retired
+# enhancer's; dropping them needs a verified image rebuild (open).
 #   docker build --target gpu -t blokport-scraper:gpu .
 FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime AS gpu
 ENV PYTHONUNBUFFERED=1 \
@@ -108,14 +107,13 @@ RUN pip install -r /tmp/requirements.txt \
        "transformers==4.44.2" "safetensors==0.4.4" "fal-client>=0.4" "requests>=2.31" \
        "git+https://github.com/PramaLLC/BEN2.git@2c99a5da477b5523585bfa5c893888a6e818a8f6"
 # ben2: BEN2 background-removal for VARIANT TEXTURES (rb_images.py), so RUN_MODE=generate-textures runs on
-# THIS same GPU image. Additive -- the de-watermark/enhance paths are unchanged. Its model is BAKED below
+# THIS same GPU image. Its model is BAKED below
 # (pinned), so no fetch happens on a live task.
 # Bake the model weights at build, PINNED (ESRGAN by SHA-256; CLIP + BEN2 by immutable revision) so no
 # unverified fetch happens on a live task and dev/prod are byte-identical:
-#   - Real-ESRGAN x4plus       : the enhancement engine (local GPU)
-#   - clip-vit-base-patch32    : the non-stone image classifier (local GPU)
+#   - Real-ESRGAN x4plus       : the retired enhancer's (see above)
+#   - clip-vit-base-patch32    : the retired non-stone classifier's (see above)
 #   - PramaLLC/BEN2            : variant-texture background remover (rb_images.py)
-# De-watermarking is FAL FLUX Fill (hosted) -- no local model to bake.
 RUN mkdir -p /app/models \
     && curl -fsSL -o /app/models/RealESRGAN_x4plus.pth \
        https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth \
@@ -125,7 +123,7 @@ RUN python -c "from huggingface_hub import snapshot_download as d; \
 # BEN2 background-remover weights, PINNED to the same revision rb_images.py loads (no runtime fetch).
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('PramaLLC/BEN2', revision='e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f', ignore_patterns=['BEN2_demo_pictures/*','*.md'])"
-# Sensible enhancement defaults baked in (Batch job overrides SRC / BLOKPORT_ENV / bucket).
+# Defaults baked in (the Batch job overrides BLOKPORT_ENV / bucket).
 # HF offline: the CLIP + BEN2 snapshots are baked above (root's default /root/.cache/huggingface). Force
 # offline so from_pretrained can NEVER fall through to a live Hub fetch -- on the Batch GPU subnet that has no
 # HF route the fetch does not fail fast, it HANGS for minutes with no output (the 26-min BEN2 stall). Offline
@@ -146,7 +144,7 @@ ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 
 # ---------------------------------------------------------------------------------------------------
 # The photo standardiser (RUN_MODE=standardise): its own image, because its models need far newer torch +
-# transformers + diffusers than the :gpu target's pinned stack, and dev's live enhancer runs :gpu. No hosted
+# transformers + diffusers than the :gpu target's pinned stack. No hosted
 # API: every model is open, baked here at an immutable revision, so no fetch ever happens on a live task.
 #   docker build --target standardise -t blokport-scraper:standardise .
 FROM python:3.12-slim AS standardise

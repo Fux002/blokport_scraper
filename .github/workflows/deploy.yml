@@ -20,11 +20,11 @@ on:
   workflow_dispatch:
     inputs:
       build_imageproc:
-        description: "Also build + push the heavy imageproc image (CPU torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark)"
+        description: "Also build + push the heavy imageproc image (CPU torch: the variant-texture stack, for local/CPU use)"
         type: boolean
         default: false
       build_gpu:
-        description: "Also build + push the GPU image (CUDA torch Real-ESRGAN enhance + FAL FLUX Fill de-watermark) for the AWS Batch enhancer"
+        description: "Also build + push the GPU image (CUDA torch) for the AWS Batch texture job"
         type: boolean
         default: false
 
@@ -78,7 +78,7 @@ jobs:
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target core -t "$REPO:core" -t "$REPO:$SHA" .
-          docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts, deploy.validate_dewatermark, deploy.reprocess_source"
+          docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts"
           echo "Entrypoint imports OK in $REPO:core"
 
       - name: Push image
@@ -117,8 +117,7 @@ jobs:
           sudo docker builder prune -af || true
           df -h /
 
-      # Heavy CPU-torch variant (Real-ESRGAN enhance + FAL de-watermark, ~10 GB with baked
-      # ESRGAN model); only on manual dispatch with the flag set.
+      # Heavy CPU-torch variant (~10 GB with baked models); only on manual dispatch with the flag set.
       - name: Build and push imageproc image
         if: steps.gate.outputs.ready == 'true' && inputs.build_imageproc
         env:
@@ -139,7 +138,7 @@ jobs:
           sudo docker builder prune -af || true
           df -h /
 
-      # GPU image for the AWS Batch enhancer; :gpu = dev (mutable), :gpu-<sha> = promote to prod.
+      # GPU image for the AWS Batch texture job; :gpu = dev (mutable), :gpu-<sha> = promote to prod.
       - name: Build and push gpu image
         if: steps.gate.outputs.ready == 'true' && inputs.build_gpu
         env:

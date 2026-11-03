@@ -118,7 +118,6 @@ def test_placeholder_blocked(local_cfg, monkeypatch):
 def test_passthrough_links_to_improved_s3(monkeypatch):
     # passthrough points product images at the IMPROVED S3 versions via the imageproc manifest,
     # never the raw source url; an image not in the manifest is DROPPED, not defaulted.
-    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
     monkeypatch.setattr(images, "_readonly_manifest",
                         lambda: {"http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg"})
     cfg = ImagesConfig(mode="passthrough")
@@ -130,11 +129,10 @@ def test_passthrough_links_to_improved_s3(monkeypatch):
 
 def test_passthrough_holds_untreated_manifest_entries(monkeypatch):
     # a manifest entry that points at a raw (non-/improved/) S3 upload is HELD, not linked -- only
-    # enhanced/upscaled images ever reach the upload. The treated one links; the untreated one is held.
-    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
+    # re-hosted images ever reach the upload. The re-hosted one links; the raw one is held.
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {
-        "http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg",   # treated
-        "http://x/b.jpg": "https://s3/dev/products/zucchi/bb.jpg",       # on S3 but NOT enhanced
+        "http://x/a.jpg": "https://s3/dev/products/improved/x/aa.jpg",   # re-hosted
+        "http://x/b.jpg": "https://s3/dev/products/zucchi/bb.jpg",       # on S3 but raw
     })
     cfg = ImagesConfig(mode="passthrough")
     row = CanonicalRow(src_site="x", surrogate_key="7", is_block=False,
@@ -145,8 +143,7 @@ def test_passthrough_holds_untreated_manifest_entries(monkeypatch):
 
 def test_passthrough_all_untreated_holds_product_imageless(monkeypatch):
     # every image still raw on S3 -> nothing links -> the product is held imageless (no_image), not
-    # shipped with untreated pictures. Re-links on a later produce once improved/ versions exist.
-    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
+    # shipped with raw pictures. Re-links on a later produce once improved/ versions exist.
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {
         "http://x/a.jpg": "https://s3/dev/products/zucchi/aa.jpg"})
     cfg = ImagesConfig(mode="passthrough")
@@ -158,7 +155,6 @@ def test_passthrough_all_untreated_holds_product_imageless(monkeypatch):
 
 def test_passthrough_drops_images_when_manifest_unreachable(monkeypatch):
     # offline / no S3 -> empty manifest -> images are DROPPED, never leaked as raw source urls
-    monkeypatch.setattr(images, "_load_discard_set", lambda cfg=None: set())   # the pool is S3-only; not this test's concern
     monkeypatch.setattr(images, "_readonly_manifest", lambda: {})
     cfg = ImagesConfig(mode="passthrough")
     row = CanonicalRow(src_site="x", surrogate_key="7", is_block=False,
@@ -174,65 +170,40 @@ def _jpeg_bytes(h=120, w=180, fill=50):
     return enc.tobytes()
 
 
-def test_processing_disabled_is_noop(local_cfg, monkeypatch):
-    # default config has processing.enabled = False -> no ImageProcessor built.
-    import stone_pipeline.io.image_processing as ip
-    monkeypatch.setattr(ip, "ImageProcessor", lambda cfg: (_ for _ in ()).throw(
-        AssertionError("processor must not be built when disabled")))
+def test_processing_disabled_hosts_the_raw_bytes(local_cfg):
+    # default config has processing.enabled = False -> the raw bytes at the content key, nothing size-reduced
+    raw = _jpeg_bytes()
     row = CanonicalRow(src_site="varsha", surrogate_key="p1", is_block=False,
                        raw_image_urls=["http://x/a.jpg"])
-    stats = images.run([row], fetch=_fake_fetch({"http://x/a.jpg": _jpeg_bytes()}), cfg=local_cfg)
-    assert stats.processed == 0
+    stats = images.run([row], fetch=_fake_fetch({"http://x/a.jpg": raw}), cfg=local_cfg)
+    assert stats.processed == 0 and stats.bytes_uploaded == len(raw)
+    assert "/improved/" not in row.product_image_keys[0]
 
 
-def test_processing_enhances_and_is_idempotent(tmp_path, monkeypatch):
+def test_processing_size_reduces_and_is_idempotent(tmp_path):
     from stone_pipeline.config.settings import ImageProcessingConfig
-    # deterministic page flags: enhance=off + watermarked=off -> the source finishes on :core (resize),
-    # independent of the ambient config store; routing reads these.
-    monkeypatch.setattr(images, "_enhance_sources", lambda: set())
-    monkeypatch.setattr(images, "_watermarked_sources", lambda: set())
     cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s",
                        public_base="https://cdn/x/",
-                       processing=ImageProcessingConfig(enabled=True, dewatermark=False,
-                                                        write_preview=False))
+                       processing=ImageProcessingConfig(enabled=True))
     raw = _jpeg_bytes()
     row = CanonicalRow(src_site="varsha", surrogate_key="p2", is_block=False,
                        raw_image_urls=["http://x/a.jpg"])
     first = images.run([row], fetch=_fake_fetch({"http://x/a.jpg": raw}), cfg=cfg)
-    assert first.processed == 1 and first.bytes_uploaded > 0 and row.product_image_keys
-    # re-run: source already hosted -> no reprocess, no re-upload
+    assert first.processed == 1 and first.bytes_uploaded > 0 and "/improved/" in row.product_image_keys[0]
+    # re-run: source already hosted -> no re-process, no re-upload
     row2 = CanonicalRow(src_site="varsha", surrogate_key="p2", is_block=False,
                         raw_image_urls=["http://x/a.jpg"])
     second = images.run([row2], fetch=_fake_fetch({"http://x/a.jpg": raw}), cfg=cfg)
     assert second.processed == 0 and second.bytes_uploaded == 0
 
 
-def test_watermarked_kept_in_scraped_and_held_when_fal_unavailable(tmp_path, monkeypatch):
-    """A watermarked + enhance=off source finishes on :core (de-watermark is FAL, no GPU) -- but if FAL is
-    unavailable, :core cannot de-watermark, so the raw MUST still land in scraped/ (the GPU reprocess's
-    INPUT) and the product is HELD, never a watermarked original in improved/. Regression: scraped/ was
-    written only when :core changed the bytes, so a watermarked image stranded (scraped/ empty -> GPU delta
-    never saw it -> held forever)."""
-    import stone_pipeline.io.image_processing as ip
+def test_an_undecodable_photo_is_hosted_as_it_came(tmp_path):
     from stone_pipeline.config.settings import ImageProcessingConfig
-
-    # FAL unavailable here so :core cannot de-watermark (enhance=off means it WOULD try -> falls to a hold)
-    monkeypatch.setattr(ip._Dewatermarker, "available", lambda self: False)
-    monkeypatch.setattr(images, "_watermarked_sources", lambda: {"varsha"})
-    monkeypatch.setattr(images, "_enhance_sources", lambda: set())
     cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
-                       processing=ImageProcessingConfig(enabled=True, dewatermark=True,
-                                                        keep_scraped=True, write_preview=False))
-    row = CanonicalRow(src_site="varsha", surrogate_key="w1", is_block=False,
-                       raw_image_urls=["http://x/wm.jpg"])
-    stats = images.run([row], fetch=_fake_fetch({"http://x/wm.jpg": _jpeg_bytes()}), cfg=cfg)
-    # HELD this run: no linked image, transient no_image (retries next produce once the GPU has run)
-    assert row.image_keys == [] and stats.no_image == 1
-    assert any(f.code == FlagCode.no_image for f in row.review_flags)
-    # raw kept under scraped/ (the GPU's input); NOTHING written under improved/ (left for the GPU)
-    jpgs = list((tmp_path / "s").rglob("*.jpg"))
-    assert len([p for p in jpgs if "scraped" in p.parts]) == 1
-    assert [p for p in jpgs if "improved" in p.parts] == []
+                       processing=ImageProcessingConfig(enabled=True))
+    row = CanonicalRow(src_site="x", surrogate_key="s1", raw_image_urls=["http://x/a.svg"])
+    stats = images.run([row], fetch=_fake_fetch({"http://x/a.svg": b"<svg/>"}), cfg=cfg)
+    assert stats.bytes_uploaded == len(b"<svg/>") and row.product_image_keys
 
 
 def test_rescrape_same_url_different_bytes_not_reprocessed(tmp_path):
@@ -260,3 +231,20 @@ def test_rescrape_same_url_different_bytes_not_reprocessed(tmp_path):
     assert key1 == key2                    # same stored object reused
     stored = list((tmp_path / "s").rglob("*.jpg"))
     assert len(stored) == 1                # exactly one object, no duplicate
+
+
+def test_a_photo_that_cannot_be_size_reduced_is_held_and_the_others_are_hosted(tmp_path):
+    # a degenerate photo (1 x 5000: its scaled width rounds to 0) is held like a failed download, retried next produce,
+    # and never takes the source's run down
+    import cv2
+    import numpy as np
+    from stone_pipeline.config.settings import ImageProcessingConfig
+    cfg = ImagesConfig(mode="local", local_staging_dir=tmp_path / "s", public_base="https://cdn/x/",
+                       processing=ImageProcessingConfig(enabled=True))
+    sliver = cv2.imencode(".png", np.full((5000, 1, 3), 120, dtype=np.uint8))[1].tobytes()
+    bad = CanonicalRow(src_site="x", surrogate_key="d1", raw_image_urls=["http://x/sliver.png"])
+    good = CanonicalRow(src_site="x", surrogate_key="d2", raw_image_urls=["http://x/a.jpg"])
+    stats = images.run([bad, good], fetch=_fake_fetch({"http://x/sliver.png": sliver, "http://x/a.jpg": _jpeg_bytes()}),
+                       cfg=cfg)
+    assert bad.image_keys == [] and any(f.code == FlagCode.no_image for f in bad.review_flags)
+    assert good.image_keys and stats.size_reduce_failed == 1 and stats.staged == 1

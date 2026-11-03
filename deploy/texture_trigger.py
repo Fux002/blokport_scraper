@@ -3,13 +3,12 @@
 
 Part of the produce (Republish), NOT a cron: it fires only when a produce actually queued new textures, and
 only when BLOKPORT_AUTO_TEXTURE is set. Fire-and-forget -- produce submits and returns; the images land in
-dev/variations/ and the NEXT produce stamps them (the same one-cycle hold as auto-enhance, so a partial or
-failed run just leaves those products HELD, never shipped imageless).
+dev/variations/ and the NEXT produce stamps them (a one-cycle hold, so a partial or failed run just leaves
+those products HELD, never shipped imageless).
 
-Reuses the gpu_enhance Batch queue + job definition (same :gpu image, same IAM) with a RUN_MODE override:
-RUN_MODE=generate-textures -> run_pipeline.sh -> python -m stone_pipeline.prepare_variant_images (the
-UNCHANGED generate -> de-bg -> upload-to-variations pipeline). The only new deploy requirement is `ben2` in
-the :gpu image (rb_images imports it); nothing about generation/refresh/enhance changes.
+Runs on the gpu_enhance Batch queue + job definition (the :gpu image), RUN_MODE=generate-textures ->
+run_pipeline.sh -> python -m stone_pipeline.prepare_variant_images (generate -> de-bg -> upload-to-variations).
+The :gpu image must carry `ben2` (rb_images imports it).
 """
 
 from __future__ import annotations
@@ -51,8 +50,8 @@ def submit_texture_job(queued: int, queue_key: str | None = None) -> str | None:
             jobName="autotexture",
             jobQueue=cfg.queue,
             jobDefinition=cfg.job_definition,
-            # override the job-def's default RUN_MODE (reprocess) so the SAME :gpu container runs the texture
-            # pipeline instead of the de-watermark/enhance one. No SRC/window env: one job does the whole queue.
+            # RUN_MODE is the job-def's default too; stated here so the job never depends on that default. No
+            # SRC/window env: one job does the whole queue.
             # BLOKPORT_S3_DRY_RUN=false is REQUIRED: it defaults TRUE in dev (a safety so a box never writes the
             # bucket), and the gpu job-def does not set it -- so without this the texture upload no-ops and every
             # {Key}.png silently never reaches dev/variations/ (the produce container sets this same false).

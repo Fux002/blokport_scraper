@@ -210,15 +210,7 @@ module "scraper_dev" {
   cpu             = var.cpu
   memory          = var.memory
 
-  # Auto-enhance: the ad-hoc task submits the dev GPU reprocess for newly-staged images. ON in dev
-  # (dev_auto_enhance defaults true). Prod stays unwired until its own GPU module is active.
-  gpu_job_queue_name       = module.gpu_enhance_dev[0].job_queue
-  gpu_job_definition_name  = module.gpu_enhance_dev[0].job_definition
-  gpu_job_queue_arn        = module.gpu_enhance_dev[0].job_queue_arn
-  gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
-  auto_enhance_enabled     = var.dev_auto_enhance
-  require_enhanced_enabled = var.dev_require_enhanced
-  require_standard_photo   = var.dev_require_standard_photo
+  require_standard_photo = var.dev_require_standard_photo
 }
 
 # --- PROD deployment (runs in blokport-prod, writes the prod bucket only) -----
@@ -248,9 +240,9 @@ module "scraper_prod" {
 }
 
 # =============================================================================
-# GPU image enhancer (AWS Batch, on-demand, scales to 0). One per env, scoped to
-# that env's bucket. Runs the :gpu image (Real-ESRGAN enhance + FAL FLUX Fill de-watermark).
-# Dev tracks :gpu; prod uses the promoted :gpu-<sha>. FAL_KEY is injected on dev (de-watermark).
+# GPU Batch (AWS Batch, on-demand, scales to 0). One per env, scoped to that env's bucket. Its
+# queue runs the variant-texture job (:gpu image, RUN_MODE=generate-textures) and the photo process's
+# standardise jobs (their own job definition). Dev tracks :gpu; prod uses the promoted :gpu-<sha>.
 # =============================================================================
 module "gpu_enhance_dev" {
   source = "./modules/gpu_enhance"
@@ -270,15 +262,15 @@ module "gpu_enhance_dev" {
   # so instance-hours ran 2-3x the job-hours. Two warm instances queue those jobs at the same total
   # GPU-hours. Raise temporarily for a full-catalog backfill (~53 GPU-hours), where wall-clock matters.
   max_vcpus = 8
-  # FAL_KEY for the FAL FLUX Fill de-watermarker (watermarked sources). Wired by convention to the known
-  # dev SSM param, exactly like the scraper/produce secrets, so a plain apply can never strip it.
+  # FAL_KEY for the FLUX texture generation. Wired by convention to the known dev SSM param, exactly like
+  # the scraper/produce secrets, so a plain apply can never strip it.
   ssm_secret_arns       = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
   alert_email           = var.alert_email
   standardise_image_tag = var.dev_standardise_image_tag
 }
 
 locals {
-  # The batch:SubmitJob IAM for the auto-enhance triggers must survive job-definition REVISION bumps. The
+  # The batch:SubmitJob IAM for the texture trigger must survive job-definition REVISION bumps. The
   # trigger submits by NAME, which resolves to the latest revision; pinning the policy to the exact :N ARN
   # (module output) means any job-def change (e.g. adding a secret) silently breaks the submit with an IAM
   # denial until every dependent module is re-applied. Match all revisions by NAME instead: strip the
@@ -306,7 +298,7 @@ module "gpu_enhance_prod" {
   # job (plus a 5 GB image pull through NAT) dominated the GPU bill. Raise temporarily for a backfill.
   max_vcpus   = 8
   alert_email = var.alert_email
-  # FAL_KEY (+ proxy) for FLUX texture gen + FAL de-watermark, by convention like dev. Empty until the
+  # FAL_KEY (+ proxy) for FLUX texture gen, by convention like dev. Empty until the
   # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
   ssm_secret_arns       = local.prod_ssm_secrets
   secrets_kms_key_arn   = local.prod_secrets_kms_key_arn
@@ -375,16 +367,13 @@ module "sync_service_dev" {
   # scraper -- proxy for the Cloudflare-fronted sites, fal key for images -- when they're configured.
   produce_secret_arns = local.dev_ssm_secrets
 
-  # Auto-enhance: the produce trigger submits the dev GPU reprocess for newly-staged images (scoped IAM +
-  # queue/def names). ON in dev (dev_auto_enhance defaults true). Auto-texture reuses the same queue/jobdef.
-  gpu_job_queue_name       = module.gpu_enhance_dev[0].job_queue
-  gpu_job_definition_name  = module.gpu_enhance_dev[0].job_definition
-  gpu_job_queue_arn        = module.gpu_enhance_dev[0].job_queue_arn
-  gpu_job_definition_arn   = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
-  auto_enhance_enabled     = var.dev_auto_enhance
-  auto_texture_enabled     = var.dev_auto_texture
-  require_enhanced_enabled = var.dev_require_enhanced
-  require_standard_photo   = var.dev_require_standard_photo
+  # Auto-texture: the produce submits the texture job on the GPU queue (scoped IAM + queue/def names).
+  gpu_job_queue_name      = module.gpu_enhance_dev[0].job_queue
+  gpu_job_definition_name = module.gpu_enhance_dev[0].job_definition
+  gpu_job_queue_arn       = module.gpu_enhance_dev[0].job_queue_arn
+  gpu_job_definition_arn  = local.dev_gpu_jobdef_iam_arn # revision-agnostic (see locals): survives job-def bumps
+  auto_texture_enabled    = var.dev_auto_texture
+  require_standard_photo  = var.dev_require_standard_photo
 
   # The standardised-photo process (the runner's photos stage) on the same GPU queue.
   standardise_enabled             = var.dev_standardise_auto
@@ -434,7 +423,7 @@ data "aws_kms_key" "prod_secrets" {
 
 locals {
   prod_secrets_kms_key_arn = local.prod_enabled ? data.aws_kms_key.prod_secrets[0].arn : ""
-  # Revision-agnostic prod job-def ARN for the auto-enhance/texture SubmitJob IAM (see dev_gpu_jobdef_iam_arn).
+  # Revision-agnostic prod job-def ARN for the texture SubmitJob IAM (see dev_gpu_jobdef_iam_arn).
   # Guarded by prod_enabled so the count-gated module index [0] is only reached when prod exists.
   prod_gpu_jobdef_iam_arn         = local.prod_enabled ? replace(module.gpu_enhance_prod[0].job_definition_arn, "/:[0-9]+$/", ":*") : ""
   prod_standardise_jobdef_iam_arn = local.prod_enabled ? replace(module.gpu_enhance_prod[0].standardise_job_definition_arn, "/:[0-9]+$/", ":*") : ""
@@ -468,13 +457,11 @@ module "sync_service_prod" {
   produce_secret_arns  = local.prod_ssm_secrets
   secrets_kms_key_arn  = local.prod_secrets_kms_key_arn
 
-  gpu_job_queue_name       = module.gpu_enhance_prod[0].job_queue
-  gpu_job_definition_name  = module.gpu_enhance_prod[0].job_definition
-  gpu_job_queue_arn        = module.gpu_enhance_prod[0].job_queue_arn
-  gpu_job_definition_arn   = local.prod_gpu_jobdef_iam_arn
-  auto_enhance_enabled     = var.prod_auto_enhance
-  auto_texture_enabled     = var.prod_auto_texture
-  require_enhanced_enabled = var.prod_require_enhanced
+  gpu_job_queue_name      = module.gpu_enhance_prod[0].job_queue
+  gpu_job_definition_name = module.gpu_enhance_prod[0].job_definition
+  gpu_job_queue_arn       = module.gpu_enhance_prod[0].job_queue_arn
+  gpu_job_definition_arn  = local.prod_gpu_jobdef_iam_arn
+  auto_texture_enabled    = var.prod_auto_texture
 
   standardise_enabled             = var.prod_standardise_auto
   standardise_budget_usd          = var.prod_standardise_budget_usd

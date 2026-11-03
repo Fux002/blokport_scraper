@@ -502,7 +502,8 @@ def run_source(
     # the standardised photos, once the emitted products are known: a photo emitted products of several stones show is
     # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
     # the review page read (stages.images.link_standard)
-    if not inventory_only and (conflicts := images.link_standard(rows, validation.emit)) is not None:
+    if not inventory_only and (conflicts := images.link_standard(rows, validation.emit,
+                                                                     image_pipeline=source_cfg.image_pipeline)) is not None:
         images.save_conflicts(conflicts)
     # row fingerprint: hash of the inputs that determine the output (section 11.2),
     # the basis for incremental runs (section 13A.5) and drift checks
@@ -751,16 +752,6 @@ def run_all(sources: Optional[list[str]] = None, outputs_dir: Optional[Path] = N
             log.error(f"{source} aborted on health gate; continuing other sources")
         except Exception:
             log.exception(f"{source} failed; continuing other sources")
-    # Auto-enhance: after Stage 7 staged this run's raw images, fire the GPU reprocess for the NEW ones so
-    # enhancement/de-watermark happens without a manual step (GPU spins up on demand, back to zero when
-    # idle). No-op unless BLOKPORT_AUTO_ENHANCE is set; best-effort (never fails the pipeline). Skipped for
-    # inventory-only runs (no new images). Covers every produce path, since all of them run the pipeline here.
-    if not inventory_only and results:
-        try:
-            from deploy.enhance_trigger import submit_pending
-            submit_pending(list(results.keys()))
-        except Exception:
-            log.exception("auto-enhance trigger failed (non-fatal; images stay raw until next run)")
     return results
 
 
@@ -800,16 +791,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 1 if (missing or blocked) else 0
         manifest = run_source(target)
         print_summary(manifest)
-        # Auto-enhance for the single-source path too. run_all() fires the GPU reprocess for the "all"
-        # produce; a per-source produce (build --sources X, or build's per-source loop) reaches main() HERE
-        # and must fire it as well -- otherwise a single-source (cold-start) produce stages raw images that
-        # never get de-watermarked, so improved/ stays empty and every re-produce rejects them as no_image.
-        # No-op unless BLOKPORT_AUTO_ENHANCE is set; best-effort (never fails the run).
-        try:
-            from deploy.enhance_trigger import submit_pending
-            submit_pending([target])
-        except Exception:
-            log.exception("auto-enhance trigger failed (non-fatal; images stay raw until next run)")
     except SystemExit as exc:
         return int(exc.code or 0)
     except Exception:

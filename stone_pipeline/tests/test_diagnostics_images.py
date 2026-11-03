@@ -1,98 +1,87 @@
-"""GET /config/v1/diagnostics enriches each source with a LIVE `images` progress block, computed at serve
-time from the S3 markers (not the produce-time snapshot) so the admin UI's poll actually moves while the
-GPU de-watermarks. Pure dispatch tests, boto3 mocked (no AWS).
-"""
+"""GET /config/v1/diagnostics enriches each source with an `images` block counted from the sync ledger at serve time,
+over its listable products (in stock, or hidden for want of a standardised photo; a sold-out product is not counted):
+total = ready + hidden + the rest. ready: listed with a published standardised photo (with the image pipeline off, with a
+hosted photo); hidden: served at stock 0 with reason no_photo; generating: a photos run is under way; and the last
+produce's held_for_image. The photo process relinks the products itself when it publishes, so the ledger is current."""
 
 from __future__ import annotations
 
-import types
+import pytest
 
-from stone_pipeline.config import diagnostics, server
+from stone_pipeline.config import diagnostics, runner, server, store
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT
+from stone_pipeline.ledger.db import Ledger, now_iso
 
-A, B, C = "a" * 64, "b" * 64, "c" * 64
-
-
-class _Paginator:
-    def __init__(self, keys):
-        self.keys = keys
-
-    def paginate(self, Bucket, Prefix):
-        yield {"Contents": [{"Key": k} for k in self.keys if k.startswith(Prefix)]}
+BASE = f"https://bucket.s3.amazonaws.com/{ENV_SEGMENT}/products"
 
 
-class FakeS3:
-    def __init__(self, keys):
-        self.keys = keys
-
-    def get_paginator(self, _name):
-        return _Paginator(self.keys)
-
-
-def _keys(scraped=(), enhanced=(), discarded=(), src="varsha"):
-    k = [f"dev/products/scraped/{src}/{s}.jpg" for s in scraped]
-    k += [f"dev/products/enhanced/{src}/{s}.txt" for s in enhanced]
-    k += [f"dev/products/discarded/{src}/{s}.json" for s in discarded]
-    return k
+@pytest.fixture
+def ledger_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    store.upsert_row({"source": "sentas", "source_code": "sen", "vendor": "Sentas", "ports": ["Izmir"]})
+    store.upsert_row({"source": "varsha", "source_code": "var", "vendor": "Varsha", "ports": ["Brindisi"],
+                      "image_pipeline": False})
+    return tmp_path / "ledger.db"
 
 
-def _set_mode(monkeypatch, mode):
-    # ImagesConfig is a frozen dataclass; replace the whole SETTINGS the helper imports at call time.
-    monkeypatch.setattr("stone_pipeline.config.settings.SETTINGS",
-                        types.SimpleNamespace(images=types.SimpleNamespace(mode=mode)))
+def _product(ledger, sku, source, thumbnail, reason=None, qty=3):
+    now = now_iso()
+    ledger.upsert("product", {"sku": sku, "source": source, "state": "synced", "thumbnail_key": thumbnail,
+                              "created_at": now, "updated_at": now}, pk=("sku",))
+    ledger.upsert("inventory", {"sku": sku, "qty": 0 if reason else qty, "reason": reason, "updated_at": now}, pk=("sku",))
 
 
-def _wire(monkeypatch, mode, rows, keys):
-    _set_mode(monkeypatch, mode)
+def _fill(path):
+    with Ledger.open(path, env=ENV_NAME) as ledger:
+        _product(ledger, "SEN-1", "sen", f"{BASE}/standard/main/sentas/{'a' * 64}.jpg")
+        _product(ledger, "SEN-2", "sen", f"{BASE}/improved/sentas/{'b' * 64}.jpg", reason="no_photo")
+        _product(ledger, "SEN-3", "sen", "")
+        _product(ledger, "SEN-4", "sen", f"{BASE}/standard/main/sentas/{'d' * 64}.jpg", qty=0)   # sold out: not counted
+        _product(ledger, "VAR-1", "var", f"{BASE}/improved/varsha/{'c' * 64}.jpg")
+        _product(ledger, "VAR-2", "var", "")
+
+
+def _diagnostics(monkeypatch, rows):
     monkeypatch.setattr(diagnostics, "read_all", lambda *a, **k: rows)
-    monkeypatch.setattr("boto3.client", lambda service, region_name=None: FakeS3(keys))
-
-
-def test_diagnostics_attaches_live_images_block(monkeypatch):
-    rows = [{"source": "varsha", "health": "OK"}]
-    _wire(monkeypatch, "s3", rows, _keys(scraped=(A, B, C), enhanced=(A,), discarded=(B,)))
     code, body = server.dispatch("GET", ["diagnostics"], None)
     assert code == 200
-    assert body["diagnostics"][0]["images"] == {
-        "total": 3, "ready": 1, "held": 1, "generating": True, "held_for_image": 0}  # no stages -> 0
+    return {r["source"]: r.get("images") for r in body["diagnostics"]}
 
 
-def test_no_images_block_when_not_s3_mode(monkeypatch):
-    rows = [{"source": "varsha", "health": "OK"}]
-    _wire(monkeypatch, "passthrough", rows, _keys(scraped=(A, B, C)))
-    _, body = server.dispatch("GET", ["diagnostics"], None)
-    assert "images" not in body["diagnostics"][0]
+def test_the_images_block_counts_each_source_from_the_ledger(ledger_path, monkeypatch):
+    _fill(ledger_path)
+    rows = [{"source": "sentas", "stages": [{"stage": "images", "extra": {"no_image": 2}}]}, {"source": "varsha"}]
+    blocks = _diagnostics(monkeypatch, rows)
+    assert blocks["sentas"] == {"image_pipeline": True, "total": 3, "ready": 1, "hidden": 1, "generating": False,
+                                "held_for_image": 2}
+    assert blocks["varsha"] == {"image_pipeline": False, "total": 2, "ready": 1, "hidden": 0, "generating": False,
+                                "held_for_image": 0}
 
 
-def test_images_omitted_for_source_with_no_scraped(monkeypatch):
-    rows = [{"source": "varsha", "health": "OK"}]
-    _wire(monkeypatch, "s3", rows, _keys())        # nothing scraped for the source
-    _, body = server.dispatch("GET", ["diagnostics"], None)
-    assert "images" not in body["diagnostics"][0]
+def test_generating_is_a_photos_run_under_way_for_a_source_in_the_pipeline(ledger_path, monkeypatch):
+    _fill(ledger_path)
+    monkeypatch.setattr(runner, "photos_in_progress", lambda: True)
+    blocks = _diagnostics(monkeypatch, [{"source": "sentas"}, {"source": "varsha"}])
+    assert blocks["sentas"]["generating"] is True and blocks["varsha"]["generating"] is False
 
 
-def test_s3_failure_omits_block_never_500s(monkeypatch):
-    rows = [{"source": "varsha", "health": "OK"}]
-    _set_mode(monkeypatch, "s3")
-    monkeypatch.setattr(diagnostics, "read_all", lambda *a, **k: rows)
-
-    def _boom(service, region_name=None):
-        raise RuntimeError("s3 unreachable")
-
-    monkeypatch.setattr("boto3.client", _boom)
-    code, body = server.dispatch("GET", ["diagnostics"], None)
-    assert code == 200
-    assert "images" not in body["diagnostics"][0]
+def test_a_source_with_no_product_in_the_ledger_has_no_block(ledger_path, monkeypatch):
+    _fill(ledger_path)
+    assert _diagnostics(monkeypatch, [{"source": "zucchi"}]) == {"zucchi": None}
 
 
-def test_images_block_carries_held_for_image_from_the_run(monkeypatch):
-    # held_for_image surfaces the last produce's no_image count (products held because their texture was not
-    # ready) into the LIVE images block, so the admin renders "N held -> Republish" alongside the live texture
-    # progress -- the reconciliation the frozen per-run 'Produced' count cannot give on its own.
-    rows = [{"source": "varsha", "health": "OK",
-             "stages": [{"stage": "images", "extra": {"no_image": 5, "staged": 0}}]}]
-    _wire(monkeypatch, "s3", rows, _keys(scraped=(A, B, C), enhanced=(A,)))
-    _, body = server.dispatch("GET", ["diagnostics"], None)
-    assert body["diagnostics"][0]["images"]["held_for_image"] == 5
+def test_without_a_ledger_no_block_is_served_and_none_is_created(ledger_path, monkeypatch):
+    assert _diagnostics(monkeypatch, [{"source": "sentas"}]) == {"sentas": None}
+    assert not ledger_path.exists()
+
+
+def test_photos_in_progress_is_only_a_running_photos_stage(monkeypatch):
+    monkeypatch.setattr(runner, "_current_id", "r1")
+    for stage, status, expected in (("photos", "running", True), ("photos", "queued", True),
+                                    ("all", "running", False), ("photos", "succeeded", False)):
+        monkeypatch.setattr(runner, "_runs", {"r1": {"stage": stage, "status": status}})
+        assert runner.photos_in_progress() is expected
 
 
 def test_held_for_image_helper_is_defensive():

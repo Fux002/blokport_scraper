@@ -79,11 +79,9 @@ class _EveryUrlImproved(dict):
 def scrape_data_dir():
     """The hermetic pipeline input: the committed scrape fixtures, laid out exactly like the workspace
     data/ tree (<source>/<timestamp>/products.csv + scrape_complete.json), plus an image stage that needs
-    no S3 (the same two stubs the image unit tests use: a manifest that knows every url, an empty discard
-    pool). run_source / run_all then read the SAME input locally and in CI: no test depends on the
+    no S3 (the stub the image unit tests use: a manifest that knows every url). run_source / run_all then read the SAME input locally and in CI: no test depends on the
     operator's gitignored scrapes or on the dev bucket's manifest."""
     from stone_pipeline.stages import images
     with pytest.MonkeyPatch.context() as mp:            # module scope: the m8 emitted fixture runs once per module
         mp.setattr(images, "_readonly_manifest", _EveryUrlImproved)
-        mp.setattr(images, "_load_discard_set", lambda cfg=None: set())
         yield SETTINGS.paths.tests_fixtures_dir / "data"

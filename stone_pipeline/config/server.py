@@ -115,43 +115,23 @@ def _country_iso(raw: str) -> str | None:
 
 
 def _attach_image_progress(rows: list[dict]) -> None:
-    """Enrich each source diagnostic with a LIVE `images` block, computed at serve time from the S3 markers
-    (deliberately NOT the produce-time stages.json snapshot: de-watermark + upscale run async for tens of
-    minutes after the produce, so the UI's 30s poll must see numbers that actually move). Only meaningful
-    when images are hosted on S3; a source with no scraped images gets no block (the UI renders "-").
-
-    Best-effort and isolated: a single S3 client is reused across sources, and any listing failure omits the
-    images block rather than failing the whole diagnostics response -- the endpoint's primary job is pipeline
-    health, and the UI already treats a missing block as "-"."""
-    from stone_pipeline.config.settings import S3_REGION, SETTINGS
-    if SETTINGS.images.mode != "s3":
+    """Enrich each source diagnostic with its `images` block (diagnostics.images_block), counted from the sync ledger
+    at serve time; the photo process relinks the products itself when it publishes, so the ledger is current. No block
+    when the ledger cannot be read or the source has no product in it (the UI renders "-")."""
+    from stone_pipeline.config import diagnostics, runner
+    from stone_pipeline.config.sources import SourceConfig, load_sources
+    counts = diagnostics.ledger_image_counts()
+    if counts is None:
         return
-    try:
-        import boto3
-        client = boto3.client("s3", region_name=S3_REGION)
-    except Exception:
-        log.warning("live image-progress: S3 client unavailable; omitting images blocks", exc_info=True)
-        return
-    from deploy.enhance_trigger import image_progress
-    from stone_pipeline.config import diagnostics
-    for row in rows:                          # isolate per source: one source's S3 hiccup never drops the rest
-        source = row.get("source")
-        if not source:
+    sources = load_sources()
+    generating = runner.photos_in_progress()
+    for row in rows:
+        name = row.get("source")
+        if not name:
             continue
-        try:
-            block = image_progress(client, source)
-        except Exception:
-            log.warning("live image-progress failed for %s; omitting its images block",
-                        source, exc_info=True)
-            continue
-        if block is not None:
-            # held_for_image: products the LAST produce held for no_image (their texture was not ready at emit).
-            # Paired with this LIVE block (ready/total/generating) so the admin can render the reconciliation
-            # the frozen per-run 'Produced' count cannot give on its own: "N held for image, M of T textures
-            # ready -> Republish". Per-run (drops to 0 on the next republish as they emit); read from the same
-            # row's images-stage diagnostic, so no extra I/O.
-            block["held_for_image"] = diagnostics.held_for_image(row)
-            row["images"] = block
+        cfg = sources.get(name) or SourceConfig(source=name)
+        if (found := counts.get(cfg.source_code)) is not None:
+            row["images"] = diagnostics.images_block(found, cfg.image_pipeline, generating, diagnostics.held_for_image(row))
 
 
 # --- the route table -----------------------------------------------------------------------------------
@@ -218,9 +198,11 @@ def _post_reset(params, body, query):
     #     Hard and soft resets never touch the hosted product images.
     #   {"pristine": true}                           factory cold start: global hard reset + wipe the
     #     durable operator overlay (variety/leaf/retired decisions) so the next produce is seed-only,
-    #     AND the only image wipe in the system (hosted product images + enhanced markers + manifest).
-    #   {"pristine": true, "keep_images": true}      same, but KEEP the hosted product images + enhanced
-    #     markers (a re-scrape reuses them, no GPU/FAL rebuild) -- the test-reset path.
+    #     AND the only image wipe in the system (everything under <env>/products/: scraped originals,
+    #     re-hosted photos, published standardised views + 3D slabs, manifest). The photo process's stored
+    #     results are kept, so its next run republishes the chosen photos without paying again.
+    #   {"pristine": true, "keep_images": true}      same, but KEEP the hosted product images (a re-scrape
+    #     reuses them and products link their standardised photos at once) -- the test-reset path.
     #   {"pristine": true, "keep_scrape": true}      same, but KEEP the cached scrape (data/ + outputs/)
     #     so the catalog is rebuilt with a Republish All instead of a re-scrape.
     # 409 if a run/serve is active (never reset mid-run); base variant config is never deleted. A GLOBAL

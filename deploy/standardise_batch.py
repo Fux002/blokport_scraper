@@ -58,10 +58,9 @@ def slices(todo):
             for n, i in enumerate(range(0, len(shas), C.RUN_SLICE))]
 
 
-def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
+def submit(batch, s3, queue, jobdef, tag, todo, run_id, ids):
     """Store each slice's photo list (the run's own files, run_id) and submit its two jobs, appending each job id to ids as
-    it is submitted (so a submit that fails part way still knows its jobs). todo = {source: shas}; watermarked =
-    {source: bool}."""
+    it is submitted (so a submit that fails part way still knows its jobs). todo = {source: shas}."""
     for src, n, shas in slices(todo):
         only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-todo-{run_id}-{src}-{n}.json"
         s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(shas).encode(), ContentType="application/json")
@@ -74,22 +73,20 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
         standardise = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-standardise-{name}", jobQueue=queue, jobDefinition=jobdef,
                                        dependsOn=[{"jobId": retouch}], timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT},
                                        retryStrategy=ONE_ATTEMPT,
-                                       containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise"},
-                                                                           {"name": "WATERMARKED", "value": str(watermarked[src]).lower()}]
+                                       containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise"}]
                                                            + common})["jobId"]
         ids.append(standardise)
     return ids
 
 
-def submit_close(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
+def submit_close(batch, s3, queue, jobdef, tag, todo, run_id, ids):
     """Store each slice's photo list (the run's own files, run_id) and submit its close-only job (deploy.standardise_close:
     the chosen photos' close-ups made again), appending each job id to ids as it is submitted. todo = {source: shas of its
-    chosen photos}; tag: the clean tag, whose choice records the job reads; watermarked = {source: bool}."""
+    chosen photos}; tag: the clean tag, whose choice records the job reads."""
     for src, n, shas in slices(todo):
         only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-close-{run_id}-{src}-{n}.json"
         s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(shas).encode(), ContentType="application/json")
-        environment = (("RUN_MODE", "standardise-close"), ("SRC", src), ("CLEAN_TAG", tag), ("ONLY_KEY", only),
-                       ("WATERMARKED", str(watermarked[src]).lower()))
+        environment = (("RUN_MODE", "standardise-close"), ("SRC", src), ("CLEAN_TAG", tag), ("ONLY_KEY", only))
         ids.append(batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-close-{src}-{tag}-{n}", jobQueue=queue, jobDefinition=jobdef,
                                     timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT}, retryStrategy=ONE_ATTEMPT,
                                     containerOverrides={"environment": [{"name": k, "value": v} for k, v in environment]})["jobId"])
@@ -207,7 +204,7 @@ def ran_usd(batch, ids, reserved, now=time.time, sleep=time.sleep):
     return gpu_usd(ran_ms / 1000 + len(started) * C.GPU_JOB_ALLOWANCE_SECONDS)
 
 
-def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, work=STANDARDISE_ROUND, clock=time.monotonic,
+def run_round(batch, s3, tag, todo, run_id, deadline, spend, work=STANDARDISE_ROUND, clock=time.monotonic,
               now=time.time, sleep=time.sleep):
     """Every listed photo through the round's work under `tag` (STANDARDISE_ROUND: retouch and standardise; CLOSE_ROUND:
     the close-up made again): [(job name, why)] of failed jobs. No jobs, no ceiling change, when nothing is listed. Skipped when less than GPU_MIN_WINDOW_SECONDS of the work window (on `clock`)
@@ -230,7 +227,7 @@ def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, work=S
     try:
         with raised(batch, pool(batch, queue)):
             try:
-                work.submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
+                work.submit(batch, s3, queue, jobdef, tag, todo, run_id, ids)
                 return wait(batch, ids, started + min(wait_limit(len(slices(todo))), window), clock=clock)
             except BaseException as exc:
                 stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")

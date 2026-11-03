@@ -128,7 +128,7 @@ For `:4200`: one button, `POST /config/v1/run` (server-side, with the token), th
   "origin_default": "IT",          // supplier ISO-2 country (origin fallback)
   "ports": ["Brindisi"],           // origin ports (names or UN/LOCODEs)
   "mode": "review",                // "review" (quarantine) or "auto" (load live)
-  "watermarked": false,            // source burns a watermark into its photos
+  "image_pipeline": true,          // the standardised-photo process + no_photo rule (off: scraped photos)
   "emit_on_review": true,
   "default_bundle_size": 6,
   "min_expected_rows": 75          // catastrophic-scrape floor (abort below this)

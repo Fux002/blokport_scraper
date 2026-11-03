@@ -9,8 +9,8 @@ terraform {
 
 # =============================================================================
 # Scraper task definition - ONE environment per module instance (dev OR prod). The root stack
-# instantiates this twice. It is the AD-HOC task (aws ecs run-task with RUN_MODE=validate-dewatermark |
-# reprocess); the produce runs only in the sync service (modules/sync_service), which owns the ledger.
+# instantiates this twice. It is the AD-HOC task (aws ecs run-task with a RUN_MODE of deploy/run_pipeline.sh);
+# the produce runs only in the sync service (modules/sync_service), which owns the ledger.
 # There is no cron here: an unattended schedule is an EventBridge target on that service's /run API.
 # Each instance:
 #   * runs in its OWN platform VPC/cluster (home_env: dev runs in blokport-dev,
@@ -153,21 +153,6 @@ data "aws_iam_policy_document" "task" {
     actions   = ["s3:ListBucket"]
     resources = [local.bucket_arn]
   }
-  # Auto-enhance: let the scheduled scrape submit the GPU reprocess for newly-staged images. Scoped to
-  # ONLY this env's enhance queue + job-definition. Present only when the GPU module is wired (empty = the
-  # permission is not granted and the trigger never submits).
-  dynamic "statement" {
-    for_each = var.gpu_job_queue_arn == "" ? [] : [1]
-    content {
-      sid     = "SubmitEnhanceJobs"
-      actions = ["batch:SubmitJob"]
-      # SubmitJob by NAME (what the triggers do) authorizes against the BARE job-definition ARN
-      # (.../name), while submit-by-revision authorizes against .../name:<n>. The passed ARN is the ':*'
-      # (revision) form, which does NOT match the bare name -> AccessDenied. Allow BOTH so a name-submit works.
-      resources = concat([var.gpu_job_queue_arn],
-      distinct([var.gpu_job_definition_arn, replace(var.gpu_job_definition_arn, ":*", "")]))
-    }
-  }
 }
 
 resource "aws_iam_role_policy" "task" {
@@ -206,18 +191,6 @@ resource "aws_ecs_task_definition" "this" {
       { name = "SCRAPER_IMAGE_MODE", value = "s3" },
       { name = "SCRAPER_IMAGE_PROCESSING", value = "true" },
       { name = "SCRAPER_KEEP_SCRAPED", value = var.keep_scraped },
-      # Auto-enhance: submit the GPU reprocess for the delta after the scheduled scrape stages new images.
-      # Ships OFF (flag false); queue/def names let the trigger reach Batch once enabled. CLASSIFY stays false.
-      { name = "SCRAPER_AUTO_ENHANCE", value = tostring(var.auto_enhance_enabled) },
-      # Fan-out cap: max GPU enhance jobs one produce dispatches (over-cap windows ride the next). Raised
-      # from the default 8 so one produce clears every source's pending windows instead of starving a big
-      # source; actual FAL spend stays bounded by real pending images (per-job fal_max_usd ceiling).
-      { name = "SCRAPER_ENHANCE_MAX_JOBS", value = tostring(var.enhance_max_jobs) },
-      { name = "SCRAPER_GPU_QUEUE", value = var.gpu_job_queue_name },
-      { name = "SCRAPER_GPU_JOBDEF", value = var.gpu_job_definition_name },
-      # HARD publish gate: only images the GPU actually enhanced (enhanced/ marker) may be linked. Ships OFF
-      # -- flip on ONLY after the markers are backfilled for the already-enhanced set, else every image holds.
-      { name = "SCRAPER_REQUIRE_ENHANCED", value = tostring(var.require_enhanced_enabled) },
       ],
       # No standardised photo -> served qty 0, reason no_photo (hidden, kept for review). Unset leaves the code's
       # env default (on in production), so an env that does not pass it keeps its task definition unchanged.

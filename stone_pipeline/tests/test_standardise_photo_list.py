@@ -70,7 +70,7 @@ def test_the_image_stage_keeps_each_product_s_own_photos_before_the_standardised
     row = CanonicalRow(src_site="sentas", surrogate_key="1", format_value="Slab", image_keys=list(own))
     cfg = type("Cfg", (), {"mode": "passthrough"})()
     images.run([row], cfg=cfg)
-    images.link_standard([row], [row], cfg=cfg)
+    images.link_standard([row], [row], cfg=cfg, image_pipeline=True)
     assert [u.split("/products/")[1] for u in row.image_keys] == [f"standard/main/sentas/{A}.jpg", f"standard/white/sentas/{A}.jpg"]
     assert row.own_photo_keys == own
 

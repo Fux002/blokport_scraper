@@ -22,7 +22,8 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
                       (record missing, its photo no longer the listing's or on the exclude list, not the owner's
                       choice, or a conflict photo the owner did not assign), and every slab listing whose chosen
                       photo is no whole slab (a close-up), its choice kept; never one the owner removed, never a
-                      tile listing (rendered at step 10, see Tile listings)
+                      tile listing (rendered at step 10, see Tile listings); only of the
+                      sources whose image pipeline is on
        4. GPU         the listings' first JUDGE_MAX photos the standardiser has not run, or whose result is
                       outdated (RUN_TAG); none of a listing the owner chose a photo for
        5. judge       the owner's choice for the listing, else its results in its own order until one passes (a
@@ -139,6 +140,17 @@ vendor's slab of that variety, never from its own photos (warehouse racks) and n
   problem list. Any other error fails the run, and a failed bucket listing stops publish, before anything is removed.
 - **Variations export**: a sheet product whose variation is missing from it is matched to no stone; the log says how
   many (the export is stale or empty) and the run record counts them (`tiles.unknown_variations`).
+
+## Per source: the image pipeline switch
+
+A source's `image_pipeline` (admin, default on) decides whether this process works it. On: its listings are picked and
+a product is live only with a standardised photo (the no_photo rule). Off: its listings are never picked (nothing is
+spent on them) and its products show the scraped photos, re-hosted by the image stage, and stay listed.
+
+A logo, watermark or overlay text on a photo is no source setting: it is the judge's `leftover_mark` finding on the
+standardised result, which the clean step removes from the photo with a hosted edit (within the month's budget), like a
+sticker or a card. With the clean step off (`SCRAPER_STANDARDISE_CLEAN=false`) such a listing stays on the review list
+(`tracked.csv`: "judge fail (leftover_mark)") and hidden by the no_photo rule.
 
 ## Trigger
 
@@ -303,6 +315,44 @@ TerminateJob scope: the svc task role may stop jobs `arn:aws:batch:<region>:<acc
 a job's name; scoping to the process's own jobs would need tags on submit (`batch:TagResource`) and an
 `aws:ResourceTag` condition on TerminateJob, which is not applied here: the process only stops jobs it named
 (`photos-<run id>-...`).
+
+### At the deploy that retired the logo step: mark every result it made (once per environment)
+
+Two steps add views to a stored result from a re-run of its photo, unjudged: completing an outdated open book (its close
+view and 3D slab) and the close-only run (its close-up, under every close-up rule). A result the retired logo step made
+(RUN_TAG, a watermarked source) would be re-run without that step. Before the first photos run of that release on an
+environment, run `python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first, then `false`; the environment's usual
+`SCRAPER_` settings). It writes `logo-step/<sha>.json` beside each such result; a marked result is never completed and
+its close-up never made again, whatever `CLOSEUP_VERSION` says: it keeps its judged views, its choice and its
+`close.jpg` as they are. It reads the watermarked sources from a config.db snapshot taken before the migration; for dev
+pass prod's too (`CONFIG_DB_SNAPSHOTS`, see the script), since dev's varsha results were made by prod's run. Dry run on
+2026-11-03: 1278 in prod, 1187 in dev, all varsha `v2` results. Idempotent.
+
+### Rolling back past the image pipeline switch (config.db schema 9)
+
+The release that retired the old enhancer migrates config.db to schema 9: every source gets `image_pipeline` (on), and
+`enhance`, `fal_prompt` and `watermarked` are dropped. Older code cannot read a schema 9 config.db (it selects the dropped
+columns). Rolling back past it therefore means restoring the config.db snapshot taken before the deploy
+(`<env>/scraper/config/config.db` in the env's bucket, an earlier S3 version) together with the older image; the
+operator decisions made since that snapshot are then lost.
+
+### Before prod: the judge catches a burned-in logo (once, on dev)
+
+The logo of a watermarked supplier (varsha) is no longer taken off by a step of its own: the judge must find it
+(`leftover_mark`) for the clean step to remove it. Evidence before prod, on dev, about 1.80 USD:
+
+1. Pick 20 varsha photos in the dev sheet whose choice record has tag `v2` (made with the retired logo step, so
+   their stored results are logo-free and say nothing here). Write their shas as a JSON list to S3.
+2. Run the GPU round on them under a throwaway tag (`RUN_TAG=logo-check`, `ONLY_KEY=<that list>`): one retouch and
+   one standardise job, about 0.30 to 0.50 USD of GPU time (one slice, its 12-minute allowance plus about 40 s a photo
+   on 4 vCPU at 0.147 USD per vCPU-hour). Nothing is published: the tag is not RUN_TAG or CLEAN_TAG.
+3. Judge each finished result (`deploy.standardise_select.verdict` on the `logo-check` round): 20 judge calls,
+   about 0.016 USD each as billed (0.14 reserved). Then judge the close view of each result that passed and has one
+   (`<sha>.close.jpg`; the judge sees the published views, and the close view is cut from the photo's middle, where
+   varsha's logo sits): at most 20 more calls, about 0.30 USD.
+4. Count the verdicts that fail with `leftover_mark`, on the main and on the close views, and look at the passes by eye.
+   Prod goes ahead when every result or close view that still shows the logo is a `leftover_mark` fail; a pass with a
+   visible logo means the judge prompt needs the logo named more plainly first.
 
 ## Shared photos
 

@@ -42,10 +42,10 @@ def test_a_partial_put_changes_only_the_fields_it_names(tmp_path, monkeypatch):
     # an admin form that does not render a field must never reset it to its default on save
     monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
     store.upsert_row({"source": "sentas", "source_code": "sen", "vendor": "Sentas Marble", "ports": ["Izmir"],
-                      "enhance": False, "primary_origin": "TR", "min_expected_rows": 120})
+                      "image_pipeline": False, "primary_origin": "TR", "min_expected_rows": 120})
     code, body = server.dispatch("PUT", ["sources", "sentas"], {"vendor": "Sentas Mermer"})
     assert code == 200
-    assert (body["vendor"], body["ports"], body["enhance"], body["primary_origin"], body["min_expected_rows"]) \
+    assert (body["vendor"], body["ports"], body["image_pipeline"], body["primary_origin"], body["min_expected_rows"]) \
         == ("Sentas Mermer", ["Izmir"], False, "TR", 120)
 
 

@@ -5,7 +5,7 @@ photo edges it runs into, each end's joint profile with its strongest joints and
 reason), <sha>.mask.png (the slab mask the corners were fitted to) and <sha>.overlay.jpg. Only the survey models load.
 Env: SRC; ONLY_KEY = the S3 key of a JSON list of shas (as deploy.standardise_source); DIAG_TAG (optional) writes under
 diag/<DIAG_TAG>/ instead; RUN_TAG (optional) reads that run's retouched copy of a photo when it has one, as its
-standardise job did. A watermarked source is read before its logo step.
+standardise job did.
 Same photos, same files: a re-run overwrites them with the same content.
 """
 

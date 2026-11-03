@@ -195,13 +195,15 @@ def fill_variation_types(ledger: Ledger) -> int:
     return n
 
 
-def _photo_ready(r: CanonicalRow, prev) -> bool:
+def _photo_ready(r: CanonicalRow, prev, cfg: SourceConfig) -> bool:
     """The no-photo rule, decided here once per product: with images.require_standard_photo on, a product without a
     standardised photo is not ready. A run that cannot tell (standard_photo None: the photo pool unread or empty) keeps
     an existing product's last decision, and a product new to the ledger starts not ready (created as a hidden draft,
-    shown once a run sees its photo). Without the rule every product is ready. populate_inventory hides exactly the
-    products this marks not ready, so the product payload and the stock reason come from one decision."""
-    if not SETTINGS.images.require_standard_photo:
+    shown once a run sees its photo). Without the rule every product is ready, and so is every product of a source whose
+    image pipeline is off (cfg.image_pipeline): it shows its scraped photos, so it is never hidden, a new one never
+    starts hidden, and one hidden while the pipeline was on is shown on the next full produce. populate_inventory hides
+    exactly the products this marks not ready, so the product payload and the stock reason come from one decision."""
+    if not (SETTINGS.images.require_standard_photo and cfg.image_pipeline):
         return True
     if r.standard_photo is None:
         return bool(prev["photo_ready"]) if prev else False
@@ -225,7 +227,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         variation_key = r.variation_key or _variation_key_for(ledger, r.variation_id) \
             or (prev["variation_key"] if prev else None)
         category = _category_name_for(ledger, r.category_pcat_id)   # once: used in the record AND the hash
-        photo_ready = _photo_ready(r, prev)
+        photo_ready = _photo_ready(r, prev, cfg)
         record = {
             "sku": sku,
             "source": cfg.source_code,

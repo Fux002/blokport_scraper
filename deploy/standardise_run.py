@@ -4,7 +4,8 @@ runner's `photos` stage, started after each full produce on the owner's button. 
   0. clear: GPU jobs an earlier, killed run left are stopped and the GPU pool's ceiling is set back to idle
   1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's or excluded,
      not the owner's choice, or a photo listings of several stones show that the owner did not assign), never one the
-     owner removed; and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept
+     owner removed; and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept;
+     only of the sources whose image pipeline is on
   2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG
   3. judge: the owner's choice of a listing, else its results in its own order until one passes
   4. clean: a hosted edit of one fixable photo of each listing still without a pass
@@ -55,7 +56,7 @@ from deploy import standardise_publish as publish
 from deploy import standardise_select as select
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_SEGMENT, RUN_TIMEOUT_SECONDS, S3_BUCKET, S3_REGION, STANDARDISE as C
-from stone_pipeline.config.sources import load_source
+from stone_pipeline.config.sources import image_pipeline_off
 from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger import writethrough
@@ -265,12 +266,16 @@ def todo(listings, records, exclude, slabs, removed, conflicts, picks):
     answers cost nothing; a change that can help it reaches it). And a slab listing whose chosen photo is no whole slab
     (no <sha>.slab.png in `slabs`: a close-up, no 3D slab), with that choice as "kept": its further photos may show the
     whole slab, and the choice stays unless one of them passes; never one the owner chose a photo for (it stands). Its
-    stored answers cost nothing either, so it is simply looked at again by every run."""
+    stored answers cost nothing either, so it is simply looked at again by every run. A listing of a source whose image
+    pipeline is off is never picked: its products show the scraped photos, so nothing is spent on it."""
+    off = image_pipeline_off()
     out = []
     for l in listings:
         if l["sku"] in removed:
             continue
         r = records.get(l["key"])
+        if l["source"] in off:
+            continue
         if not valid_choice(l, r, exclude, conflicts, picks):
             out.append(l)
         elif (l["key"] not in picks and l["format"] == C.CUTOUT_FORMAT
@@ -310,10 +315,9 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     the work window or stuck, a round skipped (too little window left, or the budget left covers not one slice: the
     hosted steps still judge what is finished, within their own reservations), listed photos left without a result.
     stopped: paid work has ended (the window, a stop, a lost lock), so no step after it starts."""
-    watermarked = {src: load_source(src).watermarked for src in todo}
     try:
         problems = [f"GPU job {name} failed: {why}"
-                    for name, why in gpu.run_round(batch, sel.client, tag, todo, watermarked, run_id, deadline, spend)]
+                    for name, why in gpu.run_round(batch, sel.client, tag, todo, run_id, deadline, spend)]
     except select.Halted as exc:
         return [f"GPU round {tag} not started: {exc}"], True
     except (gpu.Skipped, select.SpendCapReached) as exc:
@@ -405,11 +409,11 @@ def photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisi
 def close_round(s3, batch, spend, run_id, deadline, root, say):
     """Instead of steps 1 to 7 (SCRAPER_STANDARDISE_CLOSE_ONLY): every chosen photo's close-up not made yet under the
     current rule made again, one close-only GPU job per slice of those (gpu.CLOSE_ROUND: the same sizing to the budget,
-    reservation and window as any round; a photo already done never boots a GPU), the logo setting from each source's
-    config as for a standardise round: (problems, counts, kept)."""
+    reservation and window as any round; a photo already done never boots a GPU), never of a source whose image pipeline
+    is off (its products show the scraped photos): (problems, counts, kept)."""
     records = close.chosen(s3, root)
     photos, todo = 0, {}
-    for src in sorted({r["source"] for r in records}):
+    for src in sorted({r["source"] for r in records} - image_pipeline_off()):
         listed = close.listed(records, src)
         photos += len({r["sha"] for r in listed})
         if left := sorted({r["sha"] for r in close.undone(s3, listed)}):
@@ -419,10 +423,9 @@ def close_round(s3, batch, spend, run_id, deadline, root, say):
         f"{' of ' + ', '.join(todo) if todo else ''}")
     problems = []
     if todo:
-        watermarked = {src: load_source(src).watermarked for src in todo}
         try:
             problems = [f"GPU job {name} failed: {why}" for name, why in
-                        gpu.run_round(batch, s3, C.CLEAN_TAG, todo, watermarked, run_id, deadline, spend, work=gpu.CLOSE_ROUND)]
+                        gpu.run_round(batch, s3, C.CLEAN_TAG, todo, run_id, deadline, spend, work=gpu.CLOSE_ROUND)]
         except (select.Halted, gpu.Skipped, select.SpendCapReached) as exc:
             problems = [f"close-up round not started: {exc}"]
         except TimeoutError as exc:                    # its jobs were stopped; what they finished stays

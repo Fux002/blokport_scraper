@@ -385,16 +385,17 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
     not just the sync state. Without (b), a seed change (e.g. a retype) leaves the old variety live in
     Medusa forever (seed vs Medusa out of line). It is global-only (a scoped factory reset is meaningless)
     and forces hard=True (a cold start starts from no scraped products). It is also the ONLY reset that wipes
-    the hosted product images (raw scraped + improved + enhanced/discarded markers + manifest), and only when
-    `keep_images` is off: a wipe forces the next scrape to re-download and re-process every image (the
-    "spend GPU/FAL" restart), so it must never ride a routine hard or soft reset, nor 'clean raw scraped data'
-    (stone_pipeline.clean, a SEPARATE endpoint). Variant textures (<env>/variations/) are never touched by any
+    the hosted product images (everything under <env>/products/: the scraped originals, the re-hosted photos, the
+    published standardised views and 3D slabs, the manifest), and only when `keep_images` is off: a wipe forces
+    the next scrape to re-download and re-host every photo, so it must never ride a routine hard or soft reset,
+    nor 'clean raw scraped data' (stone_pipeline.clean, a SEPARATE endpoint). The photo process's stored results
+    (<env>/standardise-test/) are never wiped: its next run publishes the chosen photos again without paying. Variant textures (<env>/variations/) are never touched by any
     of these. Registered sources and run history are left alone -- neither affects the catalog output.
 
     `keep_images` (factory reset only): everything else runs (ledger reset + reseed, overlay wipe,
-    stale-variation prune) but the hosted product images and their enhanced/discarded markers stay, so the
-    re-scrape reuses the already GPU/FAL-processed images -- the repeatable test-reset path. No effect on a
-    hard or soft reset, which keep images regardless.
+    stale-variation prune) but the hosted product images stay (everything under <env>/products/), so the
+    re-scrape reuses the hosted photos and the products link their published standardised photos at once -- the
+    repeatable test-reset path. No effect on a hard or soft reset, which keep images regardless.
 
     `keep_scrape` (factory reset only): keep the cached scrape (data/ + outputs/ and their S3 snapshots) so
     the catalog can be rebuilt from scratch with a Republish All instead of re-scraping every site. Safe
@@ -492,8 +493,8 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
             out["config"] = config
         if pristine and not keep_images:
             # The ONE image wipe in the system: a factory reset without keep_images drops the hosted product
-            # images (raw scraped + treated improved + markers + manifest), so the next scrape re-downloads and
-            # re-processes from scratch -- the "spend GPU/FAL" restart. Hard/soft resets never reach here.
+            # images (everything under <env>/products/ + the manifest), so the next scrape re-downloads and
+            # re-hosts from scratch. Hard/soft resets never reach here.
             # Best-effort + LOUD: a wipe failure (e.g. missing s3:DeleteObject) never fails the reset
             # (catalog/ledger are already reset) but is surfaced so the operator knows images stayed.
             try:
@@ -503,10 +504,9 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 log.exception("reset: product-image wipe FAILED; images were kept")
                 out["images_wiped"] = {"error": f"wipe failed, images kept: {exc}"}
         elif pristine:
-            # keep_images: the factory reset preserves the hosted product images AND their enhanced/discarded
-            # markers, so the re-scrape reuses the existing GPU/FAL-processed images (the enhance delta sees
-            # the markers as done) instead of rebuilding them -- the repeatable test-reset path.
-            out["images_wiped"] = {"kept": "keep_images -- product images + enhanced markers preserved"}
+            # keep_images: the factory reset preserves the hosted product images, so the re-scrape reuses them
+            # and the products link their published standardised photos at once -- the repeatable test-reset path.
+            out["images_wiped"] = {"kept": "keep_images -- hosted product images preserved"}
         return out
 
     result, code = _ledger_op("reset", _do_reset)

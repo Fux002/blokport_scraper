@@ -16,7 +16,7 @@ image lane** (AI-generate a uniform texture per variety). They converge at the M
 - **`catalog_source/`** — hand-maintained, shared across envs: `backbone_{slabs,blocks,tiles}.json`
   (allowed variety×color×finish×quality sets), `backbone_additions/`, `ports.csv`, `origin_map.csv`, `synonyms.csv`.
 - **`stone_pipeline/config/sources.yaml`** — per-source config (`adapter`, `source_code`, `mode: review|auto`,
-  `watermarked`, `origin_default`, ports, bundle size).
+  `image_pipeline`, `origin_default`, ports, bundle size).
 
 **Identity key:** every variety has a deterministic **`Key`** = `{branch}_{type}_{name}_{uuid5(path)}`.
 Keys are stable across runs/envs; Medusa mints internal Ids but never changes the Key. Everything joins on Key.
@@ -73,14 +73,14 @@ variation **Id**, which only exists after variants are imported → the round-tr
 
 ---
 
-## 2. Scraped-photo lane (`stone_pipeline/io/image_processing.py`) — Stage 7
+## 2. Scraped-photo lane (`stone_pipeline/stages/images.py`): Stage 7
 
-Real photos of the actual slabs, shot in storage units. **Faithful, classical (OpenCV) — no invented detail.**
-Enabled by `SCRAPER_IMAGE_MODE=s3` + `SCRAPER_IMAGE_PROCESSING=true`. Per image:
-1. **De-watermark** (flagged sources, e.g. varsha): locate the fixed logo by its **pink/magenta hue** (a colour
-   natural stone never has), then **FAL FLUX Kontext** re-renders the slab from an instruction (a faithful whole-image edit, not a masked inpaint).
-2. **Enhance**: gray-world white-balance (±15% clamp), CLAHE on L-channel, light NLM denoise, unsharp mask.
-3. **Resize**: **downscale-only**, cap long edge 1600, q85 JPEG.
+Real photos of the actual slabs, shot in storage units. Enabled by `SCRAPER_IMAGE_MODE=s3` +
+`SCRAPER_IMAGE_PROCESSING=true`. Per new image: **resize** (downscale-only, cap long edge 2048, q85 JPEG) into
+`improved/`, the raw original kept in `scraped/`. A source with its `image_pipeline` on then gets one standardised
+photo per listing from the photo process (STANDARDISE_PROCESS.md: GPU standardise, hosted judge, hosted clean of
+reflections, marks and logos), published under `standard/`; a product is listed only with one. A source with it off
+shows the re-hosted scraped photos.
 
 **S3 layout** (`blokport-dev-staging-3e58a6`): `dev/products/improved/<src>/<sha256>.jpg` (final, linked by products),
 `dev/products/scraped/<src>/<sha256>.jpg` (raw archive), `dev/products/_manifest.json` (`source_url→improved_url`).
@@ -126,7 +126,7 @@ re-running catalog with `SCRAPER_VARIANT_IMAGE_BASE=<prod-bucket>/.../variations
 - **Terraform** `infra/`: egress-only SG, private subnets, OIDC deploy role, SSM SecureString secrets (`FAL_KEY`,
   `BLOKPORT_SCRAPER_PROXY`), encrypted+locked state. `cd infra && terraform apply`.
 - **CI/CD** `.github/workflows/`: `ci.yml` (pytest + certify), `deploy.yml` (OIDC build+push; `build_imageproc=true`).
-- **Entry** `deploy/run_pipeline.sh` via **`RUN_MODE`**: `pipeline` (default, runs `stone_pipeline.produce`) · `validate-dewatermark` · `reprocess` · `generate-textures`.
+- **Entry** `deploy/run_pipeline.sh` via **`RUN_MODE`**: `standardise` · `standardise-retouch` · `standardise-edit-test` · `generate-textures` (the produce runs in the sync service).
 - **Trust/state**: `certify.py` (config/adapter/selftest/contract gate, CI), `state/` alias writeback (learning loop),
   `mode: review|auto` per source, the consistency gate, the >30% delist guard.
 - **Module gates** (`gates/`) — per-boundary contracts (ingest/clean/process; images/upgrade planned) that run inside
@@ -135,7 +135,7 @@ re-running catalog with `SCRAPER_VARIANT_IMAGE_BASE=<prod-bucket>/.../variations
   keep it in review or fix it). This is the onboarding funnel for a new source: certify → health → ingest → clean → process.
 
 ## 7. Current state (sources)
-varsha ✅ (de-watermarked, verified) · polonine ✅ · marenostone ✅ · zucchi ❌ (scrape gate — scraper chat).
+varsha ✅ · polonine ✅ · marenostone ✅ · zucchi ❌ (scrape gate: scraper chat).
 Product CSV: 798/870 linked, 0 broken; 72 imageless = supplier never photographed them.
 
 ## 8. Open / handoffs
@@ -152,12 +152,10 @@ SSRF guard (`io/ssrf.py`), setuptools≥78.1.1, all GitHub Actions SHA-pinned, E
 ## 10. Commands & gotchas
 ```bash
 python -m stone_pipeline.build                 # scrape→catalog→tree→gate
-SRC=<src> WATERMARKED=<bool> python -m deploy.reprocess_source   # re-clean a source's images in place
 # image reclamation is via the reset/wipe flows only (deploy.cleanup_images.wipe_*), never a catalog diff
 aws ecs run-task ... --no-cli-pager            # run-task can HANG without --no-cli-pager
 ```
-- `dewatermarked=True` ≠ removed — verify by eye. · Settings changes don't retroactively reprocess (do it explicitly).
-- `scraped/` originals let you reprocess without re-downloading. · The two image lanes (variations/ vs products/) are distinct.
+- `scraped/` originals are the photo process's input (no re-download). · The two image lanes (variations/ vs products/) are distinct.
 - Variant set must be frozen mid-sync; combos before products; Keys are the cross-env identity.
 
 **Key docs:** `RUNBOOK.md` (the sync loop), `DEV_PROD_PIPELINE.md`, `SYNC_LEDGER_DESIGN.md`, `DEPLOY.md`,

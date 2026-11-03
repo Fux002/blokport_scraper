@@ -82,13 +82,13 @@ Config lives in `infra/brands/blokport.tfvars` (+ `infra/brands/blokport.backend
   - `fal_key_ssm_name` / `scraper_proxy_ssm_name` (from Phase 0).
   - `prod_image_tag = "<the :core-<sha> currently deployed AND soaked in dev at this moment>"` — record the exact sha + digest here; pin it, never `core`.
   - `prod_gpu_image_tag = "gpu-<sha>"` (the dev-proven GPU build).
-  - `prod_auto_enhance = false`, `prod_auto_texture = false`, `prod_require_enhanced = false` (quiet start).
+  - `prod_auto_texture = false` (quiet start). (`prod_auto_enhance` / `prod_require_enhanced` were retired with the old enhancer, 2026-11-02.)
   - `alert_email = "<ops email>"` — **required before a full apply**, else the apply removes the dev SNS alert the earlier targeted apply created.
 - [ ] `terraform plan` — with the platform state present it should CREATE the prod services (`scraper_prod`, `gpu_enhance_prod`, `sync_service_prod`, prod data sources, Batch queue/jobdef). Confirm **0 destroy** and no unexpected ECR churn (see the drift reconcile in Phase 0).
 - [ ] `terraform apply` → confirm the prod ECS services (incl. `sync_service_prod`) + the Batch queue/jobdef come up. Confirm the revision-agnostic `batch:SubmitJob` IAM (`:*`) is on the prod roles (mirrors the dev fix).
 
 ### Phase 4b — One-off texture + base-data transplant (us, command line)
-The variant textures + de-watermark set are **expensive** (GPU + FAL) and **env-agnostic** — every image is named
+The variant textures + hosted product photos are **expensive** (GPU + FAL) and **env-agnostic** — every image is named
 by its variety **Key** (`{Key}.png`, a deterministic uuid5 from the Id-free variety data) or a content **sha**,
 never a Medusa id. So they transplant 1:1 and prod skips the entire GPU pipeline. This needs only the prod bucket
 (Phase 1) + our write access to it.
@@ -97,9 +97,9 @@ never a Medusa id. So they transplant 1:1 and prod skips the entire GPU pipeline
   aws s3 sync s3://blokport-dev-staging-3e58a6/dev/variations/ s3://blokport-prod-staging/prod/variations/
   aws s3 sync s3://blokport-dev-staging-3e58a6/dev/products/    s3://blokport-prod-staging/prod/products/
   ```
-  `dev/variations/` = the ~13.5k variant/type icon textures; `dev/products/` = the de-watermark set + the
-  `enhanced/`/`discarded/` **markers**. Copying the markers is what makes prod's produce treat every image as
-  **already processed** → auto-enhance submits ZERO GPU jobs (no FAL cost, no GPU hours).
+  `dev/variations/` = the ~13.5k variant/type icon textures; `dev/products/` = the hosted product photos.
+  (2026-11-02: the old enhancer and its `enhanced/`/`discarded/` markers are retired; a cutover today copies only
+  the textures and hosted photos, and the photo process makes prod's standardised photos itself.)
 - [ ] Sanity: `aws s3 ls --summarize --recursive` object counts on the prod prefixes ≈ the dev source counts.
 - [ ] **Base data (varieties/attributes) is NOT a copy** — it loads from the committed `catalog_source/` (Id-free)
   + prod Medusa's own `from_medusa/production/attributes.csv` at produce time (Phase 5/6). Nothing to move; just

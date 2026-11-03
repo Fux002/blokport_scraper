@@ -53,19 +53,11 @@ class SourceConfig:
     collection_city_default: str = ""
     emit_on_review: bool = True
     default_bundle_size: int = 6
-    # The source burns a visible watermark into its product photos (e.g. varsha).
-    # When true the image stage de-watermarks before re-hosting (local/s3 modes).
-    watermarked: bool = False
-    # The de-watermark INSTRUCTION for this source's logo (FAL Kontext), e.g. "Remove the pink 'Varsha
-    # Stones' watermark logo...". It names the supplier's own mark (colour + text) for the best removal, so
-    # each watermarked source SHOULD set its own. Empty falls back to the GENERIC, source-agnostic global
-    # default (settings ImageProcessingConfig.fal_prompt) -- safe for any source, just less tuned. Ignored
-    # when watermarked is False. Set from the admin UI, like watermarked/enhance.
-    fal_prompt: str = ""
-    # Upscale (Real-ESRGAN, GPU) this source's photos before re-host. A per-source switch like
-    # watermarked, set from the admin UI -- default on. When off the GPU upscale is skipped; images are
-    # still size-reduced (CPU, no GPU) and re-hosted. Independent of watermarked.
-    enhance: bool = True
+    # The image pipeline (owner 2026-11-02), set per source from the admin. On: the photo process works the source's
+    # listings and a product is listed only with a standardised photo (images.require_standard_photo). Off: its
+    # products show the scraped photos as re-hosted (size-reduced, no GPU, no hosted call) and stay listed, and the
+    # photo process never picks them (nothing is spent on them); handy for testing a source.
+    image_pipeline: bool = True
     # Trust level for auto-loading into Medusa: "review" (default) quarantines the
     # source's output to the stage-for-sign-off lane; "auto" lets it load
     # automatically. Promote review->auto only after `python -m stone_pipeline.certify
@@ -122,6 +114,11 @@ def load_sources(path: Path | None = None) -> dict[str, SourceConfig]:
         if store.config_db_path().exists():
             return store.read_sources()
     return load_yaml_sources(path)
+
+
+def image_pipeline_off(path: Path | None = None) -> set[str]:
+    """The sources whose image pipeline is switched off. A source with no config runs with the default (on)."""
+    return {name for name, cfg in load_sources(path).items() if not cfg.image_pipeline}
 
 
 def load_source(source: str, path: Path | None = None) -> SourceConfig:

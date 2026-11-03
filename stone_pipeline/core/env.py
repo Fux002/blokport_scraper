@@ -42,16 +42,6 @@ def require(name: str) -> str:
     return val
 
 
-def job_flag(name: str) -> bool:
-    """A true/false setting a submitted job must carry, read as given (no prefix, no default): its submitter derives it
-    from config (a source's `watermarked`, deploy.standardise_run / deploy.enhance_trigger), so a job submitted
-    without it fails loud instead of guessing. ValueError unless it is exactly true or false."""
-    value = os.environ.get(name, "").strip().lower()
-    if value not in ("true", "false"):
-        raise ValueError(f"{name} must be true or false, set by the job's submitter from config; got {value!r}")
-    return value == "true"
-
-
 def env_bool(name: str, default: bool = False) -> bool:
     """True/False from a boolean env var (1/true/yes/on), read via getenv (so the neutral SCRAPER_ prefix
     wins over the legacy BLOKPORT_ fallback). Returns `default` when neither prefix carries a value. The ONE

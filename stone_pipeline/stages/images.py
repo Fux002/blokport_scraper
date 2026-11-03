@@ -12,9 +12,10 @@ mode (config) selects the path:
   s3           download + upload to the staging bucket.
 
 When cfg.processing.enabled (local/s3 only), each freshly-fetched image is
-enhanced/de-watermarked once before re-host (see io/image_processing.py): the
-improved image goes to <prefix>/improved/, the raw download optionally to
-<prefix>/scraped/, and the emit links to the improved one.
+size-reduced once before re-host: the hosted image goes to <prefix>/improved/,
+the raw download optionally to <prefix>/scraped/ (the photo process's input), and
+the emit links to the hosted one. A product of a source whose image pipeline is on
+then links its published standardised photo when it has one.
 
 The fetcher is injectable so tests run offline with deterministic bytes.
 """
@@ -28,6 +29,9 @@ import re
 from stone_pipeline.core import env
 from dataclasses import dataclass
 from typing import Callable, Optional
+
+import cv2
+import numpy as np
 
 from stone_pipeline.config.settings import SETTINGS, STANDARDISE, Confidence
 from stone_pipeline.core import logfmt
@@ -76,13 +80,14 @@ def _build_backend(cfg) -> Optional[storage.StorageBackend]:
 class ImageStats:
     staged: int = 0
     no_image: int = 0
-    # subset of no_image with NO usable source url at all: a permanent reject (nothing to enhance/link,
-    # ever), NOT republishable. no_image - no_image_source = the transient set a republish can still emit.
+    # subset of no_image with NO usable source url at all: a permanent reject (nothing to link, ever), NOT
+    # republishable. no_image - no_image_source = the transient set a republish can still emit.
     no_image_source: int = 0
     placeholders: int = 0
     download_failed: int = 0
     bytes_uploaded: int = 0
-    processed: int = 0  # source images enhanced/de-watermarked before re-host
+    processed: int = 0  # source images size-reduced before re-host
+    size_reduce_failed: int = 0  # photos the size-reduce could not handle (degenerate shape): held, retried next run
 
 
 _MANIFEST_KEY = "_manifest.json"
@@ -142,12 +147,6 @@ def _hosted_object_exists(backend, hosted_url: str) -> bool:
     return backend.exists(hosted_url[len(base):])
 
 
-def _list_shas(prefix: str) -> set[str]:
-    """The content sha256 embedded in every object key under an S3 pool prefix (discarded/, enhanced/).
-    Raises on any S3 failure: the callers decide the policy."""
-    return set(_list_etags(prefix))
-
-
 def _list_etags(prefix: str) -> dict[str, str]:
     """{content sha256: ETag} of the object keys under an S3 pool prefix. Raises on any S3 failure."""
     return _by_sha(_list_objects(prefix))
@@ -170,72 +169,7 @@ def _by_sha(objects: dict[str, str], suffix: str = "") -> dict[str, str]:
     return {sha: etag for key, etag in objects.items() if key.endswith(suffix) and (sha := imagestore.sha_from_url(key))}
 
 
-def _load_discard_set(cfg=None) -> set[str] | None:
-    """The content sha256 of every image the pipeline classified as non-stone (the products/discarded/
-    pool written by the GPU reprocess). A linked url whose embedded sha is in this set is NEVER published;
-    a variant whose EVERY image is in it emits the terminal no_publishable_image flag. Empty in local mode
-    (discards live only in the S3 pool). None when the pool cannot be read: UNKNOWN, and the stage then
-    HOLDS every image (fail closed, like the enhanced-marker set) rather than re-linking every discarded
-    spec sheet and logo, which is what treating "unreachable" as "nothing discarded" did."""
-    if getattr(cfg, "mode", None) == "local":
-        return set()
-    try:
-        return _list_shas(imagestore.DISCARDED_PREFIX_ALL)
-    except Exception as exc:
-        log.warning("discard pool unreachable; every image is HELD this run (never publish unverified)",
-                    extra={"extra_fields": {"error": str(exc)}})
-        return None
-
-
-def _load_enhanced_set(cfg=None) -> set[str]:
-    """The content sha256 of every image the GPU reprocess actually ENHANCED (the products/enhanced/ marker
-    pool). When cfg.require_enhanced is on, ONLY these shas may be published -- an image in improved/ that
-    lacks a marker is a raw re-encode (produce on :core) and is HELD, never linked. Read from S3, read-only.
-    Fail CLOSED: if the set is unreachable, return an empty set so nothing is treated as enhanced (holds
-    rather than risks publishing raw)."""
-    if getattr(cfg, "mode", None) == "local":
-        return set()
-    try:
-        return _list_shas(imagestore.ENHANCED_PREFIX_ALL)
-    except Exception as exc:  # fail closed: hold everything rather than risk publishing an un-enhanced image
-        log.warning("enhanced-marker set unreachable; with require_enhanced ON this HOLDS all images",
-                    extra={"extra_fields": {"error": str(exc)}})
-        return set()
-
-
-def _watermarked_sources() -> set[str]:
-    """Source names flagged `watermarked: true` in sources.yaml."""
-    from stone_pipeline.config.sources import load_sources
-
-    return {name for name, cfg in load_sources().items() if getattr(cfg, "watermarked", False)}
-
-
-def _enhance_sources() -> set[str]:
-    """Source names with the GPU-upscale switch ON (`enhance`, default on). Off -> size-reduce only."""
-    from stone_pipeline.config.sources import load_sources
-
-    return {name for name, cfg in load_sources().items() if getattr(cfg, "enhance", True)}
-
-
-def _write_preview(rows: list[dict]) -> None:
-    """Append a source -> processed audit row so a human can eyeball results
-    before they go live (de-watermarking is detect-then-inpaint, not perfect)."""
-    if not rows:
-        return
-    path = SETTINGS.paths.workspace_root / "images" / "reports" / "processed_preview.csv"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    new = not path.exists()
-    cols = ["src_site", "source_url", "processed_url", "watermarked", "dewatermarked",
-            "enhanced", "upscaled"]
-    with path.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=cols)
-        if new:
-            writer.writeheader()
-        writer.writerows(rows)
-
-
-def _slot_row(row: CanonicalRow, public_urls: list[str], *,
-              terminal_discard: bool = False, discard_reason: str = "") -> None:
+def _slot_row(row: CanonicalRow, public_urls: list[str]) -> None:
     row.image_keys = public_urls
     row.thumbnail_key = public_urls[0] if public_urls else None
     if row.is_block:
@@ -246,25 +180,15 @@ def _slot_row(row: CanonicalRow, public_urls: list[str], *,
     else:
         row.product_image_keys = public_urls[:_SLAB_SLOTS]
         row.oriented_image_keys = []
-    if public_urls:
-        return
-    # No linked image. Emit EXACTLY ONE flag (the discard contract): a variant whose every scraped image
-    # was classified non-stone is a TERMINAL known-good empty (no_publishable_image -> publishes imageless,
-    # not retried); anything else is a transient no_image (retry next scrape).
-    if terminal_discard:
-        row.add_flag(ReviewFlag(field="images", code=FlagCode.no_publishable_image,
-                                best_guess=discard_reason or "non-stone image (spec sheet / logo)",
-                                confidence=Confidence.high, method="clip_stone_classifier",
-                                src_url=row.src_url))
-    else:
+    if not public_urls:   # no linked image: a transient no_image, retried next scrape
         row.add_flag(ReviewFlag(field="images", code=FlagCode.no_image,
                                 confidence=Confidence.none, method="zero_usable", src_url=row.src_url))
 
 
 def _readonly_manifest() -> dict[str, str]:
     """Read the imageproc manifest (source_url -> IMPROVED S3 url) straight from S3, read-only, so
-    even a no-download passthrough run links products to the upscaled/de-watermarked images and
-    NEVER to a raw supplier url. Best-effort: {} if S3/boto3 is unreachable (then source urls are
+    even a no-download passthrough run links products to the re-hosted images and NEVER to a raw
+    supplier url. Best-effort: {} if S3/boto3 is unreachable (then source urls are
     kept so a fully-offline run still works)."""
     try:
         import boto3
@@ -280,9 +204,9 @@ def _readonly_manifest() -> dict[str, str]:
 
 
 def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> ImageStats:
-    """Stage 7. passthrough links products to their TREATED S3 images through the read-only imageproc
-    manifest; local/s3 fetch NEW source images, process them (when enabled) and host them, then link.
-    Either way a row ends in _finish_row: linked, held (transient, retried next produce) or terminal. The standardised
+    """Stage 7. passthrough links products to their re-hosted S3 images through the read-only imageproc
+    manifest; local/s3 fetch NEW source images, size-reduce them (when enabled) and host them, then link.
+    Either way a row ends in _finish_row: linked or held (transient, retried next produce). The standardised
     photos are linked once validation has said which products are emitted (link_standard)."""
     cfg = cfg or SETTINGS.images
     stats = ImageStats()
@@ -293,12 +217,16 @@ def run(rows: list[CanonicalRow], fetch: Optional[Fetcher] = None, cfg=None) -> 
     return stats
 
 
-def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=None) -> Optional[dict[str, dict[str, list[str]]]]:
+def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=None, *,
+                  image_pipeline: bool) -> Optional[dict[str, dict[str, list[str]]]]:
     """After validation: every product linked to its standardised photo, from the published pool, and the conflict set
     {source: {sha: [handles]}} of the emitted products (index.shared_photos, each with every photo it has: the products
     on the sheet, nothing validation rejected), returned to be stored (save_conflicts) as the one set the photo process
     and the review page read. A conflict photo is linked only to the product its assignment file names. None when the
-    pool cannot be read (nothing is stored then; the products keep their images and their listed state)."""
+    pool cannot be read (nothing is stored then; the products keep their images and their listed state). The rows are one
+    source's; `image_pipeline` is its switch as the produce loaded it (one value for the whole run). Off: every product
+    keeps its hosted scraped photos (standard_photo stays None; populate never hides it), and the photo list and the
+    conflict set are made as for any source (the photo process refuses a source on the sheet without them)."""
     cfg = cfg or SETTINGS.images
     views = _load_standard_views(cfg)
     removed, assigned = _load_owner_removed(cfg), _load_assigned(cfg)
@@ -312,6 +240,8 @@ def link_standard(rows: list[CanonicalRow], emitted: list[CanonicalRow], cfg=Non
     skus = _skus(rows) if removed or conflicts else {}
     for row in rows:
         row.own_photo_keys = list(row.image_keys)      # the photo list (emit.write_photos_json): before the views replace them
+        if not image_pipeline:                         # off: it keeps the hosted scraped photos
+            continue
         seen = _seen_by(row, skus.get(id(row)), views or {}, removed, conflicts, assigned)
         lead = listing_lead(row, seen, cfg) if _is_tile(row) else photo_lead(row.image_keys, seen)
         row.standard_photo = lead is not None if known else None
@@ -547,12 +477,9 @@ def _get_object(key: str) -> bytes:
     return client.get_object(Bucket=s3.bucket, Key=key)["Body"].read()
 
 
-def _finish_row(row: CanonicalRow, urls: list[str], srcs: int, n_discarded: int, n_held: int,
-                stats: ImageStats) -> None:
-    """Slot a row's linked images and count it. Terminal (no_publishable_image, never retried) ONLY when
-    every scraped image was discarded: none survived and none is merely held."""
-    terminal = srcs > 0 and not urls and n_discarded > 0 and n_held == 0
-    _slot_row(row, urls, terminal_discard=terminal)
+def _finish_row(row: CanonicalRow, urls: list[str], srcs: int, stats: ImageStats) -> None:
+    """Slot a row's linked images and count it."""
+    _slot_row(row, urls)
     if urls:
         stats.staged += 1
     else:
@@ -567,69 +494,45 @@ def _source_urls(row: CanonicalRow) -> list[str]:
 
 # --- passthrough: link to the treated images the imageproc manifest knows -----------------------------------
 def _link_from_manifest(rows: list[CanonicalRow], cfg, stats: ImageStats) -> None:
-    # Link product images ONLY to their TREATED (improved) S3 version via the imageproc manifest. Two things
-    # are HELD, never linked: a source url the manifest doesn't know, AND a manifest entry that still points
-    # at an UNtreated upload (a source staged to S3 before enhancement ran). So the upload only ever carries
-    # enhanced/upscaled/compressed images -- and a later produce re-links each held image the moment its
-    # improved/ version lands in the manifest.
+    # Link product images ONLY to their re-hosted (improved) S3 version via the imageproc manifest. Two things are
+    # HELD, never linked: a source url the manifest doesn't know, AND a manifest entry that still points at a raw upload
+    # outside improved/. A later produce re-links each held image the moment its improved/ version is in the manifest.
     manifest = _readonly_manifest()
     if not manifest:
         log.warning("passthrough: imageproc manifest empty/unreachable -- product images are HELD, "
                     "never linked to raw source urls. Run the image stage in s3 mode or restore S3 "
                     "access to populate the manifest.")
-    discarded = _load_discard_set(cfg)
-    # HARD gate: when require_enhanced is on, publish ONLY images the GPU actually enhanced (marker present).
-    # improved/ presence is NOT proof -- produce on :core writes raw re-encodes there. None disables the gate.
-    enhanced = _load_enhanced_set(cfg) if getattr(cfg, "require_enhanced", False) else None
-    improved_marker = imagestore.IMPROVED_MARKER              # a treated image lives under improved/
-    held_untreated = 0
+    held_raw = 0
     for row in rows:
         srcs = _source_urls(row)
         urls: list[str] = []
-        n_discarded = n_held = 0
         for u in srcs:
-            if discarded is None:
-                n_held += 1                                  # discard pool unknown -> hold (fail closed)
-                continue
             mapped = manifest.get(u)
-            sha = imagestore.sha_from_url(mapped) if mapped else None
-            if sha and sha in discarded:
-                n_discarded += 1                             # classified non-stone -> never link
-                continue
-            # link only if it is under improved/ AND (gate off OR proven-enhanced by a marker)
-            if mapped and improved_marker in mapped and (enhanced is None or (sha and sha in enhanced)):
-                urls.append(mapped)                          # enhanced -> link it
+            if mapped and imagestore.IMPROVED_MARKER in mapped:
+                urls.append(mapped)
             elif mapped:
-                held_untreated += 1                          # on S3 but not enhanced yet -> hold
-                n_held += 1
-            else:
-                n_held += 1                                  # unknown url -> hold (retry next produce)
-        _finish_row(row, urls, len(srcs), n_discarded, n_held, stats)
+                held_raw += 1                                # on S3 but not re-hosted into improved/ -> hold
+        _finish_row(row, urls, len(srcs), stats)
     log.info("images done (passthrough -> improved S3 only)", extra={"extra_fields": {
         "staged": stats.staged, "no_image": stats.no_image, "no_image_source": stats.no_image_source,
-        "manifest_entries": len(manifest), "held_untreated": held_untreated,
-        "discard_set": None if discarded is None else len(discarded)}})
+        "manifest_entries": len(manifest), "held_raw": held_raw}})
 
 
-# --- local / s3: fetch, process, host, link --------------------------------------------------------------
-class _Processing:
-    """The optional faithful enhancement / de-watermark step and its per-source routing (off by default)."""
-
-    def __init__(self, cfg):
-        from stone_pipeline.io.image_processing import ImageProcessor
-        from stone_pipeline.config.sources import load_sources
-        self.processor = ImageProcessor(cfg.processing)
-        self.watermarked_sources = _watermarked_sources()
-        self.enhance_sources = _enhance_sources()
-        # one processor serves every source, so pass each watermarked source's OWN de-watermark prompt per
-        # image (empty -> the processor's generic fallback). Same prompt the GPU reprocess uses.
-        _all = load_sources()
-        self.source_prompts = {s: p for s in self.watermarked_sources
-                               if (c := _all.get(s)) and (p := (c.fal_prompt or "").strip())}
-
-    @staticmethod
-    def build(cfg) -> "Optional[_Processing]":
-        return _Processing(cfg) if getattr(cfg, "processing", None) and cfg.processing.enabled else None
+# --- local / s3: fetch, size-reduce, host, link ---------------------------------------------------------------------------
+def _size_reduce(data: bytes, cfg) -> bytes:
+    """The photo with its long edge capped at cfg.target_long_edge (downscale only, never enlarged: more pixels add bytes,
+    not detail) and re-encoded as JPEG. Bytes that are not a decodable raster (an svg) are hosted as they came."""
+    bgr = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if bgr is None:
+        return data
+    h, w = bgr.shape[:2]
+    if max(h, w) > cfg.target_long_edge:
+        scale = cfg.target_long_edge / max(h, w)
+        bgr = cv2.resize(bgr, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    ok, enc = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, cfg.jpeg_quality])
+    if not ok:
+        raise ValueError("could not encode the size-reduced photo as JPEG")
+    return enc.tobytes()
 
 
 def _url_sites(rows: list[CanonicalRow]) -> dict[str, str]:
@@ -665,183 +568,113 @@ def _reuse_hosted(manifest: dict, backend, urls) -> tuple[dict[str, Optional[str
 
 
 def _sample(new_urls: list[str]) -> list[str]:
-    # validation cap: process only N new images per run, so de-watermark/enhance output can be eyeballed on a
-    # sample before a full run. 0 = no cap.
+    # validation cap: host only N new images per run, so a sample can be eyeballed before a full run. 0 = no cap.
     sample_limit = int(env.getenv("BLOKPORT_IMAGE_SAMPLE_LIMIT", "0") or 0)
     return new_urls[:sample_limit] if sample_limit > 0 else new_urls
 
 
 class _Stager:
-    """Hosts one NEW source image per call: content-addressed dedup, placeholder drop, reuse of an already
-    treated object, else raw put or the page-routed processing (de-watermark on :core only for a source it
-    completes, FAL spend bounded, raw original kept for the GPU, publish marker when :core finished the whole
-    job). Returns the public url, or None for a placeholder/held image."""
+    """Hosts one NEW source image per call: content-addressed dedup, placeholder drop, reuse of an already hosted
+    object, else the raw bytes at the content key or (cfg.processing.enabled) the size-reduced photo under improved/
+    with the raw original kept under scraped/. Returns the public url, or None for a placeholder, a failed download or
+    a photo the size-reduce could not handle (held like a failed download, so one bad photo never stops the run)."""
 
-    def __init__(self, cfg, backend, processing: Optional[_Processing], manifest: dict,
-                 url_to_site: dict[str, str], stats: ImageStats):
-        self.cfg, self.backend, self.processing, self.manifest = cfg, backend, processing, manifest
+    def __init__(self, cfg, backend, manifest: dict, url_to_site: dict[str, str], stats: ImageStats):
+        self.cfg, self.backend, self.manifest = cfg, backend, manifest
         self.url_to_site, self.stats = url_to_site, stats
         self.placeholders = _load_placeholder_hashes()
         self.hash_to_public: dict[str, str] = {}      # content-address: bytes hash -> public url (upload once)
-        # digests held THIS run (processing failed / deferred to the GPU): a second url carrying the same bytes
-        # gets the same outcome without re-running the processing (a second FAL bill for a known hold). The memo
-        # lives only in this run, so the next produce retries the hold as before.
-        self.held: set[str] = set()
         self.manifest_dirty = False
-        self.preview: list[dict] = []
-        # F13: bound the FAL de-watermark spend on THIS :core run. Once the accrued cost reaches fal_max_usd,
-        # watermarked images stop being de-watermarked here and are HELD for the GPU (the deferred path), so
-        # a runaway can never silently overspend. <=0 disables the ceiling.
-        self.fal_cost = 0.0
-        self.fal_ceiling = cfg.processing.fal_max_usd if processing is not None else 0.0
-        self.fal_budget_logged = False
 
     def stage(self, url: str, data: Optional[bytes]) -> Optional[str]:
         if data is None:
             self.stats.download_failed += 1
             return None
         # hash the SOURCE bytes: keys/dedup/placeholder checks stay stable on the source even though the
-        # stored bytes are processed (so re-runs are no-ops).
+        # stored bytes are size-reduced (so re-runs are no-ops).
         digest = hashlib.sha256(data).hexdigest()
         if digest in self.placeholders:
             self.stats.placeholders += 1
             return None
         if digest in self.hash_to_public:
             return self._remember(url, self.hash_to_public[digest])
-        if digest in self.held:
-            return None
-        src_site = self.url_to_site.get(url, "unknown")
-        ck = storage.content_key(src_site, digest)
-        # When processing runs, the improved image lives in its own subfolder and the raw scraped copy in a
-        # sibling folder; Medusa points at the improved one. Without processing, the image stays at the root.
-        dest_key = f"{imagestore.IMPROVED_SUBDIR}/{ck}" if self.processing is not None else ck
+        ck = storage.content_key(self.url_to_site.get(url, "unknown"), digest)
+        processing = self.cfg.processing.enabled
+        # With processing the hosted photo lives in improved/ and the raw original in its sibling scraped/; Medusa
+        # points at the improved one. Without processing, the raw bytes stay at the root.
+        dest_key = f"{imagestore.IMPROVED_SUBDIR}/{ck}" if processing else ck
         if self.backend.exists(dest_key):
-            # already treated (this run or a prior one) -> reuse, never re-process
-            public = self.backend.url_for(dest_key)
-        elif self.processing is None:
-            public = self.backend.put(dest_key, data)          # no processing -> raw bytes at the content key
-            self.stats.bytes_uploaded += len(data)
+            public = self.backend.url_for(dest_key)          # hosted by this run or a prior one: reused as it is
         else:
-            public = self._process_and_host(url, data, digest, src_site, ck, dest_key)
-            if public is None:
-                self.held.add(digest)
-                return None
+            if processing:
+                try:
+                    body = _size_reduce(data, self.cfg.processing)
+                except (cv2.error, ValueError) as exc:     # a degenerate photo (e.g. 1 x 5000 px): this photo only
+                    self.stats.size_reduce_failed += 1
+                    log.error("photo could not be size-reduced; held this run",
+                              extra={"extra_fields": {"url": url, "error": str(exc)}})
+                    return None
+                self.stats.processed += 1
+                self._keep_scraped(ck, data)
+            else:
+                body = data
+            public = self.backend.put(dest_key, body)
+            self.stats.bytes_uploaded += len(body)
         self.hash_to_public[digest] = public
         return self._remember(url, public)
+
+    def _keep_scraped(self, ck: str, data: bytes) -> None:
+        """The raw original under scraped/ (keep_scraped): the photo process's input. Idempotent."""
+        skey = f"{imagestore.SCRAPED_SUBDIR}/{ck}"
+        if self.cfg.processing.keep_scraped and not self.backend.exists(skey):
+            self.backend.put(skey, data)
+            self.stats.bytes_uploaded += len(data)
 
     def _remember(self, url: str, public: str) -> str:
         self.manifest[url] = public
         self.manifest_dirty = True
         return public
 
-    def _process_and_host(self, url, data, digest, src_site, ck, dest_key) -> Optional[str]:
-        cfg, pz, backend = self.cfg, self.processing, self.backend
-        # ROUTE BY THE PAGE FLAGS. The GPU is needed ONLY for the ESRGAN upscale (enhance=on); de-watermark is
-        # a hosted FAL call (no GPU) and resize is CPU, so :core FINISHES every enhance=off source here,
-        # de-watermarking it too when the page marks it watermarked. :core must NOT de-watermark an enhance=on
-        # source: the GPU de-watermarks + upscales it in one pass, and doing FAL here as well would bill it
-        # twice -- so request de-wm on :core only for a source we complete on :core, and only while the run's
-        # FAL budget remains (once spent, a watermarked image is deferred to the GPU rather than billed unbounded).
-        watermarked_src = src_site in pz.watermarked_sources
-        fal_budget_ok = self.fal_ceiling <= 0 or self.fal_cost < self.fal_ceiling
-        finish_on_core = (src_site not in pz.enhance_sources) and fal_budget_ok
-        if watermarked_src and not fal_budget_ok and not self.fal_budget_logged:
-            log.warning("FAL de-watermark budget reached on :core; deferring remaining watermarked images to "
-                        "the GPU", extra={"extra_fields": {"fal_cost": round(self.fal_cost, 2),
-                                                           "ceiling": self.fal_ceiling}})
-            self.fal_budget_logged = True
-        pr = pz.processor.process(data, watermarked=finish_on_core and watermarked_src,
-                                  enhance=src_site in pz.enhance_sources,
-                                  prompt=pz.source_prompts.get(src_site))   # this source's own de-watermark prompt
-        self.stats.processed += 1
-        self.fal_cost += pr.billed_mp * cfg.processing.fal_price_per_mp   # every billed generation (F5)
-        # Persist the raw original UNCONDITIONALLY (keep_scraped): it is the GPU reprocess's INPUT. Writing
-        # scraped/ only when :core changed the bytes stranded every watermarked image (the GPU delta never saw
-        # it and the product HELD forever). Idempotent: skip if already present.
-        if cfg.processing.keep_scraped:
-            skey = f"{imagestore.SCRAPED_SUBDIR}/{ck}"
-            if not backend.exists(skey):
-                backend.put(skey, data)
-                self.stats.bytes_uploaded += len(data)
-        if pr.failed or pr.dewatermark_failed or (watermarked_src and not finish_on_core):
-            # HOLD this run (no improved/, no marker, no manifest entry) whenever processing FAILED (a transient
-            # error is retried next run, never memoized as treated), de-watermarking FAILED here, or the source
-            # is enhance=on + watermarked and so deferred to the GPU: :core must never write a still-watermarked
-            # image into improved/. The raw is in scraped/ for the GPU; the next produce re-derives it and it
-            # links only once the GPU has written the treated improved/ + the marker.
-            return None
-        if cfg.processing.write_preview:
-            self.preview.append({
-                "src_site": src_site, "source_url": url, "processed_url": backend.url_for(dest_key),
-                "watermarked": watermarked_src, "dewatermarked": pr.dewatermarked, "enhanced": pr.enhanced,
-                "upscaled": pr.upscaled})
-        public = backend.put(dest_key, pr.data)
-        self.stats.bytes_uploaded += len(pr.data)
-        # PUBLISH MARKER (the require_enhanced unlock), PAGE-DRIVEN: written on :core ONLY when this source's
-        # configured pipeline is COMPLETE here (enhance=off AND watermarked=off: the CPU size-reduce IS the
-        # whole job). A source that needs the GPU upscale or FAL gets its marker from the GPU reprocess.
-        if pr.is_complete(enhance_requested=src_site in pz.enhance_sources):
-            mkey = f"{imagestore.ENHANCED_SUBDIR}/{src_site}/{digest}.txt"
-            if not backend.exists(mkey):
-                backend.put(mkey, b"", content_type="text/plain")
-        return public
-
 
 def _link_hosted(rows: list[CanonicalRow], url_to_public: dict[str, Optional[str]], fetched: dict,
                  cfg, stats: ImageStats) -> None:
-    discarded = _load_discard_set(cfg)
-    # HARD gate (same as passthrough): with require_enhanced on, link ONLY images the GPU actually enhanced.
-    enhanced = _load_enhanced_set(cfg) if getattr(cfg, "require_enhanced", False) else None
     for row in rows:
         public_urls: list[str] = []
-        srcs = n_discarded = n_other = 0
+        srcs = 0
         for url in (row.raw_image_urls or []):
             if not url or not url.strip():
                 continue
             srcs += 1
             public = url_to_public.get(url)
             if public is None:
-                # download failed / placeholder-blocked / held -> transient, retry (never turns the row terminal)
-                n_other += 1
+                # download failed / placeholder-blocked -> transient, retried next produce
                 if url in fetched and fetched[url] is None:
                     row.add_flag(ReviewFlag(field="images", code=FlagCode.image_download_failed,
                                             raw_value=url, confidence=Confidence.low,
                                             method="download", src_url=row.src_url))
                 continue
-            sha = imagestore.sha_from_url(public)
-            if discarded is None:
-                n_other += 1                                   # discard pool unknown -> HOLD (fail closed)
-                continue
-            if sha and sha in discarded:
-                n_discarded += 1                               # classified non-stone -> never link
-                continue
-            if enhanced is not None and not (sha and sha in enhanced):
-                n_other += 1                                   # raw / not-yet-enhanced -> HOLD (transient)
-                continue
             if public not in public_urls:
                 public_urls.append(public)
-        _finish_row(row, public_urls, srcs, n_discarded, n_other, stats)
+        _finish_row(row, public_urls, srcs, stats)
 
 
 def _stage_and_link(rows: list[CanonicalRow], fetch: Optional[Fetcher], cfg, stats: ImageStats) -> None:
     backend = _build_backend(cfg)
     fetch = fetch or dl.httpx_fetcher(timeout=cfg.timeout, retries=cfg.retries)
-    processing = _Processing.build(cfg)
     manifest = _load_manifest(backend)
     url_to_site = _url_sites(rows)
     url_to_public, new_urls, stale_pruned = _reuse_hosted(manifest, backend, url_to_site)
     fetched = dl.fetch_many(_sample(new_urls), fetch, concurrency=cfg.concurrency)
-    stager = _Stager(cfg, backend, processing, manifest, url_to_site, stats)
+    stager = _Stager(cfg, backend, manifest, url_to_site, stats)
     for url, data in fetched.items():
         url_to_public[url] = stager.stage(url, data)
     _link_hosted(rows, url_to_public, fetched, cfg, stats)
     if stager.manifest_dirty or stale_pruned:
         _save_manifest(backend, manifest)
-    if processing is not None and cfg.processing.write_preview:
-        _write_preview(stager.preview)
     log.info("images done", extra={"extra_fields": {
         "mode": cfg.mode, "staged": stats.staged, "no_image": stats.no_image,
         "no_image_source": stats.no_image_source,
         "download_failed": stats.download_failed, "placeholders": stats.placeholders,
         "bytes_uploaded": stats.bytes_uploaded, "processed": stats.processed,
+        "size_reduce_failed": stats.size_reduce_failed,
         "stale_manifest_pruned": stale_pruned}})

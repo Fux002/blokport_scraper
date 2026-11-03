@@ -16,9 +16,9 @@ WATERMARKS (IMPORTANT):
     varshastones.slabware.com burns a visible watermark into its product photos.
     The image URLs captured here (image_url_full / photo_urls) are the
     *watermarked source URLs*. Fine for cataloguing/matching, but NOT customer
-    -facing as-is: a later step must download, de-watermark, and re-host the
-    clean images. We still capture the source URLs so that step has something to
-    fetch.
+    -facing as-is: the image stage re-hosts them and the photo process takes the
+    logo off each photo (its judge finds it, its hosted clean step removes it). We
+    capture the source URLs so those steps have something to fetch.
 
 Run:  python scrapers/varsha.py
 """

@@ -1,5 +1,5 @@
 output "job_queue" {
-  description = "Batch job queue name to submit enhancement jobs to."
+  description = "Batch job queue name the texture and standardise jobs are submitted to."
   value       = aws_batch_job_queue.this.name
 }
 
@@ -8,7 +8,7 @@ output "job_queue_arn" {
 }
 
 output "job_definition" {
-  description = "Batch job definition name (RUN_MODE=reprocess; override SRC per submission)."
+  description = "The texture job definition name (RUN_MODE=generate-textures)."
   value       = aws_batch_job_definition.this.name
 }
 

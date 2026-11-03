@@ -112,8 +112,8 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 title="Origin country could not be resolved", kind="decision",
                 recovery="Confirm the origin card in Review, set the variety's origin, or set the supplier's "
                          "default origin. Lists on the next produce.", stage="Derive"),
-    Requirement("no_image", "an image present when images are required (unless no_publishable_image)",
-                "raw_image_urls -> the image stage; a terminal non-stone set publishes imageless",
+    Requirement("no_image", "an image present when images are required",
+                "raw_image_urls -> the image stage",
                 title="Photo failed to fetch or process this run", kind="transient",
                 recovery="Retried on the next scrape; lists once the photo comes through.", stage="Images"),
     Requirement("dimension_unavailable", "no dimension whose source FETCH failed (transient)",

@@ -21,7 +21,7 @@ def _seed_yaml(tmp_path):
         "varsha:\n"
         "  source_code: var\n"
         "  vendor: Varsha Stones\n"
-        "  watermarked: true\n",
+        "  image_pipeline: false\n",
         encoding="utf-8")
     return yaml_path
 
@@ -95,7 +95,7 @@ def test_seed_pipeline_read_and_enable(tmp_path, monkeypatch):
     assert set(srcs) == {"polonine", "varsha"}
     assert srcs["polonine"].vendor == "Polonine Stone Co"
     assert load_source("polonine").ports_default == ["Brindisi"]
-    assert load_source("varsha").watermarked is True
+    assert load_source("varsha").image_pipeline is False
 
     # all enabled by default; disabling one removes it from the run set
     assert store.enabled_names() == {"polonine", "varsha"}
@@ -124,23 +124,6 @@ def test_lifecycle_defaults_to_active_and_round_trips(tmp_path, monkeypatch):
     assert {r["source"]: r["lifecycle"] for r in store.list_rows()} == {"polonine": "active", "varsha": "paused"}
     # a second connect re-runs _migrate (idempotent): the value persists, no error, no duplicate column
     assert store.get_row("varsha")["lifecycle"] == "paused"
-
-
-def test_fal_prompt_is_per_source_and_round_trips(tmp_path, monkeypatch):
-    # The de-watermark instruction is source-specific: it must persist per source through the store + the
-    # admin API, and default to '' (the global fallback) for a source that never sets one.
-    monkeypatch.setenv("BLOKPORT_CONFIG_DB", str(tmp_path / "config.db"))
-    store.upsert_row({"source": "acme", "source_code": "acm", "vendor": "Acme",
-                      "watermarked": True, "fal_prompt": "Remove the blue AcmeStone mark"})
-    store.upsert_row({"source": "plain", "source_code": "pla", "vendor": "Plain"})   # sets no prompt
-    # pipeline read (SourceConfig)
-    srcs = store.read_sources()
-    assert srcs["acme"].fal_prompt == "Remove the blue AcmeStone mark"
-    assert srcs["plain"].fal_prompt == ""            # falls back to the global default at de-watermark time
-    # admin API dict carries it (so the UI can edit per source)
-    assert store.get_row("acme")["fal_prompt"] == "Remove the blue AcmeStone mark"
-    # one source's prompt never leaks onto another
-    assert srcs["acme"].fal_prompt != srcs["plain"].fal_prompt
 
 
 def test_collection_location_is_per_source_and_round_trips(tmp_path, monkeypatch):
@@ -447,19 +430,19 @@ def test_evaluate_from_outputs_records_once_and_skips_replays(tmp_path, monkeypa
     assert len(store.read_run_events("polonine")) == 1                      # no double-count
 
 
-def test_enhance_flag_defaults_on_and_round_trips(tmp_path):
-    # the per-source GPU-upscale switch: default ON, editable per source, exposed to the :4200 UI. Mirrors
-    # `watermarked`. No env var -- purely config-store driven.
+def test_image_pipeline_flag_defaults_on_and_round_trips(tmp_path):
+    # the per-source image pipeline switch: default ON, editable per source, exposed to the :4200 UI. No env var --
+    # purely config-store driven.
     from stone_pipeline.config.sources import SourceConfig
     p = tmp_path / "config.db"
     store.upsert_source(SourceConfig(source="a"), path=p)
-    assert store.read_sources(p)["a"].enhance is True                   # default ON
-    store.upsert_source(SourceConfig(source="b",  enhance=False), path=p)
-    assert store.read_sources(p)["b"].enhance is False                  # per-source OFF
+    assert store.read_sources(p)["a"].image_pipeline is True            # default ON
+    store.upsert_source(SourceConfig(source="b", image_pipeline=False), path=p)
+    assert store.read_sources(p)["b"].image_pipeline is False           # per-source OFF
     row = store.get_row("b", p)
-    assert row["enhance"] is False                                      # exposed to the admin UI
-    store.upsert_row({**row, "enhance": True}, p)                       # UI flips it
-    assert store.get_row("b", p)["enhance"] is True
+    assert row["image_pipeline"] is False                               # exposed to the admin UI
+    store.upsert_row({**row, "image_pipeline": True}, p)                # UI flips it
+    assert store.get_row("b", p)["image_pipeline"] is True
 
 
 def test_schema_and_migrate_stay_in_parity(tmp_path):
