@@ -151,8 +151,9 @@ close-only photos run, an operator's action (no UI button): `POST /config/v1/run
 It is a photos run like any other (the run slot, giving way to the owner's Publish, a run record with `close_only: true`);
 the runner alone tells the process it is close-only (`SCRAPER_STANDARDISE_CLOSE_ONLY` in that run's environment only). It
 holds the same lock, budget, work window and run id, makes one close-only GPU job per slice of the chosen photos whose
-close-up is not made yet (`deploy.standardise_close`) instead of steps 1-7, then publishes and relinks as any run; its
-summary is `close-summary.json`, so the photos run's `summary.json` stays.
+close-up is not made yet (`deploy.standardise_close`) instead of steps 1-7, then publishes and relinks as any run (the
+owner's decisions and the stored conflict set read the same way, so only the conflict photos the owner assigned are
+published); its summary is `close-summary.json`, so the photos run's `summary.json` stays.
 
 The owner's Publish is never blocked: any other stage asked for while a photos run holds the run slot (Blokport's
 Publish button runs a republish) stops the photos run cleanly (the SIGTERM path below) and starts at once; the request
