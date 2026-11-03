@@ -174,7 +174,8 @@ Only products whose variation is synced and whose texture is live.
     "lot_code": null, "lot_position": null,
     "image_urls": ["https://.../products/improved/polonine/<sha>.jpg"],
     "model_3d": {"cutout": "https://.../products/standard/cutout/polonine/<sha>.webp",
-                 "meta": "https://.../products/standard/cutout/polonine/<sha>.json"}
+                 "meta": "https://.../products/standard/cutout/polonine/<sha>.json"},
+    "photo_ready": true
   }
 }
 ```
@@ -211,6 +212,19 @@ A tile's files (views and 3D) are named after the listing, not a photo. A tile p
 the laid tiles seen from above at true scale (the catalog image), one tile face-on, and one tile at an angle showing
 its thickness; a tile whose slab gives too few distinct faces gets one tile face-on as its catalog image, then the
 angled view. Every view is drawn at the product's own `length` x `width` x `height`.
+
+**Photo ready** (`photo_ready`, boolean, always present; an additive field on the unchanged product payload contract
+`v6-model-3d`, so ignore it if you do not use it): the scraper's photo rule decision for the product, whether it has its
+standardised photo. The same decision sends the product's stock at quantity 0 with reason `"no_photo"` (section 5), so
+in one produce both come from it together. **Read it at create only; the stock lane owns visibility afterwards.** On
+create, `false` -> create the product as a hidden draft (never publish it, priced or not); `true` -> publish as usual.
+After that, hiding and showing again are the stock lane's alone (reason `"no_photo"`, then a quantity above 0 with no
+reason once the photo is published). `photo_ready` is not part of `payload_hash`: a change of it never re-serves a
+product, and an existing product that is re-served for another reason carries the current value, which you ignore.
+The stock reason can later change while the photo decision does not: a photo-hidden product its supplier drops goes to
+quantity 0 with no reason, and a bundle replaced by its lot to `"replaced_by_lot"`; its `photo_ready` stays `false`. A
+product first produced in a run that could not read the published photos starts `false` (the safe side). In
+an environment that does not require a standardised photo (the rule off), every product is `photo_ready: true`.
 
 **Collection location** (`collection_country_code`, `collection_city`) is where the product is
 physically **collected** before shipping (the supplier's warehouse). It is a distinct axis from
@@ -297,7 +311,8 @@ A zero may carry a `reason` (a closed set; an unknown reason is treated as a pla
 - none: the supplier no longer lists the product (sold out or dropped). Deactivate it, never delete.
 - `"delisted"`: an operator took the product offline (admin delist). Hide it.
 - `"no_photo"`: the product has no standardised photo yet; always sent with quantity 0. Hide it. It comes back with
-  quantity above 0 and no reason once its photo is published.
+  quantity above 0 and no reason once its photo is published. The same decision is on the product payload as
+  `photo_ready: false`, read at create only (section 4, Photo ready); on an existing product this reason is the signal.
 - `"replaced_by_lot"`, with `"lot_code"`: a bundle replaced by its pieces (its lot).
   Deactivate the bundle (never delete: orders and documents reference it) and redirect its page to the
   lot. Served only once at least one piece of that lot exists in Medusa, so the redirect never lands on

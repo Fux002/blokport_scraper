@@ -288,6 +288,6 @@ def test_a_v9_ledger_gains_the_3d_column_and_keeps_its_data(tmp_path):
     raw.commit()
     raw.close()
     with Ledger.open(p, env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 10
+        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert "model_3d_key" in {r[1] for r in lg.conn.execute("PRAGMA table_info(product)")}
         assert lg.get("variation", "key", KEY)["name"] == "Calacatta Viola"
