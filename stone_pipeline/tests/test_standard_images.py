@@ -164,10 +164,12 @@ def test_the_product_index_follows_the_categories_refreshed_from_the_export(monk
 def test_listings_take_each_product_s_own_photos_in_its_order_from_the_photo_list(monkeypatch):
     from stone_pipeline.standardise import index
     _slab_category(monkeypatch)
-    sheet = "Product Handle,Product Category 1,Product Image 1\none,pcat_S,x\ntwo,pcat_S,\nnone,pcat_S,\n"
+    sheet = ("Product Handle,Variant Sku,STN Variation Id,STN Finish Id,Product Category 1,Product Image 1\n"
+             "one,SEN-1,v1,f1,pcat_S,x\ntwo,SEN-2,v1,f2,pcat_S,\nnone,SEN-3,v1,f1,pcat_S,\n")
     photos = {"one": [("sentas", B), ("sentas", A)], "two": [("sentas", A)], "none": []}
-    assert index.listings(sheet, photos) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [B, A]},
-                                             {"key": "two", "source": "sentas", "format": "slab", "photos": [A]}]
+    assert index.listings(sheet, photos) == [
+        {"key": "one", "sku": "SEN-1", "source": "sentas", "stone": ("v1", "f1"), "format": "slab", "photos": [B, A]},
+        {"key": "two", "sku": "SEN-2", "source": "sentas", "stone": ("v1", "f2"), "format": "slab", "photos": [A]}]
 
 
 def test_a_published_listing_keeps_all_its_own_photos_whatever_the_sheet_shows(monkeypatch):
@@ -175,8 +177,26 @@ def test_a_published_listing_keeps_all_its_own_photos_whatever_the_sheet_shows(m
     # list still has every photo of the listing, so a later run can try its further photos (a whole slab after a close-up)
     from stone_pipeline.standardise import index
     _slab_category(monkeypatch)
-    sheet = ("Product Handle,Product Category 1,Product Length,Product Width,Product Image 1,Product Image 2\n"
-             f"one,pcat_S,3.0,1.8,{_std('main', A)},{_std('white', A)}\n")
+    sheet = ("Product Handle,Variant Sku,STN Variation Id,STN Finish Id,Product Category 1,Product Length,Product Width,"
+             "Product Image 1,Product Image 2\n"
+             f"one,SEN-1,v1,f1,pcat_S,3.0,1.8,{_std('main', A)},{_std('white', A)}\n")
     photos = {"one": [("sentas", A), ("sentas", B)]}
-    assert index.listings(sheet, photos) == [{"key": "one", "source": "sentas", "format": "slab", "photos": [A, B]}]
+    assert index.listings(sheet, photos) == [
+        {"key": "one", "sku": "SEN-1", "source": "sentas", "stone": ("v1", "f1"), "format": "slab", "photos": [A, B]}]
     assert set(index.build(sheet, photos)) == {A, B}                                      # the GPU job sees both
+
+
+def test_a_photo_several_listings_show_is_their_stone_s_or_a_conflict():
+    # a photo belongs to a stone and finish: slabs of one block share it (siblings); the same photo on another variety or
+    # finish (prod: Luminatta Leathered and Polished at zucchi, Royal Black and Toros Black at marenostone) is a conflict
+    from stone_pipeline.standardise import index
+    D_ = "d" * 64
+
+    def l(key, stone, *photos, source="sentas"):
+        return {"key": key, "sku": key.upper(), "source": source, "stone": stone, "format": "slab", "photos": list(photos)}
+    listings = [l("block-1", ("v1", "f1"), A, B), l("block-2", ("v1", "f1"), A), l("leathered", ("v2", "lea"), D_),
+                l("polished", ("v2", "pol"), D_, B), l("alone", ("v3", "f1"), "e" * 64), l("other-src", ("v9", "f9"), A, source="zucchi")]
+    shared = index.shared_photos(listings)
+    assert shared == {("sentas", A): index.Shared("siblings", ("block-1", "block-2")),
+                      ("sentas", B): index.Shared("conflict", ("block-1", "polished")),
+                      ("sentas", D_): index.Shared("conflict", ("leathered", "polished"))}

@@ -61,6 +61,7 @@ def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=()):
 def _selection(listings, gpu_round=None, clean_round=None, exclude=()):
     s = object.__new__(sel_mod.Selection)
     s.client, s.listings, s.tags, s.exclude, s.root = _S3(), listings, ("v9", "v9-clean"), set(exclude), "r/"
+    s.owner, s.conflicts = {}, {}
     s.sources = sorted({l["source"] for l in listings})
     s.rounds = [("v9", {"sentas": gpu_round or _round()}), ("v9-clean", {"sentas": clean_round or _round()})]
     s.refresh = lambda: None
@@ -68,7 +69,7 @@ def _selection(listings, gpu_round=None, clean_round=None, exclude=()):
 
 
 def _listing(*photos, key="slab-1"):
-    return {"key": key, "source": "sentas", "format": "slab", "photos": list(photos)}
+    return {"key": key, "sku": "SEN-1", "source": "sentas", "format": "slab", "photos": list(photos)}
 
 
 # --- the GPU round --------------------------------------------------------------------------------------------------

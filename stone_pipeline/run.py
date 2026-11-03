@@ -491,13 +491,6 @@ def run_source(
     # Stage 8: constants
     _record(manifest, run_log, constants.run(rows, source_cfg))
 
-    # row fingerprint: hash of the inputs that determine the output (section 11.2),
-    # the basis for incremental runs (section 13A.5) and drift checks
-    for row in rows:
-        row.row_fingerprint = ids_mod.row_fingerprint([
-            row.surrogate_key, row.variation_id, row.color_id, row.finish_id,
-            row.quality_id, row.type_id, row.title, row.bundle_size, "|".join(row.image_keys),
-        ])
     # Process gate: enforce the Medusa-importable output contract (origin country code is required
     # for Medusa's pricing-rule lookup). Runs before validate so any reject it stamps flows through
     # validate's existing emit/review/reject routing.
@@ -506,6 +499,18 @@ def run_source(
     # Stage 9: validation
     validation = validate.run(rows, emit_on_review=source_cfg.emit_on_review,
                               require_images=False if inventory_only else SETTINGS.images.require_images)
+    # the standardised photos, once the emitted products are known: a photo emitted products of several stones show is
+    # classified here, over the products on the sheet only, and stored as the one conflict set the photo process and
+    # the review page read (stages.images.link_standard)
+    if not inventory_only and (conflicts := images.link_standard(rows, validation.emit)) is not None:
+        images.save_conflicts(conflicts)
+    # row fingerprint: hash of the inputs that determine the output (section 11.2),
+    # the basis for incremental runs (section 13A.5) and drift checks
+    for row in rows:
+        row.row_fingerprint = ids_mod.row_fingerprint([
+            row.surrogate_key, row.variation_id, row.color_id, row.finish_id,
+            row.quality_id, row.type_id, row.title, row.bundle_size, "|".join(row.image_keys),
+        ])
     # honest status (was always OK): a majority-reject run is a systemic problem (a whole batch failing a
     # required id/dimension), not the odd stray reject -- surface it here instead of only in the count.
     _val_status = _ratio_status(len(validation.rejects), len(rows),

@@ -69,8 +69,9 @@ class _S3:
         return _Pages()
 
 
-def _listing(key, *photos, fmt="slab"):
-    return {"key": key, "source": "sentas", "format": fmt, "photos": list(photos)}
+def _listing(key, *photos, fmt="slab", stone=("v1", "f1")):
+    return {"key": key, "sku": f"SEN-{key.upper()}", "source": "sentas", "stone": stone, "format": fmt,
+            "photos": list(photos)}
 
 
 def _record(key, sha, prefix=RUN):
@@ -85,14 +86,15 @@ def _rec(sha):
 def test_the_process_picks_exactly_the_listings_without_a_valid_chosen_photo():
     listings = [_listing("done", A, B), _listing("new", D), _listing("moved", E), _listing("excluded", B)]
     records = {"done": _rec(A), "moved": _rec(D), "excluded": _rec(B), "gone": _rec(E)}
-    assert [l["key"] for l in proc.todo(listings, records, {B}, {f"{RUN}{A}.slab.png"})] == ["new", "moved", "excluded"]
+    assert [l["key"] for l in proc.todo(listings, records, {B}, {f"{RUN}{A}.slab.png"}, removed=set(), conflicts={},
+                                        picks={})] == ["new", "moved", "excluded"]
 
 
 def test_a_slab_listing_whose_chosen_photo_has_no_3d_slab_is_picked_again_with_its_choice_kept():
     listings = [_listing("whole", A, B), _listing("close-up", D, E), _listing("block", E, fmt="block"),
                 _listing("tile", E, fmt="tile")]
     records = {"whole": _rec(A), "close-up": _rec(D), "block": _rec(E), "tile": _rec(E)}
-    found = proc.todo(listings, records, set(), {f"{RUN}{A}.slab.png"})
+    found = proc.todo(listings, records, set(), {f"{RUN}{A}.slab.png"}, removed=set(), conflicts={}, picks={})
     assert found == [{**_listing("close-up", D, E), "kept": (C.RUN_TAG, D)}]          # a block or tile has no 3D slab
 
 
@@ -102,6 +104,52 @@ def test_which_chosen_photos_have_a_3d_slab_is_read_from_the_runs_the_records_po
               f"{other}{B}.slab.png": b"p", f"{ENV_SEGMENT}/standardise-test/v1/sentas/{D}.slab.png": b"p"})
     records = {"one": {"sha": A, "prefix": RUN}, "two": {"sha": B, "prefix": other}}
     assert proc.whole_slabs(s3, records) == {f"{RUN}{A}.slab.png", f"{other}{B}.slab.png"}
+
+
+def _owned(sha, tag=C.RUN_TAG, listing="mine"):
+    return {"tag": tag, "sha": sha, "at": "2026-11-02T10:00:00Z", "listing": listing, "decided_on": listing}
+
+
+def test_a_choice_the_owner_overruled_or_a_conflict_photo_chosen_by_itself_is_worked_again():
+    listings = [_listing("redecided", A, B), _listing("agreed", A, B), _listing("conflict", D), _listing("assigned", D)]
+    records = {k: _rec(sha) for k, sha in (("redecided", A), ("agreed", B), ("conflict", D), ("assigned", D))}
+    picks = {"redecided": (C.RUN_TAG, B), "agreed": (C.RUN_TAG, B), "assigned": (C.RUN_TAG, D)}
+    conflicts = {("sentas", D): ("assigned", "conflict")}
+    found = proc.todo(listings, records, set(), set(), removed=set(), conflicts=conflicts, picks=picks)
+    assert [l["key"] for l in found] == ["redecided", "conflict"]
+
+
+def test_a_conflict_photo_is_assigned_to_the_one_listing_whose_valid_owner_choice_names_it():
+    listings = [_listing("mine", D, A), _listing("partner", D, stone=("v2", "f1")), _listing("other", B),
+                _listing("stale", B, stone=("v3", "f1"))]
+    conflicts = {("sentas", D): ("mine", "partner"), ("sentas", B): ("other", "stale")}
+    assigned, problems = proc.assignments(listings, {"mine": (C.RUN_TAG, D)}, conflicts)
+    assert assigned == {("sentas", D): ["SEN-MINE"], ("sentas", B): []} and problems == []
+
+
+def test_a_conflict_photo_two_listings_claim_is_linked_to_neither_and_said():
+    listings = [_listing("mine", D), _listing("partner", D, stone=("v2", "f1"))]
+    conflicts = {("sentas", D): ("mine", "partner")}
+    assigned, problems = proc.assignments(listings, {"mine": (C.RUN_TAG, D), "partner": (C.RUN_TAG, D)}, conflicts)
+    assert assigned == {("sentas", D): []}
+    assert problems == [f"photo {D[:12]} ({C.CONFLICT_REASON}) is the owner's choice for mine, partner: linked to none "
+                        "until one decision is withdrawn"]
+
+
+def test_a_listing_the_owner_removed_is_never_worked_on_whatever_its_choice():
+    listings = [_listing("new", D), _listing("removed", E), _listing("removed-chosen", A)]
+    records = {"removed-chosen": _rec(A)}
+    assert [l["key"] for l in proc.todo(listings, records, set(), set(), removed={"SEN-REMOVED", "SEN-REMOVED-CHOSEN"},
+                                        conflicts={}, picks={})] == ["new"]
+
+
+def test_the_owner_s_removals_are_read_by_sku_from_their_own_store():
+    # prod SKUs carry slashes, spaces and plus signs (MAR-P/02/16): each still names exactly one record, in one folder
+    skus = {"SEN-1", "MAR-P/02/16", "ZUC-A B+C.2"}
+    s3 = _S3({**{imagestore.owner_removed_key(sku): b"{}" for sku in skus}, f"{ROOT}chosen/x.json": b"{}"})
+    prefix = imagestore.owner_removed_prefix()
+    assert prefix == f"{ENV_SEGMENT}/standardise-test/removed/" and proc.removed_listings(s3) == skus
+    assert all("/" not in key[len(prefix):] for key in s3.objects if key.startswith(prefix))
 
 
 def test_the_choice_records_are_read_from_the_clean_root():
@@ -197,21 +245,40 @@ def _published_bucket():
     return _S3({f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.white.jpg": b"w", f"{ROOT}chosen/one.json": _record("one", A)})
 
 
+def test_the_stored_conflict_sets_of_every_source_are_read_as_one():
+    s3 = _S3({imagestore.conflicts_key("sentas"): json.dumps({D: ["mine", "partner"]}).encode(),
+              imagestore.conflicts_key("zucchi"): b"{}"})
+    assert pub.read_conflicts(s3, ["sentas", "zucchi"]) == {("sentas", D): ("mine", "partner")}
+
+
+def test_a_source_without_a_stored_conflict_set_is_refused_never_read_as_no_conflicts():
+    s3 = _S3({imagestore.conflicts_key("sentas"): b"{}"})
+    with pytest.raises(pub.NoConflictSet, match="no conflict set yet for zucchi: run a produce first"):
+        pub.read_conflicts(s3, ["sentas", "zucchi"])
+
+
+def test_the_photo_run_refuses_to_start_without_the_conflict_set(monkeypatch, capsys):
+    monkeypatch.setattr(proc, "process", lambda *a, **k: (_ for _ in ()).throw(pub.NoConflictSet("no conflict set yet for "
+                                                                                                  "sentas: run a produce first")))
+    rc, relinks = _main(monkeypatch, keep_process=True)
+    assert rc == 2 and relinks == [] and "no conflict set yet for sentas" in capsys.readouterr().out
+
+
 def test_publish_copies_only_what_changed_and_says_whether_the_folder_changed():
     s3 = _published_bucket()
-    first = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    first = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert first["copied"] == 2 and first["changed"]
     assert s3.objects[imagestore.standard_key("sentas", A, "main")]["Body"] == b"m"
     s3.written.clear()
-    second = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    second = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert not second["changed"] and s3.written == []                      # nothing rewritten: no new versions, no re-serve
 
 
 def test_a_view_its_run_made_again_is_published_again():
     s3 = _published_bucket()
-    pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     s3._store(f"{RUN}{A}.main.jpg", b"m2")
-    again = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    again = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert again["copied"] == 1 and again["changed"]
     assert s3.objects[imagestore.standard_key("sentas", A, "main")]["Body"] == b"m2"
 
@@ -219,7 +286,7 @@ def test_a_view_its_run_made_again_is_published_again():
 def test_a_view_no_longer_chosen_is_removed_and_that_is_a_change():
     s3 = _published_bucket()
     s3._store(imagestore.standard_key("sentas", B, "main"), b"old")
-    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert out["removed"] == 1 and imagestore.standard_key("sentas", B, "main") not in s3.objects
 
 
@@ -230,7 +297,7 @@ def test_3d_slabs_are_cut_out_a_few_at_a_time_on_the_small_service(monkeypatch):
     real = pub.ThreadPoolExecutor
     monkeypatch.setattr(pub, "ThreadPoolExecutor", lambda n: pools.append(n) or real(n))
     monkeypatch.setattr(pub, "_publish_cutout", lambda client, s, key, etag: True)
-    assert pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)["made_3d"] == 1
+    assert pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})["made_3d"] == 1
     assert C.CUTOUT_WORKERS in pools and C.CUTOUT_WORKERS <= 4
 
 
@@ -245,26 +312,78 @@ def _slab_png():
 def test_a_choice_moved_from_a_close_up_to_a_whole_slab_publishes_its_views_and_its_3d_slab_and_drops_the_old(monkeypatch):
     s3 = _S3({f"{RUN}{A}.main.jpg": b"ma", f"{RUN}{A}.white.jpg": b"wa", f"{ROOT}chosen/one.json": _record("one", A),
               **{f"{RUN}{B}.{v}.jpg": f"{v}b".encode() for v in imagestore.STANDARD_VIEWS}, f"{RUN}{B}.slab.png": _slab_png()})
-    first = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    first = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert first["copied"] == 2 and first["made_3d"] == 0                              # the close-up: two views, no 3D
     s3._store(f"{ROOT}chosen/one.json", _record("one", B))
-    moved = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    moved = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert moved["changed"] and moved["copied"] == 4 and moved["made_3d"] == 1 and moved["removed"] == 2
     assert {k for k in s3.objects if "/products/standard/" in k} == (
         {imagestore.standard_key("sentas", B, v) for v in imagestore.STANDARD_VIEWS}
         | {imagestore.cutout_key("sentas", B, ext) for ext in ("webp", "json")})
 
 
+def test_a_conflict_photo_is_published_only_when_the_owner_assigned_it_and_says_to_whom(monkeypatch):
+    s3 = _published_bucket()
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", A): []})
+    assert imagestore.standard_key("sentas", A, "main") not in s3.objects and out["listings"] == 0
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", A): ["SEN-MINE"]})
+    assert imagestore.standard_key("sentas", A, "main") in s3.objects and out["changed"]
+    assert json.loads(s3.objects[imagestore.assigned_key("sentas", A)]["Body"]) == ["SEN-MINE"]
+    s3.written.clear()
+    assert not pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", A): ["SEN-MINE"]})["changed"]
+    assert s3.written == []
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})                 # no longer a conflict
+    assert imagestore.assigned_key("sentas", A) not in s3.objects and out["changed"]
+
+
+class _Crash(Exception):
+    pass
+
+
+def test_a_conflict_photo_s_assignment_is_written_before_its_views_so_a_stop_between_links_nobody_else(monkeypatch):
+    s3 = _published_bucket()
+    copy = s3.copy_object
+    monkeypatch.setattr(s3, "copy_object", lambda **kw: (_ for _ in ()).throw(_Crash("stopped mid-publish")))
+    with pytest.raises(_Crash):
+        pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", A): ["SEN-MINE"]})
+    assert json.loads(s3.objects[imagestore.assigned_key("sentas", A)]["Body"]) == ["SEN-MINE"]
+    assert imagestore.standard_key("sentas", A, "main") not in s3.objects                # no view without its file
+    monkeypatch.setattr(s3, "copy_object", copy)
+    pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", A): ["SEN-MINE"]})
+    assert imagestore.standard_key("sentas", A, "main") in s3.objects
+
+
+def test_a_stale_assignment_is_removed_only_after_the_views_it_covers(monkeypatch):
+    s3 = _published_bucket()
+    pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", A): ["SEN-MINE"]})
+    s3.objects.pop(f"{ROOT}chosen/one.json")
+    s3._store(f"{ROOT}chosen/two.json", _record("two", B))
+    s3._store(f"{RUN}{B}.main.jpg", b"m")
+    delete = s3.delete_object
+
+    def crash_on_views(Bucket, Key, **condition):
+        if "/standard/main/" in Key:
+            raise _Crash("stopped mid-publish")
+        return delete(Bucket=Bucket, Key=Key, **condition)
+    monkeypatch.setattr(s3, "delete_object", crash_on_views)
+    with pytest.raises(_Crash):
+        pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", A): []})
+    assert imagestore.standard_key("sentas", A, "main") in s3.objects                    # the view is still there ...
+    assert imagestore.assigned_key("sentas", A) in s3.objects                            # ... and still only its owner's
+
+
 def test_publish_without_any_choice_record_is_refused_with_its_own_error():
     with pytest.raises(pub.NoChoiceRecords):
-        pub.publish(_S3({f"{RUN}{A}.main.jpg": b"m"}), ROOT, NO_TILES, {}, say=lambda m: None)
+        pub.publish(_S3({f"{RUN}{A}.main.jpg": b"m"}), ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
 
 
 # --- the process end to end -------------------------------------------------------------------------------------------
 def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_summary(monkeypatch):
-    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.slab.png": _slab_png()})
+    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.slab.png": _slab_png(),
+              imagestore.owner_removed_key("SEN-GONE"): b"{}", imagestore.conflicts_key("sentas"): b"{}"})
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
-    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("done", A), _listing("new", D)])
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("done", A), _listing("new", D),
+                                                                       _listing("gone", E)])
     cleared, worked = [], []
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or [])
 
@@ -275,15 +394,38 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
     import time
     summary = proc.process(s3, None, select.Spend(5.0, others=lambda: 1.0), "R1", time.monotonic() + 3600, say=lambda m: None)
     assert cleared == ["R1"] and worked == ["new"]                       # an earlier run's jobs are stopped first
-    assert summary["listings"] == 1 and summary["pending"] == 1 and summary["problems"] == 1
+    assert summary["listings"] == 1 and summary["pending"] == 1 and summary["problems"] == 1 and summary["removed"] == 1
     assert summary["published"]["changed"] and summary["month_spent_usd"] == 1.0
     stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
     assert stored["pending_listings"] == ["new"] and stored["problem_list"] == ["sentas d: no result after the GPU round"]
 
 
+def test_the_run_reads_the_owner_s_choices_by_sku_and_the_conflicts_the_produce_stored(monkeypatch):
+    # the produce's conflict set (classified over the emitted products with every photo each has), never the sheet's own
+    # reading: here the sheet would call the two listings siblings
+    s3 = _S3({pub.owner_key(ROOT, "SEN-MINE"): json.dumps(_owned(D)).encode(), f"{RUN}{D}.main.jpg": b"m",
+              imagestore.conflicts_key("sentas"): json.dumps({D: ["mine", "partner"]}).encode()})
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D), _listing("partner", D)])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    seen, handed = {}, {}
+
+    def run(batch, sel, spend, run_id, deadline, say=print):
+        seen.update(owner=sel.owner, conflicts=sel.conflicts)
+        return [], {"chosen": [], "tracked": [], "pending": []}
+    monkeypatch.setattr(proc, "run", run)
+    monkeypatch.setattr(proc.publish, "publish",
+                        lambda s3, root, sheet, photos, say, assigned: handed.update(assigned) or {"changed": False})
+    import time
+    proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None)
+    assert seen["owner"] == {"SEN-MINE": _owned(D)} and seen["conflicts"] == {("sentas", D): ("mine", "partner")}
+    assert handed == {("sentas", D): ["SEN-MINE"]}
+
+
 def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
     import time
-    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m"})
+    s3 = _S3({f"{ROOT}chosen/done.json": _record("done", A), f"{RUN}{A}.main.jpg": b"m",
+              imagestore.conflicts_key("sentas"): b"{}"})
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
     monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("new", D)])
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
@@ -315,10 +457,11 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
 
     def picked():
         records = proc.choices(s3, ROOT)
-        return proc.todo([_listing("one", A, B, D)], records, set(), proc.whole_slabs(s3, records))
+        return proc.todo([_listing("one", A, B, D)], records, set(), proc.whole_slabs(s3, records), set(), {}, {})
     found = picked()
     assert [l["kept"] for l in found] == [(C.RUN_TAG, A)]
-    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
+    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, {}, {},
+                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]))
     assert sel.gpu_todo() == {}                                     # every candidate has its result: no GPU
     spend = select.Spend(5.0)
     select.judge_all(sel, spend, float("inf"))
@@ -338,8 +481,8 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
     monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("paid again"))
     monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
     records = proc.choices(s3, ROOT)
-    sel = select.Selection(s3, proc.todo([_listing("one", A, B)], records, set(), proc.whole_slabs(s3, records)),
-                           C.RUN_TAG, C.CLEAN_TAG)
+    sel = select.Selection(s3, proc.todo([_listing("one", A, B)], records, set(), proc.whole_slabs(s3, records), set(), {}, {}),
+                           C.RUN_TAG, C.CLEAN_TAG, {}, {}, select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]))
     spend = select.Spend(5.0)
     assert sel.gpu_todo() == {}
     assert select.judge_all(sel, spend, float("inf")) == ([], False)
@@ -354,8 +497,9 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
               f"{RUN}judged/{A}.json": json.dumps({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}).encode()})
     monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("judged again"))
     records = proc.choices(s3, ROOT)
-    found = proc.todo([_listing("one", A)], records, set(), proc.whole_slabs(s3, records))
-    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG)
+    found = proc.todo([_listing("one", A)], records, set(), proc.whole_slabs(s3, records), set(), {}, {})
+    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, {}, {},
+                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]))
     assert sel.gpu_todo() == {"sentas": [A]}                        # outdated: the GPU completes it
     s3._store(f"{RUN}{A}.close.jpg", b"close")                     # what the GPU job adds (standardise_source.complete)
     s3._store(f"{RUN}{A}.slab.png", _slab_png())
@@ -365,7 +509,7 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     s3.written.clear()
     assert [c["sha"] for c in select.report(sel)["chosen"]] == [A] and spend.spent == 0
     assert f"{ROOT}chosen/one.json" not in s3.written                # the same choice: its record stays
-    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None)
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert out["made_3d"] == 1 and imagestore.standard_key("sentas", A, "close") in s3.objects
 
 
@@ -377,8 +521,10 @@ class _Clients:
         return self.s3 if name == "s3" else object()
 
 
-def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, relink_rc=0, writethrough_on=True):
-    """main() with the process stubbed: what it returns and the relinks it made."""
+def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, relink_rc=0, writethrough_on=True,
+          keep_process=False):
+    """main() with the process stubbed (unless the test stubbed it, keep_process): what it returns and the relinks it
+    made."""
     monkeypatch.setattr(proc, "unconfigured", lambda: [])
     monkeypatch.setattr(proc, "stop_on_signal", lambda spend: None)
     monkeypatch.setattr(proc.boto3, "client", _Clients(_S3()))
@@ -394,7 +540,8 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
     def process(s3, batch, spend, run_id, deadline, say=print):
         spend.capped = capped
         return {"problems": problems, "pending": 0, "budget_reached": capped, "published": {"changed": changed}}
-    monkeypatch.setattr(proc, "process", process)
+    if not keep_process:
+        monkeypatch.setattr(proc, "process", process)
     return proc.main(), relinks
 
 

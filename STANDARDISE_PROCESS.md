@@ -19,13 +19,15 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
                       set back to idle
        3. pick        every listing of the sheet just published (its photos from the photo list beside it)
                       WITHOUT a valid choice record
-                      (record missing, or its photo no longer the listing's, or on the exclude list), and every
-                      slab listing whose chosen photo is no whole slab (a close-up), its choice kept; never a
+                      (record missing, its photo no longer the listing's or on the exclude list, not the owner's
+                      choice, or a conflict photo the owner did not assign), and every slab listing whose chosen
+                      photo is no whole slab (a close-up), its choice kept; never one the owner removed, never a
                       tile listing (rendered at step 10, see Tile listings)
        4. GPU         the listings' first JUDGE_MAX photos the standardiser has not run, or whose result is
-                      outdated (RUN_TAG)
-       5. judge       each listing's results in its own order until one passes; a slab listing goes on past a
-                      passing close-up to its whole slabs only, and takes the first of those that passes
+                      outdated (RUN_TAG); none of a listing the owner chose a photo for
+       5. judge       the owner's choice for the listing, else its results in its own order until one passes (a
+                      conflict photo is never chosen by itself); a slab listing goes on past a passing close-up to
+                      its whole slabs only, and takes the first of those that passes
        6. clean       only for a listing whose every judged photo failed for a cleanable reason:
                       one photo, hosted edit models cheapest first (nano2, kontext, flux3) until a copy passes
        7. GPU         the cleaned copies (CLEAN_TAG)
@@ -217,13 +219,19 @@ orphaned:
 | prod | `v2` | `v2-clean2` |
 
 They are fixed in `settings.STANDARDISE` (not env, so they cannot be mistyped per deployment). Moving to new tags is a
-deliberate code change and a migration (copy the choice records), never a setting. Under `<env>/standardise-test/`:
+deliberate code change and a migration, never a setting: copy the choice records and the owner's choice records
+(`<CLEAN_TAG>/owner/`) to the new clean tag, and keep (or copy) the results they name, since each names a tag and a
+photo; an owner record naming a tag the process no longer runs is not read (the listing is worked again). The removal
+records are outside the tags and need nothing. Under `<env>/standardise-test/`:
 
 ```
 run.lock                            the running process (rewritten every 5 min)
 spend/<YYYY-MM>/<run id>.json       each run's spend of the month
+removed/<SKU>.json                  a listing the owner removed (SKU percent-encoded)
 <RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated open book tried once)
 <CLEAN_TAG>/<src>/...               cleaned/, attempts/, GPU results of cleaned copies, judged/ (unchanged)
+<CLEAN_TAG>/owner/<SKU>.json        the owner's photo choice of a listing (SKU percent-encoded): {tag, sha, at, listing,
+                                    decided_on}
 <CLEAN_TAG>/chosen/<listing>.json   one record per listing with a good photo (what publish reads)
 <CLEAN_TAG>/tracked.csv             the review list: every listing no step could fix, what happened to each photo
 <CLEAN_TAG>/summary.json            the last run's summary, its pending listings and problems
@@ -281,6 +289,82 @@ TerminateJob scope: the svc task role may stop jobs `arn:aws:batch:<region>:<acc
 a job's name; scoping to the process's own jobs would need tags on submit (`batch:TagResource`) and an
 `aws:ResourceTag` condition on TerminateJob, which is not applied here: the process only stops jobs it named
 (`photos-<run id>-...`).
+
+## Shared photos
+
+A photo belongs to a stone and finish, not to one listing. There is one conflict set, made once and read by every side.
+The produce makes it after validation (`stages.images.link_standard`): over the products it emits, nothing validation
+rejects, each with every photo it has, it classifies each photo several products of a source show with
+`stone_pipeline.standardise.index.shared_photos` (by variety and finish ids), applies it to its own linking, and stores
+it per source as `standard/conflicts/<src>.json` (`{sha: [handles]}`, whole, an empty set too, written only when it
+changed). Only a produce that writes the bucket stores it (s3 image mode without the s3 dry run, as the service runs);
+a laptop run never overwrites an environment's set. The photo process, the owner's decisions and the review page read
+that stored set (`standardise_publish.read_conflicts`); none classifies conflicts again, and a source on the sheet with
+no stored set is refused ("no conflict set yet: run a produce first", the photos run exits 2), never read as no
+conflicts. (The sheet could not serve as the input: it carries only a live product's lead photo.)
+
+1. Shown by one listing: nothing special.
+2. Shown by listings of one variety and finish (slabs of one block or bundle, tile sizes): the vendor's own practice. A
+   pass is good for them all, and the owner's choice on one reaches the others (below; the groups come from the sheet,
+   `index.groups`, never for a photo in the conflict set).
+3. Shown by products of different varieties or finishes (prod: Luminatta Leathered and Polished at zucchi, Royal Black
+   and Toros Black at marenostone): a conflict. The photo is never chosen by itself for any of them (the review list
+   says `photo_conflict` and names the others), and a choice made before it became one no longer counts. Only the owner
+   assigns it, to one listing, by a decision on that listing itself (a choice that reached it from a sibling of its
+   stone never does); the applier refuses a second listing and names the first, and a photo the owner's choices name
+   for two listings anyway is linked to neither and reported. Publish writes `standard/assigned/<src>/<sha>.json`
+   (whose it is) before the photo's views and removes a stale one only after them, so a publish stopped half way never
+   leaves a conflict photo's view without its file; a conflict photo nobody is assigned is not published. The produce
+   links a conflict photo only to the product its file names, from the produce that makes it a conflict on. Two names
+   for one stone (a variety alias) is a question for the variety review, not for this page.
+
+Until the first produce after the release stores the sets, the photos run, the applier and the review page refuse.
+That produce already holds a live listing whose photo is a conflict (prod: Royal Black and Toros Black) until the owner
+assigns it on the review page built after it.
+
+## The owner's decisions
+
+The owner reviews the hidden listings (no chosen photo, not removed) on a decision page: per listing "Use this photo"
+(one of its standardised results) or "Remove listing"; a shared photo says which listings of the same stone it also
+applies to, and the conflicts page names, per conflict photo, every listing that shows it, live ones included (one
+live now is hidden by the next run unless the owner assigns the photo to it). The page keeps one document per
+listing; its export (a JSON array of `{id: <listing handle>, action, source, sha, tag, at}`) is applied with
+`python -m deploy.standardise_decisions` (`SCRAPER_ENV` set explicitly, `DECISIONS_FILE=<export>`, `DRY_RUN=true|false`).
+It prints the environment and bucket first. It checks every decision before writing anything: the listing is on the
+sheet; the action is known with exactly the page's fields; `at` is an ISO UTC timestamp; the source is the listing's;
+the photo is one of the listing's and not excluded; the tag's result exists; and the decision is not older than the one
+already stored for the listing, so an old export applied again never undoes a later decision. One bad decision refuses
+the whole file (exit 2). It reads and writes inside the run lock (exit 4 while a photos run holds it), writes only what
+differs (applying again writes nothing), never touches the judge's verdicts, and the next photos run acts on it. Every
+record is keyed by the listing's SKU: a variety decided later re-binds the product and moves its handle, never its SKU.
+
+- **use**: the owner's choice record `<CLEAN_TAG>/owner/<SKU>.json` (`{tag, sha, at, listing, decided_on}`); a later
+  decision overwrites it. Every run checks it (the photo is still one of the listing's, not excluded, its result there)
+  and then chooses it before anything else: nothing of the listing is judged, cleaned or sent to the GPU. A record that
+  no longer applies is not read, the same as a choice record. The choice reaches each listing of the same stone that shows
+  the photo, each with its own record (`decided_on` names the listing decided on; the dry run lists them), except one with
+  its own decision (in the same file or stored) and one live with its own photo (never re-chosen). A conflict photo is
+  assigned to that one listing only. A "use" lifts the listing's removal.
+- **remove**: a record `removed/<SKU>.json` (`{sku, listing, source, reason: "owner_removed", at}`); the listing's owner
+  choice and choice record go. The process never works on the listing, and the image stage links nothing standardised
+  to the product (no standardised thumbnail, gallery, 3D or version, whatever `require_standard_photo` says), even a
+  photo published for a listing of its stone: it keeps its own images and has no standardised photo, so it stays hidden
+  with reason `no_photo`. Nothing is deleted from the catalog; Blokport deletes the product.
+
+Why removals are a per-environment store and not a reviewed file like the exclude list: the exclude list is about a
+photo (its sha, the same in every environment) and is an engineering review; a removal is the owner's decision about one
+environment's listing, made on that environment's page, and takes effect on the next run without a release, beside the
+owner's choices it is applied with.
+
+Why `no_photo` and not a new reason: the inventory reason is a closed set on Blokport's side (MEDUSA_INTEGRATION_GUIDE.md
+section 5) and an unknown one is read as a plain quantity; `owner_removed` is kept in the removal record until Blokport
+agrees to a new reason.
+
+Order of review: variety minting and aliasing come first. That holds by construction: a product whose variety is still
+pending review (a variety card in the config.db review queue) is not bound, fails validation (tree gap) and is not on
+the product sheet, so it is never a listing on the decision page (prod 2026-11-02: no product of the 14 pending
+variety cards is on the sheet). Once its variety is decided it is bound, appears on the sheet and is hidden until a photo
+is chosen. A variety decided later moves the handle but not the photos or the SKU, so no decision is lost.
 
 ## What an operator still does
 

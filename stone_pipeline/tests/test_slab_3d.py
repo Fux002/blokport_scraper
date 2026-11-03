@@ -201,10 +201,14 @@ def test_the_served_files_contents_are_the_product_s_standard_version():
 def test_a_slab_gets_its_photo_s_3d_a_block_none_and_a_tile_never_borrows_a_photo_s_set(monkeypatch):
     # the tile shares photo A with the slab: it is shown only from its own rendered set (none here), never A's
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: VIEWS)
+    monkeypatch.setattr(images, "_load_owner_removed", lambda cfg: set())
+    monkeypatch.setattr(images, "_load_assigned", lambda cfg: {})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
     rows = [CanonicalRow(src_site="sentas", surrogate_key=k, handle=f"h{k}", format_value=f, image_keys=[_improved(A)])
             for k, f in (("1", "Slab"), ("2", "Block"), ("3", "Tile"))]
-    images.run(rows, cfg=type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})())
+    cfg = type("Cfg", (), {"mode": "passthrough", "public_base": f"{BASE}/"})()
+    images.run(rows, cfg=cfg)
+    images.link_standard(rows, rows, cfg=cfg)
     assert [r.model_3d_key for r in rows] == [f"{BASE}/standard/cutout/sentas/{A}.webp", None, None]
     assert [r.standard_version for r in rows] == ["m1 w1 s1 c1 t1+j1", "m1 w1 s1 c1", None]
     assert [r.standard_photo for r in rows] == [True, True, False]

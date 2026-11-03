@@ -68,7 +68,9 @@ def test_the_image_stage_keeps_each_product_s_own_photos_before_the_standardised
     monkeypatch.setattr(images, "_load_standard_views", lambda cfg: {"main": {A: "m"}, "white": {A: "w"}})
     monkeypatch.setattr(images, "_link_from_manifest", lambda rows, cfg, stats: None)
     row = CanonicalRow(src_site="sentas", surrogate_key="1", format_value="Slab", image_keys=list(own))
-    images.run([row], cfg=type("Cfg", (), {"mode": "passthrough"})())
+    cfg = type("Cfg", (), {"mode": "passthrough"})()
+    images.run([row], cfg=cfg)
+    images.link_standard([row], [row], cfg=cfg)
     assert [u.split("/products/")[1] for u in row.image_keys] == [f"standard/main/sentas/{A}.jpg", f"standard/white/sentas/{A}.jpg"]
     assert row.own_photo_keys == own
 

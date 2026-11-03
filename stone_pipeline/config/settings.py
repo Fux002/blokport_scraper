@@ -1047,6 +1047,19 @@ class STANDARDISE:
     FINISH_SECONDS = 5400
     LOCK_HEARTBEAT_SECONDS = 300       # the run lock is rewritten this often while the process runs (its sign of life)
     SPEND_DIR = "spend"                # <env>/<TEST_PREFIX>/<this>/<YYYY-MM>/<run id>.json: each run's spend of the month
+    # The listings the owner removed on the hidden-listings page (deploy.standardise_decisions): <env>/<TEST_PREFIX>/<this>/
+    # <SKU>.json each (percent-encoded), per environment and outside the run tags (a removal is about the listing, not a
+    # run's results). The process never works on them and the image stage gives them no standardised photo, so they stay
+    # hidden with the existing reason 'no_photo' (a new inventory reason needs Blokport's agreement); the record keeps why.
+    REMOVED_DIR = "removed"
+    REMOVED_REASON = "owner_removed"
+    # The owner's photo choice per listing (deploy.standardise_decisions): <env>/<TEST_PREFIX>/<CLEAN_TAG>/<this>/<SKU>.json
+    # (percent-encoded) = {tag, sha, at, listing, decided_on}; it names a result of the process's tags, so it moves with
+    # them (a tag migration copies these records with the choice records).
+    OWNER_DIR = "owner"
+    # A photo listings of several varieties or finishes show is never chosen by itself (index.shared_photos): the reason
+    # the review list gives for it.
+    CONFLICT_REASON = "photo_conflict"
     JOB_PREFIX = "photos-"             # the process's Batch jobs: <this><run id>-..., so a later run finds what one left
     # The GPU's share of the month's budget: a job's running time at this price per vCPU-hour (g4dn.xlarge on demand in
     # eu-west-1, about 0.59 USD/h for its 4 vCPUs). An instance's boot before its first job is not counted.
