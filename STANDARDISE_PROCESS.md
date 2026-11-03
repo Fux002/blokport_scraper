@@ -50,8 +50,12 @@ higher JUDGE_MAX, a new clean instruction version) reaches it by itself.
 ## A whole slab before a close-up (the 3D slab)
 
 A result is a whole slab when its run saved `<sha>.slab.png`: a single slab, or an open book, whose slab is one of its
-two halves (each half is a whole real slab: the one with more stone in its outline, the left on a tie; its close view
-is made from that half too). Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
+two halves (each half is a whole real slab: the one with more stone in its outline as the layout draws it, the left on
+a tie; its close view is made from that half too). Which slab it is, is recorded beside it (`<sha>.slab.json`, written
+just before the slab), so a close-only run makes the close-up of that same half, never choosing again. A result made
+before that record existed is decided against the slab.png it saved: the one slab found now its size as drawn and
+showing its stone (`CLOSEUP_SLAB_*`); when none does, or both halves of an open book do, it gets no close-up and the
+reason is recorded, never a guess. Publish makes the 3D slab from it. A close-up shows only part of a slab: no slab.png, no
 close view, no 3D.
 
 A slab listing prefers a whole slab, within the same JUDGE_MAX candidates and their order. Once a close-up has passed
@@ -141,6 +145,15 @@ vendor's slab of that variety, never from its own photos (warehouse racks) and n
 The process is a stage of the config runner (`photos`), chained only after a successful full produce (`all`, the
 owner's Run) when `SCRAPER_STANDARDISE_AUTO` is on, never after `republish` or `catalog`. It can also be started on its
 own: `POST /config/v1/run {"stage": "photos"}`. Nothing starts it otherwise (no schedule).
+
+When the close-up rule changes (`STANDARDISE.CLOSEUP_VERSION`), the chosen photos' close-ups are made again by a
+close-only photos run, an operator's action (no UI button): `POST /config/v1/run {"stage": "photos", "close_only": true}`.
+It is a photos run like any other (the run slot, giving way to the owner's Publish, a run record with `close_only: true`);
+the runner alone tells the process it is close-only (`SCRAPER_STANDARDISE_CLOSE_ONLY` in that run's environment only). It
+holds the same lock, budget, work window and run id, makes one close-only GPU job per slice of the chosen photos whose
+close-up is not made yet (`deploy.standardise_close`) instead of steps 1-7, then publishes and relinks as any run (the
+owner's decisions and the stored conflict set read the same way, so only the conflict photos the owner assigned are
+published); its summary is `close-summary.json`, so the photos run's `summary.json` stays.
 
 The owner's Publish is never blocked: any other stage asked for while a photos run holds the run slot (Blokport's
 Publish button runs a republish) stops the photos run cleanly (the SIGTERM path below) and starts at once; the request
@@ -250,7 +263,8 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 | GPU_VCPU_HOUR_USD | `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` | 0.147 (default) |
 | WORK_SECONDS | `SCRAPER_STANDARDISE_WORK_SECONDS` | 7200 (default) |
 | (job target) | `SCRAPER_GPU_QUEUE`, `SCRAPER_STANDARDISE_JOBDEF` | from the gpu_enhance module |
-| (hosted key) | `FAL_KEY` | already injected in both |
+| (hosted key) | `FAL_KEY` | already injected in both (not needed by a close-only run) |
+| CLOSE_ONLY | `SCRAPER_STANDARDISE_CLOSE_ONLY` | never set on the svc: the runner sets it per photos run (`close_only`) |
 
 ## Failure modes
 

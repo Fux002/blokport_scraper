@@ -666,9 +666,23 @@ def test_completing_an_open_book_adds_its_close_view_then_its_slab_and_leaves_wh
     s3 = _Written(_open_book())
     half = (np.zeros((20, 30, 3), np.uint8), np.ones((20, 30), np.float32))
     img = np.zeros((20, 30, 3), np.uint8)
-    res = Result(kind="open book", images={"main": img, "white": img, "studio": img, "close": img}, slab=half)
+    res = Result(kind="open book", images={"main": img, "white": img, "studio": img, "close": img}, slab=half, chosen=(1, 2))
     assert src.complete(s3, GPU, A, res) == "completed"
-    assert s3.written == [f"{GPU}{A}.close.jpg", f"{GPU}{A}.slab.png"]          # the slab last: the result is complete
+    # the slab last: the result is complete; which half it is, beside it
+    assert s3.written == [f"{GPU}{A}.close.jpg", f"{GPU}{A}.slab.json", f"{GPU}{A}.slab.png"]
+    assert json.loads(s3.objects[f"{GPU}{A}.slab.json"]) == {"index": 1, "of": 2}
+
+
+def test_a_new_whole_slab_result_records_which_slab_it_is_before_its_slab_and_its_views(monkeypatch):
+    import numpy as np
+    from stone_pipeline.standardise.photo import Result
+    s3 = _Slice({})
+    img = np.zeros((20, 30, 3), np.uint8)
+    book = lambda *a, **k: Result(kind="open book", images={"main": img, "white": img}, slab=(img, np.ones((20, 30), np.float32)),
+                                  chosen=(0, 2))
+    assert _completing(monkeypatch, s3, book) == 0
+    assert [k for k in s3.written if A in k] == [f"{GPU}{A}.slab.json", f"{GPU}{A}.slab.png", f"{GPU}{A}.white.jpg", f"{GPU}{A}.main.jpg"]
+    assert json.loads(s3.objects[f"{GPU}{A}.slab.json"]) == {"index": 0, "of": 2}
 
 
 @pytest.mark.parametrize("res", ["close-up", "held"])
@@ -707,12 +721,13 @@ def _completing(monkeypatch, s3, standardise):
     from deploy import standardise_source as src
     monkeypatch.setenv("SRC", "sentas")
     monkeypatch.setenv("RUN_TAG", "v9")
+    monkeypatch.setenv("WATERMARKED", "false")
     monkeypatch.setattr(src.boto3, "client", lambda *a, **k: s3)
     monkeypatch.setattr(src, "sheet_photos", lambda client: {A: {"source": "sentas", "key": "k", "format": "slab", "size": None}})
     monkeypatch.setattr(src, "_photo_keys", lambda client, s, photos: [f"dev/products/scraped/sentas/{A}.jpg"])
-    monkeypatch.setattr(src.models, "load", lambda survey_only: None)
+    monkeypatch.setattr(src.models, "load", lambda need: None)
     monkeypatch.setattr(src, "_get", lambda client, key: b"jpg")
-    monkeypatch.setattr(src.photo, "decode", lambda data: np.zeros((20, 30, 3), np.uint8))
+    monkeypatch.setattr(src.photo, "read", lambda data: np.zeros((20, 30, 3), np.uint8))
     monkeypatch.setattr(src.photo, "standardise", standardise)
     return src.main()
 
@@ -736,7 +751,8 @@ def test_a_completion_cut_short_by_a_passing_storage_error_leaves_no_half_and_is
     s3 = _Slice(_open_book(), failing={f"{GPU}{A}.slab.png": slow})
     img = np.zeros((20, 30, 3), np.uint8)
     half = (img, np.ones((20, 30), np.float32))
-    book = lambda *a, **k: Result(kind="open book", images={"main": img, "white": img, "studio": img, "close": img}, slab=half)
+    book = lambda *a, **k: Result(kind="open book", images={"main": img, "white": img, "studio": img, "close": img}, slab=half,
+                                  chosen=(0, 2))
     assert _completing(monkeypatch, s3, book) == 0
     assert f"{GPU}{A}.close.jpg" not in s3.objects                                   # never published half done
     assert f"{GPU}noslab/{A}.json" not in s3.objects and f"{GPU}held/{A}.json" not in s3.objects   # the next run retries
@@ -747,11 +763,11 @@ def test_a_completion_cut_short_removes_its_close_view_only_while_the_slab_is_mi
     from deploy import standardise_source as src
     from stone_pipeline.standardise.photo import Result
     img = np.zeros((20, 30, 3), np.uint8)
-    res = Result(kind="open book", images={"close": img}, slab=(img, np.ones((20, 30), np.float32)))
+    res = Result(kind="open book", images={"close": img}, slab=(img, np.ones((20, 30), np.float32)), chosen=(0, 2))
     s3 = _Slice(_open_book(), failing={f"{GPU}{A}.slab.png": TimeoutError("lost")})
     with pytest.raises(TimeoutError):
         src.complete(s3, GPU, A, res)
-    assert s3.written == [f"{GPU}{A}.close.jpg", f"delete {GPU}{A}.close.jpg"]
+    assert s3.written == [f"{GPU}{A}.close.jpg", f"{GPU}{A}.slab.json", f"delete {GPU}{A}.close.jpg"]
 
 
 # --- the owner's choice (deploy.standardise_decisions) and shared photos -------------------------------------------

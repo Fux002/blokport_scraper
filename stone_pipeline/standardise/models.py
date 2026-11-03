@@ -50,13 +50,21 @@ def _inpaint(dev):
     return StableDiffusionXLInpaintPipeline.from_pretrained(**where, vae=vae, torch_dtype=torch.float16, variant="fp16", use_safetensors=True).to(dev)
 
 
-def load(survey_only=False):
-    """All the models; survey_only: just what classifying a photo needs (cheap, no eraser, upscaler or inpainting)."""
+NEEDS = ("all", "survey", "close")
+
+
+def load(need="all"):
+    """The models a job needs: "all" to standardise; "survey" just what classifying a photo needs (no eraser, upscaler or
+    inpainting); "close" just what squaring a slab needs, for its close-up (no classifier, upscaler or inpainting)."""
+    if need not in NEEDS:
+        raise ValueError(f"unknown model set {need!r} (expected one of {NEEDS})")
     from simple_lama_inpainting import SimpleLama
     dev = device()
     seg = marks.load_sam()
     det = outline.load_detector(seg[2])
+    if need == "close":
+        return Models(seg, det, SimpleLama(), None, None, None)
     clip = _clip(dev)
-    if survey_only:
+    if need == "survey":
         return Models(seg, det, None, None, clip, None)
     return Models(seg, det, SimpleLama(), _esrgan(), clip, _inpaint(dev))

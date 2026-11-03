@@ -1,5 +1,7 @@
 """The standardiser's rules, on synthetic images (no model, no GPU): the same canvas on every image, a room that cannot
 trace a vendor, real chips kept, flares told from veins, a logo removed only when it can be trusted."""
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
@@ -216,10 +218,384 @@ def test_only_a_sure_pile_hangar_or_interior_is_skipped(kind, conf, skipped):
     assert kinds.is_skipped(kind, conf) is skipped
 
 
+def _sharp_stone(h, w, seed=1, contrast=1.0):
+    """A flat slab as a sharp photo shows it: sharp meandering veins (the zero crossings of smooth noise: never straight,
+    so no staircase repeats as an enlargement's pattern does) and speckle, uneven across it (real structure, unlike an
+    even grain, which cannot be told from noise); contrast < 1: a calm stone."""
+    rng = np.random.default_rng(seed)
+    field = cv2.GaussianBlur(rng.standard_normal((h, w)).astype(np.float32), (0, 0), 12)
+    marks = (np.abs(field) < 0.04 * field.std()).astype(np.float32) * 70.0
+    marks += (rng.random((h, w)) < 0.03 * np.linspace(0.1, 1, w)[None, :]) * 50.0     # speckle, denser to the right
+    rgb = np.clip(_stone(h, w, seed).astype(np.float32) - contrast * marks[..., None], 0, 255).astype(np.uint8)
+    return rgb, np.ones((h, w), np.float32)
+
+
+@pytest.mark.parametrize("w,h,density", [(1400, 860, 1.0), (1500, 920, 1.0), (2000, 1230, 1.0), (2600, 1600, 1.0),
+                                         (4000, 2450, 1.0), (3000, 900, 1.0), (4000, 2450, 0.6), (2600, 1600, 1.4),
+                                         (6000, 4000, 1.0)])
+def test_a_close_up_never_holds_more_pixels_than_the_photo_has_there(w, h, density):
+    box = views.closeup_box(w, h, density)
+    if box is not None:
+        x, y, cw, ch = box
+        (native_w, native_h), (out_w, out_h) = views.closeup_size(cw, density)
+        assert native_w <= cw * density * C.CLOSEUP_MAX_ENLARGE and native_h <= ch * density * C.CLOSEUP_MAX_ENLARGE  # 1:1
+        assert out_w <= native_w and out_h <= native_h                                                         # never larger
+        assert C.CLOSEUP_MIN_WIDTH <= out_w <= C.OUT_W and abs(out_w / out_h - C.OUT_W / C.OUT_H) < 0.01     # the canvas shape
+        assert cw <= C.CLOSEUP_MAX_SHARE * w and ch <= C.CLOSEUP_MAX_SHARE * h + 1
+        assert x >= 0 and y >= 0 and x + cw <= w and y + ch <= h
+
+
+def test_a_lower_resolution_slab_gets_a_wider_crop_never_an_enlarged_one():
+    big, small = views.closeup_box(4000, 2450), views.closeup_box(2000, 1230)
+    assert big[2] == round(C.CLOSEUP_SHARE * 4000)                       # enough pixels: the tightest close-up
+    assert small[2] / 2000 > big[2] / 4000                              # fewer pixels: more of the slab ...
+    assert views.closeup_size(small[2])[1][0] == small[2]               # ... stored at its own pixels, 1:1
+
+
+def test_a_close_up_with_more_pixels_than_the_canvas_is_made_smaller_to_it():
+    x, y, cw, ch = views.closeup_box(6000, 4000)
+    assert cw > C.OUT_W and views.closeup_size(cw) == ((cw, cw * C.OUT_H // C.OUT_W), (C.OUT_W, C.OUT_H))
+
+
+def test_a_close_up_made_smaller_to_the_canvas_shows_no_false_pattern(monkeypatch):
+    # Far more of the photo's pixels than the canvas holds (the crop 0.9 of a 4600 px slab: about 2x), with a grating finer
+    # than the stored close-up can show: made smaller properly it averages away; sampled without a filter it folds
+    # into broad false bands (moire).
+    monkeypatch.setattr(C, "CLOSEUP_SHARE", 0.9)
+    stone, _ = _sharp_stone(3000, 4600)
+    grating = (40 * np.sin(2 * np.pi * 0.48 * np.arange(4600, dtype=np.float32)))[None, :, None]
+    striped = np.clip(stone.astype(np.float32) + grating, 0, 255).astype(np.uint8)
+    plain, with_grating = (views.close_up(_frame_slab(layout.fit_working(p)), p) for p in (stone, striped))
+    assert plain.shape[1] == C.OUT_W
+    broad = lambda img: cv2.GaussianBlur(img.astype(np.float32), (0, 0), 3)
+    assert (broad(with_grating) - broad(plain)).std() < 3              # sampled without a filter: 21; area-filtered: 1
+
+
+def test_a_slab_stretched_by_its_squaring_needs_a_wider_crop():
+    plain, stretched = views.closeup_box(4000, 2450), views.closeup_box(4000, 2450, density=0.45)
+    assert stretched[2] > plain[2]
+    assert views.closeup_size(stretched[2], 0.45)[1][0] <= stretched[2] * 0.45     # never more than the photo's own pixels
+
+
+def test_the_photos_own_pixels_per_slab_pixel_come_from_the_squaring():
+    least = lambda to_slab, size: views._scales(to_slab, views._widest(size))[0]
+    assert abs(least(layout.scaling(0.5, 0.5), (1000, 600)) - 2.0) < 1e-6           # squared smaller: 2 photo px each
+    assert abs(least(layout.scaling(1.6, 1.0), (1600, 600)) - 1 / 1.6) < 1e-6        # stretched across: fewer
+    tilt = cv2.getPerspectiveTransform(np.float32([[0, 0], [999, 0], [999, 599], [0, 599]]),
+                                       np.float32([[0, 0], [999, 60], [999, 540], [0, 599]]))     # the far side shortened
+    lo, hi = views._scales(tilt, views._widest((1000, 600)))
+    assert lo < 1 <= hi                                                 # the near side keeps its pixels, the far side fewer
+
+
+def test_a_near_frontal_shot_s_close_up_keeps_its_finest_detail(monkeypatch):
+    # A 12 px skew: the near and far sides differ by about 1%, far too little to fold any stone into a false pattern.
+    # Squared straight to its stored size, as a square-on shot is; a reduce from a slightly denser grid would act as a
+    # blur of about 2 px and take a fifth of the finest detail.
+    monkeypatch.setattr(views, "fine_detail", lambda rgb, block=C.JPEG_BLOCK: 1.0)     # the bar is not what is tested
+    full, _ = _sharp_stone(2000, 3000)
+    h, w = full.shape[:2]
+
+    def close(skew):
+        q = np.float32([[20 + skew, 15], [w - 21 - skew, 15], [w - 21, h - 16], [20, h - 16]])
+        work = layout.fit_working(full)
+        flat, H = outline._flat(work, _corners_in_work_copy(q, w / work.shape[1]))
+        return views.close_up(layout.Flat(flat, np.ones(flat.shape[:2], np.float32), H, work), full)
+
+    def finest(img):
+        g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        return float((g - cv2.GaussianBlur(g, (0, 0), 1.0)).std())
+    square_on, skewed = close(0), close(12)
+    assert skewed.shape == square_on.shape and finest(skewed) > 0.97 * finest(square_on)
+
+
+def test_a_steep_shot_s_close_up_shows_no_false_pattern_from_its_near_side():
+    # The far edge half as tall as the near one: the crop is stored at the far side's pixels, so the near side has about
+    # twice as many as it keeps. A grating finer than the stored close-up can show, squared straight to that size, folds
+    # into broad false bands there; squared at the near side's own pixels, then area-filtered, it averages away.
+    h, w = 3200, 4800
+    stone, _ = _sharp_stone(h, w)
+    grating = (40 * np.sin(2 * np.pi * 0.48 * np.arange(w, dtype=np.float32)))[None, :, None]
+    striped = np.clip(stone.astype(np.float32) + grating, 0, 255).astype(np.uint8)
+    q = np.float32([[40, 40], [w - 40, 820], [w - 40, h - 820], [40, h - 40]])
+
+    def close(full):
+        work = layout.fit_working(full)
+        flat, H = outline._flat(work, _corners_in_work_copy(q, full.shape[1] / work.shape[1]))
+        return views.close_up(layout.Flat(flat, np.ones(flat.shape[:2], np.float32), H, work), full)
+    plain, with_grating = close(stone), close(striped)
+    assert plain.shape[1] >= C.CLOSEUP_MIN_WIDTH
+    broad = lambda img: cv2.GaussianBlur(img.astype(np.float32), (0, 0), 3)
+    assert (broad(with_grating) - broad(plain)).std() < 3              # squared at the far side's pixels: 9.1; at the near: 0.4
+
+
+def test_a_slab_stretched_past_its_pixels_by_a_steep_shot_gets_no_close_up():
+    work, _ = _sharp_stone(1300, 2000)
+    stretch = layout.scaling(2.0, 1.0)                                  # each photo pixel already two slab pixels wide
+    flat = cv2.warpPerspective(work, stretch, (4000, 1300), flags=cv2.INTER_CUBIC)
+    assert views.close_up(layout.Flat(flat, np.ones((1300, 4000), np.float32), stretch, work), work) is None
+
+
+def _jpeg(rgb, q):
+    return cv2.imdecode(cv2.imencode(".jpg", rgb, [cv2.IMWRITE_JPEG_QUALITY, q])[1], cv2.IMREAD_UNCHANGED)
+
+
+def _enlarged(rgb, factor, interp):
+    """rgb as a vendor publishes a photo enlarged `factor` times: made smaller, enlarged back."""
+    h, w = rgb.shape[:2]
+    return cv2.resize(cv2.resize(rgb, (round(w / factor), round(h / factor)), interpolation=cv2.INTER_AREA), (w, h), interpolation=interp)
+
+
+def _unsharp(rgb):
+    return np.clip(rgb * 2.0 - cv2.GaussianBlur(rgb, (0, 0), 1.0).astype(np.float32), 0, 255).astype(np.uint8)
+
+
+def _pil_unsharp(rgb):
+    from PIL import Image, ImageFilter
+    return np.asarray(Image.fromarray(rgb).filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=0)))
+
+
+def _noisy(rgb):
+    return np.clip(rgb + np.random.default_rng(0).normal(0, 6, rgb.shape), 0, 255).astype(np.uint8)
+
+
+@pytest.mark.parametrize("fooled", [lambda rgb: _jpeg(_enlarged(rgb, 2.0, cv2.INTER_CUBIC), 60),
+                                    lambda rgb: _unsharp(_jpeg(_enlarged(rgb, 2.0, cv2.INTER_CUBIC), 60)),
+                                    lambda rgb: _noisy(_unsharp(_jpeg(_enlarged(rgb, 2.0, cv2.INTER_CUBIC), 60)))],
+                         ids=["enlarged 2x + jpeg60", "+ unsharp", "+ noise"])
+def test_a_photo_enlarged_then_sharpened_or_noised_gets_no_close_up(fooled):
+    sharp, _ = _sharp_stone(1300, 2000)
+    assert views.close_up(*_photo_slab_of(sharp)) is not None
+    assert views.close_up(*_photo_slab_of(fooled(sharp))) is None
+
+
+@pytest.mark.parametrize("q", [60, 85])
+@pytest.mark.parametrize("sharpened", [False, True], ids=["plain", "unsharp"])
+@pytest.mark.parametrize("interp", [cv2.INTER_LINEAR, cv2.INTER_CUBIC], ids=["bilinear", "cubic"])
+def test_a_photo_enlarged_twice_over_is_too_soft_to_show_at_1_to_1(interp, sharpened, q):
+    sharp, _ = _sharp_stone(1100, 1700)
+    assert views.fine_detail(sharp) >= C.CLOSEUP_DETAIL_MIN
+    big = _enlarged(sharp, 2.0, interp)
+    assert views.fine_detail(_jpeg(_pil_unsharp(big) if sharpened else big, q)) < C.CLOSEUP_DETAIL_MIN
+
+
+@pytest.mark.parametrize("name,gets_one", [("sharp", True),                 # mar-1a7b77cb: detail 0.98
+                                           ("near_bar_sharp", True),        # pol-1eb05952: 0.41, just over the bar
+                                           ("near_bar_soft", False)])       # the same photo elsewhere: 0.39, just under it
+def test_real_photos_near_the_bar_are_decided_as_their_pixels_say(name, gets_one):
+    assert (views.fine_detail(_fixture(name)) >= C.CLOSEUP_DETAIL_MIN) is gets_one
+
+
+@pytest.mark.parametrize("interp", [cv2.INTER_LINEAR, cv2.INTER_CUBIC], ids=["bilinear", "cubic"])
+def test_a_real_sharp_photo_enlarged_twice_over_is_too_soft_to_show_at_1_to_1(interp):
+    assert views.fine_detail(_jpeg(_enlarged(_fixture("sharp"), 2.0, interp), 85)) < C.CLOSEUP_DETAIL_MIN
+
+
+def test_a_sharp_calm_stone_keeps_its_close_up():
+    calm, _ = _sharp_stone(1300, 2000, contrast=0.2)
+    assert views.close_up(*_photo_slab_of(calm)) is not None
+
+
+def test_noise_spread_evenly_is_no_detail():
+    noise = np.random.default_rng(2).integers(0, 255, (683, 1024, 3), dtype=np.uint8)
+    assert views.fine_detail(noise) < 0.1 * C.CLOSEUP_DETAIL_MIN
+
+
+def test_a_stone_smoothed_to_its_8_bit_steps_or_blank_has_no_detail():
+    smoothed = cv2.GaussianBlur(_sharp_stone(1300, 2000)[0], (0, 0), 2.7)
+    assert views.fine_detail(smoothed) == 0.0
+    assert views.fine_detail(np.full((683, 1024, 3), 128, np.uint8)) == 0.0
+    sharp, _ = _sharp_stone(683, 1024)
+    assert abs(views.fine_detail(_noisy(sharp)) - views.fine_detail(sharp)) < 0.25 * views.fine_detail(sharp)
+
+
+def _photo_slab_of(rgb):
+    return layout.Flat(rgb, np.ones(rgb.shape[:2], np.float32), np.eye(3), rgb), rgb
+
+
+def _photo_slab(h, w):
+    """(a slab filling a photo no larger than the work copy, the photo): squared as it is."""
+    rgb, alpha = _sharp_stone(h, w)
+    return layout.Flat(rgb, alpha, np.eye(3), rgb), rgb
+
+
+def test_a_slab_with_too_few_pixels_gets_no_close_up():
+    assert views.closeup_box(1000, 620) is None                         # even its widest crop holds too few of its pixels
+    assert views.close_up(*_photo_slab(620, 1000)) is None
+
+
+def test_a_soft_slab_gets_no_close_up():
+    flat, full = _photo_slab(1100, 1700)
+    assert views.close_up(flat, full) is not None
+    soft = cv2.GaussianBlur(full, (0, 0), 1.5)                          # its fine detail is gone: none is invented
+    assert views.close_up(layout.Flat(soft, flat.alpha, flat.homography, soft), soft) is None
+
+
+def test_a_sharp_slab_gives_a_close_up_at_its_own_pixels():
+    x, y, cw, ch = views.closeup_box(1700, 1100)
+    _, (out_w, out_h) = views.closeup_size(cw)
+    assert views.close_up(*_photo_slab(1100, 1700)).shape == (out_h, out_w, 3) and out_w == cw
+
+
 def test_a_close_up_is_only_of_real_stone():
-    slab, alpha = _slab(800, 1400)
-    alpha[350:450, 650:750] = 0
-    assert views.close_up(slab, alpha, None) is None
+    flat, full = _photo_slab(1100, 1700)
+    flat.alpha[500:600, 800:900] = 0
+    assert views.close_up(flat, full) is None
+
+
+def test_a_close_up_takes_no_model_only_the_photos_own_pixels():
+    import inspect
+    assert list(inspect.signature(views.close_up).parameters) == ["flat", "full", "edits"]
+
+
+def _corners_in_work_copy(q, s):
+    """Corners on the full photo, on the work copy s times smaller (pixel centres, as cv2.resize maps them)."""
+    return ((q + 0.5) / s - 0.5).astype(np.float32)
+
+
+def _like(img, other):
+    """img at other's size, to compare two close-ups whose boxes differ by a rounded pixel."""
+    return cv2.resize(img, other.shape[1::-1], interpolation=cv2.INTER_AREA)
+
+
+def test_a_close_up_takes_the_slab_from_the_full_resolution_photo(monkeypatch):
+    full, _ = _sharp_stone(1950, 3000)                                       # 1.5 x the work copy
+    work = layout.fit_working(full)
+    q = np.float32([[150, 120], [2850, 180], [2880, 1830], [120, 1800]])
+    flat, H = outline._flat(work, _corners_in_work_copy(q, full.shape[1] / work.shape[1]))
+    got = views.close_up(layout.Flat(flat, np.ones(flat.shape[:2], np.float32), H, work), full)
+    monkeypatch.setattr(C, "WORK_LONG_EDGE", 10_000)                    # the same slab squared on the full photo itself
+    big, Hf = outline._flat(full, q)
+    want = views.close_up(layout.Flat(big, np.ones(big.shape[:2], np.float32), Hf, full), full)
+    blur = lambda img: cv2.GaussianBlur(img.astype(np.float32), (0, 0), 3)
+    assert abs(got.shape[1] - want.shape[1]) <= 2 and np.abs(blur(got) - blur(_like(want, got))).mean() < 2
+
+
+def test_a_close_up_is_lit_as_the_whole_slab_is():
+    full, _ = _sharp_stone(1950, 3000)
+    full = np.clip(full * np.linspace(0.7, 1.2, 3000, dtype=np.float32)[None, :, None] * (1.05, 1.0, 0.92), 0, 255).astype(np.uint8)
+    work = layout.fit_working(full)
+    got = views.close_up(_frame_slab(work), full)
+    x, y, cw, ch = views.closeup_box(3000, 1950)
+    want = marks.even_light(full, np.ones(full.shape[:2], np.uint8))[y:y + ch, x:x + cw]
+    blur = lambda img: cv2.GaussianBlur(img.astype(np.float32), (0, 0), 4)
+    assert np.abs(blur(got) - blur(_like(want, got))).mean() < 2
+
+
+def _frame_slab(work):
+    """The work copy's whole frame as the slab."""
+    return layout.Flat(work, np.ones(work.shape[:2], np.float32), np.eye(3), work)
+
+
+def test_a_photo_soft_at_1_to_1_but_sharp_made_smaller_gets_its_close_up_from_the_work_copy():
+    # Shot at 4000 px and softened (a phone's processing): too soft at 1:1, its 2000 px copy sharp.
+    full = cv2.GaussianBlur(_sharp_stone(2600, 4000)[0], (0, 0), 1.0)                # detail 0.09 at 1:1, 0.48 at 2000 px
+    flat = _frame_slab(layout.fit_working(full))
+    assert views.fine_detail(full[650:1950, 1000:3000]) < C.CLOSEUP_DETAIL_MIN
+    got = views.close_up(flat, full)
+    assert got is not None
+    assert np.array_equal(got, views.close_up(flat, flat.work))           # the work copy's close-up, same rules
+
+
+def test_a_sharp_full_resolution_photo_keeps_its_full_resolution_close_up():
+    full, _ = _sharp_stone(2600, 4000)
+    flat = _frame_slab(layout.fit_working(full))
+    assert views.close_up(flat, full).shape[1] > views.close_up(flat, flat.work).shape[1]   # more of its own pixels
+
+
+def test_a_photo_soft_at_both_sizes_gets_no_close_up():
+    full = cv2.GaussianBlur(_sharp_stone(1950, 3000)[0], (0, 0), 4)
+    assert views.close_up(_frame_slab(layout.fit_working(full)), full) is None
+
+
+def _labelled(rows, cols):
+    """(the photo with a magenta label at rows x cols of its middle, the slab of its work copy with the label erased)."""
+    stone, _ = _sharp_stone(1950, 3000)
+    full = stone.copy()
+    full[rows, cols] = (255, 0, 255)
+    return full, _frame_slab(layout.fit_working(stone))
+
+
+def test_what_the_work_copy_erased_stays_erased_in_the_full_resolution_close_up():
+    full, flat = _labelled(slice(960, 990), slice(1470, 1500))         # a small label: well under CLOSEUP_EDIT_MAX of the crop
+    out = views.close_up(flat, full)
+    assert out is not None
+    assert not ((out[..., 0] > 180) & (out[..., 1] < 90) & (out[..., 2] > 180)).any()
+
+
+def test_a_close_up_mostly_erased_or_filled_is_none():
+    full, flat = _labelled(slice(900, 1050), slice(1350, 1650))        # a logo or card: a patch the eraser made up
+    assert views.close_up(flat, full) is None
+
+
+def test_a_close_up_of_a_photo_a_model_cleaned_or_retouched_there_is_none():
+    full, _ = _sharp_stone(1950, 3000)
+    flat = _frame_slab(layout.fit_working(full))
+    assert views.close_up(flat, full) is not None
+    assert views.close_up(flat, full, edits=np.ones(full.shape[:2], np.uint8)) is None          # a hosted model's cleaned copy
+    fills = np.zeros(full.shape[:2], np.uint8)
+    fills[800:1150, 1200:1800] = 1                                                             # a retouch's fill in the middle
+    assert views.close_up(flat, full, edits=fills) is None
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "closeup"
+
+
+def _fixture(name):
+    """A real photo's crop (its own pixels, 8 px aligned so its JPEG grid stays on its axes), RGB."""
+    return cv2.cvtColor(cv2.imread(str(FIXTURES / f"{name}.png")), cv2.COLOR_BGR2RGB)
+
+
+def test_a_colourful_stone_re_encoded_with_nothing_filled_has_no_fills():
+    from stone_pipeline.standardise import photo
+    stone = _fixture("varsha_colour_edges")             # var-c7adcb37: the old rule flagged 3.8% of this crop
+    recoded = _jpeg(stone, 95)                          # as the retouch stores its copy: q95, colour subsampled 4:2:0
+    assert not photo.retouch_fills(recoded, stone).any()
+
+
+def test_a_retouchs_fills_are_told_from_its_jpeg():
+    from stone_pipeline.standardise import photo
+    made_from, _ = _sharp_stone(600, 900)
+    retouched = made_from.copy()
+    retouched[200:300, 300:450] = _stone(100, 150, seed=7, base=90, var=30)    # filled with other stone
+    retouched = cv2.imdecode(cv2.imencode(".jpg", retouched, [cv2.IMWRITE_JPEG_QUALITY, 95])[1], cv2.IMREAD_UNCHANGED)
+    fills = photo.retouch_fills(retouched, made_from)
+    assert fills[210:290, 310:440].all() and fills[:150].sum() == 0 and fills[400:].sum() == 0
+    assert not photo.retouch_fills(retouched[50:550, 50:850], made_from).any()   # cropped clear of its marks: nothing filled
+
+
+class _Esr:
+    """Stands in for Real-ESRGAN: 4x, plain cubic."""
+    def enhance(self, bgr):
+        return cv2.resize(bgr, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+
+
+def test_the_close_up_leaves_every_other_view_as_it_was(monkeypatch):
+    from stone_pipeline.standardise import models as standardise_models, photo
+    full, alpha = _sharp_stone(1100, 1700)                   # pixels enough for a close-up, still enlarged by the layout
+    flats = [layout.Flat(full, alpha, np.eye(3), full)]
+    monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.99))
+    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, seg, det, lama, size=None: flats)
+    monkeypatch.setattr(blend, "blend", lambda img, solid, stand, pipe, seed: img)
+    m = standardise_models.Models(seg=None, det=None, lama=None, esr=_Esr(), clip=None, inpaint=None)
+    asked = []                                          # where the start photo is not as shot: asked only for a close-up
+    plain = photo.standardise(full, fmt="slab", key="p", models=m, edits=lambda: asked.append("plain"))
+    extra = photo.standardise(full, fmt="slab", key="p", models=m, extra_views=True, edits=lambda: asked.append("extra"))
+    assert asked == ["extra"]
+
+    def original_gone():
+        raise photo.NoCloseUp("its input is missing: scraped/x.jpg")
+    unread = photo.standardise(full, fmt="slab", key="p", models=m, extra_views=True, edits=original_gone)
+    assert "close" not in unread.images and all(np.array_equal(unread.images[k], plain.images[k]) for k in plain.images)
+    slabs = layout.enlarged(flats, m.esr)
+    assert slabs[0][0].shape[1] > full.shape[1]
+    assert "close" in extra.images and "close" not in plain.images
+    for name in ("main", "white", "studio"):
+        assert np.array_equal(plain.images[name], extra.images[name])
+    assert np.array_equal(extra.images["white"], layout.on_white(slabs))
+    assert all(np.array_equal(a, b) for a, b in zip(extra.slab, slabs[0]))
+    # The close-only run makes the same close-up from the same photo.
+    assert np.array_equal(photo.close_view(full, size=None, models=m, chosen=extra.chosen, saved=None), extra.images["close"])
+
 
 
 SHEET = """Product Handle,Product Length,Product Width,Product Category 1,Front Image,Product Image 1
@@ -851,20 +1227,22 @@ def test_a_whole_slab_framed_tightly_is_never_cropped_either():
 
 
 # --- the 3D slab of a photo -------------------------------------------------------------------------------------------
-def _standardised(monkeypatch, slabs, kind_found=None):
+def _standardised(monkeypatch, slabs, kind_found=None, drawn=None):
     """photo.standardise on found slabs (or a close-up), the models and the expensive steps stood in: (its result, the
-    slabs the close view was made from)."""
+    slabs the close view was made from). drawn: the slabs as enlarged draws them; the found ones when not given."""
     from stone_pipeline.standardise import closeup, photo
     monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.9))
-    monkeypatch.setattr(layout, "squared_slabs", lambda rgb, *m, size=None: slabs if kind_found is None else "no outline")
+    flats = None if slabs is None else [layout.Flat(rgb, alpha, np.eye(3), rgb) for rgb, alpha in slabs]
+    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats if kind_found is None else "no outline")
+    monkeypatch.setattr(layout, "enlarged", lambda flats, esr: slabs if drawn is None else drawn)
     monkeypatch.setattr(closeup, "closeup", lambda rgb, size, *m: kind_found)
     monkeypatch.setattr(photo, "_finished", lambda s, key, models, seed: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
     monkeypatch.setattr(studio, "place", lambda s: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
     closed = []                                                      # the slabs given to the close view, by identity
-    monkeypatch.setattr(views, "close_up", lambda slab, alpha, esr: closed.append((id(slab), id(alpha))) or np.ones((4, 4, 3), np.uint8))
+    monkeypatch.setattr(views, "close_up", lambda flat, full, edits: closed.append((id(flat.rgb), id(flat.alpha))) or np.ones((4, 4, 3), np.uint8))
 
     class _Models:
-        clip, cleaners, esr = None, (None, None, None, None), None
+        clip, cleaners, esr, seg, det, lama = None, (None, None, None, None), None, None, None, None
     return photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models(), extra_views=True), closed
 
 
@@ -879,7 +1257,89 @@ def test_each_half_of_an_open_book_is_a_whole_slab_and_the_one_with_more_stone_g
 def test_of_two_equal_halves_the_left_is_taken(monkeypatch):
     left, right = _slab(80, 100), _slab(80, 100)
     res, closed = _standardised(monkeypatch, [left, right])
-    assert res.slab is left and closed == [(id(left[0]), id(left[1]))]
+    assert res.slab is left and closed == [(id(left[0]), id(left[1]))] and res.chosen == (0, 2)
+
+
+def _near_tie():
+    """An open book's two flat halves, near-equal: on the flat slabs the left has more stone (its outer edge part
+    chipped: 99.3 of 100 columns, the right's seam edge all gone: 99), but the right's loss lies in the strip the layout
+    trims off at the seam, so as drawn the right has more."""
+    left, right = np.ones((80, 100), np.float32), np.ones((80, 100), np.float32)
+    left[:, 0], right[:, 0] = 0.3, 0.0
+    return [layout.Flat(_stone(80, 100, seed), a, np.eye(3), None) for seed, a in ((1, left), (2, right))]
+
+
+def test_the_outlines_as_drawn_come_from_the_flat_slabs_alone_as_enlarged_draws_them():
+    from stone_pipeline.standardise import photo
+    big = [layout.Flat(_stone(1300, 2400), np.ones((1300, 2400), np.float32), np.eye(3), None)]   # drawn as it is
+    for flats in (_near_tie(), _near_tie()[:1], big):
+        drawn = layout.enlarged(flats, _Esr())
+        assert all(np.array_equal(a, b) for a, (_, b) in zip(layout.drawn_alphas(flats), drawn))
+    tie = _near_tie()
+    assert photo.whole_index([f.alpha for f in tie], "open book") == 0          # on the flat slabs: the left
+    assert photo.whole_index(layout.drawn_alphas(tie), "open book") == 1       # as drawn: the right
+
+
+def test_the_half_chosen_is_the_one_with_more_stone_as_drawn_and_its_choice_is_recorded(monkeypatch):
+    tie = _near_tie()
+    drawn = [(np.zeros(a.shape + (3,), np.uint8), a) for a in layout.drawn_alphas(tie)]
+    res, closed = _standardised(monkeypatch, [(f.rgb, f.alpha) for f in tie], drawn=drawn)
+    assert res.slab is drawn[1] and res.chosen == (1, 2)                       # the 3D slab: the right half as drawn
+    assert closed == [(id(tie[1].rgb), id(tie[1].alpha))]                      # its close-up from that same half
+
+
+def _close_view_of(monkeypatch, flats, chosen=None, saved=None):
+    from stone_pipeline.standardise import photo
+    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats)
+    monkeypatch.setattr(views, "close_up", lambda flat, full, edits: flat)
+
+    class _Models:
+        seg = det = lama = None
+    return photo.close_view(np.zeros((60, 90, 3), np.uint8), size=None, models=_Models(), chosen=chosen, saved=saved)
+
+
+def _saved(flats, i):
+    """What a run saved as <sha>.slab.png of slab i of these: as the layout drew it (enlarged, lit, the seam trimmed)."""
+    return layout.enlarged(flats, _Esr())[i]
+
+
+def test_the_close_only_run_takes_the_half_its_run_recorded_never_choosing_again(monkeypatch):
+    from stone_pipeline.standardise import photo
+    tie = _near_tie()
+    monkeypatch.setattr(layout, "drawn_alphas", lambda flats: pytest.fail("chose again"))
+    assert _close_view_of(monkeypatch, tie, (0, 2)) is tie[0]
+    assert _close_view_of(monkeypatch, tie, (1, 2)) is tie[1]
+    with pytest.raises(photo.NoCloseUp, match="2 slabs"):
+        _close_view_of(monkeypatch, tie[:1], (1, 2))                           # its run squared two, now one
+
+
+def test_an_unrecorded_open_book_gets_the_close_up_of_the_half_its_saved_slab_shows(monkeypatch):
+    tie = _near_tie()                                                          # the rule as drawn would take the right
+    assert _close_view_of(monkeypatch, tie, saved=_saved(tie, 0)) is tie[0]    # its run saved the left: the left
+    assert _close_view_of(monkeypatch, tie, saved=_saved(tie, 1)) is tie[1]
+    one = [layout.Flat(_stone(80, 200, 4), np.ones((80, 200), np.float32), np.eye(3), None)]
+    assert _close_view_of(monkeypatch, one, saved=_saved(one, 0)) is one[0]
+
+
+def test_an_unrecorded_single_slab_found_as_two_now_has_no_close_up(monkeypatch):
+    from stone_pipeline.standardise import photo
+    rgb = _stone(80, 200, 4)
+    one = [layout.Flat(rgb, np.ones((80, 200), np.float32), np.eye(3), None)]
+    two = [layout.Flat(np.ascontiguousarray(rgb[:, i:i + 100]), np.ones((80, 100), np.float32), np.eye(3), None) for i in (0, 100)]
+    with pytest.raises(photo.NoCloseUp, match="size"):
+        _close_view_of(monkeypatch, two, saved=_saved(one, 0))
+    with pytest.raises(photo.NoCloseUp, match="size"):                        # and an open book found as one slab
+        _close_view_of(monkeypatch, one, saved=_saved(two, 0))
+
+
+def test_an_unrecorded_result_is_never_given_a_half_its_saved_slab_does_not_tell(monkeypatch):
+    from stone_pipeline.standardise import photo
+    alike = [layout.Flat(_stone(80, 100, 1), np.ones((80, 100), np.float32), np.eye(3), None) for _ in "lr"]
+    with pytest.raises(photo.NoCloseUp, match="which"):                       # two halves alike: not told apart
+        _close_view_of(monkeypatch, alike, saved=_saved(alike, 0))
+    other = [layout.Flat(_stone(80, 100, 9), np.ones((80, 100), np.float32), np.eye(3), None) for _ in "lr"]
+    with pytest.raises(photo.NoCloseUp, match="stone"):                       # neither is the stone it saved
+        _close_view_of(monkeypatch, _near_tie(), saved=_saved(other, 0))
 
 
 def test_a_single_slab_keeps_its_own_slab_and_close_view(monkeypatch):

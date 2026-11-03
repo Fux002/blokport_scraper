@@ -1,14 +1,17 @@
 """One GPU round of a standardise run on AWS Batch: the listed photos of each source, in slices of RUN_SLICE, each slice a
-retouch job then a standardise job that starts when the retouch ended, both reading the slice's own fixed photo list
-(ONLY_KEY). The GPU pool's ceiling is raised for the round and always set back; a round that fails, times out or is
-stopped stops its jobs. Queue and job definition come from the
+retouch job then a standardise job that starts when the retouch ended (STANDARDISE_ROUND), or one close-only job
+(CLOSE_ROUND: deploy.standardise_close), every job reading the slice's own fixed photo list (ONLY_KEY). Both kinds share
+one path: sized to the month's budget, reserved and settled, the GPU pool's ceiling raised for the round and always set
+back, a round that fails, times out or is stopped stopping its jobs. Queue and job definition come from the
 environment (SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF), never named here."""
 
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -17,6 +20,10 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE a
 from stone_pipeline.core import env
 
 _DONE = ("SUCCEEDED", "FAILED")
+# Each job runs once, as its reservation counts (worst_seconds). A job that stops on purpose exits 1 (its photos are left
+# to the next run, recorded in S3); a second attempt would only repeat that unpaid for. Set on every submission, so the
+# job definition's own retry setting can never change what a round costs.
+ONE_ATTEMPT = {"attempts": 1}
 
 
 def target():
@@ -61,16 +68,45 @@ def submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
         common = [{"name": k, "value": str(v)} for k, v in (("SRC", src), ("RUN_TAG", tag), ("ONLY_KEY", only))]
         name = f"{src}-{tag}-{n}"
         retouch = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-retouch-{name}", jobQueue=queue, jobDefinition=jobdef,
-                                   timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT},
+                                   timeout={"attemptDurationSeconds": C.RETOUCH_TIMEOUT}, retryStrategy=ONE_ATTEMPT,
                                    containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise-retouch"}] + common})["jobId"]
         ids.append(retouch)
         standardise = batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-standardise-{name}", jobQueue=queue, jobDefinition=jobdef,
                                        dependsOn=[{"jobId": retouch}], timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT},
+                                       retryStrategy=ONE_ATTEMPT,
                                        containerOverrides={"environment": [{"name": "RUN_MODE", "value": "standardise"},
                                                                            {"name": "WATERMARKED", "value": str(watermarked[src]).lower()}]
                                                            + common})["jobId"]
         ids.append(standardise)
     return ids
+
+
+def submit_close(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids):
+    """Store each slice's photo list (the run's own files, run_id) and submit its close-only job (deploy.standardise_close:
+    the chosen photos' close-ups made again), appending each job id to ids as it is submitted. todo = {source: shas of its
+    chosen photos}; tag: the clean tag, whose choice records the job reads; watermarked = {source: bool}."""
+    for src, n, shas in slices(todo):
+        only = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/gpu-close-{run_id}-{src}-{n}.json"
+        s3.put_object(Bucket=S3_BUCKET, Key=only, Body=json.dumps(shas).encode(), ContentType="application/json")
+        environment = (("RUN_MODE", "standardise-close"), ("SRC", src), ("CLEAN_TAG", tag), ("ONLY_KEY", only),
+                       ("WATERMARKED", str(watermarked[src]).lower()))
+        ids.append(batch.submit_job(jobName=f"{C.JOB_PREFIX}{run_id}-close-{src}-{tag}-{n}", jobQueue=queue, jobDefinition=jobdef,
+                                    timeout={"attemptDurationSeconds": C.STANDARDISE_TIMEOUT}, retryStrategy=ONE_ATTEMPT,
+                                    containerOverrides={"environment": [{"name": k, "value": v} for k, v in environment]})["jobId"])
+    return ids
+
+
+@dataclass(frozen=True)
+class Work:
+    """What each slice of a round runs: `jobs` jobs, one after another (one GPU at a time), within `seconds` together,
+    submitted by `submit`."""
+    jobs: int
+    seconds: int
+    submit: Callable
+
+
+STANDARDISE_ROUND = Work(2, C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, submit)
+CLOSE_ROUND = Work(1, C.STANDARDISE_TIMEOUT, submit_close)
 
 
 def wait(batch, ids, until, sleep=time.sleep, clock=time.monotonic):
@@ -112,22 +148,22 @@ def gpu_usd(seconds):
     return seconds / 3600 * C.GPU_JOB_VCPUS * C.GPU_VCPU_HOUR_USD
 
 
-def worst_seconds(n_slices, window):
-    """The most GPU-seconds a round of n slices can be charged: its running time, one GPU per slice at a time (its
-    retouch job, then its standardise job, each within its timeout), never past the window and at most RUN_GPU_VCPUS
-    worth at once; plus the allowance of every job that can start, which is each of its 2 jobs per slice. ran_usd
-    charges exactly these parts, so a round never settles above what it reserved."""
+def worst_seconds(n_slices, window, work=STANDARDISE_ROUND):
+    """The most GPU-seconds a round of n slices can be charged: its running time, one GPU per slice at a time (its jobs
+    one after another, within work.seconds), never past the window and at most RUN_GPU_VCPUS worth at once; plus the
+    allowance of every job that can start, which is each of the work's jobs per slice. ran_usd charges exactly these
+    parts, so a round never settles above what it reserved."""
     at_once = max(1, C.RUN_GPU_VCPUS // C.GPU_JOB_VCPUS)
-    running = min(n_slices * min(C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, window), at_once * window)
-    return running + 2 * n_slices * C.GPU_JOB_ALLOWANCE_SECONDS
+    running = min(n_slices * min(work.seconds, window), at_once * window)
+    return running + work.jobs * n_slices * C.GPU_JOB_ALLOWANCE_SECONDS
 
 
-def fitting(n_slices, window, left):
+def fitting(n_slices, window, left, work=STANDARDISE_ROUND):
     """The most of the round's slices whose worst case the budget left covers (the cost only grows with the slices)."""
     low, high = 0, n_slices
     while low < high:
         mid = (low + high + 1) // 2
-        if gpu_usd(worst_seconds(mid, window)) <= left:
+        if gpu_usd(worst_seconds(mid, window, work)) <= left:
             low = mid
         else:
             high = mid - 1
@@ -171,10 +207,10 @@ def ran_usd(batch, ids, reserved, now=time.time, sleep=time.sleep):
     return gpu_usd(ran_ms / 1000 + len(started) * C.GPU_JOB_ALLOWANCE_SECONDS)
 
 
-def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=time.monotonic, now=time.time,
-              sleep=time.sleep):
-    """Every listed photo through retouch and standardise under `tag`: [(job name, why)] of failed jobs. No jobs, no
-    ceiling change, when nothing is listed. Skipped when less than GPU_MIN_WINDOW_SECONDS of the work window (on `clock`)
+def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, work=STANDARDISE_ROUND, clock=time.monotonic,
+              now=time.time, sleep=time.sleep):
+    """Every listed photo through the round's work under `tag` (STANDARDISE_ROUND: retouch and standardise; CLOSE_ROUND:
+    the close-up made again): [(job name, why)] of failed jobs. No jobs, no ceiling change, when nothing is listed. Skipped when less than GPU_MIN_WINDOW_SECONDS of the work window (on `clock`)
     is left. The round is sized to the month's budget left: as many whole slices as their worst case fits, the rest
     waits (SpendCapReached when not one fits: nothing is submitted); that worst case is reserved first and settled to
     what the jobs ran, however the round ends. It waits until the deadline at most: then its jobs are stopped
@@ -187,14 +223,14 @@ def run_round(batch, s3, tag, todo, watermarked, run_id, deadline, spend, clock=
         raise Skipped(f"only {window:.0f}s of the work window left (a round needs {C.GPU_MIN_WINDOW_SECONDS}s)")
     queue, jobdef = target()
     plan = slices(todo)
-    todo = _first(plan[:max(1, fitting(len(plan), window, spend.left()))])
-    reserved = gpu_usd(worst_seconds(len(slices(todo)), window))
+    todo = _first(plan[:max(1, fitting(len(plan), window, spend.left(), work))])
+    reserved = gpu_usd(worst_seconds(len(slices(todo)), window, work))
     spend.reserve(reserved)                            # not even one slice fits: SpendCapReached, nothing submitted
     ids = []
     try:
         with raised(batch, pool(batch, queue)):
             try:
-                submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
+                work.submit(batch, s3, queue, jobdef, tag, todo, watermarked, run_id, ids)
                 return wait(batch, ids, started + min(wait_limit(len(slices(todo))), window), clock=clock)
             except BaseException as exc:
                 stop(batch, ids, f"standardise run {run_id} stopped: {type(exc).__name__}")

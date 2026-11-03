@@ -20,6 +20,7 @@ import boto3
 
 from deploy.enhance_trigger import done_shas   # shared "already enhanced or discarded" delta
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, ImageProcessingConfig
+from stone_pipeline.core import env
 from stone_pipeline.io import imagestore
 from stone_pipeline.io.image_processing import ImageProcessor
 
@@ -60,7 +61,11 @@ def main() -> int:
     if not src:
         print("ERROR: SRC is required (the source to reprocess); aborting")
         return 2
-    watermarked = os.environ.get("WATERMARKED", "true").lower() in ("1", "true", "yes")
+    try:
+        watermarked = env.job_flag("WATERMARKED")
+    except ValueError as exc:
+        print(f"ERROR: {exc}; aborting")
+        return 2
     enhance = os.environ.get("ENHANCE", "true").lower() in ("1", "true", "yes")
     # Default OFF: a discard is destructive, and the CLIP prompts are material-tuned -- a manual/scheduled
     # reprocess over a non-stone pack must not run the classifier unless explicitly asked (CLASSIFY=true).

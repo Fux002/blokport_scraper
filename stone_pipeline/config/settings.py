@@ -1278,7 +1278,65 @@ Your whole answer is one JSON object and nothing else:
     LOGO_FEATHER = 2.0
     LOGO_HUE, LOGO_MIN_SAT, LOGO_MIN_VAL = (160, 3), 110, 110   # the logo's pink (HSV, 0..180 / 0..255)
     LOGO_MAX_LEFT = 40                 # more pink pixels than this left after removal: held
-    CLOSEUP_SHARE = 0.45               # a close-up shows this share of the slab's width
+    CLOSEUP_SHARE = 0.45               # a close-up shows this share of the slab's width when the photo has the pixels for it ...
+    CLOSEUP_MAX_ENLARGE = 1.0          # ... else it widens: at most 1:1 of the photo's own pixels, never enlarged (the owner,
+                                       # 2026-11-02, only real detail; any enlargement, ours or a viewer's, shows the
+                                       # interpolation, not the stone) ...
+    CLOSEUP_MIN_WIDTH = 1400           # ... until it holds this many of them across: stored at its own size (at most the 2048 px
+                                       # canvas, made smaller with an area filter, never larger) in the canvas's 3:2 shape.
+                                       # Blokport draws every image contain-fit, scaled to the frame, never at 1:1; its 3:2
+                                       # frames are drawn up to 1328 device px wide (product page, DPR2 desktop), 1068 (iPhone
+                                       # DPR3), 1148 (quick view), 1350-2700 (full-screen viewer): narrower than 1400 x 933
+                                       # (Blokport's minimum, 2026-11-02) the frame would enlarge it, so it has none ...
+    CLOSEUP_MAX_SHARE = 0.9            # ... up to this share of the slab on either axis; needing more: no close-up
+    CLOSEUP_DENSITY_SAMPLES = 5        # the squaring's local scale is read on this many points per axis (corner to corner)
+    CLOSEUP_ALIAS_RATIO = 1.25         # a close-up whose near side has more than this many times its far side's photo pixels is
+                                       # squared at the near side's scale, then made smaller (else its finer stone folds into
+                                       # false bands: 9.1 at 2x); below it, straight at the far side's, as a square-on shot is: a
+                                       # reduce of a few % acts as a 2 px blur and takes a fifth of the finest detail (12 px
+                                       # skew, sen-1547ed34: 18.6 -> 14.5), while what folds at 1.25x lands near the finest
+                                       # scale, never in broad bands
+    # A result made before its chosen slab was recorded (<sha>.slab.json) is decided against the <sha>.slab.png it saved:
+    CLOSEUP_SLAB_SIZE_TOL = 0.03       # a slab found now is its size as drawn within this share on either axis (a fresh outline
+                                       # moves a few px; a single slab and an open book's half differ about twice) ...
+    CLOSEUP_SLAB_MATCH_WIDTH = 64      # ... and shows its stone: both compared this many px across (coarse: a fresh outline's
+                                       # drift of 1% then moves it under a pixel) ...
+    CLOSEUP_SLAB_MATCH_SMOOTH = 4.0    # ... their light and broad shading taken off (a blur of this many px subtracted) ...
+    CLOSEUP_SLAB_MATCH_MIN = 0.5       # ... correlating at least this much ...
+    CLOSEUP_SLAB_MATCH_MARGIN = 0.2    # ... and by this much more than an open book's other half (its mirror image); else none.
+                                       # 12 real stones bookmatched, the outline drifted 1%: the same half 0.63 to 0.93, the
+                                       # mirrored one at most 0.34, the least gap 0.32
+    CLOSEUP_EDIT_MAX = 0.01            # a close-up more than this share not as shot (a logo, erased label, retouch fill, a hosted
+                                       # model's cleaned copy) is none: a made-up patch shows at 1:1
+    CLOSEUP_RETOUCH_DIFF = 8.0         # a retouched copy's pixel this much off the photo it was made from (8-bit luma, ...
+    CLOSEUP_RETOUCH_SMOOTH = 2.0       # ... smoothed over this many px) was filled: luma only, as a q95 4:2:0 re-encode moves
+                                       # colour, not luma (measured 2026-11-02 on 55 real photos: 0 px flagged; colour too
+                                       # flagged up to 0.39%), a fill of other stone found at a median of 100%
+    CLOSEUP_DETAIL_BANDS = ((0.18, 0.25), (0.28, 0.40))   # cycles/px: the band just under half a photo's resolution and the
+                                       # one above it, where a soft photo has little of its own ...
+    CLOSEUP_DETAIL_SMOOTH = 8.0        # ... their local energy smoothed over this many px ...
+    CLOSEUP_DETAIL_STEP = 8            # ... and compared every this many px
+    JPEG_BLOCK = 8                     # px: a JPEG photo's block grid, whose frequencies the detail score leaves out ...
+    CLOSEUP_JPEG_GRID_BINS = 1.5       # ... this many FFT bins either side
+    CLOSEUP_DETAIL_MIN = 0.40          # the upper band's energy rises at least this much with the lower's across the crop, on the
+                                       # photo's own pixels, else too soft to show at 1:1: no close-up. Calibrated 2026-11-02 on
+                                       # 55 real photos (gate/good, even ones; checked on the odd ones) against each enlarged 2x
+                                       # by bilinear and bicubic, plain and unsharp-masked, JPEG q60 and q85 (clearly soft at
+                                       # 1:1): those pass 1.8% / 4.2% pooled, real photos 79% / 78%. Accepted residual risk: a
+                                       # vendor's own enlargement shown at 1:1, with no enlargement of ours, the same pixels the
+                                       # main view shows; per kind (calibration / held-out) bilinear 2x passes 7% / 15% (about
+                                       # 20% in the review's crop harness), bicubic and bilinear 1.25x-1.5x up to 39% / 30%,
+                                       # nearest-neighbour at any factor 68-100% (blocky but real pixels). No detector tells
+                                       # these from a downscale or a crop without losing the sharpest photos
+    CLOSEUP_DETAIL_SPREAD_MIN = 0.15   # the lower band's energy varies at least this much across the crop (std / mean), else
+                                       # detail cannot be told from noise (real calm stone: 0.32 and up)
+    CLOSEUP_DETAIL_ENERGY_MIN = 0.1    # the lower band's mean energy (8-bit grey levels squared) at least this, else nothing to
+                                       # judge: a stone smoothed to its 8-bit steps (0.01; real calm stone 2.8 and up)
+    CLOSEUP_VERSION = 2                # raised when the close-up's rule changes: the close-only run makes every close-up again
+    CLOSEUP_RETRY_MAX = 3              # a photo a passing storage error left to the next run this many runs in a row has none
+    CLOSEUP_HOLD_STREAK_MAX = 25       # this many photos in a row with no close-up for one kind of reason stop the slice
+                                       # unwritten: a cause outside the photos (inputs gone from storage, a broken model),
+                                       # not the photos; photos off the product sheet are an outcome en masse and never count
     SEAM_BAND = (0.46, 0.54)       # an open book is two equal slabs from one block: its seam is central
     SEAM_MIN = 6.0                 # robust z-score of a joint column (edge change + dark gap)
     JOINT_EDGE = 0.01              # joints are looked for inside this margin of the outline's ends
