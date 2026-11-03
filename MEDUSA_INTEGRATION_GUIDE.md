@@ -213,17 +213,18 @@ the laid tiles seen from above at true scale (the catalog image), one tile face-
 its thickness; a tile whose slab gives too few distinct faces gets one tile face-on as its catalog image, then the
 angled view. Every view is drawn at the product's own `length` x `width` x `height`.
 
-**Photo ready** (`photo_ready`, boolean, always present; product payload contract `v7-photo-ready`): whether the
-product has its standardised photo. It is the same decision as the stock lane's reason `"no_photo"` (section 5), sent on
-the product so the catalog lane can act before any stock delta reaches it: a product goes out `photo_ready: false`
-exactly when its stock goes out at quantity 0 with reason `"no_photo"`, and both change in the same produce. Act on it
-when you create the product: `false` -> create it as a hidden draft (never publish it, priced or not); `true` -> publish
-as usual. On an existing product, hiding and showing again stay the stock lane's job, so a `photo_ready: true` alone
-never publishes a product the stock lane hides (delisted, dropped, sold). A product that is later delisted or dropped by
-its supplier keeps `photo_ready: false` while its stock reason becomes `"delisted"` or none: it still has no photo. A
-change of `photo_ready` changes `payload_hash` and re-serves the product; its stock delta follows once the product is
-acked (stock is served only for a synced product). In an environment that does not require a standardised photo (the
-rule off), every product is `photo_ready: true`.
+**Photo ready** (`photo_ready`, boolean, always present; an additive field on the unchanged product payload contract
+`v6-model-3d`, so ignore it if you do not use it): the scraper's photo rule decision for the product, whether it has its
+standardised photo. The same decision sends the product's stock at quantity 0 with reason `"no_photo"` (section 5), so
+in one produce both come from it together. **Read it at create only; the stock lane owns visibility afterwards.** On
+create, `false` -> create the product as a hidden draft (never publish it, priced or not); `true` -> publish as usual.
+After that, hiding and showing again are the stock lane's alone (reason `"no_photo"`, then a quantity above 0 with no
+reason once the photo is published). `photo_ready` is not part of `payload_hash`: a change of it never re-serves a
+product, and an existing product that is re-served for another reason carries the current value, which you ignore.
+The stock reason can later change while the photo decision does not: a photo-hidden product its supplier drops goes to
+quantity 0 with no reason, and a bundle replaced by its lot to `"replaced_by_lot"`; its `photo_ready` stays `false`. A
+product first produced in a run that could not read the published photos starts `false` (the safe side). In
+an environment that does not require a standardised photo (the rule off), every product is `photo_ready: true`.
 
 **Collection location** (`collection_country_code`, `collection_city`) is where the product is
 physically **collected** before shipping (the supplier's warehouse). It is a distinct axis from
@@ -310,8 +311,8 @@ A zero may carry a `reason` (a closed set; an unknown reason is treated as a pla
 - none: the supplier no longer lists the product (sold out or dropped). Deactivate it, never delete.
 - `"delisted"`: an operator took the product offline (admin delist). Hide it.
 - `"no_photo"`: the product has no standardised photo yet; always sent with quantity 0. Hide it. It comes back with
-  quantity above 0 and no reason once its photo is published. The product itself says the same: its payload carries
-  `photo_ready: false` exactly while its stock carries this reason (section 4, Photo ready).
+  quantity above 0 and no reason once its photo is published. The same decision is on the product payload as
+  `photo_ready: false`, read at create only (section 4, Photo ready); on an existing product this reason is the signal.
 - `"replaced_by_lot"`, with `"lot_code"`: a bundle replaced by its pieces (its lot).
   Deactivate the bundle (never delete: orders and documents reference it) and redirect its page to the
   lot. Served only once at least one piece of that lot exists in Medusa, so the redirect never lands on

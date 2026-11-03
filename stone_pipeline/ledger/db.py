@@ -134,16 +134,17 @@ class Ledger:
         # Apply the DDL once per database, not on every open (the sync server opens a
         # connection per request). PRAGMA user_version makes a reopen a no-op; the
         # schema is all CREATE ... IF NOT EXISTS, so a one-time apply is sufficient.
-        if self.conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+        from_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+        if from_version >= SCHEMA_VERSION:
             return
         self.conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
-        self._migrate()   # add columns to tables created before a field existed (CREATE IF NOT
-                          # EXISTS never alters an existing table). Keeps ledger_meta in step.
+        self._migrate(from_version)   # add columns to tables created before a field existed (CREATE IF NOT
+                                      # EXISTS never alters an existing table). Keeps ledger_meta in step.
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.execute("UPDATE ledger_meta SET schema_version = ? WHERE id = 1", (SCHEMA_VERSION,))
         self.conn.commit()
 
-    def _migrate(self) -> None:
+    def _migrate(self, from_version: int) -> None:
         """Idempotent ALTERs for a ledger that predates a column (v1 -> v2 added the sync dead-letter
         fields; v2 -> v3 added inventory.reason, the delist marker; v3 -> v4 added removed.kind, the
         product|variation discriminator -- the `removed` table itself is a CREATE IF NOT EXISTS in
@@ -175,10 +176,14 @@ class Ledger:
             self.conn.execute("ALTER TABLE product ADD COLUMN lot_position INTEGER")
         if "model_3d_key" not in prod_cols:   # v10: the lead slab's 3D cut-out (null = no 3D)
             self.conn.execute("ALTER TABLE product ADD COLUMN model_3d_key TEXT")
-        if "photo_ready" not in prod_cols:   # v11: the no-photo rule's decision, until v11 kept as the stock reason
+        if "photo_ready" not in prod_cols:   # v11: the no-photo rule's decision
             self.conn.execute("ALTER TABLE product ADD COLUMN photo_ready INTEGER NOT NULL DEFAULT 1")
-            self.conn.execute("UPDATE product SET photo_ready = 0 WHERE sku IN "
-                              "(SELECT sku FROM inventory WHERE reason = 'no_photo')")
+        if from_version < 11:
+            # Before v11 the decision was kept only as the stock reason, so derive it from that. Keyed on the version,
+            # not on the ALTER: the ALTER commits on its own, so a crash before the version bump below leaves the
+            # column without its values, and this runs again on the next open (in one transaction with the bump).
+            self.conn.execute("UPDATE product SET photo_ready = CASE WHEN sku IN "
+                              "(SELECT sku FROM inventory WHERE reason = 'no_photo') THEN 0 ELSE 1 END")
         removed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(removed)")}
         if "kind" not in removed_cols:   # v4: existing tombstones are all products (that was the only lane)
             self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")

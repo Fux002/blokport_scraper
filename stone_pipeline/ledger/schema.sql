@@ -145,7 +145,8 @@ CREATE INDEX IF NOT EXISTS idx_combination_variation ON combination (variation_k
 -- payload_hash covers: (variation_key, color, finish, quality, type, title, description,
 --   handle, weight, length, width, height, origin_country_code, product_image_keys,
 --   oriented_image_keys, company_id, sales_channel_id, category, bundle_size, ports, model_3d_key,
---   standard_version: the ETags of the standardised files, not stored, photo_ready).
+--   standard_version: the ETags of the standardised files, not stored). Not photo_ready: Blokport reads it at
+--   create only (the stock lane owns visibility afterwards), so a change of it never re-serves a product.
 -- ---------------------------------------------------------------------------
 --
 -- Two groups of columns. The DESIGN fields (name-based: color/finish/quality/

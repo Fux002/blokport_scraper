@@ -29,8 +29,9 @@ from stone_pipeline.stages.product_state import inventory_str
 # links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
 # origin_country_code (which fanned every product out to all ports in its quarry country).
 # v4: height is the thickness, width the short face (every shape flat). v5: lot_code + lot_position.
-# v6: model_3d, the lead slab's 3D cut-out. v7: photo_ready, the no-photo rule's decision.
-_PRODUCT_PAYLOAD_CONTRACT = "v7-photo-ready"
+# v6: model_3d, the lead slab's 3D cut-out. photo_ready is additive and outside the hash (read at create only), so it
+# needs no bump: an existing product does not re-serve for it.
+_PRODUCT_PAYLOAD_CONTRACT = "v6-model-3d"
 
 
 def _image_models(path: str | Path | None = None) -> dict[str, str]:
@@ -197,12 +198,13 @@ def fill_variation_types(ledger: Ledger) -> int:
 def _photo_ready(r: CanonicalRow, prev) -> bool:
     """The no-photo rule, decided here once per product: with images.require_standard_photo on, a product without a
     standardised photo is not ready. A run that cannot tell (standard_photo None: the photo pool unread or empty) keeps
-    the product's last decision. Without the rule every product is ready. populate_inventory hides exactly the products
-    this marks not ready, so the product payload and the stock reason always agree."""
+    an existing product's last decision, and a product new to the ledger starts not ready (created as a hidden draft,
+    shown once a run sees its photo). Without the rule every product is ready. populate_inventory hides exactly the
+    products this marks not ready, so the product payload and the stock reason come from one decision."""
     if not SETTINGS.images.require_standard_photo:
         return True
     if r.standard_photo is None:
-        return bool(prev["photo_ready"]) if prev else True
+        return bool(prev["photo_ready"]) if prev else False
     return r.standard_photo
 
 
@@ -280,7 +282,6 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 r.model_3d_key,   # a slab that gains, changes or loses its 3D re-serves
                 # the standardised files are re-made in place under the same names: their content re-serves them
                 r.standard_version,
-                photo_ready,   # a product that gains or loses its standardised photo re-serves
             ])),
             "created_at": now,
             "updated_at": now,

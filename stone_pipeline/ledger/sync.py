@@ -308,9 +308,10 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             # sources like the images; null when the product has none (a close-up, a block or tile).
             "model_3d": ({"cutout": p["model_3d_key"], "meta": imagestore.cutout_meta_url(p["model_3d_key"])}
                          if p["model_3d_key"] else None),
-            # The photo fact, the no-photo rule's one decision (populate._photo_ready): false exactly while the
-            # product's stock goes out with reason 'no_photo'. Blokport creates a product that is not ready as a hidden
-            # draft, so a priced product never goes on sale before a stock delta could hide it.
+            # The no-photo rule's decision (populate._photo_ready), the same one that sends the stock out with reason
+            # 'no_photo'. Blokport reads it at create only: a product that is not ready is created as a hidden draft, so
+            # a priced product never goes on sale before a stock delta could hide it; afterwards the stock lane owns
+            # visibility. Not in payload_hash, so a change never re-serves a product on its own.
             "photo_ready": bool(p["photo_ready"]),
         },
     })
