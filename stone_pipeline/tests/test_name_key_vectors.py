@@ -8,7 +8,7 @@ import json
 import unicodedata
 from pathlib import Path
 
-from stone_pipeline.core.text import match_key
+from stone_pipeline.core.text import UnfoldableName, clean_name, match_key
 
 _VECTORS = json.loads(
     (Path(__file__).parent / "fixtures" / "name_key_vectors.json").read_text(encoding="utf-8"))
@@ -28,3 +28,16 @@ def test_match_key_agrees_with_every_shared_vector():
     wrong = [(c["input"], c["expected"], match_key(c["input"]))
              for c in _VECTORS["cases"] if match_key(c["input"]) != c["expected"]]
     assert not wrong, f"{len(wrong)} vectors disagree, first: {wrong[:3]}"
+
+
+def _display(text: str):
+    try:
+        return clean_name(text)
+    except UnfoldableName:
+        return None
+
+
+def test_clean_name_agrees_with_every_shared_display_vector():
+    wrong = [(c["input"], c["display"], _display(c["input"]))
+             for c in _VECTORS["cases"] if _display(c["input"]) != c["display"]]
+    assert not wrong, f"{len(wrong)} display vectors disagree, first: {wrong[:3]}"

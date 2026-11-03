@@ -72,6 +72,39 @@ def match_key(text: str) -> str:
     return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text)).casefold().split())
 
 
+class UnfoldableName(ValueError):
+    """A name carries a letter with no ASCII form (a non-Latin script): it is never stored half-folded. The
+    caller decides by context: an alias is dropped and reported, a variety name goes to review."""
+
+
+# Typographic punctuation unified BEFORE anything else, so a curly and a straight apostrophe, or an en dash and a
+# hyphen, never give two names (report 21, defect 1.3.2).
+_TYPOGRAPHIC = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u02bc": "'", "\u00b4": "'", "`": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
+    "\u00b7": " ",
+})
+# The owner's display rule (report 21 O1): letters, digits, spaces and hyphens only.
+_NOT_NAME = re.compile(r"[^A-Za-z0-9 -]+")
+
+
+def clean_name(text: str) -> str:
+    """The ONE display-name rule (owner, 2026-11-03): plain ASCII letters, digits, spaces and hyphens. Typographic
+    punctuation is unified, format and control characters are removed, compatibility forms are folded (NFKC),
+    accents are folded (ascii_fold), '&' reads 'and', and every other mark becomes a space, the same way match_key
+    treats it, so cleaning never changes a name's identity except for '&'. Case is the caller's. Raises
+    UnfoldableName when a letter has no ASCII form. Bracketed alternatives are split off by the caller first
+    (split_bracket_alias). Byte-identical expectations live in the shared name-key vectors (`display`)."""
+    unified = "".join(" " if c.isspace() else c for c in (text or "").translate(_TYPOGRAPHIC))
+    visible = unicodedata.normalize(
+        "NFKC", "".join(c for c in unified if unicodedata.category(c) not in ("Cf", "Cc")))
+    if any(c.isalpha() and not ascii_fold(c) for c in visible):
+        raise UnfoldableName(f"no ASCII form for a letter in {text!r}")
+    named = _NOT_NAME.sub(" ", ascii_fold(visible).replace("&", " and "))
+    return " ".join(named.split()).strip("- ")
+
+
 _BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")
 
 

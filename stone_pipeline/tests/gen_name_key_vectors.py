@@ -15,7 +15,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from stone_pipeline.core.text import _TRANSLIT, match_key
+from stone_pipeline.core.text import _TRANSLIT, UnfoldableName, clean_name, match_key
 
 OUT = Path(__file__).parent / "fixtures" / "name_key_vectors.json"
 FLOOR = "14.0.0"
@@ -27,12 +27,20 @@ def assigned_by_floor(s):
     return all(unicodedata.category(c) != "Cn" for c in s)
 
 
+def _display(s):
+    # the cleaned display name, or None when the name is refused (a letter with no ASCII form)
+    try:
+        return clean_name(s)
+    except UnfoldableName:
+        return None
+
+
 def add(group, s):
     if s in seen:
         return
     assert assigned_by_floor(s), f"unassigned code point in {s!r}"
     seen.add(s)
-    cases.append({"group": group, "input": s, "expected": match_key(s)})
+    cases.append({"group": group, "input": s, "expected": match_key(s), "display": _display(s)})
 
 
 for ch in sorted({chr(k) for k in _TRANSLIT}):
@@ -74,6 +82,11 @@ doc = {
     "and '_' becomes a space; (2) ascii_fold: unless plain ASCII, NFKD-decompose, drop every mark, "
     "transliterate the letters with no decomposition (_TRANSLIT), drop remaining non-ASCII; (3) casefold, "
     "which after step 2 is ASCII lower-case; (4) split on whitespace, join with one space. "
+    "DISPLAY (`display`, clean_name): typographic punctuation unified (curly quotes and the modifier apostrophe to "
+    "', curly double quotes to \", every dash and the minus sign to -, the middle dot to a space); every whitespace "
+    "to a space; format (Cf) and control (Cc) characters removed; NFKC; if any letter has no ASCII form the name is "
+    "REFUSED (display = null); ascii_fold; '&' to ' and '; every character outside [A-Za-z0-9 -] to a space; "
+    "whitespace collapsed; leading and trailing hyphens and spaces stripped. Case is kept. "
     "UNICODE: every input uses only code points assigned in Unicode " + FLOOR + ", the floor across the "
     "runtimes in use (SC deploy and CI: Python 3.12 = Unicode 15.0.0; SC CI syntax floor: Python 3.11 = 14.0.0). "
     "Agreement is guaranteed for those code points; each repo's test asserts its runtime Unicode version is at "
