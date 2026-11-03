@@ -1,0 +1,1180 @@
+{
+  "_header": "PAIRED FILE. Byte-identical copies: BE src/model/catalog/__tests__/name-key.vectors.json and SC stone_pipeline/tests/fixtures/name_key_vectors.json. A change to either normaliser is a PAIRED PR in both repos, each green on the same vectors. Generated from the scraper's match_key (SC stone_pipeline/core/text.py, branch fix/match-key-nfc). Steps: (0) NFD-decompose and DROP every mark (Unicode category M*); (1) every [^\\w\\s] (Python unicode \\w, \\s) and '_' becomes a space; (2) ascii_fold: _TRANSLIT, then NFKD, drop combining marks, drop remaining non-ASCII; (3) casefold, which after step 2 is ASCII lower-case; (4) split on whitespace, join with one space. UNICODE: every input uses only code points assigned in Unicode 14.0.0, the floor across the runtimes in use (SC deploy and CI: Python 3.12 = Unicode 15.0.0; SC CI syntax floor: Python 3.11 = 14.0.0). Agreement is guaranteed for those code points; each repo's test asserts its runtime Unicode version is at least 14.0.0.",
+  "generator": {
+    "python": "3.11.15",
+    "unicodedata": "14.0.0",
+    "floor": "14.0.0"
+  },
+  "cases": [
+    {
+      "group": "translit",
+      "input": "Æ",
+      "expected": "ae"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Æx æÆ",
+      "expected": "stone aex aeae"
+    },
+    {
+      "group": "translit",
+      "input": "Ð",
+      "expected": "d"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Ðx ðÐ",
+      "expected": "stone dx dd"
+    },
+    {
+      "group": "translit",
+      "input": "Ø",
+      "expected": "o"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Øx øØ",
+      "expected": "stone ox oo"
+    },
+    {
+      "group": "translit",
+      "input": "Þ",
+      "expected": "th"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Þx þÞ",
+      "expected": "stone thx thth"
+    },
+    {
+      "group": "translit",
+      "input": "ß",
+      "expected": "ss"
+    },
+    {
+      "group": "translit",
+      "input": "Stone ßx ßß",
+      "expected": "stone ssx ssss"
+    },
+    {
+      "group": "translit",
+      "input": "æ",
+      "expected": "ae"
+    },
+    {
+      "group": "translit",
+      "input": "Stone æx ææ",
+      "expected": "stone aex aeae"
+    },
+    {
+      "group": "translit",
+      "input": "ð",
+      "expected": "d"
+    },
+    {
+      "group": "translit",
+      "input": "Stone ðx ðð",
+      "expected": "stone dx dd"
+    },
+    {
+      "group": "translit",
+      "input": "ø",
+      "expected": "o"
+    },
+    {
+      "group": "translit",
+      "input": "Stone øx øø",
+      "expected": "stone ox oo"
+    },
+    {
+      "group": "translit",
+      "input": "þ",
+      "expected": "th"
+    },
+    {
+      "group": "translit",
+      "input": "Stone þx þþ",
+      "expected": "stone thx thth"
+    },
+    {
+      "group": "translit",
+      "input": "Đ",
+      "expected": "d"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Đx đĐ",
+      "expected": "stone dx dd"
+    },
+    {
+      "group": "translit",
+      "input": "đ",
+      "expected": "d"
+    },
+    {
+      "group": "translit",
+      "input": "Stone đx đđ",
+      "expected": "stone dx dd"
+    },
+    {
+      "group": "translit",
+      "input": "Ħ",
+      "expected": "h"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Ħx ħĦ",
+      "expected": "stone hx hh"
+    },
+    {
+      "group": "translit",
+      "input": "ħ",
+      "expected": "h"
+    },
+    {
+      "group": "translit",
+      "input": "Stone ħx ħħ",
+      "expected": "stone hx hh"
+    },
+    {
+      "group": "translit",
+      "input": "İ",
+      "expected": "i"
+    },
+    {
+      "group": "translit",
+      "input": "Stone İx i̇İ",
+      "expected": "stone ix ii"
+    },
+    {
+      "group": "translit",
+      "input": "ı",
+      "expected": "i"
+    },
+    {
+      "group": "translit",
+      "input": "Stone ıx ıı",
+      "expected": "stone ix ii"
+    },
+    {
+      "group": "translit",
+      "input": "Ł",
+      "expected": "l"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Łx łŁ",
+      "expected": "stone lx ll"
+    },
+    {
+      "group": "translit",
+      "input": "ł",
+      "expected": "l"
+    },
+    {
+      "group": "translit",
+      "input": "Stone łx łł",
+      "expected": "stone lx ll"
+    },
+    {
+      "group": "translit",
+      "input": "Ŋ",
+      "expected": "n"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Ŋx ŋŊ",
+      "expected": "stone nx nn"
+    },
+    {
+      "group": "translit",
+      "input": "ŋ",
+      "expected": "n"
+    },
+    {
+      "group": "translit",
+      "input": "Stone ŋx ŋŋ",
+      "expected": "stone nx nn"
+    },
+    {
+      "group": "translit",
+      "input": "Œ",
+      "expected": "oe"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Œx œŒ",
+      "expected": "stone oex oeoe"
+    },
+    {
+      "group": "translit",
+      "input": "œ",
+      "expected": "oe"
+    },
+    {
+      "group": "translit",
+      "input": "Stone œx œœ",
+      "expected": "stone oex oeoe"
+    },
+    {
+      "group": "translit",
+      "input": "Ŧ",
+      "expected": "t"
+    },
+    {
+      "group": "translit",
+      "input": "Stone Ŧx ŧŦ",
+      "expected": "stone tx tt"
+    },
+    {
+      "group": "translit",
+      "input": "ŧ",
+      "expected": "t"
+    },
+    {
+      "group": "translit",
+      "input": "Stone ŧx ŧŧ",
+      "expected": "stone tx tt"
+    },
+    {
+      "group": "translit",
+      "input": "ẞ",
+      "expected": "ss"
+    },
+    {
+      "group": "translit",
+      "input": "Stone ẞx ßẞ",
+      "expected": "stone ssx ssss"
+    },
+    {
+      "group": "eszett",
+      "input": "Straße",
+      "expected": "strasse"
+    },
+    {
+      "group": "eszett",
+      "input": "STRASSE",
+      "expected": "strasse"
+    },
+    {
+      "group": "eszett",
+      "input": "Großer Weiß",
+      "expected": "grosser weiss"
+    },
+    {
+      "group": "eszett",
+      "input": "ßß",
+      "expected": "ssss"
+    },
+    {
+      "group": "accents",
+      "input": "Rosa Porriño",
+      "expected": "rosa porrino"
+    },
+    {
+      "group": "accents",
+      "input": "São Gabriel",
+      "expected": "sao gabriel"
+    },
+    {
+      "group": "accents",
+      "input": "Crème Brûlée",
+      "expected": "creme brulee"
+    },
+    {
+      "group": "accents",
+      "input": "Çanakkale",
+      "expected": "canakkale"
+    },
+    {
+      "group": "accents",
+      "input": "Ægean Blue",
+      "expected": "aegean blue"
+    },
+    {
+      "group": "accents",
+      "input": "Œil de Perdrix",
+      "expected": "oeil de perdrix"
+    },
+    {
+      "group": "accents",
+      "input": "Mármol Crema Marfil",
+      "expected": "marmol crema marfil"
+    },
+    {
+      "group": "accents",
+      "input": "Dalmația",
+      "expected": "dalmatia"
+    },
+    {
+      "group": "accents",
+      "input": "Šivec",
+      "expected": "sivec"
+    },
+    {
+      "group": "accents",
+      "input": "Žula",
+      "expected": "zula"
+    },
+    {
+      "group": "accents",
+      "input": "Ćao",
+      "expected": "cao"
+    },
+    {
+      "group": "accents",
+      "input": "Tǎo",
+      "expected": "tao"
+    },
+    {
+      "group": "accents",
+      "input": "Ëlva",
+      "expected": "elva"
+    },
+    {
+      "group": "accents",
+      "input": "İzmir",
+      "expected": "izmir"
+    },
+    {
+      "group": "accents",
+      "input": "Iğdır",
+      "expected": "igdir"
+    },
+    {
+      "group": "accents",
+      "input": "Façade",
+      "expected": "facade"
+    },
+    {
+      "group": "accents",
+      "input": "Naïve",
+      "expected": "naive"
+    },
+    {
+      "group": "accents",
+      "input": "Ångström",
+      "expected": "angstrom"
+    },
+    {
+      "group": "accents",
+      "input": "Smørrebrød",
+      "expected": "smorrebrod"
+    },
+    {
+      "group": "accents",
+      "input": "Łódź",
+      "expected": "lodz"
+    },
+    {
+      "group": "accents",
+      "input": "Ñandú",
+      "expected": "nandu"
+    },
+    {
+      "group": "accents",
+      "input": "Ūla",
+      "expected": "ula"
+    },
+    {
+      "group": "accents",
+      "input": "Ǆemal",
+      "expected": "dzemal"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "Rosa Porriño",
+      "expected": "rosa porrino"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "Crème Brulée",
+      "expected": "creme brulee"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "áb",
+      "expected": "ab"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "́lead",
+      "expected": "lead"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "traiĺ",
+      "expected": "trail"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "São Gabriel",
+      "expected": "sao gabriel"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "Çanakkale",
+      "expected": "canakkale"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "é́",
+      "expected": "e"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "ȫ",
+      "expected": "o"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "Ma̱rmol Crema",
+      "expected": "marmol crema"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "é̱te",
+      "expected": "ete"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "a̱",
+      "expected": "a"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "x̱y",
+      "expected": "xy"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "Nero⃝",
+      "expected": "nero"
+    },
+    {
+      "group": "combining_nfd",
+      "input": "a҉b",
+      "expected": "ab"
+    },
+    {
+      "group": "compat",
+      "input": "ﬁne",
+      "expected": "fine"
+    },
+    {
+      "group": "compat",
+      "input": "ﬂow",
+      "expected": "flow"
+    },
+    {
+      "group": "compat",
+      "input": "Ｇ６０３",
+      "expected": "g603"
+    },
+    {
+      "group": "compat",
+      "input": "Ⅳ Grey",
+      "expected": "iv grey"
+    },
+    {
+      "group": "compat",
+      "input": "m²",
+      "expected": "m2"
+    },
+    {
+      "group": "compat",
+      "input": "x³",
+      "expected": "x3"
+    },
+    {
+      "group": "compat",
+      "input": "½ slab",
+      "expected": "12 slab"
+    },
+    {
+      "group": "compat",
+      "input": "Ⓐbc",
+      "expected": "bc"
+    },
+    {
+      "group": "compat",
+      "input": "ℌ",
+      "expected": "h"
+    },
+    {
+      "group": "compat",
+      "input": "ℓ",
+      "expected": "l"
+    },
+    {
+      "group": "compat",
+      "input": "™ Stone",
+      "expected": "stone"
+    },
+    {
+      "group": "compat",
+      "input": "№ 5",
+      "expected": "5"
+    },
+    {
+      "group": "compat",
+      "input": "ｶﾀｶﾅ",
+      "expected": ""
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a!b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a\"b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a#b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a$b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a%b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a&b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a'b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a(b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a)b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a*b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a+b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a,b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a-b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a.b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a/b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a:b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a;b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a<b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a=b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a>b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a?b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a@b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a[b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a\\b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a]b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a^b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a_b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a`b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a{b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a|b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a}b",
+      "expected": "a b"
+    },
+    {
+      "group": "ascii_punct",
+      "input": "a~b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "Semi-Precious Stone",
+      "expected": "semi precious stone"
+    },
+    {
+      "group": "punct",
+      "input": "semi_precious_stone",
+      "expected": "semi precious stone"
+    },
+    {
+      "group": "punct",
+      "input": "Black & Gold",
+      "expected": "black gold"
+    },
+    {
+      "group": "punct",
+      "input": "St. Laurent",
+      "expected": "st laurent"
+    },
+    {
+      "group": "punct",
+      "input": "O'Brien",
+      "expected": "o brien"
+    },
+    {
+      "group": "punct",
+      "input": "(Star Galaxy)",
+      "expected": "star galaxy"
+    },
+    {
+      "group": "punct",
+      "input": "[alt]",
+      "expected": "alt"
+    },
+    {
+      "group": "punct",
+      "input": "a—b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a–b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a‐b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a…b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a·b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a•b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "50%",
+      "expected": "50"
+    },
+    {
+      "group": "punct",
+      "input": "¿Qué?",
+      "expected": "que"
+    },
+    {
+      "group": "punct",
+      "input": "«Nero»",
+      "expected": "nero"
+    },
+    {
+      "group": "punct",
+      "input": "„Nero“",
+      "expected": "nero"
+    },
+    {
+      "group": "punct",
+      "input": "‘Nero’",
+      "expected": "nero"
+    },
+    {
+      "group": "punct",
+      "input": "a⁄b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a∕b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a§b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a¶b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a°b",
+      "expected": "a b"
+    },
+    {
+      "group": "punct",
+      "input": "a±b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "  Lead  ",
+      "expected": "lead"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\tb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\nb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\rb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\u000bb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\fb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a b",
+      "expected": "ab"
+    },
+    {
+      "group": "whitespace",
+      "input": "a b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a b",
+      "expected": "ab"
+    },
+    {
+      "group": "whitespace",
+      "input": "a b",
+      "expected": "ab"
+    },
+    {
+      "group": "whitespace",
+      "input": "a b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a　b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a​b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a‌b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a‍b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a⁠b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "ab",
+      "expected": "ab"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\u001cb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\u001db",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\u001eb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a\u001fb",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a﻿b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "﻿Lead",
+      "expected": "lead"
+    },
+    {
+      "group": "whitespace",
+      "input": "_lead_",
+      "expected": "lead"
+    },
+    {
+      "group": "whitespace",
+      "input": "a__b",
+      "expected": "a b"
+    },
+    {
+      "group": "whitespace",
+      "input": "a - b",
+      "expected": "a b"
+    },
+    {
+      "group": "non_latin",
+      "input": "黑金砂",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "Nero 黑 Marquina",
+      "expected": "nero marquina"
+    },
+    {
+      "group": "non_latin",
+      "input": "Nero黑Marquina",
+      "expected": "neromarquina"
+    },
+    {
+      "group": "non_latin",
+      "input": "Γκρι",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "Серый гранит",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "шлифованный",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "שחור",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "أسود",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "ภาษา",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "한국",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "日本の石",
+      "expected": ""
+    },
+    {
+      "group": "non_latin",
+      "input": "😀 Nero",
+      "expected": "nero"
+    },
+    {
+      "group": "non_latin",
+      "input": "Nero😀Marquina",
+      "expected": "nero marquina"
+    },
+    {
+      "group": "non_latin",
+      "input": "Neró",
+      "expected": "nero"
+    },
+    {
+      "group": "edge",
+      "input": "",
+      "expected": ""
+    },
+    {
+      "group": "edge",
+      "input": " ",
+      "expected": ""
+    },
+    {
+      "group": "edge",
+      "input": "-",
+      "expected": ""
+    },
+    {
+      "group": "edge",
+      "input": "_",
+      "expected": ""
+    },
+    {
+      "group": "edge",
+      "input": "...",
+      "expected": ""
+    },
+    {
+      "group": "edge",
+      "input": "G603",
+      "expected": "g603"
+    },
+    {
+      "group": "edge",
+      "input": "G 603",
+      "expected": "g 603"
+    },
+    {
+      "group": "edge",
+      "input": "g-603",
+      "expected": "g 603"
+    },
+    {
+      "group": "edge",
+      "input": "G603 ",
+      "expected": "g603"
+    },
+    {
+      "group": "edge",
+      "input": "ABC123def",
+      "expected": "abc123def"
+    },
+    {
+      "group": "edge",
+      "input": "007",
+      "expected": "007"
+    },
+    {
+      "group": "edge",
+      "input": "2cm 3 cm",
+      "expected": "2cm 3 cm"
+    },
+    {
+      "group": "edge",
+      "input": "Ⅻ",
+      "expected": "xii"
+    },
+    {
+      "group": "edge",
+      "input": "a",
+      "expected": "a"
+    },
+    {
+      "group": "edge",
+      "input": "A",
+      "expected": "a"
+    },
+    {
+      "group": "edge",
+      "input": "1",
+      "expected": "1"
+    },
+    {
+      "group": "edge",
+      "input": "aB1",
+      "expected": "ab1"
+    },
+    {
+      "group": "edge",
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "group": "names",
+      "input": "Absolute Black",
+      "expected": "absolute black"
+    },
+    {
+      "group": "names",
+      "input": "absolute  black",
+      "expected": "absolute black"
+    },
+    {
+      "group": "names",
+      "input": "ABSOLUTE-BLACK",
+      "expected": "absolute black"
+    },
+    {
+      "group": "names",
+      "input": "Bianco Carrara C/D",
+      "expected": "bianco carrara c d"
+    },
+    {
+      "group": "names",
+      "input": "Nero Marquina (Spain)",
+      "expected": "nero marquina spain"
+    },
+    {
+      "group": "names",
+      "input": "Tan Brown",
+      "expected": "tan brown"
+    },
+    {
+      "group": "names",
+      "input": "Kashmir White",
+      "expected": "kashmir white"
+    },
+    {
+      "group": "names",
+      "input": "Juparana Colombo",
+      "expected": "juparana colombo"
+    },
+    {
+      "group": "names",
+      "input": "Blue Pearl GT",
+      "expected": "blue pearl gt"
+    },
+    {
+      "group": "names",
+      "input": "Emperador Dark",
+      "expected": "emperador dark"
+    },
+    {
+      "group": "names",
+      "input": "Calacatta Oro",
+      "expected": "calacatta oro"
+    },
+    {
+      "group": "names",
+      "input": "Crema Marfil Coto",
+      "expected": "crema marfil coto"
+    },
+    {
+      "group": "names",
+      "input": "Verde Ubatuba",
+      "expected": "verde ubatuba"
+    },
+    {
+      "group": "names",
+      "input": "Giallo Veneziano",
+      "expected": "giallo veneziano"
+    },
+    {
+      "group": "names",
+      "input": "Labrador Antique",
+      "expected": "labrador antique"
+    }
+  ]
+}

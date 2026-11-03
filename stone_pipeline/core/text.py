@@ -52,9 +52,15 @@ def match_key(text: str) -> str:
     'Black & Gold' == 'Black Gold', 'St. Laurent' == 'St Laurent', 'Rosa Porriño' == 'Rosa Porrino'.
 
     Punctuation is folded BEFORE ascii_fold, so a unicode dash/punct becomes a space rather than
-    being stripped to nothing (which would glue the two words together). This is the one shared
-    normalizer; per-module copies MUST delegate here, not roll a weaker variant."""
-    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text or "")).casefold().split())
+    being stripped to nothing (which would glue the two words together). Marks are dropped FIRST:
+    a mark (accent, combining sign) is not \\w, so the punctuation pass would turn 'n' + U+0303 into a
+    space and fork the stone. Decomposed input (NFD, common from macOS pages and PDFs) carries such
+    marks, and NFC cannot compose a mark that has no precomposed letter (U+0331), so the text is
+    decomposed and every mark removed instead. This is the one shared normalizer; per-module copies
+    MUST delegate here, not roll a weaker variant."""
+    unmarked = "".join(c for c in unicodedata.normalize("NFD", text or "")
+                       if not unicodedata.category(c).startswith("M"))
+    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", unmarked)).casefold().split())
 
 
 _BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")

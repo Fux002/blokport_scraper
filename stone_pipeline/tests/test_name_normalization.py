@@ -81,3 +81,21 @@ def test_alias_dedup_is_accent_and_case_insensitive():
     # aliases differing only by accent/case collapse to one, and the KEPT display keeps its accent
     from stone_pipeline.core.text import clean_alias_list
     assert clean_alias_list("Rosa", ["Rosé", "rose", "ROSÉ"]) == ["Rosé"]
+
+
+def test_match_key_decomposed_accent_does_not_fork_identity():
+    # Pages and PDFs made on macOS often send decomposed text (NFD): 'n' + U+0303 instead of 'ñ'.
+    # A combining mark is not \w, so before the fix the punctuation pass turned it into a SPACE:
+    # 'Porriño' -> 'porrin o', a second key for the same stone.
+    nfc, nfd = "Rosa Porriño", "Rosa Porriño"
+    assert match_key(nfd) == match_key(nfc) == "rosa porrino"
+    assert match_key("Crème Brulée") == match_key("Crème Brûlée") == "creme brulee"
+    assert proj.norm(nfd) == proj.norm(nfc)
+
+
+def test_match_key_mark_without_a_composed_form_does_not_fork_identity():
+    # NFC composes only marks that HAVE a precomposed letter. U+0331 (combining macron below) has none
+    # on most letters, so after NFC it is still a separate, non-\w mark: marks must be dropped before
+    # the punctuation pass, not merely composed.
+    assert match_key("Ma̱rmol Crema") == match_key("Marmol Crema") == "marmol crema"
+    assert match_key("é̱te") == "ete"
