@@ -25,6 +25,19 @@ def _drop_marks(text: str, form: str) -> str:
     return "".join(c for c in unicodedata.normalize(form, text) if not unicodedata.category(c).startswith("M"))
 
 
+def _prepared(text: str) -> str:
+    """The ONE preparation both match_key and clean_name run first, so the two can never disagree: typographic
+    punctuation unified, compatibility forms decomposed and every mark dropped (NFKD: '\u2474' becomes '(1)'
+    BEFORE the punctuation step sees it), then invisible characters removed and unusual spaces made plain."""
+    return _visible(_drop_marks(text.translate(_TYPOGRAPHIC), "NFKD"))
+
+
+def _visible(text: str) -> str:
+    """Every whitespace becomes a space and every format or control character is removed: an invisible character
+    (soft hyphen, zero-width space) never splits a word, and an unusual space (U+2028, U+0085) never glues two."""
+    return "".join(" " if c.isspace() else c for c in text if c.isspace() or unicodedata.category(c) not in ("Cf", "Cc"))
+
+
 def ascii_fold(text: str) -> str:
     """Fold accented/special Latin letters to plain ASCII so a variety name never carries a
     special character that splits the same stone in two -- 'Rosa Porriño' == 'Rosa Porrino',
@@ -67,8 +80,8 @@ def match_key(text: str) -> str:
     decomposed and every mark removed instead (skipped for plain ASCII text, which carries no mark: the hot path). This is the one shared normalizer; per-module copies
     MUST delegate here, not roll a weaker variant."""
     text = text or ""
-    if not text.isascii():
-        text = _drop_marks(text, "NFD")
+    if not (text.isascii() and text.isprintable()):
+        text = _prepared(text)
     return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text)).casefold().split())
 
 
@@ -85,24 +98,49 @@ _TYPOGRAPHIC = str.maketrans({
     "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
     "\u00b7": " ",
 })
-# The owner's display rule (report 21 O1): letters, digits, spaces and hyphens only.
-_NOT_NAME = re.compile(r"[^A-Za-z0-9 -]+")
+# The owner's two display rules (2026-11-03): a NAME is ASCII letters, digits, spaces, hyphens and apostrophes;
+# an IDENTIFIER (a grade such as 'AA/BB', a finish or standard code, a title) keeps printable ASCII punctuation.
+_NOT_NAME = re.compile(r"[^A-Za-z0-9 '-]+")
+_HYPHEN_RUN = re.compile(r"\s*-[\s-]*")
+
+
+def _display_char(c: str) -> str:
+    """A non-ASCII dash becomes a hyphen and any other non-ASCII punctuation or symbol a space, exactly where
+    match_key's punctuation pass puts a space, so the display keeps the value's identity."""
+    if c.isascii():
+        return c
+    category = unicodedata.category(c)
+    if category == "Pd":
+        return "-"
+    return " " if category[0] in "PS" else c
+
+
+def _ascii_display(text: str) -> str:
+    """The shared part of both display rules: the one preparation match_key runs, non-ASCII punctuation mapped
+    where match_key puts a space, then accents and compatibility forms folded. Raises UnfoldableName when a letter
+    has no ASCII form (a modifier letter is folded or dropped, as match_key does): never stored half-folded."""
+    mapped = "".join(_display_char(c) for c in _prepared(text or ""))
+    if any(c.isalpha() and unicodedata.category(c) != "Lm" and not ascii_fold(c) for c in mapped):
+        raise UnfoldableName(f"no ASCII form for a letter in {text!r}")
+    return ascii_fold(mapped)
 
 
 def clean_name(text: str) -> str:
-    """The ONE display-name rule (owner, 2026-11-03): plain ASCII letters, digits, spaces and hyphens. Typographic
-    punctuation is unified, format and control characters are removed, compatibility forms are folded (NFKC),
-    accents are folded (ascii_fold), '&' reads 'and', and every other mark becomes a space, the same way match_key
-    treats it, so cleaning never changes a name's identity except for '&'. Case is the caller's. Raises
-    UnfoldableName when a letter has no ASCII form. Bracketed alternatives are split off by the caller first
-    (split_bracket_alias). Byte-identical expectations live in the shared name-key vectors (`display`)."""
-    unified = "".join(" " if c.isspace() else c for c in (text or "").translate(_TYPOGRAPHIC))
-    visible = unicodedata.normalize(
-        "NFKC", "".join(c for c in unified if unicodedata.category(c) not in ("Cf", "Cc")))
-    if any(c.isalpha() and not ascii_fold(c) for c in visible):
-        raise UnfoldableName(f"no ASCII form for a letter in {text!r}")
-    named = _NOT_NAME.sub(" ", ascii_fold(visible).replace("&", " and "))
-    return " ".join(named.split()).strip("- ")
+    """The display rule for a NAME (variety, alias, type, colour, origin, port, category): ASCII letters, digits,
+    spaces, hyphens and apostrophes. '&' reads 'and', every other mark becomes a space, and hyphen runs collapse.
+    Every step mirrors match_key, so the cleaned name always keys like the original; '&' is the one deliberate
+    change. Case is the caller's. Bracketed alternatives are split off by the caller first (split_bracket_alias).
+    Expectations live in the shared name-key vectors (`display`)."""
+    named = _NOT_NAME.sub(" ", _ascii_display(text).replace("&", " and "))
+    return " ".join(_HYPHEN_RUN.sub("-", named).split()).strip("- ")
+
+
+def clean_identifier(text: str) -> str:
+    """The display rule for an IDENTIFIER (a quality grade such as 'AA/BB', a finish or standard code, a title):
+    printable ASCII with its punctuation kept, whitespace collapsed. Keys like the original (match_key). Which
+    fields are identifiers is set per brand in the brand's configuration (owner, 2026-11-03). Expectations live in
+    the shared name-key vectors (`identifier`)."""
+    return " ".join(_ascii_display(text).split())
 
 
 _BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")
