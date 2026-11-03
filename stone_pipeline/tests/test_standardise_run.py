@@ -244,6 +244,18 @@ def test_the_steps_run_in_order(monkeypatch):
     assert done == ["gpu v9", "judge", "clean", "gpu v9-clean", "judge", "report"] and not problems
 
 
+def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge_keeps_it(monkeypatch):
+    # a GPU round that ran to the window's end left every photo it finished unjudged, so the run published none of them
+    given = []
+    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (given.append((tag, deadline)), ([], False))[1])
+    monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (given.append(("judge", deadline)), ([], False))[1])
+    monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: ([], False))
+    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": []})
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", 10_000, say=lambda m: None, clock=lambda: 0)
+    gpu_end = 10_000 - C.JUDGE_WINDOW_SECONDS
+    assert given == [("v9", gpu_end), ("judge", 10_000), ("v9-clean", gpu_end), ("judge", 10_000)]
+
+
 def test_with_the_clean_up_off_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     done = _steps(monkeypatch)

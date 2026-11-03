@@ -355,11 +355,14 @@ module "sync_service_dev" {
   # peak is measured. NOT a separate produce task -- that races the single-host SQLite ledger invariant.
   memory = 6144 # 3.0 GB peak observed over two weeks (the combination tree build); 6 GB keeps 2x headroom
 
-  vpc_id                = data.terraform_remote_state.platform_dev.outputs.vpc_id
-  private_subnet_ids    = data.terraform_remote_state.platform_dev.outputs.private_subnet_ids
-  ecs_cluster_arn       = data.terraform_remote_state.platform_dev.outputs.ecs_cluster_arn
-  medusa_service_sg_id  = data.terraform_remote_state.platform_dev.outputs.service_sg_id
-  internal_namespace_id = data.terraform_remote_state.platform_dev.outputs.internal_namespace_id
+  vpc_id                  = data.terraform_remote_state.platform_dev.outputs.vpc_id
+  private_subnet_ids      = data.terraform_remote_state.platform_dev.outputs.private_subnet_ids
+  ecs_cluster_arn         = data.terraform_remote_state.platform_dev.outputs.ecs_cluster_arn
+  medusa_service_sg_id    = data.terraform_remote_state.platform_dev.outputs.service_sg_id
+  internal_namespace_id   = data.terraform_remote_state.platform_dev.outputs.internal_namespace_id
+  internal_namespace_name = data.terraform_remote_state.platform_dev.outputs.internal_namespace_name
+  photos_nightly_enabled  = var.dev_photos_nightly
+  photos_nightly_schedule = var.photos_nightly_schedule
 
   sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_dev.arn
   config_token_ssm_arn = data.aws_ssm_parameter.config_token_dev.arn
@@ -446,11 +449,14 @@ module "sync_service_prod" {
   image_upgrade_batch = var.prod_image_upgrade_batch
   run_timeout_seconds = var.run_timeout_seconds
 
-  vpc_id                = data.terraform_remote_state.platform_prod[0].outputs.vpc_id
-  private_subnet_ids    = data.terraform_remote_state.platform_prod[0].outputs.private_subnet_ids
-  ecs_cluster_arn       = data.terraform_remote_state.platform_prod[0].outputs.ecs_cluster_arn
-  medusa_service_sg_id  = data.terraform_remote_state.platform_prod[0].outputs.service_sg_id
-  internal_namespace_id = data.terraform_remote_state.platform_prod[0].outputs.internal_namespace_id
+  vpc_id                  = data.terraform_remote_state.platform_prod[0].outputs.vpc_id
+  private_subnet_ids      = data.terraform_remote_state.platform_prod[0].outputs.private_subnet_ids
+  ecs_cluster_arn         = data.terraform_remote_state.platform_prod[0].outputs.ecs_cluster_arn
+  medusa_service_sg_id    = data.terraform_remote_state.platform_prod[0].outputs.service_sg_id
+  internal_namespace_id   = data.terraform_remote_state.platform_prod[0].outputs.internal_namespace_id
+  internal_namespace_name = data.terraform_remote_state.platform_prod[0].outputs.internal_namespace_name
+  photos_nightly_enabled  = var.prod_photos_nightly
+  photos_nightly_schedule = var.photos_nightly_schedule
 
   sync_token_ssm_arn   = data.aws_ssm_parameter.sync_token_prod[0].arn
   config_token_ssm_arn = data.aws_ssm_parameter.config_token_prod[0].arn

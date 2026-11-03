@@ -213,8 +213,19 @@ the boot, the image pull and the pool's idle tail, at `SCRAPER_STANDARDISE_GPU_V
 ## Timing and stopping
 
 - Work window `SCRAPER_STANDARDISE_WORK_SECONDS` (default 2 h): after it no hosted call and no GPU round starts and a
-  running round's jobs are stopped. No GPU round starts with less than `GPU_MIN_WINDOW_SECONDS` (30 min) of it left. Report, publish and relink get `FINISH_SECONDS` (1.5 h). The process refuses to
-  start unless both fit under the runner's ceiling (`SCRAPER_RUN_TIMEOUT_SECONDS`, 4 h on the svc).
+  running round's jobs are stopped. Its last `JUDGE_WINDOW_SECONDS` (40 min) are the judge's: a GPU round's jobs are
+  stopped that long before the window ends, so what they finished is judged and published in the same run. No GPU round
+  starts with less than `GPU_MIN_WINDOW_SECONDS` (30 min) of its part left. Report, publish and relink get
+  `FINISH_SECONDS` (1.5 h). The process refuses to start unless the window leaves the GPU rounds their minimum after the
+  judge's share, and the window plus its finish fit under the runner's ceiling (`SCRAPER_RUN_TIMEOUT_SECONDS`, 4 h on
+  the svc).
+- Slices of `SCRAPER_STANDARDISE_RUN_SLICE` (default 30) photos: a slice runs on one GPU, about 100 s a photo for retouch
+  and standardise together, so it ends inside the GPU part of the window and a backlog spreads over the pool's GPUs.
+- The overnight press (`deploy.start_photos_run`, `infra/modules/sync_service/photos_nightly.tf`): an EventBridge
+  schedule per environment (`photos_nightly_schedule`, Europe/Amsterdam) runs a one-off task that presses Run for the
+  photos stage through the config API, so it is the same run as the button's. Off until `dev_photos_nightly` /
+  `prod_photos_nightly` is set; switching it is one apply that never rolls the svc. A press while a run is under way
+  starts nothing (exit 3 in the press's log).
 - A stop of the svc (a roll): no run starts any more, and the config server passes SIGTERM to the running run. One
   deadline, `SCRAPER_RUN_STOP_GRACE_SECONDS` (80 s), bounds the whole stop and leaves 40 s of the container's
   `stopTimeout` (120 s) for the last config save. The photo process stops its GPU jobs (waiting up to 60 s for them to
@@ -274,6 +285,7 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 | RUN_GPU_VCPUS | `SCRAPER_STANDARDISE_GPU_VCPUS` | 32 / 128 |
 | GPU_VCPU_HOUR_USD | `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` | 0.147 (default) |
 | WORK_SECONDS | `SCRAPER_STANDARDISE_WORK_SECONDS` | 7200 (default) |
+| RUN_SLICE | `SCRAPER_STANDARDISE_RUN_SLICE` | 30 (default) |
 | (job target) | `SCRAPER_GPU_QUEUE`, `SCRAPER_STANDARDISE_JOBDEF` | from the gpu_enhance module |
 | (hosted key) | `FAL_KEY` | already injected in both (not needed by a close-only run) |
 | CLOSE_ONLY | `SCRAPER_STANDARDISE_CLOSE_ONLY` | never set on the svc: the runner sets it per photos run (`close_only`) |
