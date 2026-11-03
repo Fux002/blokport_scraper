@@ -99,3 +99,13 @@ def test_match_key_mark_without_a_composed_form_does_not_fork_identity():
     # the punctuation pass, not merely composed.
     assert match_key("Ma̱rmol Crema") == match_key("Marmol Crema") == "marmol crema"
     assert match_key("é̱te") == "ete"
+
+
+def test_ascii_fold_keeps_a_transliteration_letter_that_carries_a_mark():
+    # Ǣ and Ǿ decompose to Æ and Ø plus a mark. Transliterating BEFORE decomposing missed them, so the
+    # letter was dropped as non-ASCII: the Key slug and proj.compact lost it while match_key kept it.
+    from stone_pipeline.core.text import ascii_fold, slugify
+    assert ascii_fold("Ǣgean") == "AEgean"
+    assert ascii_fold("Ǿstfold") == "Ostfold"
+    assert slugify("Ǣgean Blue") == slugify("Aegean Blue")
+    assert proj.compact("Ǿ Grey") == proj.compact("O Grey")

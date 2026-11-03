@@ -19,16 +19,24 @@ _TRANSLIT = str.maketrans({
 })
 
 
+def _drop_marks(text: str, form: str) -> str:
+    """Decompose `text` in Unicode normal `form` and remove every mark (category M*): accents and
+    combining signs carry no letter of their own."""
+    return "".join(c for c in unicodedata.normalize(form, text) if not unicodedata.category(c).startswith("M"))
+
+
 def ascii_fold(text: str) -> str:
     """Fold accented/special Latin letters to plain ASCII so a variety name never carries a
     special character that splits the same stone in two -- 'Rosa Porriño' == 'Rosa Porrino',
-    'São Gabriel' == 'Sao Gabriel', 'Łysa' == 'Lysa'. Non-decomposing letters (Æ/Œ/Ø/Ł/ß...) are
-    transliterated first; then NFKD decomposes accents, combining marks are dropped, and any
-    remaining non-ASCII is removed. Applied in slug, title-case, and the match key so the folding
-    is consistent everywhere (scrapes that use accents/ligatures match those that don't)."""
-    decomposed = unicodedata.normalize("NFKD", (text or "").translate(_TRANSLIT))
-    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return stripped.encode("ascii", "ignore").decode("ascii")
+    'São Gabriel' == 'Sao Gabriel', 'Łysa' == 'Lysa'. NFKD decomposes accents and compatibility
+    forms and every mark is dropped; THEN the non-decomposing letters (Æ/Œ/Ø/Ł/ß...) are
+    transliterated, so a letter such as Ǣ or Ǿ (Æ or Ø carrying a mark) is not lost; any remaining
+    non-ASCII is removed. Applied in slug, title-case, and the match key so the folding is
+    consistent everywhere (scrapes that use accents/ligatures match those that don't)."""
+    text = text or ""
+    if text.isascii():
+        return text
+    return _drop_marks(text, "NFKD").translate(_TRANSLIT).encode("ascii", "ignore").decode("ascii")
 
 
 def collapse_ws(text: str) -> str:
@@ -56,11 +64,12 @@ def match_key(text: str) -> str:
     a mark (accent, combining sign) is not \\w, so the punctuation pass would turn 'n' + U+0303 into a
     space and fork the stone. Decomposed input (NFD, common from macOS pages and PDFs) carries such
     marks, and NFC cannot compose a mark that has no precomposed letter (U+0331), so the text is
-    decomposed and every mark removed instead. This is the one shared normalizer; per-module copies
+    decomposed and every mark removed instead (skipped for plain ASCII text, which carries no mark: the hot path). This is the one shared normalizer; per-module copies
     MUST delegate here, not roll a weaker variant."""
-    unmarked = "".join(c for c in unicodedata.normalize("NFD", text or "")
-                       if not unicodedata.category(c).startswith("M"))
-    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", unmarked)).casefold().split())
+    text = text or ""
+    if not text.isascii():
+        text = _drop_marks(text, "NFD")
+    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text)).casefold().split())
 
 
 _BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")
