@@ -59,11 +59,14 @@ def classify(c: Curation) -> None:
             continue
         # DEDUP: one decision per cleaned identity, keyed on (RESOLVED type, cleaned name, decision level)
         # -- the SAME identity gen_key uses, so two same-named varieties of DIFFERENT types are EACH minted,
-        # and a vendor's own stone is a separate identity from the global meaning (see level).
-        identity = (proj.norm(stone_type), proj.norm(clean), level(c, row.src_site, name, clean))
-        if identity in c.seen_new:
-            continue
-        c.seen_new.add(identity)
+        # and a vendor's own stone is a separate identity from the global meaning (see level). A name with no
+        # usable key (a non-Latin script only, empty folded key) has no identity to share: deduping on "" would
+        # pool every such name of one type into the first and silently drop the rest, so each one goes on.
+        if key := proj.norm(clean):
+            identity = (proj.norm(stone_type), key, level(c, row.src_site, name, clean))
+            if identity in c.seen_new:
+                continue
+            c.seen_new.add(identity)
         if _reject_or_decide(c, row, gap, name, stone_type, clean):
             continue
         if _resolve_existing(c, row, gap, name, stone_type, clean):

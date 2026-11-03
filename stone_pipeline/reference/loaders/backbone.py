@@ -31,6 +31,8 @@ class Backbone:
 
     def lookup_all(self, name: str) -> list[BackboneVariety]:
         key = norm(name)
+        if not key:   # an empty folded key is no usable name: it can never identify a variety
+            return []
         return self.by_norm_name.get(key) or self.by_norm_alias.get(key) or []
 
     def lookup(self, name: str, stone_type: str | None = None) -> Optional[BackboneVariety]:
