@@ -515,7 +515,7 @@ def reap(run_id):
 def unconfigured(close_only=False):
     """What is missing or wrong in the settings: the GPU target, the hosted key (not for a close-only run: it makes no
     hosted call), the month's budget, and a work window that leaves the GPU rounds their minimum after the judge's share
-    and that, plus its finish, must end before the runner's ceiling."""
+    (not for a close-only run: it judges nothing) and that, plus its finish, must end before the runner's ceiling."""
     missing = []
     for name in ("GPU_QUEUE", "STANDARDISE_JOBDEF"):          # what gpu.target() reads, each named when missing
         try:
@@ -529,7 +529,7 @@ def unconfigured(close_only=False):
         missing.append("FAL_KEY")
     if C.BUDGET_USD is None:
         missing.append("SCRAPER_STANDARDISE_BUDGET_USD")
-    if C.WORK_SECONDS < C.JUDGE_WINDOW_SECONDS + C.GPU_MIN_WINDOW_SECONDS:
+    if not close_only and C.WORK_SECONDS < C.JUDGE_WINDOW_SECONDS + C.GPU_MIN_WINDOW_SECONDS:   # close-only: no judge
         missing.append(f"SCRAPER_STANDARDISE_WORK_SECONDS ({C.WORK_SECONDS}) at least JUDGE_WINDOW_SECONDS "
                        f"({C.JUDGE_WINDOW_SECONDS}) + GPU_MIN_WINDOW_SECONDS ({C.GPU_MIN_WINDOW_SECONDS})")
     if C.WORK_SECONDS + C.FINISH_SECONDS >= RUN_TIMEOUT_SECONDS:

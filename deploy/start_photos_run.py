@@ -40,8 +40,10 @@ def press(post) -> int:
     if resp.status_code == 202:
         print(f"==> photos run {rec.get('run_id')} started")
         return 0
-    if resp.status_code == 409:
-        print(f"==> not started: the {rec.get('stage')} run {rec.get('run_id')} is under way ({rec.get('status')})")
+    if resp.status_code == 409:      # a run holds the slot (its record), or an operation does (its error)
+        held = (f"the {rec.get('stage')} run {rec['run_id']} is under way ({rec.get('status')})" if rec.get("run_id")
+                else rec.get("error"))
+        print(f"==> not started: {held}")
         return 3
     print(f"ERROR: the config API answered {resp.status_code}: {resp.text[:300]}; no run started")
     return 1

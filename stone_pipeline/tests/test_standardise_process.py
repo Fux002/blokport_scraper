@@ -247,6 +247,12 @@ def test_the_work_window_must_leave_the_gpu_rounds_their_minimum_after_the_judge
                                    f"({C.JUDGE_WINDOW_SECONDS}) + GPU_MIN_WINDOW_SECONDS ({C.GPU_MIN_WINDOW_SECONDS})"]
 
 
+def test_a_close_only_run_has_no_judge_so_no_judge_share_is_asked_of_its_window(monkeypatch):
+    _configured(monkeypatch)
+    monkeypatch.setattr(C, "WORK_SECONDS", C.GPU_MIN_WINDOW_SECONDS)
+    assert proc.unconfigured(close_only=True) == []
+
+
 # --- publish: only what changed ---------------------------------------------------------------------------------------
 def _published_bucket():
     return _S3({f"{RUN}{A}.main.jpg": b"m", f"{RUN}{A}.white.jpg": b"w", f"{ROOT}chosen/one.json": _record("one", A)})

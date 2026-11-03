@@ -36,6 +36,12 @@ def test_a_run_under_way_is_3_and_named(configured, capsys):
     assert "the all run R0 is under way (running)" in capsys.readouterr().out
 
 
+def test_a_slot_held_by_an_operation_is_3_with_its_reason(configured, capsys):
+    post, _ = _answer(409, {"error": "a reset is in progress; refusing to run"})
+    assert press_mod.press(post) == 3
+    assert "not started: a reset is in progress; refusing to run" in capsys.readouterr().out
+
+
 def test_any_other_answer_is_1(configured, capsys):
     post, _ = _answer(500, text="boom")
     assert press_mod.press(post) == 1
