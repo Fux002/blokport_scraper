@@ -655,6 +655,7 @@ def test_an_open_book_without_its_slab_is_not_finished_until_completed_or_tried(
     assert not src.finished(_Bucket(_open_book()), GPU, A)
     assert src.finished(_Bucket(_open_book(f"{GPU}{A}.slab.png")), GPU, A)
     assert src.finished(_Bucket(_open_book(f"{GPU}noslab/{A}.json")), GPU, A)
+    assert src.finished(_Bucket(_open_book(src.logo_step_key(GPU, A))), GPU, A)    # made by the retired logo step
     assert src.finished(_Bucket({f"{GPU}{A}.main.jpg": b"", f"{GPU}{A}.white.jpg": b""}), GPU, A)    # a close-up
     assert src.finished(_Bucket({f"{GPU}held/{A}.json": b""}), GPU, A)
     assert not src.finished(_Bucket({}), GPU, A)

@@ -54,6 +54,17 @@ def slab_record_key(out, sha):
     return f"{out}{sha}.slab.json"
 
 
+LOGO_STEP = "logo-step/"
+
+
+def logo_step_key(out, sha):
+    """The marker of a result the retired logo step made (deploy.mark_logo_step_results, once at that release's deploy):
+    a re-run would start from the photo with its logo and add views no judge saw, so such a result is never completed
+    (outdated) and its close-up never made again (deploy.standardise_close), whatever the close-up rule. Per photo:
+    data, never a source setting."""
+    return f"{out}{LOGO_STEP}{sha}.json"
+
+
 def _store_slab(client, out, sha, res):
     """The photo's whole slab (<sha>.slab.png, written last of the two: it marks a whole slab) and, before it, which of
     the slabs found it is."""
@@ -71,10 +82,11 @@ def _exists(client, prefix):
 
 
 def outdated(client, out, sha):
-    """A result made before an open book's halves had their slab: a side view (studio) and no <sha>.slab.png, and not
-    tried again before (noslab/). Every result made now that has a side view has its slab, so nothing else matches."""
+    """A result made before an open book's halves had their slab: a side view (studio) and no <sha>.slab.png, not tried
+    again before (noslab/) and not made by the retired logo step (logo_step_key). Every result made now that has a side
+    view has its slab, so nothing else matches."""
     return (_exists(client, f"{out}{sha}.studio.jpg") and not _exists(client, f"{out}{sha}.slab.png")
-            and not _exists(client, f"{out}noslab/{sha}.json"))
+            and not _exists(client, f"{out}noslab/{sha}.json") and not _exists(client, logo_step_key(out, sha)))
 
 
 def finished(client, out, sha):

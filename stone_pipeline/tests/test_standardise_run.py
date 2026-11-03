@@ -50,10 +50,10 @@ class _S3:
         self.objects[Key] = Body
 
 
-def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=()):
+def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=(), logo_step=()):
     r = object.__new__(sel_mod.Round)
     r.prefix, r.finished, r.held, r.cleaned = "p/", set(finished), set(held), set(cleaned)
-    r.slabs, r.studio, r.noslab = set(slabs), set(studio), set(noslab)
+    r.slabs, r.studio, r.noslab, r.logo_step = set(slabs), set(studio), set(noslab), set(logo_step)
     r.judged, r.attempts, r.edited = set(), set(), set()
     return r
 
@@ -680,5 +680,11 @@ def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkey
 
 def test_a_round_s_outdated_results_are_worked_out_once_not_per_candidate():
     r = sel_mod.Round.__new__(sel_mod.Round)
-    r.finished, r.studio, r.slabs, r.noslab, r.held = {A, B}, {A, B}, {B}, set(), set()
+    r.finished, r.studio, r.slabs, r.noslab, r.held, r.logo_step = {A, B}, {A, B}, {B}, set(), set(), set()
     assert r.outdated == {A} and r.outdated is r.outdated
+
+
+def test_an_open_book_the_retired_logo_step_made_is_never_completed():
+    # its completion would publish a close view and 3D slab from the photo with the logo, unjudged
+    rnd = _round(finished={A, B}, studio={A, B}, logo_step={A})
+    assert rnd.outdated == {B}

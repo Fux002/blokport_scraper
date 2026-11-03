@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, pool_map, read_exclude
-from deploy.standardise_source import round_prefix
+from deploy.standardise_source import LOGO_STEP, round_prefix
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import clean, judge
@@ -123,6 +123,7 @@ class Round:
         self.slabs = {k[:64] for k in keys if k.endswith(".slab.png") and "/" not in k}     # whole slabs: a 3D slab each
         self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
         self.noslab = _shas(keys, "noslab/")
+        self.logo_step = _shas(keys, LOGO_STEP)        # made by the retired logo step: never completed
         self.held = _shas(keys, "held/")
         self.judged = _shas(keys, "judged/")
         self.cleaned = _shas(keys, "cleaned/")
@@ -133,9 +134,10 @@ class Round:
 
     @functools.cached_property
     def outdated(self):
-        """The results made before an open book's halves had their slab (a side view, no slab, not tried again): the GPU
-        completes each once (deploy.standardise_source.complete). Worked out once per Round: none of its sets change."""
-        return (self.finished & self.studio) - self.slabs - self.noslab - self.held
+        """The results made before an open book's halves had their slab (a side view, no slab, not tried again, not made
+        by the retired logo step): the GPU completes each once (deploy.standardise_source.complete). Worked out once per
+        Round: none of its sets change."""
+        return (self.finished & self.studio) - self.slabs - self.noslab - self.held - self.logo_step
 
     def lock(self, sha):
         with self._guard:

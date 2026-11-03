@@ -1,6 +1,7 @@
-"""deploy.mark_logo_step_results: at the deploy that retired the logo step, the outdated open-book results the step made
-(RUN_TAG, a source watermarked in a pre-migration config.db snapshot) are marked tried, so the photo process never
-completes them without it. DRY_RUN is explicit, a migrated snapshot is refused, and a second run marks nothing."""
+"""deploy.mark_logo_step_results: at the deploy that retired the logo step, every result the step made (RUN_TAG, a source
+watermarked in a pre-migration config.db snapshot) gets its logo-step marker, so the photo process never completes it
+nor makes its close-up again without that step. DRY_RUN is explicit, a migrated snapshot is refused, and a second run
+marks nothing."""
 from __future__ import annotations
 
 import io
@@ -10,7 +11,7 @@ import sqlite3
 import pytest
 
 from deploy import mark_logo_step_results as m
-from deploy.standardise_source import round_prefix
+from deploy.standardise_source import logo_step_key, round_prefix
 from stone_pipeline.config.settings import S3_BUCKET, STANDARDISE as C
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
@@ -97,15 +98,16 @@ def test_the_evidence_is_the_union_of_pre_migration_snapshots_and_a_migrated_one
         m.snapshots()
 
 
-def test_only_the_run_tag_s_outdated_open_books_of_the_marked_sources_are_marked_once(bucket):
-    assert m.mark(bucket, {"varsha"}, write=False) == {"varsha": [A]} and bucket.written == []   # dry run: nothing
-    assert m.mark(bucket, {"varsha"}, write=True) == {"varsha": [A]}
+def test_every_run_tag_result_of_the_marked_sources_is_marked_once(bucket):
+    every = [A, B, D, E]                                     # outdated, completed, tried, a close-up: each a result
+    assert m.mark(bucket, {"varsha"}, write=False) == {"varsha": every} and bucket.written == []   # dry run: nothing
+    assert m.mark(bucket, {"varsha"}, write=True) == {"varsha": every}
     out = round_prefix(C.RUN_TAG, "varsha")
-    assert bucket.written == [f"{out}noslab/{A}.json"]
-    assert "retired logo step" in json.loads(bucket.objects[(S3_BUCKET, f"{out}noslab/{A}.json", None)])["reason"]
+    assert bucket.written == [logo_step_key(out, sha) for sha in every]
+    assert "retired logo step" in json.loads(bucket.objects[(S3_BUCKET, logo_step_key(out, A), None)])["reason"]
     clean = round_prefix(C.CLEAN_TAG, "varsha")
-    assert (S3_BUCKET, f"{clean}noslab/{A}.json", None) not in bucket.objects            # a cleaned copy had no logo step
-    assert (S3_BUCKET, f"{round_prefix(C.RUN_TAG, 'sentas')}noslab/{A}.json", None) not in bucket.objects
+    assert (S3_BUCKET, logo_step_key(clean, A), None) not in bucket.objects             # a cleaned copy had no logo step
+    assert (S3_BUCKET, logo_step_key(round_prefix(C.RUN_TAG, "sentas"), A), None) not in bucket.objects
     assert m.mark(bucket, {"varsha"}, write=True) == {"varsha": []}                       # idempotent
 
 
@@ -114,5 +116,5 @@ def test_main_prints_the_count_and_writes_nothing_on_a_dry_run(bucket, monkeypat
     monkeypatch.setenv("CONFIG_DB_SNAPSHOTS", "prod-bucket/production/scraper/config/config.db@v1")
     monkeypatch.setattr(m.boto3, "client", lambda *a, **k: bucket)
     assert m.main() == 0
-    assert "would mark (DRY_RUN) 1 outdated open-book results of ['varsha']" in capsys.readouterr().out
+    assert "would mark (DRY_RUN) 4 results of ['varsha']" in capsys.readouterr().out
     assert bucket.written == []

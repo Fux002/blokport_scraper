@@ -316,15 +316,17 @@ a job's name; scoping to the process's own jobs would need tags on submit (`batc
 `aws:ResourceTag` condition on TerminateJob, which is not applied here: the process only stops jobs it named
 (`photos-<run id>-...`).
 
-### At the deploy that retired the logo step: mark its outdated open books (once per environment)
+### At the deploy that retired the logo step: mark every result it made (once per environment)
 
-An outdated open-book result is completed by a re-run that publishes its close view and 3D slab unjudged. The results
-the retired logo step made (RUN_TAG, a watermarked source) would be re-run without it. Before the first photos run of
-that release on an environment, mark them tried with `python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first,
-then `false`; the environment's usual `SCRAPER_` settings). It reads the watermarked sources from a config.db snapshot
-taken before the migration; for dev pass prod's too (`CONFIG_DB_SNAPSHOTS`, see the script), since dev's varsha results
-were made by prod's run. Dry run on 2026-11-02: 28 in prod, 29 in dev, all varsha. They keep their judged views and
-choices and get no close view and no 3D slab. Idempotent.
+Two steps add views to a stored result from a re-run of its photo, unjudged: completing an outdated open book (its close
+view and 3D slab) and the close-only run (its close-up, under every close-up rule). A result the retired logo step made
+(RUN_TAG, a watermarked source) would be re-run without that step. Before the first photos run of that release on an
+environment, run `python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first, then `false`; the environment's usual
+`SCRAPER_` settings). It writes `logo-step/<sha>.json` beside each such result; a marked result is never completed and
+its close-up never made again, whatever `CLOSEUP_VERSION` says: it keeps its judged views, its choice and its
+`close.jpg` as they are. It reads the watermarked sources from a config.db snapshot taken before the migration; for dev
+pass prod's too (`CONFIG_DB_SNAPSHOTS`, see the script), since dev's varsha results were made by prod's run. Dry run on
+2026-11-03: 1278 in prod, 1187 in dev, all varsha `v2` results. Idempotent.
 
 ### Rolling back past the image pipeline switch (config.db schema 9)
 
@@ -337,7 +339,7 @@ operator decisions made since that snapshot are then lost.
 ### Before prod: the judge catches a burned-in logo (once, on dev)
 
 The logo of a watermarked supplier (varsha) is no longer taken off by a step of its own: the judge must find it
-(`leftover_mark`) for the clean step to remove it. Evidence before prod, on dev, about 1.50 USD:
+(`leftover_mark`) for the clean step to remove it. Evidence before prod, on dev, about 1.80 USD:
 
 1. Pick 20 varsha photos in the dev sheet whose choice record has tag `v2` (made with the retired logo step, so
    their stored results are logo-free and say nothing here). Write their shas as a JSON list to S3.
@@ -345,10 +347,12 @@ The logo of a watermarked supplier (varsha) is no longer taken off by a step of 
    one standardise job, about 0.30 to 0.50 USD of GPU time (one slice, its 12-minute allowance plus about 40 s a photo
    on 4 vCPU at 0.147 USD per vCPU-hour). Nothing is published: the tag is not RUN_TAG or CLEAN_TAG.
 3. Judge each finished result (`deploy.standardise_select.verdict` on the `logo-check` round): 20 judge calls,
-   about 0.016 USD each as billed (0.14 reserved).
-4. Count the verdicts that fail with `leftover_mark`, and look at the passes by eye. Prod goes ahead when every
-   photo whose result still shows the logo is a `leftover_mark` fail; a pass with a visible logo means the judge
-   prompt needs the logo named more plainly first.
+   about 0.016 USD each as billed (0.14 reserved). Then judge the close view of each result that passed and has one
+   (`<sha>.close.jpg`; the judge sees the published views, and the close view is cut from the photo's middle, where
+   varsha's logo sits): at most 20 more calls, about 0.30 USD.
+4. Count the verdicts that fail with `leftover_mark`, on the main and on the close views, and look at the passes by eye.
+   Prod goes ahead when every result or close view that still shows the logo is a `leftover_mark` fail; a pass with a
+   visible logo means the judge prompt needs the logo named more plainly first.
 
 ## Shared photos
 

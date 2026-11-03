@@ -53,6 +53,14 @@ class _S3:
         self._fail(Key)
         self.objects.pop(Key, None)
 
+    def get_paginator(self, _name):
+        objects = self.objects
+
+        class _Pages:
+            def paginate(self, Bucket, Prefix):
+                yield {"Contents": [{"Key": k, "ETag": "\"e\""} for k in sorted(objects) if k.startswith(Prefix)]}
+        return _Pages()
+
 
 def _record(sha, prefix=RUN, source="sentas"):
     return {"source": source, "key": f"slab-{sha[0]}", "sha": sha, "tag": prefix.split("/")[2], "prefix": prefix}
@@ -327,3 +335,21 @@ def test_what_of_the_start_photo_is_not_as_shot():
     assert fills[110:190, 210:290].all() and fills[:80].sum() == 0
     with pytest.raises(photo.NoCloseUp, match="missing"):                                     # its original is gone
         runner.start_edits(_S3(), RUN, key, f"{RUN}retouched/{A}.jpg", False, retouched)
+
+
+# --- a result the retired logo step made (deploy.mark_logo_step_results) -----------------------------------------------
+def test_a_photo_the_retired_logo_step_made_is_never_remade_whatever_the_close_up_rule(monkeypatch):
+    # its close-up would be made from the photo with the logo, unjudged: it is never remade and its close.jpg stays
+    from deploy import standardise_source as src
+    marked, plain = _record(A), _record(B)
+    s3 = _S3({src.logo_step_key(RUN, A): b"{}", f"{RUN}{A}.close.jpg": b"old close-up"})
+    assert close.undone(s3, [marked, plain]) == [plain]
+    _remakes(monkeypatch, {B: IMAGE})                                  # A is not in it: remaking A would raise
+    tally = _redo(s3, [marked, plain], _slab(A, B) | {src.logo_step_key(RUN, A)})
+    assert tally == {"made by the retired logo step": 1, "close-up": 1}
+    assert s3.objects[f"{RUN}{A}.close.jpg"] == b"old close-up" and close.done_key(marked) not in s3.objects
+    assert close.done_key(plain) in s3.objects                         # an unmarked photo is remade
+    monkeypatch.setattr(C, "CLOSEUP_VERSION", C.CLOSEUP_VERSION + 1)  # a new close-up rule redoes every photo ...
+    assert close.undone(s3, [marked, plain]) == [plain]                # ... but this one
+    _remakes(monkeypatch, {B: IMAGE})
+    assert _redo(s3, [marked, plain], _slab(A, B) | {src.logo_step_key(RUN, A)})["made by the retired logo step"] == 1

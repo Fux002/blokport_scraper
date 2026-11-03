@@ -1,11 +1,12 @@
-"""One-off, per environment, at the deploy of the release that retired the logo step (2026-11-02): mark the outdated
-open-book results that the retired logo step made, so the photo process never completes them without it.
+"""One-off, per environment, at the deploy of the release that retired the logo step (2026-11-02): mark every result the
+retired logo step made, so the photo process never adds to it without that step.
 
-Why: an outdated open-book result (a side view, no <sha>.slab.png, not tried: deploy.standardise_source.outdated) is
-completed by a re-run that publishes its close view and 3D slab without a judge call. A result the retired logo step
-made had its logo taken off with a reference copy; its re-run now has no such step, so the completed close view and 3D
-slab could show the logo. Marking it tried (noslab/<sha>.json, deploy.standardise_source.tried) keeps its judged views
-and choice and gives it no close view and no 3D slab. A per-photo marker, data, never a source setting.
+Why: two later steps add views to a stored result from a re-run of its photo, unjudged: completing an outdated open book
+(its close view and 3D slab: deploy.standardise_source.complete) and the close-only run (its close-up again, every
+close-up rule: deploy.standardise_close). A result the retired logo step made had its logo taken off with a reference
+copy; a re-run now has no such step, so what it adds could show the logo. The marker (logo-step/<sha>.json,
+deploy.standardise_source.logo_step_key) stops both, whatever the close-up rule: the result keeps its judged views,
+its choice and its close.jpg as they are. A per-photo marker, data, never a source setting.
 
 Which results, by data:
 - the run tag: STANDARDISE.RUN_TAG only. The logo step never ran on a cleaned copy (the clean tag's input), so a clean
@@ -21,11 +22,12 @@ Env (no flags):
   DRY_RUN                required, exactly true or false: true lists and counts, writes nothing
   CONFIG_DB_SNAPSHOTS    optional, comma-separated <bucket>/<key>[@<version id>] of pre-migration config.db snapshots;
                          default: this environment's own snapshot (its latest version)
-Idempotent: a result already marked is no longer outdated, so a second run marks nothing.
+Idempotent: a result already marked is left as it is, so a second run marks nothing.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import sys
@@ -35,12 +37,12 @@ from pathlib import Path
 
 import boto3
 
-from deploy.standardise_source import outdated, round_prefix, tried
+from deploy.standardise_source import LOGO_STEP, logo_step_key, round_prefix
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.ledger import snapshot
 
-REASON = ("made with the retired logo step (2026-11-02): never completed without it; its judged views and choice "
-          "stand, it gets no close view and no 3D slab")
+REASON = ("made with the retired logo step (2026-11-02): never completed and its close-up never made again without it; "
+          "its judged views, choice and close-up stand")
 
 
 def dry_run() -> bool:
@@ -90,13 +92,12 @@ def evidence(client) -> set[str]:
 
 
 def candidates(client, src) -> list[str]:
-    """The shas of src's RUN_TAG results that are outdated open books (the same rule the GPU job applies)."""
+    """The shas of src's RUN_TAG results (each with its <sha>.main.jpg) not marked yet."""
     out = round_prefix(C.RUN_TAG, src)
-    studio = sorted({o["Key"][len(out):].split(".")[0]
-                     for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=out)
-                     for o in page.get("Contents", []) if "/" not in o["Key"][len(out):]
-                     and o["Key"].endswith(".studio.jpg")})
-    return [sha for sha in studio if outdated(client, out, sha)]
+    keys = {o["Key"][len(out):] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=out)
+            for o in page.get("Contents", [])}
+    marked = {k[len(LOGO_STEP):].split(".")[0] for k in keys if k.startswith(LOGO_STEP)}
+    return sorted({k.split(".")[0] for k in keys if "/" not in k and k.endswith(".main.jpg")} - marked)
 
 
 def mark(client, sources, write) -> dict[str, list[str]]:
@@ -105,8 +106,10 @@ def mark(client, sources, write) -> dict[str, list[str]]:
     for src in sorted(sources):
         shas = candidates(client, src)
         if write:
+            out = round_prefix(C.RUN_TAG, src)
             for sha in shas:
-                tried(client, round_prefix(C.RUN_TAG, src), sha, REASON)
+                client.put_object(Bucket=S3_BUCKET, Key=logo_step_key(out, sha), ContentType="application/json",
+                                  Body=json.dumps({"reason": REASON}, sort_keys=True).encode())
         marked[src] = shas
     return marked
 
@@ -120,7 +123,7 @@ def main() -> int:
         for sha in shas:
             print(f"   {src} {sha}")
     total = sum(len(s) for s in marked.values())
-    print(f"==> {'marked' if write else 'would mark (DRY_RUN)'} {total} outdated open-book results of "
+    print(f"==> {'marked' if write else 'would mark (DRY_RUN)'} {total} results of "
           f"{sorted(sources) or 'no source'} under {C.RUN_TAG} in s3://{S3_BUCKET}", flush=True)
     return 0
 

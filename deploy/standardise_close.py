@@ -10,7 +10,8 @@ when the photo gets none: by the close-up rule, for a reason of its own (photo.N
 the product sheet, one of its own inputs is missing or no image, it no longer gives the slabs its run found), because a storage error on it persisted over CLOSEUP_RETRY_MAX jobs, or because its run made no whole single
 slab of it. Each photo done is recorded (with the reason when it has none) under <prefix>close_v<CLOSEUP_VERSION>/, so
 a re-run goes on where it stopped and a new close-up rule does every photo again; deploy.standardise_publish then
-publishes it, or takes the published one down.
+publishes it, or takes the published one down. A photo the retired logo step made (logo_step_key) is never made again,
+whatever the rule: its remake would start from the photo with its logo, unjudged; its close.jpg stays as it is.
 
 What is not the photo's own outcome changes nothing: a passing storage error leaves the photo to the next job (counted
 once per job, whatever Batch's retries), a broken GPU stops the slice (a photo that breaks it in two jobs has none), any
@@ -34,8 +35,9 @@ from concurrent.futures import ThreadPoolExecutor
 import boto3
 
 from deploy.standardise_publish import _objects, chosen_prefix
-from deploy.standardise_source import (_encode, _get, gpu_error, own_input, passing_storage_error, read_slab,
-                                       sheet_photos, slab_record_key, start, start_edits)
+from deploy.standardise_source import (LOGO_STEP, _encode, _get, gpu_error, logo_step_key, own_input,
+                                       passing_storage_error, read_slab, sheet_photos, slab_record_key, start,
+                                       start_edits)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import models, photo
@@ -44,6 +46,7 @@ WORKERS = 32                 # parallel reads of the choice records
 PROGRESS_EVERY = 25          # photos between progress lines
 NO_CLOSE_UP = "the close-up rule gives this photo none"
 NO_SLAB = "its run made no whole single slab of it"
+LOGO_STEP_MADE = "made by the retired logo step"
 OFF_SHEET = "the photo is no longer on the product sheet"
 
 
@@ -78,10 +81,12 @@ def chosen(client, root):
 
 
 def undone(client, records):
-    """The records whose close-up is not made yet under the current rule (no done_key): one listing per run folder."""
-    done = {k for prefix in sorted({r["prefix"] for r in records})
-            for k in _objects(client, f"{prefix}close_v{C.CLOSEUP_VERSION}/")}
-    return [r for r in records if done_key(r) not in done]
+    """The records whose close-up is not made yet under the current rule (no done_key), never one the retired logo step
+    made (logo_step_key: never remade, whatever the rule): two listings per run folder."""
+    prefixes = sorted({r["prefix"] for r in records})
+    done = {k for prefix in prefixes for k in _objects(client, f"{prefix}close_v{C.CLOSEUP_VERSION}/")}
+    done |= {k for prefix in prefixes for k in _objects(client, f"{prefix}{LOGO_STEP}")}
+    return [r for r in records if done_key(r) not in done and logo_step_key(r["prefix"], r["sha"]) not in done]
 
 
 def listed(records, src, wanted=None):
@@ -237,6 +242,9 @@ def redo(client, records, made, photos, m, job):
             if done_key(record) in made:
                 run.tally["already done"] += 1
                 continue
+            if logo_step_key(record["prefix"], record["sha"]) in made:   # its close.jpg stays as it is
+                run.tally[LOGO_STEP_MADE] += 1
+                continue
             run.one(record, photos, m)
             if i % PROGRESS_EVERY == 0:
                 print(f"   [{i + 1}/{len(records)}] {dict(run.tally)}", flush=True)
@@ -262,7 +270,7 @@ def main() -> int:
         return 2
     whole = listed(records, src, json.loads(_get(client, only)) if only else None)
     made = {k for prefix in sorted({r["prefix"] for r in whole}) for k in _objects(client, prefix)}
-    todo = sum(done_key(r) not in made for r in whole)
+    todo = sum(done_key(r) not in made and logo_step_key(r["prefix"], r["sha"]) not in made for r in whole)
     print(f"==> close-ups v{C.CLOSEUP_VERSION} of {tag}/{src} (job {job}): {len(whole)} photos, {todo} to do", flush=True)
     tally = redo(client, whole, made, sheet_photos(client), models.load("close"), job) if todo else {"already done": len(whole)}
     summary = {"tag": tag, "source": src, "version": C.CLOSEUP_VERSION, "job": job, "photos": len(whole), "counts": tally}
