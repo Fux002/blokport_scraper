@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "586939a745a40ee7fee96da59356b3e9eb55d221"     # + a stock-only refresh never rewrites a product, a failed source fails loud (#481)
+prod_image_tag     = "f3dd3d19c2a7ca863f24cd078b5c0e89fcd4d764"     # standardised photo release: one photo process, tiles, 3D, close-ups, owner decisions, photo_ready, old enhancer retired (#483-#494)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
@@ -59,12 +59,12 @@ dev_require_standard_photo = true
 # The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image both envs' standardise jobs run today
 # (standardise-edit-cbc576cf9ebd-x, registered by hand until now), under its protected pin tag: add the tag to that
 # image in ECR BEFORE applying (STANDARDISE_PROCESS.md, rollout). The process runs after each full produce only once
-# AUTO: on in dev for the end-to-end verification (owner 2026-11-02), off in prod until the owner's word after it. The
+# AUTO: on in both: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run). The
 # month's budget, hosted calls and GPU together, is the owner's (2026-11-02): prod 100 USD, dev 40 USD.
 dev_standardise_image_tag  = "standardise-pin-f3dd3d19c2a7"
-prod_standardise_image_tag = "standardise-pin-cbc576cf9ebd"
+prod_standardise_image_tag = "standardise-pin-f3dd3d19c2a7"
 dev_standardise_auto       = true
-prod_standardise_auto      = false
+prod_standardise_auto      = true
 # The hosted clean-up edits (FAL) stay off in both until the owner switches them on (owner 2026-11-02: no FAL spend now);
 # listings whose photos all fail for a cleanable reason go to the review list instead.
 dev_standardise_clean       = false
