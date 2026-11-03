@@ -61,7 +61,7 @@ dev_require_standard_photo = true
 # image in ECR BEFORE applying (STANDARDISE_PROCESS.md, rollout). The process runs after each full produce only once
 # AUTO: on in dev for the end-to-end verification (owner 2026-11-02), off in prod until the owner's word after it. The
 # month's budget, hosted calls and GPU together, is the owner's (2026-11-02): prod 100 USD, dev 40 USD.
-dev_standardise_image_tag  = "standardise-pin-cbc576cf9ebd"
+dev_standardise_image_tag  = "standardise-pin-f3dd3d19c2a7"
 prod_standardise_image_tag = "standardise-pin-cbc576cf9ebd"
 dev_standardise_auto       = true
 prod_standardise_auto      = false
