@@ -29,8 +29,8 @@ from stone_pipeline.stages.product_state import inventory_str
 # links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
 # origin_country_code (which fanned every product out to all ports in its quarry country).
 # v4: height is the thickness, width the short face (every shape flat). v5: lot_code + lot_position.
-# v6: model_3d, the lead slab's 3D cut-out.
-_PRODUCT_PAYLOAD_CONTRACT = "v6-model-3d"
+# v6: model_3d, the lead slab's 3D cut-out. v7: photo_ready, the no-photo rule's decision.
+_PRODUCT_PAYLOAD_CONTRACT = "v7-photo-ready"
 
 
 def _image_models(path: str | Path | None = None) -> dict[str, str]:
@@ -194,9 +194,22 @@ def fill_variation_types(ledger: Ledger) -> int:
     return n
 
 
+def _photo_ready(r: CanonicalRow, prev) -> bool:
+    """The no-photo rule, decided here once per product: with images.require_standard_photo on, a product without a
+    standardised photo is not ready. A run that cannot tell (standard_photo None: the photo pool unread or empty) keeps
+    the product's last decision. Without the rule every product is ready. populate_inventory hides exactly the products
+    this marks not ready, so the product payload and the stock reason always agree."""
+    if not SETTINGS.images.require_standard_photo:
+        return True
+    if r.standard_photo is None:
+        return bool(prev["photo_ready"]) if prev else True
+    return r.standard_photo
+
+
 def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
     """Write canonical rows into the `product` table, in input order. New entities
-    land `pending`; the equivalence test renders them straight back."""
+    land `pending`; the equivalence test renders them straight back. Each product's photo fact (photo_ready) is
+    decided here, before its stock (populate_inventory reads it)."""
     now = now_iso()
     n = 0
     for r in rows:
@@ -210,6 +223,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
         variation_key = r.variation_key or _variation_key_for(ledger, r.variation_id) \
             or (prev["variation_key"] if prev else None)
         category = _category_name_for(ledger, r.category_pcat_id)   # once: used in the record AND the hash
+        photo_ready = _photo_ready(r, prev)
         record = {
             "sku": sku,
             "source": cfg.source_code,
@@ -248,6 +262,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "inventory_quantity": inventory_str(r),
             "lot_code": r.lot_code,
             "lot_position": r.lot_position,
+            "photo_ready": 1 if photo_ready else 0,
             "payload_hash": (ph := payload_hash([
                 _PRODUCT_PAYLOAD_CONTRACT,   # bump forces a one-time full re-sync on a payload-shape change
                 variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
@@ -265,6 +280,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
                 r.model_3d_key,   # a slab that gains, changes or loses its 3D re-serves
                 # the standardised files are re-made in place under the same names: their content re-serves them
                 r.standard_version,
+                photo_ready,   # a product that gains or loses its standardised photo re-serves
             ])),
             "created_at": now,
             "updated_at": now,
@@ -301,13 +317,14 @@ def ledger_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceCon
 def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
     """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field).
     `last_synced_qty` is left null, so a freshly populated row is a delta to serve
-    (design section 7). Products must be populated first (the sku FK). With images.require_standard_photo on, a product
-    without a standardised photo is hidden: stock 0, reason 'no_photo' (always with stock 0: Blokport hides on stock 0
-    and reads an unknown reason above 0 as a plain quantity; 'delisted' stays the vendor take-offline's, so the
-    dead-stock purge can tell them apart). One whose photo this run could not tell
-    (standard_photo None: the pool unread or empty, or the stock-only refresh) keeps the listed or hidden state it had.
-    A change of reason is a delta like a change of stock: hiding or showing a product already at stock 0 is served."""
-    rule = SETTINGS.images.require_standard_photo
+    (design section 7). Products must be populated first (the sku FK, and the photo fact). A product the no-photo rule
+    marked not ready (product.photo_ready 0, decided by populate_products) is hidden: stock 0, reason 'no_photo' (always
+    with stock 0: Blokport hides on stock 0 and reads an unknown reason above 0 as a plain quantity; 'delisted' stays the
+    vendor take-offline's, so the dead-stock purge can tell them apart). The stock-only refresh writes no product, so it
+    never changes whether a product is hidden: that waits for the full run, which serves the product and its stock
+    together. A change of reason is a delta like a change of stock: hiding or showing a product already at stock 0 is
+    served."""
+    not_ready = {p["sku"] for p in ledger.execute("SELECT sku FROM product WHERE photo_ready = 0")}
     now = now_iso()
     n = 0
     for r in rows:
@@ -315,8 +332,7 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
         resolved = inventory_str(r)
         qty = int(resolved) if str(resolved).isdigit() else 0
         stored = ledger.get("inventory", "sku", sku)
-        was_hidden = bool(stored) and stored["reason"] == "no_photo"
-        hidden = rule and (r.standard_photo is False or (r.standard_photo is None and was_hidden))
+        hidden = sku in not_ready
         reason = "no_photo" if hidden else None
         # keep last_synced_qty on update: it is owned by the ack, not the write-through.
         # Overwriting it to NULL each run would re-serve every product as a delta forever.

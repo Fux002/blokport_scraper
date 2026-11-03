@@ -17,7 +17,7 @@ from stone_pipeline.config.sources import load_source
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger import populate
-from stone_pipeline.ledger.populate import populate_discontinued, populate_inventory
+from stone_pipeline.ledger.populate import populate_discontinued, populate_inventory, populate_products
 from stone_pipeline.ledger.sync import purge_discontinued, ready
 from stone_pipeline.stages import emit, images
 
@@ -25,8 +25,9 @@ A = "a" * 64
 BASE = f"https://bucket.s3.amazonaws.com/{ENV_SEGMENT}/products"
 
 
-def _row(key, standard_photo, qty="3"):
-    return CanonicalRow(src_site="sentas", surrogate_key=key, inventory_quantity=qty, standard_photo=standard_photo)
+def _row(key, standard_photo, qty="3", lot_code=None):
+    return CanonicalRow(src_site="sentas", surrogate_key=key, inventory_quantity=qty, standard_photo=standard_photo,
+                        lot_code=lot_code)
 
 
 def _rule(monkeypatch, on):
@@ -40,11 +41,9 @@ def rule_on(monkeypatch):
 
 
 def _stocked(ledger, rows, cfg):
-    """populate_inventory on rows whose products exist (the write-through populates products first)."""
-    now = now_iso()
-    for r in rows:
-        ledger.upsert("product", {"sku": emit._sku(r, cfg), "source": "sen", "state": "synced",
-                                  "created_at": now, "updated_at": now}, pk=("sku",))
+    """The write-through's order: the products (each one's photo decision), applied by Blokport, then their stock."""
+    populate_products(ledger, rows, cfg)
+    ledger.execute("UPDATE product SET state = 'synced'")
     return populate_inventory(ledger, rows, cfg)
 
 
@@ -117,21 +116,21 @@ def test_a_photo_hidden_product_always_goes_out_at_stock_0(tmp_path, rule_on):
 
 def test_a_bundle_never_redirects_to_a_lot_with_no_piece_on_sale(tmp_path, rule_on):
     cfg = load_source("sentas")
-    piece = _row("2555-4", False)
+    piece = _row("2555-4", False, lot_code="L1")
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
         now = now_iso()
         ledger.upsert("product", {"sku": "SEN-2555", "source": "sen", "state": "synced", "medusa_id": "m-b",
                                   "created_at": now, "updated_at": now}, pk=("sku",))
         ledger.upsert("inventory", {"sku": "SEN-2555", "qty": 9, "last_synced_qty": 9, "updated_at": now}, pk=("sku",))
         _stocked(ledger, [piece], cfg)
-        ledger.execute("UPDATE product SET lot_code = 'L1', medusa_id = 'm-p' WHERE sku = ?", (emit._sku(piece, cfg),))
+        ledger.execute("UPDATE product SET medusa_id = 'm-p' WHERE sku = ?", (emit._sku(piece, cfg),))
         now = now_iso()
         ledger.upsert("product", {"sku": "SEN-2555-1", "source": "sen", "state": "synced", "lot_code": "L1",
                                   "medusa_id": "m-sold", "created_at": now, "updated_at": now}, pk=("sku",))
         ledger.upsert("inventory", {"sku": "SEN-2555-1", "qty": 0, "last_synced_qty": 0, "updated_at": now}, pk=("sku",))
         populate_discontinued(ledger, [("SEN-2555", "h")], replaced={"SEN-2555": "L1"})
         assert "SEN-2555" not in [r["external_id"] for r in ready(ledger, "inventory")]   # one hidden, one sold
-        _stocked(ledger, [_row("2555-4", True)], cfg)                                   # its photo is published
+        _stocked(ledger, [_row("2555-4", True, lot_code="L1")], cfg)                    # its photo is published
         assert "SEN-2555" in [r["external_id"] for r in ready(ledger, "inventory")]
 
 

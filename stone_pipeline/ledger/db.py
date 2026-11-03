@@ -27,11 +27,12 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 10  # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 11  # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
 #                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
 #                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
-#                      v10: product.model_3d_key -- the lead slab's 3D cut-out
+#                      v10: product.model_3d_key -- the lead slab's 3D cut-out;
+#                      v11: product.photo_ready -- the no-photo rule's decision
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 
@@ -174,6 +175,10 @@ class Ledger:
             self.conn.execute("ALTER TABLE product ADD COLUMN lot_position INTEGER")
         if "model_3d_key" not in prod_cols:   # v10: the lead slab's 3D cut-out (null = no 3D)
             self.conn.execute("ALTER TABLE product ADD COLUMN model_3d_key TEXT")
+        if "photo_ready" not in prod_cols:   # v11: the no-photo rule's decision, until v11 kept as the stock reason
+            self.conn.execute("ALTER TABLE product ADD COLUMN photo_ready INTEGER NOT NULL DEFAULT 1")
+            self.conn.execute("UPDATE product SET photo_ready = 0 WHERE sku IN "
+                              "(SELECT sku FROM inventory WHERE reason = 'no_photo')")
         removed_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(removed)")}
         if "kind" not in removed_cols:   # v4: existing tombstones are all products (that was the only lane)
             self.conn.execute("ALTER TABLE removed ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'")

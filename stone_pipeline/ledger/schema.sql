@@ -145,7 +145,7 @@ CREATE INDEX IF NOT EXISTS idx_combination_variation ON combination (variation_k
 -- payload_hash covers: (variation_key, color, finish, quality, type, title, description,
 --   handle, weight, length, width, height, origin_country_code, product_image_keys,
 --   oriented_image_keys, company_id, sales_channel_id, category, bundle_size, ports, model_3d_key,
---   standard_version: the ETags of the standardised files, not stored).
+--   standard_version: the ETags of the standardised files, not stored, photo_ready).
 -- ---------------------------------------------------------------------------
 --
 -- Two groups of columns. The DESIGN fields (name-based: color/finish/quality/
@@ -189,6 +189,9 @@ CREATE TABLE IF NOT EXISTS product (
     oriented_image_keys  TEXT,                          -- JSON array, ordered (blocks: Front/Right/Back/Left)
     product_image_keys   TEXT,                          -- JSON array, ordered (slabs: Product Image 1..N)
     model_3d_key         TEXT,                          -- the lead slab's 3D cut-out url; null = no 3D
+    -- the no-photo rule's decision (populate._photo_ready): 0 = no standardised photo, so its stock goes out at 0
+    -- with reason 'no_photo'; 1 otherwise (and always with the rule off)
+    photo_ready          INTEGER NOT NULL DEFAULT 1,
     company_id           TEXT,
     sales_channel_id     TEXT,
     ports                TEXT,                          -- JSON array of port ids
