@@ -1059,6 +1059,18 @@ class STANDARDISE:
     # their real stop times are counted; inside the 100 s stop grace on a SIGTERM.
     STOP_WAIT_SECONDS, STOP_POLL_SECONDS = 60, 5
     CUTOUT_WORKERS = 4                 # 3D cut-outs made at once by publish (full-size slabs in memory, on the 6 GB service)
+    DIAG_DIR = "diag"                  # the outline diagnostic (deploy.standardise_diag) writes under <env>/<TEST_PREFIX>/<this>/ only
+    DIAG_JOINTS = 6                    # it lists this many of the strongest joints in each half of a profile ...
+    DIAG_JOINT_MIN = 2.0               # ... scoring at least this (the trim's own bar is SEAM_MIN_END)
+    DIAG_LONG_EDGE = 1600              # px: its overlay's long side
+    DIAG_LINE_PER, DIAG_LINE_MIN = 500, 2   # its lines: one px per this many px of the photo's long side, at least this
+    DIAG_WIDTHS = {"box": 3, "frame": 4, "outline": 2, "trim": 2, "slab": 2}   # in lines
+    DIAG_TINT = 0.3                    # the mask's tint
+    DIAG_FONT = 0.5                    # text scale per line px
+    DIAG_TEXT_AT = (10, 20)            # the reason's place, in lines
+    DIAG_COLOURS = {"mask": (0, 255, 0), "detection": (60, 120, 255), "box": (0, 200, 255), "frame": (255, 0, 0),
+                    "outline": (255, 230, 0), "joint": (255, 140, 0), "trim": (255, 0, 255), "slab": (0, 255, 0),
+                    "text": (255, 255, 0)}
     SHEET_KEY = "scraper/to_upload/3_products_all.csv"   # the product sheet, under <env>/
     # Each listing's own photos in its order ({Product Handle: [[source, sha], ...]}), written by the produce beside the
     # sheet: the sheet's image columns carry only the chosen photo's views once it is published, so the photo process
