@@ -342,11 +342,13 @@ def hosted(step, sel, spend, deadline):
 
 def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
     """The GPU and hosted steps, then the report: (problems, report). A step starts only inside the work window and while
-    the budget lasts; the report always runs, so what is chosen is recorded and published."""
-    steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, deadline, spend),
+    the budget lasts; the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; the report
+    always runs, so what is chosen is recorded and published."""
+    gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
+    steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.judge_all, sel, spend, deadline),
              *([lambda: hosted(select.clean_all, sel, spend, deadline)] if C.CLEAN_ENABLED else []),
-             lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, deadline, spend),
+             lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.judge_all, sel, spend, deadline)]
     problems = []
     for step in steps:
@@ -512,7 +514,8 @@ def reap(run_id):
 
 def unconfigured(close_only=False):
     """What is missing or wrong in the settings: the GPU target, the hosted key (not for a close-only run: it makes no
-    hosted call), the month's budget, and a work window plus its finish that must end before the runner's ceiling."""
+    hosted call), the month's budget, and a work window that leaves the GPU rounds their minimum after the judge's share
+    and that, plus its finish, must end before the runner's ceiling."""
     missing = []
     for name in ("GPU_QUEUE", "STANDARDISE_JOBDEF"):          # what gpu.target() reads, each named when missing
         try:
@@ -526,6 +529,9 @@ def unconfigured(close_only=False):
         missing.append("FAL_KEY")
     if C.BUDGET_USD is None:
         missing.append("SCRAPER_STANDARDISE_BUDGET_USD")
+    if C.WORK_SECONDS < C.JUDGE_WINDOW_SECONDS + C.GPU_MIN_WINDOW_SECONDS:
+        missing.append(f"SCRAPER_STANDARDISE_WORK_SECONDS ({C.WORK_SECONDS}) at least JUDGE_WINDOW_SECONDS "
+                       f"({C.JUDGE_WINDOW_SECONDS}) + GPU_MIN_WINDOW_SECONDS ({C.GPU_MIN_WINDOW_SECONDS})")
     if C.WORK_SECONDS + C.FINISH_SECONDS >= RUN_TIMEOUT_SECONDS:
         missing.append(f"SCRAPER_STANDARDISE_WORK_SECONDS ({C.WORK_SECONDS}) + FINISH_SECONDS ({C.FINISH_SECONDS}) "
                        f"under SCRAPER_RUN_TIMEOUT_SECONDS ({RUN_TIMEOUT_SECONDS})")

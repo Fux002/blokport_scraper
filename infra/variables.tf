@@ -242,6 +242,24 @@ variable "prod_standardise_gpu_vcpus" {
   description = "SCRAPER_STANDARDISE_GPU_VCPUS in prod: the GPU pool's ceiling during a photo round (32 jobs at once)."
 }
 
+variable "dev_photos_nightly" {
+  type        = bool
+  default     = false
+  description = "Dev's overnight photos-run schedule on or off (deploy.start_photos_run; the schedule exists either way)."
+}
+
+variable "prod_photos_nightly" {
+  type        = bool
+  default     = false
+  description = "Prod's overnight photos-run schedule on or off (deploy.start_photos_run; the schedule exists either way)."
+}
+
+variable "photos_nightly_schedule" {
+  type        = string
+  default     = "cron(0 22,1,4 * * ? *)"
+  description = "When the overnight press starts a photos run, Europe/Amsterdam time (both environments)."
+}
+
 variable "dev_enable_execute_command" {
   description = "Allow ECS Exec into the dev sync service (operator access to the live ledger). Prod deliberately has no equivalent."
   type        = bool

@@ -923,6 +923,10 @@ class STANDARDISE:
     # a run without cleaning up.
     WORK_SECONDS = _env_int("SCRAPER_STANDARDISE_WORK_SECONDS", 7200)
     FINISH_SECONDS = 5400
+    # The last JUDGE_WINDOW_SECONDS of the work window are the judge's: a GPU round is stopped this long before the window
+    # ends, so what it finished is judged and published in the same run (a round that ran to the window's end left every
+    # photo it finished unjudged, and the run published none of them).
+    JUDGE_WINDOW_SECONDS = 2400
     LOCK_HEARTBEAT_SECONDS = 300       # the run lock is rewritten this often while the process runs (its sign of life)
     SPEND_DIR = "spend"                # <env>/<TEST_PREFIX>/<this>/<YYYY-MM>/<run id>.json: each run's spend of the month
     # The listings the owner removed on the hidden-listings page (deploy.standardise_decisions): <env>/<TEST_PREFIX>/<this>/
@@ -1100,7 +1104,10 @@ Your whole answer is one JSON object and nothing else:
     # IDLE_GPU_VCPUS after (the pool scales to zero when idle; the ceiling caps what a burst can cost).
     # The size of a run's GPU burst is set per run (a full environment overnight wants more GPUs and smaller slices than
     # a test): the ceiling is the account's G-instance quota at most, and is always set back to IDLE_GPU_VCPUS.
-    RUN_SLICE = _env_int("SCRAPER_STANDARDISE_RUN_SLICE", 150)
+    # A slice's photos run one after another on one GPU, about 100 s each for retouch and standardise together, so a slice
+    # of 30 ends inside the GPU rounds' part of the work window (WORK_SECONDS - JUDGE_WINDOW_SECONDS) with its boot, and a
+    # backlog spreads over the pool's GPUs instead of queueing on a few.
+    RUN_SLICE = _env_int("SCRAPER_STANDARDISE_RUN_SLICE", 30)
     RUN_GPU_VCPUS = _env_int("SCRAPER_STANDARDISE_GPU_VCPUS", 128)
     IDLE_GPU_VCPUS = 8
     RUN_POLL_SECONDS = 60              # how often a run asks Batch whether its jobs are done ...

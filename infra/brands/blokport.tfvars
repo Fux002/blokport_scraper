@@ -73,6 +73,10 @@ dev_standardise_budget_usd  = "40"
 prod_standardise_budget_usd = "100"
 dev_standardise_gpu_vcpus   = 32
 prod_standardise_gpu_vcpus  = 128
+# The overnight photos run (deploy.start_photos_run, infra/modules/sync_service/photos_nightly.tf): the schedule exists
+# in both environments and is off until the owner switches it on; on or off is one apply that never rolls the service.
+dev_photos_nightly  = false
+prod_photos_nightly = false
 
 # Prod runtime secrets, by SSM parameter NAME (empty = that secret is not wired).
 fal_key_ssm_name       = "/blokport-prod/FAL_KEY"                # texture generation + the photo process

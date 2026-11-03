@@ -54,6 +54,28 @@ variable "internal_namespace_id" {
   description = "Cloud Map private DNS namespace id (blokport-<env>.internal)."
 }
 
+variable "internal_namespace_name" {
+  type        = string
+  description = "Cloud Map private DNS namespace name (blokport-<env>.internal): the overnight press reaches <service_dns_name>.<this>:8724."
+}
+
+variable "photos_nightly_enabled" {
+  type        = bool
+  default     = false
+  description = "The overnight photos-run schedule on (ENABLED) or off (DISABLED). Switching it is one apply that never rolls the service."
+}
+
+variable "photos_nightly_schedule" {
+  type        = string
+  description = "When the overnight press starts a photos run (EventBridge Scheduler expression, in photos_nightly_timezone). A press while a run is under way starts nothing."
+}
+
+variable "photos_nightly_timezone" {
+  type        = string
+  default     = "Europe/Amsterdam"
+  description = "The time zone photos_nightly_schedule is read in."
+}
+
 variable "service_dns_name" {
   type        = string
   default     = "scraper"
