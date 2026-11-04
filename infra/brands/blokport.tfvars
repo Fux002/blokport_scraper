@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "334c16a5dcbd7e8b0f3966c3eb92a09be8811d56"     # standardised photo release (#483-#494) + judge window, slices of 30, overnight press (#497) + owner take-offs, GPU idle reset (#501)
+prod_image_tag     = "0ad1d896ca1e0f0263b596406a9731e0b8d56c52"     # + names (#498), empty-key matcher (#499), Pietra Grey seed (#502), release-leases (#505), deploy newest-wins (#504), tile floor lead (#507), free-size shapes + made to order, ledger v12 (#509, #510)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
