@@ -296,3 +296,19 @@ def test_a_spelling_with_no_ascii_form_is_held_for_a_stated_name_never_minted(mo
     _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {("", "nero onyx"): "Nero Marquina"})
     res = curate.build_curation([_row(spelling, "t1")], loaders.load_all())
     assert [r["Name"] for r in _new(res, "slab")] == ["Nero Marquina"]
+
+
+def test_a_mint_backbone_post_writes_each_value_by_its_field(monkeypatch):
+    # W6: observed colours, finishes and aliases are written clean; a colour with no ASCII form is dropped
+    # BEFORE the fallback chain, so the post still gets the pack's fallback colour.
+    from stone_pipeline.config.domain import active_pack
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
+    res = curate.build_curation([_row(SCRAPED, "t1", color_name="rosé", finish_name="polìshed")],
+                                loaders.load_all())
+    post = next(r for r in res.backbone_new["slab"] if r["variant"] == SCRAPED)
+    assert post["color"] == ["Rose"]
+    assert "Polished" in post["finishes"]
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
+    res = curate.build_curation([_row(SCRAPED, "t1", color_name="黑")], loaders.load_all())
+    post = next(r for r in res.backbone_new["slab"] if r["variant"] == SCRAPED)
+    assert post["color"] == [active_pack().fallback_color]
