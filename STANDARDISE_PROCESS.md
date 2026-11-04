@@ -313,10 +313,12 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 
 ## The GPU image
 
-- **Release image** (`standardise-pin-<sha12>`): `deploy/build_standardise_image.sh` on a clean checkout of the commit
-  builds `deploy/standardise.Dockerfile` (the base with that commit's `deploy/` and `stone_pipeline/`, the base's own
-  copies removed first), smoke-imports the GPU run modes, and pushes it. It refuses a dirty tree and an existing tag.
-  Then pin it in the brand tfvars (`dev_` / `prod_standardise_image_tag`); Terraform registers the job definition.
+- **Release image** (`standardise-pin-<sha12>`): `deploy/build_standardise_image.sh` builds `deploy/standardise.Dockerfile`
+  from the tree of the commit HEAD names (`git archive`, never the working files): the base with everything but its
+  models replaced by that commit's tree. It checks the base's packages meet the commit's requirements (offline pip
+  dry run; unmet means a new base is due), imports every standardise run mode `deploy/run_pipeline.sh` dispatches,
+  and pushes. It refuses a tag that already exists, and fails on any other error checking for it. Then pin it in the
+  brand tfvars (`dev_` / `prod_standardise_image_tag`); Terraform registers the job definition.
 - **Base** (`standardise-base-<sha12>`): the Dockerfile's `standardise-edit` target, CUDA torch and the models baked at
   pinned revisions (about 27 GB). Built only when the models or packages change; `deploy/standardise.Dockerfile` pins
   it by digest (`BASE_IMAGE`), so a moved tag never changes a release's models. The current base is digest

@@ -107,14 +107,14 @@ resource "aws_ecr_lifecycle_policy" "this" {
       { rulePriority = 4, description = "keep the pinned prod images (prod-<sha>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["prod-"], countType = "imageCountMoreThan", countNumber = 5 },
       action = { type = "expire" } },
-      # A standardise GPU image pinned in the brand tfvars (*_standardise_image_tag) is tagged standardise-pin-<sha>:
-      # matched here first, so the build churn below (3 newest standardise-) can never expire an image a job
-      # definition runs. Pins are few (one per release); this keeps the last 20.
       # The GPU base every standardise image is built on (deploy/standardise.Dockerfile pins it by digest): its own
       # prefix, so no number of releases can push it out of the pins' 20.
       { rulePriority = 5, description = "keep the standardise GPU bases (standardise-base-<sha>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-base-"], countType = "imageCountMoreThan", countNumber = 3 },
       action = { type = "expire" } },
+      # A standardise GPU image pinned in the brand tfvars (*_standardise_image_tag) is tagged standardise-pin-<sha>:
+      # matched before the build churn below (3 newest standardise-), so it can never expire an image a job
+      # definition runs. Pins are few (one per release); this keeps the last 20.
       { rulePriority = 6, description = "keep the pinned standardise GPU images (standardise-pin-<sha>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-pin-"], countType = "imageCountMoreThan", countNumber = 20 },
       action = { type = "expire" } },
