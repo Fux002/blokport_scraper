@@ -15,6 +15,8 @@ data/
 to_upload/
 review/
 from_medusa/variants_export.csv
+# fetched at run time only; a stray local copy in the image would mask a failed fetch
+from_medusa/**/field-kinds.json
 images/
 image_pipeline/images/
 image_pipeline/to_upload/

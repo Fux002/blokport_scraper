@@ -135,3 +135,18 @@ def test_no_module_but_the_loader_and_text_imports_the_cleaners():
             if {"clean_name", "clean_identifier"} & set(names):
                 offenders.append(str(path.relative_to(root)))
     assert not offenders, offenders
+
+
+def test_the_map_is_never_committed_outside_the_test_fixture():
+    # A map in the repo or the build context would ship in the image (`COPY . /app`) to the run-time path, so a failed
+    # fetch would serve a stale map instead of failing loud (503 / produce exit 2). The fixture is the one copy.
+    import subprocess
+    root = Path(__file__).resolve().parents[2]
+    git = ["git", "-C", str(root)]
+    tracked = subprocess.run([*git, "ls-files", "*field-kinds.json"], capture_output=True, text=True, check=True)
+    assert tracked.stdout.split() == ["stone_pipeline/tests/fixtures/field-kinds.json"]
+    for runtime in ("from_medusa/development/field-kinds.json", "from_medusa/production/field-kinds.json"):
+        ignored = subprocess.run([*git, "check-ignore", "--no-index", "-q", runtime])
+        assert ignored.returncode == 0, f"{runtime} is not gitignored"
+    # `COPY . /app` follows .dockerignore, not .gitignore: an untracked local copy must not reach the image either
+    assert "from_medusa/**/field-kinds.json" in (root / ".dockerignore").read_text().splitlines()
