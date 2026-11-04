@@ -276,3 +276,23 @@ def test_a_matched_row_without_a_decision_keeps_its_match(monkeypatch):
     res = curate.build_curation([_matched_row("Brown Granite", "Brown Granite")], loaders.load_all())
     for b in ("slab", "block", "tile"):
         assert _new(res, b) == [], (b, _new(res, b))
+
+
+def test_a_mint_name_is_written_by_the_variety_name_rule(monkeypatch):
+    # W5: the minted Name is the variety field's display (cleaned, title-cased), so no accent reaches a Name.
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {("", "honey onyx"): "Crème Honey"})
+    res = curate.build_curation([_row(SCRAPED, "t1")], loaders.load_all())
+    assert [r["Name"] for r in _new(res, "slab")] == ["Creme Honey"]
+
+
+def test_a_spelling_with_no_ascii_form_is_held_for_a_stated_name_never_minted(monkeypatch):
+    spelling = "Nero 黑 Onyx"
+    _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {})
+    res = curate.build_curation([_row(spelling, "t1")], loaders.load_all())
+    assert _new(res, "slab") == []
+    card = next(p for p in res.pending_confirm if p["kind"] == "new")
+    assert "no ASCII form" in card["reason"]
+    # the operator states an ASCII name for the same spelling: it mints under that name
+    _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {("", "nero onyx"): "Nero Marquina"})
+    res = curate.build_curation([_row(spelling, "t1")], loaders.load_all())
+    assert [r["Name"] for r in _new(res, "slab")] == ["Nero Marquina"]

@@ -8,8 +8,9 @@ from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
-from stone_pipeline.core.text import title_case
+from stone_pipeline.core.text import UnfoldableName, title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
 from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, core, gen_key, image_filename, image_url
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, named_with_types, review_card,
@@ -28,13 +29,22 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
     does. Two different spellings renamed to ONE name mint one variety: the second only adds its spelling."""
     name = spelling_of(row)
     renamed = c.decisions.seed_name(row.src_site, name, clean) or ""
-    display = title_case(renamed) if renamed and proj.norm(renamed) != proj.norm(clean) else title_case(clean)
+    try:
+        display = field_kinds.display(field_kinds.VARIATION_NAME,
+                                      renamed if renamed and proj.norm(renamed) != proj.norm(clean) else clean)
+    except UnfoldableName:
+        # Never minted under a half-folded name: the operator states the variety's ASCII name on a `new` card, and
+        # the next produce mints under it (the existing card kind, so the review UI needs nothing new).
+        c.pending_confirm.append(review_card(
+            "new", clean, "New variety with no ASCII form for its name: state the variety's name to add it.",
+            review_evidence(row), stone_type=stone_type, color=title_case(attr_surface(row, "color"))))
+        return
     owner = (proj.norm(display), proj.norm(stone_type))
     if proj.norm(display) != proj.norm(clean) and not c.decisions.scope(row.src_site, name, clean):
         # the scraped spelling rides onto the mint row via sib_aliases (owner[0] == norm(title)); for a
         # variety that does not exist yet emit_alias_rows finds no import row and skips it, as intended.
         # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its products.
-        c.alias_new.setdefault(owner, set()).add(title_case(clean))
+        c.alias_new.setdefault(owner, set()).add(clean)        # emit writes it by the alias rule (W3)
     if owner in c.minted_display:
         return                          # a second spelling of the same renamed variety: alias only
     c.minted_display.add(owner)
