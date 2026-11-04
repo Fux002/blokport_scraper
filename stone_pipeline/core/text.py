@@ -120,7 +120,7 @@ def match_key(text: str) -> str:
     decomposed and every mark removed instead (skipped for plain ASCII text, which carries no mark: the hot
     path). This is the one shared normalizer; per-module copies MUST delegate here, not roll a weaker variant."""
     text = text or ""
-    if not (text.isascii() and text.isprintable()):
+    if not text.isascii():
         text = _prepared(text)
     return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text.replace("&", " and "))).casefold().split())
 

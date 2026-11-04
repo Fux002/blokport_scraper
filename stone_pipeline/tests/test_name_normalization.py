@@ -124,3 +124,14 @@ def test_compact_is_the_key_without_spaces():
     for a, b in [("Black & Gold", "Black and Gold"), ("Absolute Black\u2122", "Absolute Black"),
                  ("Rosa Porrin\u0303o", "Rosa Porrino"), ("Mont-Blanc", "MontBlanc")]:
         assert proj.compact(a) == proj.compact(b) == "".join(match_key(a).split())
+
+
+def test_the_ascii_fast_path_is_exact():
+    # match_key skips the shared preparation for ASCII text. That is only correct if the preparation never
+    # changes an ASCII string's key: check every 1- and 2-character ASCII string.
+    import itertools
+    from stone_pipeline.core.text import _prepared
+    chars = [chr(i) for i in range(128)]
+    for n in (1, 2):
+        for s in map("".join, itertools.product(chars, repeat=n)):
+            assert match_key(s) == match_key(_prepared(s)), repr(s)
