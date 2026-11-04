@@ -493,6 +493,33 @@ def test_failed_ack_dead_letters_after_cap_then_requeues(tmp_path):
         assert r["state"] == "synced" and r["sync_attempts"] == 0 and r["sync_error"] is None
 
 
+def test_a_combination_refusal_is_an_item_error_on_the_existing_failed_ack(tmp_path):
+    # PHASE-0 V1 (11.2 item 13): the backend refuses a scraper product whose combination is not live and
+    # answers it as an item error, the failed ack it already sends. It needs no scraper change: the item
+    # keeps its reason, waits its backoff, dead-letters at the cap and shows in failures; its batch-mates sync.
+    from stone_pipeline.ledger.server import dispatch
+    from stone_pipeline.ledger.sync import _MAX_SYNC_ATTEMPTS, failures
+    reason = "combination_not_live: Marble / Pietra Grey / Polished is not in the live list"
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _product(ledger, "P-1", "slab_v1", state="pending")
+        _product(ledger, "P-2", "slab_v1", state="pending")
+        assert {i["external_id"] for i in ready(ledger, "products")} == {"P-1", "P-2"}
+        code, body = dispatch(ledger, "POST", "ack", {}, [
+            {"type": "products", "external_id": "P-1", "status": "failed", "reason": reason},
+            {"type": "products", "external_id": "P-2", "medusa_id": "M2", "status": "synced"}])
+        assert code == 200 and body["acked"] == 2
+        assert ledger.get("product", "sku", "P-2")["state"] == "synced"
+        refused = ledger.get("product", "sku", "P-1")
+        assert refused["state"] == "dirty" and refused["sync_error"] == reason
+        assert ready(ledger, "products") == []                     # waits its backoff, not re-served at once
+        for _ in range(_MAX_SYNC_ATTEMPTS - 1):
+            dispatch(ledger, "POST", "ack", {}, [
+                {"type": "products", "external_id": "P-1", "status": "failed", "reason": reason}])
+        assert ledger.get("product", "sku", "P-1")["state"] == "gap_held"
+        assert [(f["external_id"], f["error"]) for f in failures(ledger)] == [("P-1", reason)]
+
+
 def test_synced_ack_does_not_unretire_a_retiring_variation(tmp_path):
     # a stray/out-of-order synced ack must NOT flip a RETIRING variation back to synced -- its tombstone
     # still serves /removed, so un-retiring it would diverge the two systems.
