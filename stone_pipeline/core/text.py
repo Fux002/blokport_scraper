@@ -168,7 +168,8 @@ def clean_identifier(text: str) -> str:
     return " ".join(_ascii_display(text).split())
 
 
-_BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")
+# ASCII and fullwidth round and square brackets
+_BRACKET_ALIAS_RE = re.compile("[(\\[\uff08\uff3b]\\s*([^)\\]\uff09\uff3d]+?)\\s*[)\\]\uff09\uff3d]")
 
 
 def split_bracket_alias(name: str) -> tuple[str, list[str]]:
@@ -184,49 +185,58 @@ def split_bracket_alias(name: str) -> tuple[str, list[str]]:
     return collapse_ws(_BRACKET_ALIAS_RE.sub(" ", text)), aliases
 
 
-# A '(In) <place> Market <: | called/known/named as> ' context prefix some imported aliases carry
+# A '(In) <place> Market <: | called/known/named as | called:> ' context prefix some imported aliases carry
 # before the actual local name, e.g. 'In China Market:(bai Si Hui Wang)', 'In Local Market: (Dolomit
-# Arbon', 'In China Stone Market Callled As (Caiyun Zhui Yue'. 'market' must be followed by a colon or
-# an explicit 'as' phrase, so a normal name that merely contains the word 'market' is never stripped.
+# Arbon', 'In China Stone Market Callled As (Caiyun Zhui Yue', 'In China Local Market Called: Bai Yu'. 'market'
+# must be followed by a colon or an explicit 'as' phrase, so a normal name that merely contains the word
+# 'market' is never stripped.
 _MARKET_CTX_RE = re.compile(
-    r"^\s*\(?\s*(?:in\s+)?(?:\w+\s+){0,3}market\b\s*(?::|(?:cal+led|known|named)\s+as)\s*[-(]?\s*", re.I)
-_EMPTY_BRACKETS_RE = re.compile(r"[\(\[]\s*[\)\]]")
+    r"^\s*\(?\s*(?:in\s+)?(?:\w+\s+){0,3}market\b\s*(?::|(?:cal+led|known|named)\s*(?:as\b|:))\s*[-(]?\s*", re.I)
+_EMPTY_BRACKETS_RE = re.compile("[(\\[\uff08\uff3b]\\s*[)\\]\uff09\uff3d]")
+# Every comma form one alias field may join several names with. The split comes BEFORE cleaning: cleaned whole,
+# a blob with one non-Latin half would be refused and lose its Latin half too.
+_ALIAS_SEPARATOR_RE = re.compile("[,\u060c\u3001\ufe10\ufe11\ufe50\ufe51\uff0c\uff64]")
 _ALNUM_RE = re.compile(r"[A-Za-z0-9]")
 
 
-def clean_alias_list(name: str, raw_aliases) -> list[str]:
+def clean_alias_list(name: str, raw_aliases, clean) -> tuple[list[str], list[str]]:
     """Normalize a variant's alias list into clean, de-duplicated alternative names:
-      - split a comma-joined blob into separate aliases ('Tropical Rain Forest, Rain Forest'),
+      - split a blob on every comma form ('Tropical Rain Forest, Rain Forest'), before cleaning,
       - drop a 'China market:' context prefix and pull any '(local name)' out of the brackets,
       - strip stray wrapping punctuation/brackets and junk (an alias with no letters or digits),
-      - drop any alias equal to the variant Name (redundant),
-      - title-case for DISPLAY (accents preserved) but de-duplicate on match_key, so a case- OR
-        accent-only difference (Rosé vs Rose) still collapses. First-seen order preserved.
-    Returns the cleaned alias list (possibly empty). title_case is resolved at call time."""
+      - clean each piece with `clean` (the alias field's display rule, which the caller passes in, so this module
+        holds no kind),
+      - drop any alias equal to the variant Name (redundant) and de-duplicate on match_key, first seen kept.
+    Returns (kept, dropped): a piece with no ASCII form (UnfoldableName) is dropped and returned for reporting."""
     name_key = match_key(name or "")
-    out: list[str] = []
+    kept: list[str] = []
+    dropped: list[str] = []
     seen: set[str] = set()
 
     def add(value: str) -> None:
         value = collapse_ws((value or "").strip(" ()[]{}:;-/.,").strip())
-        if not _ALNUM_RE.search(value):
+        if not _ALNUM_RE.search(value) and not any(c.isalpha() for c in value):
             return                                   # pure punctuation -> junk
-        value = title_case(value)
+        try:
+            value = clean(value)
+        except UnfoldableName:
+            dropped.append(value)
+            return
         key = match_key(value)
         if not key or key == name_key or key in seen:
             return                                   # empty, == Name, or already have it
         seen.add(key)
-        out.append(value)
+        kept.append(value)
 
     for raw in raw_aliases or []:
-        for piece in (raw or "").split(","):         # one alias may hold several comma-joined names
+        for piece in _ALIAS_SEPARATOR_RE.split(raw or ""):
             piece = _MARKET_CTX_RE.sub("", piece)
             piece = _EMPTY_BRACKETS_RE.sub(" ", piece)     # drop empty '()' / '[]' pairs
             base, bracketed = split_bracket_alias(piece)   # pull '(local name)' out as its own alias
             add(base)
             for b in bracketed:
                 add(b)
-    return out
+    return kept, dropped
 
 
 def _cap_word(word: str) -> str:

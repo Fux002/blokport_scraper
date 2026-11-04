@@ -24,14 +24,45 @@ from pathlib import Path
 from stone_pipeline.config.settings import SETTINGS, active_categories, category_for_key
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import (
+    UnfoldableName,
     clean_alias_list,
     clean_variety_name,
     looks_like_artifact,
     split_bracket_alias,
-    title_case,
 )
+from stone_pipeline.reference.loaders import field_kinds
 
 log = logfmt.get_logger("emit_catalog")
+
+
+def _alias_display(text: str) -> str:
+    return field_kinds.display(field_kinds.VARIATION_ALIAS_VALUE, text)
+
+
+def _write_names(row: dict) -> list[str]:
+    """Write a row's Name and Aliases by their fields' rule (field-kinds.json); returns the aliases dropped for
+    having no ASCII form. A '(alternative)' moves out of the Name into the alias list ('Black Galaxy (Star
+    Galaxy)' -> Name 'Black Galaxy' + alias 'Star Galaxy'). The Key is unchanged (a Name/alias correction, not a
+    re-key), and matching improves because both the clean name and each alternative spelling resolve."""
+    bare_name, name_bracket_aliases = split_bracket_alias(row["Name"])
+    raw_aliases = [a for a in row["Aliases"].split("|") if a.strip()] + name_bracket_aliases
+    try:
+        row["Name"] = field_kinds.display(field_kinds.VARIATION_NAME, bare_name)
+    except UnfoldableName as exc:
+        # dropping the row would delete the variety (base := full), so a name with no ASCII form stops emit
+        raise UnfoldableName(f"{row['Key']}: variety name {bare_name!r} has no ASCII form") from exc
+    kept, dropped = clean_alias_list(bare_name, raw_aliases, _alias_display)
+    row["Aliases"] = "|".join(kept)
+    return dropped
+
+
+def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
+    """Every alias dropped for having no ASCII form (owner decision O2), listed for the operator, sorted."""
+    path = SETTINGS.paths.review_dir / "aliases_dropped.csv"
+    csvio.write_dicts(path, ["Key", "alias"], [{"Key": k, "alias": a} for k, a in sorted(drops)], sanitize=True)
+    if drops:
+        log.info("aliases dropped for having no ASCII form", extra={"extra_fields": {
+            "count": len(drops), "report": str(path)}})
 
 _COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
 
@@ -314,6 +345,7 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
     # seed_only: never touch live S3 (None -> the deterministic has_export_image heuristic reproduces the
     # base's own image cells). Otherwise use the passed key set, or resolve it from S3.
     s3_keys = None if seed_only else (image_keys if image_keys is not None else _s3_variation_keys())
+    alias_drops: list[tuple[str, str]] = []
     for r in rows:
         cat = category_for_key(r["Key"])
         # advertise the image link only when the image really exists (see _image_link): a
@@ -322,16 +354,8 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
         r["Image"] = _image_link(r["Key"], bool((r.get("Image") or "").strip()),
                                   r["Key"] in backed, s3_keys, base)
         r["Volume per kg (m³/kg)"] = cat.volume_per_kg if cat else ""
-        # Move a '(alternative)' out of the Name into the alias list ('Black Galaxy (Star Galaxy)' ->
-        # Name 'Black Galaxy' + alias 'Star Galaxy'), then normalize the whole alias list: split
-        # comma-joined blobs into separate aliases, drop 'market:' context prefixes / wrapping brackets
-        # / junk, drop any alias equal to the Name, title-case, and de-duplicate. The Key is unchanged
-        # (a Name/alias correction, not a re-key), and matching improves because both the clean name and
-        # each alternative spelling now resolve.
-        clean_name, name_bracket_aliases = split_bracket_alias(r["Name"])
-        raw_aliases = [a for a in r["Aliases"].split("|") if a.strip()] + name_bracket_aliases
-        r["Name"] = title_case(clean_name)               # consistent casing for the whole catalog
-        r["Aliases"] = "|".join(clean_alias_list(clean_name, raw_aliases))
+        alias_drops.extend((r["Key"], alias) for alias in _write_names(r))
+    _report_alias_drops(alias_drops)
 
     # THE dedup gate: collapse every (branch,type,name) that resolves to more than one Key to a single
     # survivor before write. 1_variants_full feeds BOTH the committed base (base := full) AND the ledger,

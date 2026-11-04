@@ -31,6 +31,17 @@ def _no_ambient_aws(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _published_field_kinds(monkeypatch):
+    """The name-field kinds come from the backend's published field-kinds.json, which a produce fetches. Tests read
+    the committed fixture instead (the only place a copy lives), so every writer cleans by a real map."""
+    from pathlib import Path
+    from stone_pipeline.reference.loaders import field_kinds
+    fixture = Path(__file__).parent / "fixtures" / "field-kinds.json"
+    monkeypatch.setattr(field_kinds, "_path", lambda: fixture)
+    monkeypatch.setattr(field_kinds, "_cache", None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_magnitude_baselines(monkeypatch, tmp_path_factory):
     """The drift gate's baseline lives in the developer's gitignored state/ (absent in CI). A stale one there
     (e.g. from before a convention change) makes a run abort before emit and fails tests that never assert on

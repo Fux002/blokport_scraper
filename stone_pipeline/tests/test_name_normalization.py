@@ -78,9 +78,12 @@ def test_title_case_lowercases_connectors_except_leading():
 
 
 def test_alias_dedup_is_accent_and_case_insensitive():
-    # aliases differing only by accent/case collapse to one, and the KEPT display keeps its accent
+    # aliases differing only by accent/case collapse to one, and the kept alias is its clean ASCII name
+    from functools import partial
     from stone_pipeline.core.text import clean_alias_list
-    assert clean_alias_list("Rosa", ["Rosé", "rose", "ROSÉ"]) == ["Rosé"]
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    clean = partial(fk.display, fk.VARIATION_ALIAS_VALUE)
+    assert clean_alias_list("Rosa", ["Ros\u00e9", "rose", "ROS\u00c9"], clean) == (["Rose"], [])
 
 
 def test_match_key_decomposed_accent_does_not_fork_identity():
