@@ -38,7 +38,7 @@ def test_proj_norm_folds_the_same_way():
 def test_match_key_folds_all_punctuation_to_agree_with_proj_norm():
     # match_key must fold ALL punctuation (not just separators), so it agrees with proj.norm and the
     # backbone/attribute vocab (match_key-keyed) joins the match index (proj.norm-keyed).
-    for a, b in [("Black & Gold", "Black Gold"), ("St. Laurent", "St Laurent"),
+    for a, b in [("Black & Gold", "Black and Gold"), ("St. Laurent", "St Laurent"),
                  ("Crema Marfil, Extra", "Crema Marfil Extra"), ("King's Blue", "King s Blue")]:
         assert match_key(a) == match_key(b) == proj.norm(a), f"{a!r} must fold like {b!r}"
 
@@ -81,3 +81,57 @@ def test_alias_dedup_is_accent_and_case_insensitive():
     # aliases differing only by accent/case collapse to one, and the KEPT display keeps its accent
     from stone_pipeline.core.text import clean_alias_list
     assert clean_alias_list("Rosa", ["Rosé", "rose", "ROSÉ"]) == ["Rosé"]
+
+
+def test_match_key_decomposed_accent_does_not_fork_identity():
+    # Pages and PDFs made on macOS often send decomposed text (NFD): 'n' + U+0303 instead of 'ñ'.
+    # A combining mark is not \w, so before the fix the punctuation pass turned it into a SPACE:
+    # 'Porrin\u0303o' -> 'porrin o', a second key for the same stone.
+    nfc, nfd = "Rosa Porriño", "Rosa Porrin\u0303o"
+    assert match_key(nfd) == match_key(nfc) == "rosa porrino"
+    assert match_key("Cre\u0300me Brule\u0301e") == match_key("Crème Brûlée") == "creme brulee"
+    assert proj.norm(nfd) == proj.norm(nfc)
+
+
+def test_match_key_mark_without_a_composed_form_does_not_fork_identity():
+    # NFC composes only marks that HAVE a precomposed letter. U+0331 (combining macron below) has none
+    # on most letters, so after NFC it is still a separate, non-\w mark: marks must be dropped before
+    # the punctuation pass, not merely composed.
+    assert match_key("Ma\u0331rmol Crema") == match_key("Marmol Crema") == "marmol crema"
+    assert match_key("e\u0301\u0331te") == "ete"
+
+
+def test_ascii_fold_keeps_a_transliteration_letter_that_carries_a_mark():
+    # Ǣ and Ǿ decompose to Æ and Ø plus a mark. Transliterating BEFORE decomposing missed them, so the
+    # letter was dropped as non-ASCII: the Key slug and proj.compact lost it while match_key kept it.
+    from stone_pipeline.core.text import ascii_fold, slugify
+    assert ascii_fold("Ǣgean") == "AEgean"
+    assert ascii_fold("Ǿstfold") == "Ostfold"
+    assert slugify("Ǣgean Blue") == slugify("Aegean Blue")
+    assert proj.compact("Ǿ Grey") == proj.compact("O Grey")
+
+
+def test_ampersand_reads_and_in_the_key_as_in_a_cleaned_name():
+    # Owner D1 (2026-11-04): clean_name writes '&' as 'and', so the key reads it the same way; a scraped
+    # 'Black & Gold' then still matches its own cleaned spelling 'Black and Gold'.
+    assert match_key("Black & Gold") == match_key("Black and Gold") == "black and gold"
+    assert match_key("Black\uff06Gold") == "black and gold"            # the fullwidth form too
+    assert match_key("AT&T") == "at and t"
+
+
+def test_compact_is_the_key_without_spaces():
+    # One reading for every projection: compact agrees with the key on '&', symbols and marks.
+    for a, b in [("Black & Gold", "Black and Gold"), ("Absolute Black\u2122", "Absolute Black"),
+                 ("Rosa Porrin\u0303o", "Rosa Porrino"), ("Mont-Blanc", "MontBlanc")]:
+        assert proj.compact(a) == proj.compact(b) == "".join(match_key(a).split())
+
+
+def test_the_ascii_fast_path_is_exact():
+    # match_key skips the shared preparation for ASCII text. That is only correct if the preparation never
+    # changes an ASCII string's key: check every 1- and 2-character ASCII string.
+    import itertools
+    from stone_pipeline.core.text import _prepared
+    chars = [chr(i) for i in range(128)]
+    for n in (1, 2):
+        for s in map("".join, itertools.product(chars, repeat=n)):
+            assert match_key(s) == match_key(_prepared(s)), repr(s)

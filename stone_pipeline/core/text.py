@@ -19,16 +19,75 @@ _TRANSLIT = str.maketrans({
 })
 
 
+def _drop_marks(text: str, form: str) -> str:
+    """Decompose `text` in Unicode normal `form` and remove every mark (category M*): accents and
+    combining signs carry no letter of their own."""
+    return "".join(c for c in unicodedata.normalize(form, text) if not unicodedata.category(c).startswith("M"))
+
+
+# Typographic forms unified BEFORE anything else, so a curly and a straight apostrophe never give two names (report
+# 21, defect 1.3.2). The minus sign is a hyphen, a zero-width space marks a word break, and the micro sign is written
+# 'u' in ASCII ('120um'). Every other separator is decided by its category (_separator).
+_TYPOGRAPHIC = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u02bc": "'", "\u00b4": "'", "`": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+    "\u2212": "-", "\u200b": " ", "\u00b5": "u",
+})
+
+
+def _prepared(text: str) -> str:
+    """The ONE preparation both match_key and the display rules run first, so they can never disagree: typographic
+    forms unified, separators decided on the ORIGINAL character (decomposed first, '\u2122' would become the
+    letters 'TM' and join the word), compatibility forms decomposed and every mark dropped, separators again for
+    what decomposition yields ('\u00bd' is '1\u20442'), then format characters removed and every whitespace or
+    control character made a space. Afterwards the only punctuation left is ASCII."""
+    separated = _separated(_drop_marks(_separated(text.translate(_TYPOGRAPHIC)), "NFKD"))
+    return _visible(separated)
+
+
+def _separated(text: str) -> str:
+    """Every non-ASCII punctuation, symbol, private-use or unassigned character separates words: a dash becomes a
+    hyphen, a compatibility form of one ASCII punctuation character becomes that character ('\uff0f' is '/'), and
+    any other one a space. Letters, digits, marks, spaces, format and control characters pass through."""
+    return "".join(_separator(c) for c in text)
+
+
+_ASCII_PUNCT = re.compile(r"[!-/:-@\[-`{-~]")
+
+
+def _separator(c: str) -> str:
+    if c.isascii():
+        return c
+    category = unicodedata.category(c)
+    if category == "Pd":
+        return "-"
+    if category[0] in "PS":
+        ascii_form = unicodedata.normalize("NFKD", c).translate(_TYPOGRAPHIC)
+        return ascii_form if _ASCII_PUNCT.fullmatch(ascii_form) else " "
+    return " " if category in ("Co", "Cn", "Cs") else c
+
+
+
+def _visible(text: str) -> str:
+    """Every whitespace or control character becomes a space and every format character is removed: an invisible
+    character (soft hyphen, word joiner) never splits a word, and an unusual space (U+2028) or a control character
+    (U+0092, cp1252's curly apostrophe read as Latin-1) never glues two."""
+    return "".join(" " if c.isspace() or unicodedata.category(c) == "Cc" else c for c in text
+                   if unicodedata.category(c) != "Cf")
+
+
 def ascii_fold(text: str) -> str:
     """Fold accented/special Latin letters to plain ASCII so a variety name never carries a
     special character that splits the same stone in two -- 'Rosa Porriño' == 'Rosa Porrino',
-    'São Gabriel' == 'Sao Gabriel', 'Łysa' == 'Lysa'. Non-decomposing letters (Æ/Œ/Ø/Ł/ß...) are
-    transliterated first; then NFKD decomposes accents, combining marks are dropped, and any
-    remaining non-ASCII is removed. Applied in slug, title-case, and the match key so the folding
-    is consistent everywhere (scrapes that use accents/ligatures match those that don't)."""
-    decomposed = unicodedata.normalize("NFKD", (text or "").translate(_TRANSLIT))
-    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return stripped.encode("ascii", "ignore").decode("ascii")
+    'São Gabriel' == 'Sao Gabriel', 'Łysa' == 'Lysa'. NFKD decomposes accents and compatibility
+    forms and every mark is dropped; THEN the non-decomposing letters (Æ/Œ/Ø/Ł/ß...) are
+    transliterated, so a letter such as Ǣ or Ǿ (Æ or Ø carrying a mark) is not lost; any remaining
+    non-ASCII is removed. Applied in slug, title-case, and the match key so the folding is
+    consistent everywhere (scrapes that use accents/ligatures match those that don't)."""
+    text = text or ""
+    if text.isascii():
+        return text
+    return _drop_marks(text, "NFKD").translate(_TRANSLIT).encode("ascii", "ignore").decode("ascii")
 
 
 def collapse_ws(text: str) -> str:
@@ -36,7 +95,7 @@ def collapse_ws(text: str) -> str:
 
 
 # Every non-alphanumeric character -- whitespace, underscore, AND all punctuation (hyphen/dash,
-# slash, '&', "'", '.', ',', '(', ')', '+', unicode dashes/punct, ...) -- folds to ONE space, so
+# slash, "'", '.', ',', '(', ')', '+', unicode dashes/punct, ...) -- folds to ONE space ('&' reads 'and' first), so
 # NEITHER a separator NOR any punctuation ever forks identity. `\w` keeps unicode letters (folded
 # later by ascii_fold) and underscore, so underscore is added explicitly.
 _NON_ALNUM = re.compile(r"[^\w\s]|_", re.UNICODE)
@@ -49,12 +108,64 @@ def match_key(text: str) -> str:
     accent, OR punctuation difference must NEVER split the same name in two, so every name lookup
     and index in the pipeline keys on this -- and it agrees with matching.projections.norm:
     'Semi-Precious Stone' == 'semi_precious_stone' == 'Semi Precious Stone', and
-    'Black & Gold' == 'Black Gold', 'St. Laurent' == 'St Laurent', 'Rosa Porriño' == 'Rosa Porrino'.
+    'St. Laurent' == 'St Laurent', 'Rosa Porriño' == 'Rosa Porrino'. '&' reads 'and', exactly as a cleaned name
+    writes it (owner D1, 2026-11-04), so 'Black & Gold' == 'Black and Gold' and a scraped spelling keeps matching
+    its own cleaned display.
 
     Punctuation is folded BEFORE ascii_fold, so a unicode dash/punct becomes a space rather than
-    being stripped to nothing (which would glue the two words together). This is the one shared
-    normalizer; per-module copies MUST delegate here, not roll a weaker variant."""
-    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text or "")).casefold().split())
+    being stripped to nothing (which would glue the two words together). Marks are dropped FIRST:
+    a mark (accent, combining sign) is not \\w, so the punctuation pass would turn 'n' + U+0303 into a
+    space and fork the stone. Decomposed input (NFD, common from macOS pages and PDFs) carries such
+    marks, and NFC cannot compose a mark that has no precomposed letter (U+0331), so the text is
+    decomposed and every mark removed instead (skipped for plain ASCII text, which carries no mark: the hot
+    path). This is the one shared normalizer; per-module copies MUST delegate here, not roll a weaker variant."""
+    text = text or ""
+    if not text.isascii():
+        text = _prepared(text)
+    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text.replace("&", " and "))).casefold().split())
+
+
+class UnfoldableName(ValueError):
+    """A name carries a letter with no ASCII form (a non-Latin script): it is never stored half-folded. The
+    caller decides by context: an alias is dropped and reported, a variety name goes to review."""
+
+
+# The owner's two display rules (2026-11-03): a NAME is ASCII letters, digits, spaces, hyphens and apostrophes;
+# an IDENTIFIER (a grade such as 'AA/BB', a finish or standard code, a title) keeps printable ASCII punctuation.
+_NOT_NAME = re.compile(r"[^A-Za-z0-9 '-]+")
+_HYPHEN_RUN = re.compile(r"\s*-[\s-]*")
+_APOSTROPHE_RUN = re.compile(r"'{2,}")
+_LOOSE_APOSTROPHE = re.compile(r"(?<![A-Za-z0-9])'|'(?![A-Za-z0-9])")
+
+
+def _ascii_display(text: str) -> str:
+    """The shared part of both display rules: the one preparation match_key runs, then accents and compatibility
+    forms folded. Raises UnfoldableName when a letter has no ASCII form (a modifier letter is folded or dropped,
+    as match_key does): never stored half-folded."""
+    prepared = _prepared(text or "")
+    if any(c.isalpha() and unicodedata.category(c) != "Lm" and not ascii_fold(c) for c in prepared):
+        raise UnfoldableName(f"no ASCII form for a letter in {text!r}")
+    return ascii_fold(prepared)
+
+
+def clean_name(text: str) -> str:
+    """The display rule for a NAME (variety, alias, type, colour, origin, port, category): ASCII letters, digits,
+    spaces, hyphens and apostrophes. '&' reads 'and', every other punctuation or symbol becomes a space, hyphen
+    runs collapse, and an apostrophe is kept only inside a word (one, never a run). Every step mirrors match_key, so
+    the cleaned name always keys like the original. Case is the caller's.
+    Bracketed alternatives are split off by the caller first (split_bracket_alias). Expectations live in the shared
+    name-key vectors (`display`)."""
+    named = _NOT_NAME.sub(" ", _ascii_display(text).replace("&", " and "))
+    named = _LOOSE_APOSTROPHE.sub(" ", _APOSTROPHE_RUN.sub("'", named))
+    return " ".join(_HYPHEN_RUN.sub("-", named).split()).strip("- ")
+
+
+def clean_identifier(text: str) -> str:
+    """The display rule for an IDENTIFIER (a quality grade such as 'AA/BB', a finish or standard code, a title):
+    printable ASCII with its punctuation kept, whitespace collapsed. Keys like the original (match_key). Which
+    fields are identifiers is set per brand in the brand's configuration (owner, 2026-11-03). Expectations live in
+    the shared name-key vectors (`identifier`)."""
+    return " ".join(_ascii_display(text).split())
 
 
 _BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")

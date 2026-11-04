@@ -19,7 +19,7 @@ import re
 import jellyfish
 
 from stone_pipeline.config import domain
-from stone_pipeline.core.text import ascii_fold, match_key
+from stone_pipeline.core.text import match_key
 
 def _inv_prefix() -> re.Pattern:
     # supplier inventory prefixes ('Z', 'ZB', 'Z B' for stone), declared by the active pack
@@ -48,10 +48,9 @@ def norm(value: str) -> str:
 
 
 def compact(value: str) -> str:
-    # ascii_fold first (like norm) so an accented surface compacts to the SAME key as its unaccented
-    # spelling -- else compact('Porriño')='porrio' (ñ dropped) != compact('Porrino')='porrino', and the
-    # high-confidence exact tier fails to unite them.
-    return re.sub(r"[^a-z0-9]", "", ascii_fold(value or "").casefold())
+    # The key with its spaces removed ('Mont Blanc' == 'MontBlanc'), so compact reads accents, marks, symbols and
+    # '&' exactly as norm does and the two tiers can never disagree on a name.
+    return "".join(norm(value).split())
 
 
 def tokenset(value: str) -> tuple[str, ...]:
