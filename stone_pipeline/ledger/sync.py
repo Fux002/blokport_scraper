@@ -63,11 +63,14 @@ def _retry_after(attempts: int) -> str:
 _SYNCING_LEASE_SECONDS = 900   # 15 min -- comfortably longer than a pull->apply->ack cycle
 
 
-def reap_stale_syncing(ledger: Ledger, table: str | None = None) -> int:
-    """Return dead leases ('syncing' older than _SYNCING_LEASE_SECONDS) to 'dirty' so they re-serve.
+def reap_stale_syncing(ledger: Ledger, table: str | None = None,
+                       older_than_s: int = _SYNCING_LEASE_SECONDS) -> int:
+    """Return dead leases ('syncing' older than `older_than_s`) to 'dirty' so they re-serve.
     Called lazily at the head of every serve, so a crashed puller's in-flight rows recover on the
-    next pull without a background job. Returns the number reclaimed."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=_SYNCING_LEASE_SECONDS)).isoformat()
+    next pull without a background job. POST /sync/v1/release-leases calls it with 0: the consumer's
+    run, the ledger's one puller under its catalog lock, declares every lease dead before its first
+    pull (PHASE-0 Q8). Returns the number reclaimed."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=older_than_s)).isoformat()
     now, n = now_iso(), 0
     for t in ([table] if table else ["variation", "product"]):
         cur = ledger.execute(
