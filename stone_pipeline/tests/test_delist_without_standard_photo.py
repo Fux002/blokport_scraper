@@ -83,7 +83,7 @@ def test_hiding_a_product_already_at_stock_0_is_still_served_to_blokport(tmp_pat
     sold = _row("x", True, qty="0")
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
         _stocked(ledger, [sold], cfg)
-        ledger.execute("UPDATE inventory SET last_synced_qty = 0")                    # its stock 0 was acked
+        ledger.execute("UPDATE inventory SET last_synced_qty = 0, last_synced_made_to_order = 0")   # stock 0 acked
         assert ready(ledger, "inventory") == []
         _stocked(ledger, [_row("x", False, qty="0")], cfg)
         assert [r["payload"].get("reason") for r in ready(ledger, "inventory")] == ["no_photo"]
@@ -121,13 +121,15 @@ def test_a_bundle_never_redirects_to_a_lot_with_no_piece_on_sale(tmp_path, rule_
         now = now_iso()
         ledger.upsert("product", {"sku": "SEN-2555", "source": "sen", "state": "synced", "medusa_id": "m-b",
                                   "created_at": now, "updated_at": now}, pk=("sku",))
-        ledger.upsert("inventory", {"sku": "SEN-2555", "qty": 9, "last_synced_qty": 9, "updated_at": now}, pk=("sku",))
+        ledger.upsert("inventory", {"sku": "SEN-2555", "qty": 9, "last_synced_qty": 9, "last_synced_made_to_order": 0,
+                                    "updated_at": now}, pk=("sku",))
         _stocked(ledger, [piece], cfg)
         ledger.execute("UPDATE product SET medusa_id = 'm-p' WHERE sku = ?", (emit._sku(piece, cfg),))
         now = now_iso()
         ledger.upsert("product", {"sku": "SEN-2555-1", "source": "sen", "state": "synced", "lot_code": "L1",
                                   "medusa_id": "m-sold", "created_at": now, "updated_at": now}, pk=("sku",))
-        ledger.upsert("inventory", {"sku": "SEN-2555-1", "qty": 0, "last_synced_qty": 0, "updated_at": now}, pk=("sku",))
+        ledger.upsert("inventory", {"sku": "SEN-2555-1", "qty": 0, "last_synced_qty": 0, "last_synced_made_to_order": 0,
+                                    "updated_at": now}, pk=("sku",))
         populate_discontinued(ledger, [("SEN-2555", "h")], replaced={"SEN-2555": "L1"})
         assert "SEN-2555" not in [r["external_id"] for r in ready(ledger, "inventory")]   # one hidden, one sold
         _stocked(ledger, [_row("2555-4", True, lot_code="L1")], cfg)                    # its photo is published

@@ -153,9 +153,9 @@ def seed_products(ledger: Ledger, path: str | Path | None = None) -> int:
         # (a phantom out-of-stock that then re-serves as a spurious delta). parse_number reads them right.
         _n = parse_number(inv)
         qty = int(_n) if _n is not None and _n > 0 else 0
-        # last_synced_qty equals qty so the bootstrap itself produces no spurious delta
-        ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty,
-                                    "updated_at": now}, pk=("sku",))
+        # the last synced stock equals the stock so the bootstrap itself produces no spurious delta
+        ledger.upsert("inventory", {"sku": sku, "qty": qty, "made_to_order": 0, "last_synced_qty": qty,
+                                    "last_synced_made_to_order": 0, "updated_at": now}, pk=("sku",))
         n += 1
     return n
 

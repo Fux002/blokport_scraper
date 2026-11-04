@@ -18,7 +18,7 @@ from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import match_key
-from stone_pipeline.ledger.db import Ledger, now_iso, payload_hash
+from stone_pipeline.ledger.db import FORGET_SYNCED_STOCK_SQL, Ledger, now_iso, payload_hash
 from stone_pipeline.stages.emit import _sku
 from stone_pipeline.stages.emit_catalog import _COLS as _VARIANTS_FULL_COLS
 from stone_pipeline.stages.product_state import inventory_str
@@ -264,6 +264,7 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "sold_in_bundle": 1 if r.sold_in_bundle else 0,
             "bundle_size": r.bundle_size,
             "inventory_quantity": inventory_str(r),
+            "made_to_order": 1 if r.made_to_order else 0,
             "lot_code": r.lot_code,
             "lot_position": r.lot_position,
             "photo_ready": 1 if photo_ready else 0,
@@ -318,39 +319,47 @@ def ledger_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceCon
 
 
 def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
-    """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field).
-    `last_synced_qty` is left null, so a freshly populated row is a delta to serve
-    (design section 7). Products must be populated first (the sku FK, and the photo fact). A product the no-photo rule
-    marked not ready (product.photo_ready 0, decided by populate_products) is hidden: stock 0, reason 'no_photo' (always
-    with stock 0: Blokport hides on stock 0 and reads an unknown reason above 0 as a plain quantity; 'delisted' stays the
-    vendor take-offline's, so the dead-stock purge can tell them apart). The stock-only refresh writes no product, so it
-    never changes whether a product is hidden: that waits for the full run, which serves the product and its stock
-    together. A change of reason is a delta like a change of stock: hiding or showing a product already at stock 0 is
-    served."""
+    """Write per-product stock into the `inventory` table (qty = the derived inventory_quantity field, NULL for made
+    to order). The last synced stock is left null, so a freshly populated row is a delta to serve (design section
+    7). Products must be populated first (the sku FK, and the photo fact). A product the no-photo rule marked not
+    ready (product.photo_ready 0, decided by populate_products) is hidden: stock 0, reason 'no_photo' (always with
+    stock 0, never made to order: Blokport hides on stock 0 and reads an unknown reason above 0 as a plain quantity;
+    'delisted' stays the vendor take-offline's, so the dead-stock purge can tell them apart). The stock-only refresh
+    writes no product, so it never changes whether a product is hidden: that waits for the full run, which serves
+    the product and its stock together. A change of reason is a delta like a change of stock: hiding or showing a
+    product already at stock 0 is served."""
     not_ready = {p["sku"] for p in ledger.execute("SELECT sku FROM product WHERE photo_ready = 0")}
     now = now_iso()
     n = 0
     for r in rows:
         sku = _sku(r, cfg)
-        resolved = inventory_str(r)
-        qty = int(resolved) if str(resolved).isdigit() else 0
         stored = ledger.get("inventory", "sku", sku)
         hidden = sku in not_ready
         reason = "no_photo" if hidden else None
-        # keep last_synced_qty on update: it is owned by the ack, not the write-through.
+        made_to_order = r.made_to_order and not hidden
+        if made_to_order:
+            qty = None
+        elif hidden:
+            qty = 0
+        else:
+            resolved = inventory_str(r)
+            qty = int(resolved) if resolved.isdigit() else 0
+        # keep the last synced stock on update: it is owned by the ack, not the write-through.
         # Overwriting it to NULL each run would re-serve every product as a delta forever.
         ledger.upsert("inventory", {
             "sku": sku,
-            "qty": 0 if hidden else qty,
+            "qty": qty,
+            "made_to_order": 1 if made_to_order else 0,
             "last_synced_qty": None,   # only on insert (a never-synced row is a delta)
+            "last_synced_made_to_order": None,
             # a normal scrape write clears any 'delisted' marker: re-scraping a re-enabled vendor republishes it
             # (restock delta, no reason), and a product whose standardised photo is now published comes back
             "reason": reason,
             "replaced_by_lot_code": None,   # listed again, so no longer replaced by a lot
             "updated_at": now,
-        }, pk=("sku",), keep_on_update=("last_synced_qty",))
+        }, pk=("sku",), keep_on_update=("last_synced_qty", "last_synced_made_to_order"))
         if stored and stored["reason"] != reason:
-            ledger.execute("UPDATE inventory SET last_synced_qty = NULL WHERE sku = ?", (sku,))
+            ledger.execute(f"UPDATE inventory SET {FORGET_SYNCED_STOCK_SQL} WHERE sku = ?", (sku,))
         n += 1
     return n
 
@@ -393,12 +402,14 @@ def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
             "VALUES (?, ?, ?, ?, ?, ?)",
             (sku, src.lower(), handle or "", "synced", now, now),
         )
-        # keep last_synced_qty on update (ack-owned), so a still-discontinued product
+        # keep the last synced stock on update (ack-owned), so a still-discontinued product
         # is not re-served as a delist on every run (same fix as populate_inventory).
         # a plain drop is dead stock, whatever hid it before (a photo-hidden product its supplier drops is purgeable)
-        record = {"sku": sku, "qty": 0, "last_synced_qty": None, "reason": None, "updated_at": now}
+        record = {"sku": sku, "qty": 0, "made_to_order": 0, "last_synced_qty": None,
+                  "last_synced_made_to_order": None, "reason": None, "updated_at": now}
         if sku in replaced:
             record.update(reason="replaced_by_lot", replaced_by_lot_code=replaced[sku])
-        ledger.upsert("inventory", record, pk=("sku",), keep_on_update=("last_synced_qty",))
+        ledger.upsert("inventory", record, pk=("sku",),
+                      keep_on_update=("last_synced_qty", "last_synced_made_to_order"))
         n += 1
     return n

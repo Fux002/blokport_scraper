@@ -71,9 +71,16 @@ def sku_for(row: CanonicalRow, cfg: SourceConfig) -> str:
 def inventory_str(row: CanonicalRow) -> str:
     """String form of the stock field for CSV cells / change-detection. Stock is derived ONCE in Stage 6
     (derive.derive_inventory) from the raw signals only, never bundle_size; this just FORMATS that field,
-    it never recomputes it -- so every writer agrees. A None reads 0 (an out-of-stock; also covers a
-    ledger-render row that set the field explicitly)."""
+    it never recomputes it -- so every writer agrees. Made to order has no count (''); any other None reads 0
+    (an out-of-stock; also covers a ledger-render row that set the field explicitly)."""
+    if row.made_to_order:
+        return ""
     return str(row.inventory_quantity if row.inventory_quantity is not None else 0)
+
+
+def manage_inventory_str(row: CanonicalRow) -> str:
+    """Whether Medusa counts the variant's stock: never for made to order (no count, orders not capped)."""
+    return "false" if row.made_to_order else SETTINGS.backend.variant_manage_inventory
 
 
 @dataclass

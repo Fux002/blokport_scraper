@@ -30,6 +30,7 @@ def _prod(ledger, sku, source, qty, last):
                               "state": "synced", "medusa_id": "P", "created_at": now,
                               "updated_at": now}, pk=("sku",))
     ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": last,
+                                "last_synced_made_to_order": None if last is None else 0,
                                 "updated_at": now}, pk=("sku",))
 
 
@@ -125,7 +126,8 @@ def test_retire_variation_cascades_and_tombstones_a_synced_variety(tmp_path):
                                     "created_at": now, "updated_at": now}, pk=("key",))
         ledger.upsert("product", {"sku": "ZUC-1", "source": "zuc", "variation_key": "K", "state": "synced",
                                   "medusa_id": "P", "created_at": now, "updated_at": now}, pk=("sku",))
-        ledger.upsert("inventory", {"sku": "ZUC-1", "qty": 5, "last_synced_qty": 5, "updated_at": now}, pk=("sku",))
+        ledger.upsert("inventory", {"sku": "ZUC-1", "qty": 5, "last_synced_qty": 5, "last_synced_made_to_order": 0,
+                                    "updated_at": now}, pk=("sku",))
         ledger.execute("INSERT INTO combination (combo_key, category, type, variation_key, color, finish, "
                        "quality, state, created_at, updated_at) VALUES ('c1','Slabs','Marble','K','White',"
                        "'Polished','A','synced',?,?)", (now, now))
@@ -246,13 +248,14 @@ def test_delist_flags_inventory_reason_ordinary_oos_does_not(tmp_path):
         _prod(ledger, "OOS-1", "bbb", qty=0, last=5)          # ordinary out-of-stock (no reason)
         delist_source(ledger, source_codes=["aaa"])
         served = {i["external_id"]: i["payload"] for i in ready(ledger, "inventory")}
-        assert served["DEL-1"] == {"sku": "DEL-1", "quantity": 0, "reason": "delisted"}
-        assert served["OOS-1"] == {"sku": "OOS-1", "quantity": 0}     # no reason key -> stays listed
+        assert served["DEL-1"] == {"sku": "DEL-1", "quantity": 0, "made_to_order": False,
+                                    "reason": "delisted"}
+        assert served["OOS-1"] == {"sku": "OOS-1", "quantity": 0, "made_to_order": False}   # no reason key -> stays listed
 
         # a re-scrape restocks (qty>0) and clears the marker -> Medusa republishes
         ledger.execute("UPDATE inventory SET qty = 8, reason = NULL WHERE sku = 'DEL-1'")
         back = {i["external_id"]: i["payload"] for i in ready(ledger, "inventory")}
-        assert back["DEL-1"] == {"sku": "DEL-1", "quantity": 8}       # back in stock, no reason
+        assert back["DEL-1"] == {"sku": "DEL-1", "quantity": 8, "made_to_order": False}   # back in stock, no reason
 
 
 def test_reopen_migrates_an_old_ledger_to_the_tombstone_lane(tmp_path):

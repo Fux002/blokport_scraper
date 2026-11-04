@@ -125,7 +125,7 @@ def ledger_image_counts() -> dict[str, dict[str, int]] | None:
     serves no images block, and the failure is logged."""
     from stone_pipeline.config.settings import ENV_NAME
     from stone_pipeline.ledger import writethrough
-    from stone_pipeline.ledger.db import Ledger, LedgerError
+    from stone_pipeline.ledger.db import ON_SALE_SQL, Ledger, LedgerError
     path = writethrough.ledger_path()
     if not path.exists():
         return None
@@ -138,7 +138,7 @@ def ledger_image_counts() -> dict[str, dict[str, int]] | None:
                 " AS hosted,"
                 " SUM(CASE WHEN i.reason = 'no_photo' THEN 1 ELSE 0 END) AS hidden"
                 " FROM product p JOIN inventory i ON i.sku = p.sku"
-                " WHERE i.qty > 0 OR i.reason = 'no_photo' GROUP BY p.source",
+                f" WHERE {ON_SALE_SQL} OR i.reason = 'no_photo' GROUP BY p.source",
                 (f"%{_STANDARD_MARKER}%",)).fetchall()
     except (sqlite3.Error, LedgerError):
         log.exception("images block: the ledger could not be read; no images block served")

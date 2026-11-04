@@ -11,7 +11,7 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
       LOST-UPDATE GUARD (optional, strongly recommended): echo back the version that was APPLIED so the
       ledger only marks 'synced' if it is still current -- otherwise a produce that changed the row between
       the pull and the ack is silently lost. For variations/products add `payload_hash` (the value served
-      on the pull item); for inventory add `quantity` (the served payload.quantity). Backward compatible:
+      on the pull item); for inventory add `quantity` and `made_to_order` (the served payload's). Backward compatible:
       if omitted, the prior behavior is kept, so the guard engages the moment the consumer starts echoing.
     POST /sync/v1/requeue   body (optional): {type: variations|products}  -- un-quarantine gap_held
       entities back to dirty after the Medusa-side cause is fixed (the recovery lever behind failures)

@@ -20,7 +20,7 @@ from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import csvio
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.bootstrap import attribute_id
-from stone_pipeline.ledger.db import Ledger
+from stone_pipeline.ledger.db import STOCK_DELTA_SQL, Ledger
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.emit_catalog import _COLS as VARIANTS_FULL_COLS
 
@@ -89,7 +89,8 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
         bundle_size=p["bundle_size"],
         # emit reads the derived inventory_quantity field; set it directly from the stored stock so a
         # ledger-render re-emit reproduces the same Variant Inventory Quantity cell (a rebuilt row skips
-        # Stage 6, so nothing else would populate it).
+        # Stage 6, so nothing else would populate it). Made to order carries no count.
+        made_to_order=bool(p["made_to_order"]),
         inventory_quantity=(int(_q) if (_q := str(p["inventory_quantity"] or "").strip()).lstrip("-").isdigit() else 0),
     )
 
@@ -118,29 +119,30 @@ def render_products(ledger: Ledger, cfg: SourceConfig, path: str | Path,
 
 def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int:
     """Render the inventory delta (4_inventory_update.csv): the products whose stock
-    moved since the last sync (qty distinct from last_synced_qty), joined to the
+    moved since the last sync (db.STOCK_DELTA_SQL), joined to the
     product row for the handle. Reuses emit.write_inventory_csv so the format
     matches. A qty of 0 is the reversible delist, written like any other row."""
     served = ledger.execute(
-        "SELECT p.sku AS sku, i.qty AS qty, p.surrogate_key AS surrogate_key, p.handle AS handle "
-        "FROM inventory i JOIN product p ON p.sku = i.sku "
-        "WHERE i.last_synced_qty IS NULL OR i.last_synced_qty != i.qty "
-        "ORDER BY i.rowid"
+        "SELECT p.sku AS sku, i.qty AS qty, i.made_to_order AS made_to_order, p.surrogate_key AS surrogate_key, "
+        "p.handle AS handle FROM inventory i JOIN product p ON p.sku = i.sku "
+        f"WHERE {STOCK_DELTA_SQL} ORDER BY i.rowid"
     ).fetchall()
-    # qty 0 is the reversible delist: emit writes 0 only via its discontinued path, so split by qty and
-    # feed the positive-stock rows through `changed`.
+    # qty 0 is the reversible delist: emit writes 0 only via its discontinued path, so split on sale (stock above 0,
+    # or made to order) from not, and feed the on-sale rows through `changed`.
+    def on_sale(r) -> bool:
+        return bool(r["made_to_order"]) or r["qty"] > 0
+
     changed = [
         CanonicalRow(
             src_site=cfg.source_code,
             surrogate_key=r["surrogate_key"],
             handle=r["handle"],
-            inventory_quantity=int(r["qty"]),  # emit reads the derived stock field directly
+            made_to_order=bool(r["made_to_order"]),
+            inventory_quantity=r["qty"],  # emit reads the derived stock field directly
         )
-        for r in served if r["qty"] and int(r["qty"]) > 0
+        for r in served if on_sale(r)
     ]
-    discontinued = tuple(
-        (r["sku"], r["handle"] or "") for r in served if not (r["qty"] and int(r["qty"]) > 0)
-    )
+    discontinued = tuple((r["sku"], r["handle"] or "") for r in served if not on_sale(r))
     emit.write_inventory_csv(changed, cfg, Path(path), discontinued=discontinued)
     return len(changed) + len(discontinued)
 

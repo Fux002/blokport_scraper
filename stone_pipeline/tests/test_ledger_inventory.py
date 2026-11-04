@@ -97,7 +97,8 @@ def test_reinventory_preserves_last_synced_qty(tmp_path):
         populate_products(ledger, [r], cfg)
         populate_inventory(ledger, [r], cfg)   # first record -> last_synced_qty NULL (a delta)
         sku = emit._sku(r, cfg)
-        ledger.execute("UPDATE inventory SET last_synced_qty = 5 WHERE sku = ?", (sku,))  # ack
+        ledger.execute("UPDATE inventory SET last_synced_qty = 5, last_synced_made_to_order = 0 WHERE sku = ?",
+                       (sku,))  # ack
         populate_inventory(ledger, [r], cfg)   # next run, same stock
         inv = ledger.get("inventory", "sku", sku)
         assert inv["last_synced_qty"] == 5, "re-record clobbered the ack-owned last_synced_qty"
