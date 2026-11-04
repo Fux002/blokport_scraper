@@ -1792,6 +1792,34 @@
       "identifier": "Black Gold"
     },
     {
+      "group": "edge",
+      "input": "a&b&c",
+      "expected": "a and b and c",
+      "display": "a and b and c",
+      "identifier": "a&b&c"
+    },
+    {
+      "group": "edge",
+      "input": "Black\ufe60Gold",
+      "expected": "black and gold",
+      "display": "Black and Gold",
+      "identifier": "Black&Gold"
+    },
+    {
+      "group": "edge",
+      "input": "&Gold",
+      "expected": "and gold",
+      "display": "and Gold",
+      "identifier": "&Gold"
+    },
+    {
+      "group": "edge",
+      "input": "Rosa Porrin\u0303o & Gold",
+      "expected": "rosa porrino and gold",
+      "display": "Rosa Porrino and Gold",
+      "identifier": "Rosa Porrino & Gold"
+    },
+    {
       "group": "names",
       "input": "Absolute Black",
       "expected": "absolute black",

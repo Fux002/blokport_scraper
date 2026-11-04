@@ -95,7 +95,7 @@ def collapse_ws(text: str) -> str:
 
 
 # Every non-alphanumeric character -- whitespace, underscore, AND all punctuation (hyphen/dash,
-# slash, '&', "'", '.', ',', '(', ')', '+', unicode dashes/punct, ...) -- folds to ONE space, so
+# slash, "'", '.', ',', '(', ')', '+', unicode dashes/punct, ...) -- folds to ONE space ('&' reads 'and' first), so
 # NEITHER a separator NOR any punctuation ever forks identity. `\w` keeps unicode letters (folded
 # later by ascii_fold) and underscore, so underscore is added explicitly.
 _NON_ALNUM = re.compile(r"[^\w\s]|_", re.UNICODE)

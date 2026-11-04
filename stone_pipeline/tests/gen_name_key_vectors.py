@@ -88,7 +88,8 @@ def build():
         add("non_latin", s)
     for s in ["", " ", "-", "_", "...", "G603", "G 603", "g-603", "G603 ", "ABC123def", "007", "2cm 3 cm",
               "\u216b", "a", "A", "1", "aB1", "x" * 64, "'Nero'", "O''Brien", "Rock 'n' Roll", "''", "a-'b",
-              "Black--Gold", "a`b", "a\u02bcb", "a\u02bbb", "Black\uf005Gold"]:
+              "Black--Gold", "a`b", "a\u02bcb", "a\u02bbb", "Black\uf005Gold",
+              "a&b&c", "Black\ufe60Gold", "&Gold", "Rosa Porrin\u0303o & Gold"]:
         add("edge", s)
     for s in ["Absolute Black", "absolute  black", "ABSOLUTE-BLACK", "Bianco Carrara C/D", "Nero Marquina (Spain)",
               "Tan Brown", "Kashmir White", "Juparana Colombo", "Blue Pearl GT", "Emperador Dark", "Calacatta Oro",
