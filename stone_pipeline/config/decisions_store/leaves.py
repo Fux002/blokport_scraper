@@ -76,8 +76,9 @@ def set_backbone_leaf_decision(variety: str, stone_type: str, attribute: str, va
         raise InvalidDecision(f"leaf attribute must be one of {_LEAF_ATTRIBUTES}, got {attribute!r}")
     if action not in _LEAF_ACTIONS:
         raise InvalidDecision(f"leaf action must be approve|reject, got {action!r}")
-    if not (variety.strip() and value.strip()):
-        raise InvalidDecision("leaf decision needs a variety and a value")
+    if not (_norm(variety) and _norm(value)):
+        raise InvalidDecision("leaf decision needs a variety and a value with a usable name "
+                              "(a name in a non-Latin script only folds to no key)")
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
@@ -94,15 +95,15 @@ def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
     mint statement. This is what stops base<->backbone drift: the transient backbone_additions file is
     overwritten every produce (a variety no longer minted this run drops out of it), but the overlay this
     feeds carries the membership forever, and apply_leaf_overlay CREATES the record for a variety absent from
-    every backbone file. `rows` are (variety, stone_type, attribute, value); a bad attribute/empty value is
-    skipped (never a guessed row). One transaction; idempotent (ON CONFLICT). Returns the count of valid
+    every backbone file. `rows` are (variety, stone_type, attribute, value); a bad attribute, or a variety or value
+    with no usable name (empty folded key), is skipped (never a guessed row). One transaction; idempotent (ON CONFLICT). Returns the count of valid
     rows written (each inserted OR updated in place -- a re-run rewrites the same rows, changing nothing)."""
     written = 0
     with closing(store.open_store()) as conn:
         for variety, stone_type, attribute, value in rows:
             attribute = (attribute or "").strip().lower()
             variety, value = (variety or "").strip(), (value or "").strip()
-            if attribute not in _LEAF_ATTRIBUTES or not variety or not value:
+            if attribute not in _LEAF_ATTRIBUTES or not _norm(variety) or not _norm(value):
                 continue
             conn.execute(
                 "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "

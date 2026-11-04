@@ -36,8 +36,9 @@ def _upsert_statement(source: str, spelling: str, verdict: str, *, name: str | N
                       stone_type: str | None = None, color: str | None = None, origin_iso: str | None = None,
                       widen: bool = False, asked_by: str = "") -> None:
     src, sp = (source or "").strip(), (spelling or "").strip()
-    if not sp:
-        raise InvalidDecision("a statement needs a scraped spelling")
+    if not _norm(sp):
+        raise InvalidDecision("a statement needs a scraped spelling with a usable name "
+                              "(a spelling in a non-Latin script only folds to no key)")
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, color, origin_iso, "
@@ -222,8 +223,9 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     stone_type = (stone_type or "").strip()
     color = (color or "").strip()
     origin = (origin or "").strip().upper()
-    if not src or not spelling or not name or not stone_type:
-        raise InvalidDecision("a decision requires source, scraped spelling, name and stone_type")
+    if not src or not _norm(spelling) or not _norm(name) or not stone_type:
+        raise InvalidDecision("a decision requires source, scraped spelling, name and stone_type, "
+                              "and the spelling and name must have a usable name (not a non-Latin script only)")
     exists_as, alias_target, clean = _lookups(exists_as, alias_target, clean)
     # a name the operator states may already be an existing variety's ALIAS (same type); it then resolves to
     # that variety's canonical name, so the statement binds instead of minting a duplicate of a known alias

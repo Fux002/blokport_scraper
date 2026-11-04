@@ -326,7 +326,9 @@ class VariationEngine:
         block_origin: str = "",
     ) -> VariationMatch:
         empty = VariationMatch(None, None, Confidence.none, "no_candidate", 0.0, [])
-        if not query or not query.strip():
+        # An empty folded key is no usable name (blank, or a non-Latin script only): no candidate,
+        # so the row routes to the missing-variation gap instead of binding on the key "".
+        if not proj.norm(query):
             return empty
 
         # tier 1: override

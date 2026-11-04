@@ -42,9 +42,11 @@ class CandidateIndex:
     by_phonetic: dict[tuple, set[str]] = field(default_factory=dict)
 
     def _add_surface(self, cid: str, surface: str) -> None:
-        if not surface:
+        # A surface that folds to an empty key (a name in a non-Latin script only) is no usable name:
+        # indexed under "", it would be the exact hit for every other such name.
+        if not (key := proj.norm(surface)):
             return
-        self.by_norm.setdefault(proj.norm(surface), set()).add(cid)
+        self.by_norm.setdefault(key, set()).add(cid)
         self.by_compact.setdefault(proj.compact(surface), set()).add(cid)
         self.by_tokenset.setdefault(proj.tokenset(surface), set()).add(cid)
         self.by_deprefixed.setdefault(proj.deprefixed(surface), set()).add(cid)
