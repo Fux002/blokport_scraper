@@ -32,6 +32,11 @@ permissions:
   id-token: write   # OIDC
   contents: read
 
+# One deploy at a time: merges in quick succession queue their deploys instead of pushing :core over each other.
+concurrency:
+  group: deploy-core
+  cancel-in-progress: false
+
 env:
   AWS_REGION: eu-west-1
   # Dev tracks the mutable :core tag and the service's task def points at :core, so a new :core push does
@@ -81,15 +86,26 @@ jobs:
           docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts"
           echo "Entrypoint imports OK in $REPO:core"
 
+      # :core is dev's image, so only main's newest commit may move it. Each merge's CI finishes on its own
+      # schedule; without this a deploy of an older commit that finished last put dev back on older code
+      # (2026-11-04: three merges, dev ended on the first). :<sha> is immutable and always pushed.
       - name: Push image
+        id: push
         if: steps.gate.outputs.ready == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
-          docker push "$REPO:core"
           docker push "$REPO:$SHA"
-          echo "Pushed $REPO:core and :$SHA"
+          HEAD_SHA=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$SHA" = "$HEAD_SHA" ]; then
+            docker push "$REPO:core"
+            echo "core=true" >> "$GITHUB_OUTPUT"
+            echo "Pushed $REPO:core and :$SHA"
+          else
+            echo "core=false" >> "$GITHUB_OUTPUT"
+            echo "Pushed $REPO:$SHA only: main is at $HEAD_SHA now, so its own deploy moves :core"
+          fi
 
       # The mutable-tag gotcha: pushing a new :core does not change the task def, so ECS never rolls the
       # running service on its own -- the new image would sit in ECR, never live. Force a new deployment so
@@ -97,7 +113,7 @@ jobs:
       # that the image was pushed. Only on the CI-gated main run (the dev deploy); a manual imageproc/gpu
       # dispatch must not roll the app service. Prod is a separate task, promoted explicitly.
       - name: Roll dev service (re-pull :core) and wait for stable
-        if: steps.gate.outputs.ready == 'true' && github.event_name == 'workflow_run'
+        if: steps.gate.outputs.ready == 'true' && github.event_name == 'workflow_run' && steps.push.outputs.core == 'true'
         run: |
           aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
             --force-new-deployment >/dev/null
