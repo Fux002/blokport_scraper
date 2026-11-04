@@ -220,6 +220,17 @@ def _catalog_source_file(filename: str) -> Path:
 # Colour is NOT last-resorted here (it inherits the variety's texture-classified colour, 'Natural' floor).
 
 
+# --- Product descriptions (owner decision O3, report 21) ------------------------
+# A supplier description passes only as plain English prose: its share of these English function words must reach
+# DESCRIPTION_MIN_ENGLISH_SHARE (prod: English 0.20 to 0.45; the Spanish zucchi texts 0.014; internal notes 0.0).
+# 'no' is deliberately absent: it is also Spanish and Italian.
+DESCRIPTION_FUNCTION_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "in", "is", "it", "its", "of",
+    "on", "or", "that", "the", "this", "to", "which", "with",
+})
+DESCRIPTION_MIN_ENGLISH_SHARE = 0.10
+
+
 # --- Confidence enum with a fixed numeric mapping (section 3.4) ----------------
 class Confidence(IntEnum):
     """Four level confidence, high > medium > low > none, with numeric backing

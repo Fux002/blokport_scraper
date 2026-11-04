@@ -166,6 +166,26 @@ def clean_identifier(text: str) -> str:
     the shared name-key vectors (`identifier`)."""
     return " ".join(_ascii_display(text).split())
 
+_HTML_RE = re.compile(r"<[A-Za-z/!][^>]*>|&[A-Za-z]+;|&#\d+;")
+_PROSE_WORD_RE = re.compile(r"[a-z']+")
+
+
+def clean_description(text: str, function_words, min_share: float) -> str | None:
+    """A supplier description as stored prose, or None when it is not plain English prose (owner decision O3): NFC,
+    format characters removed, line breaks unified to '\n', any other control character a space, spacing otherwise
+    kept. None for an HTML tag or entity, or when the share of English `function_words` among its words is below
+    `min_share` (another language, an internal note); the caller then uses the generated description."""
+    text = unicodedata.normalize("NFC", text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = "".join(" " if unicodedata.category(c) == "Cc" and c != "\n" else c for c in text
+                   if unicodedata.category(c) != "Cf").strip()
+    if not text or _HTML_RE.search(text):
+        return None
+    words = _PROSE_WORD_RE.findall(text.casefold())
+    if not words or sum(w in function_words for w in words) / len(words) < min_share:
+        return None
+    return text
+
+
 
 # ASCII and fullwidth round and square brackets
 _BRACKET_ALIAS_RE = re.compile("[(\\[\uff08\uff3b]\\s*([^)\\]\uff09\uff3d]+?)\\s*[)\\]\uff09\uff3d]")

@@ -17,7 +17,8 @@ import re
 
 from stone_pipeline.config import domain
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence, bulk_form_name, category, default_form_name
+from stone_pipeline.config.settings import (CATEGORIES, DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE,
+                                             SETTINGS, Confidence, bulk_form_name, category, default_form_name)
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
@@ -25,8 +26,8 @@ from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
-from stone_pipeline.core.text import slugify, title_case
-from stone_pipeline.reference.loaders import ReferenceData, resolve_iso
+from stone_pipeline.core.text import UnfoldableName, clean_description, slugify, title_case
+from stone_pipeline.reference.loaders import ReferenceData, field_kinds, resolve_iso
 
 log = logfmt.get_logger("derive")
 
@@ -732,27 +733,37 @@ def derive_title(row: CanonicalRow) -> None:
     # stays only in the description, via _FORMAT_WORD). Finish is dropped for blocks (uncut stone has no
     # finish; avoids 'Carrara Raw'); material is omitted when the variety name already implies it
     # (_material_suffix). The handle keys off variety+finish INDEPENDENTLY (derive_handle).
+    # A title is an identifier built from parts: each part is written by its own field, then the whole by the
+    # title's rule (field-kinds.json), so an accent never reaches a title and an identifier part keeps its case.
     if not row.variation_name:
-        row.title = title_case(row.raw_name or "")
-        row.title_method = "raw_name_fallback"
+        try:
+            row.title = field_kinds.clean(field_kinds.PRODUCT_TITLE, title_case(row.raw_name or ""))
+            row.title_method = "raw_name_fallback"
+        except UnfoldableName:
+            row.title, row.title_method = "", "raw_name_unfoldable"     # never a half-folded title
         return
     variety = _primary_variety_name(row.variation_name)
-    parts = [variety]
+    parts = [field_kinds.display(field_kinds.VARIATION_NAME, variety)]
     if row.finish_name and not row.is_block:
-        parts.append(row.finish_name)
+        parts.append(field_kinds.display(field_kinds.FINISH_NAME, row.finish_name))
     if material := _material_suffix(variety, row.type_name):
-        parts.append(material)
-    row.title = title_case(" ".join(p for p in parts if p))
+        parts.append(field_kinds.display(field_kinds.TYPE_NAME, material))
+    row.title = field_kinds.clean(field_kinds.PRODUCT_TITLE, " ".join(p for p in parts if p))
     row.title_method = "construct"
 
 
 def derive_description(row: CanonicalRow) -> None:
-    if row.raw_description and len(row.raw_description.strip()) > 20:
-        row.description = row.raw_description.strip()
+    prose = clean_description(row.raw_description or "", DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE)
+    if prose and len(prose) > 20:
+        row.description = prose
         row.description_method = "passthrough"
         return
-    variety = title_case(_primary_variety_name(row.variation_name or row.raw_name
-                                               or f"This {active_pack().generic_material_word}"))
+    no_name = f"This {active_pack().generic_material_word}"
+    try:
+        variety = field_kinds.display(field_kinds.VARIATION_NAME,
+                                      _primary_variety_name(row.variation_name or row.raw_name or no_name))
+    except UnfoldableName:
+        variety = no_name                     # the existing no-name wording, never a half-folded name
     stone_type = (row.type_name or active_pack().generic_material_word).lower()  # generic material noun
     color = (row.color_name or "").lower()               # OMIT when unresolved -- never invent 'natural'
     material = f"{color} {stone_type}".strip()           # 'black marble', or just 'marble'
