@@ -73,3 +73,21 @@ def test_scraper_owned_tables_are_fixed_points():
     ports = _csv("catalog_source/ports.csv")
     assert _not_fixed(fk.PORT_NAME, (r["name"] for r in ports), fk.clean) == []
     assert _not_fixed(fk.PORT_REGION_NAME, (r["region_name"] for r in ports), fk.clean) == []
+
+
+def test_backbone_loader_reads_the_committed_alias_lists_as_written():
+    # The alias rule lives in the writers (cleanup, minting); the loader re-splits nothing (W16).
+    from stone_pipeline.reference.loaders.backbone import load_backbone
+    path = ROOT / "catalog_source/backbone_slabs.json"
+    posts = json.loads(path.read_text(encoding="utf-8"))["posts"]
+    loaded = [v for vs in load_backbone(path).by_norm_name.values() for v in vs]
+    assert sorted((v.variant, tuple(v.aliases)) for v in loaded) == sorted(
+        (p["variant"].strip(), tuple(p.get("aliases") or [])) for p in posts if p["variant"].strip())
+
+
+def test_backbone_loader_keeps_an_alias_whole(tmp_path):
+    from stone_pipeline.reference.loaders.backbone import load_backbone
+    path = tmp_path / "backbone.json"
+    path.write_text(json.dumps({"posts": [{"variant": "Agata", "aliases": ["Preto Agata, Agate Black"]}]}),
+                    encoding="utf-8")
+    assert load_backbone(path).by_norm_name["agata"][0].aliases == ["Preto Agata, Agate Black"]
