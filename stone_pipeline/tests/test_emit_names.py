@@ -33,3 +33,11 @@ def test_a_bracketed_alternative_moves_from_the_name_into_the_aliases():
     row = _row("Black Galaxy (Star Galaxy)")
     emit_catalog._write_names(row)
     assert (row["Name"], row["Aliases"]) == ("Black Galaxy", "Star Galaxy")
+
+
+def test_the_update_file_is_the_cleaned_subset_of_the_full_rows():
+    # W26: the incremental upload is the full file's rows the delta names, the same cleaned objects in full order;
+    # a delta row the full gates dropped is not published.
+    full = [{"Key": "a", "Name": "Rose"}, {"Key": "b", "Name": "Black"}, {"Key": "c", "Name": "Grey"}]
+    delta = [{"Key": "c", "Name": "grey"}, {"Key": "a", "Name": "Rosé"}, {"Key": "gone", "Name": "x"}]
+    assert emit_catalog.update_rows(full, delta) == [full[0], full[2]]

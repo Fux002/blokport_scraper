@@ -27,12 +27,11 @@ def _write_csv(path: Path, cols: list[str], rows: list[dict], sanitize: bool = T
 
 def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     """Write the catalog curation outputs to the fixed top-level folders:
-      to_upload/1_variants_update.csv      the new + alias-update DELTA (incremental upload)
+      outputs/<env>/curate_delta.csv       the new + alias-update DELTA, raw (emit publishes it cleaned)
       catalog_source/backbone_additions/   new varieties to append to the backbones
       review/                              the human-decision aids (never uploaded)
-    The full upload file (to_upload/1_variants_full.csv) is produced by emit_catalog."""
+    Both upload files (to_upload/1_variants_full.csv and 1_variants_update.csv) are produced by emit_catalog."""
     p = SETTINGS.paths
-    to_upload = p.to_upload_dir
     additions = p.catalog_source_dir / "backbone_additions"
     upload_rows: list[dict] = []
     needs_review: list[dict] = []
@@ -80,8 +79,8 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     upload_rows = [r for r in upload_rows if _is_real_delta(r) and r["Key"] not in _delete_keys]
     if before != len(upload_rows):
         log.info("update delta pruned", extra={"extra_fields": {"dropped_noops": before - len(upload_rows)}})
-    if upload_rows:
-        _write_csv(to_upload / "1_variants_update.csv", _IMPORT_COLS, upload_rows, sanitize=False)  # Medusa import
+    # always written, header-only when empty, so emit never reads a previous run's delta
+    _write_csv(p.curate_delta_csv, _IMPORT_COLS, upload_rows, sanitize=False)
     # the ONLY review file from curate: the decision ledger (uncertain new varieties, confirm
     # true/false). Always (re)written so applied/rejected rows drop out. Advisory sets (uncertain
     # alias spellings, code-like names, images) are logged as counts, not clutter files.

@@ -56,6 +56,13 @@ def _write_names(row: dict) -> list[str]:
     return dropped
 
 
+def update_rows(full_rows: list[dict], delta: list[dict]) -> list[dict]:
+    """The rows of the full file whose Key the delta names, in full-file order; a delta row the full gates dropped
+    (retired, artifact, consolidated, collapsed) is not published."""
+    wanted = {r["Key"] for r in delta}
+    return [r for r in full_rows if r["Key"] in wanted]
+
+
 def _report_alias_drops(drops: list[tuple[str, str]]) -> None:
     """Every alias dropped for having no ASCII form (owner decision O2), listed for the operator, sorted."""
     path = SETTINGS.paths.review_dir / "aliases_dropped.csv"
@@ -270,7 +277,8 @@ def _uniform_rows(by_key: dict[str, dict]) -> list[dict]:
 def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
           *, seed_only: bool = False, out_path: Path | None = None) -> Path:
     """Assemble to_upload/1_variants_full.csv from the committed base (the complete
-    source-of-truth variant set) + this run's delta (to_upload/1_variants_update.csv).
+    source-of-truth variant set) + this run's delta (curate's outputs/<env>/curate_delta.csv), and
+    to_upload/1_variants_update.csv as the subset of the full rows the delta names (one cleaning point).
 
     image_keys: the set of variant Keys that actually have a {Key}.png on S3. When provided (or
     resolvable from S3), a variant advertises its image link IFF its image exists -- so the file
@@ -297,7 +305,7 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
                 by_key[r["Key"]] = r
                 order.append(r["Key"])
     n_existing = len(order)
-    delta = [] if seed_only else _rows(SETTINGS.paths.to_upload_dir / "1_variants_update.csv")  # new+alias
+    delta = [] if seed_only else _rows(SETTINGS.paths.curate_delta_csv)              # curate's new + alias delta
     for r in delta:
         if r["Key"] in by_key:
             by_key[r["Key"]].update(r)                        # alias update onto existing row
@@ -394,6 +402,10 @@ def build(existing_path: Path | None = None, image_keys: set[str] | None = None,
     # Name/Alias would corrupt the catalog data. (Operator review of scraped names is the sanitized
     # review files' job, not this machine-consumed deliverable.)
     csvio.write_dicts(path, _COLS, rows, sanitize=False)
+    if not seed_only:
+        # the incremental upload: the full file's rows this run's delta names, the SAME cleaned row objects in
+        # full-file order, so the two upload files can never disagree on a Name or alias
+        csvio.write_dicts(path.parent / "1_variants_update.csv", _COLS, update_rows(rows, delta), sanitize=False)
     # Sidecar {Key: image content fingerprint (S3 ETag)} for every variant advertising an image. The
     # ledger folds this into the variation payload_hash so a REGENERATED texture (same {Key}.png URL,
     # new bytes) flips the variation dirty and re-serves -- a URL-only hash would miss it and Medusa

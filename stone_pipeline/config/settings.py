@@ -262,6 +262,9 @@ class Paths:
     from_medusa_dir: Path = _FROM_MEDUSA
     review_dir: Path = _REVIEW
     outputs_dir: Path = _OUTPUTS
+    # curate's raw new + alias-update delta, read only by emit, which publishes to_upload/1_variants_update.csv
+    # from it as the cleaned subset of 1_variants_full.csv (one cleaning point; never uploaded itself).
+    curate_delta_csv: Path = _OUTPUTS / "curate_delta.csv"
     # small CSV samples the test suite reads (self-contained in the package).
     tests_fixtures_dir: Path = REPO_ROOT / "tests" / "fixtures"
 
