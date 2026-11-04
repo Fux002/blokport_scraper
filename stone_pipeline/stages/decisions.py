@@ -188,11 +188,6 @@ def load_attribute_ids() -> dict[tuple[str, str], tuple[str, str]]:
     return decisions_store.attribute_ids()
 
 
-# the attribute card kinds (curate pipeline _ATTR_VOCABS) and the name field each one's value becomes
-_ATTRIBUTE_FIELDS = {"color": field_kinds.COLOR_NAME, "finish": field_kinds.FINISH_NAME,
-                     "type": field_kinds.TYPE_NAME, "quality": field_kinds.QUALITY_NAME}
-
-
 def write_attributes_to_add(pending: list[dict]) -> int:
     """Replace the pending ATTRIBUTE queue with values still missing a Medusa id. Returns the count.
     A card carries its value by its kind's field rule, the name the attribute will have in Medusa ('Marble
@@ -204,7 +199,7 @@ def write_attributes_to_add(pending: list[dict]) -> int:
         if not (kind and raw):
             continue
         try:
-            value = field_kinds.display(_ATTRIBUTE_FIELDS[kind], raw)
+            value = field_kinds.display(field_kinds.ATTRIBUTE_FIELDS[kind], raw)
         except UnfoldableName:
             log.warning("attribute card dropped: no ASCII form", extra={"extra_fields": {"kind": kind, "value": raw}})
             continue

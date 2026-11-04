@@ -163,8 +163,13 @@ def test_statement_naming_the_pair_under_a_different_type_mints(config_db, monke
 
 def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch):
     _card(); _vocab(monkeypatch, [])
+    # a name not in its clean form is refused with the clean form (W12, the backend's rule) ...
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": SCRAPED, "name": "honey  ONYX", "type": "Onyx"})
+    assert code == 400 and body["clean"] == "honey ONYX"
+    # ... and the same spelling stated clean is a plain mint: no rename, so no seed name
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "zucchi", "scraped": SCRAPED, "name": "Honey Onyx", "type": "Onyx"})
     assert code == 200 and body["result"] == "minted"
     assert views.seed_names() == {}
     assert views.confirm() == {("", "honey onyx"): "yes"}
@@ -312,3 +317,10 @@ def test_a_mint_backbone_post_writes_each_value_by_its_field(monkeypatch):
     res = curate.build_curation([_row(SCRAPED, "t1", color_name="黑")], loaders.load_all())
     post = next(r for r in res.backbone_new["slab"] if r["variant"] == SCRAPED)
     assert post["color"] == [active_pack().fallback_color]
+
+
+def test_a_stated_name_that_keys_like_the_spelling_still_mints_under_it(monkeypatch):
+    # W15 with W5: 'Nero 黑 Onyx' and its stated 'Nero Onyx' share one key; the stated name is minted.
+    _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {("", "nero onyx"): "Nero Onyx"})
+    res = curate.build_curation([_row("Nero 黑 Onyx", "t1")], loaders.load_all())
+    assert [r["Name"] for r in _new(res, "slab")] == ["Nero Onyx"]

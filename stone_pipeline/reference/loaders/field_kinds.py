@@ -36,6 +36,8 @@ REQUIRED = frozenset({
     VARIATION_NAME, VARIATION_ALIAS_VALUE,
 })
 NAME, IDENTIFIER = "name", "identifier"
+# the attribute vocabularies (review cards, the attribute-id route) and the field each one's value is
+ATTRIBUTE_FIELDS = {"color": COLOR_NAME, "finish": FINISH_NAME, "type": TYPE_NAME, "quality": QUALITY_NAME}
 
 
 class FieldKindsError(RuntimeError):

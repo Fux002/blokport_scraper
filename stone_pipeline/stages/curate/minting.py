@@ -30,8 +30,8 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
     name = spelling_of(row)
     renamed = c.decisions.seed_name(row.src_site, name, clean) or ""
     try:
-        display = field_kinds.display(field_kinds.VARIATION_NAME,
-                                      renamed if renamed and proj.norm(renamed) != proj.norm(clean) else clean)
+        # the stated name whenever there is one: a spelling with no ASCII form keys like its stated ASCII name
+        display = field_kinds.display(field_kinds.VARIATION_NAME, renamed or clean)
     except UnfoldableName:
         # Never minted under a half-folded name: the operator states the variety's ASCII name on a `new` card, and
         # the next produce mints under it (the existing card kind, so the review UI needs nothing new).
