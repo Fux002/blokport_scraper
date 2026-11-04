@@ -1313,6 +1313,7 @@ Your whole answer is one JSON object and nothing else:
     ATTRIBUTES_KEY = "scraper/from_medusa/attributes.csv"      # ... and attributes (category, value, sourceid)
     TILE_RENDER_VERSION = 3            # part of every tile's made-from stamp: a new version re-renders every tile
                                        # (2: the owner's view set, the laid tiles from above as the main view)
+                                       # (3: every tile leads with the laid tiles, however few its faces)
     # A tile is rendered at its listing's own size only when that size is a tile's: each side and the thickness within
     # these bounds (metres). Outside them the size is a data error, never drawn: no images, the reason in the summary.
     # A size the produce filled from the pack's defaults (dimension_defaulted) is never shown either (the image stage).

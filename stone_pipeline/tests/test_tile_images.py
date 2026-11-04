@@ -327,14 +327,15 @@ def test_slabs_are_tried_the_tile_s_own_vendor_s_first_then_the_most_stone_and_n
     assert tile_plan.ranked([own_small], "marenostone", {}) == []                         # every slab refused
 
 
-def test_every_tile_leads_with_the_laid_floor_and_has_the_single_tile_and_studio_as_extras_however_few_its_faces():
+@pytest.mark.parametrize("size, faces", [((1.2, 1.2, 0.02), 2), ((2.0, 1.5, 0.02), 1)])   # straight, half-bond
+def test_every_tile_leads_with_the_laid_floor_and_has_the_single_tile_and_studio_as_extras_however_few_its_faces(size, faces):
     # owner 2026-11-04: every tile's catalog image is the laid floor; the single tile on white, the studio view and the
-    # 3D tile are extras. A 1.2 m square fits twice on this slab's stone, so its floor repeats those faces, turned.
+    # 3D tile are extras. These sizes fit only once or twice on this slab's stone: the floor repeats those faces, turned.
     stone = _stone()
-    product = tile_plan.Product("big", "marenostone", "tile", ("x", "y"), POLISHED, (1.2, 1.2, 0.02))
+    product = tile_plan.Product("big", "marenostone", "tile", ("x", "y"), POLISHED, size)
     slab = tile_plan.Slab("s", "marenostone", A, (3.0, 2.0), "k", "e")
     cuts = tile_plan.faces_of(product, stone)
-    assert 0 < len(cuts.origins) < 6
+    assert len(cuts.origins) == faces
     files = tile_plan.render(product, slab, stone, cuts)
     sha = imagestore.listing_sha("big")
     main, white, studio = (files[imagestore.standard_key("marenostone", sha, v)][0] for v in ("main", "white", "studio"))
