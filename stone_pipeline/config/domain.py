@@ -31,6 +31,16 @@ _REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categori
 
 
 @dataclass(frozen=True)
+class FreeSizeShapes:
+    """The shapes a category's free-size listing is offered in. Each ratio is one shape's long:short side (1 a
+    square). A side the vendor states is the short side and the free side is ratio x it; with every side free
+    the long side is `long_side`. A shape longer than `max_length` is not offered. Metres."""
+    ratios: tuple[float, ...]
+    long_side: float
+    max_length: float
+
+
+@dataclass(frozen=True)
 class DomainPack:
     """The declared vocabulary + defaults for one product type. Grows as more hardcoded constants move here
     (the category model lands in a later Phase 3 step)."""
@@ -97,6 +107,11 @@ class DomainPack:
     color_attribute: str = "color"
     in_stock_words: tuple[str, ...] = ()
     out_of_stock_words: tuple[str, ...] = ()
+    # Free size: a supplier word for a side cut to order ('Free' length), and per category the shapes such a
+    # listing is offered in, one listing per shape (stages/free_size). A category with no entry offers none:
+    # its free side stays a defaulted size, as before.
+    free_size_words: tuple[str, ...] = ()
+    free_size_shapes: dict[str, FreeSizeShapes] = dataclasses.field(default_factory=dict)
 
 
 def _pack_path(name: str) -> Path:
@@ -113,7 +128,7 @@ IDENTITY_ATTRIBUTE = "type"
 
 # the keys each category dict must carry (settings.py reads these to build a Category); the rest are optional.
 _VOCABULARY_LISTS = ("inventory_prefixes", "trailing_render_tags", "join_noise_words", "in_stock_words",
-                     "out_of_stock_words")
+                     "out_of_stock_words", "free_size_words")
 
 _CATEGORY_KEYS = ("name", "plural", "label", "backbone_filename", "base_image", "shares_variety_vocab", "fan_out")
 
@@ -180,6 +195,27 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     for words in _VOCABULARY_LISTS:
         if words in data and not isinstance(data[words], list):
             bad(f"'{words}' must be a list")
+    shapes = data.get("free_size_shapes") or {}
+    if not isinstance(shapes, dict):
+        bad("'free_size_shapes' must be a mapping of category -> {ratios, long_side, max_length}")
+
+    def number(v) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    for fmt, spec in shapes.items():
+        where = f"free_size_shapes[{fmt!r}]"
+        if fmt not in cat_names:
+            bad(f"{where} is not in the declared categories {sorted(cat_names)}")
+        if not isinstance(spec, dict) or set(spec) != {"ratios", "long_side", "max_length"}:
+            bad(f"{where} must be a mapping of exactly ratios, long_side, max_length")
+        ratios = spec["ratios"]
+        if not isinstance(ratios, list) or not ratios or not all(number(r) and r >= 1 for r in ratios):
+            bad(f"{where}.ratios must be a non-empty list of long:short ratios >= 1, got {ratios!r}")
+        if len(set(ratios)) != len(ratios):
+            bad(f"{where}.ratios must be distinct (one listing each), got {ratios!r}")
+        for side in ("long_side", "max_length"):
+            if not number(spec[side]) or spec[side] <= 0:
+                bad(f"{where}.{side} must be a positive number (metres), got {spec[side]!r}")
     if "spelling_variants" in data and not isinstance(data["spelling_variants"], dict):
         bad("'spelling_variants' must be a mapping of variant -> canonical word")
     if "color_attribute" in data and data["color_attribute"] not in data["attributes"]:
@@ -270,6 +306,10 @@ def load_pack(name: str | None = None) -> DomainPack:
         color_attribute=data.get("color_attribute", "color"),
         in_stock_words=_words(data.get("in_stock_words") or []),
         out_of_stock_words=_words(data.get("out_of_stock_words") or []),
+        free_size_words=_words(data.get("free_size_words") or []),
+        free_size_shapes={fmt: FreeSizeShapes(tuple(float(r) for r in spec["ratios"]), float(spec["long_side"]),
+                                              float(spec["max_length"]))
+                          for fmt, spec in (data.get("free_size_shapes") or {}).items()},
     )
 
 

@@ -62,7 +62,8 @@ def _acked(path):
     """Blokport applied the product and its stock."""
     with _open(path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_a' WHERE sku = ?", (SKU,))
-        ledger.execute("UPDATE inventory SET last_synced_qty = qty WHERE sku = ?", (SKU,))
+        ledger.execute("UPDATE inventory SET last_synced_qty = qty, last_synced_made_to_order = made_to_order "
+                       "WHERE sku = ?", (SKU,))
 
 
 def _state(path):
@@ -197,7 +198,7 @@ def test_a_v10_ledger_gains_photo_ready_from_the_stock_reason(tmp_path):
     p = tmp_path / "mig.ledger"
     _v10_ledger(p)
     with Ledger.open(p, env="development") as lg:
-        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 11
+        assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert _photo_ready_by_sku(lg) == {"SEN-1": 0, "SEN-2": 1, "SEN-3": 1, "SEN-4": 1}
 
 

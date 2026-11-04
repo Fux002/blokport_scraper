@@ -27,13 +27,28 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 11  # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 12  # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
 #                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
 #                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
 #                      v10: product.model_3d_key -- the lead slab's 3D cut-out;
-#                      v11: product.photo_ready -- the no-photo rule's decision
+#                      v11: product.photo_ready -- the no-photo rule's decision;
+#                      v12: made to order -- inventory.qty nullable + made_to_order + last_synced_made_to_order,
+#                           product.made_to_order
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+# The inventory rows the lane serves: the stock (qty, made_to_order) differs from the last synced stock, or was
+# never synced (last_synced_made_to_order NULL). Over the inventory table aliased `i`; the one definition.
+STOCK_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
+                   "OR i.last_synced_qty IS NOT i.qty)")
+# Forget the last synced stock, so the row serves again (a reset, a changed reason).
+FORGET_SYNCED_STOCK_SQL = "last_synced_qty = NULL, last_synced_made_to_order = NULL"
+
+
+def on_sale_sql(alias: str) -> str:
+    """The one rule for an inventory row (aliased `alias`) on sale: stock above 0, or made to order (no count).
+    Its negation is stock 0, the reversible delist (qty is never negative, and NULL only when made to order)."""
+    return f"({alias}.qty > 0 OR {alias}.made_to_order = 1)"
 
 
 class LedgerError(Exception):
@@ -165,6 +180,8 @@ class Ledger:
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
         if "replaced_by_lot_code" not in inv_cols:   # v8: the lot a bundle was replaced by (its redirect target)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN replaced_by_lot_code TEXT")
+        if "made_to_order" not in inv_cols:   # v12: qty becomes nullable, which SQLite only does by a rebuild
+            self._rebuild_inventory_v12()
         prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}
         if "collection_country_code" not in prod_cols:   # v6: supplier collection location (independent of origin)
             self.conn.execute("ALTER TABLE product ADD COLUMN collection_country_code TEXT")
@@ -178,6 +195,8 @@ class Ledger:
             self.conn.execute("ALTER TABLE product ADD COLUMN model_3d_key TEXT")
         if "photo_ready" not in prod_cols:   # v11: the no-photo rule's decision
             self.conn.execute("ALTER TABLE product ADD COLUMN photo_ready INTEGER NOT NULL DEFAULT 1")
+        if "made_to_order" not in prod_cols:   # v12: on sale with no count (read by Blokport at create)
+            self.conn.execute("ALTER TABLE product ADD COLUMN made_to_order INTEGER NOT NULL DEFAULT 0")
         if from_version < 11:
             # Before v11 the decision was kept only as the stock reason, so derive it from that. Keyed on the version,
             # not on the ALTER: the ALTER commits on its own, so a crash before the version bump below leaves the
@@ -199,6 +218,25 @@ class Ledger:
         # the lot lookup that gates a bundle's replacement delta on its pieces (sync.ready_inventory); HERE for
         # the same reason: on an old ledger product.lot_code only exists after the ALTER above
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_product_lot_code ON product (lot_code)")
+
+    def _rebuild_inventory_v12(self) -> None:
+        """The v12 inventory (schema.sql) from a v11 one, in one transaction (a crash leaves the v11 table): every
+        row keeps its stock and is counted (made_to_order 0); a synced row's last synced stock is its count, so the
+        migration serves nothing new."""
+        old = "inventory_v11"
+        self.conn.execute("SAVEPOINT inventory_v12")
+        self.conn.execute(f"ALTER TABLE inventory RENAME TO {old}")
+        # the table's one definition is schema.sql's statement (it ends at the first line-initial ');')
+        ddl = _SCHEMA_PATH.read_text(encoding="utf-8")
+        start = ddl.index("CREATE TABLE IF NOT EXISTS inventory (")
+        self.conn.execute(ddl[start:ddl.index("\n);", start) + 3])
+        self.conn.execute(
+            "INSERT INTO inventory (sku, qty, made_to_order, last_synced_qty, last_synced_made_to_order, reason, "
+            "replaced_by_lot_code, updated_at) SELECT sku, qty, 0, last_synced_qty, "
+            "CASE WHEN last_synced_qty IS NULL THEN NULL ELSE 0 END, reason, replaced_by_lot_code, updated_at "
+            f"FROM {old}")
+        self.conn.execute(f"DROP TABLE {old}")
+        self.conn.execute("RELEASE inventory_v12")
 
     def _bind_env(self, env: str, fingerprint: str | None) -> None:
         """Initialize or assert the single `ledger_meta` row (the env guard)."""

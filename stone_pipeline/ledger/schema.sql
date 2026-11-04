@@ -201,6 +201,7 @@ CREATE TABLE IF NOT EXISTS product (
     sold_in_bundle       INTEGER,                       -- 0/1
     bundle_size          INTEGER,
     inventory_quantity   TEXT,                          -- the resolved stock string (derive.derive_inventory)
+    made_to_order        INTEGER NOT NULL DEFAULT 0,    -- 1: on sale with no count (a free-size shape)
     lot_code             TEXT,                          -- shared by every piece of a lot; null = not in a lot
     lot_position         INTEGER,                       -- the piece's place in the lot's cut order
     medusa_id            TEXT,                          -- null until synced
@@ -220,22 +221,23 @@ CREATE INDEX IF NOT EXISTS idx_product_variation ON product (variation_key);
 CREATE INDEX IF NOT EXISTS idx_product_source ON product (source);
 
 -- ---------------------------------------------------------------------------
--- inventory: stock per SKU. No state/payload_hash: the qty vs last_synced_qty
--- compare drives what is served (design section 7). qty 0 is the reversible
--- delist for a discontinued product.
+-- inventory: stock per SKU. No state/payload_hash: the stock (qty, made_to_order) vs the last synced
+-- stock drives what is served (design section 7, db.STOCK_DELTA_SQL). qty 0 is the reversible delist for
+-- a discontinued product; made_to_order 1 is on sale with no count (qty NULL).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS inventory (
     sku              TEXT PRIMARY KEY REFERENCES product (sku),
-    qty              INTEGER NOT NULL,
-    last_synced_qty  INTEGER,                           -- null until first inventory sync
+    qty              INTEGER,                           -- null exactly when made_to_order
+    made_to_order    INTEGER NOT NULL DEFAULT 0,
+    last_synced_qty  INTEGER,
+    last_synced_made_to_order INTEGER,                  -- null until first inventory sync
     reason           TEXT,                              -- why qty is 0: 'delisted' (admin take-offline, Medusa
                                                         -- hides it), 'replaced_by_lot' (a bundle split into its
                                                         -- pieces) vs null (ordinary out-of-stock, stays listed)
     replaced_by_lot_code TEXT,                          -- reason 'replaced_by_lot': the lot that replaced it
-    updated_at       TEXT NOT NULL
+    updated_at       TEXT NOT NULL,
+    CHECK (made_to_order IN (0, 1) AND (made_to_order = 1) = (qty IS NULL))
 );
--- served when qty IS DISTINCT FROM last_synced_qty; this index supports that scan.
-CREATE INDEX IF NOT EXISTS idx_inventory_delta ON inventory (last_synced_qty, qty);
 
 -- ---------------------------------------------------------------------------
 -- image: one row per unique image content (sha256). Two lanes, two gates

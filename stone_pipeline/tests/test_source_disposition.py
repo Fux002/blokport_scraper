@@ -15,7 +15,7 @@ from stone_pipeline.adapters.base import read_scrape_csv
 from stone_pipeline.adapters.selftest import fixture_dir
 from stone_pipeline.config.domain import active_pack
 from stone_pipeline.stages import derive
-from stone_pipeline.stages.derive import _dimension_category
+from stone_pipeline.stages.derive import dimension_category
 
 
 def _adapt(source: str):
@@ -29,6 +29,6 @@ def test_marenostone_unlimited_stock_row_lists_via_the_in_stock_fallback():
     assert row.raw_stock_m2 == "Unlimited"                       # extraction
     derive.derive_inventory(row)                                 # handling
     # lists via the per-category made-to-order fallback (positive), never held as stock_undetermined
-    assert row.inventory_quantity == active_pack().in_stock_fallback_qty[_dimension_category(row)]
+    assert row.inventory_quantity == active_pack().in_stock_fallback_qty[dimension_category(row)]
     assert row.inventory_quantity > 0
     assert row.inventory_method == "in_stock_word_fallback"      # lists, not stock_undetermined (held)

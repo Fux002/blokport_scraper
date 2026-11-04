@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
-from stone_pipeline.ledger.db import Ledger, now_iso
+from stone_pipeline.ledger.db import FORGET_SYNCED_STOCK_SQL, STOCK_DELTA_SQL, Ledger, now_iso, on_sale_sql
 
 log = logfmt.get_logger("ledger.sync")
 
@@ -105,9 +105,7 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     last sync), which is what the inventory lane would serve."""
     out: dict[str, dict[str, int]] = {t: ledger.counts(t) for t in _STATE_TABLES}
     inv = ledger.execute(
-        "SELECT COUNT(*) AS total, "
-        "SUM(CASE WHEN last_synced_qty IS NULL OR last_synced_qty != qty THEN 1 ELSE 0 END) AS delta "
-        "FROM inventory"
+        f"SELECT COUNT(*) AS total, SUM(CASE WHEN {STOCK_DELTA_SQL} THEN 1 ELSE 0 END) AS delta FROM inventory i"
     ).fetchone()
     out["inventory"] = {"total": inv["total"] or 0, "delta": inv["delta"] or 0}
     # E13: variation reconcile signal. `retiring` already surfaces in out["variation"] (a state count);
@@ -316,26 +314,33 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             # a priced product never goes on sale before a stock delta could hide it; afterwards the stock lane owns
             # visibility. Not in payload_hash, so a change never re-serves a product on its own.
             "photo_ready": bool(p["photo_ready"]),
+            # Made to order (a free-size shape): on sale with no count. Read at create like photo_ready (the variant's
+            # inventory is not managed); afterwards the stock lane carries every change. Not in payload_hash.
+            "made_to_order": bool(p["made_to_order"]),
         },
     })
 
 
 def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
-    """Stock deltas to push: rows whose qty moved since the last sync, for products
+    """Stock deltas to push: rows whose stock moved since the last sync, for products
     that are already synced (a product must exist in Medusa before its stock loads).
     A bundle replaced by its lot waits until a piece of that lot exists in Medusa and is on sale
-    (stock above 0: Blokport hides a sold or delisted piece), so the redirect Blokport derives from
+    (db.on_sale_sql: Blokport hides a sold or delisted piece), so the redirect Blokport derives from
     it never points at an empty lot page."""
     rows = ledger.execute(
-        "SELECT i.sku AS sku, i.qty AS qty, i.reason AS reason, i.replaced_by_lot_code AS lot_code "
+        "SELECT i.sku AS sku, i.qty AS qty, i.made_to_order AS made_to_order, i.reason AS reason, "
+        "i.replaced_by_lot_code AS lot_code "
         "FROM inventory i JOIN product p ON p.sku = i.sku "
-        "WHERE p.state = 'synced' AND (i.last_synced_qty IS NULL OR i.last_synced_qty != i.qty) "
+        f"WHERE p.state = 'synced' AND {STOCK_DELTA_SQL} "
+        # a piece counts when on sale or with no stock row yet (the LEFT JOIN)
         "AND (i.reason IS NOT 'replaced_by_lot' OR EXISTS (SELECT 1 FROM product q LEFT JOIN inventory j ON j.sku = q.sku "
-        "     WHERE q.lot_code = i.replaced_by_lot_code AND q.medusa_id IS NOT NULL AND (j.qty IS NULL OR j.qty > 0))) "
+        "     WHERE q.lot_code = i.replaced_by_lot_code AND q.medusa_id IS NOT NULL "
+        f"    AND (j.sku IS NULL OR {on_sale_sql('j')}))) "
         "ORDER BY i.sku" + _sub_limit(limit))
     out = []
     for r in rows:
-        payload = {"sku": r["sku"], "quantity": r["qty"]}
+        # quantity is null exactly when made_to_order (on sale with no count)
+        payload = {"sku": r["sku"], "quantity": r["qty"], "made_to_order": bool(r["made_to_order"])}
         # 'delisted' -> Medusa hides; 'replaced_by_lot' -> Medusa deactivates + 301s to the lot (lot_code);
         # absent -> a plain out-of-stock
         if r["reason"]:
@@ -382,7 +387,8 @@ def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
 
 def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = None,
         status_: str = "synced", reason: str | None = None,
-        payload_hash: str | None = None, quantity: int | None = None) -> int:
+        payload_hash: str | None = None, quantity: int | None = None,
+        made_to_order: bool | None = None) -> int:
     """Medusa talks back for ONE entity. Returns the number of ledger rows changed (0 = the
     external_id was not found, or the ack was REFUSED as out-of-order -- see the eligibility guard).
       synced -> record the minted/matched id, mark synced, clear the failure counter+reason.
@@ -394,7 +400,7 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     already synced, and stock only if its product is synced -- so a duplicate/out-of-order ack can
     never load a product ahead of its variation (which the serve gate already prevents, but the ack
     path must not trust the caller). Inventory has no id/state; a non-failed ack means Medusa holds
-    this stock (last_synced_qty = qty)."""
+    this stock (the last synced stock = the stock)."""
     now = now_iso()
     if type_ == "removed":
         # tombstone ack: 'done' = Medusa deleted it -> retire the tombstone; 'blocked' = an open
@@ -434,18 +440,20 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     if type_ == "inventory":
         if status_ == "failed":
             return 0                                    # leaves it a delta -> re-serves
-        # F4 lost-update guard: clear the delta only if the SERVED quantity is still the current one. When
-        # the ack echoes the applied quantity (the robust round-trip), require qty == that value: a produce
-        # that moved stock between serve and ack makes the live qty differ, so this ack is refused (0 rows)
-        # and the NEW qty re-serves as a delta -- instead of snapping last_synced_qty to a value Medusa
-        # never received. Without the echoed quantity (legacy pull) the prior behavior is kept.
-        qty_cond, qty_params = "", []
+        # F4 lost-update guard: clear the delta only if the SERVED stock is still the current one. Each stock field
+        # the ack echoes (the robust round-trip) must equal the live one: a produce that moved stock between serve and
+        # ack makes it differ, so this ack is refused (0 rows) and the NEW stock re-serves as a delta -- instead of
+        # recording as synced a stock Medusa never received. A made-to-order echo has quantity null: its
+        # made_to_order = 1 alone pins the stock (qty is NULL exactly then). An unechoed field is not checked.
+        cond, params = "", []
         if quantity is not None:
-            qty_cond, qty_params = " AND qty = ?", [quantity]
+            cond, params = cond + " AND qty = ?", params + [quantity]
+        if made_to_order is not None:
+            cond, params = cond + " AND made_to_order = ?", params + [1 if made_to_order else 0]
         cur = ledger.execute(                            # only for a synced product (F2)
-            "UPDATE inventory SET last_synced_qty = qty, updated_at = ? WHERE sku = ? "
-            "AND sku IN (SELECT sku FROM product WHERE state = 'synced')" + qty_cond,
-            (now, external_id, *qty_params))
+            "UPDATE inventory SET last_synced_qty = qty, last_synced_made_to_order = made_to_order, updated_at = ? "
+            "WHERE sku = ? AND sku IN (SELECT sku FROM product WHERE state = 'synced')" + cond,
+            (now, external_id, *params))
         return cur.rowcount
     if type_ not in _ENTITY:
         raise ValueError(f"unsupported sync type {type_!r}")
@@ -504,7 +512,8 @@ def ack_batch(ledger: Ledger, acks: list[dict]) -> dict[str, int]:
         try:
             changed = ack(ledger, a["type"], a["external_id"], a.get("medusa_id"),
                           a.get("status", "synced"), a.get("error") or a.get("reason"),
-                          payload_hash=a.get("payload_hash"), quantity=a.get("quantity"))
+                          payload_hash=a.get("payload_hash"), quantity=a.get("quantity"),
+                          made_to_order=a.get("made_to_order"))
             if changed:
                 applied += 1
             else:
@@ -733,7 +742,7 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
         out["product"] = _reset_overlay(ledger, "product", now, where, params)
         inv_where = " WHERE sku IN (SELECT sku FROM product%s)" % where if scoped else ""
         out["inventory"] = ledger.execute(
-            f"UPDATE inventory SET last_synced_qty = NULL, updated_at = ?{inv_where}",
+            f"UPDATE inventory SET {FORGET_SYNCED_STOCK_SQL}, updated_at = ?{inv_where}",
             (now, *params)).rowcount
 
     log.warning("ledger sync state RESET", extra={"extra_fields": {
@@ -771,14 +780,14 @@ def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None,
     if source_codes is not None:
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
-    # dead stock = a product whose inventory qty is 0 (populate_discontinued / a drop set it there). A product hidden
+    # dead stock = a product not on sale, stock 0 (populate_discontinued / a drop set it there). A product hidden
     # only until its standardised photo is published (reason 'no_photo') is not dead stock: it comes back, so only the
     # vendor removal (reason 'vendor_removed') deletes it.
     if reason != "vendor_removed":
         scope += " AND i.reason IS NOT 'no_photo'"
     rows = ledger.execute(
         f"SELECT p.sku AS sku, p.source AS source FROM product p JOIN inventory i ON i.sku = p.sku "
-        f"WHERE i.qty = 0{scope}", params).fetchall()
+        f"WHERE NOT {on_sale_sql('i')}{scope}", params).fetchall()
     skus = [r["sku"] for r in rows]
     if not skus:
         return {"product": 0, "inventory": 0, "external_ids": []}
@@ -803,13 +812,14 @@ def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
     skus = [r["sku"] for r in ledger.execute(
-        f"SELECT p.sku FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.qty != 0{scope}", params)]
+        f"SELECT p.sku FROM product p JOIN inventory i ON i.sku = p.sku WHERE {on_sale_sql('i')}{scope}", params)]
     if not skus:
         return {"delisted": 0, "external_ids": []}
     q = ",".join("?" * len(skus))
     # reason='delisted' rides the inventory delta so Medusa can HIDE (status->draft) exactly these SKUs,
     # provenance-safe, and tell them apart from an ordinary out-of-stock (qty 0, reason null -> stays listed).
-    ledger.execute(f"UPDATE inventory SET qty = 0, reason = 'delisted', updated_at = ? WHERE sku IN ({q})",
+    ledger.execute(f"UPDATE inventory SET qty = 0, made_to_order = 0, reason = 'delisted', updated_at = ? "
+                   f"WHERE sku IN ({q})",
                    (now_iso(), *skus))
     log.warning("ledger DELIST source (qty -> 0)", extra={"extra_fields": {
         "sources": source_codes or "all", "delisted": len(skus)}})
@@ -817,7 +827,7 @@ def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict
 
 
 def live_products(ledger: Ledger, source_codes: list[str] | None = None) -> int:
-    """How many of a source's products are still LIVE (inventory qty > 0). The vendor-removal DELETE
+    """How many of a source's products are still LIVE (on sale, db.on_sale_sql). The vendor-removal DELETE
     guard uses this: a source with live products must be taken offline (delisted to qty 0, pulled by
     Medusa) before it can be removed, so nothing is left orphaned-live in the shop."""
     scope, params = "", ()
@@ -825,16 +835,16 @@ def live_products(ledger: Ledger, source_codes: list[str] | None = None) -> int:
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
     row = ledger.execute(
-        f"SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku WHERE i.qty > 0{scope}",
+        f"SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku WHERE {on_sale_sql('i')}{scope}",
         params).fetchone()
     return int(row["n"]) if row else 0
 
 
 def variation_live_products(ledger: Ledger, key: str) -> int:
-    """How many LIVE (qty > 0) products a variety still has. retire_variation guards on this (E11): a
+    """How many LIVE (on sale, db.on_sale_sql) products a variety still has. retire_variation guards on this (E11): a
     variety with live products must have them delisted/moved first, or `force` cascades them."""
     row = ledger.execute("SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku "
-                         "WHERE p.variation_key = ? AND i.qty > 0", (key,)).fetchone()
+                         f"WHERE p.variation_key = ? AND {on_sale_sql('i')}", (key,)).fetchone()
     return int(row["n"]) if row else 0
 
 

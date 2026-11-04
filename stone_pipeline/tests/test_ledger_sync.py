@@ -112,7 +112,7 @@ def test_reset_sync_state_clean_start(tmp_path):
         _product(ledger, "P-1", "slab_v1", state="synced")
         ledger.execute("UPDATE product SET medusa_id='OLD-PID', last_synced='x' WHERE sku='P-1'")
         ledger.execute("UPDATE variation SET last_synced='x' WHERE key='slab_v1'")
-        ledger.upsert("inventory", {"sku": "P-1", "qty": 7, "last_synced_qty": 7,
+        ledger.upsert("inventory", {"sku": "P-1", "qty": 7, "last_synced_qty": 7, "last_synced_made_to_order": 0,
                                     "updated_at": now_iso()}, pk=("sku",))
 
         out = reset_sync_state(ledger)
@@ -190,7 +190,7 @@ def test_reset_hard_drops_scraper_output_but_keeps_base_variations(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="synced", medusa_id="VID")
         _product(ledger, "P-1", "slab_v1", state="synced")
-        ledger.upsert("inventory", {"sku": "P-1", "qty": 5, "last_synced_qty": 5,
+        ledger.upsert("inventory", {"sku": "P-1", "qty": 5, "last_synced_qty": 5, "last_synced_made_to_order": 0,
                                     "updated_at": now_iso()}, pk=("sku",))
         out = reset_sync_state(ledger, hard=True)
         assert ledger.get("product", "sku", "P-1") is None            # scraper output deleted
@@ -229,7 +229,7 @@ def test_purge_discontinued_deletes_only_qty0_products(tmp_path):
                                       "medusa_id": "M-" + sku, "state": "synced",
                                       "created_at": now, "updated_at": now}, pk=("sku",))
             ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty,
-                                        "updated_at": now}, pk=("sku",))
+                                        "last_synced_made_to_order": 0, "updated_at": now}, pk=("sku",))
 
         out = purge_discontinued(ledger)
         assert set(out["external_ids"]) == {"POL-1", "ZUC-1"} and out["product"] == 2   # both qty-0 sources
@@ -240,7 +240,8 @@ def test_purge_discontinued_deletes_only_qty0_products(tmp_path):
         for sku in ("POL-1", "ZUC-1"):   # re-seed both qty-0 again
             ledger.upsert("product", {"sku": sku, "source": sku[:3].lower(), "variation_key": "slab_v1",
                                       "state": "synced", "created_at": now, "updated_at": now}, pk=("sku",))
-            ledger.upsert("inventory", {"sku": sku, "qty": 0, "last_synced_qty": 0, "updated_at": now}, pk=("sku",))
+            ledger.upsert("inventory", {"sku": sku, "qty": 0, "last_synced_qty": 0, "last_synced_made_to_order": 0,
+                                        "updated_at": now}, pk=("sku",))
         out = purge_discontinued(ledger, source_codes=["pol"])
         assert out["external_ids"] == ["POL-1"]                  # zuc untouched by a pol-scoped purge
         assert ledger.get("product", "sku", "ZUC-1") is not None

@@ -177,7 +177,8 @@ def test_stock_only_record_keeps_the_product_and_moves_only_its_stock(tmp_path, 
     assert writethrough.record_source([_photographed("AAA", 5)], [], cfg, inventory_only=False, path=ledger_path)
     with _open_seeded(ledger_path) as ledger:
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'prod_a' WHERE sku = 'POL-AAA'")
-        ledger.execute("UPDATE inventory SET last_synced_qty = qty WHERE sku = 'POL-AAA'")
+        ledger.execute("UPDATE inventory SET last_synced_qty = qty, last_synced_made_to_order = made_to_order "
+                       "WHERE sku = 'POL-AAA'")
         ledger.conn.commit()
         before = dict(ledger.get("product", "sku", "POL-AAA"))
 

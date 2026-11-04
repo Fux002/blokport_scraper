@@ -215,7 +215,8 @@ Tables (columns abbreviated; every table has `created_at`, `updated_at`):
 - `payload_hash`, `medusa_id` (nullable), `state`, `last_synced`
 
 `inventory`
-- `sku` (PK, FK to product), `qty`, `last_synced_qty`, `updated_at`
+- `sku` (PK, FK to product), `qty` (null exactly when `made_to_order`), `made_to_order`, `last_synced_qty`,
+  `last_synced_made_to_order` (null until first synced), `updated_at`
 
 `image`
 - `sha256` (PK), `kind` in {scraped_photo, variant_texture}, `source_url`,
@@ -253,7 +254,8 @@ combination `(category_pcat, type, variation_key, color, finish, quality)`; prod
 `(variation_key, color, finish, quality, title, description, handle, weight,
 length, width, height, origin_country_code, ordered(image_urls), company_id,
 sales_channel_id, category, bundle_size, ports)`. Inventory uses no hash: the
-`qty != last_synced_qty` compare drives it. A field Medusa applies must be in the
+compare of the stock `(qty, made_to_order)` with the last synced stock drives it
+(`db.STOCK_DELTA_SQL`). A field Medusa applies must be in the
 hash or a real change never re-syncs; a volatile field must be out of it or every
 run churns.
 
@@ -550,9 +552,9 @@ Inventory becomes a first-class entity with a fast lane that needs no product
 re-import and no export download.
 
 - An `inventory_only` ingest updates `inventory.qty` in the ledger.
-- Inventory is served as `ready` only where `qty != last_synced_qty`; on the ack
-  the scraper sets `last_synced_qty = qty`. Unchanged stock is never served, so a
-  stock refresh moves only the deltas.
+- Inventory is served as `ready` only where the stock `(qty, made_to_order)` differs
+  from the last synced stock; on the ack the scraper records the stock as synced.
+  Unchanged stock is never served, so a stock refresh moves only the deltas.
 - The >30% delist guard becomes a count query the sync service applies before it
   serves inventory, refusing to expose a mass delist from a partial scrape. It is
   PER SOURCE (fixes L3), matching the current per-source guard in `run.py`, so one
@@ -656,11 +658,14 @@ why a re-seed needs no special handling.
   `variation_external_id` = variation Key, canonical `color`/`finish`/`quality`
   names, `title`, `description`, `handle`, dims (`weight,length,width,height`),
   `origin_country_code`, `image_urls[]` (ordered live-bucket urls), `company_id`,
-  `sales_channel_id`, `category` (canonical), `bundle_size`, ports. Served only
+  `sales_channel_id`, `category` (canonical), `bundle_size`, ports, `made_to_order`
+  (read at create: the variant's inventory is not managed). Served only
   after the variation and its combination are `synced`, its referenced attributes
   are `synced`, and its scraped photos are `promoted`.
-- `inventory`: `sku`, `quantity`. Served only after the product is `synced`. A
-  `quantity` of 0 is the reversible delist for a discontinued product.
+- `inventory`: `sku`, `quantity`, `made_to_order`. Served only after the product is
+  `synced`. A `quantity` of 0 is the reversible delist for a discontinued product.
+  `made_to_order` true (a free-size shape, cut on demand) is on sale with no count:
+  `quantity` is null exactly then. The ack echoes both; it is refused when either moved.
 
 Booleans and casing follow the existing template conventions. The canonical
 attribute names are exactly the backbone spellings the scraper already validates

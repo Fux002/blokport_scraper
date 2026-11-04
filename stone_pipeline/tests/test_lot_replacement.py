@@ -51,7 +51,8 @@ def _inventory_row(ledger, sku):
 
 
 def _synced_stock(ledger, sku, qty):
-    ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty, "updated_at": now_iso()},
+    ledger.upsert("inventory", {"sku": sku, "qty": qty, "last_synced_qty": qty, "last_synced_made_to_order": 0,
+                                "updated_at": now_iso()},
                   pk=("sku",))
 
 
@@ -78,7 +79,7 @@ def test_the_replacement_is_served_only_once_a_piece_of_the_lot_exists_in_medusa
         ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'm-piece' WHERE sku = 'SEN-2555-4'")
         out = ready(ledger, "inventory")
         assert out == [{"external_id": "SEN-2555", "payload": {
-            "sku": "SEN-2555", "quantity": 0, "reason": "replaced_by_lot", "lot_code": CODE}}]
+            "sku": "SEN-2555", "quantity": 0, "made_to_order": False, "reason": "replaced_by_lot", "lot_code": CODE}}]
 
 
 def test_a_plain_sold_out_delta_carries_no_reason_and_no_lot(tmp_path):
@@ -87,7 +88,7 @@ def test_a_plain_sold_out_delta_carries_no_reason_and_no_lot(tmp_path):
         _synced_stock(ledger, "SEN-2213", 9)
         populate_discontinued(ledger, [("SEN-2213", "h")])
         assert ready(ledger, "inventory") == [{"external_id": "SEN-2213",
-                                               "payload": {"sku": "SEN-2213", "quantity": 0}}]
+                                               "payload": {"sku": "SEN-2213", "quantity": 0, "made_to_order": False}}]
 
 
 def test_a_bundle_listed_again_drops_its_replacement(tmp_path):

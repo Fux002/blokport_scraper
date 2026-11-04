@@ -125,8 +125,9 @@ MEDUSA_REQUIREMENTS: tuple[Requirement, ...] = (
                 title="Unreadable size (zero or malformed)", kind="transient",
                 recovery="Lists on the next scrape that carries a valid size. If it persists, the source's size "
                          "parse needs a fix.", stage="Derive"),
-    Requirement("stock_undetermined", "inventory_quantity determined (a real value, including 0)",
-                "a count, or a piece-count derived from an available stock area; else held",
+    Requirement("stock_undetermined", "inventory_quantity determined (a real value, including 0) or made to order",
+                "a count, a piece-count derived from an available stock area, or made to order (a free-size "
+                "shape); else held",
                 title="Stock could not be determined", kind="decision",
                 recovery="The scrape carries no stock signal. Fix the adapter to read it, or set the stock. "
                          "Lists on the next produce.", stage="Derive"),

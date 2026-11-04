@@ -144,7 +144,23 @@ def _derive_weight(row: CanonicalRow, ref: ReferenceData,
 _FACE_DIMS = ("length", "height")
 
 
-def _dimension_category(row: CanonicalRow) -> str:
+def raw_dimension_parts(row: CanonicalRow) -> dict[str, str]:
+    """The row's dims string as {raw key: its text} ('length=Free;height=40cm' -> {'length': 'Free',
+    'height': '40cm'}); the one reader of that string's shape. A later repeat of a key wins."""
+    parts: dict[str, str] = {}
+    for part in (row.raw_dimensions or "").split(";"):
+        if "=" in part:
+            key, val = part.split("=", 1)
+            parts[key.strip().lower()] = val
+    return parts
+
+
+def raw_face_texts(row: CanonicalRow) -> dict[str, str]:
+    """The FACE entries of raw_dimension_parts."""
+    return {key: val for key, val in raw_dimension_parts(row).items() if key in _FACE_DIMS}
+
+
+def dimension_category(row: CanonicalRow) -> str:
     """The row's dimension bucket (a category name): the bulk form when is_block (stone: block), else the
     row's own format if it is a known category (a tile keeps its own size), else the default form (slab)."""
     fmt = (row.format_value or "").casefold()
@@ -154,7 +170,7 @@ def _dimension_category(row: CanonicalRow) -> str:
     return fmt if category(fmt) else default_form_name()
 
 
-def _parse_face(text: str, ref: ReferenceData) -> float | None:
+def parse_face(text: str, ref: ReferenceData) -> float | None:
     """A face dimension (length/height) in metres: a range resolves to its MAX endpoint, a single measure
     parses normally. None when absent/unparseable, so the caller fills the pack default."""
     if not text:
@@ -188,13 +204,14 @@ def _dim_fetch_failed(row: CanonicalRow, field: str) -> bool:
 
 
 def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, default: float,
-                       category: str, methods: list[str]) -> float | None:
-    """Keep a real parsed value (INCLUDING 0, which validate then rejects as a data error). A value missing
+                       category: str, methods: list[str], source: str = "parsed") -> float | None:
+    """Keep a real value (INCLUDING 0, which validate then rejects as a data error), recorded as `source`
+    (parsed, or free_size_shape for a face a free-size shape gives). A value missing
     because its FETCH FAILED is HELD (left None + flagged dimension_unavailable) so the row retries next
     scrape -- never defaulted, so freight is never computed from a fabricated size. A GENUINELY-absent value
     is filled from the pack default, flagged. Never fills over a real value."""
     if value is not None:
-        methods.append(f"{field}:parsed")
+        methods.append(f"{field}:{source}")
         return value
     if _dim_fetch_failed(row, field):
         methods.append(f"{field}:unavailable")
@@ -228,23 +245,23 @@ def _normalize_unit(value: float | None, field: str, category: str) -> tuple[flo
 def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     """Resolve length/width/height in metres: one physical meaning per column for every shape, as if the
     piece lies flat. length+width are the two FACE dimensions (a range takes its MAX); height is the
-    thickness. Each parses from the scraped strings; anything still missing or
-    ambiguous (MULTI thickness, 'Free' length, absent) is filled from the pack's dimension_defaults for the
-    row's category and provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
+    thickness. Each parses from the scraped strings; a free-size shape (stages/free_size) takes both faces from
+    its shape; anything still missing or ambiguous (MULTI thickness, a 'Free' side with no shape, absent) is
+    filled from the pack's dimension_defaults for the row's category and
+    provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
     validate rejects it (a wrong real size breaks area/volume pricing + freight)."""
-    category = _dimension_category(row)
+    category = dimension_category(row)
     defaults = active_pack().dimension_defaults[category]
 
     faces: dict[str, float] = {}
-    if row.raw_dimensions:
-        for part in row.raw_dimensions.split(";"):
-            if "=" not in part:
-                continue
-            key, val = part.split("=", 1)
-            key = key.strip().lower()
-            meters = _parse_face(val, ref) if key in _FACE_DIMS else _parse_thickness(val, ref)
-            if meters is not None:
-                faces[key] = meters
+    for key, val in raw_dimension_parts(row).items():
+        meters = parse_face(val, ref) if key in _FACE_DIMS else _parse_thickness(val, ref)
+        if meters is not None:
+            faces[key] = meters
+    face_source = "parsed"
+    if row.is_free_size_shape:                     # the shape's faces, long side in length
+        faces["length"], faces["height"] = row.free_size_length, row.free_size_width
+        face_source = "free_size_shape"
 
     # thickness: the row's own field first, then a width=/thickness= entry in the dims string.
     thickness = _parse_thickness(row.raw_thickness, ref) if row.raw_thickness else None
@@ -254,8 +271,10 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     # raw -> canonical, once: raw 'height' is the SHORT FACE -> canonical width; the thickness -> canonical
     # height. Every shape lying flat, so face area is length x width and thickness bands read height.
     methods: list[str] = []
-    length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods)
-    width = _resolve_dimension(row, "width", faces.get("height"), defaults["width"], category, methods)
+    length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods,
+                                face_source)
+    width = _resolve_dimension(row, "width", faces.get("height"), defaults["width"], category, methods,
+                               face_source)
     height = _resolve_dimension(row, "height", thickness, defaults["height"], category, methods)
 
     # Unit sanity BEFORE weight: a dimension stored in centimetres reads ~100x too large in metres and would
@@ -396,6 +415,8 @@ def derive_inventory(row: CanonicalRow) -> None:
       0. an EXPLICIT out-of-stock flag (structured status / word) -> quantity 0, a trusted sold-out. This
          wins over a published stock AREA below: if the supplier says the item is unavailable it is
          unavailable, and a stale Ready-Stock figure must not resurrect it.
+      0b. a free-size shape (stages/free_size) -> made to order, no count: the supplier cuts it on demand,
+         so its published stock (an area of uncut stone) is not this shape's count.
       1. an explicit count (raw_slab_count, then raw_inventory_quantity), a deliberate magnitude incl. 0.
       2. a count DERIVED from an available stock AREA (raw_stock_m2 / per-piece face area).
       3. a positive availability WORD/flag with no magnitude -> the made-to-order fallback qty.
@@ -407,6 +428,12 @@ def derive_inventory(row: CanonicalRow) -> None:
     if _out_of_stock_flag(row):
         row.inventory_quantity = 0
         row.inventory_method = "out_of_stock_flag"
+        row.inventory_confidence = _conf_name(Confidence.high)
+        return
+    if row.is_free_size_shape:
+        row.made_to_order = True
+        row.inventory_quantity = None
+        row.inventory_method = "made_to_order"
         row.inventory_confidence = _conf_name(Confidence.high)
         return
     for candidate, method in ((row.raw_slab_count, "raw_slab_count"),
@@ -433,7 +460,7 @@ def derive_inventory(row: CanonicalRow) -> None:
     # HOLDS below rather than shipping a fabricated number. The fallback COUNT is per category (a block is a
     # single large piece; a slab/tile is stocked in modest quantity), not one global magnitude.
     if _in_stock_word(row):
-        row.inventory_quantity = active_pack().in_stock_fallback_qty[_dimension_category(row)]
+        row.inventory_quantity = active_pack().in_stock_fallback_qty[dimension_category(row)]
         row.inventory_method = "in_stock_word_fallback"
         row.inventory_confidence = _conf_name(Confidence.low)
         return
