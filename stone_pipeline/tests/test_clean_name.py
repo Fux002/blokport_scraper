@@ -19,8 +19,8 @@ from stone_pipeline.core.text import UnfoldableName, clean_identifier, clean_nam
 
 @pytest.mark.parametrize("raw, clean", [
     ("Rosa Porriño", "Rosa Porrino"),
-    ("Rosa Porriño", "Rosa Porrino"),          # decomposed accent
-    ("Ma̱rmol Crema", "Marmol Crema"),           # a mark with no precomposed letter
+    ("Rosa Porrin\u0303o", "Rosa Porrino"),          # decomposed accent
+    ("Ma\u0331rmol Crema", "Marmol Crema"),           # a mark with no precomposed letter
     ("Ǣgean Blue", "AEgean Blue"),               # a transliteration letter carrying a mark
     ("Black & Gold", "Black and Gold"),
     ("St. Laurent", "St Laurent"),
@@ -30,13 +30,18 @@ from stone_pipeline.core.text import UnfoldableName, clean_identifier, clean_nam
     ("Bianco Carrara C/D", "Bianco Carrara C D"),
     ("Semi–Precious", "Semi-Precious"),          # every dash is a hyphen
     ("Semi-Precious", "Semi-Precious"),
-    ("Grey⁠ Finish", "Grey Finish"),             # invisible format character
+    ("Grey\u2060 Finish", "Grey Finish"),             # invisible format character
     ("Ras  Tannurah", "Ras Tannurah"),
-    ("a b", "a b"),
+    ("a\u00a0b", "a b"),
     ("Ｇ６０３", "G603"),              # fullwidth compatibility forms
     ("Nero (Spain)", "Nero Spain"),                    # brackets: the caller splits them into an alias FIRST
     ("-Lead-", "Lead"),
     ("...", ""),
+    ("Absolute Black\u2122", "Absolute Black"),       # a symbol is a separator, never the letters 'TM'
+    ("'Nero'", "Nero"),                                # an apostrophe is kept only inside a word
+    ("O''Brien", "O'Brien"),
+    ("Rock 'n' Roll", "Rock n Roll"),
+    ("''", ""),
 ])
 def test_clean_name(raw, clean):
     assert clean_name(raw) == clean
@@ -50,9 +55,11 @@ def test_clean_name(raw, clean):
     ("Film Dynea/StoraEnso 120g", "Film Dynea/StoraEnso 120g"),
     ("X & Squared", "X & Squared"),
     ("Pine Commercial Plywood / 18mm", "Pine Commercial Plywood / 18mm"),
-    ("Grade A–B", "Grade A-B"),             # an unusual space and an en dash
+    ("Grade\u00a0A–B", "Grade A-B"),             # an unusual space and an en dash
     ("“Premium”", '"Premium"'),             # typographic quotes become ASCII
-    ("Mármol  Grade  A", "Marmol Grade A"),
+    ("Ma\u0301rmol  Grade  A", "Marmol Grade A"),
+    ("Film 120\u00b5m", "Film 120um"),                 # the micro sign is written 'u' in ASCII
+    ("Silestone\u2122 Grade A", "Silestone Grade A"),
 ])
 def test_clean_identifier(raw, clean):
     assert clean_identifier(raw) == clean
@@ -73,17 +80,19 @@ def test_cleaning_is_a_fixed_point(clean):
         assert clean(once) == once
 
 
-def _identity_holds(raw: str, clean) -> bool:
+def _breaks(raw: str, clean) -> bool:
+    """True when cleaning `raw` changes its identity or cleaning it again changes it further."""
     try:
         cleaned = clean(raw)
     except UnfoldableName:
-        return True   # a refused value has no display to compare
-    return match_key(cleaned) == match_key(raw)
+        return False   # a refused value has no display to compare
+    return match_key(cleaned) != match_key(raw) or clean(cleaned) != cleaned
 
 
-def test_cleaning_never_changes_identity_for_any_character():
+def test_cleaning_keeps_identity_and_is_a_fixed_point_for_any_character():
     # Every assigned BMP character, inside a word and between spaces: the cleaned value keys exactly like the
-    # original. '&' (in any form) is the one deliberate change in a name (owner O1: it reads 'and').
+    # original and is its own cleaned form. '&' (in any form) is the one deliberate change in a name (owner O1:
+    # it reads 'and').
     broken = []
     for cp in range(0x20, 0x10000):
         ch = chr(cp)
@@ -91,17 +100,28 @@ def test_cleaning_never_changes_identity_for_any_character():
             continue
         for raw in (f"Black{ch}Gold", f"Black {ch} Gold"):
             for clean in (clean_name, clean_identifier):
-                if not _identity_holds(raw, clean):
+                if _breaks(raw, clean):
                     broken.append((clean.__name__, hex(cp), raw))
-    assert not broken, f"{len(broken)} inputs change identity, first: {broken[:5]}"
+    assert not broken, f"{len(broken)} inputs change identity or are no fixed point, first: {broken[:5]}"
 
 
 def test_format_characters_never_split_a_word_and_unusual_spaces_never_glue_two():
-    assert match_key("Mar­mol") == match_key("Marmol")        # soft hyphen (Cf) is invisible
-    assert match_key("Black​Gold") == match_key("BlackGold")  # zero-width space (Cf)
-    for space in (" ", " ", "\u0085"):
+    assert match_key("Mar\u00admol") == match_key("Marmol")        # soft hyphen (Cf) is invisible
+    assert match_key("Black\u2060Gold") == match_key("BlackGold")  # word joiner (Cf)
+    assert match_key("Black\u200bGold") == "black gold"         # a zero-width space marks a word break
+    for space in ("\u2028", "\u1680", "\u0085"):
         assert match_key(f"Black{space}Gold") == "black gold"
     assert clean_name("Black•Gold") == "Black Gold"           # a non-ASCII bullet is a separator
     assert clean_name("Black﹘Gold") == "Black-Gold"           # any dash, compatibility forms included
     assert clean_name("Oʻzbek") == "Ozbek"                    # a modifier letter is not refused
     assert clean_name("Black--Gold") == clean_name("Black - Gold") == "Black-Gold"
+
+
+def test_a_symbol_is_a_separator_decided_on_the_original_character():
+    # Decomposed first, a symbol would become letters and join the word: 'Absolute Black\u2122' keyed
+    # 'absolute blacktm' and split the stone from 'Absolute Black'.
+    assert match_key("Absolute Black\u2122") == "absolute black"
+    assert match_key("\u2116 5") == "5"
+    assert match_key("\u24b6bc") == "bc"
+    assert match_key("\u00bd slab") == "1 2 slab"        # what decomposition yields ('1\u20442') is separated too
+    assert clean_name("Para\u0140lel") == clean_name("Paral\u00b7lel") == "Paral lel"   # ela geminada

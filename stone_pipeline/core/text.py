@@ -26,16 +26,34 @@ def _drop_marks(text: str, form: str) -> str:
 
 
 def _prepared(text: str) -> str:
-    """The ONE preparation both match_key and clean_name run first, so the two can never disagree: typographic
-    punctuation unified, compatibility forms decomposed and every mark dropped (NFKD: '\u2474' becomes '(1)'
-    BEFORE the punctuation step sees it), then invisible characters removed and unusual spaces made plain."""
-    return _visible(_drop_marks(text.translate(_TYPOGRAPHIC), "NFKD"))
+    """The ONE preparation both match_key and the display rules run first, so they can never disagree: typographic
+    forms unified, separators decided on the ORIGINAL character (decomposed first, '\u2122' would become the
+    letters 'TM' and join the word), compatibility forms decomposed and every mark dropped, separators again for
+    what decomposition yields ('\u00bd' is '1\u20442'), then invisible characters removed and unusual spaces made
+    plain. Afterwards the only punctuation left is ASCII."""
+    separated = _separated(_drop_marks(_separated(text.translate(_TYPOGRAPHIC)), "NFKD"))
+    return _visible(separated)
+
+
+def _separated(text: str) -> str:
+    """A non-ASCII dash becomes a hyphen and any other non-ASCII punctuation or symbol a space."""
+    return "".join(_separator(c) for c in text)
+
+
+def _separator(c: str) -> str:
+    if c.isascii():
+        return c
+    category = unicodedata.category(c)
+    if category == "Pd":
+        return "-"
+    return " " if category[0] in "PS" else c
 
 
 def _visible(text: str) -> str:
     """Every whitespace becomes a space and every format or control character is removed: an invisible character
-    (soft hyphen, zero-width space) never splits a word, and an unusual space (U+2028, U+0085) never glues two."""
-    return "".join(" " if c.isspace() else c for c in text if c.isspace() or unicodedata.category(c) not in ("Cf", "Cc"))
+    (soft hyphen, word joiner) never splits a word, and an unusual space (U+2028, U+0085) never glues two."""
+    return "".join(" " if c.isspace() else c for c in text
+                   if c.isspace() or unicodedata.category(c) not in ("Cf", "Cc"))
 
 
 def ascii_fold(text: str) -> str:
@@ -77,8 +95,8 @@ def match_key(text: str) -> str:
     a mark (accent, combining sign) is not \\w, so the punctuation pass would turn 'n' + U+0303 into a
     space and fork the stone. Decomposed input (NFD, common from macOS pages and PDFs) carries such
     marks, and NFC cannot compose a mark that has no precomposed letter (U+0331), so the text is
-    decomposed and every mark removed instead (skipped for plain ASCII text, which carries no mark: the hot path). This is the one shared normalizer; per-module copies
-    MUST delegate here, not roll a weaker variant."""
+    decomposed and every mark removed instead (skipped for plain ASCII text, which carries no mark: the hot
+    path). This is the one shared normalizer; per-module copies MUST delegate here, not roll a weaker variant."""
     text = text or ""
     if not (text.isascii() and text.isprintable()):
         text = _prepared(text)
@@ -90,48 +108,41 @@ class UnfoldableName(ValueError):
     caller decides by context: an alias is dropped and reported, a variety name goes to review."""
 
 
-# Typographic punctuation unified BEFORE anything else, so a curly and a straight apostrophe, or an en dash and a
-# hyphen, never give two names (report 21, defect 1.3.2).
+# Typographic forms unified BEFORE anything else, so a curly and a straight apostrophe never give two names (report
+# 21, defect 1.3.2); every dash already becomes a hyphen as a separator. The minus sign is a hyphen too, a
+# zero-width space marks a word break, and the micro sign is written 'u' in ASCII ('120um').
 _TYPOGRAPHIC = str.maketrans({
     "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u02bc": "'", "\u00b4": "'", "`": "'",
     "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
-    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-", "\u2212": "-",
-    "\u00b7": " ",
+    "\u2212": "-", "\u200b": " ", "\u00b5": "u",
 })
 # The owner's two display rules (2026-11-03): a NAME is ASCII letters, digits, spaces, hyphens and apostrophes;
 # an IDENTIFIER (a grade such as 'AA/BB', a finish or standard code, a title) keeps printable ASCII punctuation.
 _NOT_NAME = re.compile(r"[^A-Za-z0-9 '-]+")
 _HYPHEN_RUN = re.compile(r"\s*-[\s-]*")
-
-
-def _display_char(c: str) -> str:
-    """A non-ASCII dash becomes a hyphen and any other non-ASCII punctuation or symbol a space, exactly where
-    match_key's punctuation pass puts a space, so the display keeps the value's identity."""
-    if c.isascii():
-        return c
-    category = unicodedata.category(c)
-    if category == "Pd":
-        return "-"
-    return " " if category[0] in "PS" else c
+_APOSTROPHE_RUN = re.compile(r"'{2,}")
+_LOOSE_APOSTROPHE = re.compile(r"(?<![A-Za-z0-9])'|'(?![A-Za-z0-9])")
 
 
 def _ascii_display(text: str) -> str:
-    """The shared part of both display rules: the one preparation match_key runs, non-ASCII punctuation mapped
-    where match_key puts a space, then accents and compatibility forms folded. Raises UnfoldableName when a letter
-    has no ASCII form (a modifier letter is folded or dropped, as match_key does): never stored half-folded."""
-    mapped = "".join(_display_char(c) for c in _prepared(text or ""))
-    if any(c.isalpha() and unicodedata.category(c) != "Lm" and not ascii_fold(c) for c in mapped):
+    """The shared part of both display rules: the one preparation match_key runs, then accents and compatibility
+    forms folded. Raises UnfoldableName when a letter has no ASCII form (a modifier letter is folded or dropped,
+    as match_key does): never stored half-folded."""
+    prepared = _prepared(text or "")
+    if any(c.isalpha() and unicodedata.category(c) != "Lm" and not ascii_fold(c) for c in prepared):
         raise UnfoldableName(f"no ASCII form for a letter in {text!r}")
-    return ascii_fold(mapped)
+    return ascii_fold(prepared)
 
 
 def clean_name(text: str) -> str:
     """The display rule for a NAME (variety, alias, type, colour, origin, port, category): ASCII letters, digits,
-    spaces, hyphens and apostrophes. '&' reads 'and', every other mark becomes a space, and hyphen runs collapse.
-    Every step mirrors match_key, so the cleaned name always keys like the original; '&' is the one deliberate
-    change. Case is the caller's. Bracketed alternatives are split off by the caller first (split_bracket_alias).
-    Expectations live in the shared name-key vectors (`display`)."""
+    spaces, hyphens and apostrophes. '&' reads 'and', every other mark becomes a space, hyphen runs collapse, and an
+    apostrophe is kept only inside a word (one, never a run). Every step mirrors match_key, so the cleaned name
+    always keys like the original; '&' is the one deliberate change. Case is the caller's. Bracketed alternatives
+    are split off by the caller first (split_bracket_alias). Expectations live in the shared name-key vectors
+    (`display`)."""
     named = _NOT_NAME.sub(" ", _ascii_display(text).replace("&", " and "))
+    named = _LOOSE_APOSTROPHE.sub(" ", _APOSTROPHE_RUN.sub("'", named))
     return " ".join(_HYPHEN_RUN.sub("-", named).split()).strip("- ")
 
 
