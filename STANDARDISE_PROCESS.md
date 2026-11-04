@@ -311,6 +311,19 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
   photos); housekeeping is an open item.
 - A tile listing without slab stone of its variety and finish: no files; listed in `summary.json` (`tiles_hidden`).
 
+## The GPU image
+
+- **Release image** (`standardise-pin-<sha12>`): `deploy/build_standardise_image.sh` on a clean checkout of the commit
+  builds `deploy/standardise.Dockerfile` (the base with that commit's `deploy/` and `stone_pipeline/`, the base's own
+  copies removed first), smoke-imports the GPU run modes, and pushes it. It refuses a dirty tree and an existing tag.
+  Then pin it in the brand tfvars (`dev_` / `prod_standardise_image_tag`); Terraform registers the job definition.
+- **Base** (`standardise-base-<sha12>`): the Dockerfile's `standardise-edit` target, CUDA torch and the models baked at
+  pinned revisions (about 27 GB). Built only when the models or packages change; `deploy/standardise.Dockerfile` pins
+  it by digest (`BASE_IMAGE`), so a moved tag never changes a release's models. The current base is digest
+  `sha256:8908a42b...` (built from d977dca), tagged `standardise-base-d977dca028f3`.
+- **Kept** by the ECR lifecycle (`infra/main.tf`): bases (`standardise-base-`, newest 3), then pins
+  (`standardise-pin-`, newest 20), each its own rule, so releases can never push a base out.
+
 ## Rollout (once, per environment)
 
 1. Pin the GPU image: add the tag `standardise-pin-cbc576cf9ebd` to the image `standardise-edit-cbc576cf9ebd-x` in ECR
