@@ -14,16 +14,25 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SPELLINGS = {"Pietra Gray Marble", "Pietra Gray"}
-OWNER, NOT_OWNER, TYPE = "Pietra Grey", "African Black", "Marble"
+OWNER, TYPE = "Pietra Grey", "Marble"
+
+
+def _assert_owned_by_pietra_grey(records):
+    """`records` is (name, aliases) for every MARBLE record of one file: the owner exists, holds both spellings, and
+    no other marble holds either."""
+    owners = [aliases for name, aliases in records if name == OWNER]
+    assert owners, "marble Pietra Grey is missing"
+    for aliases in owners:
+        assert SPELLINGS <= aliases
+    holders = {name for name, aliases in records if SPELLINGS & aliases}
+    assert holders == {OWNER}, holders
 
 
 @pytest.mark.parametrize("path", ["catalog_source/backbone_slabs.json", "catalog_source/backbone_blocks.json",
                                   "catalog_source/backbone_tiles.json"])
 def test_backbone_pietra_gray_spellings_belong_to_pietra_grey(path):
     posts = json.loads((ROOT / path).read_text(encoding="utf-8"))["posts"]
-    aliases = {p["variant"]: set(p["aliases"]) for p in posts if p["stone_type"] == TYPE}
-    assert SPELLINGS <= aliases[OWNER]
-    assert not SPELLINGS & aliases[NOT_OWNER]
+    _assert_owned_by_pietra_grey([(p["variant"], set(p["aliases"])) for p in posts if p["stone_type"] == TYPE])
 
 
 @pytest.mark.parametrize("path", ["from_medusa/development/variants_export_base.csv",
@@ -31,9 +40,4 @@ def test_backbone_pietra_gray_spellings_belong_to_pietra_grey(path):
 def test_base_pietra_gray_spellings_belong_to_pietra_grey(path):
     with open(ROOT / path, newline="", encoding="utf-8") as f:
         rows = [r for r in csv.DictReader(f) if r["Key"].split("_")[1] == TYPE.lower()]
-    for row in rows:
-        aliases = set(filter(None, row["Aliases"].split("|")))
-        if row["Name"] == OWNER:
-            assert SPELLINGS <= aliases, row["Key"]
-        if row["Name"] == NOT_OWNER:
-            assert not SPELLINGS & aliases, row["Key"]
+    _assert_owned_by_pietra_grey([(r["Name"], set(filter(None, r["Aliases"].split("|")))) for r in rows])
