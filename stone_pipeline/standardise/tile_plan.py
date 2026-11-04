@@ -137,18 +137,17 @@ def stamp(product: Product, slab: Slab) -> str:
     return hashlib.sha256(json.dumps(made, sort_keys=True).encode()).hexdigest()
 
 
-def views(n_faces: int) -> tuple:
-    """The views a tile with this many distinct faces gets (the owner's set, 2026-11-02): main = the laid tiles from
-    above at true scale, white = one tile face-on, studio = one tile at an angle (its thickness). The laid tiles need
-    TILE_MIN_FACES (else they repeat a face): with fewer, main is the single tile face-on and there is no white view,
-    so no image is shown twice. The close slot is never used: the main view is the close-up."""
-    return ("main", "white", "studio") if n_faces >= C.TILE_MIN_FACES else ("main", "studio")
+# Every tile listing's views (owner 2026-11-02, 2026-11-04): main, its catalog image, = the laid tiles from above at
+# true scale, also when its slab gives only a few distinct faces (the floor then repeats them, turned, as a layer from
+# one lot does); white = one tile face-on; studio = one tile at an angle (its thickness); the 3D tile beside them. The
+# close slot is never used: the main view is the close-up.
+VIEWS = ("main", "white", "studio")
 
 
-def keys(product: Product, view_names: tuple) -> list:
+def keys(product: Product) -> list:
     """Every file of a rendered tile listing, the record last (written last: it means the set is complete)."""
     sha = imagestore.listing_sha(product.key)
-    return ([imagestore.standard_key(product.source, sha, v) for v in view_names]
+    return ([imagestore.standard_key(product.source, sha, v) for v in VIEWS]
             + [imagestore.cutout_key(product.source, sha, ext) for ext in ("webp", "json")]
             + [imagestore.tile_record_key(product.source, sha)])
 
@@ -169,17 +168,14 @@ def render(product: Product, slab: Slab, stone: tile_stone.Stone, cuts: tile_sto
     tile = tile_views.Tile(tuple(faces), tile_stone.hero(stone, cuts), stone.ppm, max(length, width), min(length, width),
                            thick)
     face = tile_views.oriented(tile, length, width)
-    names = views(len(faces))
-    single = tile_views.single(face)
-    drawn = {"main": tile_views.close(tile) if "white" in names else single, "white": single,
-             "studio": tile_views.side(face, product.size)}
+    drawn = {"main": tile_views.close(tile), "white": tile_views.single(face), "studio": tile_views.side(face, product.size)}
     webp, meta = tile_views.model(face, stone.ppm)
     record = {"listing": product.key, "stamp": stamp(product, slab), "renderer": C.TILE_RENDER_VERSION,
               "stone": {"listing": slab.listing, "source": slab.source, "sha": slab.sha, "cutout": slab.cutout,
                         "etag": slab.etag, "px_per_mm": round(stone.ppm / 1000, 4)},
-              "size_m": list(product.size), "faces": len(faces), "views": list(names)}
-    blobs = [(tile_views.encode_jpeg(drawn[v]), "image/jpeg") for v in names]
+              "size_m": list(product.size), "faces": len(faces), "views": list(VIEWS)}
+    blobs = [(tile_views.encode_jpeg(drawn[v]), "image/jpeg") for v in VIEWS]
     blobs += [(webp, "image/webp"), (meta, "application/json"),
               (json.dumps(record, sort_keys=True).encode(), "application/json")]
-    return dict(zip(keys(product, names), blobs))
+    return dict(zip(keys(product), blobs))
 

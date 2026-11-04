@@ -1,7 +1,7 @@
 """Tile listings' images (owner 2026-11-02): rendered from the same variety's judge-passed, published slab stone, never
 guessed. A tile listing without a published slab of its variety AND finish gets nothing; a slab cut-out with a
-crosshatch or at the wrong proportions is never used; one slab per variety, never a pool; the laid tiles (main) only
-with TILE_MIN_FACES distinct faces; every view at the listing's own size (a tile's size, never a defaulted one); the 3D
+crosshatch or at the wrong proportions is never used; one slab per variety, never a pool; every tile leads with the
+laid tiles (main), however few distinct faces its slab gives; every view at the listing's own size (a tile's size, never a defaulted one); the 3D
 tile at its listed length and proportions, CUTOUT_LONG_SIDE px; the tile step
 renders exactly when its inputs change and writes byte-identical files; the photo process never takes a tile listing,
 and the image stage links a tile product to the set named after it."""
@@ -327,9 +327,20 @@ def test_slabs_are_tried_the_tile_s_own_vendor_s_first_then_the_most_stone_and_n
     assert tile_plan.ranked([own_small], "marenostone", {}) == []                         # every slab refused
 
 
-def test_the_owner_s_view_set_and_the_single_tile_when_the_faces_are_too_few():
-    assert tile_plan.views(C.TILE_MIN_FACES) == ("main", "white", "studio")         # main: the laid tiles from above
-    assert tile_plan.views(C.TILE_MIN_FACES - 1) == ("main", "studio")               # main = the single tile, no white
+@pytest.mark.parametrize("size, faces", [((1.2, 1.2, 0.02), 2), ((2.0, 1.5, 0.02), 1)])   # straight, half-bond
+def test_every_tile_leads_with_the_laid_floor_and_has_the_single_tile_and_studio_as_extras_however_few_its_faces(size, faces):
+    # owner 2026-11-04: every tile's catalog image is the laid floor; the single tile on white, the studio view and the
+    # 3D tile are extras. These sizes fit only once or twice on this slab's stone: the floor repeats those faces, turned.
+    stone = _stone()
+    product = tile_plan.Product("big", "marenostone", "tile", ("x", "y"), POLISHED, size)
+    slab = tile_plan.Slab("s", "marenostone", A, (3.0, 2.0), "k", "e")
+    cuts = tile_plan.faces_of(product, stone)
+    assert len(cuts.origins) == faces
+    files = tile_plan.render(product, slab, stone, cuts)
+    sha = imagestore.listing_sha("big")
+    main, white, studio = (files[imagestore.standard_key("marenostone", sha, v)][0] for v in ("main", "white", "studio"))
+    assert list(files) == tile_plan.keys(product)
+    assert main != white and main != studio                                          # main is the floor, not one tile
 
 
 def test_a_listing_whose_size_is_no_tile_s_gets_no_stone(categories):
@@ -423,10 +434,10 @@ def test_a_tile_listing_is_shown_from_its_variety_s_slab_stone_not_its_own_photo
     s3 = _bucket(_stone_rgba(960, 640))
     out = _publish(s3)
     sha = imagestore.listing_sha("rb-tile")
-    files = tile_plan.keys(tile_plan.Product("rb-tile", "marenostone", "tile", None, POLISHED, None), ("main", "white", "studio"))
+    files = tile_plan.keys(tile_plan.Product("rb-tile", "marenostone", "tile", None, POLISHED, None))
     assert all(k in s3.objects for k in files)
     record = json.loads(s3.objects[imagestore.tile_record_key("marenostone", sha)]["Body"])
-    assert record["stone"]["sha"] == A and record["faces"] >= C.TILE_MIN_FACES
+    assert record["stone"]["sha"] == A and record["faces"] > 0
     assert imagestore.standard_key("marenostone", B, "main") not in s3.objects   # the tile's photo is no longer published
     assert imagestore.standard_key("marenostone", A, "main") in s3.objects       # the slab's still is
     puts = [k for op, k in s3.written if op == "put" and sha in k]
@@ -455,7 +466,7 @@ def test_a_tile_renders_byte_identical_every_time():
     cuts = tile_plan.faces_of(product, stone)
     first = tile_plan.render(product, slab, stone, cuts)
     assert tile_plan.render(product, slab, stone, cuts) == first
-    assert list(first) == tile_plan.keys(product, tile_plan.views(len(cuts.origins)))
+    assert list(first) == tile_plan.keys(product)
 
 
 def test_a_slab_with_a_crosshatch_leaves_its_tiles_hidden(categories):

@@ -120,9 +120,9 @@ vendor's slab of that variety, never from its own photos (warehouse racks) and n
 - **Views** (the owner's set, 2026-11-02; the slab view folders, the contract unchanged): main (the catalog card) = the
   laid tiles from straight above at true scale, a few tiles and their 3 mm joints, real pixels enlarged at most 2x;
   white = one tile face-on; studio = one tile at an angle, its three dimensions with the true thickness; the close
-  slot is not used (the main view is the close-up). With fewer than `TILE_MIN_FACES` distinct faces (non-overlapping
-  cuts of the slab) the laid tiles would repeat a face: main is then the single tile face-on and there is no separate
-  white view. No perspective floor or room is drawn.
+  slot is not used (the main view is the close-up). Every tile listing leads with the laid tiles (owner 2026-11-04),
+  also when its slab gives only a few distinct faces (non-overlapping cuts): the floor then repeats them, turned, as a
+  layer from one lot does. No perspective floor or room is drawn.
 - **3D tile**: the same cut-out format as a slab's, the face at the listing's stored length along x, 2048 px on its
   long side (Lanczos). `px_per_mm` is the stone's real resolution in source pixels per millimetre, measured before the
   resample to 2048 px (0.65 to 1.2 on prod); the cut-out's own scale is `width_px` / (`length` in mm), which is
