@@ -86,10 +86,10 @@ def test_alias_dedup_is_accent_and_case_insensitive():
 def test_match_key_decomposed_accent_does_not_fork_identity():
     # Pages and PDFs made on macOS often send decomposed text (NFD): 'n' + U+0303 instead of 'ñ'.
     # A combining mark is not \w, so before the fix the punctuation pass turned it into a SPACE:
-    # 'Porriño' -> 'porrin o', a second key for the same stone.
-    nfc, nfd = "Rosa Porriño", "Rosa Porriño"
+    # 'Porrin\u0303o' -> 'porrin o', a second key for the same stone.
+    nfc, nfd = "Rosa Porriño", "Rosa Porrin\u0303o"
     assert match_key(nfd) == match_key(nfc) == "rosa porrino"
-    assert match_key("Crème Brulée") == match_key("Crème Brûlée") == "creme brulee"
+    assert match_key("Cre\u0300me Brule\u0301e") == match_key("Crème Brûlée") == "creme brulee"
     assert proj.norm(nfd) == proj.norm(nfc)
 
 
@@ -97,8 +97,8 @@ def test_match_key_mark_without_a_composed_form_does_not_fork_identity():
     # NFC composes only marks that HAVE a precomposed letter. U+0331 (combining macron below) has none
     # on most letters, so after NFC it is still a separate, non-\w mark: marks must be dropped before
     # the punctuation pass, not merely composed.
-    assert match_key("Ma̱rmol Crema") == match_key("Marmol Crema") == "marmol crema"
-    assert match_key("é̱te") == "ete"
+    assert match_key("Ma\u0331rmol Crema") == match_key("Marmol Crema") == "marmol crema"
+    assert match_key("e\u0301\u0331te") == "ete"
 
 
 def test_ascii_fold_keeps_a_transliteration_letter_that_carries_a_mark():

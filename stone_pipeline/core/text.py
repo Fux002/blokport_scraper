@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 
@@ -25,35 +26,55 @@ def _drop_marks(text: str, form: str) -> str:
     return "".join(c for c in unicodedata.normalize(form, text) if not unicodedata.category(c).startswith("M"))
 
 
+# Typographic forms unified BEFORE anything else, so a curly and a straight apostrophe never give two names (report
+# 21, defect 1.3.2). The minus sign is a hyphen, a zero-width space marks a word break, and the micro sign is written
+# 'u' in ASCII ('120um'). Every other separator is decided by its category (_separator).
+_TYPOGRAPHIC = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u02bc": "'", "\u00b4": "'", "`": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+    "\u2212": "-", "\u200b": " ", "\u00b5": "u",
+})
+
+
 def _prepared(text: str) -> str:
     """The ONE preparation both match_key and the display rules run first, so they can never disagree: typographic
     forms unified, separators decided on the ORIGINAL character (decomposed first, '\u2122' would become the
     letters 'TM' and join the word), compatibility forms decomposed and every mark dropped, separators again for
-    what decomposition yields ('\u00bd' is '1\u20442'), then invisible characters removed and unusual spaces made
-    plain. Afterwards the only punctuation left is ASCII."""
+    what decomposition yields ('\u00bd' is '1\u20442'), then format characters removed and every whitespace or
+    control character made a space. Afterwards the only punctuation left is ASCII."""
     separated = _separated(_drop_marks(_separated(text.translate(_TYPOGRAPHIC)), "NFKD"))
     return _visible(separated)
 
 
 def _separated(text: str) -> str:
-    """A non-ASCII dash becomes a hyphen and any other non-ASCII punctuation or symbol a space."""
+    """Every non-ASCII punctuation, symbol, private-use or unassigned character separates words: a dash becomes a
+    hyphen, a compatibility form of one ASCII punctuation character becomes that character ('\uff0f' is '/'), and
+    any other one a space. Letters, digits, marks, spaces and format characters pass through."""
     return "".join(_separator(c) for c in text)
 
 
+@functools.cache
 def _separator(c: str) -> str:
     if c.isascii():
         return c
     category = unicodedata.category(c)
     if category == "Pd":
         return "-"
-    return " " if category[0] in "PS" else c
+    if category[0] in "PS":
+        ascii_form = unicodedata.normalize("NFKD", c).translate(_TYPOGRAPHIC)
+        return ascii_form if len(ascii_form) == 1 and ascii_form.isascii() and _ASCII_MARK.match(ascii_form) else " "
+    return " " if category in ("Co", "Cn", "Cs") else c
+
+
+_ASCII_MARK = re.compile(r"[!-/:-@\[-`{-~]")
 
 
 def _visible(text: str) -> str:
-    """Every whitespace becomes a space and every format or control character is removed: an invisible character
-    (soft hyphen, word joiner) never splits a word, and an unusual space (U+2028, U+0085) never glues two."""
-    return "".join(" " if c.isspace() else c for c in text
-                   if c.isspace() or unicodedata.category(c) not in ("Cf", "Cc"))
+    """Every whitespace or control character becomes a space and every format character is removed: an invisible
+    character (soft hyphen, word joiner) never splits a word, and an unusual space (U+2028) or a control character
+    (U+0092, cp1252's curly apostrophe read as Latin-1) never glues two."""
+    return "".join(" " if c.isspace() or unicodedata.category(c) == "Cc" else c for c in text
+                   if unicodedata.category(c) != "Cf")
 
 
 def ascii_fold(text: str) -> str:
@@ -108,14 +129,6 @@ class UnfoldableName(ValueError):
     caller decides by context: an alias is dropped and reported, a variety name goes to review."""
 
 
-# Typographic forms unified BEFORE anything else, so a curly and a straight apostrophe never give two names (report
-# 21, defect 1.3.2); every dash already becomes a hyphen as a separator. The minus sign is a hyphen too, a
-# zero-width space marks a word break, and the micro sign is written 'u' in ASCII ('120um').
-_TYPOGRAPHIC = str.maketrans({
-    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'", "\u02bc": "'", "\u00b4": "'", "`": "'",
-    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
-    "\u2212": "-", "\u200b": " ", "\u00b5": "u",
-})
 # The owner's two display rules (2026-11-03): a NAME is ASCII letters, digits, spaces, hyphens and apostrophes;
 # an IDENTIFIER (a grade such as 'AA/BB', a finish or standard code, a title) keeps printable ASCII punctuation.
 _NOT_NAME = re.compile(r"[^A-Za-z0-9 '-]+")
@@ -136,11 +149,11 @@ def _ascii_display(text: str) -> str:
 
 def clean_name(text: str) -> str:
     """The display rule for a NAME (variety, alias, type, colour, origin, port, category): ASCII letters, digits,
-    spaces, hyphens and apostrophes. '&' reads 'and', every other mark becomes a space, hyphen runs collapse, and an
-    apostrophe is kept only inside a word (one, never a run). Every step mirrors match_key, so the cleaned name
-    always keys like the original; '&' is the one deliberate change. Case is the caller's. Bracketed alternatives
-    are split off by the caller first (split_bracket_alias). Expectations live in the shared name-key vectors
-    (`display`)."""
+    spaces, hyphens and apostrophes. '&' reads 'and', every other punctuation or symbol becomes a space, hyphen
+    runs collapse, and an apostrophe is kept only inside a word (one, never a run). Every step mirrors match_key, so
+    the cleaned name always keys like the original; '&' is the one deliberate change. Case is the caller's.
+    Bracketed alternatives are split off by the caller first (split_bracket_alias). Expectations live in the shared
+    name-key vectors (`display`)."""
     named = _NOT_NAME.sub(" ", _ascii_display(text).replace("&", " and "))
     named = _LOOSE_APOSTROPHE.sub(" ", _APOSTROPHE_RUN.sub("'", named))
     return " ".join(_HYPHEN_RUN.sub("-", named).split()).strip("- ")

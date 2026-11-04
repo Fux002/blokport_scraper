@@ -2,7 +2,7 @@
 
 NAMES (variety, alias, type, colour, origin, port, category) are plain ASCII letters, digits, spaces, hyphens and
 apostrophes: typographic punctuation is unified, invisible characters removed, accents and compatibility forms
-folded, '&' reads 'and', and every other mark becomes a space. IDENTIFIERS (quality grades, finish and standard
+folded, '&' reads 'and', and every other punctuation or symbol becomes a space. IDENTIFIERS (quality grades, finish and standard
 codes, product titles) keep normal ASCII punctuation, because 'AA/BB' is an industry grade. In both, a letter with
 no ASCII form (a non-Latin script) is refused with UnfoldableName and the caller decides, and the cleaned value
 always keys like the original (match_key), '&' in a name being the one deliberate change.
@@ -42,6 +42,9 @@ from stone_pipeline.core.text import UnfoldableName, clean_identifier, clean_nam
     ("O''Brien", "O'Brien"),
     ("Rock 'n' Roll", "Rock n Roll"),
     ("''", ""),
+    ("Black\uff06Gold", "Black and Gold"),
+    ("D\uff07Oro", "D'Oro"),
+    ("Black\uf005Gold", "Black Gold"),                 # a private-use glyph (an icon font) separates
 ])
 def test_clean_name(raw, clean):
     assert clean_name(raw) == clean
@@ -60,6 +63,7 @@ def test_clean_name(raw, clean):
     ("Ma\u0301rmol  Grade  A", "Marmol Grade A"),
     ("Film 120\u00b5m", "Film 120um"),                 # the micro sign is written 'u' in ASCII
     ("Silestone\u2122 Grade A", "Silestone Grade A"),
+    ("AA\uff0fBB", "AA/BB"),                          # a fullwidth form of one ASCII mark is that mark
 ])
 def test_clean_identifier(raw, clean):
     assert clean_identifier(raw) == clean
@@ -90,13 +94,13 @@ def _breaks(raw: str, clean) -> bool:
 
 
 def test_cleaning_keeps_identity_and_is_a_fixed_point_for_any_character():
-    # Every assigned BMP character, inside a word and between spaces: the cleaned value keys exactly like the
+    # Every BMP character (unassigned and private use included), inside a word and between spaces: the cleaned value keys exactly like the
     # original and is its own cleaned form. '&' (in any form) is the one deliberate change in a name (owner O1:
     # it reads 'and').
     broken = []
     for cp in range(0x20, 0x10000):
         ch = chr(cp)
-        if "&" in unicodedata.normalize("NFKD", ch) or unicodedata.category(ch) in ("Cn", "Cs", "Co"):
+        if "&" in unicodedata.normalize("NFKD", ch):
             continue
         for raw in (f"Black{ch}Gold", f"Black {ch} Gold"):
             for clean in (clean_name, clean_identifier):
@@ -111,6 +115,9 @@ def test_format_characters_never_split_a_word_and_unusual_spaces_never_glue_two(
     assert match_key("Black\u200bGold") == "black gold"         # a zero-width space marks a word break
     for space in ("\u2028", "\u1680", "\u0085"):
         assert match_key(f"Black{space}Gold") == "black gold"
+    # a control character is mojibake of a separator (U+0092 is cp1252's curly apostrophe read as Latin-1)
+    for control in ("\u0092", "\u0096", "\x00", "\x1f"):
+        assert match_key(f"O{control}Brien") == "o brien"
     assert clean_name("Black•Gold") == "Black Gold"           # a non-ASCII bullet is a separator
     assert clean_name("Black﹘Gold") == "Black-Gold"           # any dash, compatibility forms included
     assert clean_name("Oʻzbek") == "Ozbek"                    # a modifier letter is not refused
