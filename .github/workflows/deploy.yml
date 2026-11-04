@@ -76,6 +76,11 @@ jobs:
           fi
           HEAD_SHA=$(gh api "repos/$REPO_NAME/commits/main" --jq .sha)
           GREEN=$(gh api "repos/$REPO_NAME/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&branch=main&status=success" --jq .total_count)
+          # inside `if`, a non-numeric answer would read as "no green CI yet": refuse it instead
+          if ! [[ "$GREEN" =~ ^[0-9]+$ ]]; then
+            echo "::error::unexpected green-CI count for $HEAD_SHA: '$GREEN'"
+            exit 1
+          fi
           if [ "$GREEN" -gt 0 ]; then
             echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
             echo "core=true" >> "$GITHUB_OUTPUT"
