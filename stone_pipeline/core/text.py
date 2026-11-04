@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import unicodedata
 
-_NON_SLUG = re.compile(r"[^a-z0-9]+")
 _WS = re.compile(r"\s+")
 
 
@@ -271,8 +270,11 @@ def title_case(text: str) -> str:
         for i, w in enumerate(words))
 
 
-def slugify(text: str) -> str:
-    return _NON_SLUG.sub("-", ascii_fold(text or "").casefold()).strip("-")
+def slugify(text: str, sep: str = "-") -> str:
+    """A slug from the name's key words (match_key), so a slug, a Key and the match key read a name ONE way: a curly
+    and a straight apostrophe, or '&' and 'and', give one handle and one Key. `sep` is '-' for handles and '_' for
+    Keys and identity slugs."""
+    return sep.join(match_key(text).split())
 
 
 # strip stray edge punctuation, but NOT brackets -- a balanced '(Sunset Gold)' is meaningful

@@ -138,3 +138,17 @@ def test_the_ascii_fast_path_is_exact():
     for n in (1, 2):
         for s in map("".join, itertools.product(chars, repeat=n)):
             assert match_key(s) == match_key(_prepared(s)), repr(s)
+
+
+def test_one_slug_rule_for_handles_keys_and_identity():
+    # A slug is the name's key words joined (W4), so a slug, a Key and the match key read a name one way: a curly
+    # and a straight apostrophe, and '&' and 'and', give one Key and one handle.
+    from stone_pipeline.core.text import slugify
+    from stone_pipeline.reference.loaders.identity import variety_identity
+    from stone_pipeline.stages.curate.keys import gen_key
+    assert gen_key("slab", "Marble", "Valle D’Aosta") == gen_key("slab", "Marble", "Valle D'Aosta")
+    assert gen_key("slab", "Marble", "Black & Gold") == gen_key("slab", "Marble", "Black and Gold")
+    assert slugify("Black & Gold Polished") == "black-and-gold-polished"
+    assert slugify("Absolute Black™") == "absolute-black"
+    key = "slab_granite_x_1"
+    assert variety_identity(key, "Valle D’Aosta") == variety_identity(key, "Valle D'Aosta")
