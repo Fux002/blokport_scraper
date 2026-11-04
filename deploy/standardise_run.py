@@ -582,6 +582,13 @@ def main() -> int:
         else:
             summary["relinked"] = True
             print("==> the new photos are linked (republish done)", flush=True)
+    # A ceiling lowered while a round's instances still ran stays at what they held (Batch never sets it below them), so
+    # it is set once more now, after publish and relink, when the pool has drained. Not failing the run: its photos are
+    # published, and the next run sets the ceiling again before its first round (clear_leftovers).
+    try:
+        gpu.set_idle(batch)
+    except (BotoCoreError, ClientError) as exc:
+        print(f"ERROR: the GPU pool's ceiling could not be set back to idle ({exc}); the next run sets it", flush=True)
     hand_over(summary)
     return rc
 

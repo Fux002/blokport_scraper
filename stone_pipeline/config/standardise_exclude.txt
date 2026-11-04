@@ -35,3 +35,7 @@ ed129272b441eb6e6970112a4a6cc61a65709b51afefc591e7b06abd88019e8e  # marenostone 
 f6f6e8f37c905717dc67eaf048f973280131940e5f5f34586097c6efda8dd0e8  # marenostone tile listing: warehouse photo, replaced by rendered tile images (user 2026-11-02)
 feca85ae7c01a159426c2ffb000b539a3ba65c3f1e21b62c0f8f519da583afee  # marenostone tile listing: warehouse photo, replaced by rendered tile images (user 2026-11-02)
 ff901fbc4d61524db8a22e31edbf77a734580a677862ccbb7d98630cb5e2e79c  # marenostone tile listing: warehouse photo, replaced by rendered tile images (user 2026-11-02)
+1c87e187ff286c4af610512b35f87040eb32a92e550fd774c72723e27d76ca83  # sentas bianco-allegro-polished-sen-659: taken off in the owner's live check (user 2026-11-02)
+da1a338b00e012259006cb1a1d89aba1ed00844026da13bbe09f564963684515  # sentas black-crocodile-polished-sen-7059-1: taken off in the owner's live check (user 2026-11-02)
+100d991b0c537e45983e785afa29a8177a90dbe8e0f94e7eace3b0c62d2fe3bb  # zucchi mont-blanc-polished-zuc-bd00202239: taken off in the owner's live check (user 2026-11-02)
+7b38b02a64c0966372343f0a567796cbf490bd902fee5eeba8d5153ef0b4be83  # sentas riva-travertine-polished-sen-1706: taken off in the owner's live check (user 2026-11-02)
