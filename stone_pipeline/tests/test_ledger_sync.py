@@ -366,6 +366,27 @@ def test_serving_leases_so_overlapping_pulls_never_double_serve(tmp_path):
         assert {i["external_id"] for i in ready(ledger, "products")} == {"P-0", "P-1", "P-2"}   # re-served
 
 
+def test_release_leases_returns_a_dead_runs_fresh_leases_at_once(tmp_path):
+    # PHASE-0 Q8: the consumer's catalog run releases every lease before its first pull. Under its catalog
+    # lock it is the ledger's ONLY puller of the leasing lanes, so a 'syncing' row at that moment belongs to
+    # a run that has ended (a deploy's SIGTERM, a crash), and must re-serve NOW, not after the 900 s lease.
+    from stone_pipeline.ledger.server import dispatch
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
+        _variation(ledger, "slab_v2", state="pending")
+        for i in range(3):
+            _product(ledger, f"P-{i}", "slab_v1", state="pending")
+        assert len(ready(ledger, "variations")) == 1 and len(ready(ledger, "products")) == 3   # dead run leased
+        assert ready(ledger, "products") == []                         # a fresh lease: withheld
+
+        assert dispatch(ledger, "POST", "release-leases", {}, None) == (200, {"released": 4})
+        assert ledger.counts("product") == {"dirty": 3}
+        assert {i["external_id"] for i in ready(ledger, "products")} == {"P-0", "P-1", "P-2"}  # re-served at once
+        assert {i["external_id"] for i in ready(ledger, "variations")} == {"slab_v2"}
+        assert dispatch(ledger, "POST", "release-leases", {}, None) == (200, {"released": 4})  # this run's own pages
+        assert dispatch(ledger, "POST", "release-leases", {}, None) == (200, {"released": 0})
+
+
 def test_dispatch_routes_status_ready_ack(tmp_path):
     from stone_pipeline.ledger.server import dispatch
 

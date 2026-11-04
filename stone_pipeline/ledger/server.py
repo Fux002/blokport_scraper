@@ -18,6 +18,10 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
     POST /sync/v1/abandon   body: {type: variations|products|removed, external_id}  -- the OPPOSITE of
       requeue: drop ONE structurally-re-rejecting dead-letter to terminal (abandoned_at). Keyed by the
       same {type, external_id} a /failures row carries. 404 unknown id, 409 if not a dead-letter.
+    POST /sync/v1/release-leases   no body  -- every 'syncing' variation and product back to 'dirty' at
+      once, answering {released: n}. The consumer's catalog run calls it before its first pull: under its
+      catalog lock it is this ledger's only puller of the leasing lanes, so any lease is a dead run's
+      (PHASE-0 Q8), and its rows re-serve now instead of after the 900 s lease.
 
 Auth is a bearer token (BLOKPORT_SYNC_TOKEN), matching the per-env SSM secret the
 design calls for; the server refuses to start without it. This is the contract
@@ -94,6 +98,8 @@ def dispatch(ledger: Ledger, method: str, resource: str,
         if type_ is not None and type_ not in ("variations", "products"):
             return 400, {"error": "type must be 'variations' or 'products' (or omitted for both)"}
         return 200, {"requeued": sync.requeue_dead_lettered(ledger, type_=type_)}
+    if method == "POST" and resource == "release-leases":
+        return 200, {"released": sync.reap_stale_syncing(ledger, older_than_s=0)}
     if method == "POST" and resource == "abandon":
         # the opposite of requeue: drop ONE structurally-re-rejecting dead-letter to a terminal
         # `abandoned_at` -- it stops re-serving, requeue no longer resurrects it, and it still renders in
