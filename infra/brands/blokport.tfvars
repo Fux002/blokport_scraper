@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "f3dd3d19c2a7ca863f24cd078b5c0e89fcd4d764"     # standardised photo release: one photo process, tiles, 3D, close-ups, owner decisions, photo_ready, old enhancer retired (#483-#494)
+prod_image_tag     = "33900b5036fbea10c408601efcbd95651dea4b25"     # standardised photo release (#483-#494) + photo run judge window, slices of 30, overnight press (#497)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
