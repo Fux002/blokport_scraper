@@ -223980,7 +223980,10 @@
       "qualities": [
         "A"
       ],
-      "aliases": [],
+      "aliases": [
+        "Pietra Gray Marble",
+        "Pietra Gray"
+      ],
       "image_file": "block_rb_37_marble_pietra_grey.png",
       "exists": "yes",
       "in_csv": "no",
@@ -227288,9 +227291,7 @@
         "A"
       ],
       "aliases": [
-        "Pietra Gray Marble",
         "Persian Marquina Marble",
-        "Pietra Gray",
         "Persian Marquina",
         "非洲黑",
         "Fēizhōu hēi"
