@@ -39,6 +39,7 @@ from stone_pipeline.stages import (
     derive,
     emit,
     format_resolve,
+    free_size,
     health,
     images,
     keys_dedupe,
@@ -418,6 +419,13 @@ def run_source(
     fmt_stats = format_resolve.run(rows, ref)
     manifest.add_stage(StageMetric(stage="format", rows_in=len(rows), rows_out=len(rows),
                                    extra={"by_value": fmt_stats.by_value, "unresolved": fmt_stats.unresolved}))
+
+    # Free size: a listing whose vendor sells a side 'Free' becomes one listing per shape of its category
+    # (the format above decides the shapes), so every stage below sees ordinary listings.
+    offered = len(rows)
+    rows, fanned = free_size.run(rows, ref)
+    manifest.add_stage(StageMetric(stage="free_size", rows_in=offered, rows_out=len(rows),
+                                   extra={"fanned_out": fanned}))
 
     # Stage 3: normalize
     _record(manifest, run_log, normalize.run(rows, ref))

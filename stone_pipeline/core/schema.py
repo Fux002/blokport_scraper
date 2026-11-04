@@ -247,6 +247,12 @@ class CanonicalRow(BaseModel):
     inventory_quantity: Optional[int] = None
     inventory_confidence: str = "none"
     inventory_method: str = ""
+    # Cut to order: on sale with no count (inventory_quantity None). Set by derive for a free-size shape.
+    made_to_order: bool = False
+    # The size (metres) this listing offers for a face its vendor sells 'Free' (stages/free_size): the raw
+    # long face lands in length, the raw short face in width. None for a face the vendor states.
+    free_size_length: Optional[float] = None
+    free_size_width: Optional[float] = None
     weight: Optional[float] = None
     # Metres, one physical meaning per column for every shape, as if the piece lies flat: length and width are
     # the two faces (face area = length x width), height is the thickness (volume = length x width x height).
@@ -312,6 +318,11 @@ class CanonicalRow(BaseModel):
 
     def add_gap(self, gap: TreeGap) -> None:
         self.tree_gaps.append(gap)
+
+    @property
+    def is_free_size_shape(self) -> bool:
+        """Whether this listing is one shape of a free-size listing (stages/free_size)."""
+        return self.free_size_length is not None or self.free_size_width is not None
 
     @property
     def is_emittable(self) -> bool:

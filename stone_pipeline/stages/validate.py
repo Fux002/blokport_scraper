@@ -147,8 +147,9 @@ def validate_row(row: CanonicalRow, require_images: bool = False) -> None:
     # stock_undetermined) when it could neither read a count nor derive one from a stock area. Emitting it
     # would ship a fabricated 0 (a false out-of-stock); HOLD it for review instead -- exactly like a
     # defaulted dimension. A determined value INCLUDING a real 0 is fine and ships as sold-out. The operator
-    # supplies the stock (or the adapter/scrape is fixed) before the product lists.
-    if row.inventory_quantity is None:
+    # supplies the stock (or the adapter/scrape is fixed) before the product lists. A made-to-order listing
+    # has no count by definition (derive decided it), so it is determined.
+    if row.inventory_quantity is None and not row.made_to_order:
         row.add_reject(RejectReason(rule="stock_undetermined", detail="inventory"))
 
 
