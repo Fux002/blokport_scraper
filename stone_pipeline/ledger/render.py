@@ -20,7 +20,7 @@ from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import csvio
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.bootstrap import attribute_id
-from stone_pipeline.ledger.db import STOCK_DELTA_SQL, Ledger
+from stone_pipeline.ledger.db import STOCK_DELTA_SQL, Ledger, on_sale_sql
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.emit_catalog import _COLS as VARIANTS_FULL_COLS
 
@@ -91,8 +91,16 @@ def _product_shim(ledger: Ledger, p) -> CanonicalRow:
         # ledger-render re-emit reproduces the same Variant Inventory Quantity cell (a rebuilt row skips
         # Stage 6, so nothing else would populate it). Made to order carries no count.
         made_to_order=bool(p["made_to_order"]),
-        inventory_quantity=(int(_q) if (_q := str(p["inventory_quantity"] or "").strip()).lstrip("-").isdigit() else 0),
+        inventory_quantity=_stored_count(p),
     )
+
+
+def _stored_count(p) -> int | None:
+    """A product row's stored stock count: none when made to order, else its stock string as an int (0 when blank)."""
+    if p["made_to_order"]:
+        return None
+    text = str(p["inventory_quantity"] or "").strip()
+    return int(text) if text.lstrip("-").isdigit() else 0
 
 
 def render_products(ledger: Ledger, cfg: SourceConfig, path: str | Path,
@@ -124,14 +132,11 @@ def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int
     matches. A qty of 0 is the reversible delist, written like any other row."""
     served = ledger.execute(
         "SELECT p.sku AS sku, i.qty AS qty, i.made_to_order AS made_to_order, p.surrogate_key AS surrogate_key, "
-        "p.handle AS handle FROM inventory i JOIN product p ON p.sku = i.sku "
+        f"p.handle AS handle, {on_sale_sql('i')} AS on_sale FROM inventory i JOIN product p ON p.sku = i.sku "
         f"WHERE {STOCK_DELTA_SQL} ORDER BY i.rowid"
     ).fetchall()
-    # qty 0 is the reversible delist: emit writes 0 only via its discontinued path, so split on sale (stock above 0,
-    # or made to order) from not, and feed the on-sale rows through `changed`.
-    def on_sale(r) -> bool:
-        return bool(r["made_to_order"]) or r["qty"] > 0
-
+    # qty 0 is the reversible delist: emit writes 0 only via its discontinued path, so split on sale (db.on_sale_sql)
+    # from not, and feed the on-sale rows through `changed`.
     changed = [
         CanonicalRow(
             src_site=cfg.source_code,
@@ -140,9 +145,9 @@ def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int
             made_to_order=bool(r["made_to_order"]),
             inventory_quantity=r["qty"],  # emit reads the derived stock field directly
         )
-        for r in served if on_sale(r)
+        for r in served if r["on_sale"]
     ]
-    discontinued = tuple((r["sku"], r["handle"] or "") for r in served if not on_sale(r))
+    discontinued = tuple((r["sku"], r["handle"] or "") for r in served if not r["on_sale"])
     emit.write_inventory_csv(changed, cfg, Path(path), discontinued=discontinued)
     return len(changed) + len(discontinued)
 

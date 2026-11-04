@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
-from stone_pipeline.ledger.db import FORGET_SYNCED_STOCK_SQL, ON_SALE_SQL, STOCK_DELTA_SQL, Ledger, now_iso
+from stone_pipeline.ledger.db import FORGET_SYNCED_STOCK_SQL, STOCK_DELTA_SQL, Ledger, now_iso, on_sale_sql
 
 log = logfmt.get_logger("ledger.sync")
 
@@ -322,19 +322,20 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
 
 
 def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
-    """Stock deltas to push: rows whose qty moved since the last sync, for products
+    """Stock deltas to push: rows whose stock moved since the last sync, for products
     that are already synced (a product must exist in Medusa before its stock loads).
     A bundle replaced by its lot waits until a piece of that lot exists in Medusa and is on sale
-    (stock above 0: Blokport hides a sold or delisted piece), so the redirect Blokport derives from
+    (db.on_sale_sql: Blokport hides a sold or delisted piece), so the redirect Blokport derives from
     it never points at an empty lot page."""
     rows = ledger.execute(
         "SELECT i.sku AS sku, i.qty AS qty, i.made_to_order AS made_to_order, i.reason AS reason, "
         "i.replaced_by_lot_code AS lot_code "
         "FROM inventory i JOIN product p ON p.sku = i.sku "
         f"WHERE p.state = 'synced' AND {STOCK_DELTA_SQL} "
-        # a piece is on sale with stock above 0, made to order (qty NULL), or no stock row yet (the LEFT JOIN)
+        # a piece counts when on sale or with no stock row yet (the LEFT JOIN)
         "AND (i.reason IS NOT 'replaced_by_lot' OR EXISTS (SELECT 1 FROM product q LEFT JOIN inventory j ON j.sku = q.sku "
-        "     WHERE q.lot_code = i.replaced_by_lot_code AND q.medusa_id IS NOT NULL AND (j.qty IS NULL OR j.qty > 0))) "
+        "     WHERE q.lot_code = i.replaced_by_lot_code AND q.medusa_id IS NOT NULL "
+        f"    AND (j.sku IS NULL OR {on_sale_sql('j')}))) "
         "ORDER BY i.sku" + _sub_limit(limit))
     out = []
     for r in rows:
@@ -779,14 +780,14 @@ def purge_discontinued(ledger: Ledger, source_codes: list[str] | None = None,
     if source_codes is not None:
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
-    # dead stock = a product whose inventory qty is 0 (populate_discontinued / a drop set it there). A product hidden
+    # dead stock = a product not on sale, stock 0 (populate_discontinued / a drop set it there). A product hidden
     # only until its standardised photo is published (reason 'no_photo') is not dead stock: it comes back, so only the
     # vendor removal (reason 'vendor_removed') deletes it.
     if reason != "vendor_removed":
         scope += " AND i.reason IS NOT 'no_photo'"
     rows = ledger.execute(
         f"SELECT p.sku AS sku, p.source AS source FROM product p JOIN inventory i ON i.sku = p.sku "
-        f"WHERE i.qty = 0{scope}", params).fetchall()
+        f"WHERE NOT {on_sale_sql('i')}{scope}", params).fetchall()
     skus = [r["sku"] for r in rows]
     if not skus:
         return {"product": 0, "inventory": 0, "external_ids": []}
@@ -811,7 +812,7 @@ def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
     skus = [r["sku"] for r in ledger.execute(
-        f"SELECT p.sku FROM product p JOIN inventory i ON i.sku = p.sku WHERE {ON_SALE_SQL}{scope}", params)]
+        f"SELECT p.sku FROM product p JOIN inventory i ON i.sku = p.sku WHERE {on_sale_sql('i')}{scope}", params)]
     if not skus:
         return {"delisted": 0, "external_ids": []}
     q = ",".join("?" * len(skus))
@@ -826,7 +827,7 @@ def delist_source(ledger: Ledger, source_codes: list[str] | None = None) -> dict
 
 
 def live_products(ledger: Ledger, source_codes: list[str] | None = None) -> int:
-    """How many of a source's products are still LIVE (on sale, ON_SALE_SQL). The vendor-removal DELETE
+    """How many of a source's products are still LIVE (on sale, db.on_sale_sql). The vendor-removal DELETE
     guard uses this: a source with live products must be taken offline (delisted to qty 0, pulled by
     Medusa) before it can be removed, so nothing is left orphaned-live in the shop."""
     scope, params = "", ()
@@ -834,16 +835,16 @@ def live_products(ledger: Ledger, source_codes: list[str] | None = None) -> int:
         marks = ",".join("?" * len(source_codes)) or "NULL"
         scope, params = (f" AND p.source IN ({marks})", tuple(source_codes))
     row = ledger.execute(
-        f"SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku WHERE {ON_SALE_SQL}{scope}",
+        f"SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku WHERE {on_sale_sql('i')}{scope}",
         params).fetchone()
     return int(row["n"]) if row else 0
 
 
 def variation_live_products(ledger: Ledger, key: str) -> int:
-    """How many LIVE (on sale, ON_SALE_SQL) products a variety still has. retire_variation guards on this (E11): a
+    """How many LIVE (on sale, db.on_sale_sql) products a variety still has. retire_variation guards on this (E11): a
     variety with live products must have them delisted/moved first, or `force` cascades them."""
     row = ledger.execute("SELECT COUNT(*) AS n FROM product p JOIN inventory i ON i.sku = p.sku "
-                         f"WHERE p.variation_key = ? AND {ON_SALE_SQL}", (key,)).fetchone()
+                         f"WHERE p.variation_key = ? AND {on_sale_sql('i')}", (key,)).fetchone()
     return int(row["n"]) if row else 0
 
 

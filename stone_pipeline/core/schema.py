@@ -249,8 +249,8 @@ class CanonicalRow(BaseModel):
     inventory_method: str = ""
     # Cut to order: on sale with no count (inventory_quantity None). Set by derive for a free-size shape.
     made_to_order: bool = False
-    # The size (metres) this listing offers for a face its vendor sells 'Free' (stages/free_size): the raw
-    # long face lands in length, the raw short face in width. None for a face the vendor states.
+    # A free-size shape's size in metres (stages/free_size): its long side and its short side; None on every
+    # other listing. derive takes both faces from it.
     free_size_length: Optional[float] = None
     free_size_width: Optional[float] = None
     weight: Optional[float] = None
@@ -322,7 +322,7 @@ class CanonicalRow(BaseModel):
     @property
     def is_free_size_shape(self) -> bool:
         """Whether this listing is one shape of a free-size listing (stages/free_size)."""
-        return self.free_size_length is not None or self.free_size_width is not None
+        return self.free_size_length is not None
 
     @property
     def is_emittable(self) -> bool:

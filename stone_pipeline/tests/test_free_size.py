@@ -76,7 +76,8 @@ def test_a_malformed_free_size_shapes_entry_fails_loud_at_load(tmp_path, monkeyp
     ("length=Free;height=70cm", ["K-70x70"]),
     ("length=Free;height=80cm", ["K-80x80"]),
     ("length=Free;height=Free", ["K-60x60", "K-60x30", "K-60x15"]),
-], ids=["40 wide", "60 wide", "70 wide", "80 wide", "every side free"])
+    ("length=40cm;height=Free", ["K-40x40", "K-80x40"]),
+], ids=["40 wide", "60 wide", "70 wide", "80 wide", "every side free", "stated length, free width"])
 def test_each_free_size_listing_becomes_its_shapes_under_the_cap(ref, dims, keys):
     rows, fanned = free_size.run([_tile(key="K", dims=dims)], ref)
     assert fanned == 1
@@ -89,9 +90,9 @@ def test_the_shapes_replace_the_listing_in_place_and_leave_the_vendor_record_unt
     assert _keys(rows) == ["A", "MAR-P/12/03-40x40", "MAR-P/12/03-80x40", "Z"]
     assert {r.src_natural_key for r in rows[1:3]} == {"MAR-P/12/03"}
     assert {r.raw_dimensions for r in rows[1:3]} == {"length=Free;height=40cm"}
-    # only the free face carries an offered size; the stated one stays the vendor's
+    # each shape carries its size, long side first; every other listing none
     assert [(r.free_size_length, r.free_size_width) for r in rows] == [
-        (None, None), (0.4, None), (0.8, None), (None, None)]
+        (None, None), (0.4, 0.4), (0.8, 0.4), (None, None)]
 
 
 @pytest.mark.parametrize("row", [
@@ -124,13 +125,14 @@ def _derived(rows, ref, cfg):
     return rows
 
 
-def test_each_shape_carries_its_offered_size_and_the_stated_side(ref, cfg):
-    rows, _ = free_size.run([_tile()], ref)
+@pytest.mark.parametrize("dims", ["length=Free;height=40cm", "length=40cm;height=Free"])
+def test_each_shape_carries_its_size_long_side_in_length(ref, cfg, dims):
+    rows, _ = free_size.run([_tile(dims=dims)], ref)
     _derived(rows, ref, cfg)
     assert [(r.length, r.width, r.height) for r in rows] == [(0.4, 0.4, 0.018), (0.8, 0.4, 0.018)]
     for r in rows:
         methods = r.dimension_method.split(",")
-        assert "length:free_size_option" in methods and "width:parsed" in methods
+        assert "length:free_size_shape" in methods and "width:free_size_shape" in methods
         assert not any(f.code == FlagCode.dimension_defaulted for f in r.review_flags)
     assert len({r.handle for r in rows}) == 2
 
@@ -139,7 +141,7 @@ def test_a_tile_free_on_every_side_gets_both_offered_sides(ref, cfg):
     rows, _ = free_size.run([_tile(dims="length=Free;height=Free")], ref)
     _derived(rows, ref, cfg)
     assert [(r.length, r.width) for r in rows] == [(0.6, 0.6), (0.6, 0.3), (0.6, 0.15)]
-    assert all("width:free_size_option" in r.dimension_method.split(",") for r in rows)
+    assert all("width:free_size_shape" in r.dimension_method.split(",") for r in rows)
 
 
 def test_a_shape_is_made_to_order_whatever_area_the_vendor_publishes(ref, cfg):

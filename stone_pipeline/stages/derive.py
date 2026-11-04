@@ -160,11 +160,6 @@ def raw_face_texts(row: CanonicalRow) -> dict[str, str]:
     return {key: val for key, val in raw_dimension_parts(row).items() if key in _FACE_DIMS}
 
 
-def is_free_side(text: str) -> bool:
-    """Whether a raw side value is the pack's word for a side cut to order ('Free')."""
-    return " ".join((text or "").strip().lower().split()) in active_pack().free_size_words
-
-
 def dimension_category(row: CanonicalRow) -> str:
     """The row's dimension bucket (a category name): the bulk form when is_block (stone: block), else the
     row's own format if it is a known category (a tile keeps its own size), else the default form (slab)."""
@@ -211,7 +206,7 @@ def _dim_fetch_failed(row: CanonicalRow, field: str) -> bool:
 def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, default: float,
                        category: str, methods: list[str], source: str = "parsed") -> float | None:
     """Keep a real value (INCLUDING 0, which validate then rejects as a data error), recorded as `source`
-    (parsed, or free_size_option for a free side a free-size shape offers). A value missing
+    (parsed, or free_size_shape for a face a free-size shape gives). A value missing
     because its FETCH FAILED is HELD (left None + flagged dimension_unavailable) so the row retries next
     scrape -- never defaulted, so freight is never computed from a fabricated size. A GENUINELY-absent value
     is filled from the pack default, flagged. Never fills over a real value."""
@@ -250,25 +245,23 @@ def _normalize_unit(value: float | None, field: str, category: str) -> tuple[flo
 def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     """Resolve length/width/height in metres: one physical meaning per column for every shape, as if the
     piece lies flat. length+width are the two FACE dimensions (a range takes its MAX); height is the
-    thickness. Each parses from the scraped strings; a 'Free' side of a free-size shape (stages/free_size)
-    takes the shape's size; anything still missing or ambiguous (MULTI thickness, a 'Free' side with no
-    shape, absent) is filled from the pack's dimension_defaults for the row's category and
+    thickness. Each parses from the scraped strings; a free-size shape (stages/free_size) takes both faces from
+    its shape; anything still missing or ambiguous (MULTI thickness, a 'Free' side with no shape, absent) is
+    filled from the pack's dimension_defaults for the row's category and
     provenance-flagged -- never silent, never over a real value. A parsed 0 stays 0, so
     validate rejects it (a wrong real size breaks area/volume pricing + freight)."""
     category = dimension_category(row)
     defaults = active_pack().dimension_defaults[category]
 
     faces: dict[str, float] = {}
-    offer = {"length": row.free_size_length, "height": row.free_size_width}   # a free-size shape's faces
-    sources: dict[str, str] = {}                   # raw face key -> provenance, when not 'parsed'
     for key, val in raw_dimension_parts(row).items():
-        if offer.get(key) is not None and is_free_side(val):
-            faces[key] = offer[key]
-            sources[key] = "free_size_option"
-            continue
         meters = parse_face(val, ref) if key in _FACE_DIMS else _parse_thickness(val, ref)
         if meters is not None:
             faces[key] = meters
+    face_source = "parsed"
+    if row.is_free_size_shape:                     # the shape's faces, long side in length
+        faces["length"], faces["height"] = row.free_size_length, row.free_size_width
+        face_source = "free_size_shape"
 
     # thickness: the row's own field first, then a width=/thickness= entry in the dims string.
     thickness = _parse_thickness(row.raw_thickness, ref) if row.raw_thickness else None
@@ -279,9 +272,9 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     # height. Every shape lying flat, so face area is length x width and thickness bands read height.
     methods: list[str] = []
     length = _resolve_dimension(row, "length", faces.get("length"), defaults["length"], category, methods,
-                                sources.get("length", "parsed"))
+                                face_source)
     width = _resolve_dimension(row, "width", faces.get("height"), defaults["width"], category, methods,
-                               sources.get("height", "parsed"))
+                               face_source)
     height = _resolve_dimension(row, "height", thickness, defaults["height"], category, methods)
 
     # Unit sanity BEFORE weight: a dimension stored in centimetres reads ~100x too large in metres and would

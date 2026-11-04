@@ -43,8 +43,12 @@ STOCK_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_t
                    "OR i.last_synced_qty IS NOT i.qty)")
 # Forget the last synced stock, so the row serves again (a reset, a changed reason).
 FORGET_SYNCED_STOCK_SQL = "last_synced_qty = NULL, last_synced_made_to_order = NULL"
-# An inventory row (aliased `i`) on sale: stock above 0, or made to order (no count).
-ON_SALE_SQL = "(i.qty > 0 OR i.made_to_order = 1)"
+
+
+def on_sale_sql(alias: str) -> str:
+    """The one rule for an inventory row (aliased `alias`) on sale: stock above 0, or made to order (no count).
+    Its negation is stock 0, the reversible delist (qty is never negative, and NULL only when made to order)."""
+    return f"({alias}.qty > 0 OR {alias}.made_to_order = 1)"
 
 
 class LedgerError(Exception):

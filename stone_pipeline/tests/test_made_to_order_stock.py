@@ -34,7 +34,8 @@ def cfg():
 
 def _row(sku: str, *, made_to_order: bool, count: str = "5") -> CanonicalRow:
     r = CanonicalRow(src_site="polonine", surrogate_key=sku, variation_id="V1", handle=f"h-{sku.lower()}",
-                     raw_slab_count=count, free_size_width=0.4 if made_to_order else None)
+                     raw_slab_count=count, free_size_length=0.8 if made_to_order else None,
+                     free_size_width=0.4 if made_to_order else None)
     derive_inventory(r)
     return r
 
@@ -227,3 +228,35 @@ def test_the_ledger_render_of_a_made_to_order_product_equals_emit(cfg, tmp_path)
     assert via.read_bytes() == direct.read_bytes()
     first = next(csv.DictReader(direct.open(encoding="utf-8-sig")))  # the made-to-order row
     assert (first["Variant Manage Inventory"], first["Variant Inventory Quantity"]) == ("false", "")
+
+
+def test_a_rendered_made_to_order_product_carries_no_count(cfg, tmp_path):
+    from stone_pipeline.ledger.render import _product_shim
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _seed(ledger)
+        populate_products(ledger, [_row("A", made_to_order=True)], cfg)
+        shim = _product_shim(ledger, ledger.get("product", "sku", "POL-A"))
+        assert (shim.made_to_order, shim.inventory_quantity) == (True, None)
+
+
+def test_a_bundle_redirects_to_a_lot_whose_piece_on_sale_is_made_to_order(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        now = now_iso()
+        for sku, lot in (("POL-B", None), ("POL-P", "L1")):
+            ledger.execute("INSERT INTO product (sku, source, state, medusa_id, lot_code, created_at, updated_at) "
+                           "VALUES (?, 'pol', 'synced', 'm', ?, ?, ?)", (sku, lot, now, now))
+        ledger.execute("INSERT INTO inventory (sku, qty, made_to_order, reason, replaced_by_lot_code, updated_at) "
+                       "VALUES ('POL-B', 0, 0, 'replaced_by_lot', 'L1', ?)", (now,))
+        ledger.execute("INSERT INTO inventory (sku, qty, made_to_order, last_synced_qty, last_synced_made_to_order, "
+                       "updated_at) VALUES ('POL-P', NULL, 1, NULL, 1, ?)", (now,))
+        assert list(_lane(ledger)) == ["POL-B"]
+        assert sync.purge_discontinued(ledger)["external_ids"] == ["POL-B"]   # the made-to-order piece is kept
+
+
+def test_the_migrated_inventory_table_is_exactly_the_fresh_one(tmp_path):
+    p = tmp_path / "mig.ledger"
+    _v11_ledger(p)
+    with Ledger.open(p, env="development") as migrated, Ledger.open(tmp_path / "fresh.ledger", env="development") as fresh:
+        def ddl(ledger):
+            return ledger.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'inventory'").fetchone()[0]
+        assert ddl(migrated) == ddl(fresh)
