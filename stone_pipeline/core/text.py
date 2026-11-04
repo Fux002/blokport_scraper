@@ -162,8 +162,8 @@ def clean_name(text: str) -> str:
 
 def clean_identifier(text: str) -> str:
     """The display rule for an IDENTIFIER (a quality grade such as 'AA/BB', a finish or standard code, a title):
-    printable ASCII with its punctuation kept, whitespace collapsed. Keys like the original (match_key). Which
-    fields are identifiers is set per brand in the brand's configuration (owner, 2026-11-03). Expectations live in
+    printable ASCII with its punctuation kept, whitespace collapsed. Keys like the original (match_key). The kind
+    of each field comes from the backend's field-kinds.json (reference/loaders/field_kinds.py). Expectations live in
     the shared name-key vectors (`identifier`)."""
     return " ".join(_ascii_display(text).split())
 

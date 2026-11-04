@@ -257,6 +257,9 @@ class Paths:
     # attribute name -> Medusa id; lives in from_medusa/<env>/ because its ids come FROM
     # that env's Medusa (like the variants export), not hand-maintained like catalog_source/.
     attributes_csv: Path = _FROM_MEDUSA / "attributes.csv"
+    # which name field is a NAME and which an IDENTIFIER, published by the backend beside attributes.csv; the
+    # one map, read only by reference/loaders/field_kinds.py and fetched by every produce (no committed copy).
+    field_kinds_json: Path = _FROM_MEDUSA / "field-kinds.json"
     # The combined cross-category id-variants EXPORT (with Medusa Id), download-only:
     # the immutable "existing variants" the catalog reads. The UPLOAD files are PRODUCED
     # by the catalog (to_upload/) and never read back -- input and output never alias.

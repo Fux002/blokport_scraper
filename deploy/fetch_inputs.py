@@ -28,6 +28,8 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SE
 #     whole run (every product ships no port), and in prod there is no dev fallback to catch it.
 # These keep the local copy unless the S3 copy is at least half as complete (_MIN_KEEP_FRACTION).
 _PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv", "ports.csv"}
+# fetched and validated only by fetch_field_kinds, so the file has one fetch path
+FIELD_KINDS_NAME = "field-kinds.json"
 _MIN_KEEP_FRACTION = 0.5
 # The variant exports list every vendor's variants; the scraper keeps only its own (a Key whose prefix is one of its
 # categories). Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
@@ -93,6 +95,26 @@ def fetch_attributes(client=None, target=None) -> bool:
             tmp.unlink()
 
 
+def fetch_field_kinds(client=None, target=None) -> None:
+    """Fetch field-kinds.json, the backend's map of name and identifier fields, validate it, and swap it in.
+    Unlike fetch_attributes it RAISES on any failure: no name is written on a guessed kind, so a produce stops
+    and the config server's kind routes answer 503 until a valid map arrives. `target` overrides the destination
+    for tests."""
+    from stone_pipeline.reference.loaders import field_kinds
+    key = f"{ENV_SEGMENT}/scraper/from_medusa/{FIELD_KINDS_NAME}"
+    target = Path(target or SETTINGS.paths.field_kinds_json)
+    tmp = target.with_suffix(target.suffix + ".incoming")
+    try:
+        client = client or boto3.client("s3", region_name=S3_REGION)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(S3_BUCKET, key, str(tmp))
+        field_kinds.parse(tmp.read_bytes(), key)
+        tmp.replace(target)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
 def main() -> int:
     prefix = f"{ENV_SEGMENT}/scraper/from_medusa/"
     dest = Path(SETTINGS.paths.from_medusa_dir)
@@ -104,7 +126,7 @@ def main() -> int:
         for obj in page.get("Contents", []):
             key = obj["Key"]
             name = key[len(prefix):]
-            if not name:  # the prefix "folder" placeholder
+            if not name or name == FIELD_KINDS_NAME:  # the prefix "folder" placeholder; the map's own path
                 continue
             target = dest / name
             # guard against a key with '..' segments resolving outside dest (path traversal)

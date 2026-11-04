@@ -51,6 +51,13 @@ def _fetch_inputs() -> None:
             raise SystemExit(2)
         log.warning("fetch_inputs skipped; matching runs against whatever export is local",
                     exc_info=True)
+    # The name-field kinds have no local fallback on ANY environment: every writer cleans by them.
+    from deploy import fetch_inputs
+    try:
+        fetch_inputs.fetch_field_kinds()
+    except Exception:
+        log.exception("field-kinds.json could not be fetched; a produce never writes names on a guessed kind")
+        raise SystemExit(2)
     # Realign the category registry with the export NOW on disk. The pcats were read once at import
     # (bootstrap, BEFORE this fetch); a produce that just pulled a changed attributes.csv -- a new Medusa
     # pcat id or a corrected category label -- would otherwise keep gating emit + new-variety fan-out on

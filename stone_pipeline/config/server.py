@@ -921,11 +921,17 @@ def boot(config_db, ledger_path) -> None:
     # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
     # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
     # just-added colour is rejected at mint until the next full produce. Best-effort: a fetch failure keeps
-    # the committed vocab (a fresh/offline host still validates against a real seed), and a REPUBLISH does
-    # not fetch inputs, so without this boot fetch a redeploy leaves the vocab stale.
+    # the committed vocab (a fresh/offline host still validates against a real seed).
     from deploy import fetch_inputs
     if fetch_inputs.fetch_attributes():
         log.info("boot: refreshed attribute vocab from S3 (live Medusa colours/types)")
+    # The name-field kinds: a boot failure is logged, not fatal. The routes that clean names read the map per
+    # request and answer 503 until a later boot or produce fetch has written a valid one.
+    try:
+        fetch_inputs.fetch_field_kinds()
+        log.info("boot: fetched field-kinds.json")
+    except Exception:
+        log.warning("boot: field-kinds.json not fetched; the name routes answer 503 until it is", exc_info=True)
 
 
 def shutdown(config_db, periodic) -> None:
