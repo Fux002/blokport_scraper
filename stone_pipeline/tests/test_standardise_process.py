@@ -619,9 +619,11 @@ class _Clients:
 
 
 def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, relink_rc=0, writethrough_on=True,
-          keep_process=False):
+          keep_process=False, steps=None):
     """main() with the process stubbed (unless the test stubbed it, keep_process): what it returns and the relinks it
-    made."""
+    made. steps, when given, records the relink and the pool's last idle setting in the order they happen."""
+    steps = [] if steps is None else steps
+    monkeypatch.setattr(proc.gpu, "set_idle", lambda batch: steps.append("idle"))
     monkeypatch.setattr(proc, "unconfigured", lambda close_only=False: [])
     monkeypatch.setattr(proc, "stop_on_signal", lambda spend: None)
     monkeypatch.setattr(proc.boto3, "client", _Clients(_S3()))
@@ -632,7 +634,7 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
     else:
         monkeypatch.delenv("SCRAPER_RUN_SUMMARY", raising=False)
     relinks = []
-    monkeypatch.setattr(proc, "relink", lambda: relinks.append(1) or relink_rc)
+    monkeypatch.setattr(proc, "relink", lambda: relinks.append(1) or steps.append("relink") or relink_rc)
 
     def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
         spend.capped = capped
@@ -658,6 +660,24 @@ def test_a_run_at_the_budget_or_with_problems_still_succeeds_its_summary_says_so
     assert _main(monkeypatch, tmp_path, capped=True, problems=3) == (0, [1])
     handed = json.loads((tmp_path / "summary.json").read_text())
     assert handed["budget_reached"] and handed["problems"] == 3 and handed["relinked"]
+
+
+@pytest.mark.parametrize("changed, relink_rc, want", [(True, 0, ["relink", "idle"]), (True, 2, ["relink", "idle"]),
+                                                       (False, 0, ["idle"])])
+def test_the_pool_is_set_back_to_idle_at_the_run_s_end_after_the_relink(monkeypatch, changed, relink_rc, want):
+    # a ceiling lowered while the round's instances still ran stays at what they held (prod 24 and 12, dev 32 on 3-4 Nov)
+    steps = []
+    _main(monkeypatch, changed=changed, relink_rc=relink_rc, steps=steps)
+    assert steps == want
+
+
+def test_a_pool_that_cannot_be_set_back_is_reported_and_the_run_s_outcome_stands(monkeypatch, capsys):
+    def refused(batch):
+        raise ClientError({"Error": {"Code": "ServerException", "Message": "busy"}}, "UpdateComputeEnvironment")
+    _main(monkeypatch, steps=[])
+    monkeypatch.setattr(proc.gpu, "set_idle", refused)
+    assert proc.main() == 0
+    assert "ERROR: the GPU pool's ceiling could not be set back to idle" in capsys.readouterr().out
 
 
 def test_a_failed_relink_fails_the_run(monkeypatch):
