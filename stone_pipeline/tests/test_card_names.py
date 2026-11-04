@@ -25,3 +25,18 @@ def test_a_mixed_script_card_keeps_its_spelling_and_ref(monkeypatch):
     card = _write(monkeypatch, {"variant": "Nero 黑 Marquina", "stone_type": "Marble"})
     assert card["payload"]["variant"] == "Nero 黑 Marquina"
     assert card["ref"] == "nero marquina|marble"
+
+
+def _write_attrs(monkeypatch, rows):
+    seen = {}
+    monkeypatch.setattr(decisions.decisions_store, "replace_pending", lambda kind, rows: seen.setdefault(kind, rows))
+    decisions.write_attributes_to_add(rows)
+    return seen["attribute"]
+
+
+def test_an_attribute_card_carries_its_value_by_its_kinds_rule(monkeypatch):
+    cards = _write_attrs(monkeypatch, [{"kind": "type", "value": "Marble (translucent)", "count": 3},
+                                       {"kind": "quality", "value": "PINK", "count": 1},
+                                       {"kind": "color", "value": "黑", "count": 2}])
+    by_ref = {c["ref"]: c["payload"]["value"] for c in cards}
+    assert by_ref == {"type:marble translucent": "Marble Translucent", "quality:pink": "PINK"}

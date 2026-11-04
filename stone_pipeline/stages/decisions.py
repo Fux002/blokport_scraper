@@ -24,7 +24,10 @@ from stone_pipeline.config.decisions_model import Decisions
 from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core.text import UnfoldableName, title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.core import logfmt
 from stone_pipeline.reference.loaders import field_kinds
+
+log = logfmt.get_logger("decisions")
 
 # Field names the catalog stages build/read. Kept here so curate.py and emit stay unchanged; the store
 # persists these same fields as the pending-queue payload.
@@ -185,12 +188,29 @@ def load_attribute_ids() -> dict[tuple[str, str], tuple[str, str]]:
     return decisions_store.attribute_ids()
 
 
+# the attribute card kinds (curate pipeline _ATTR_VOCABS) and the name field each one's value becomes
+_ATTRIBUTE_FIELDS = {"color": field_kinds.COLOR_NAME, "finish": field_kinds.FINISH_NAME,
+                     "type": field_kinds.TYPE_NAME, "quality": field_kinds.QUALITY_NAME}
+
+
 def write_attributes_to_add(pending: list[dict]) -> int:
-    """Replace the pending ATTRIBUTE queue with values still missing a Medusa id. Returns the count."""
-    rows = [{"ref": f"{(r.get('kind') or '').strip().lower()}:{_norm(r.get('value', ''))}",
-             "payload": {c: r.get(c, "") for c in ATTR_COLUMNS},
-             "sources": r.get("sources")}
-            for r in pending if (r.get("kind") and r.get("value"))]
+    """Replace the pending ATTRIBUTE queue with values still missing a Medusa id. Returns the count.
+    A card carries its value by its kind's field rule, the name the attribute will have in Medusa ('Marble
+    (translucent)' shows 'Marble Translucent'; the quality 'PINK' keeps its case). A value with no ASCII form
+    raises no card: it can never be a Medusa attribute. The ref stays kind:norm(value)."""
+    rows = []
+    for r in pending:
+        kind, raw = (r.get("kind") or "").strip().lower(), r.get("value") or ""
+        if not (kind and raw):
+            continue
+        try:
+            value = field_kinds.display(_ATTRIBUTE_FIELDS[kind], raw)
+        except UnfoldableName:
+            log.warning("attribute card dropped: no ASCII form", extra={"extra_fields": {"kind": kind, "value": raw}})
+            continue
+        rows.append({"ref": f"{kind}:{_norm(raw)}",
+                     "payload": {**{c: r.get(c, "") for c in ATTR_COLUMNS}, "value": value},
+                     "sources": r.get("sources")})
     decisions_store.replace_pending("attribute", rows)
     return len(rows)
 
