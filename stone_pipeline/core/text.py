@@ -108,7 +108,9 @@ def match_key(text: str) -> str:
     accent, OR punctuation difference must NEVER split the same name in two, so every name lookup
     and index in the pipeline keys on this -- and it agrees with matching.projections.norm:
     'Semi-Precious Stone' == 'semi_precious_stone' == 'Semi Precious Stone', and
-    'Black & Gold' == 'Black Gold', 'St. Laurent' == 'St Laurent', 'Rosa Porriño' == 'Rosa Porrino'.
+    'St. Laurent' == 'St Laurent', 'Rosa Porriño' == 'Rosa Porrino'. '&' reads 'and', exactly as a cleaned name
+    writes it (owner D1, 2026-11-04), so 'Black & Gold' == 'Black and Gold' and a scraped spelling keeps matching
+    its own cleaned display.
 
     Punctuation is folded BEFORE ascii_fold, so a unicode dash/punct becomes a space rather than
     being stripped to nothing (which would glue the two words together). Marks are dropped FIRST:
@@ -120,7 +122,7 @@ def match_key(text: str) -> str:
     text = text or ""
     if not (text.isascii() and text.isprintable()):
         text = _prepared(text)
-    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text)).casefold().split())
+    return " ".join(ascii_fold(_NON_ALNUM.sub(" ", text.replace("&", " and "))).casefold().split())
 
 
 class UnfoldableName(ValueError):
@@ -150,7 +152,7 @@ def clean_name(text: str) -> str:
     """The display rule for a NAME (variety, alias, type, colour, origin, port, category): ASCII letters, digits,
     spaces, hyphens and apostrophes. '&' reads 'and', every other punctuation or symbol becomes a space, hyphen
     runs collapse, and an apostrophe is kept only inside a word (one, never a run). Every step mirrors match_key, so
-    the cleaned name always keys like the original; '&' is the one deliberate change. Case is the caller's.
+    the cleaned name always keys like the original. Case is the caller's.
     Bracketed alternatives are split off by the caller first (split_bracket_alias). Expectations live in the shared
     name-key vectors (`display`)."""
     named = _NOT_NAME.sub(" ", _ascii_display(text).replace("&", " and "))

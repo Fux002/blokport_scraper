@@ -114,19 +114,20 @@ def main():
         "superscript or subscript form) to that character, any other non-ASCII punctuation, symbol, private-use "
         "(Co), unassigned (Cn) or surrogate (Cs) character to a space; (c) NFKD-decompose and drop every mark "
         "(M*); (d) step (b) again on what decomposition yields; (e) every whitespace or control (Cc) character to "
-        "a space, every format (Cf) character removed. KEY (`expected`, match_key): (1) every [^\\w\\s] (Python "
-        "unicode \\w, \\s) and '_' becomes a space; (2) ascii_fold: unless plain ASCII, NFKD-decompose, drop every "
-        "mark, transliterate the letters with no decomposition (_TRANSLIT), drop remaining non-ASCII; (3) "
-        "casefold, which after step 2 is ASCII lower-case; (4) split on whitespace, join with one space. DISPLAY, "
-        "two kinds (owner 2026-11-03): REFUSED (null) if a letter other than a modifier letter (Lm) has no ASCII "
-        "form; otherwise ascii_fold. NAME (`display`, clean_name): '&' to ' and '; every character outside "
-        "[A-Za-z0-9 '-] to a space; apostrophe runs to one; an apostrophe not between two letters or digits to a "
-        "space; hyphen runs and spaces around a hyphen collapse to one hyphen; whitespace collapsed; leading and "
-        "trailing hyphens and spaces stripped. IDENTIFIER (`identifier`, clean_identifier): printable ASCII kept, "
-        "whitespace collapsed and trimmed. Case is kept. UNICODE: every input uses only code points assigned in "
-        "Unicode " + FLOOR + ", the floor across the runtimes in use (SC deploy and CI: Python 3.12 = Unicode "
-        "15.0.0; SC CI syntax floor: Python 3.11 = 14.0.0). Both repos must agree on every case; each repo's test "
-        "asserts its runtime Unicode version is at least " + FLOOR + "."),
+        "a space, every format (Cf) character removed. KEY (`expected`, match_key): (0) every '&' becomes ' and ' "
+        "(owner D1, 2026-11-04); (1) every [^\\w\\s] (Python unicode \\w, \\s) and '_' becomes a space; (2) "
+        "ascii_fold: unless plain ASCII, NFKD-decompose, drop every mark, transliterate the letters with no "
+        "decomposition (_TRANSLIT), drop remaining non-ASCII; (3) casefold, which after step 2 is ASCII "
+        "lower-case; (4) split on whitespace, join with one space. DISPLAY, two kinds (owner 2026-11-03): REFUSED "
+        "(null) if a letter other than a modifier letter (Lm) has no ASCII form; otherwise ascii_fold. NAME "
+        "(`display`, clean_name): '&' to ' and '; every character outside [A-Za-z0-9 '-] to a space; apostrophe "
+        "runs to one; an apostrophe not between two letters or digits to a space; hyphen runs and spaces around a "
+        "hyphen collapse to one hyphen; whitespace collapsed; leading and trailing hyphens and spaces stripped. "
+        "IDENTIFIER (`identifier`, clean_identifier): printable ASCII kept, whitespace collapsed and trimmed. Case "
+        "is kept. UNICODE: every input uses only code points assigned in Unicode " + FLOOR + ", the floor across "
+        "the runtimes in use (SC deploy and CI: Python 3.12 = Unicode 15.0.0; SC CI syntax floor: Python 3.11 = "
+        "14.0.0). Both repos must agree on every case; each repo's test asserts its runtime Unicode version is at "
+        "least " + FLOOR + "."),
       "generator": {"python": sys.version.split()[0], "unicodedata": unicodedata.unidata_version, "floor": FLOOR},
       "cases": cases,
     }

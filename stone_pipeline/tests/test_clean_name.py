@@ -5,12 +5,10 @@ apostrophes: typographic punctuation is unified, invisible characters removed, a
 folded, '&' reads 'and', and every other punctuation or symbol becomes a space. IDENTIFIERS (quality grades, finish
 and standard codes, product titles) keep normal ASCII punctuation, because 'AA/BB' is an industry grade. In both, a
 letter with no ASCII form (a non-Latin script) is refused with UnfoldableName and the caller decides, and the
-cleaned value always keys like the original (match_key), '&' in a name being the one deliberate change.
+cleaned value always keys like the original (match_key) ('&' reads 'and' in both, owner D1).
 """
 
 from __future__ import annotations
-
-import unicodedata
 
 import pytest
 
@@ -95,13 +93,11 @@ def _breaks(raw: str, clean) -> bool:
 
 def test_cleaning_keeps_identity_and_is_a_fixed_point_for_any_character():
     # Every BMP code point (controls, unassigned and private use included), inside a word and between spaces: the
-    # cleaned value keys exactly like the original and is its own cleaned form. '&' (in any form) is the one
-    # deliberate change in a name (owner O1: it reads 'and').
+    # cleaned value keys exactly like the original and is its own cleaned form ('&' reads 'and' in the key too,
+    # owner D1).
     broken = []
     for cp in range(0x10000):
         ch = chr(cp)
-        if "&" in unicodedata.normalize("NFKD", ch):
-            continue
         for raw in (f"Black{ch}Gold", f"Black {ch} Gold"):
             for clean in (clean_name, clean_identifier):
                 if _breaks(raw, clean):

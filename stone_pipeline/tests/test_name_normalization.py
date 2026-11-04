@@ -38,7 +38,7 @@ def test_proj_norm_folds_the_same_way():
 def test_match_key_folds_all_punctuation_to_agree_with_proj_norm():
     # match_key must fold ALL punctuation (not just separators), so it agrees with proj.norm and the
     # backbone/attribute vocab (match_key-keyed) joins the match index (proj.norm-keyed).
-    for a, b in [("Black & Gold", "Black Gold"), ("St. Laurent", "St Laurent"),
+    for a, b in [("Black & Gold", "Black and Gold"), ("St. Laurent", "St Laurent"),
                  ("Crema Marfil, Extra", "Crema Marfil Extra"), ("King's Blue", "King s Blue")]:
         assert match_key(a) == match_key(b) == proj.norm(a), f"{a!r} must fold like {b!r}"
 
@@ -109,3 +109,18 @@ def test_ascii_fold_keeps_a_transliteration_letter_that_carries_a_mark():
     assert ascii_fold("Ǿstfold") == "Ostfold"
     assert slugify("Ǣgean Blue") == slugify("Aegean Blue")
     assert proj.compact("Ǿ Grey") == proj.compact("O Grey")
+
+
+def test_ampersand_reads_and_in_the_key_as_in_a_cleaned_name():
+    # Owner D1 (2026-11-04): clean_name writes '&' as 'and', so the key reads it the same way; a scraped
+    # 'Black & Gold' then still matches its own cleaned spelling 'Black and Gold'.
+    assert match_key("Black & Gold") == match_key("Black and Gold") == "black and gold"
+    assert match_key("Black\uff06Gold") == "black and gold"            # the fullwidth form too
+    assert match_key("AT&T") == "at and t"
+
+
+def test_compact_is_the_key_without_spaces():
+    # One reading for every projection: compact agrees with the key on '&', symbols and marks.
+    for a, b in [("Black & Gold", "Black and Gold"), ("Absolute Black\u2122", "Absolute Black"),
+                 ("Rosa Porrin\u0303o", "Rosa Porrino"), ("Mont-Blanc", "MontBlanc")]:
+        assert proj.compact(a) == proj.compact(b) == "".join(match_key(a).split())
