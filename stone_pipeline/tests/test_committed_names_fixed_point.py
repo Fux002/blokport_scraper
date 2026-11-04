@@ -57,7 +57,7 @@ def test_backbone_names_values_and_aliases_are_fixed_points():
             bad.append((name, "variant", p["variant"]))
         for field, values in ((fk.TYPE_NAME, [p.get("stone_type") or ""]), (fk.COLOR_NAME, p.get("color") or []),
                               (fk.FINISH_NAME, p.get("finishes") or []), (fk.QUALITY_NAME, p.get("qualities") or [])):
-            bad += [(name, field, v) for v in _not_fixed(field, values)]
+            bad += [(name, field, v) for v in _not_fixed(field, values, fk.clean)]   # Medusa spellings, case kept
         aliases = list(p.get("aliases") or [])
         if clean_alias_list(p["variant"], aliases, _alias) != (aliases, []):
             bad.append((name, "aliases", p["variant"]))
