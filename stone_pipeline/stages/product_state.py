@@ -78,9 +78,10 @@ def inventory_str(row: CanonicalRow) -> str:
     return str(row.inventory_quantity if row.inventory_quantity is not None else 0)
 
 
-def manage_inventory_str(row: CanonicalRow) -> str:
-    """Whether Medusa counts the variant's stock: never for made to order (no count, orders not capped)."""
-    return "false" if row.made_to_order else SETTINGS.backend.variant_manage_inventory
+def allow_backorder_str(row: CanonicalRow) -> str:
+    """Whether the variant takes orders beyond its stock: always for made to order (no count). The platform's one
+    made-to-order mechanism (Blokport's product CSV import: stock is always tracked, made to order is the backorder)."""
+    return "true" if row.made_to_order else SETTINGS.backend.variant_allow_backorder
 
 
 @dataclass

@@ -21,7 +21,7 @@ from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow
-from stone_pipeline.stages.product_state import inventory_str, manage_inventory_str
+from stone_pipeline.stages.product_state import allow_backorder_str, inventory_str
 from stone_pipeline.standardise import index
 
 log = logfmt.get_logger("emit")
@@ -77,8 +77,8 @@ COLUMN_MAP: dict[str, Callable[[CanonicalRow, SourceConfig], str]] = {
     # one per SETTINGS.images.product_image_slots, filled in order and blank beyond what exists.
     "Variant Title": lambda r, c: SETTINGS.backend.variant_title,
     "Variant Sku": _sku,
-    "Variant Manage Inventory": lambda r, c: manage_inventory_str(r),
-    "Variant Allow Backorder": lambda r, c: SETTINGS.backend.variant_allow_backorder,
+    "Variant Manage Inventory": lambda r, c: SETTINGS.backend.variant_manage_inventory,
+    "Variant Allow Backorder": lambda r, c: allow_backorder_str(r),
     "Variant Option 1 Name": lambda r, c: SETTINGS.backend.variant_option_1_name,
     "Variant Option 1 Value": lambda r, c: SETTINGS.backend.variant_option_1_value,
     "Variant Inventory Quantity": lambda r, c: _inventory(r),

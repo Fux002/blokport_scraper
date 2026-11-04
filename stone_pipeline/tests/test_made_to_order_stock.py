@@ -1,6 +1,7 @@
 """Made to order: a free-size shape is on sale with no count. One stock state end to end.
 
-The row (derive) -> the CSVs (no quantity, inventory not managed) -> the ledger (inventory qty NULL,
+The row (derive) -> the CSVs (no quantity, backorder allowed: the platform's one made-to-order mechanism, the
+WudPort CSV path's) -> the ledger (inventory qty NULL,
 made_to_order 1) -> the product record (made_to_order, read at create) and the inventory lane
 ({sku, quantity: null, made_to_order: true}) -> the ack, which echoes both and is refused when either moved.
 A hidden or discontinued shape is a plain stock 0, never made to order.
@@ -21,7 +22,7 @@ from stone_pipeline.ledger.populate import populate_discontinued, populate_inven
 from stone_pipeline.ledger.render import render_inventory, render_products
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.derive import derive_inventory
-from stone_pipeline.stages.product_state import inventory_str, manage_inventory_str
+from stone_pipeline.stages.product_state import allow_backorder_str, inventory_str
 from stone_pipeline.tests.test_ledger_products import _fixture_rows, _seed_ids
 
 KEY = "tile_marble_pietra_grey_0001"
@@ -61,12 +62,14 @@ def _lane(ledger: Ledger) -> dict:
 
 # --- the row and the CSVs -------------------------------------------------------------------------------
 
-def test_a_made_to_order_row_has_no_count_and_unmanaged_inventory_in_every_csv(cfg, tmp_path):
+def test_a_made_to_order_row_has_no_count_and_allows_backorder_in_every_csv(cfg, tmp_path):
     mto, counted = _row("A", made_to_order=True), _row("B", made_to_order=False)
-    assert (inventory_str(mto), manage_inventory_str(mto)) == ("", "false")
-    assert (inventory_str(counted), manage_inventory_str(counted)) == ("5", "true")
-    cells = {c: emit.COLUMN_MAP[c](mto, cfg) for c in ("Variant Inventory Quantity", "Variant Manage Inventory")}
-    assert cells == {"Variant Inventory Quantity": "", "Variant Manage Inventory": "false"}
+    assert (inventory_str(mto), allow_backorder_str(mto)) == ("", "true")
+    assert (inventory_str(counted), allow_backorder_str(counted)) == ("5", "false")
+    columns = ("Variant Inventory Quantity", "Variant Manage Inventory", "Variant Allow Backorder")
+    cells = {c: emit.COLUMN_MAP[c](mto, cfg) for c in columns}
+    # stock is always tracked (product-csv.ts ignores a Manage Inventory column); made to order is the backorder
+    assert cells == {"Variant Inventory Quantity": "", "Variant Manage Inventory": "true", "Variant Allow Backorder": "true"}
 
 
 def test_the_ledger_render_of_a_made_to_order_delta_equals_emit(cfg, tmp_path):
@@ -227,7 +230,7 @@ def test_the_ledger_render_of_a_made_to_order_product_equals_emit(cfg, tmp_path)
         render_products(ledger, cfg, via, columns)
     assert via.read_bytes() == direct.read_bytes()
     first = next(csv.DictReader(direct.open(encoding="utf-8-sig")))  # the made-to-order row
-    assert (first["Variant Manage Inventory"], first["Variant Inventory Quantity"]) == ("false", "")
+    assert (first["Variant Allow Backorder"], first["Variant Inventory Quantity"]) == ("true", "")
 
 
 def test_a_rendered_made_to_order_product_carries_no_count(cfg, tmp_path):

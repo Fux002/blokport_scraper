@@ -659,7 +659,7 @@ why a re-seed needs no special handling.
   names, `title`, `description`, `handle`, dims (`weight,length,width,height`),
   `origin_country_code`, `image_urls[]` (ordered live-bucket urls), `company_id`,
   `sales_channel_id`, `category` (canonical), `bundle_size`, ports, `made_to_order`
-  (read at create: the variant's inventory is not managed). Served only
+  (read at create: the variant takes backorders). Served only
   after the variation and its combination are `synced`, its referenced attributes
   are `synced`, and its scraped photos are `promoted`.
 - `inventory`: `sku`, `quantity`, `made_to_order`. Served only after the product is

@@ -314,8 +314,8 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
             # a priced product never goes on sale before a stock delta could hide it; afterwards the stock lane owns
             # visibility. Not in payload_hash, so a change never re-serves a product on its own.
             "photo_ready": bool(p["photo_ready"]),
-            # Made to order (a free-size shape): on sale with no count. Read at create like photo_ready (the variant's
-            # inventory is not managed); afterwards the stock lane carries every change. Not in payload_hash.
+            # Made to order (a free-size shape): on sale with no count. Read at create like photo_ready (the variant
+            # takes backorders); afterwards the stock lane carries every change. Not in payload_hash.
             "made_to_order": bool(p["made_to_order"]),
         },
     })
