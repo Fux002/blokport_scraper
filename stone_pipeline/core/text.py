@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import re
 import unicodedata
 
@@ -49,11 +48,13 @@ def _prepared(text: str) -> str:
 def _separated(text: str) -> str:
     """Every non-ASCII punctuation, symbol, private-use or unassigned character separates words: a dash becomes a
     hyphen, a compatibility form of one ASCII punctuation character becomes that character ('\uff0f' is '/'), and
-    any other one a space. Letters, digits, marks, spaces and format characters pass through."""
+    any other one a space. Letters, digits, marks, spaces, format and control characters pass through."""
     return "".join(_separator(c) for c in text)
 
 
-@functools.cache
+_ASCII_PUNCT = re.compile(r"[!-/:-@\[-`{-~]")
+
+
 def _separator(c: str) -> str:
     if c.isascii():
         return c
@@ -62,11 +63,9 @@ def _separator(c: str) -> str:
         return "-"
     if category[0] in "PS":
         ascii_form = unicodedata.normalize("NFKD", c).translate(_TYPOGRAPHIC)
-        return ascii_form if len(ascii_form) == 1 and ascii_form.isascii() and _ASCII_MARK.match(ascii_form) else " "
+        return ascii_form if _ASCII_PUNCT.fullmatch(ascii_form) else " "
     return " " if category in ("Co", "Cn", "Cs") else c
 
-
-_ASCII_MARK = re.compile(r"[!-/:-@\[-`{-~]")
 
 
 def _visible(text: str) -> str:
