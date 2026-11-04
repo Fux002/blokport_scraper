@@ -41,3 +41,12 @@ def test_the_update_file_is_the_cleaned_subset_of_the_full_rows():
     full = [{"Key": "a", "Name": "Rose"}, {"Key": "b", "Name": "Black"}, {"Key": "c", "Name": "Grey"}]
     delta = [{"Key": "c", "Name": "grey"}, {"Key": "a", "Name": "Rosé"}, {"Key": "gone", "Name": "x"}]
     assert emit_catalog.update_rows(full, delta) == [full[0], full[2]]
+
+
+def test_a_union_filled_key_equals_the_key_of_its_cleaned_name():
+    # W18: union-fill keys a missing-category row from the Name before emit cleans it; the one slug rule (W4)
+    # and the identity property of the clean rules make that Key the cleaned Name's Key.
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    from stone_pipeline.stages.curate.keys import gen_key
+    for raw in ("São Gabriel", "Valle D’Aosta", "Black & Gold", "Nero  (Spain)"):
+        assert gen_key("tile", "Granite", raw) == gen_key("tile", "Granite", fk.display(fk.VARIATION_NAME, raw))

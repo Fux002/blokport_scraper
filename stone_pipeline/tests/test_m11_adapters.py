@@ -235,18 +235,17 @@ def test_clean_variety_name_generic_and_prefix():
     assert c("ZB Patagonia", (r"^[Zz]\s*[Bb]?\s+",)) == "Patagonia"
 
 
-def test_accents_preserved_in_display_folded_in_identity():
-    # The DISPLAY name PRESERVES source accents (reads as the name); IDENTITY (slug/key/match key)
-    # folds them -- so 'Porriño' and 'Porrino' are still ONE stone, but the display shows 'Porriño'.
-    from stone_pipeline.core.text import ascii_fold, title_case, slugify
+def test_accents_fold_in_display_and_in_identity():
+    # The DISPLAY of a name is ASCII (its field's rule, owner O1); IDENTITY (slug/key/match key) folds accents
+    # too, so 'Porri\u00f1o' and 'Porrino' are ONE stone and show as 'Porrino'.
+    from stone_pipeline.core.text import ascii_fold, slugify
     from stone_pipeline.matching.projections import norm
-    # identity folds accents (one stone regardless of accent)
-    assert ascii_fold("Rosa Porriño") == "Rosa Porrino"
-    assert slugify("Cinza Corumbá") == "cinza-corumba"
-    assert norm("Porriño") == norm("Porrino")            # accent-insensitive matching
-    # display PRESERVES accents (Unicode-aware title-case), and does not fold to ASCII
-    assert title_case("são GABRIEL") == "São Gabriel"
-    assert title_case("Rosa Porriño") == "Rosa Porriño"
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    assert ascii_fold("Rosa Porri\u00f1o") == "Rosa Porrino"
+    assert slugify("Cinza Corumb\u00e1") == "cinza-corumba"
+    assert norm("Porri\u00f1o") == norm("Porrino")            # accent-insensitive matching
+    assert fk.display(fk.VARIATION_NAME, "s\u00e3o GABRIEL") == "Sao Gabriel"
+    assert fk.display(fk.VARIATION_NAME, "Rosa Porri\u00f1o") == "Rosa Porrino"
 
 
 def test_load_frame_makes_non_file_sources_first_class(tmp_path, monkeypatch, scrape_data_dir):

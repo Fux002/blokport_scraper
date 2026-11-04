@@ -57,16 +57,14 @@ def test_country_and_variety_keys_route_through_match_key():
         assert loaders_norm(v) == match_key(v) == proj.norm(v) == "united states"
 
 
-def test_title_case_preserves_display_accents_but_identity_still_folds():
-    # DISPLAY: Unicode-aware title-case keeps SOURCE accents and reads as the name.
-    from stone_pipeline.core.text import title_case
-    assert title_case("AZUL MACAÚBAS") == "Azul Macaúbas"            # source accent preserved
-    assert title_case("quartzo vitro rosé") == "Quartzo Vitro Rosé"
-    assert title_case("são GABRIEL") == "São Gabriel"
-    # accent RESTORATION is out of scope -- a missing accent is NOT invented
-    assert title_case("AZUL MACAUBAS") == "Azul Macaubas"
-    # IDENTITY still folds, so the accented and unaccented display names are ONE stone
-    assert match_key("Azul Macaúbas") == match_key("Azul Macaubas")
+def test_a_names_display_is_ascii_and_identity_still_folds():
+    # DISPLAY of a name is its field's rule: cleaned to ASCII, then title-cased (owner O1). title_case itself is
+    # casing only and decides no alphabet; IDENTITY folds, so the accented and plain spellings are ONE stone.
+    from stone_pipeline.reference.loaders import field_kinds as fk
+    assert fk.display(fk.VARIATION_NAME, "AZUL MACA\u00daBAS") == "Azul Macaubas"
+    assert fk.display(fk.VARIATION_NAME, "quartzo vitro ros\u00e9") == "Quartzo Vitro Rose"
+    assert fk.display(fk.VARIATION_NAME, "s\u00e3o GABRIEL") == "Sao Gabriel"
+    assert match_key("Azul Maca\u00fabas") == match_key("Azul Macaubas")
 
 
 def test_title_case_lowercases_connectors_except_leading():

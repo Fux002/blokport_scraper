@@ -278,12 +278,10 @@ _TITLE_CONNECTORS = frozenset({"de", "do", "da", "di", "del", "della", "e", "y"}
 
 
 def title_case(text: str) -> str:
-    """Every word capitalized, rest lower-case, whitespace collapsed. Unicode-aware: source accents
-    are PRESERVED (Rosé stays Rosé, Macaúbas stays Macaúbas) so the display name reads as the name,
-    while IDENTITY folds accents separately (match_key / gen_key's slug), so 'Porriño' and 'Porrino'
-    are still one stone. Romance connectors (de/do/di/...) stay lower-case unless they lead the name.
-    Note: this preserves accents that are IN the source; it does not restore a missing one
-    (AZUL MACAUBAS -> Azul Macaubas, not Macaúbas -- that needs a canonical/synonym table)."""
+    """Every word capitalized, rest lower-case, whitespace collapsed: casing only. It decides no alphabet: a
+    name is cleaned to ASCII by its field's rule first (field_kinds.display), and review-card prose may carry raw
+    scraped text, which this never refuses. Romance connectors (de/do/di/...) stay lower-case unless they lead
+    the name."""
     words = (text or "").split()
     return " ".join(
         w.lower() if i and w.lower() in _TITLE_CONNECTORS else _cap_word(w)
