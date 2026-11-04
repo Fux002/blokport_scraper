@@ -11,7 +11,11 @@ name: Deploy
 # `deploy_role_arn` Terraform output.
 
 # Gated on CI: this runs when the CI workflow on main COMPLETES, and every step is skipped unless CI
-# succeeded, so a red suite can never build and roll an image. The checked-out ref is CI's head sha.
+# succeeded, so a red suite can never build and roll an image. It builds MAIN'S HEAD, not the commit whose CI
+# finished: merges in quick succession finish CI in any order, and a deploy of the commit that finished last used
+# to put dev back on older code (2026-11-04). The head is built only once its own CI is green (else its CI's
+# completion brings the deploy that builds it), so whichever deploy runs last builds the head. A manual dispatch
+# builds the dispatched ref, for the heavy images and an immutable :<sha>, and never moves :core.
 on:
   workflow_run:
     workflows: [CI]
@@ -31,6 +35,13 @@ on:
 permissions:
   id-token: write   # OIDC
   contents: read
+  actions: read     # whether main's head has a green CI run
+
+# One merge deploy at a time; GitHub keeps one pending run per group, which is safe because every merge deploy
+# builds the same head. A dispatch has its own group, so the two never cancel each other.
+concurrency:
+  group: deploy-${{ github.event_name }}
+  cancel-in-progress: false
 
 env:
   AWS_REGION: eu-west-1
@@ -44,17 +55,50 @@ jobs:
   build-push:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    env:
-      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    defaults:
+      run:
+        shell: bash   # -eo pipefail: a failed lookup fails the deploy, never a silent green
     steps:
+      # What this run builds: the dispatched ref (never :core), or main's head when its CI is green (:core).
+      - name: Resolve the commit to build
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_NAME: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          DISPATCHED: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "sha=$DISPATCHED" >> "$GITHUB_OUTPUT"
+            echo "core=false" >> "$GITHUB_OUTPUT"
+            echo "Dispatch: building $DISPATCHED; :core is left as it is"
+            exit 0
+          fi
+          HEAD_SHA=$(gh api "repos/$REPO_NAME/commits/main" --jq .sha)
+          GREEN=$(gh api "repos/$REPO_NAME/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&branch=main&status=success" --jq .total_count)
+          # inside `if`, a non-numeric answer would read as "no green CI yet": refuse it instead
+          if ! [[ "$GREEN" =~ ^[0-9]+$ ]]; then
+            echo "::error::unexpected green-CI count for $HEAD_SHA: '$GREEN'"
+            exit 1
+          fi
+          if [ "$GREEN" -gt 0 ]; then
+            echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+            echo "core=true" >> "$GITHUB_OUTPUT"
+            echo "Building main's head $HEAD_SHA (its CI is green)"
+          else
+            echo "core=false" >> "$GITHUB_OUTPUT"
+            echo "Main's head $HEAD_SHA has no green CI yet: its CI's completion brings the deploy that builds it"
+          fi
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: steps.target.outputs.sha != ''
         with:
-          ref: ${{ env.SHA }}
+          ref: ${{ steps.target.outputs.sha }}
 
       # No-op (green) until AWS_DEPLOY_ROLE_ARN is set - see DEPLOY.md.
       - name: Check deploy is configured
         id: gate
-        run: echo "ready=${{ secrets.AWS_DEPLOY_ROLE_ARN != '' }}" >> "$GITHUB_OUTPUT"
+        run: echo "ready=${{ secrets.AWS_DEPLOY_ROLE_ARN != '' && steps.target.outputs.sha != '' }}" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials (OIDC)
         if: steps.gate.outputs.ready == 'true'
@@ -75,21 +119,29 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ steps.target.outputs.sha }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target core -t "$REPO:core" -t "$REPO:$SHA" .
           docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts"
           echo "Entrypoint imports OK in $REPO:core"
 
+      # :<sha> is immutable and always pushed; :core (dev's image) only from main's head (Resolve).
       - name: Push image
         if: steps.gate.outputs.ready == 'true'
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ steps.target.outputs.sha }}
+          CORE: ${{ steps.target.outputs.core }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
-          docker push "$REPO:core"
           docker push "$REPO:$SHA"
-          echo "Pushed $REPO:core and :$SHA"
+          if [ "$CORE" = "true" ]; then
+            docker push "$REPO:core"
+            echo "Pushed $REPO:core and :$SHA"
+          else
+            echo "Pushed $REPO:$SHA only"
+          fi
 
       # The mutable-tag gotcha: pushing a new :core does not change the task def, so ECS never rolls the
       # running service on its own -- the new image would sit in ECR, never live. Force a new deployment so
@@ -97,7 +149,7 @@ jobs:
       # that the image was pushed. Only on the CI-gated main run (the dev deploy); a manual imageproc/gpu
       # dispatch must not roll the app service. Prod is a separate task, promoted explicitly.
       - name: Roll dev service (re-pull :core) and wait for stable
-        if: steps.gate.outputs.ready == 'true' && github.event_name == 'workflow_run'
+        if: steps.gate.outputs.ready == 'true' && github.event_name == 'workflow_run' && steps.target.outputs.core == 'true'
         run: |
           aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
             --force-new-deployment >/dev/null
@@ -143,6 +195,7 @@ jobs:
         if: steps.gate.outputs.ready == 'true' && inputs.build_gpu
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SHA: ${{ steps.target.outputs.sha }}
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target gpu -t "$REPO:gpu" -t "$REPO:gpu-$SHA" .
