@@ -269,7 +269,7 @@ def _tile(client, product, ranked, stone_of, published):
         except tile_stone.Refused as exc:
             misfits.append(f"{slab.source}/{slab.sha[:12]}: {exc}")
             continue
-        files = tile_plan.keys(product, tile_plan.views(len(cuts.origins)))
+        files = tile_plan.keys(product)
         current, note = _tile_current(client, files, published, tile_plan.stamp(product, slab))
         if current:
             return files, False, ""

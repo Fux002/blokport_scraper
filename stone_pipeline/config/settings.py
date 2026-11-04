@@ -1311,7 +1311,7 @@ Your whole answer is one JSON object and nothing else:
     TILE_FORMAT = "tile"               # the format whose listings are rendered here, never sent through the photo process
     VARIANTS_KEY = "scraper/from_medusa/variants_export.csv"   # under <env>/: the Medusa variations (Id, Name) ...
     ATTRIBUTES_KEY = "scraper/from_medusa/attributes.csv"      # ... and attributes (category, value, sourceid)
-    TILE_RENDER_VERSION = 2            # part of every tile's made-from stamp: a new version re-renders every tile
+    TILE_RENDER_VERSION = 3            # part of every tile's made-from stamp: a new version re-renders every tile
                                        # (2: the owner's view set, the laid tiles from above as the main view)
     # A tile is rendered at its listing's own size only when that size is a tile's: each side and the thickness within
     # these bounds (metres). Outside them the size is a data error, never drawn: no images, the reason in the summary.
@@ -1337,9 +1337,6 @@ Your whole answer is one JSON object and nothing else:
     TILE_GRID_BAND = (4, 0.45)         # ... over the frequencies from this many cycles per window to this share of the window
     TILE_GRID_OFF_AXIS = (3, 6)        # an axis is compared with the frequencies this many bins beside it
     TILE_GRID_MAX = 4.0                # both axes this many times their neighbours: a crosshatch, the slab is not used
-    # The laid tiles (the main view) need this many distinct faces (non-overlapping cuts of the one slab): fewer and the
-    # floor repeats a face, so the main view is the single tile face-on instead, and there is no separate white view.
-    TILE_MIN_FACES = 6
     # Laying: 3 mm joints (the norm for natural stone floors), straight for a square, half-bond for a rectangle.
     TILE_JOINT_M = 0.003
     TILE_JOINT_GREY = (205.0, 70.0)    # grout grey for a light / a dark stone, mixed with the stone's own mean ...
