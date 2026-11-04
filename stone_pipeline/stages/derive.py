@@ -609,8 +609,8 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         gate_rule = rule if vendor_iso else None   # an unresolvable primary_origin corroborates nothing
         if gate_rule and vendor_iso in gate_rule.countries:
             row.origin_country_code = vendor_iso
-            row.origin_city = gate_rule.city
-            row.origin_county = gate_rule.county
+            row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, gate_rule.city)
+            row.origin_county = _place(field_kinds.PRODUCT_ORIGIN_COUNTY, gate_rule.county)
             row.origin_source = "vendor_origin"
             row.origin_confidence = _conf_name(Confidence.high)
             return
@@ -629,8 +629,8 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         home = _to_iso(source_cfg.origin_default, ref) or ""
         iso, conf, flag = _select_origin(rule.countries, home)
         row.origin_country_code = iso
-        row.origin_city = rule.city
-        row.origin_county = rule.county
+        row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, rule.city)
+        row.origin_county = _place(field_kinds.PRODUCT_ORIGIN_COUNTY, rule.county)
         row.origin_source = "origin_map"
         row.origin_confidence = _conf_name(conf)
         if flag:
@@ -691,7 +691,13 @@ def collection_location(ref: ReferenceData, source_cfg: SourceConfig) -> tuple[s
     iso = _to_iso(country, ref)
     if not iso:
         raise ValueError(f"collection_country_default {country!r} does not resolve to a country")
-    return iso, city or None
+    # a source-level operator setting: a city with no ASCII form stops this source's run loudly (UnfoldableName)
+    return iso, _place(field_kinds.PRODUCT_COLLECTION_CITY, city) or None
+
+
+def _place(field: str, value: str | None) -> str | None:
+    """A city or county by its field's rule; empty stays empty. UnfoldableName propagates (the caller's guard)."""
+    return field_kinds.clean(field, value) if value else value
 
 
 def derive_collection(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
@@ -828,12 +834,17 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
         else:
             log.warning("override origin_country_code did not resolve to a country; ignored",
                         extra={"extra_fields": {"value": v, "surrogate": row.surrogate_key}})
+    # An override passes its field's rule like a derived value; one that fails it raises, so the row guard
+    # dead-letters the row loudly instead of storing it or silently replacing it.
     if v := get("origin_city"):
-        row.origin_city = v
+        row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, v)
     if v := get("title"):
-        row.title, row.title_method = v, "override"
+        row.title, row.title_method = field_kinds.clean(field_kinds.PRODUCT_TITLE, v), "override"
     if v := get("description"):
-        row.description, row.description_method = v, "override"
+        prose = clean_description(v, DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE)
+        if prose is None:
+            raise ValueError(f"description override for {row.surrogate_key!r} is not plain English prose")
+        row.description, row.description_method = prose, "override"
 
 
 def _provenance_gap(row: CanonicalRow) -> bool:

@@ -741,3 +741,28 @@ def test_a_passed_description_is_normalised_not_reworded():
     row = _slab_row(raw_description="This granite is\r\nquarried in Brazil​ and is used in the kitchen.")
     derive.derive_description(row)
     assert row.description == "This granite is\nquarried in Brazil and is used in the kitchen."
+
+
+def test_a_collection_city_is_written_by_its_field_and_refused_without_an_ascii_form(ref):
+    # W24: the source's collection city is a name; zucchi's 'São Francisco' becomes 'Sao Francisco'.
+    from types import SimpleNamespace
+    from stone_pipeline.core.text import UnfoldableName
+    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="São Francisco")
+    assert derive.collection_location(ref, cfg) == ("BR", "Sao Francisco")
+    cfg = SimpleNamespace(collection_country_default="Brazil", collection_city_default="黑")
+    with pytest.raises(UnfoldableName):
+        derive.collection_location(ref, cfg)
+
+
+def test_overrides_pass_their_fields_rules(ref):
+    # W22: an override is cleaned by its field's rule; a description override that is not English prose fails
+    # the row loudly (the row guard dead-letters it), never silently replaced.
+    from types import SimpleNamespace
+    values = {"title": "São X Polished", "origin_city": "São Paulo"}
+    over = SimpleNamespace(overrides=SimpleNamespace(get=lambda site, key, f: values.get(f)))
+    row = _slab_row()
+    derive._apply_overrides(row, over)
+    assert (row.title, row.origin_city) == ("Sao X Polished", "Sao Paulo")
+    values = {"description": "HOLD FOR SAHIL BHAIYA <br /> do not sell"}
+    with pytest.raises(ValueError):
+        derive._apply_overrides(_slab_row(), over)
