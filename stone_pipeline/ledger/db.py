@@ -59,6 +59,18 @@ class LedgerEnvMismatch(LedgerError):
     """The ledger belongs to a different environment than the caller (design 2)."""
 
 
+# The states each sync-state table can hold, in schema.sql's CHECK order (a test pins them to it): what
+# GET /sync/v1/status reports for every table, 0 for a state with no rows, so a count is always a value.
+_SYNC_STATES = ("pending", "dirty", "syncing", "synced", "needs_resync", "gap_held", "retiring")
+STATES: dict[str, tuple[str, ...]] = {
+    "attribute": ("pending", "dirty", "syncing", "synced", "needs_resync"),
+    "variation": _SYNC_STATES,
+    "combination": _SYNC_STATES,
+    "product": _SYNC_STATES,
+    "gap": ("open", "resolved"),
+    "removed": ("pending", "dead"),
+}
+
 def now_iso() -> str:
     """UTC ISO8601 timestamp, the one timestamp format the ledger stores."""
     return datetime.now(timezone.utc).isoformat()
