@@ -124,6 +124,7 @@ class Round:
         self.studio = {k[:64] for k in keys if k.endswith(".studio.jpg") and "/" not in k}
         self.noslab = _shas(keys, "noslab/")
         self.logo_step = _shas(keys, LOGO_STEP)        # made by the retired logo step: never completed
+        self.checked = _shas(keys, C.OUTLINE_CHECKED)  # whole slabs drawn under the current outline rule
         self.held = _shas(keys, "held/")
         self.judged = _shas(keys, "judged/")
         self.cleaned = _shas(keys, "cleaned/")
@@ -133,11 +134,18 @@ class Round:
         self._locks, self._guard = {}, threading.Lock()
 
     @functools.cached_property
+    def older_outline(self):
+        """The whole slabs made under an older outline rule (no note of C.OUTLINE_CHECKED), not made by the retired logo
+        step: not finished until the GPU has checked them (deploy.standardise_source.rework), so never judged before
+        that."""
+        return (self.finished & self.slabs) - self.checked - self.held - self.logo_step
+
+    @functools.cached_property
     def outdated(self):
-        """The results made before an open book's halves had their slab (a side view, no slab, not tried again, not made
-        by the retired logo step): the GPU completes each once (deploy.standardise_source.complete). Worked out once per
-        Round: none of its sets change."""
-        return (self.finished & self.studio) - self.slabs - self.noslab - self.held - self.logo_step
+        """The results the GPU works on again, once each (deploy.standardise_source.rework): those made before an open
+        book's halves had their slab (a side view, no slab, not tried again), and the older_outline ones; never one the
+        retired logo step made. Worked out once per Round: none of its sets change."""
+        return ((self.finished & self.studio) - self.slabs - self.noslab - self.held - self.logo_step) | self.older_outline
 
     def lock(self, sha):
         with self._guard:
@@ -234,7 +242,7 @@ def choose(client, rounds, listing, exclude, spend=None, owner=None):
         for sha in shas:
             if sha in r.held:
                 continue
-            if sha not in r.finished:
+            if sha not in r.finished or sha in r.older_outline:     # no result yet, or one the GPU checks first
                 complete = False
                 continue
             whole = sha in r.slabs
@@ -404,14 +412,16 @@ def owner_choice(record, listing, exclude, conflicts, rounds):
 class Selection:
     """The listings one run works on and what the two run tags hold for them (rounds: read_rounds, re-read after each
     GPU round). owner = {SKU: the owner's choice record} (deploy.standardise_decisions); conflicts = {(source, sha):
-    listing keys} of the photos listings of several stones show (index.shared_photos)."""
+    listing keys} of the photos listings of several stones show (index.shared_photos); chosen = [(tag, source, sha)] of
+    what the listings a run may publish show now (deploy.standardise_run.live_choices): an outdated one goes to the GPU
+    too, its listing not picked again (its verdict and choice stand)."""
 
-    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds):
+    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen):
         if not run_tag or not clean_tag or run_tag == clean_tag:
             raise ValueError("two different run tags are required: the scraped photos' run and the cleaned copies' run")
         self.client, self.listings, self.tags = client, listings, (run_tag, clean_tag)
-        self.owner, self.conflicts, self.rounds = owner, conflicts, rounds
-        self.sources = sorted({l["source"] for l in listings})
+        self.owner, self.conflicts, self.rounds, self.chosen = owner, conflicts, rounds, sorted(set(chosen))
+        self.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in self.chosen})
         self.exclude = read_exclude(EXCLUDE_PATH.read_text())
         self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
 
@@ -429,15 +439,22 @@ class Selection:
 
     def gpu_todo(self):
         """{source: shas} of each listing's candidates (the photos the judge looks at) the standardiser has not run yet,
-        or whose result is outdated; none of a listing the owner chose a photo for."""
+        or whose result is outdated, none of a listing the owner chose a photo for; and the chosen results of this run
+        tag that are outdated (excluded ones left out)."""
         gpu = self.rounds[0][1]
-        return _by_source((l["source"], sha) for l in self.listings if self.owner_pick(l) is None
-                          for sha in candidates(l, self.blocked(l)) if needs_gpu(gpu[l["source"]], sha))
+        picked = [(l["source"], sha) for l in self.listings if self.owner_pick(l) is None
+                  for sha in candidates(l, self.blocked(l))]
+        chosen = [(src, sha) for tag, src, sha in self.chosen if tag == self.tags[0] and sha not in self.exclude]
+        return _by_source((src, sha) for src, sha in picked + chosen if needs_gpu(gpu[src], sha))
 
     def clean_todo(self):
-        """{source: shas} with a cleaned copy the standardiser has not run yet, or whose result is outdated."""
+        """{source: shas} of the cleaned copies of this run's listings' photos and of the chosen cleaned copies (excluded
+        ones left out) the standardiser has not run yet, or whose result is outdated; never a cleaned copy of a photo
+        no current listing has."""
         cl = self.rounds[1][1]
-        return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned if needs_gpu(cl[src], sha))
+        wanted = ({sha for l in self.listings for sha in l["photos"]} |
+                  {sha for tag, _, sha in self.chosen if tag == self.tags[1]}) - self.exclude
+        return _by_source((src, sha) for src in self.sources for sha in cl[src].cleaned & wanted if needs_gpu(cl[src], sha))
 
 
 def needs_gpu(rnd, sha):

@@ -36,10 +36,12 @@ class _S3:
         self.objects.pop(Key, None)
 
 
-def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=(), requested=(), slabs=()):
+def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=(), requested=(), slabs=(), checked=None):
+    """checked: the whole slabs drawn under the current outline rule (default: every slab)."""
     import threading
     r = object.__new__(sel.Round)
     r.prefix, r.finished, r.held, r.judged, r.slabs = prefix, set(finished), set(held), set(judged), set(slabs)
+    r.checked, r.logo_step = set(slabs) if checked is None else set(checked), set()
     r.cleaned, r.attempts, r.edited, r.requested = set(cleaned), set(attempts), set(edited), set(requested)
     r._locks, r._guard = {}, threading.Lock()
     return r
@@ -241,6 +243,13 @@ def test_a_photo_with_no_standardiser_result_leaves_the_listing_open_not_without
     assert sel.choose(s3, rounds, _listing(A, B), set()) == (None, False)          # A: its GPU job left no result
 
 
+def test_a_whole_slab_made_under_the_older_outline_rule_is_never_judged_before_the_gpu_checked_it(monkeypatch):
+    s3 = _S3({f"{GPU}{A}.main.jpg": b"m"})
+    monkeypatch.setattr(sel.judge, "judge", lambda *a: pytest.fail("judged an outdated result"))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), slabs=(A,), checked=())}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(s3, rounds, _listing(A), set(), spend=sel.Spend(5.0)) == (None, False)   # open until it is checked
+
+
 def test_the_gpu_and_the_judge_look_at_the_same_photos_excluded_ones_left_out_first():
     photos = [c * 64 for c in "123456"]
     assert sel.candidates(_listing(*photos), {photos[0]}) == photos[1:1 + C.JUDGE_MAX_PER_LISTING]
@@ -302,7 +311,7 @@ def test_the_gpu_list_is_the_judge_s_candidates_when_a_listing_s_first_photo_is_
     photos = [c * 64 for c in "12345"]
     s = object.__new__(sel.Selection)
     s.client, s.listings, s.exclude, s.owner, s.conflicts = _S3(), [_listing(*photos)], {photos[0]}, {}, {}
-    s.sources, s.rounds = ["sentas"], [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})]
+    s.sources, s.rounds, s.chosen = ["sentas"], [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})], []
     assert s.gpu_todo() == {"sentas": sel.candidates(_listing(*photos), {photos[0]})} == {"sentas": photos[1:4]}
 
 
@@ -899,7 +908,7 @@ def test_a_completion_cut_short_removes_its_close_view_only_while_the_slab_is_mi
 def _selection(s3, listings, rounds, owner=None, conflicts=None, exclude=()):
     s = object.__new__(sel.Selection)
     s.client, s.listings, s.exclude, s.sources = s3, listings, set(exclude), ["sentas"]
-    s.owner, s.conflicts, s.rounds, s.tags = owner or {}, conflicts or {}, rounds, ("v9", "v9-clean")
+    s.owner, s.conflicts, s.rounds, s.tags, s.chosen = owner or {}, conflicts or {}, rounds, ("v9", "v9-clean"), []
     return s
 
 

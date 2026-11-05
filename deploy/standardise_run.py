@@ -6,7 +6,9 @@ runner's `photos` stage, started after each full produce on the owner's button. 
      not the owner's choice, or a photo listings of several stones show that the owner did not assign), never one the
      owner removed; and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept;
      only of the sources whose image pipeline is on
-  2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG
+  2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG,
+     and every chosen result outdated (a whole slab drawn under an older outline rule: live_choices), its listing not
+     picked again
   3. judge: the owner's choice of a listing, else its results in its own order until one passes
   4. clean: a hosted edit of one fixable photo of each listing still without a pass
   5. GPU: the cleaned copies, through every step a scraped photo takes, under STANDARDISE.CLEAN_TAG
@@ -284,6 +286,25 @@ def todo(listings, records, exclude, slabs, removed, conflicts, picks):
     return out
 
 
+def live_choices(listings, records, removed, decisions):
+    """[(tag, source, sha)] of what the listings a run may publish show now: each one's owner choice that applies, else
+    its valid choice record (valid_choice); never a listing the owner removed or of a source whose image pipeline is off
+    (its products show the scraped photos). An outdated whole slab among them goes to the GPU without its listing being
+    picked again (select.Selection). A listing that left the sheet keeps its record, but its photos are no longer listed
+    for the GPU job, so it is not among them."""
+    off = image_pipeline_off()
+    out = set()
+    for l in listings:
+        if l["sku"] in removed or l["source"] in off:
+            continue
+        r = records.get(l["key"])
+        if l["key"] in decisions.picks:
+            out.add((decisions.picks[l["key"]][0], l["source"], decisions.picks[l["key"]][1]))
+        elif valid_choice(l, r, decisions.exclude, decisions.conflicts, decisions.picks):
+            out.add((r["tag"], l["source"], r["sha"]))
+    return sorted(out)
+
+
 def assignments(listings, picks, conflicts):
     """({(source, sha): SKUs} of every conflict photo, the problems): the one listing whose owner choice that applies names
     it (picks, select.owner_choice). A conflict photo the owner's choices name for more than one listing (the applier
@@ -398,7 +419,8 @@ def photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisi
     removed, records = removed_listings(s3), choices(s3, root)
     found = todo(listings, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
                  decisions.picks)
-    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds)
+    sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
+                           live_choices(listings, records, removed, decisions))
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")

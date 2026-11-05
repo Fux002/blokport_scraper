@@ -83,10 +83,54 @@ until a produce runs that source again. A reset removes the list with the produc
 An open book made before its halves had a slab (a side view, no slab.png) is outdated: the next run sends it to the
 GPU once, which completes it from a re-run (its close view, then its slab, last). What was judged and published (main,
 white, studio) stays as it is, so its verdict and choice stand and no judge call is made; publish then adds its close
-view and 3D slab. A re-run that is no open book this time, or that fails for the photo itself, adds nothing and is
-noted in `noslab/<sha>.json`, so it is never run again; a judged result is never held. A completion cut short takes its
-close view off again while its slab is missing, and a passing storage error leaves it for the next run. Nothing is
-removed by hand.
+view and 3D slab. A re-run that is no open book this time adds nothing and is noted in `noslab/<sha>.json`, so it is
+never run again; a judged result is never held. A re-run that fails is not noted: the next run tries it again, unless it
+broke the GPU twice (then it is noted as above). A completion cut short takes its close view off again while its slab is
+missing, and a passing storage error leaves it for the next run. Nothing is removed by hand. The completion and the
+recheck below are one path (`deploy.standardise_source.rework`).
+
+## A change of the slab's outline rule (a recheck)
+
+The slab's outline is what SAM saw as stone, plus what was erased on it, inside the fitted slab: a printed card or label
+the text reader found (`marks.mark_mask`) is filled whole, also on a corner (it sits on the stone); an object SAM did
+not count as stone (`marks.foreign_objects`) only within the stone's own hull, one hull per slab (an open book's two
+halves each have their own, so the corners where they meet stay open). Where a rounded, chipped or broken corner leaves
+the wall inside the fitted corners, the wall stays out: the white view shows white there, the showroom its room, the 3D
+slab the real outline, and the studio draws its sawn edge only beside the stone, never up past a broken right corner (a
+square corner's pixel of rounding, a run shorter than the sawn-edge strip is wide, is no break). A corner broken off is
+never filled with stone (the owner, 2026-11-02: a broken or rounded corner shows its true shape; before it, an erased
+object anywhere inside the fitted corners counted as stone, and the wall in such a corner was drawn opaque).
+
+Every whole slab the GPU writes has a note `<run folder>outline-v2/<sha>.json` (`settings.OUTLINE_CHECKED`): it is
+drawn under this rule. `{"new": true}`: a new result; `{"changed": true}`: a result made before redrawn by this version;
+`{"changed": false}`: a result made before that this version draws the same, or an open book completed (above);
+`{"changed": false, "kept": why}`: a result made before whose re-run gave no whole slab, kept as it is. A whole slab
+without the note was made under the older rule and is outdated: it is not finished, so it is never judged, until the GPU
+has worked on it once. What every listing on the sheet shows now (its owner choice that applies, else its valid choice
+record; never a listing the owner removed or of a source whose image pipeline is off) is among them: such a photo goes
+to the GPU without its listing being picked again (`deploy.standardise_run.live_choices`). The GPU works on it:
+
+- drawn the same by this version (no wall in a corner, the sawn edge unchanged): only the note; its views stay as they
+  are. A recheck stops before the costly steps (eraser, upscale, inpainting);
+- drawn differently: written whole, every file encoded before the first write, views it no longer makes (a close view)
+  removed, then the note; publish copies the changed views, makes its 3D slab again (the slab's ETag changed, so the
+  tiles cut from it render again) and the relink runs;
+- no whole slab on the re-run (held, a close-up): nothing written but a note that it is never run again (`kept`); never
+  held: the result is judged and may be published.
+
+A re-run that fails is not noted: the next run tries it again (a problem of the round), unless it broke the GPU twice,
+then it is noted as above and never run again. The verdict and the choice stand, and no judge call is made: only what is
+not stone changes. A result the retired logo step made (`logo-step/`) is never rechecked, as it is never completed: its
+re-run would start from the photo with its logo. A later rule change takes a new folder name, and every whole slab is
+checked once more.
+
+Cost: the first photos run after this release sends every whole slab without a note to the GPU once, the chosen ones of
+every live listing included, on top of its usual work. The driver is their number: each slice of `RUN_SLICE` of them is a
+retouch job and a standardise job, each booting a GPU and loading its models; the retouch looks for marks again on each
+photo it never retouched or refused (a photo with no marks has no record of its own), and the standardise job classifies
+it and runs the outline step (SAM and the text reader), then stops for a slab drawn the same; only the slabs drawn
+differently take the costly steps. The round is sized to the month's budget and window like any other: what does not
+fit goes on in the next run.
 
 ## Tile listings
 
@@ -266,7 +310,8 @@ records are outside the tags and need nothing. Under `<env>/standardise-test/`:
 run.lock                            the running process (rewritten every 5 min)
 spend/<YYYY-MM>/<run id>.json       each run's spend of the month
 removed/<SKU>.json                  a listing the owner removed (SKU percent-encoded)
-<RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated open book tried once)
+<RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated open book tried once),
+                                    outline-v2/ (each whole slab drawn under the current outline rule, its note)
 <CLEAN_TAG>/<src>/...               cleaned/, attempts/, GPU results of cleaned copies, judged/ (unchanged)
 <CLEAN_TAG>/owner/<SKU>.json        the owner's photo choice of a listing (SKU percent-encoded): {tag, sha, at, listing,
                                     decided_on}
@@ -340,6 +385,13 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 3. The budgets are in the brand tfvars (dev 20 USD, prod 100 USD a month). Switch AUTO on in dev, verify a dev run, then
    prod after the owner's review of it.
 
+A release that changes the GPU job's code (as the outline rule's, `OUTLINE_CHECKED`), in this order:
+
+1. The GPU image first: build it from the main commit of the release, tag it `standardise-pin-<sha>`, set
+   `*_standardise_image_tag` and apply, so the job definition runs it. A pinned image older than the change does not
+   write the notes the svc looks for: every whole slab without one would be sent to the GPU again on every run.
+2. Then the svc (its image pin), whose photo process reads the notes and sends what is outdated to the GPU.
+
 TerminateJob scope: the svc task role may stop jobs `arn:aws:batch:<region>:<account>:job/*`. Batch has no condition on
 a job's name; scoping to the process's own jobs would need tags on submit (`batch:TagResource`) and an
 `aws:ResourceTag` condition on TerminateJob, which is not applied here: the process only stops jobs it named
@@ -347,12 +399,13 @@ a job's name; scoping to the process's own jobs would need tags on submit (`batc
 
 ### At the deploy that retired the logo step: mark every result it made (once per environment)
 
-Two steps add views to a stored result from a re-run of its photo, unjudged: completing an outdated open book (its close
-view and 3D slab) and the close-only run (its close-up, under every close-up rule). A result the retired logo step made
+Three steps add views to a stored result from a re-run of its photo, unjudged: completing an outdated open book (its
+close view and 3D slab), rechecking a whole slab made under an older outline rule (its views redrawn) and the close-only
+run (its close-up, under every close-up rule). A result the retired logo step made
 (RUN_TAG, a watermarked source) would be re-run without that step. Before the first photos run of that release on an
 environment, run `python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first, then `false`; the environment's usual
-`SCRAPER_` settings). It writes `logo-step/<sha>.json` beside each such result; a marked result is never completed and
-its close-up never made again, whatever `CLOSEUP_VERSION` says: it keeps its judged views, its choice and its
+`SCRAPER_` settings). It writes `logo-step/<sha>.json` beside each such result; a marked result is never completed,
+never rechecked and its close-up never made again, whatever `CLOSEUP_VERSION` says: it keeps its judged views, its choice and its
 `close.jpg` as they are. It reads the watermarked sources from a config.db snapshot taken before the migration; for dev
 pass prod's too (`CONFIG_DB_SNAPSHOTS`, see the script), since dev's varsha results were made by prod's run. Dry run on
 2026-11-03: 1278 in prod, 1187 in dev, all varsha `v2` results. Idempotent.

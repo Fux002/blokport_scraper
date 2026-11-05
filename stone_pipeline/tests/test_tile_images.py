@@ -657,6 +657,15 @@ def test_the_photo_process_never_takes_a_tile_listing(categories):
     assert [l["key"] for l in proc.photo_listings(*_sheet(*SHEET_ROWS))] == ["rb-slab", "tb-slab"]
 
 
+def test_a_tile_listing_s_old_choice_is_never_sent_to_the_gpu_again(categories):
+    """Its photo is no stone of its own any more (it is rendered from its variety's slab): an older outline of it is never
+    rechecked."""
+    records = {h: {"key": h, "sha": sha, "source": "marenostone", "tag": "v2"} for h, sha in (("rb-slab", A), ("rb-tile", B))}
+    decided = proc.Decisions(set(), {}, {}, [], {})
+    live = proc.live_choices(proc.photo_listings(*_sheet(*SHEET_ROWS)), records, set(), decided)
+    assert live == [("v2", "marenostone", A)]
+
+
 # --- the image stage ---------------------------------------------------------------------------------------------------
 PUBLIC = f"https://bucket.s3.amazonaws.com/{ENV_SEGMENT}/products/"
 
