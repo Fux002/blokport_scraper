@@ -396,8 +396,14 @@ class _S3:
         objects = self.objects
 
         class _Pages:
-            def paginate(self, Bucket, Prefix):
-                return [{"Contents": [{"Key": k, "ETag": v["ETag"]} for k, v in sorted(objects.items()) if k.startswith(Prefix)]}]
+            def paginate(self, Bucket, Prefix, Delimiter=None):
+                keys = [k for k in sorted(objects) if k.startswith(Prefix)]
+                if Delimiter:                          # the folders right under Prefix, and the keys there
+                    folders = sorted({Prefix + k[len(Prefix):].split(Delimiter)[0] + Delimiter for k in keys
+                                      if Delimiter in k[len(Prefix):]})
+                    return [{"CommonPrefixes": [{"Prefix": f} for f in folders],
+                             "Contents": [{"Key": k, "ETag": objects[k]["ETag"]} for k in keys if Delimiter not in k[len(Prefix):]]}]
+                return [{"Contents": [{"Key": k, "ETag": objects[k]["ETag"]} for k in keys]}]
         return _Pages()
 
 
@@ -655,6 +661,15 @@ def test_a_tile_s_problem_is_on_the_run_s_problem_list(monkeypatch):
 
 def test_the_photo_process_never_takes_a_tile_listing(categories):
     assert [l["key"] for l in proc.photo_listings(*_sheet(*SHEET_ROWS))] == ["rb-slab", "tb-slab"]
+
+
+def test_a_tile_listing_s_old_choice_is_never_sent_to_the_gpu_again(categories):
+    """Its photo is no stone of its own any more (it is rendered from its variety's slab): an older outline of it is never
+    rechecked."""
+    records = {h: {"key": h, "sha": sha, "source": "marenostone", "tag": "v2"} for h, sha in (("rb-slab", A), ("rb-tile", B))}
+    decided = proc.Decisions(set(), {}, {}, [], {})
+    live = proc.live_choices(proc.photo_listings(*_sheet(*SHEET_ROWS)), records, set(), decided)
+    assert live == [("v2", "marenostone", A)]
 
 
 # --- the image stage ---------------------------------------------------------------------------------------------------

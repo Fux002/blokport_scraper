@@ -36,10 +36,15 @@ class _S3:
         self.objects.pop(Key, None)
 
 
-def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=(), requested=(), slabs=()):
+def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edited=(), requested=(), slabs=(), checked=None,
+           redrawn=()):
+    """checked: the whole slabs drawn under the current outline rule (default: every slab); redrawn: those with a
+    complete candidate waiting for the judge."""
     import threading
     r = object.__new__(sel.Round)
     r.prefix, r.finished, r.held, r.judged, r.slabs = prefix, set(finished), set(held), set(judged), set(slabs)
+    r.checked, r.logo_step, r.noslab = set(slabs) if checked is None else set(checked), set(), set()
+    r.redrawn, r.redraw = set(redrawn), sel.Candidates(prefix, [])
     r.cleaned, r.attempts, r.edited, r.requested = set(cleaned), set(attempts), set(edited), set(requested)
     r._locks, r._guard = {}, threading.Lock()
     return r
@@ -211,6 +216,14 @@ class _Bucket:
         import io
         return {"Body": io.BytesIO(self.objects[Key])}
 
+    def get_paginator(self, name):
+        objects = self.objects
+
+        class _Pages:
+            def paginate(self, Bucket, Prefix):
+                return [{"Contents": [{"Key": k} for k in sorted(objects) if k.startswith(Prefix)]}]
+        return _Pages()
+
 
 def test_a_cleaned_copy_goes_through_every_step_a_scraped_photo_does():
     # the hosted edit leaves the straps: the cleaned copy is retouched like any photo
@@ -239,6 +252,16 @@ def test_a_photo_with_no_standardiser_result_leaves_the_listing_open_not_without
     s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection")})
     rounds = [("v9", {"sentas": _round(GPU, finished=(B,), judged=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(s3, rounds, _listing(A, B), set()) == (None, False)          # A: its GPU job left no result
+
+
+def test_a_whole_slab_made_under_the_older_outline_rule_is_never_judged_before_the_gpu_checked_it(monkeypatch):
+    s3 = _S3({f"{GPU}{A}.main.jpg": b"m"})
+    monkeypatch.setattr(sel.judge, "judge", lambda *a: pytest.fail("judged an outdated result"))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), slabs=(A,), checked=())}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(s3, rounds, _listing(A), set(), spend=sel.Spend(5.0)) == (None, False)   # open until it is checked
+    redrawn = _round(GPU, finished=(A,), slabs=(A,), checked=(), redrawn=(A,))       # checked: its redraw not judged yet
+    assert sel.choose(s3, [("v9", {"sentas": redrawn}), ("v9-clean", {"sentas": _round(CL)})], _listing(A), set(),
+                      spend=sel.Spend(5.0)) == (None, False)
 
 
 def test_the_gpu_and_the_judge_look_at_the_same_photos_excluded_ones_left_out_first():
@@ -302,7 +325,7 @@ def test_the_gpu_list_is_the_judge_s_candidates_when_a_listing_s_first_photo_is_
     photos = [c * 64 for c in "12345"]
     s = object.__new__(sel.Selection)
     s.client, s.listings, s.exclude, s.owner, s.conflicts = _S3(), [_listing(*photos)], {photos[0]}, {}, {}
-    s.sources, s.rounds = ["sentas"], [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})]
+    s.sources, s.rounds, s.chosen = ["sentas"], [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})], []
     assert s.gpu_todo() == {"sentas": sel.candidates(_listing(*photos), {photos[0]})} == {"sentas": photos[1:4]}
 
 
@@ -653,7 +676,8 @@ def _open_book(*extra):
 def test_an_open_book_without_its_slab_is_not_finished_until_completed_or_tried():
     from deploy import standardise_source as src
     assert not src.finished(_Bucket(_open_book()), GPU, A)
-    assert src.finished(_Bucket(_open_book(f"{GPU}{A}.slab.png")), GPU, A)
+    assert not src.finished(_Bucket(_open_book(f"{GPU}{A}.slab.png")), GPU, A)          # completed: its outline checked once
+    assert src.finished(_Bucket(_open_book(f"{GPU}{A}.slab.png", src.checked_key(GPU, A))), GPU, A)
     assert src.finished(_Bucket(_open_book(f"{GPU}noslab/{A}.json")), GPU, A)
     assert src.finished(_Bucket(_open_book(src.logo_step_key(GPU, A))), GPU, A)    # made by the retired logo step
     assert src.finished(_Bucket({f"{GPU}{A}.main.jpg": b"", f"{GPU}{A}.white.jpg": b""}), GPU, A)    # a close-up
@@ -661,18 +685,34 @@ def test_an_open_book_without_its_slab_is_not_finished_until_completed_or_tried(
     assert not src.finished(_Bucket({}), GPU, A)
 
 
-def test_completing_an_open_book_adds_its_close_view_then_its_slab_and_leaves_what_was_judged():
+def _views(img, *names):
+    return {name: img for name in names}
+
+
+def _book_result(changed, views=("main", "white", "studio", "close")):
     import numpy as np
-    from deploy import standardise_source as src
     from stone_pipeline.standardise.photo import Result
-    s3 = _Written(_open_book())
-    half = (np.zeros((20, 30, 3), np.uint8), np.ones((20, 30), np.float32))
     img = np.zeros((20, 30, 3), np.uint8)
-    res = Result(kind="open book", images={"main": img, "white": img, "studio": img, "close": img}, slab=half, chosen=(1, 2))
-    assert src.complete(s3, GPU, A, res) == "completed"
-    # the slab last: the result is complete; which half it is, beside it
-    assert s3.written == [f"{GPU}{A}.close.jpg", f"{GPU}{A}.slab.json", f"{GPU}{A}.slab.png"]
-    assert json.loads(s3.objects[f"{GPU}{A}.slab.json"]) == {"index": 1, "of": 2}
+    return Result(kind="open book", images=_views(img, *views), slab=(img, np.ones((20, 30), np.float32)), chosen=(1, 2),
+                  changed=changed)
+
+
+def test_completing_an_open_book_drawn_the_same_adds_its_close_view_then_its_slab_then_the_note():
+    from deploy import standardise_source as src
+    s3 = _Written(_open_book())
+    assert src.rework(s3, GPU, A, _book_result(changed=False), "complete") == "completed"
+    # what was judged stays; the slab last: the result is complete; which half it is, beside it
+    assert s3.written == [f"{GPU}{A}.close.jpg", src.slab_record_key(GPU, A), f"{GPU}{A}.slab.png", src.checked_key(GPU, A)]
+    assert json.loads(s3.objects[src.slab_record_key(GPU, A)]) == {"index": 1, "of": 2}
+    assert json.loads(s3.objects[src.checked_key(GPU, A)]) == {"changed": False} and src.finished(s3, GPU, A)
+
+
+def test_completing_an_open_book_this_version_draws_differently_draws_a_candidate_for_the_judge():
+    from deploy import standardise_source as src
+    s3 = _Written(_open_book())
+    assert src.rework(s3, GPU, A, _book_result(changed=True), "complete") == "redrawn for the judge"
+    assert all(k.startswith(src.candidate_prefix(GPU)) for k in s3.written)          # the result itself untouched
+    assert s3.written[-1] == src.candidate_key(GPU, A) and src.finished(s3, GPU, A)  # complete: not run again
 
 
 def test_a_new_whole_slab_result_records_which_slab_it_is_before_its_slab_and_its_views(monkeypatch):
@@ -683,7 +723,9 @@ def test_a_new_whole_slab_result_records_which_slab_it_is_before_its_slab_and_it
     book = lambda *a, **k: Result(kind="open book", images={"main": img, "white": img}, slab=(img, np.ones((20, 30), np.float32)),
                                   chosen=(0, 2))
     assert _completing(monkeypatch, s3, book) == 0
-    assert [k for k in s3.written if A in k] == [f"{GPU}{A}.slab.json", f"{GPU}{A}.slab.png", f"{GPU}{A}.white.jpg", f"{GPU}{A}.main.jpg"]
+    assert [k for k in s3.written if A in k] == [f"{GPU}{A}.slab.json", f"{GPU}{A}.slab.png", f"{GPU}{A}.white.jpg", f"{GPU}{A}.main.jpg",
+                                                 f"{GPU}{C.OUTLINE_CHECKED}{A}.json"]
+    assert json.loads(s3.objects[f"{GPU}{C.OUTLINE_CHECKED}{A}.json"]) == {"new": True}
     assert json.loads(s3.objects[f"{GPU}{A}.slab.json"]) == {"index": 0, "of": 2}
 
 
@@ -695,8 +737,99 @@ def test_an_open_book_that_is_no_open_book_on_its_rerun_is_marked_tried_and_neve
     s3 = _Written(_open_book())
     img = np.zeros((20, 30, 3), np.uint8)
     result = Result(kind="close-up", images={"main": img, "white": img}) if res == "close-up" else Result(held="no outline")
-    assert src.complete(s3, GPU, A, result) == "no slab"
+    assert src.rework(s3, GPU, A, result, "complete") == "no slab"
     assert s3.written == [f"{GPU}noslab/{A}.json"] and src.finished(s3, GPU, A)
+
+
+# --- a whole slab made under the older outline rule (the wall in a rounded corner) --------------------------------------
+def _whole(*extra):
+    return {f"{GPU}{A}.{v}": b"old" for v in ("main.jpg", "white.jpg", "studio.jpg", "close.jpg", "slab.png")} | {k: b"" for k in extra}
+
+
+def _slab_result(*views):
+    import numpy as np
+    from stone_pipeline.standardise.photo import Result
+    img = np.zeros((20, 30, 3), np.uint8)
+    return Result(kind="slab", images=_views(img, *views), slab=(img, np.ones((20, 30), np.float32)), chosen=(0, 1),
+                  changed=True)
+
+
+def test_a_whole_slab_made_under_the_older_outline_rule_is_checked_once():
+    from deploy import standardise_source as src
+    assert not src.finished(_Bucket(_whole()), GPU, A) and src.again(_Bucket(_whole()), GPU, A) == "recheck"
+    assert src.finished(_Bucket(_whole(src.checked_key(GPU, A))), GPU, A)
+    assert src.finished(_Bucket(_whole(src.candidate_key(GPU, A))), GPU, A)           # its redraw waits for the judge
+    assert not src.finished(_Bucket(_whole(f"{GPU}redraw/{A}.main.jpg")), GPU, A)      # a candidate cut short: again
+    assert src.again(_Bucket(_open_book()), GPU, A) == "complete" and src.again(_Bucket({}), GPU, A) is None
+
+
+def test_a_whole_slab_the_retired_logo_step_made_is_never_rechecked():
+    """A re-run would start from the photo with its logo and redraw views no judge saw (logo_step_key)."""
+    from deploy import standardise_source as src
+    assert src.finished(_Bucket(_whole(src.logo_step_key(GPU, A))), GPU, A)
+
+
+def test_a_recheck_drawn_the_same_only_notes_it():
+    from deploy import standardise_source as src
+    from stone_pipeline.standardise.photo import Result
+    s3 = _Written(_whole())
+    assert src.rework(s3, GPU, A, Result(kind="slab", unchanged=True), "recheck") == "outline unchanged"
+    assert s3.written == [src.checked_key(GPU, A)] and json.loads(s3.objects[src.checked_key(GPU, A)]) == {"changed": False}
+    assert src.finished(s3, GPU, A)
+
+
+def test_a_recheck_drawn_differently_draws_a_complete_candidate_and_never_touches_the_result():
+    """A separate set under redraw/, named as a result is, which slab it is and the slab first, main last, its
+    completion marker last of all; the stored result, its verdict and what is published of it stay as they are."""
+    from deploy import standardise_source as src
+    s3 = _Slice(_whole(f"{GPU}judged/{A}.json"))
+    before = dict(s3.objects)
+    assert src.rework(s3, GPU, A, _slab_result("main", "white", "studio", "close"), "recheck") == "redrawn for the judge"
+    cand = src.candidate_prefix(GPU)
+    assert s3.written == [f"{cand}{A}.slab.json", f"{cand}{A}.slab.png", f"{cand}{A}.white.jpg", f"{cand}{A}.studio.jpg",
+                          f"{cand}{A}.close.jpg", f"{cand}{A}.main.jpg", src.candidate_key(GPU, A)]
+    assert {k: v for k, v in s3.objects.items() if k in before} == before and src.finished(s3, GPU, A)
+
+
+def test_every_file_is_encoded_before_the_first_write(monkeypatch):
+    from deploy import standardise_source as src
+    s3 = _Slice(_whole())
+    res = _slab_result("main", "white")
+    real = src._encode
+    monkeypatch.setattr(src, "_encode", lambda im, quality=92: real(im) if im is not res.images["white"] else (_ for _ in ()).throw(ValueError("could not encode")))
+    with pytest.raises(ValueError):
+        src.rework(s3, GPU, A, res, "recheck")
+    assert s3.written == [] and all(s3.objects[f"{GPU}{A}.{v}"] == b"old" for v in ("main.jpg", "white.jpg", "slab.png"))
+    assert not src.finished(s3, GPU, A)                                     # rechecked again
+
+
+@pytest.mark.parametrize("res", ["held", "close-up"])
+def test_a_recheck_that_gives_no_whole_slab_keeps_the_stored_result_and_notes_it_checked(res):
+    import numpy as np
+    from deploy import standardise_source as src
+    from stone_pipeline.standardise.photo import Result
+    s3 = _Written(_whole())
+    img = np.zeros((20, 30, 3), np.uint8)
+    result = Result(held="two stones in one outline") if res == "held" else Result(kind="close-up", images={"main": img})
+    assert src.rework(s3, GPU, A, result, "recheck") == "no slab"
+    assert s3.written == [src.checked_key(GPU, A)] and json.loads(s3.objects[src.checked_key(GPU, A)])["kept"]
+    assert src.finished(s3, GPU, A) and f"{GPU}noslab/{A}.json" not in s3.objects   # never noslab/ over a live result
+    assert all(s3.objects[f"{GPU}{A}.{v}"] == b"old" for v in ("main.jpg", "white.jpg", "slab.png"))
+
+
+def test_a_new_whole_slab_is_noted_as_drawn_under_the_current_outline_rule_and_a_close_up_is_not():
+    import numpy as np
+    from deploy import standardise_source as src
+    from stone_pipeline.standardise.photo import Result
+    img = np.zeros((20, 30, 3), np.uint8)
+    whole, close = _Written({}), _Written({})
+    src.write(whole, GPU, A, Result(kind="slab", images={"main": img, "white": img}, slab=(img, np.ones((20, 30), np.float32)),
+                                    chosen=(0, 1)))
+    src.write(close, GPU, A, Result(kind="close-up", images={"main": img, "white": img}))
+    assert whole.written == [src.slab_record_key(GPU, A), f"{GPU}{A}.slab.png", f"{GPU}{A}.white.jpg", f"{GPU}{A}.main.jpg",
+                             src.checked_key(GPU, A)]
+    assert json.loads(whole.objects[src.checked_key(GPU, A)]) == {"new": True}
+    assert close.written == [f"{GPU}{A}.white.jpg", f"{GPU}{A}.main.jpg"] and src.finished(close, GPU, A)
 
 
 # --- review D1: a failing completion never holds a judged, published result ---------------------------------------------
@@ -733,15 +866,39 @@ def _completing(monkeypatch, s3, standardise):
     return src.main()
 
 
-def test_a_completion_that_crashes_is_noted_tried_never_held_over_the_published_result(monkeypatch):
-    s3 = _Slice(_open_book())
+def _tried(stored):
+    """Where a redo that gave nothing is noted: an open book's completion in noslab/ (main), a recheck in its note, kept
+    as it is (never noslab/ over a live result)."""
+    from deploy import standardise_source as src
+    return (f"{GPU}noslab/{A}.json", "reason") if stored == "open book" else (src.checked_key(GPU, A), "kept")
+
+
+@pytest.mark.parametrize("stored", ["open book", "older outline"])
+def test_a_redo_that_crashes_is_noted_tried_never_held_over_the_published_result(monkeypatch, stored):
+    from deploy import standardise_source as src
+    s3 = _Slice(_open_book() if stored == "open book" else _whole())
 
     def crash(*a, **k):
         raise ValueError("the outline went wrong")
     assert _completing(monkeypatch, s3, crash) == 0
     assert f"{GPU}held/{A}.json" not in s3.objects                                   # the judged result stays usable
-    assert "the outline went wrong" in json.loads(s3.objects[f"{GPU}noslab/{A}.json"])["reason"]
+    key, field = _tried(stored)
+    assert "the outline went wrong" in json.loads(s3.objects[key])[field]
+    assert src.finished(s3, GPU, A)                                                  # never run again
     assert all(f"{GPU}{A}.{v}.jpg" in s3.objects for v in ("main", "white", "studio"))
+
+
+@pytest.mark.parametrize("stored", ["open book", "older outline"])
+def test_a_redo_that_broke_the_gpu_twice_is_noted_and_never_run_again(monkeypatch, stored):
+    from deploy import standardise_source as src
+    s3 = _Slice(_open_book(f"{GPU}crashed/{A}.json") if stored == "open book" else _whole(f"{GPU}crashed/{A}.json"))
+
+    def crash(*a, **k):
+        raise RuntimeError("CUDA error: an illegal memory access")
+    assert _completing(monkeypatch, s3, crash) == 0
+    key, field = _tried(stored)
+    assert "CUDA" in json.loads(s3.objects[key])[field] and f"{GPU}held/{A}.json" not in s3.objects
+    assert src.finished(s3, GPU, A)
 
 
 def test_a_completion_cut_short_by_a_passing_storage_error_leaves_no_half_and_is_retried(monkeypatch):
@@ -760,14 +917,10 @@ def test_a_completion_cut_short_by_a_passing_storage_error_leaves_no_half_and_is
 
 
 def test_a_completion_cut_short_removes_its_close_view_only_while_the_slab_is_missing():
-    import numpy as np
     from deploy import standardise_source as src
-    from stone_pipeline.standardise.photo import Result
-    img = np.zeros((20, 30, 3), np.uint8)
-    res = Result(kind="open book", images={"close": img}, slab=(img, np.ones((20, 30), np.float32)), chosen=(0, 2))
     s3 = _Slice(_open_book(), failing={f"{GPU}{A}.slab.png": TimeoutError("lost")})
     with pytest.raises(TimeoutError):
-        src.complete(s3, GPU, A, res)
+        src.rework(s3, GPU, A, _book_result(changed=False, views=("close",)), "complete")
     assert s3.written == [f"{GPU}{A}.close.jpg", f"{GPU}{A}.slab.json", f"delete {GPU}{A}.close.jpg"]
 
 
@@ -775,7 +928,7 @@ def test_a_completion_cut_short_removes_its_close_view_only_while_the_slab_is_mi
 def _selection(s3, listings, rounds, owner=None, conflicts=None, exclude=()):
     s = object.__new__(sel.Selection)
     s.client, s.listings, s.exclude, s.sources = s3, listings, set(exclude), ["sentas"]
-    s.owner, s.conflicts, s.rounds, s.tags = owner or {}, conflicts or {}, rounds, ("v9", "v9-clean")
+    s.owner, s.conflicts, s.rounds, s.tags, s.chosen = owner or {}, conflicts or {}, rounds, ("v9", "v9-clean"), []
     return s
 
 

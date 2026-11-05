@@ -51,15 +51,21 @@ def steep_aspect(q, size):
     return real if fits else f"slab shot at a steep angle: its real size {max(size)} x {min(size)} does not fit the photo ({seen:.2f} wide)"
 
 
-def _flat(rgb, q, aspect=None):
-    """rgb inside q squared to a rectangle, and the homography. aspect: the slab's real width/height (steep_aspect);
-    the axis the angle did not shorten keeps its measured length."""
+def square(q, aspect=None):
+    """(homography, (width, height)) that squares the inside of q to a rectangle. aspect: the slab's real width/height
+    (steep_aspect); the axis the angle did not shorten keeps its measured length."""
     w, h = _size(q)
     if aspect is not None:
         across, up = _sides(q)
         w, h = (h * aspect, h) if across >= up else (w, w / aspect)
-    H = cv2.getPerspectiveTransform(q, np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], np.float32))
-    return cv2.warpPerspective(rgb, H, (int(w), int(h)), flags=cv2.INTER_CUBIC), H
+    corners = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], np.float32)
+    return cv2.getPerspectiveTransform(q, corners), (int(w), int(h))
+
+
+def _flat(rgb, q, aspect=None):
+    """rgb inside q squared to a rectangle (square), and the homography."""
+    H, size = square(q, aspect)
+    return cv2.warpPerspective(rgb, H, size, flags=cv2.INTER_CUBIC), H
 
 
 def _joint_profile(flat):

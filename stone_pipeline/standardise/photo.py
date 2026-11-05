@@ -16,6 +16,9 @@ class Result:
     images: dict = field(default_factory=dict)         # name -> RGB array at the canvas size
     slab: tuple = ()                                   # (squared RGB, alpha) of one whole slab: what a 3D viewer needs
     chosen: tuple = ()                                 # (which, of how many) slabs found `slab` is: what its close-up is of
+    changed: bool = False                              # a whole slab this version draws differently from the rule
+                                                       # before OUTLINE_CHECKED (layout.drawn_differently)
+    unchanged: bool = False                            # a recheck found it drawn the same: nothing drawn
 
 
 class NoCloseUp(Exception):
@@ -28,12 +31,14 @@ def _finished(slabs, key, models, seed):
     return blend.blend(layout.compose(slabs, key), solid, stand, models.inpaint, seed)
 
 
-def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, edits=None):
+def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, edits=None, redo=None):
     """The finished images of one photo, `full` at its full resolution (read). fmt = slab | block | tile (the product's
     format); key = the product, it alone chooses the room; size = (length, width) in metres; edits = a function giving
     where `full` itself is not as shot (views.close_up), called only when a close-up is made. A logo or overlay left on
     the stone is the judge's finding (leftover_mark) on the result, which the hosted clean step removes from the photo;
-    no step here looks for one."""
+    no step here looks for one. redo: the photo's stored result is worked on again: "recheck" (a whole slab made under an
+    older outline rule: unchanged, nothing drawn, when this version draws it the same) or "complete" (an open book made
+    before its halves had a slab: drawn in full); either way never a close-up instead (held with the reason)."""
     rgb = layout.fit_working(full)
     if fmt in ("block", "tile"):
         made = scene.block(rgb, *models.cleaners) if fmt == "block" else scene.tile(rgb, models.lama, models.esr)
@@ -41,13 +46,19 @@ def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, ed
     kind, confidence = kinds.classify(models.clip, rgb)
     if kinds.is_skipped(kind, confidence):
         return Result(held=f"not a slab photo: {kind} ({confidence:.2f})", kind=kind)
-    flats = layout.flat_slabs(rgb, models.seg, models.det, models.lama, size=size)
+    found = layout.slab_outline(rgb, models.seg, models.det, size)
+    changed = not isinstance(found, str) and layout.drawn_differently(found)
+    if redo == "recheck" and not isinstance(found, str) and not changed:
+        return Result(kind=kind, unchanged=True)
+    flats = found if isinstance(found, str) else layout.flats_from(rgb, found, models.lama)
     slabs = flats if isinstance(flats, str) else layout.enlarged(flats, models.esr)
     if isinstance(slabs, str):
+        if redo:
+            return Result(held=slabs, kind=kind)
         slabs_reason, slabs = slabs, closeup.closeup(rgb, size, *models.cleaners)
         if isinstance(slabs, str):
             return Result(held=f"{slabs_reason}; {slabs}", kind=kind)
-        kind = "close-up"
+        kind, changed = "close-up", False
     elif len(slabs) == 2:
         kind = "open book"
     else:
@@ -65,7 +76,7 @@ def standardise(full, *, fmt, key, size=None, models=None, extra_views=False, ed
             up = None
         if up is not None:
             images["close"] = up
-    return Result(kind=kind, images=images, slab=whole, chosen=chosen)
+    return Result(kind=kind, images=images, slab=whole, chosen=chosen, changed=changed)
 
 
 def whole_index(alphas, kind):

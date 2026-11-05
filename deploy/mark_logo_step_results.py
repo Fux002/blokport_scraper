@@ -1,12 +1,14 @@
 """One-off, per environment, at the deploy of the release that retired the logo step (2026-11-02): mark every result the
 retired logo step made, so the photo process never adds to it without that step.
 
-Why: two later steps add views to a stored result from a re-run of its photo, unjudged: completing an outdated open book
-(its close view and 3D slab: deploy.standardise_source.complete) and the close-only run (its close-up again, every
-close-up rule: deploy.standardise_close). A result the retired logo step made had its logo taken off with a reference
-copy; a re-run now has no such step, so what it adds could show the logo. The marker (logo-step/<sha>.json,
-deploy.standardise_source.logo_step_key) stops both, whatever the close-up rule: the result keeps its judged views,
-its choice and its close.jpg as they are. A per-photo marker, data, never a source setting.
+Why: later steps make views of a stored result again from a re-run of its photo: completing an outdated open book (its
+close view and 3D slab, unjudged: deploy.standardise_source.rework), the close-only run (its close-up again, every
+close-up rule, unjudged: deploy.standardise_close), and the outline recheck (a whole slab drawn differently is redrawn
+as a candidate the judge scores before it replaces the result: rework, deploy.standardise_select.settle). A result the
+retired logo step made had its logo taken off with a reference copy; a re-run now has no such step, so what it makes
+starts from the photo with its logo, not the logo-free copy the result was judged as. The marker (logo-step/<sha>.json,
+deploy.standardise_source.logo_step_key) stops all three, whatever the rule: the result keeps its judged views, its
+choice and its close.jpg as they are. A per-photo marker, data, never a source setting.
 
 Which results, by data:
 - the run tag: STANDARDISE.RUN_TAG only. The logo step never ran on a cleaned copy (the clean tag's input), so a clean

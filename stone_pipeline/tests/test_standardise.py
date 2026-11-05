@@ -92,19 +92,121 @@ def test_a_labels_square_bite_is_filled_but_a_strip_along_a_side_is_not():
 def test_a_card_erased_on_the_slabs_edge_leaves_no_bite():
     outline = np.ones((800, 1200), np.uint8)
     outline[:60, 500:800] = 0                          # SAM saw the card on the top edge as not stone
-    inside = np.ones((800, 1200), np.uint8)
-    marks = np.zeros((800, 1200), np.uint8)
-    marks[:70, 490:810] = 1                            # the card, erased and filled with stone
-    assert layout.outline_with_erased(outline, marks, inside)[30, 650] == 1
+    inside = stone = np.ones((800, 1200), np.uint8)    # stone on both sides of it: the hull bridges the card
+    objects = np.zeros((800, 1200), np.uint8)
+    objects[:70, 490:810] = 1                          # the card, erased and filled with stone
+    assert layout.outline_with_erased(outline, np.zeros_like(objects), objects, inside, stone)[30, 650] == 1
 
 
 def test_a_mark_outside_the_slab_does_not_grow_it():
     outline = np.zeros((800, 1200), np.uint8)
     outline[100:700, 100:1100] = 1
-    inside = outline.copy()
     marks = np.zeros((800, 1200), np.uint8)
     marks[20:60, 300:500] = 1                          # a painted code on the floor
-    assert layout.outline_with_erased(outline, marks, inside)[40, 400] == 0
+    stone = np.ones_like(outline)                      # even where the stone's hull would take it in
+    assert layout.outline_with_erased(outline, marks, marks, outline.copy(), stone)[40, 400] == 0
+
+
+def _rounded_corner():
+    """(outline, inside, stone, objects) of a slab whose top-right corner is rounded off: the fitted corners make the full
+    rectangle, the stone stops at the arc, and the wall left in the corner was taken for a label (foreign_objects)."""
+    inside = np.zeros((800, 1200), np.uint8)
+    inside[100:700, 100:1100] = 1
+    outline = inside.copy()
+    outline[100:300, 900:1100] = 0
+    cv2.circle(outline, (900, 300), 200, 1, -1)
+    outline &= inside
+    stone = cv2.fillConvexPoly(np.zeros_like(outline), cv2.convexHull(cv2.findNonZero(outline)), 1)
+    objects = cv2.dilate(inside & (1 - outline), np.ones((9, 9), np.uint8))
+    return outline, inside, stone, objects
+
+
+def test_the_wall_in_a_rounded_corner_is_never_counted_as_stone():
+    outline, inside, stone, objects = _rounded_corner()
+    cards = np.zeros_like(objects)
+    grown = layout.outline_with_erased(outline, cards, objects, inside, stone)
+    assert grown[110, 1090] == 0 and not (grown & (1 - stone)).any()    # the corner stays the wall's: transparent
+    assert layout.wall_in_corners(cards, objects, inside, stone)[110, 1090] == 1   # what the older rule filled with it
+
+
+def test_a_printed_card_on_a_corner_is_filled_whole():
+    outline, inside, stone, _ = _rounded_corner()
+    cards = np.zeros_like(outline)
+    cards[100:260, 940:1100] = 1                       # a label read as text, over the corner: it sits on stone
+    grown = layout.outline_with_erased(outline, cards, cards, inside, stone)
+    assert grown[110, 1090] == 1 and not layout.wall_in_corners(cards, cards, inside, stone).any()
+
+
+def test_a_slab_with_square_corners_has_no_wall_in_its_corners():
+    inside = np.zeros((800, 1200), np.uint8)
+    inside[100:700, 100:1100] = 1
+    objects = np.zeros_like(inside)
+    objects[100:170, 500:700] = 1                      # a sticker on the top edge
+    assert not layout.wall_in_corners(np.zeros_like(objects), objects, inside, inside.copy()).any()
+
+
+def _open_book_with_inner_corners():
+    """(body, quads) of an open book whose two halves are rounded where they meet at the top (radius 100): the wall
+    shows in the notch between them at the seam (x = 800)."""
+    body = np.zeros((800, 1600), np.uint8)
+    body[100:700, 100:1500] = 1
+    body[100:200, 700:900] = 0                         # the two inner top corners, squared off ...
+    cv2.circle(body, (700, 200), 100, 1, -1)           # ... and rounded: the left half's top-right
+    cv2.circle(body, (900, 200), 100, 1, -1)           # the right half's top-left
+    body[:100] = 0
+    quads = [np.float32([[100, 100], [799, 100], [799, 699], [100, 699]]),
+             np.float32([[800, 100], [1499, 100], [1499, 699], [800, 699]])]
+    return body, quads
+
+
+def test_an_open_book_s_inner_corners_are_no_stone_of_either_half():
+    body, quads = _open_book_with_inner_corners()
+    stone = layout.stone_hulls(body, quads)
+    one = cv2.fillConvexPoly(np.zeros_like(body), cv2.convexHull(cv2.findNonZero(body)), 1)
+    assert body[105, 795] == 0 and one[105, 795] == 1                   # one hull over both halves bridges the notch
+    assert stone[105, 795] == 0 and stone[105, 805] == 0 and stone[400, 795] == 1
+
+
+def _open_book_rounded_top_right(radius):
+    """layout.Outline of an open book (two 700 x 600 halves side by side), its right half's top-right corner rounded by
+    `radius` px: nothing erased, the stone's outline as SAM saw it."""
+    body = np.zeros((800, 1600), np.uint8)
+    body[100:700, 100:1500] = 1
+    body[100:100 + radius, 1500 - radius:1500] = 0
+    cv2.circle(body, (1499 - radius, 100 + radius), radius, 1, -1)
+    quads = [np.float32([[100, 100], [799, 100], [799, 699], [100, 699]]),
+             np.float32([[800, 100], [1499, 100], [1499, 699], [800, 699]])]
+    inside = np.zeros_like(body)
+    for q in quads:
+        cv2.fillConvexPoly(inside, q.astype(np.int32), 1)
+    none = np.zeros_like(body)
+    return layout.Outline(quads, [None, None], inside, inside.copy(), layout.stone_hulls(body, quads), body, none, none)
+
+
+def test_an_open_book_s_sawn_edge_is_decided_as_the_studio_draws_it():
+    """A few pixels of rounding at the open book's top right: on the right half alone, at its own size, the run is longer
+    than that half's strip is wide, but the studio draws the edge from the pair joined and enlarged, where it is shorter
+    than the strip: an edge on every row, so the slab is not drawn differently for it."""
+    found = _open_book_rounded_top_right(10)
+    drawn = layout.drawn_outlines(layout.flat_outlines(found))
+    assert studio.edge_rows(layout.flat_outlines(found)[-1]).min() == 0          # the half alone would see a break
+    assert (studio.sawn_edge(drawn) == 1).all()                                   # the studio draws every row
+    assert layout.side_reached(found) and not layout.drawn_differently(found)
+
+
+def test_an_open_book_s_broken_top_right_corner_stops_its_sawn_edge():
+    found = _open_book_rounded_top_right(60)
+    assert studio.sawn_edge(layout.drawn_outlines(layout.flat_outlines(found))).min() == 0
+    assert not layout.side_reached(found) and layout.drawn_differently(found)
+
+
+def test_the_flat_slabs_outlines_are_the_ones_the_outline_step_squares():
+    """flats_from draws exactly the outlines flat_outlines makes from the outline step alone (no eraser): the decision
+    and the drawing share one computation."""
+    found = _open_book_rounded_top_right(60)
+    rgb = np.full((800, 1600, 3), 128, np.uint8)
+    flats = layout.flats_from(rgb, found, lama=None)
+    assert all(np.array_equal(f.alpha, a) for f, a in zip(flats, layout.flat_outlines(found)))
 
 
 def test_a_real_corner_chip_stays():
@@ -543,6 +645,15 @@ def test_a_retouchs_fills_are_told_from_its_jpeg():
     assert not photo.retouch_fills(retouched[50:550, 50:850], made_from).any()   # cropped clear of its marks: nothing filled
 
 
+def _found_flats(monkeypatch, flats, changed=True):
+    """photo.standardise's outline step finds `flats` (a reason str: no whole slab), drawn differently from the older
+    outline rule or not (changed); the models it needs stood in."""
+    found = object()                                                 # the outline step's result (not a reason)
+    monkeypatch.setattr(layout, "slab_outline", lambda rgb, seg, det, size: flats if isinstance(flats, str) else found)
+    monkeypatch.setattr(layout, "drawn_differently", lambda f: changed)
+    monkeypatch.setattr(layout, "flats_from", lambda rgb, f, lama: flats)
+
+
 class _Esr:
     """Stands in for Real-ESRGAN: 4x, plain cubic."""
     def enhance(self, bgr):
@@ -554,7 +665,7 @@ def test_the_close_up_leaves_every_other_view_as_it_was(monkeypatch):
     full, alpha = _sharp_stone(1100, 1700)                   # pixels enough for a close-up, still enlarged by the layout
     flats = [layout.Flat(full, alpha, np.eye(3), full)]
     monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.99))
-    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, seg, det, lama, size=None: flats)
+    _found_flats(monkeypatch, flats)
     monkeypatch.setattr(blend, "blend", lambda img, solid, stand, pipe, seed: img)
     m = standardise_models.Models(seg=None, det=None, lama=None, esr=_Esr(), clip=None, inpaint=None)
     asked = []                                          # where the start photo is not as shot: asked only for a close-up
@@ -976,6 +1087,43 @@ def test_the_studio_slab_keeps_its_proportions_and_stands_on_the_feet():
         assert abs(studio.true_aspect(q) - w / h) < 0.03 * w / h
 
 
+def test_the_sawn_edge_runs_only_where_the_stone_reaches_the_slab_s_side():
+    alpha = np.ones((300, 500), np.float32)
+    alpha[:60, 440:] = 0                               # a broken top-right corner
+    rows = studio.edge_rows(alpha)
+    assert rows.shape == (300, studio.edge_width(500)) and rows[:60].max() == 0 and rows[60:].min() == 1
+
+
+def test_a_square_corner_s_pixel_rounding_is_no_broken_corner():
+    alpha = np.ones((300, 1600), np.float32)           # a strip of 8 columns
+    alpha[:2, -3:] = 0                                 # the outline's corner a pixel or two short of the side
+    assert (studio.edge_rows(alpha) == 1).all()
+
+
+def test_the_sawn_edge_strip_is_one_width_set_in_settings(monkeypatch):
+    assert studio.edge_width(1600) == 1600 // C.STUDIO_EDGE_STRIP and studio.edge_width(100) == C.STUDIO_EDGE_STRIP_MIN
+    monkeypatch.setattr(C, "STUDIO_EDGE_STRIP", 100)
+    assert studio.edge_width(1600) == 16 and studio.edge_rows(np.ones((10, 1600), np.float32)).shape == (10, 16)
+
+
+def test_a_whole_slab_s_sawn_edge_is_the_full_strip_as_before():
+    alpha = np.ones((300, 500), np.float32)
+    alpha[:, -1] = 0.2                                 # the photo's mixed last column: the stone still reaches the side
+    rows = studio.edge_rows(alpha)
+    assert rows.dtype == np.float32 and (rows == np.ones((300, studio.edge_width(500)), np.float32)).all()
+
+
+def test_the_studio_shows_no_sawn_edge_beside_a_broken_corner():
+    rgb, alpha = _slab(400, 650)
+    broken = alpha.copy()
+    broken[:120, 560:] = 0
+    whole_img, broken_img = studio.place([(rgb, alpha)]), studio.place([(rgb, broken)])
+    q = cv2.perspectiveTransform(studio.face(650 / 400)[None], np.float32([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))[0]
+    x, y = (int(round(v)) for v in studio.to_frame((q[1][0] + 4, q[1][1] + 15), q))     # on the edge face, near the top
+    assert np.abs(whole_img[y, x].astype(int) - broken_img[y, x].astype(int)).max() > 20
+    assert (broken_img[y, x] > 230).all()                           # the white backdrop, not stone or wall
+
+
 def test_the_old_slab_is_gone_and_the_clips_stay():
     black = (np.full((800, 1400, 3), 15, np.uint8), np.ones((800, 1400), np.float32))
     out = studio.place([black]).astype(np.float32)
@@ -1207,13 +1355,14 @@ def test_a_whole_slab_framed_tightly_is_never_cropped_either():
 
 
 # --- the 3D slab of a photo -------------------------------------------------------------------------------------------
-def _standardised(monkeypatch, slabs, kind_found=None, drawn=None):
+def _standardised(monkeypatch, slabs, kind_found=None, drawn=None, redo=None, changed=True):
     """photo.standardise on found slabs (or a close-up), the models and the expensive steps stood in: (its result, the
-    slabs the close view was made from). drawn: the slabs as enlarged draws them; the found ones when not given."""
+    slabs the close view was made from). drawn: the slabs as enlarged draws them; the found ones when not given.
+    changed: whether the outline step draws them differently from the older rule."""
     from stone_pipeline.standardise import closeup, photo
     monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.9))
     flats = None if slabs is None else [layout.Flat(rgb, alpha, np.eye(3), rgb) for rgb, alpha in slabs]
-    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats if kind_found is None else "no outline")
+    _found_flats(monkeypatch, flats if kind_found is None else "no outline", changed)
     monkeypatch.setattr(layout, "enlarged", lambda flats, esr: slabs if drawn is None else drawn)
     monkeypatch.setattr(closeup, "closeup", lambda rgb, size, *m: kind_found)
     monkeypatch.setattr(photo, "_finished", lambda s, key, models, seed: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
@@ -1223,7 +1372,8 @@ def _standardised(monkeypatch, slabs, kind_found=None, drawn=None):
 
     class _Models:
         clip, cleaners, esr, seg, det, lama = None, (None, None, None, None), None, None, None, None
-    return photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models(), extra_views=True), closed
+    return photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models(), extra_views=True,
+                             redo=redo), closed
 
 
 def test_each_half_of_an_open_book_is_a_whole_slab_and_the_one_with_more_stone_gets_the_3d_and_the_close_view(monkeypatch):
@@ -1327,6 +1477,46 @@ def test_a_single_slab_keeps_its_own_slab_and_close_view(monkeypatch):
     res, closed = _standardised(monkeypatch, [one])
     assert res.kind == "slab" and res.slab is one and closed == [(id(one[0]), id(one[1]))]
     assert set(res.images) == {"main", "white", "studio", "close"}
+
+
+def test_a_recheck_drawn_the_same_draws_nothing(monkeypatch):
+    res, closed = _standardised(monkeypatch, [_slab(80, 100)], redo="recheck", changed=False)
+    assert res.unchanged and res.images == {} and res.slab == () and not res.held and closed == []
+
+
+@pytest.mark.parametrize("redo", ["recheck", "complete"])
+def test_a_redo_that_finds_no_whole_slab_is_held_never_turned_into_a_close_up(monkeypatch, redo):
+    res, _ = _standardised(monkeypatch, None, kind_found=[_slab(80, 100)], redo=redo)
+    assert res.held == "no outline" and res.images == {} and not res.unchanged
+
+
+def test_a_recheck_drawn_differently_is_drawn_in_full_and_says_so(monkeypatch):
+    one = _slab(80, 100)
+    res, _ = _standardised(monkeypatch, [one], redo="recheck")
+    assert res.kind == "slab" and res.slab is one and res.changed and set(res.images) == {"main", "white", "studio", "close"}
+
+
+@pytest.mark.parametrize("changed", [True, False])
+def test_a_completion_is_drawn_in_full_and_says_whether_this_version_draws_it_differently(monkeypatch, changed):
+    left, right = _slab(80, 100), _slab(80, 100)
+    res, _ = _standardised(monkeypatch, [left, right], redo="complete", changed=changed)
+    assert res.kind == "open book" and res.slab and not res.unchanged and res.changed is changed
+
+
+def test_a_close_up_is_never_said_to_be_drawn_differently(monkeypatch):
+    """Whole slabs found and drawn differently from the older rule, but not shown (two stones in one outline): the
+    close-up made instead has no whole slab, nothing a recheck redraws."""
+    from stone_pipeline.standardise import closeup, photo
+    monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.9))
+    _found_flats(monkeypatch, [layout.Flat(*_slab(80, 100), np.eye(3), None)], changed=True)
+    monkeypatch.setattr(layout, "enlarged", lambda flats, esr: "two stones in one outline")
+    monkeypatch.setattr(closeup, "closeup", lambda rgb, size, *m: [_slab(80, 100)])
+    monkeypatch.setattr(photo, "_finished", lambda s, key, models, seed: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
+
+    class _Models:
+        clip, cleaners, esr, seg, det, lama = None, (None, None, None, None), None, None, None, None
+    res = photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models())
+    assert res.kind == "close-up" and not res.changed and res.slab == ()
 
 
 def test_a_close_up_shows_only_part_of_a_slab_so_it_has_no_3d_and_no_close_view(monkeypatch):

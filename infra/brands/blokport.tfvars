@@ -56,12 +56,12 @@ prod_auto_texture = true
 # code's production default; dev sets it so dev shows what prod shows (owner 2026-11-02).
 dev_require_standard_photo = true
 
-# The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image both envs' standardise jobs run today
-# (standardise-edit-cbc576cf9ebd-x, registered by hand until now), under its protected pin tag: add the tag to that
-# image in ECR BEFORE applying (STANDARDISE_PROCESS.md, rollout). The process runs after each full produce only once
+# The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image each env's standardise jobs run, built by
+# deploy/build_standardise_image.sh as standardise-pin-<sha12> of the commit it holds. Dev runs the corner fix (#514)
+# ahead of prod; its job definition is applied right after the merge, before the svc rolls (the release order).
 # AUTO: on in both: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run). The
 # month's budget, hosted calls and GPU together, is the owner's: prod 100 USD (2026-11-02), dev 100 USD (2026-11-05).
-dev_standardise_image_tag  = "standardise-pin-f3dd3d19c2a7"
+dev_standardise_image_tag  = "standardise-pin-423d02f59c1d"
 prod_standardise_image_tag = "standardise-pin-f3dd3d19c2a7"
 dev_standardise_auto       = true
 prod_standardise_auto      = true

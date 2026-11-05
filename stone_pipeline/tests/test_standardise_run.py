@@ -50,19 +50,22 @@ class _S3:
         self.objects[Key] = Body
 
 
-def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=(), logo_step=()):
+def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=(), logo_step=(), checked=None):
+    """checked: the whole slabs drawn under the current outline rule (default: every slab)."""
     r = object.__new__(sel_mod.Round)
     r.prefix, r.finished, r.held, r.cleaned = "p/", set(finished), set(held), set(cleaned)
     r.slabs, r.studio, r.noslab, r.logo_step = set(slabs), set(studio), set(noslab), set(logo_step)
+    r.checked = set(slabs) if checked is None else set(checked)
+    r.redrawn = set()
     r.judged, r.attempts, r.edited = set(), set(), set()
     return r
 
 
-def _selection(listings, gpu_round=None, clean_round=None, exclude=()):
+def _selection(listings, gpu_round=None, clean_round=None, exclude=(), chosen=()):
     s = object.__new__(sel_mod.Selection)
     s.client, s.listings, s.tags, s.exclude, s.root = _S3(), listings, ("v9", "v9-clean"), set(exclude), "r/"
-    s.owner, s.conflicts = {}, {}
-    s.sources = sorted({l["source"] for l in listings})
+    s.owner, s.conflicts, s.chosen = {}, {}, sorted(chosen)
+    s.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in s.chosen})
     s.rounds = [("v9", {"sentas": gpu_round or _round()}), ("v9-clean", {"sentas": clean_round or _round()})]
     s.refresh = lambda: None
     return s
@@ -231,6 +234,7 @@ def _steps(monkeypatch, cap_at=None):
             done.append(name)
             return [], name == cap_at
         return run
+    monkeypatch.setattr(runner.select, "settle", step("settle"))
     monkeypatch.setattr(runner.select, "judge_all", step("judge"))
     monkeypatch.setattr(runner.select, "clean_all", step("clean"))
     monkeypatch.setattr(runner.select, "report", lambda sel: done.append("report") or {"chosen": [], "tracked": [], "pending": []})
@@ -241,7 +245,7 @@ def _steps(monkeypatch, cap_at=None):
 def test_the_steps_run_in_order(monkeypatch):
     done = _steps(monkeypatch)
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
-    assert done == ["gpu v9", "judge", "clean", "gpu v9-clean", "judge", "report"] and not problems
+    assert done == ["gpu v9", "settle", "judge", "clean", "gpu v9-clean", "settle", "judge", "report"] and not problems
 
 
 def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge_keeps_it(monkeypatch):
@@ -260,7 +264,7 @@ def test_with_the_clean_up_off_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     done = _steps(monkeypatch)
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
-    assert done == ["gpu v9", "judge", "gpu v9-clean", "judge", "report"]
+    assert done == ["gpu v9", "settle", "judge", "gpu v9-clean", "settle", "judge", "report"]
 
 
 def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_not_see():
@@ -275,7 +279,7 @@ def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_
 def test_the_run_stops_its_steps_at_the_budget_and_still_reports_what_is_chosen(monkeypatch):
     done = _steps(monkeypatch, cap_at="clean")
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
-    assert done == ["gpu v9", "judge", "clean", "report"]
+    assert done == ["gpu v9", "settle", "judge", "clean", "report"]
 
 
 def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
@@ -287,10 +291,10 @@ def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
 
 def test_no_step_starts_after_the_work_window_and_the_report_still_runs(monkeypatch):
     done = _steps(monkeypatch)
-    times = iter([0, 0, 100])                                       # the window (50 s) ends during the judge step
+    times = iter([0, 0, 0, 100])                                    # the window (50 s) ends during the judge step
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", 50, say=lambda m: None,
                              clock=lambda: next(times))
-    assert done == ["gpu v9", "judge", "report"]
+    assert done == ["gpu v9", "settle", "judge", "report"]
     assert problems == [f"the work window ({C.WORK_SECONDS}s) ended: the next run goes on"]
 
 
@@ -692,7 +696,8 @@ def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkey
 
 def test_a_round_s_outdated_results_are_worked_out_once_not_per_candidate():
     r = sel_mod.Round.__new__(sel_mod.Round)
-    r.finished, r.studio, r.slabs, r.noslab, r.held, r.logo_step = {A, B}, {A, B}, {B}, set(), set(), set()
+    r.finished, r.studio, r.slabs, r.noslab, r.held, r.logo_step, r.checked = {A, B}, {A, B}, {B}, set(), set(), set(), {B}
+    r.redrawn = set()
     assert r.outdated == {A} and r.outdated is r.outdated
 
 
@@ -700,3 +705,34 @@ def test_an_open_book_the_retired_logo_step_made_is_never_completed():
     # its completion would publish a close view and 3D slab from the photo with the logo, unjudged
     rnd = _round(finished={A, B}, studio={A, B}, logo_step={A})
     assert rnd.outdated == {B}
+
+
+def test_a_whole_slab_made_under_the_older_outline_rule_goes_to_the_gpu_once():
+    old, current, close_up = A, B, D
+    gpu_round = _round(finished={old, current, close_up}, slabs={old, current}, checked={current})
+    s = _selection([_listing(old, current, close_up)], gpu_round=gpu_round,
+                   clean_round=_round(finished={old, current}, cleaned={old, current}, slabs={old, current}, checked={current}))
+    assert s.gpu_todo() == {"sentas": [old]} and s.clean_todo() == {"sentas": [old]}
+
+
+def test_a_whole_slab_the_retired_logo_step_made_is_never_rechecked():
+    # its re-run would start from the photo with its logo and redraw views no judge saw
+    rnd = _round(finished={A, B}, slabs={A, B}, checked=(), logo_step={A})
+    assert rnd.older_outline == {B} and rnd.outdated == {B}
+
+
+def test_a_chosen_whole_slab_made_under_the_older_outline_rule_goes_to_the_gpu_without_its_listing_being_picked():
+    gpu_round = _round(finished={A, B, D}, slabs={A, B, D}, checked={B})
+    s = _selection([], gpu_round=gpu_round, chosen=[("v9", "sentas", A), ("v9", "sentas", B), ("v9-clean", "sentas", D)],
+                   exclude={E})
+    assert s.gpu_todo() == {"sentas": [A]}                         # B is current; D is the cleaned run's (clean_todo)
+    s = _selection([], gpu_round=_round(finished={E}, slabs={E}), chosen=[("v9", "sentas", E)], exclude={E})
+    assert s.gpu_todo() == {}                                      # an excluded photo is unpublished, never redrawn
+
+
+def test_only_the_cleaned_copies_of_the_run_s_listings_and_the_chosen_ones_go_to_the_gpu():
+    F, G = "f" * 64, "9" * 64
+    cleaned = _round(cleaned={A, B, D, E, F, G})                    # none run yet
+    s = _selection([_listing(A, F)], clean_round=cleaned, exclude={F},
+                   chosen=[("v9-clean", "sentas", B), ("v9", "sentas", D)])
+    assert s.clean_todo() == {"sentas": [A, B]}    # D: its choice is the scraped run's; E, G: no current listing; F: excluded

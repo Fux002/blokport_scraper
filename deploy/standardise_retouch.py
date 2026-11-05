@@ -20,7 +20,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from deploy.standardise_source import _encode, _exists, _get, _photo_keys, finished, photo_source, run_prefix, sheet_photos
+from deploy.standardise_source import _encode, _exists, _get, _photo_keys, made, photo_source, run_prefix, sheet_photos
 from stone_pipeline.config.settings import S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import marks, outline, photo, retouch
@@ -149,6 +149,15 @@ def retouched(client, out, sha):
     return _exists(client, f"{out}retouched/{sha}.jpg") or _exists(client, f"{out}retouch_held/{sha}.json")
 
 
+def handled(client, out, sha):
+    """Whether this photo's input is fixed, so it is never searched for marks again: its retouch ended (retouched or
+    refused: its own record), or its run already made a result of it (standardise_source.made). A result worked on again
+    (an outdated open book, a recheck) starts from what that result was made from (standardise_source.start); a photo the
+    retouch found nothing on, or one made before the retouch existed, has no record of its own, and is not retouched
+    afresh either."""
+    return retouched(client, out, sha) or made(client, out, sha)
+
+
 def _hold(client, out, sha, reason, stays_as_shot):
     body = {"reason": reason, "stays_as_shot": stays_as_shot}
     client.put_object(Bucket=S3_BUCKET, Key=f"{out}retouch_held/{sha}.json", Body=json.dumps(body, sort_keys=True).encode(), ContentType="application/json")
@@ -163,8 +172,10 @@ def main() -> int:
     out = run_prefix(src)
     if _surveying():
         return _survey(client, src, out)
-    keys = [k for k in _photo_keys(client, src, sheet_photos(client))
-            if not finished(client, out, sha := imagestore.sha_from_url(k)) and not retouched(client, out, sha)]
+    keys = [k for k in _photo_keys(client, src, sheet_photos(client)) if not handled(client, out, imagestore.sha_from_url(k))]
+    if not keys:                                       # nothing to search: no model is loaded
+        print(f"==> retouch {src}: every photo of the slice already handled", flush=True)
+        return 0
     found, _ = _find(client, keys, out)
     print(f"==> retouch {src}: marks on {len(found)} of {len(keys)} photos", flush=True)
     if not found:
