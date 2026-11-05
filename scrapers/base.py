@@ -479,7 +479,8 @@ class ScraperBase:
         fh = logging.FileHandler(self.run_dir / "scrape.log", encoding="utf-8")
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
         sh = logging.StreamHandler()
-        sh.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        # sources scrape at once (scrapers.run.run_many) and their lines interleave in one stream: each names its own
+        sh.setFormatter(logging.Formatter(f"%(levelname)s [{self.source}] %(message)s"))
         logger.addHandler(fh)
         logger.addHandler(sh)
         return logger

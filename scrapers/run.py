@@ -1,8 +1,8 @@
-"""Scraper runner: run one site, all sites, or a custom order.
+"""Scraper runner: run one site, all sites, or a list of sites, all at once.
 
     python -m scrapers.run marenostone            # one
     python -m scrapers.run all                     # all (registry order)
-    python -m scrapers.run zucchi varsha           # explicit order
+    python -m scrapers.run zucchi varsha           # these
 
 Each scraper writes to data/<source>/<timestamp>/products.csv and declares its
 format (slab/block/tile) so blocks, slabs, and tiles are tagged correctly per
@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Type
 
 # Resolve the import path ONCE: `-m scrapers.run` gives the `scrapers.` package; running the file directly
@@ -29,8 +30,8 @@ except ImportError:
 
 # ONE source of truth: the sources the runner scrapes. A source is listed ONLY once it is fully onboarded --
 # a ScraperBase module AND an adapter + config entry (NEW_SOURCE_CHECKLIST). The class is DISCOVERED from the
-# module (mirrors adapter auto-discovery), so there is no import list to keep in sync. Order is the `all` run
-# order. slabware (helper) + stonevip (empty) are not scrapers.
+# module (mirrors adapter auto-discovery), so there is no import list to keep in sync. Order is the order
+# `all` reports results in (the sources scrape at once). slabware (helper) + stonevip (empty) are not scrapers.
 # develi / ferraz / temmer / tureks / brumagran have ScraperBase modules but NO adapter/config yet, so
 # they are deliberately NOT listed: an adapter-less source can never reach the pipeline (stone_pipeline.run
 # builds its work list from the ADAPTER registry), and listing one here would only let a `scrape all` on an
@@ -98,7 +99,7 @@ class _LiveStderr(logging.StreamHandler):
 
 
 def _stderr_logger() -> logging.Logger:
-    """The runner's own logger, on STDERR with the per-scraper line format (ScraperBase._make_logger). The
+    """The runner's own logger, on STDERR, each line naming its source in the message. The
     produce runner streams only the subprocess's stderr to CloudWatch, so a failure printed to stdout never
     reached the operator: a live scrape aborted with 'live scrape failed' and no cause anywhere in the logs.
     Everything about a source's outcome goes through here so the cause lands next to the scraper's own lines."""
@@ -115,16 +116,26 @@ def _stderr_logger() -> logging.Logger:
 log = _stderr_logger()
 
 
+def _scrape(source: str) -> str | None:
+    """One source's products file, or None once the cause is logged: one site failing never stops the others."""
+    try:
+        return str(run_one(source))
+    except SystemExit as exc:
+        log.error("%s exited: %s", source, exc)
+    except Exception as exc:
+        log.error("%s failed: %s", source, exc, exc_info=True)   # the traceback names the real cause
+    return None
+
+
 def run_many(order: list[str]) -> dict[str, str]:
-    results: dict[str, str] = {}
-    for source in order:
-        try:
-            results[source] = str(run_one(source))
-        except SystemExit as exc:
-            log.error("%s exited: %s", source, exc)
-        except Exception as exc:  # one site failing never stops the others
-            log.error("%s failed: %s", source, exc, exc_info=True)   # the traceback names the real cause
-    return results
+    """{source: products file} of the distinct sources in `order` that scraped, in that order. Every source scrapes
+    at once, a thread each: a scrape is waiting on one supplier's site, which it throttles itself, so side by side a
+    run takes its slowest source instead of the sum (2026-11-02: 79 min one after another, the slowest source 23)."""
+    if not order:
+        return {}
+    with ThreadPoolExecutor(max_workers=len(order), thread_name_prefix="scrape") as pool:
+        files = dict(zip(order, pool.map(_scrape, order)))
+    return {source: file for source, file in files.items() if file is not None}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__)
         print("registered:", sorted(REGISTRY))
         return 0
-    order = _enabled_order() if argv == ["all"] else argv
+    # a source asked twice scrapes once: two scrapes of it at once would write the same data/<source>/<timestamp>
+    order = _enabled_order() if argv == ["all"] else list(dict.fromkeys(argv))
     results = run_many(order)
     log.info("scraped %d source(s): %s", len(results),
              ", ".join(f"{src} -> {path}" for src, path in results.items()) or "none")
