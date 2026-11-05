@@ -528,22 +528,24 @@ assigns it on the review page built after it.
 
 The owner reviews the hidden listings (no chosen photo, not removed) on a decision page: per listing "Use this photo"
 (one of its standardised results), "Clean this photo" (one of its photos, by a hosted edit) or "Remove listing"; a
-shared photo says which listings of the same stone it also
-applies to, and the conflicts page names, per conflict photo, every listing that shows it, live ones included (one
-live now is hidden by the next run unless the owner assigns the photo to it). The page keeps one document per
-listing; its export (a JSON array of `{id: <listing handle>, action, source, sha, tag, at}`, the fields per action
-below) is applied with
-`python -m deploy.standardise_decisions` (`SCRAPER_ENV` set explicitly, `DECISIONS_FILE=<export>`, `DRY_RUN=true|false`).
-It prints the environment and bucket first. It checks every decision before writing anything: the listing is on the
-sheet; the action is known with exactly the page's fields; `at` is an ISO UTC timestamp; the source is the listing's;
-the photo is one of the listing's and not excluded; the tag's result exists; for a clean, the photo is no conflict photo
-and the clean step would send it (`select.fixable`: its result failed the judge only for what an edit fixes, or a hold
-an edit fixes); and the decision is not older than the one already stored for the listing (its choice, removal or
-click), so an old export applied again never undoes a later decision. The latest decision wins, and each replaces the
-other two kinds: a listing holds at most one of them. One bad decision refuses
-the whole file (exit 2). It reads and writes inside the run lock (exit 4 while a photos run holds it), writes only what
-differs (applying again writes nothing), never touches the judge's verdicts, and the next photos run acts on it. Every
-record is keyed by the listing's SKU: a variety decided later re-binds the product and moves its handle, never its SKU.
+shared photo says which listings of the same stone it also applies to, and the conflicts page names, per conflict photo,
+every listing that shows it, live ones included (one live now is hidden by the next run unless the owner assigns the
+photo to it). The page keeps one document per listing; its export (a JSON array of `{id: <listing handle>, action,
+source, sha, tag, at}`, the fields per action below) is applied with `python -m deploy.standardise_decisions`
+(`SCRAPER_ENV` set explicitly, `DECISIONS_FILE=<export>`, `DRY_RUN=true|false`). It prints the environment and bucket
+first. It checks every decision before writing anything: the listing is on the sheet; the action is known with exactly
+the page's fields; `at` is an ISO UTC timestamp; the source is the listing's; the photo is one of the listing's and not
+excluded; the tag's result exists; for a clean, the photo is no conflict photo and the photos run would use the click
+(`select.click_problem`: its result failed the judge only for what an edit fixes, or a hold an edit fixes); and the
+decision is not older than the one already stored for the listing (its choice, removal or click), so an old export
+applied again never undoes a later decision. A stored decision of the listing that cannot be read (its choice, removal
+or click file is not a JSON object) refuses the decision and names the file: the decision stored there is unknown, so
+nothing is ordered against it. Such a listing is never reached by a sibling's "use" either, and a conflict photo is not
+given to a listing while a partner's stored choice cannot be read (it may hold the photo). The latest decision wins, and
+each replaces the other two kinds: a listing holds at most one of them. One bad decision refuses the whole file (exit
+2). It reads and writes inside the run lock (exit 4 while a photos run holds it), writes only what differs (applying
+again writes nothing), never touches the judge's verdicts, and the next photos run acts on it. Every record is keyed by
+the listing's SKU: a variety decided later re-binds the product and moves its handle, never its SKU.
 
 - **use**: the owner's choice record `<CLEAN_TAG>/owner/<SKU>.json` (`{tag, sha, at, listing, decided_on}`); a later
   decision overwrites it. Every run checks it (the photo is still one of the listing's, not excluded, its result there)
@@ -574,7 +576,6 @@ record is keyed by the listing's SKU: a variety decided later re-binds the produ
   listing with an owner-chosen photo takes that photo down: the next photos run publishes the listing again only when
   the cleaned copy passes (or another of its results passes the judge), and until then it is hidden by the no_photo
   rule. A listing whose photo already passes is not cleaned: the click waits, unpaid, until the listing is worked again.
-  A stored click that cannot be read refuses any decision on its listing until an operator has looked at the file.
 
 Why removals are a per-environment store and not a reviewed file like the exclude list: the exclude list is about a
 photo (its sha, the same in every environment) and is an engineering review; a removal is the owner's decision about one

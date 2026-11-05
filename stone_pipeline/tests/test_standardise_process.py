@@ -298,6 +298,15 @@ def test_a_click_is_written_in_the_one_shape_every_run_reads():
                                                         "source": "marenostone", "sha": A, "at": "t"}}
 
 
+def test_a_click_record_has_exactly_the_click_fields_each_value_in_its_named_field():
+    record = pub.click_record(sku="SKU", listing="LISTING", source="SOURCE", sha="SHA", at="AT")
+    assert set(record) == set(pub.CLICK_FIELDS) and len(record) == len(pub.CLICK_FIELDS)
+    assert all(record[name] == name.upper() for name in pub.CLICK_FIELDS)
+    root, s3 = f"{proc.ROOT}{C.CLEAN_TAG}/", _S3()
+    pub.write_click(s3, root, **record)
+    assert pub.read_clicks(s3, root) == {"SKU": record}                     # the writer stores exactly that record
+
+
 def test_an_unreadable_click_or_choice_record_fails_only_its_own_listing(capsys):
     root = f"{proc.ROOT}{C.CLEAN_TAG}/"
     s3 = _S3({f"{pub.clicks_prefix(root)}{imagestore.sku_file('SEN-BAD')}": b"{not json",

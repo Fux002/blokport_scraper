@@ -25,8 +25,11 @@ again never undoes a later decision.
 Every decision is checked first (the listing is on the product sheet, the action is known, exactly the page's fields,
 `at` an ISO UTC timestamp, the source is the listing's, the photo one of the listing's and not excluded, the tag's result
 exists, for a clean the photo is no conflict photo and the run could use the click (select.click_problem: its result
-failed the judge only for what an edit fixes), not older than what is stored, no stored click that cannot be read); one
-bad decision refuses the whole file and nothing is written. Only what differs from the stores is written, so applying
+failed the judge only for what an edit fixes), not older than what is stored, no stored decision of the listing that
+cannot be read); one bad decision refuses the whole file and nothing is written. The stores are read through the photo
+process's own readers, so a file that cannot be read is named with its key and never crashes the applier: a listing
+with one is never decided over (its decision is unknown), never reached by a sibling's use, and a conflict photo is
+not given while a partner's stored choice cannot be read. Only what differs from the stores is written, so applying
 the same file again writes nothing. The plan is read and written inside the photo process's run lock; a write that
 fails half way is completed by running again.
 Env: SCRAPER_ENV (required, explicitly: the environment's bucket is printed first), DECISIONS_FILE (the export),
@@ -49,8 +52,9 @@ from botocore.config import Config
 
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import (CLICK_FIELDS, EXCLUDE_PATH, NoConflictSet, chosen_prefix, clicks_prefix,
-                                       owner_key, owner_prefix, read_clicks, read_conflicts, read_exclude, write_click)
+from deploy.standardise_publish import (EXCLUDE_PATH, NoConflictSet, chosen_prefix, click_record, clicks_prefix,
+                                       owner_key, owner_prefix, read_clicks, read_conflicts, read_exclude,
+                                       records_by_sku, write_click)
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -142,32 +146,51 @@ def _json(s3, key):
 
 
 class _Stores:
-    """The decisions already stored, read once: each SKU's owner choice, removal and click record (read_clicks: one that
-    cannot be read is {"error": why}), and the click files' keys by SKU, so a later decision removes the file there."""
+    """The decisions already stored, read once through the photo process's own readers (standardise_run.owner_records,
+    publish.records_by_sku, publish.read_clicks), so a file that cannot be read fails only its listing: each SKU's
+    owner choice, removal and click; `unreadable` = {SKU: [(what, key, why)]} of the files that cannot be read, whose
+    listing is never decided over (its decision is unknown); and the click files' keys by SKU, so a later decision
+    removes the file there."""
 
     def __init__(self, s3):
         self.s3 = s3
         self.owner_keys, self.removal_keys = _keys(s3, owner_prefix(ROOT)), _keys(s3, imagestore.owner_removed_prefix())
-        self.record_keys, self.clicks = _keys(s3, chosen_prefix(ROOT)), read_clicks(s3, ROOT)
+        self.record_keys = _keys(s3, chosen_prefix(ROOT))
         self.click_keys = {imagestore.sku_of(k, clicks_prefix(ROOT)): k for k in _keys(s3, clicks_prefix(ROOT))}
         self.stored = self.owner_keys | self.removal_keys | self.record_keys
+        (self.owners, owner_bad), clicks = proc.owner_records(s3, ROOT), read_clicks(s3, ROOT)
+        self.removals, removal_bad = records_by_sku(s3, imagestore.owner_removed_prefix())
+        self.clicks = {sku: r for sku, r in clicks.items() if "error" not in r}
+        self.unreadable = {}
+        for what, bad, key in (("owner choice", owner_bad, lambda sku: owner_key(ROOT, sku)),
+                               ("removal", removal_bad, imagestore.owner_removed_key),
+                               ("click", {sku: r["error"] for sku, r in clicks.items() if "error" in r},
+                                lambda sku: self.click_keys[sku])):
+            for sku, why in bad.items():
+                self.unreadable.setdefault(sku, []).append((what, key(sku), why))
         self._read = {}
 
-    def get(self, key, keys):
-        if key not in keys:
+    def chosen(self, listing):
+        """A listing's choice record (the run's own, by listing key), None without one."""
+        key = f"{chosen_prefix(ROOT)}{listing['key']}.json"
+        if key not in self.record_keys:
             return None
         if key not in self._read:
             self._read[key] = _json(self.s3, key)
         return self._read[key]
 
     def owner(self, sku):
-        return self.get(owner_key(ROOT, sku), self.owner_keys)
+        return self.owners.get(sku)
 
     def removal(self, sku):
-        return self.get(imagestore.owner_removed_key(sku), self.removal_keys)
+        return self.removals.get(sku)
 
     def click(self, sku):
         return self.clicks.get(sku)
+
+    def owner_unreadable(self, sku):
+        """The key of a SKU's owner choice that cannot be read, None when it can (or there is none)."""
+        return next((key for what, key, _ in self.unreadable.get(sku, ()) if what == "owner choice"), None)
 
     def latest(self, sku):
         """The time of the latest decision stored for a SKU, None without one."""
@@ -177,14 +200,14 @@ class _Stores:
     def live(self, listing, exclude, conflicts):
         """Whether a listing has a valid choice of its own (the process's own test, standardise_run.valid_choice, without
         an owner choice): a decision on a sibling never re-chooses it."""
-        record = self.get(f"{chosen_prefix(ROOT)}{listing['key']}.json", self.record_keys)
-        return proc.valid_choice(listing, record, exclude, conflicts, {})
+        return proc.valid_choice(listing, self.chosen(listing), exclude, conflicts, {})
 
     def own_decision(self, listing):
         """Whether the owner decided on this listing itself: a removal, a click, or a choice made on it (not reached
-        through another listing of its stone)."""
+        through another listing of its stone); a stored decision that cannot be read counts (it is unknown, so it
+        stands)."""
         sku, choice = listing["sku"], self.owner(listing["sku"])
-        return (self.removal(sku) is not None or self.click(sku) is not None
+        return (sku in self.unreadable or self.removal(sku) is not None or self.click(sku) is not None
                 or (choice is not None and choice["decided_on"] == choice["listing"]))
 
 
@@ -203,9 +226,9 @@ def _check(docs, listings, rounds, stores, exclude, shared):
         elif not found and doc["action"] == "clean" and (
                 unfit := _unusable(doc, listings[key], shared, rounds(C.RUN_TAG, doc["source"]), exclude, stores.s3)):
             found = unfit
-        elif not found and "error" in (broken := stores.click(listings[key]["sku"]) or {}):
-            found = [f"its stored click cannot be read ({broken['error']}): it has no time to order this decision "
-                     f"against; look at {stores.click_keys[listings[key]['sku']]} first"]
+        elif not found and (broken := stores.unreadable.get(listings[key]["sku"])):
+            found = [f"its stored {what} cannot be read ({why}): it has no time to order this decision against; look "
+                     f"at {path} first" for what, path, why in broken]
         elif not found and (stored := stores.latest(listings[key]["sku"])) is not None and moment(doc["at"]) < stored:
             found = [f"older than the decision already stored for it ({stored.isoformat()}): an old export"]
         if not found:
@@ -216,9 +239,10 @@ def _check(docs, listings, rounds, stores, exclude, shared):
         raise InvalidDecisions("\n".join(errors))
 
 
-def click_record(listing, doc):
-    """The click a "clean" decision stores for its listing, in the one click shape (publish.CLICK_FIELDS)."""
-    return dict(zip(CLICK_FIELDS, (listing["sku"], listing["key"], listing["source"], doc["sha"], doc["at"])))
+def _click(listing, doc):
+    """The click a "clean" decision stores for its listing (publish.click_record, the one shape of a click)."""
+    return click_record(sku=listing["sku"], listing=listing["key"], source=listing["source"], sha=doc["sha"],
+                        at=doc["at"])
 
 
 def _unusable(doc, listing, shared, rnd, exclude, s3):
@@ -228,7 +252,7 @@ def _unusable(doc, listing, shared, rnd, exclude, s3):
     group = shared.get((doc["source"], doc["sha"]))
     if group is not None and group.kind == "conflict":
         return [f"photo {doc['sha'][:12]} is a conflict photo, never chosen by itself: assign it with a use"]
-    problem = select.click_problem(s3, rnd, listing, click_record(listing, doc), exclude)
+    problem = select.click_problem(s3, rnd, listing, _click(listing, doc), exclude)
     return [f"the photos run would not use this clean: {problem}"] if problem else []
 
 
@@ -246,8 +270,14 @@ def _one_listing_per_conflict(docs, listings, shared, stores):
         if photo in holders:
             yield f"{doc['id']}: photo {doc['sha'][:12]} is a conflict photo also chosen for {holders[photo]} in this file"
             continue
-        stored = [k for k in group.listings if k != doc["id"] and k not in decided and k in listings
-                  and (r := stores.owner(listings[k]["sku"])) is not None and r["sha"] == doc["sha"]
+        others = [k for k in group.listings if k != doc["id"] and k not in decided and k in listings]
+        unknown = [(k, path) for k in others if (path := stores.owner_unreadable(listings[k]["sku"]))]
+        if unknown:
+            yield from (f"{doc['id']}: photo {doc['sha'][:12]} is a conflict photo and {k}'s stored owner choice "
+                        f"cannot be read, so whether it holds the photo is unknown; look at {path} first"
+                        for k, path in unknown)
+            continue
+        stored = [k for k in others if (r := stores.owner(listings[k]["sku"])) is not None and r["sha"] == doc["sha"]
                   and r["decided_on"] == r["listing"]]
         if stored:
             yield (f"{doc['id']}: photo {doc['sha'][:12]} is a conflict photo already the owner's choice for "
@@ -337,7 +367,7 @@ def plan(s3, docs, sheet, exclude):
             out.deletions.append(stores.click_keys[listing["sku"]])
     for doc in sorted((d for d in docs if d["action"] == "clean"), key=lambda d: d["id"]):
         listing = listings[doc["id"]]
-        record = click_record(listing, doc)
+        record = _click(listing, doc)
         if stores.click(listing["sku"]) != record:
             out.clicks[listing["sku"]] = record
         lifted = [imagestore.owner_removed_key(listing["sku"])]

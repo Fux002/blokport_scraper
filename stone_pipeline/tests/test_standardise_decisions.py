@@ -242,6 +242,34 @@ def test_applying_the_same_clean_again_writes_nothing_also_after_the_run_chose_a
     assert s3.written == [] and s3.objects == before
 
 
+@pytest.mark.parametrize("store", ["owner", "removed"])
+def test_a_decision_on_a_listing_whose_stored_choice_or_removal_cannot_be_read_is_refused(store):
+    # read through the photo process's isolated reader (publish.records_by_sku), never a bare read that crashes here
+    s3 = _bucket()
+    key = pub.owner_key(ROOT, "SEN-ONE") if store == "owner" else imagestore.owner_removed_key("SEN-ONE")
+    s3.objects[key] = b"{broken"
+    before, s3.written = dict(s3.objects), []
+    with pytest.raises(dec.InvalidDecisions, match=f"cannot be read .*look at {key} first"):
+        dec.plan(s3, [_clean("one", B, at=LATER)], LISTINGS, exclude=set())
+    assert s3.objects == before
+
+
+def test_a_use_never_reaches_a_sibling_whose_stored_choice_cannot_be_read():
+    s3 = _bucket()
+    s3.objects[pub.owner_key(ROOT, "SEN-BLOCK-2")] = b"[1, 2]"
+    p = dec.plan(s3, [_use("block-1", F)], LISTINGS, exclude=set())
+    assert list(p.owner) == [pub.owner_key(ROOT, "SEN-BLOCK-1")]
+    assert "block-2: same stone as block-1, not reached: its own decision stands" in p.notes
+
+
+def test_a_conflict_photo_is_refused_while_a_partner_s_stored_choice_cannot_be_read():
+    # the partner may hold it (the photos run leaves such a listing exactly as published): never a second holder
+    s3 = _bucket()
+    s3.objects[pub.owner_key(ROOT, "SEN-LEATHERED")] = b"{broken"
+    with pytest.raises(dec.InvalidDecisions, match="leathered's stored owner choice cannot be read"):
+        dec.plan(s3, [_use("polished", E)], LISTINGS, exclude=set())
+
+
 def test_a_removal_of_a_listing_whose_sku_has_slashes_is_one_record():
     s3 = _bucket()
     _apply(s3, [_remove("p")], [{**_listing("p", A), "sku": "MAR-P/02/16"}])
