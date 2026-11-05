@@ -194,7 +194,7 @@ def test_the_process_continues_in_the_tags_the_published_results_came_from():
 
 # --- one budget per month ---------------------------------------------------------------------------------------------
 def _spent(s3, month, run_id, usd):
-    s3._store(f"{proc.spend_prefix(month)}{run_id}.json", json.dumps({"usd": usd}).encode())
+    s3._store(f"{proc.spend_prefix(C.SPEND_DIR, month)}{run_id}.json", json.dumps({"usd": usd}).encode())
 
 
 def test_the_month_s_budget_counts_every_run_of_the_month(monkeypatch):
@@ -202,7 +202,7 @@ def test_the_month_s_budget_counts_every_run_of_the_month(monkeypatch):
     s3 = _S3()
     _spent(s3, "2026-11", "20261101T000000Z", 0.5)
     _spent(s3, "2026-11", "20261101T060000Z", 0.4)
-    spend = proc.month_spend(s3, "20261102T120000Z")
+    spend = proc.month_spend(s3, "20261102T120000Z", C.BUDGET_USD, C.SPEND_DIR)
     with pytest.raises(select.SpendCapReached):
         spend.reserve(C.JUDGE_PRICE_USD)                                     # 0.90 + 0.14 would pass 1.00
     assert spend.capped
@@ -212,7 +212,7 @@ def test_a_new_month_has_its_whole_budget(monkeypatch):
     monkeypatch.setattr(C, "BUDGET_USD", 1.0)
     s3 = _S3()
     _spent(s3, "2026-10", "20261031T230000Z", 1.0)
-    proc.month_spend(s3, "20261101T000100Z").reserve(0.5)
+    proc.month_spend(s3, "20261101T000100Z", C.BUDGET_USD, C.SPEND_DIR).reserve(0.5)
 
 
 def test_each_run_keeps_only_its_own_spend_a_reserve_counting_until_it_is_settled(monkeypatch):
@@ -220,25 +220,36 @@ def test_each_run_keeps_only_its_own_spend_a_reserve_counting_until_it_is_settle
     run_id, other = "20261102T120000Z", "20261101T000000Z"
     s3 = _S3()
     _spent(s3, "2026-11", other, 2.0)
-    spend = proc.month_spend(s3, run_id)
-    own = f"{proc.spend_prefix('2026-11')}{run_id}.json"
+    spend = proc.month_spend(s3, run_id, C.BUDGET_USD, C.SPEND_DIR)
+    own = f"{proc.spend_prefix(C.SPEND_DIR, '2026-11')}{run_id}.json"
     spend.reserve(0.14)
     assert json.loads(s3.objects[own]["Body"])["usd"] == pytest.approx(0.14)        # a run that dies now still counts it
     spend.settle(0.14, 0.02)
     assert json.loads(s3.objects[own]["Body"])["usd"] == pytest.approx(0.02)
-    assert json.loads(s3.objects[f"{proc.spend_prefix('2026-11')}{other}.json"]["Body"])["usd"] == 2.0   # never rewritten
+    assert json.loads(s3.objects[f"{proc.spend_prefix(C.SPEND_DIR, '2026-11')}{other}.json"]["Body"])["usd"] == 2.0   # never rewritten
 
 
 def test_the_month_is_summed_again_when_a_call_is_settled(monkeypatch):
     monkeypatch.setattr(C, "BUDGET_USD", 3.0)
     s3 = _S3()
-    spend = proc.month_spend(s3, "20261102T120000Z")
+    spend = proc.month_spend(s3, "20261102T120000Z", C.BUDGET_USD, C.SPEND_DIR)
     _spent(s3, "2026-11", "20261102T110000Z", 2.9)                           # written by another run since
     spend.reserve(0.05)
     spend.settle(0.05, 0.05)
     assert spend.before == pytest.approx(2.9)
     with pytest.raises(select.SpendCapReached):
         spend.reserve(0.1)
+
+
+def test_two_budgets_keep_their_runs_apart():
+    # The process's budget and any other monthly budget (the cleaning cap) each sum only their own directory's runs.
+    s3 = _S3()
+    _spent(s3, "2026-11", "20261101T000000Z", 0.9)
+    other = proc.month_spend(s3, "20261102T120000Z", 1.0, "another-spend")
+    assert other.before == 0.0
+    other.reserve(0.5)
+    assert proc.month_spend(s3, "20261102T130000Z", 1.0, C.SPEND_DIR).before == pytest.approx(0.9)
+    assert f"{proc.spend_prefix('another-spend', '2026-11')}20261102T120000Z.json" in s3.objects
 
 
 def _configured(monkeypatch):
