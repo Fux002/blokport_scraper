@@ -57,12 +57,12 @@ def test_alias_writeback_persists_and_reapplies(tmp_path, monkeypatch):
     path = tmp_path / "alias_writeback.csv"
     monkeypatch.setattr(wb, "_writeback_path", lambda name: path)
     writeback = wb.WriteBack()
-    writeback.add_alias("vid-1", "Some Scraped Spelling")
-    writeback.add_alias("vid-1", "Some Scraped Spelling")  # dup ignored
+    writeback.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")
+    writeback.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")  # dup ignored
     assert writeback.flush() == 1
     # second flush of the same content writes nothing (append-only, idempotent)
     again = wb.WriteBack()
-    again.add_alias("vid-1", "Some Scraped Spelling")
+    again.add_alias("vid-1", "Some Scraped Spelling", method="fuzzy")
     assert again.flush() == 0
     loaded = wb.load_alias_writeback(path)
     assert loaded == [("vid-1", "Some Scraped Spelling")]
