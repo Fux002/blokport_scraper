@@ -109,7 +109,7 @@ def test_a_slab_listing_whose_chosen_photo_has_no_3d_slab_is_picked_again_with_i
 
 
 def _decided(exclude=(), conflicts=None, picks=None):
-    return proc.Decisions(set(exclude), {}, conflicts or {}, [], picks or {})
+    return proc.Decisions(set(exclude), {}, {}, conflicts or {}, [], picks or {})
 
 
 def test_what_the_live_listings_show_is_refreshed_and_nothing_else():
@@ -288,6 +288,14 @@ def test_the_summary_carries_the_cleaning_cap_s_spend():
     assert proc.clean_summary(cap) == {"clean_run_spent_usd": 0.14, "clean_month_spent_usd": 4.14, "clean_budget_usd": 30.0,
                                        "clean_budget_reached": False, "clean_uses": 1}
     assert set(proc.clean_summary(None).values()) == {None}
+
+
+def test_the_owner_s_clicks_are_read_by_sku_beside_the_choices():
+    root = f"{proc.ROOT}{C.CLEAN_TAG}/"
+    s3 = _S3({f"{pub.clicks_prefix(root)}{imagestore.sku_file('MAR-P/06/22')}":
+              json.dumps({"sku": "MAR-P/06/22", "listing": "slab-1", "source": "marenostone", "sha": A, "at": "t"}).encode()})
+    assert proc.click_records(s3, root) == {"MAR-P/06/22": {"sku": "MAR-P/06/22", "listing": "slab-1",
+                                                           "source": "marenostone", "sha": A, "at": "t"}}
 
 
 def _configured(monkeypatch):
@@ -575,7 +583,7 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
     found = picked()
     assert [l["kept"] for l in found] == [(C.RUN_TAG, A)]
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, {}, {},
-                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [])
+                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {})
     assert sel.gpu_todo() == {}                                     # every candidate has its result: no GPU
     spend = select.Spend(5.0)
     select.judge_all(sel, spend, float("inf"))
@@ -596,7 +604,7 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
     monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
     records = proc.choices(s3, ROOT)
     sel = select.Selection(s3, proc.todo([_listing("one", A, B)], records, set(), proc.whole_slabs(s3, records), set(), {}, {}),
-                           C.RUN_TAG, C.CLEAN_TAG, {}, {}, select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [])
+                           C.RUN_TAG, C.CLEAN_TAG, {}, {}, select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {})
     spend = select.Spend(5.0)
     assert sel.gpu_todo() == {}
     assert select.judge_all(sel, spend, float("inf")) == ([], False)
@@ -613,7 +621,7 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     records = proc.choices(s3, ROOT)
     found = proc.todo([_listing("one", A)], records, set(), proc.whole_slabs(s3, records), set(), {}, {})
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, {}, {},
-                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [])
+                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {})
     assert sel.gpu_todo() == {"sentas": [A]}                        # outdated: the GPU completes it
     s3._store(f"{RUN}{A}.close.jpg", b"close")                     # what the GPU job adds (standardise_source.rework)
     s3._store(f"{RUN}{A}.slab.png", _slab_png())
@@ -682,10 +690,10 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"])
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, set(), {}, rounds)) is not None}
-    decided = proc.Decisions(set(), owner, {}, rounds, picks)
+    decided = proc.Decisions(set(), owner, {}, {}, rounds, picks)
     found = proc.todo(listings, records, set(), proc.whole_slabs(s3, records), set(), {}, picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, owner, {}, rounds,
-                           proc.live_choices(listings, records, set(), decided))
+                           proc.live_choices(listings, records, set(), decided), {})
     proc.run(None, sel, select.Spend(5.0), None, "R1", float("inf"), say=lambda m: None)
     pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     return sent, asked

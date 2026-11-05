@@ -245,7 +245,16 @@ def removed_listings(s3):
 
 def owner_records(s3, root):
     """{SKU: the owner's photo choice record} under the clean tag's root (deploy.standardise_decisions)."""
-    prefix = publish.owner_prefix(root)
+    return records_by_sku(s3, publish.owner_prefix(root))
+
+
+def click_records(s3, root):
+    """{SKU: the owner's click to clean one photo} under the clean tag's root (publish.clicks_prefix)."""
+    return records_by_sku(s3, publish.clicks_prefix(root))
+
+
+def records_by_sku(s3, prefix):
+    """{SKU: record} of the <SKU>.json records under prefix."""
     keys = sorted(o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
                   for o in page.get("Contents", []))
     records = publish.pool_map(publish.WORKERS, lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
@@ -405,11 +414,13 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
 
 @dataclass(frozen=True)
 class Decisions:
-    """What a run decides by, read once: the exclude list, the owner's choice records ({SKU: record}), the produce's
+    """What a run decides by, read once: the exclude list, the owner's choice records ({SKU: record}), the owner's clicks
+    to clean a photo ({SKU: record}), the produce's
     conflict set ({(source, sha): handles}: photos listings of several stones show), the run tags' stores, and the owner's choices that apply
     ({listing key: (tag, sha)}, select.owner_choice). Both kinds of round and publish see the same."""
     exclude: set
     owner: dict
+    clicks: dict
     conflicts: dict
     rounds: list
     picks: dict
@@ -419,12 +430,12 @@ def read_decisions(s3, root, listings):
     """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
     re-classified; none stored yet: publish.NoConflictSet, nothing done."""
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
-    owner = owner_records(s3, root)
+    owner, clicks = owner_records(s3, root), click_records(s3, root)
     conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, exclude, conflicts, rounds)) is not None}
-    return Decisions(exclude, owner, conflicts, rounds, picks)
+    return Decisions(exclude, owner, clicks, conflicts, rounds, picks)
 
 
 def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions):
@@ -434,7 +445,7 @@ def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings,
     found = todo(listings, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
                  decisions.picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
-                           live_choices(listings, records, removed, decisions))
+                           live_choices(listings, records, removed, decisions), decisions.clicks)
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")

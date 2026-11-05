@@ -315,28 +315,44 @@ def choose(client, rounds, listing, exclude, spend=None, owner=None):
     return fallback, complete
 
 def fixable(client, rnd, sha, exclude):
-    """Whether a cleaned copy of this photo could pass: the judge failed its result only for reflections, marks or fills,
-    or the retouch or logo step held it. A photo held for its outline, or never judged, is not worth an edit."""
+    """What a cleaned copy of this photo would fix, or None when it could not pass: {"kinds": [...]} when the judge failed
+    its result only for reflections, marks or fills, {"held": reason} when the retouch or logo step held it. A photo held
+    for its outline, or never judged, is not worth an edit."""
     if sha in exclude:
-        return False
+        return None
     if sha in rnd.finished:
         if sha not in rnd.judged:
-            return False
+            return None
         found = _get_json(client, f"{rnd.prefix}judged/{sha}.json")
-        return judge.current(found) and judge.fixable(found)          # an outdated fail is judged again first
+        if judge.current(found) and judge.fixable(found):            # an outdated fail is judged again first
+            return {"kinds": sorted({p["kind"] for p in found["problems"]})}
+        return None
     if sha in rnd.held:
-        return _get_json(client, f"{rnd.prefix}held/{sha}.json")["reason"].startswith(C.CLEAN_FIXES_HELD)
-    return False
+        reason = _get_json(client, f"{rnd.prefix}held/{sha}.json")["reason"]
+        return {"held": reason} if reason.startswith(C.CLEAN_FIXES_HELD) else None
+    return None
 
 
-def clean_photo(client, cl, src, sha, spend, listing):
+def authorised(cause, sha, click):
+    """Why this fixable photo may be sent to a paid edit, or None (owner 2026-11-05): "auto" for a mark on the stone
+    (CLEAN_AUTO_KINDS, CLEAN_AUTO_HELD; a mark with a reflection besides is cleaned too, the edit removes both), "click"
+    when the owner's click for the listing names this photo. Any other fixable photo waits for a click."""
+    if set(cause.get("kinds", ())) & set(C.CLEAN_AUTO_KINDS) or cause.get("held", "").startswith(C.CLEAN_AUTO_HELD):
+        return "auto"
+    if click is not None and click.get("sha") == sha:
+        return "click"
+    return None
+
+
+def clean_photo(client, cl, src, sha, spend, listing, why):
     """Each model in turn until a cleaned copy passes the clean check; that copy becomes cleaned/<sha>.jpg. Returns
-    whether one passed. spend is the cleaning cap's; each paid call is listed there for the listing that asked for it."""
+    whether one passed. spend is the cleaning cap's; each paid call is listed there for the listing that asked for it,
+    with why it was sent (`why`: its reason, auto or click, and what the edit fixes)."""
     with cl.lock(sha):
         if sha in cl.cleaned:
             return True
         original = _original(client, src, sha)
-        use = {"source": src, "sha": sha, "sku": listing["sku"], "listing": listing["key"]}
+        use = {"source": src, "sha": sha, "sku": listing["sku"], "listing": listing["key"], **why}
         for name in clean.MODELS:
             if _attempt(client, cl, sha, name, original, spend, use)["passes"]:
                 client.copy_object(Bucket=S3_BUCKET, Key=f"{cl.prefix}cleaned/{sha}.jpg", ContentType="image/jpeg",
@@ -412,10 +428,10 @@ def _failed(client, cl, att, ident, name, why):
     return check
 
 
-def clean_listing(client, rounds, listing, exclude, spend, owner=None):
-    """A listing with no good photo from the standardiser: its first CLEAN_PHOTOS_PER_LISTING fixable photos are
-    cleaned (one is enough). Nothing to do when the owner chose its photo, or when it already has a cleaned copy (its
-    result is judged later)."""
+def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=None):
+    """A listing with no good photo from the standardiser: its first CLEAN_PHOTOS_PER_LISTING fixable photos that may be
+    paid for (authorised: a mark on the stone, or the one the owner's click names) are cleaned (one is enough). Nothing
+    to do when the owner chose its photo, or when it already has a cleaned copy (its result is judged later)."""
     (_, gpu), (_, cl) = rounds
     src = listing["source"]
     if owner is not None or any(sha in cl[src].cleaned for sha in listing["photos"]):
@@ -425,8 +441,11 @@ def clean_listing(client, rounds, listing, exclude, spend, owner=None):
         return
     if not complete:
         raise RuntimeError("its first photos have no standardiser result or verdict yet: nothing is cleaned before they do")
-    for sha in [sha for sha in listing["photos"] if fixable(client, gpu[src], sha, exclude)][:C.CLEAN_PHOTOS_PER_LISTING]:
-        if clean_photo(client, cl[src], src, sha, spend, listing):
+    sent = [(sha, {"reason": why, **cause, **({"click_at": click["at"]} if why == "click" else {})})
+            for sha in listing["photos"]
+            if (cause := fixable(client, gpu[src], sha, exclude)) is not None and (why := authorised(cause, sha, click))]
+    for sha, why in sent[:C.CLEAN_PHOTOS_PER_LISTING]:
+        if clean_photo(client, cl[src], src, sha, spend, listing, why):
             return
 
 def photo_notes(client, rounds, listing, exclude, conflicts):
@@ -486,13 +505,15 @@ class Selection:
     GPU round). owner = {SKU: the owner's choice record} (deploy.standardise_decisions); conflicts = {(source, sha):
     listing keys} of the photos listings of several stones show (index.shared_photos); chosen = [(tag, source, sha)] of
     what the listings a run may publish show now (deploy.standardise_run.live_choices): an outdated one goes to the GPU
-    too, its listing not picked again (its verdict and choice stand)."""
+    too, its listing not picked again (its verdict and choice stand); clicks = {SKU: the owner's click to clean one
+    photo} (publish.clicks_prefix)."""
 
-    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen):
+    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen, clicks):
         if not run_tag or not clean_tag or run_tag == clean_tag:
             raise ValueError("two different run tags are required: the scraped photos' run and the cleaned copies' run")
         self.client, self.listings, self.tags = client, listings, (run_tag, clean_tag)
         self.owner, self.conflicts, self.rounds, self.chosen = owner, conflicts, rounds, sorted(set(chosen))
+        self.clicks = clicks
         self.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in self.chosen})
         self.exclude = read_exclude(EXCLUDE_PATH.read_text())
         self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
@@ -602,8 +623,8 @@ def judge_all(sel, spend, deadline):
 def clean_all(sel, spend, deadline):
     """(failures, stopped): every listing with no pass gets a cleaned copy where one can be made, each started before the
     deadline."""
-    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.blocked(l), spend, sel.owner_pick(l)),
-                 deadline)
+    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.blocked(l), spend, sel.owner_pick(l),
+                                                       sel.clicks.get(l["sku"])), deadline)
 
 
 def report(sel):

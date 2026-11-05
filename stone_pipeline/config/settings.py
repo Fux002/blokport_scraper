@@ -947,6 +947,9 @@ class STANDARDISE:
     # (percent-encoded) = {tag, sha, at, listing, decided_on}; it names a result of the process's tags, so it moves with
     # them (a tag migration copies these records with the choice records).
     OWNER_DIR = "owner"
+    # The owner's click to clean one photo of a hidden listing: <env>/<TEST_PREFIX>/<CLEAN_TAG>/<this>/<SKU>.json
+    # (percent-encoded) = {sku, listing, source, sha, at}. Only the intent: the next photos run cleans it within the cap.
+    CLICKS_DIR = "clicks"
     # A photo listings of several varieties or finishes show is never chosen by itself (index.shared_photos): the reason
     # the review list gives for it.
     CONFLICT_REASON = "photo_conflict"
@@ -1087,6 +1090,11 @@ Your whole answer is one JSON object and nothing else:
     # retired: a logo is the judge's leftover_mark now), but holds the retired step stored stay on S3 per photo (prod
     # v2: 100 varsha photos, 2026-11-02) and a cleaned copy fixes them, so they stay cleanable.
     CLEAN_FIXES_HELD = ("retouch:", "logo:")
+    # What is cleaned without asking (owner 2026-11-05): every mark on the stone, the judge's leftover_mark (labels,
+    # stickers, cards, writing, logos, tape, straps, film) and the holds the retouch or the retired logo step left for a
+    # mark. Any other fixable photo (a reflection, a bad fill) is cleaned only when the owner clicks it (CLICKS_DIR).
+    CLEAN_AUTO_KINDS = ("leftover_mark",)
+    CLEAN_AUTO_HELD = ("retouch:", "logo:")
     CLEAN_FAILED_CODES = (400, 422)    # a queued edit the model refused for good; any other error is loud and retried
     CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
 straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and

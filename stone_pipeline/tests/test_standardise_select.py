@@ -149,7 +149,7 @@ def test_without_spend_a_photo_not_judged_yet_leaves_the_listing_incomplete():
 # --- the hosted clean-up -------------------------------------------------------------------------------------------
 def _clean_setup(monkeypatch, passes_at):
     s3 = _S3({f"dev/products/scraped/sentas/{s}.jpg": b"o" for s in (A, B)}
-             | {f"{GPU}judged/{A}.json": _verdict("fail", "not_one_slab"), f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection")})
+             | {f"{GPU}judged/{A}.json": _verdict("fail", "not_one_slab"), f"{GPU}judged/{B}.json": _verdict("fail", "leftover_mark")})
     edits = []
     monkeypatch.setattr(sel.clean, "submit", lambda name, img: edits.append(name) or {"model": name})
     monkeypatch.setattr(sel.clean, "collect", lambda job: f"copy-{job['model']}".encode())
@@ -233,6 +233,54 @@ def test_a_photo_held_by_the_retouch_or_the_retired_logo_step_is_worth_cleaning_
               f"{GPU}held/{B}.json": json.dumps({"reason": "slab cut off by the photo edge"}).encode()})
     rnd = _round(GPU, held=(A, B))
     assert sel.fixable(s3, rnd, A, set()) and not sel.fixable(s3, rnd, B, set()) and not sel.fixable(s3, rnd, A, {A})
+
+
+def test_what_a_cleaned_copy_would_fix_is_named():
+    s3 = _S3({f"{GPU}judged/{A}.json": _verdict("fail", "light_reflection", "leftover_mark"),
+              f"{GPU}held/{B}.json": json.dumps({"reason": "retouch: a strap the fill could not cover"}).encode()})
+    rnd = _round(GPU, finished=(A,), judged=(A,), held=(B,))
+    assert sel.fixable(s3, rnd, A, set()) == {"kinds": ["leftover_mark", "light_reflection"]}
+    assert sel.fixable(s3, rnd, B, set()) == {"held": "retouch: a strap the fill could not cover"}
+
+
+def test_a_mark_on_the_stone_is_cleaned_without_asking_anything_else_only_on_the_owner_s_click():
+    # owner 2026-11-05: logos, labels, stickers, tape, straps and film are cleaned automatically; the rest by click
+    assert sel.authorised({"kinds": ["leftover_mark"]}, A, None) == "auto"
+    assert sel.authorised({"kinds": ["leftover_mark", "light_reflection"]}, A, None) == "auto"   # the edit removes both
+    assert sel.authorised({"held": "retouch: a strap"}, A, None) == "auto"
+    assert sel.authorised({"held": "logo: still visible"}, A, None) == "auto"
+    assert sel.authorised({"kinds": ["light_reflection"]}, A, None) is None
+    assert sel.authorised({"kinds": ["bad_fill"]}, A, {"sha": B}) is None                    # the click names another photo
+    assert sel.authorised({"kinds": ["scene_reflection"]}, A, {"sha": A}) == "click"
+
+
+def test_a_reflection_waits_for_the_owner_s_click_then_is_cleaned_and_listed_as_clicked(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == [] and spend.uses == []                                            # no click: nothing paid
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click={"sha": B, "at": "2026-11-05T18:00:00Z"})
+    assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
+    assert {(u["reason"], u["click_at"], tuple(u["kinds"])) for u in spend.uses} == {
+        ("click", "2026-11-05T18:00:00Z", ("light_reflection",))}
+
+
+def test_an_automatic_clean_is_listed_with_what_it_fixes(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert {(u["reason"], tuple(u["kinds"])) for u in spend.uses} == {("auto", ("leftover_mark",))}
+    assert all("click_at" not in u for u in spend.uses)
+
+
+def test_the_clean_step_hands_each_listing_its_own_click(monkeypatch):
+    seen = []
+    monkeypatch.setattr(sel, "clean_listing", lambda client, rounds, l, exclude, spend, owner, click: seen.append((l["sku"], click)))
+    s = _selection(_S3(), [_listing(A, key="one"), {**_listing(B, key="two"), "sku": "SEN-2"}], [])
+    s.clicks = {"SEN-2": {"sha": B, "at": "t"}}
+    sel.clean_all(s, sel.Spend(10), float("inf"))
+    assert sorted(seen) == [("SEN-1", None), ("SEN-2", {"sha": B, "at": "t"})]
 
 
 def test_spend_never_passes_the_cap_even_with_calls_in_flight():
@@ -970,6 +1018,7 @@ def _selection(s3, listings, rounds, owner=None, conflicts=None, exclude=()):
     s = object.__new__(sel.Selection)
     s.client, s.listings, s.exclude, s.sources = s3, listings, set(exclude), ["sentas"]
     s.owner, s.conflicts, s.rounds, s.tags, s.chosen = owner or {}, conflicts or {}, rounds, ("v9", "v9-clean"), []
+    s.clicks = {}
     return s
 
 

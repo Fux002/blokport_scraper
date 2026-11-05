@@ -54,6 +54,11 @@ def owner_key(root, sku):
     return f"{owner_prefix(root)}{imagestore.sku_file(sku)}"
 
 
+def clicks_prefix(root):
+    """Where the owner's clicks to clean a photo are kept: <clean tag root>clicks/<SKU>.json, one per listing by SKU."""
+    return f"{root}{C.CLICKS_DIR}/"
+
+
 class NoConflictSet(RuntimeError):
     """A source on the sheet has no stored conflict set: no produce has stored it yet (every produce stores one per
     source, an empty one too), so nothing can tell which of its photos are conflicts."""
