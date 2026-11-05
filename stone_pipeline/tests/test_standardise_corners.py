@@ -168,3 +168,35 @@ def test_a_label_on_a_corner_is_filled_whole(monkeypatch):
     text[50:140, 730:850] = 1                          # and the text reader found it
     (rgb, a), = _synthetic(monkeypatch, body, [np.float32([[50, 50], [849, 50], [849, 549], [50, 549]])], text)
     assert _corner(a, "tr").mean() > 0.9               # its place is stone: the label sat on the slab
+
+
+# --- an object or a card on a square corner ------------------------------------------------------------------------------
+def _square_with_corner_mark(monkeypatch, read_as_text):
+    """The outline step of a square pale slab with a 50 x 60 mark on its top-right corner that SAM did not count as stone:
+    a clip (an object) or, read_as_text, a printed card."""
+    body = np.zeros((600, 900), np.uint8)
+    body[50:550, 50:850] = 1
+    body[50:110, 800:850] = 0                          # the mark, over the corner
+    text = np.zeros_like(body)
+    if read_as_text:
+        text[50:110, 800:850] = 1
+    rgb = np.full(body.shape + (3,), 45, np.uint8)
+    rgb[body > 0] = 205
+    _patch(monkeypatch, [np.float32([[50, 50], [849, 50], [849, 549], [50, 549]])], body.copy(), body.copy(),
+           np.zeros_like(body), text)
+    return layout.slab_outline(rgb, None, None)
+
+
+def test_a_clip_on_a_square_corner_is_drawn_differently_so_its_recheck_redraws_it_for_the_judge(monkeypatch):
+    """The stone's hull cuts the corner under the clip diagonally: this version draws it otherwise than the older rule, so
+    a recheck redraws it, and the redraw is published only once the judge passes it (deploy.standardise_source.rework,
+    test_standardise_process)."""
+    found = _square_with_corner_mark(monkeypatch, read_as_text=False)
+    assert layout.wall_in_corners(found.cards, found.objects, found.inside, found.stone).sum() > 1000
+    assert layout.drawn_differently(found)
+
+
+def test_a_card_on_a_square_corner_is_filled_whole_and_drawn_as_before(monkeypatch):
+    found = _square_with_corner_mark(monkeypatch, read_as_text=True)
+    assert not layout.wall_in_corners(found.cards, found.objects, found.inside, found.stone).any()
+    assert not layout.drawn_differently(found)

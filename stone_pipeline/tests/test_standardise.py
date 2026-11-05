@@ -167,6 +167,48 @@ def test_an_open_book_s_inner_corners_are_no_stone_of_either_half():
     assert stone[105, 795] == 0 and stone[105, 805] == 0 and stone[400, 795] == 1
 
 
+def _open_book_rounded_top_right(radius):
+    """layout.Outline of an open book (two 700 x 600 halves side by side), its right half's top-right corner rounded by
+    `radius` px: nothing erased, the stone's outline as SAM saw it."""
+    body = np.zeros((800, 1600), np.uint8)
+    body[100:700, 100:1500] = 1
+    body[100:100 + radius, 1500 - radius:1500] = 0
+    cv2.circle(body, (1499 - radius, 100 + radius), radius, 1, -1)
+    quads = [np.float32([[100, 100], [799, 100], [799, 699], [100, 699]]),
+             np.float32([[800, 100], [1499, 100], [1499, 699], [800, 699]])]
+    inside = np.zeros_like(body)
+    for q in quads:
+        cv2.fillConvexPoly(inside, q.astype(np.int32), 1)
+    none = np.zeros_like(body)
+    return layout.Outline(quads, [None, None], inside, inside.copy(), layout.stone_hulls(body, quads), body, none, none)
+
+
+def test_an_open_book_s_sawn_edge_is_decided_as_the_studio_draws_it():
+    """A few pixels of rounding at the open book's top right: on the right half alone, at its own size, the run is longer
+    than that half's strip is wide, but the studio draws the edge from the pair joined and enlarged, where it is shorter
+    than the strip: an edge on every row, so the slab is not drawn differently for it."""
+    found = _open_book_rounded_top_right(10)
+    drawn = layout.drawn_outlines(layout.flat_outlines(found))
+    assert studio.edge_rows(layout.flat_outlines(found)[-1]).min() == 0          # the half alone would see a break
+    assert (studio.sawn_edge(drawn) == 1).all()                                   # the studio draws every row
+    assert layout.side_reached(found) and not layout.drawn_differently(found)
+
+
+def test_an_open_book_s_broken_top_right_corner_stops_its_sawn_edge():
+    found = _open_book_rounded_top_right(60)
+    assert studio.sawn_edge(layout.drawn_outlines(layout.flat_outlines(found))).min() == 0
+    assert not layout.side_reached(found) and layout.drawn_differently(found)
+
+
+def test_the_flat_slabs_outlines_are_the_ones_the_outline_step_squares():
+    """flats_from draws exactly the outlines flat_outlines makes from the outline step alone (no eraser): the decision
+    and the drawing share one computation."""
+    found = _open_book_rounded_top_right(60)
+    rgb = np.full((800, 1600, 3), 128, np.uint8)
+    flats = layout.flats_from(rgb, found, lama=None)
+    assert all(np.array_equal(f.alpha, a) for f, a in zip(flats, layout.flat_outlines(found)))
+
+
 def test_a_real_corner_chip_stays():
     alpha = np.ones((800, 1200), np.float32)
     cv2.fillConvexPoly(alpha, np.array([[0, 700], [100, 799], [0, 799]]), 0)

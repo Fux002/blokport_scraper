@@ -6,6 +6,8 @@ its run saved <sha>.slab.png) also gets its 3D slab, made here from that slab (s
 <env>/products/standard/cutout/<src>/<sha>.webp + .json. The outline carries what it was made from (the slab's key and
 ETag, CUTOUT_VERSION), so a 3D slab is made again exactly when that changed: a listing's choice moved to another run of
 the same photo, a later run re-made the slab, or the cut-out itself changed.
+A chosen photo redrawn after it was judged (deploy.standardise_source.rejudge_key) waits for the judge: nothing of it is
+copied or made, and what is published of it stays as it is, until the judge passes the redraw.
 The folder is made to match the choice exactly: a view or 3D slab no longer chosen is removed, so a photo the judge or a
 person turned down never stays live. Only a view that is missing or other than its run's is copied (server-side, same
 bytes) and a cut-out is deterministic, so a re-run is safe and changes nothing. A photo on the reviewed exclude list
@@ -28,6 +30,7 @@ from pathlib import Path
 import cv2
 from botocore.exceptions import BotoCoreError, ClientError
 
+from deploy.standardise_source import rejudge_key
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import cutout, tile_plan, tile_stone
@@ -95,6 +98,15 @@ def slabs(chosen, made, exclude=frozenset()):
     the photos that get a 3D slab."""
     return {(c["source"], c["sha"]): key for c in chosen
             if c["sha"] not in exclude and (key := f"{c['prefix']}{c['sha']}.slab.png") in made}
+
+
+def waiting_files(waiting, published, exclude=frozenset()):
+    """What is published of the chosen photos waiting for the judge (redrawn after they were judged: rejudge_key), sorted:
+    kept as it is, nothing of the redraw copied or made, until the judge passes it."""
+    return sorted(k for c in waiting if c["sha"] not in exclude
+                  for k in [*(imagestore.standard_key(c["source"], c["sha"], v) for v in imagestore.STANDARD_VIEWS),
+                            *cutout_keys((c["source"], c["sha"]))]
+                  if k in published)
 
 
 def cutout_keys(slab):
@@ -412,15 +424,18 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
     chosen = [c for c in chosen if assigned.get((c["source"], c["sha"]), True)]
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
     exclude = read_exclude(EXCLUDE_PATH.read_text())
-    plan, todo = copies(chosen, made, exclude), slabs(chosen, made, exclude)
+    waiting = [c for c in chosen if rejudge_key(c["prefix"], c["sha"]) in made]
+    ready = [c for c in chosen if rejudge_key(c["prefix"], c["sha"]) not in made]
+    plan, todo = copies(ready, made, exclude), slabs(ready, made, exclude)
     folders = [*map(imagestore.standard_prefix, (*imagestore.STANDARD_VIEWS, imagestore.CUTOUT_SUBDIR, imagestore.TILE_SUBDIR))]
     published = {k: t for prefix in folders for k, t in _objects(client, prefix).items()}
+    held = waiting_files(waiting, published, exclude)
     fresh = unpublished(plan, made, published)
     stamps = dict(zip(todo, pool_map(WORKERS, lambda s: _stamp(client, s, published), todo)))
     remake = outdated(todo, made, published, stamps)
     files = list(_objects(client, imagestore.assigned_prefix()))
     current = dict(zip(files, pool_map(WORKERS, lambda k: client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read(), files)))
-    writes, unassigned = assignment_changes(assigned, {t for _, t in plan}, current)
+    writes, unassigned = assignment_changes(assigned, {t for _, t in plan} | set(held), current)
     # A conflict photo's assignment file goes up before its views, and a stale one comes down after the views it covered:
     # a publish stopped half way never leaves a conflict photo's view without the file that says whose it is.
     for key, body in writes.items():
@@ -429,14 +444,15 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
                                                     ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh)
     # each cut-out holds a full-size slab in memory
     made_3d = sum(pool_map(C.CUTOUT_WORKERS, lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
-    slab_3d = {k for s in todo for k in cutout_keys(s)}
+    slab_3d = {k for s in todo for k in cutout_keys(s)} | {k for k in held if k.startswith(imagestore.cutout_prefix())}
     cutouts = {k: t for k, t in _objects(client, imagestore.cutout_prefix()).items() if k in slab_3d}
     tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
-    gone = stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"])
+    gone = stale(published, [t for _, t in plan] + sorted(slab_3d) + held + tiles["keep"])
     pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
     for key in unassigned:                             # only once the views it covered are gone
         client.delete_object(Bucket=S3_BUCKET, Key=key)
-    say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
+    say(f"==> published {len(chosen)} listings' photos ({len(waiting)} redrawn, waiting for the judge: kept as published): "
+        f"{len(fresh)} of {len(plan)} views copied (the rest unchanged), "
         f"made {made_3d} of {len(remake)} 3D slabs, removed {len(gone)} files no longer chosen; "
         f"{len(writes)} conflict photos assigned, {len(unassigned)} assignments removed")
     counts = ({k: tiles[k] for k in ("listings", "shown", "rendered", "unknown_variations")}

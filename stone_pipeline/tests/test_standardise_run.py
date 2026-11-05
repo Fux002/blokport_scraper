@@ -50,12 +50,13 @@ class _S3:
         self.objects[Key] = Body
 
 
-def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=(), logo_step=(), checked=None):
-    """checked: the whole slabs drawn under the current outline rule (default: every slab)."""
+def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=(), logo_step=(), checked=None, rejudge=()):
+    """checked: the whole slabs drawn under the current outline rule (default: every slab); rejudge: the redrawn ones
+    waiting for the judge."""
     r = object.__new__(sel_mod.Round)
     r.prefix, r.finished, r.held, r.cleaned = "p/", set(finished), set(held), set(cleaned)
     r.slabs, r.studio, r.noslab, r.logo_step = set(slabs), set(studio), set(noslab), set(logo_step)
-    r.checked = set(slabs) if checked is None else set(checked)
+    r.checked, r.rejudge = set(slabs) if checked is None else set(checked), set(rejudge)
     r.judged, r.attempts, r.edited = set(), set(), set()
     return r
 
@@ -695,6 +696,7 @@ def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkey
 def test_a_round_s_outdated_results_are_worked_out_once_not_per_candidate():
     r = sel_mod.Round.__new__(sel_mod.Round)
     r.finished, r.studio, r.slabs, r.noslab, r.held, r.logo_step, r.checked = {A, B}, {A, B}, {B}, set(), set(), set(), {B}
+    r.rejudge = set()
     assert r.outdated == {A} and r.outdated is r.outdated
 
 
@@ -739,3 +741,9 @@ def test_only_the_cleaned_copies_of_the_run_s_listings_and_the_chosen_ones_go_to
     s = _selection([_listing(A, F)], clean_round=cleaned, exclude={F},
                    chosen=[("v9-clean", "sentas", B), ("v9", "sentas", D)])
     assert s.clean_todo() == {"sentas": [A, B]}    # D: its choice is the scraped run's; E, G: no current listing; F: excluded
+
+
+def test_a_redraw_cut_short_is_drawn_again_whatever_noted_it():
+    # its marker (rejudge/) without its note: half of it new; a failure noted in noslab/ never leaves it so
+    rnd = _round(finished={A}, slabs={A}, checked=(), noslab={A}, rejudge={A})
+    assert rnd.older_outline == {A} and rnd.outdated == {A}

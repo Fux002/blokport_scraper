@@ -98,6 +98,12 @@ def edge_rows(alpha):
     return np.repeat(reach[:, None], n, axis=1).astype(np.float32)
 
 
+def sawn_edge(alphas):
+    """Where the studio draws the sawn edge (edge_rows) of the slabs as drawn (their outlines, an open book's two side by
+    side): one face, as place joins them."""
+    return edge_rows(np.concatenate(alphas, axis=1).astype(np.float32))
+
+
 def place(slabs):
     """The finished studio image of one slab, or an open book joined into one face."""
     rgb = np.concatenate([s for s, _ in slabs], axis=1).astype(np.float32)
@@ -124,7 +130,7 @@ def place(slabs):
     E = cv2.getPerspectiveTransform(np.float32([[0, 0], [strip.shape[1], 0], [strip.shape[1], th], [0, th]]),
                                     np.float32([tr, tr + off_top, br + off_bottom, br]))
     edge = cv2.warpPerspective(strip, E, size, flags=cv2.INTER_LINEAR) * C.STUDIO_EDGE_LIGHT
-    side = cv2.warpPerspective(edge_rows(alpha), E, size, flags=cv2.INTER_LINEAR)[..., None]
+    side = cv2.warpPerspective(sawn_edge([a for _, a in slabs]), E, size, flags=cv2.INTER_LINEAR)[..., None]
     out = out * (1 - side) + edge * side
     out = out * (1 - a) + stone * a
     out = out * (1 - keep) + warp(base, S) * keep                     # the clips stand in front of the slab's foot

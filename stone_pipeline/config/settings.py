@@ -919,7 +919,7 @@ class STANDARDISE:
     # the wall in a rounded or broken corner never shows (2026-11-02; before it, the fitted corners counted). A whole slab
     # made under it has a note <run folder><this><sha>.json; one without the note was made under the older rule and goes
     # to the GPU once, which checks its outline and redraws it only when this version draws it differently (the wall in a
-    # corner, or the studio's sawn edge beside a broken right corner); its verdict stands: only what is not stone changes.
+    # corner, or the studio's sawn edge beside a broken right corner), and a redraw is judged again before it is published.
     # A later rule change = a new folder name, and every whole slab is checked once again.
     OUTLINE_CHECKED = "outline-v2/"
     # On: the runner starts the photo process after each full produce (stage all, the owner's button), never after the

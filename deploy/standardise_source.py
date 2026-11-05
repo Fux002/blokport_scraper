@@ -81,6 +81,16 @@ def outdated(client, out, sha):
             and not _exists(client, f"{out}noslab/{sha}.json") and not _exists(client, logo_step_key(out, sha)))
 
 
+REJUDGE = "rejudge/"
+
+
+def rejudge_key(out, sha):
+    """The marker of a result redrawn after it was judged (rework): its stored verdict no longer applies. Written before
+    any of its files, it holds publish to what is published of it (deploy.standardise_publish) until the judge passes it
+    again, as a new result is (deploy.standardise_select.verdict takes it off)."""
+    return f"{out}{REJUDGE}{sha}.json"
+
+
 def checked_key(out, sha):
     """The note that this photo's whole slab is drawn under the current outline rule (C.OUTLINE_CHECKED)."""
     return f"{out}{C.OUTLINE_CHECKED}{sha}.json"
@@ -88,10 +98,12 @@ def checked_key(out, sha):
 
 def older_outline(client, out, sha):
     """A whole slab made under the outline rule before C.OUTLINE_CHECKED: its slab and no note of the current rule, not
-    tried again before (noslab/: kept as it is) and not made by the retired logo step (logo_step_key: a re-run would
-    start from the photo with its logo and redraw views no judge saw)."""
+    tried again before (noslab/: kept as it is) unless a redraw of it was cut short (its marker, rejudge_key, without
+    the note: half of it is new, so it is drawn again whole), and not made by the retired logo step (logo_step_key: a
+    re-run would start from the photo with its logo and redraw views no judge saw)."""
     return (_exists(client, f"{out}{sha}.slab.png") and not _exists(client, checked_key(out, sha))
-            and not _exists(client, f"{out}noslab/{sha}.json") and not _exists(client, logo_step_key(out, sha)))
+            and (not _exists(client, f"{out}noslab/{sha}.json") or _exists(client, rejudge_key(out, sha)))
+            and not _exists(client, logo_step_key(out, sha)))
 
 
 def made(client, out, sha):
@@ -137,16 +149,20 @@ def _put(client, out, sha, files):
 
 
 def write(client, out, sha, res, note):
-    """A result written whole: its files (_files), then the views an earlier result of the photo had and this one does
-    not make removed (a stale close view would be published with the new ones), then, for a whole slab, `note`: it is
-    drawn under the current outline rule (written last: missing, the slab is checked once more, never wrong)."""
-    files = _files(res)
+    """A result written whole (_store of its files, every one encoded before the first write)."""
+    _store(client, out, sha, _files(res), bool(res.slab), note)
+
+
+def _store(client, out, sha, files, whole, note):
+    """A result's encoded files written, then the views an earlier result of the photo had and this one does not make
+    removed (a stale close view would be published with the new ones), then, for a whole slab, `note`: it is drawn under
+    the current outline rule (written last: missing, the slab is checked once more, never wrong)."""
     _put(client, out, sha, files)
-    made = {name for name, _, _ in files}
+    names = {name for name, _, _ in files}
     for view in imagestore.STANDARD_VIEWS:
-        if f"{view}.jpg" not in made and _exists(client, f"{out}{sha}.{view}.jpg"):
+        if f"{view}.jpg" not in names and _exists(client, f"{out}{sha}.{view}.jpg"):
             client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{view}.jpg")
-    if res.slab:
+    if whole:
         _note(client, out, sha, note)
 
 
@@ -156,14 +172,15 @@ def _note(client, out, sha, note):
 
 
 def rework(client, out, sha, res, how):
-    """A stored result worked on again (how: again's "complete" or "recheck"), one path for both; its verdict and choice
-    stand (only what is not stone changes, and publish copies what changed):
+    """A stored result worked on again (how: again's "complete" or "recheck"), one path for both:
       - drawn the same by this version (a recheck stops before drawing): only the note, {"changed": false};
       - no whole slab on the re-run (held, a close-up, or a completion that is no open book this time): nothing is
         written but noslab/ (tried): it is never run again and stays as it is (it is judged and may be published: never
         held);
-      - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): written whole
-        (write), then the note {"changed": true};
+      - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): its stored verdict
+        no longer applies. Every file encoded, then its marker (rejudge_key: publish keeps what is published of it), its
+        verdict removed, the files written whole (_store) and the note {"changed": true} last: only then is it judged
+        again, as a new result is, and published once the judge passes it;
       - a completion drawn the same: what was judged (main, white, studio) stays; its close view, then which slab it is
         and its slab (the result complete), then the note {"changed": false}. Cut short, the close view comes off again
         while the slab is missing, so half of one is never published."""
@@ -174,10 +191,14 @@ def rework(client, out, sha, res, how):
         tried(client, out, sha, res.held or f"the re-run is a {res.kind}, no {'open book' if how == 'complete' else 'whole slab'}")
         return "no slab"
     if res.changed:
-        write(client, out, sha, res, {"changed": True})
+        files = _files(res)
+        client.put_object(Bucket=S3_BUCKET, Key=rejudge_key(out, sha), ContentType="application/json",
+                          Body=json.dumps({"reason": "outline redrawn"}, sort_keys=True).encode())
+        client.delete_object(Bucket=S3_BUCKET, Key=f"{out}judged/{sha}.json")
+        _store(client, out, sha, files, True, {"changed": True})
         return "outline redrawn"
-    made = {f[0]: f for f in _files(res)}
-    files = [made[name] for name in ("close.jpg", "slab.json", "slab.png") if name in made]   # the slab last: complete
+    by_name = {f[0]: f for f in _files(res)}
+    files = [by_name[n] for n in ("close.jpg", "slab.json", "slab.png") if n in by_name]   # the slab last: complete
     try:
         _put(client, out, sha, files)
     except BaseException:
