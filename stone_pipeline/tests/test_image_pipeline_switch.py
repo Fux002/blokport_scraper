@@ -224,7 +224,7 @@ def test_the_close_only_run_never_works_an_off_source(config_db, monkeypatch):
     rounds = []
     monkeypatch.setattr(proc.gpu, "run_round", lambda batch, s3, tag, todo, run_id, deadline, spend, work:
                         rounds.append(todo) or [])
-    proc.close_round(None, None, select.Spend(5.0), "R1", time.monotonic() + 3600, "root/", say=lambda m: None)
+    proc.close_round(None, None, select.Spend(5.0), "R1", time.monotonic() + 3600, "root/", lambda m: None, set())
     assert rounds == [{"sentas": [A]}]
 
 
