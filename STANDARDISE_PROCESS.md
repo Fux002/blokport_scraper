@@ -409,9 +409,10 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 
 A release that changes the GPU job's code (as the outline rule's, `OUTLINE_CHECKED`), in this order:
 
-1. The GPU image first: build it from the main commit of the release, tag it `standardise-pin-<sha>`, set
-   `*_standardise_image_tag` and apply, so the job definition runs it. A pinned image older than the change does not
-   write the notes the svc looks for: every whole slab without one would be sent to the GPU again on every run.
+1. The GPU image first: the release image of the release's main commit (`deploy/build_standardise_image.sh`, see The
+   GPU image), pinned in `*_standardise_image_tag` and applied, so the job definition runs it. A pinned image older than
+   the change writes no notes and no candidate markers: every whole slab without a note would be sent to the GPU again
+   on every run.
 2. Then the svc (its image pin), whose photo process reads the notes and sends what is outdated to the GPU.
 
 TerminateJob scope: the svc task role may stop jobs `arn:aws:batch:<region>:<account>:job/*`. Batch has no condition on
