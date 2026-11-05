@@ -244,12 +244,9 @@ def removed_listings(s3):
 
 
 def owner_records(s3, root):
-    """{SKU: the owner's photo choice record} under the clean tag's root (deploy.standardise_decisions)."""
-    prefix = publish.owner_prefix(root)
-    keys = sorted(o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
-                  for o in page.get("Contents", []))
-    records = publish.pool_map(publish.WORKERS, lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
-    return {imagestore.sku_of(k, prefix): record for k, record in zip(keys, records)}
+    """({SKU: the owner's photo choice record}, {SKU: why its record could not be read}) under the clean tag's root
+    (deploy.standardise_decisions)."""
+    return publish.records_by_sku(s3, publish.owner_prefix(root))
 
 
 def valid_choice(l, r, exclude, conflicts, picks):
@@ -373,7 +370,7 @@ def hosted(step, sel, spend, deadline):
 def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monotonic):
     """The GPU and hosted steps, then the report: (problems, report). A step starts only inside the work window and while
     the budget lasts (the hosted clean-up edits and their checks on the cleaning cap, `clean`: None when it is not set,
-    and then no photo is sent to an edit); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
+    and then no photo is sent to an edit; the clean switch governs only the automatic edits, select.authorised); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
     GPU round the outline recheck's candidates are settled (select.settle); the report always runs, so what is chosen is
     recorded and published, unless a promotion failed: raised, and the next run of either kind finishes it at its start
     (select.finish, in process) before anything is published."""
@@ -381,7 +378,7 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline),
-             *([lambda: hosted(select.clean_all, sel, clean, deadline)] if C.CLEAN_ENABLED and clean is not None else []),
+             *([lambda: hosted(select.clean_all, sel, clean, deadline)] if clean is not None else []),
              lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline)]
@@ -400,41 +397,62 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
         f"{len(result['tracked'])} on the review list (s3://{S3_BUCKET}/{sel.root}tracked.csv), {len(result['pending'])} pending")
     if result["pending"]:
         problems.append(f"{len(result['pending'])} listings not fully judged (listed in {sel.root}summary.json)")
+    problems += result["click_problems"]                 # a click that cannot be used, for any listing of the run
     return problems, result
 
 
 @dataclass(frozen=True)
 class Decisions:
-    """What a run decides by, read once: the exclude list, the owner's choice records ({SKU: record}), the produce's
-    conflict set ({(source, sha): handles}: photos listings of several stones show), the run tags' stores, and the owner's choices that apply
-    ({listing key: (tag, sha)}, select.owner_choice). Both kinds of round and publish see the same."""
+    """What a run decides by, read once: the exclude list, the owner's choice records ({SKU: record}), the owner's clicks
+    to clean a photo ({SKU: record}, publish.read_clicks), the listings whose choice record cannot be read ({SKU: why}),
+    the produce's conflict set ({(source, sha): handles}: photos listings of several stones show), the run tags' stores,
+    the owner's choices that apply ({listing key: (tag, sha)}, select.owner_choice) and the choice records ({listing key:
+    record}, choices). A listing whose choice record cannot be read stays exactly as published: its current choice
+    stands as its pick (so its conflict photo stays assigned and published), it is left out of the work, and every run
+    names it. Both kinds of round and publish see the same."""
     exclude: set
     owner: dict
+    clicks: dict
     conflicts: dict
     rounds: list
     picks: dict
+    unreadable: dict
+    chosen: dict
 
 
 def read_decisions(s3, root, listings):
     """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
     re-classified; none stored yet: publish.NoConflictSet, nothing done."""
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
-    owner = owner_records(s3, root)
+    (owner, unreadable), clicks = owner_records(s3, root), publish.read_clicks(s3, root)
     conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
+    chosen = choices(s3, root)
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, exclude, conflicts, rounds)) is not None}
-    return Decisions(exclude, owner, conflicts, rounds, picks)
+    picks |= {l["key"]: (r["tag"], r["sha"]) for l in listings
+              if l["sku"] in unreadable and (r := chosen.get(l["key"])) is not None}
+    return Decisions(exclude, owner, clicks, conflicts, rounds, picks, unreadable, chosen)
 
 
-def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions):
-    """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed), work on them and report:
-    (problems, counts, kept)."""
-    removed, records = removed_listings(s3), choices(s3, root)
-    found = todo(listings, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
+def unreadable_problems(frozen, decisions):
+    """The run's problem line for each listing whose choice record cannot be read (`frozen`; every kind of run names
+    them)."""
+    return [f"{l['key']}: the owner's choice record cannot be read ({decisions.unreadable[l['sku']]}): left exactly as "
+            "published" for l in frozen]
+
+
+def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen):
+    """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed, nor one of `frozen`, whose
+    choice record cannot be read: the owner's decision is unknown, so it is left exactly as published, its photos'
+    pending redraws included), work on them and report: (problems, counts, kept)."""
+    removed, records = removed_listings(s3), decisions.chosen
+    workable = [l for l in listings if l not in frozen]
+    found = todo(workable, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
                  decisions.picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
-                           live_choices(listings, records, removed, decisions))
+                           live_choices(workable, records, removed, decisions), decisions.clicks,
+                           {(l["source"], sha) for l in frozen for sha in l["photos"]})
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
@@ -444,12 +462,13 @@ def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings,
     return problems, counts, {"pending_listings": result["pending"]}
 
 
-def close_round(s3, batch, spend, run_id, deadline, root, say):
+def close_round(s3, batch, spend, run_id, deadline, root, say, frozen):
     """Instead of steps 1 to 7 (SCRAPER_STANDARDISE_CLOSE_ONLY): every chosen photo's close-up not made yet under the
     current rule made again, one close-only GPU job per slice of those (gpu.CLOSE_ROUND: the same sizing to the budget,
     reservation and window as any round; a photo already done never boots a GPU), never of a source whose image pipeline
-    is off (its products show the scraped photos): (problems, counts, kept)."""
-    records = close.chosen(s3, root)
+    is off (its products show the scraped photos), never of a listing whose choice record cannot be read (`frozen`, its
+    listing keys: it stays exactly as published): (problems, counts, kept)."""
+    records = [r for r in close.chosen(s3, root) if r["key"] not in frozen]
     photos, todo = 0, {}
     for src in sorted({r["source"] for r in records} - image_pipeline_off()):
         listed = close.listed(records, src)
@@ -480,23 +499,27 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     root = f"{ROOT}{C.CLEAN_TAG}/"
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
-    if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):    # no job writes now: a promotion cut short is finished
+    # No job writes now: a promotion cut short is finished, a frozen listing's too (decided before, only completed: a
+    # half-written published photo would be worse; frozen means no new decision, see settle).
+    if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):
         say(f"==> finished {settled} outline rechecks an earlier run left half settled")
     sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
     listings = photo_listings(sheet, photos)
     decisions = read_decisions(s3, root, listings)
+    frozen = [l for l in listings if l["sku"] in decisions.unreadable]   # left exactly as published, in every run kind
     assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), halt, ((spend, clean), "the work window ended"))
     closing.daemon = True
     closing.start()
     try:
         if close_only:
-            problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say)
+            problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say, {l["key"] for l in frozen})
         else:
-            problems, counts, kept = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions)
+            problems, counts, kept = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions,
+                                                  frozen)
     finally:
         closing.cancel()
-    problems += conflicted
+    problems += conflicted + unreadable_problems(frozen, decisions)
     try:
         published = publish.publish(s3, root, sheet, photos, say, assigned=assigned)
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish

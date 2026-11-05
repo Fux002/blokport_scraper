@@ -650,7 +650,7 @@ def test_a_tile_s_problem_is_on_the_run_s_problem_list(monkeypatch):
     monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [])
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     monkeypatch.setattr(proc, "choices", lambda client, root: {})
-    monkeypatch.setattr(proc, "run", lambda *a, **k: ([], {"chosen": [], "tracked": [], "pending": []}))
+    monkeypatch.setattr(proc, "run", lambda *a, **k: ([], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}))
     monkeypatch.setattr(proc.publish, "publish", lambda *a, **k: {"changed": True, "tiles_hidden": {"x": "no slab"},
                                                              "tiles_problems": {"t": "RuntimeError: boom"}})
     summary = proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 60, say=lambda m: None)
@@ -667,7 +667,7 @@ def test_a_tile_listing_s_old_choice_is_never_sent_to_the_gpu_again(categories):
     """Its photo is no stone of its own any more (it is rendered from its variety's slab): an older outline of it is never
     rechecked."""
     records = {h: {"key": h, "sha": sha, "source": "marenostone", "tag": "v2"} for h, sha in (("rb-slab", A), ("rb-tile", B))}
-    decided = proc.Decisions(set(), {}, {}, [], {})
+    decided = proc.Decisions(set(), {}, {}, {}, [], {}, {}, {})
     live = proc.live_choices(proc.photo_listings(*_sheet(*SHEET_ROWS)), records, set(), decided)
     assert live == [("v2", "marenostone", A)]
 

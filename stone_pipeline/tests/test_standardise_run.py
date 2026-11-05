@@ -64,7 +64,7 @@ def _round(finished=(), held=(), cleaned=(), slabs=(), studio=(), noslab=(), log
 def _selection(listings, gpu_round=None, clean_round=None, exclude=(), chosen=()):
     s = object.__new__(sel_mod.Selection)
     s.client, s.listings, s.tags, s.exclude, s.root = _S3(), listings, ("v9", "v9-clean"), set(exclude), "r/"
-    s.owner, s.conflicts, s.chosen = {}, {}, sorted(chosen)
+    s.owner, s.conflicts, s.chosen, s.clicks = {}, {}, sorted(chosen), {}
     s.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in s.chosen})
     s.rounds = [("v9", {"sentas": gpu_round or _round()}), ("v9-clean", {"sentas": clean_round or _round()})]
     s.refresh = lambda: None
@@ -237,7 +237,7 @@ def _steps(monkeypatch, cap_at=None):
     monkeypatch.setattr(runner.select, "settle", step("settle"))
     monkeypatch.setattr(runner.select, "judge_all", step("judge"))
     monkeypatch.setattr(runner.select, "clean_all", step("clean"))
-    monkeypatch.setattr(runner.select, "report", lambda sel: done.append("report") or {"chosen": [], "tracked": [], "pending": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel: done.append("report") or {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (done.append(f"gpu {tag}"), ([], False))[1])
     return done
 
@@ -263,7 +263,7 @@ def test_the_clean_up_edits_are_paid_from_the_cleaning_cap_and_the_judge_from_th
     monkeypatch.setattr(runner.select, "settle", lambda sel, spend, deadline: ([], False))
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: given.setdefault("judge", spend) and ([], False))
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: given.setdefault("clean", spend) and ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     runner.run(_Batch(), _selection([_listing(A)]), process, cleaning, "R1", math.inf, say=lambda m: None)
     assert given["judge"] is process and given["clean"] is cleaning
 
@@ -274,17 +274,18 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (given.append((tag, deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (given.append(("judge", deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", 10_000, say=lambda m: None, clock=lambda: 0)
     gpu_end = 10_000 - C.JUDGE_WINDOW_SECONDS
     assert given == [("v9", gpu_end), ("judge", 10_000), ("v9-clean", gpu_end), ("judge", 10_000)]
 
 
-def test_with_the_clean_up_off_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
+def test_with_the_clean_switch_off_the_clean_step_still_runs_for_the_owner_s_clicks(monkeypatch):
+    # owner 2026-11-05: the switch governs only the automatic edits (select.authorised); a click is cleaned either way
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     done = _steps(monkeypatch)
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
-    assert done == ["gpu v9", "settle", "judge", "gpu v9-clean", "settle", "judge", "report"]
+    assert done == ["gpu v9", "settle", "judge", "clean", "gpu v9-clean", "settle", "judge", "report"]
 
 
 def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_not_see():
@@ -325,7 +326,7 @@ def test_the_process_budget_still_ends_the_run_in_any_step(monkeypatch):
 
 def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
     _steps(monkeypatch)
-    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"]})
+    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": []})
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
     assert problems == ["2 listings not fully judged (listed in r/summary.json)"]
 

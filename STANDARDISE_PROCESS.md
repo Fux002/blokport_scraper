@@ -30,7 +30,8 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
                       conflict photo is never chosen by itself); a slab listing goes on past a passing close-up to
                       its whole slabs only, and takes the first of those that passes
        6. clean       only for a listing whose every judged photo failed for a cleanable reason:
-                      one photo, hosted edit models cheapest first (nano2, kontext, flux3) until a copy passes
+                      one photo, a mark on the stone without asking, anything else on the owner's click;
+                      hosted edit models cheapest first (nano2, kontext, flux3) until a copy passes
        7. GPU         the cleaned copies (CLEAN_TAG)
        8. judge       the cleaned copies' results
        9. report      choice records (<clean root>/chosen/<listing>.json), the review list
@@ -215,9 +216,27 @@ a product is live only with a standardised photo (the no_photo rule). Off: its l
 spent on them) and its products show the scraped photos, re-hosted by the image stage, and stay listed.
 
 A logo, watermark or overlay text on a photo is no source setting: it is the judge's `leftover_mark` finding on the
-standardised result, which the clean step removes from the photo with a hosted edit (within the month's budget), like a
-sticker or a card. With the clean step off (`SCRAPER_STANDARDISE_CLEAN=false`) such a listing stays on the review list
-(`tracked.csv`: "judge fail (leftover_mark)") and hidden by the no_photo rule.
+standardised result, which the clean step removes from the photo with a hosted edit (within the cleaning cap), like a
+sticker or a card. With the clean switch off (`SCRAPER_STANDARDISE_CLEAN=false`) such a listing stays on the review list
+(`tracked.csv`: "judge fail (leftover_mark)") and hidden by the no_photo rule until the owner clicks it.
+
+What is cleaned without asking (owner 2026-11-05), while the clean switch is on: every mark on the stone, the judge's
+`leftover_mark` (labels, stickers, cards, writing, logos, tape, straps, film; a photo with a reflection besides the mark
+too, since the edit removes both) and the photos the retouch or the retired logo step held (`CLEAN_AUTO_KINDS`,
+`CLEAN_AUTO_HELD`). Any other fixable photo (a reflection or a bad fill alone) is cleaned only when the owner clicks it,
+and a click is cleaned whatever the switch says, within the cap: `<CLEAN_TAG>/clicks/<SKU>.json` = {sku, listing,
+source, sha, at} (written by `publish.write_click`, read by `publish.read_clicks`) names the photo, and the next photos
+run cleans it. One rule per listing (`clean_listing`): an edit already paid for is always collected and checked first
+(the payment is made, whatever the gate says now, and no new edit is sent for it); then the clicked photo goes first,
+then the marks, skipping any photo with no edit model left to try, one photo cleaned. A click that cannot be used
+(unreadable, no time, another SKU or listing than its file's, a photo not the listing's or not fixable) is never paid
+for, and the run's problems say why for any listing it names (its line in `tracked.csv` too). A listing whose choice
+record cannot be read stays exactly as published (its photo, its conflict-photo assignment and its files untouched, in
+every kind of run) and every run names it in its problems. A listing not fully judged is simply not cleaned yet (the
+report counts it pending); an edit already paid for is not collected once its listing has a passing photo or the
+owner's choice, since it is no longer needed. Each paid call is
+listed in the cleaning cap's spend file with its reason (`auto` or `click`, with the click's time) and what the edit
+fixes (`kinds` or `held`).
 
 ## Trigger
 
@@ -344,6 +363,8 @@ removed/<SKU>.json                  a listing the owner removed (SKU percent-enc
                                     outline-v2/ (each whole slab drawn under the current outline rule, its note),
                                     redraw/ (a recheck drawn differently: its candidate, then promoted or removed)
 <CLEAN_TAG>/<src>/...               cleaned/, attempts/, GPU results of cleaned copies, judged/ (unchanged)
+<CLEAN_TAG>/clicks/<SKU>.json       the owner's click to clean one photo of a listing (SKU percent-encoded): {sku, listing,
+                                    source, sha, at}; read by every photos run, written by the admin
 <CLEAN_TAG>/owner/<SKU>.json        the owner's photo choice of a listing (SKU percent-encoded): {tag, sha, at, listing,
                                     decided_on}
 <CLEAN_TAG>/chosen/<listing>.json   one record per listing with a good photo (what publish reads)

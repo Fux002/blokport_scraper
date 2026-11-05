@@ -109,7 +109,7 @@ def test_a_slab_listing_whose_chosen_photo_has_no_3d_slab_is_picked_again_with_i
 
 
 def _decided(exclude=(), conflicts=None, picks=None):
-    return proc.Decisions(set(exclude), {}, conflicts or {}, [], picks or {})
+    return proc.Decisions(set(exclude), {}, {}, conflicts or {}, [], picks or {}, {}, {})
 
 
 def test_what_the_live_listings_show_is_refreshed_and_nothing_else():
@@ -288,6 +288,67 @@ def test_the_summary_carries_the_cleaning_cap_s_spend():
     assert proc.clean_summary(cap) == {"clean_run_spent_usd": 0.14, "clean_month_spent_usd": 4.14, "clean_budget_usd": 30.0,
                                        "clean_budget_reached": False, "clean_uses": 1}
     assert set(proc.clean_summary(None).values()) == {None}
+
+
+def test_a_click_is_written_in_the_one_shape_every_run_reads():
+    root = f"{proc.ROOT}{C.CLEAN_TAG}/"
+    s3 = _S3()
+    pub.write_click(s3, root, "MAR-P/06/22", "slab-1", "marenostone", A, "t")
+    assert pub.read_clicks(s3, root) == {"MAR-P/06/22": {"sku": "MAR-P/06/22", "listing": "slab-1",
+                                                        "source": "marenostone", "sha": A, "at": "t"}}
+
+
+def test_an_unreadable_click_or_choice_record_fails_only_its_own_listing(capsys):
+    root = f"{proc.ROOT}{C.CLEAN_TAG}/"
+    s3 = _S3({f"{pub.clicks_prefix(root)}{imagestore.sku_file('SEN-BAD')}": b"{not json",
+              f"{pub.owner_prefix(root)}{imagestore.sku_file('SEN-BAD')}": b"[1, 2]"})
+    pub.write_click(s3, root, "SEN-OK", "ok", "sentas", A, "t")
+    clicks = pub.read_clicks(s3, root)
+    assert clicks["SEN-OK"]["sha"] == A and "not JSON" in clicks["SEN-BAD"]["error"]
+    owner, unreadable = proc.owner_records(s3, root)
+    assert owner == {} and unreadable == {"SEN-BAD": "not a JSON object"}
+    assert capsys.readouterr().out.count("SEN-BAD") == 2                              # each named loud with its key
+
+
+@pytest.mark.parametrize("close_only", [False, True])
+def test_a_listing_whose_choice_record_cannot_be_read_stays_exactly_as_published(monkeypatch, close_only):
+    # review of #525: its conflict photo dropped out of the assignments, so publish unpublished it and removed the file
+    import time
+    s3 = _S3({f"{RUN}{D}.main.jpg": b"m", f"{RUN}{D}.white.jpg": b"w", f"{ROOT}chosen/mine.json": _record("mine", D),
+              imagestore.conflicts_key("sentas"): json.dumps({D: ["mine", "partner"]}).encode()})
+    pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", D): ["SEN-MINE"]})   # as published
+    s3._store(pub.owner_key(ROOT, "SEN-MINE"), b"{broken")
+    published = {k: v for k, v in s3.objects.items() if k.startswith(("dev/products/", "prod/products/"))}
+    assert imagestore.assigned_key("sentas", D) in published
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D), _listing("partner", D)])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print: (
+        [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}))
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None,
+                 close_only=close_only)
+    assert {k: v for k, v in s3.objects.items() if k.startswith(("dev/products/", "prod/products/"))} == published
+    assert json.loads(s3.objects[f"{ROOT}chosen/mine.json"]["Body"])["sha"] == D
+    summary = json.loads(s3.objects[f"{ROOT}{'close-summary' if close_only else 'summary'}.json"]["Body"])
+    assert any(p.startswith("mine: the owner's choice record cannot be read") for p in summary["problem_list"])
+
+
+def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named(monkeypatch):
+    s3 = _S3({pub.owner_key(ROOT, "SEN-MINE"): b"{broken", imagestore.conflicts_key("sentas"): b"{}"})
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D)])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    worked = []
+
+    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+        worked.extend(l["key"] for l in sel.listings)
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
+    monkeypatch.setattr(proc, "run", run)
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {"changed": False})
+    import time
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
+    stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
+    assert worked == [] and any("mine" in p and "cannot be read" in p for p in stored["problem_list"])
 
 
 def _configured(monkeypatch):
@@ -485,7 +546,7 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
-        return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"]}
+        return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     import time
     summary = proc.process(s3, None, select.Spend(5.0, others=lambda: 1.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
@@ -507,7 +568,7 @@ def test_the_run_hands_the_live_listings_choices_to_the_gpu_so_an_older_outline_
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(listings=sel.listings, todo=sel.gpu_todo())
-        return [], {"chosen": [], "tracked": [], "pending": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     import time
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
@@ -526,7 +587,7 @@ def test_the_run_reads_the_owner_s_choices_by_sku_and_the_conflicts_the_produce_
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(owner=sel.owner, conflicts=sel.conflicts)
-        return [], {"chosen": [], "tracked": [], "pending": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     monkeypatch.setattr(proc.publish, "publish",
                         lambda s3, root, sheet, photos, say, assigned: handed.update(assigned) or {"changed": False})
@@ -550,7 +611,7 @@ def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
         with pytest.raises(select.Halted, match="work window"):
             spend.reserve(0.01)
         seen.append(1)
-        return [], {"chosen": [], "tracked": [], "pending": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 0.05, say=lambda m: None)
     assert seen == [1]
@@ -575,7 +636,7 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
     found = picked()
     assert [l["kept"] for l in found] == [(C.RUN_TAG, A)]
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, {}, {},
-                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [])
+                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {}, set())
     assert sel.gpu_todo() == {}                                     # every candidate has its result: no GPU
     spend = select.Spend(5.0)
     select.judge_all(sel, spend, float("inf"))
@@ -596,7 +657,7 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
     monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
     records = proc.choices(s3, ROOT)
     sel = select.Selection(s3, proc.todo([_listing("one", A, B)], records, set(), proc.whole_slabs(s3, records), set(), {}, {}),
-                           C.RUN_TAG, C.CLEAN_TAG, {}, {}, select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [])
+                           C.RUN_TAG, C.CLEAN_TAG, {}, {}, select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {}, set())
     spend = select.Spend(5.0)
     assert sel.gpu_todo() == {}
     assert select.judge_all(sel, spend, float("inf")) == ([], False)
@@ -613,7 +674,7 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     records = proc.choices(s3, ROOT)
     found = proc.todo([_listing("one", A)], records, set(), proc.whole_slabs(s3, records), set(), {}, {})
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, {}, {},
-                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [])
+                           select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {}, set())
     assert sel.gpu_todo() == {"sentas": [A]}                        # outdated: the GPU completes it
     s3._store(f"{RUN}{A}.close.jpg", b"close")                     # what the GPU job adds (standardise_source.rework)
     s3._store(f"{RUN}{A}.slab.png", _slab_png())
@@ -682,10 +743,10 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"])
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, set(), {}, rounds)) is not None}
-    decided = proc.Decisions(set(), owner, {}, rounds, picks)
+    decided = proc.Decisions(set(), owner, {}, {}, rounds, picks, {}, records)
     found = proc.todo(listings, records, set(), proc.whole_slabs(s3, records), set(), {}, picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, owner, {}, rounds,
-                           proc.live_choices(listings, records, set(), decided))
+                           proc.live_choices(listings, records, set(), decided), {}, set())
     proc.run(None, sel, select.Spend(5.0), None, "R1", float("inf"), say=lambda m: None)
     pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     return sent, asked
@@ -728,6 +789,30 @@ def test_a_redraw_the_judge_fails_is_discarded_and_everything_live_stays_and_a_s
     assert {k: v for k, v in after.items() if k != f"{ROOT}tracked.csv"} == before
     after = _state(s3)
     assert _photos_run(monkeypatch, s3, owned) == ([], []) and _state(s3) == after
+
+
+def test_a_pending_redraw_of_a_listing_left_as_published_waits_then_settles_once_its_record_is_readable(monkeypatch):
+    # review of #525: settle promoted a redraw an earlier run left, changing the published outline of a listing whose
+    # choice record cannot be read; it must wait (kept, never discarded) and settle normally once the record reads
+    from deploy import standardise_source as src
+    s3, _ = _older_whole_slab_chosen(owner=False)
+    out = src.round_prefix(C.RUN_TAG, "sentas")
+    src.rework(s3, out, A, _redrawn(), src.again(s3, out, A))                        # left complete by an earlier run
+    asked = []
+    monkeypatch.setattr(select.judge, "judge", lambda o, r, f: asked.append(r) or (
+        {"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    before = _state(s3)
+
+    def settle(frozen):
+        rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"])
+        sel = select.Selection(s3, [], C.RUN_TAG, C.CLEAN_TAG, {}, {}, rounds, [], {}, frozen)
+        return select.settle(sel, select.Spend(5.0), float("inf"))
+    assert settle({("sentas", A)}) == ([], False)
+    assert asked == [] and _state(s3) == before                                       # judged nothing, changed nothing
+    assert any(k.startswith(src.candidate_prefix(RUN)) for k in s3.objects)          # the candidate kept, not discarded
+    settle(set())
+    assert len(asked) == 1 and not any(k.startswith(src.candidate_prefix(RUN)) for k in s3.objects)
+    assert s3.objects[f"{RUN}{A}.white.jpg"]["Body"] != b"old white"                 # promoted once readable again
 
 
 class _Killed(BaseException):
