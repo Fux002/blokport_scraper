@@ -329,8 +329,8 @@ class VariationStage:
     @staticmethod
     def _match_identity(engine: VariationEngine, clean: str, query: str, **block) -> VariationMatch:
         """IDENTITY FIRST. The variety identity is the type-stripped name (every committed base Name is a
-        clean_variety fixed point), so that form is matched before the raw spelling: 'Volakas Marble' is the
-        variety named Volakas, even though the raw spelling is an alias on four other marbles. The raw spelling
+        clean_variety fixed point), so that form is matched before the raw spelling: 'Pietra Gray Marble' is
+        matched as 'Pietra Gray' (a one-word name keeps its type word: 'Volakas Marble' stays as is). The raw spelling
         replaces the identity's verdict only with STRICTLY stronger evidence (an exact alias hit over a
         similarity guess; equals stay with the identity), and never escapes a same-type ambiguity: a tied
         same-name duplicate under the identity name must surface for review."""
