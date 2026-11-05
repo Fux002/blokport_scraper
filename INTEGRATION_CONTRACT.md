@@ -60,9 +60,9 @@ Response:
 ```
 
 Three things that make `status.scraper[type].gap_held` read wrong if assumed:
-1. **`gap_held` is OMITTED when zero.** Each per-table map is a `GROUP BY state` histogram, so a state with
-   0 rows is ABSENT, not `0`. `status.variation.gap_held` is `undefined` when there are none -- read it as
-   `?? 0`.
+1. **Every state is present, `0` when it holds none** (since 2026-11-05; before, a state with 0 rows was
+   ABSENT). Each per-table map lists every state its table can hold (`db.STATES`, pinned to schema.sql's
+   CHECK), so `status.variation.gap_held` is `0` when there are none. A reader's `?? 0` stays correct.
 2. **`gap_held` lives ONLY under `variation` and `product`** (the lanes the ack fail-path dead-letters).
    `inventory` has no states (it is `{total, delta}`) -- there is no `inventory.gap_held` to sum.
 3. **`removed` dead-letters use state `dead`, not `gap_held`.** They appear in `/failures` (type=`removed`)

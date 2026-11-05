@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
-from stone_pipeline.ledger.db import FORGET_SYNCED_STOCK_SQL, STOCK_DELTA_SQL, Ledger, now_iso, on_sale_sql
+from stone_pipeline.ledger.db import FORGET_SYNCED_STOCK_SQL, STATES, STOCK_DELTA_SQL, Ledger, now_iso, on_sale_sql
 
 log = logfmt.get_logger("ledger.sync")
 
@@ -93,17 +93,19 @@ _ENTITY = {
 # hardcoded name->label).
 _CATEGORY = {c.name: c.label for c in CATEGORIES}
 
-# tables that carry a sync `state` column (combination is empty until materialized)
-_STATE_TABLES = ("attribute", "variation", "combination", "product", "gap", "removed")
 
 
 # --- GET /sync/status ---------------------------------------------------------
 
 def status(ledger: Ledger) -> dict[str, dict[str, int]]:
-    """Per-type state counts. State-bearing tables report their state histogram;
-    inventory reports total rows and the `delta` count (stock that moved since the
-    last sync), which is what the inventory lane would serve."""
-    out: dict[str, dict[str, int]] = {t: ledger.counts(t) for t in _STATE_TABLES}
+    """Per-type state counts. Each state-bearing table reports every state it can hold (db.STATES), 0 for one
+    with no rows: a count is always a value, never an absent key (combination is all 0 until materialized);
+    inventory reports total rows and the `delta` count (stock that moved since the last sync), which is what
+    the inventory lane would serve."""
+    out: dict[str, dict[str, int]] = {}
+    for table, states in STATES.items():
+        held = ledger.counts(table)
+        out[table] = {state: held.get(state, 0) for state in states}
     inv = ledger.execute(
         f"SELECT COUNT(*) AS total, SUM(CASE WHEN {STOCK_DELTA_SQL} THEN 1 ELSE 0 END) AS delta FROM inventory i"
     ).fetchone()

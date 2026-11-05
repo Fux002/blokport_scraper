@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from stone_pipeline.ledger.db import Ledger, now_iso
+from stone_pipeline.ledger.db import STATES, Ledger, now_iso
 from stone_pipeline.ledger.sync import ack, ready, status
 
 
@@ -51,10 +51,13 @@ def test_status_reports_state_histograms_and_inventory_delta(tmp_path):
         _seed(ledger)
         st = status(ledger)
 
-    assert st["attribute"] == {"synced": 1}
-    assert st["variation"] == {"synced": 1, "pending": 1}
-    assert st["product"] == {"pending": 1}
-    assert st["combination"] == {}              # empty until materialized
+    def held(table, **counts):                    # every state the table can hold, 0 where it holds none
+        return {**dict.fromkeys(STATES[table], 0), **counts}
+
+    assert st["attribute"] == held("attribute", synced=1)
+    assert st["variation"] == held("variation", synced=1, pending=1)
+    assert st["product"] == held("product", pending=1)
+    assert st["combination"] == held("combination")   # all 0 until materialized
     assert st["inventory"] == {"total": 1, "delta": 1}
 
 
@@ -395,7 +398,7 @@ def test_dispatch_routes_status_ready_ack(tmp_path):
         _variation(ledger, "slab_new_1", state="pending")
 
         code, body = dispatch(ledger, "GET", "status", {}, None)
-        assert code == 200 and body["variation"] == {"pending": 1}
+        assert code == 200 and body["variation"] == {**dict.fromkeys(STATES["variation"], 0), "pending": 1}
 
         code, body = dispatch(ledger, "GET", "variations", {}, None)
         assert code == 200 and [i["external_id"] for i in body["items"]] == ["slab_new_1"]
