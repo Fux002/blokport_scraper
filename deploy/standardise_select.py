@@ -135,10 +135,10 @@ class Round:
 
     @functools.cached_property
     def older_outline(self):
-        """The whole slabs made under an older outline rule (no note of C.OUTLINE_CHECKED), not made by the retired logo
-        step: not finished until the GPU has checked them (deploy.standardise_source.rework), so never judged before
-        that."""
-        return (self.finished & self.slabs) - self.checked - self.held - self.logo_step
+        """The whole slabs made under an older outline rule (no note of C.OUTLINE_CHECKED), not tried again before
+        (noslab/) and not made by the retired logo step: not finished until the GPU has checked them
+        (deploy.standardise_source.rework), so never judged before that."""
+        return (self.finished & self.slabs) - self.checked - self.noslab - self.held - self.logo_step
 
     @functools.cached_property
     def outdated(self):

@@ -87,11 +87,17 @@ def checked_key(out, sha):
 
 
 def older_outline(client, out, sha):
-    """A whole slab made under the outline rule before C.OUTLINE_CHECKED: its slab and no note of the current rule, and
-    not made by the retired logo step (logo_step_key: a re-run would start from the photo with its logo and redraw views
-    no judge saw)."""
+    """A whole slab made under the outline rule before C.OUTLINE_CHECKED: its slab and no note of the current rule, not
+    tried again before (noslab/: kept as it is) and not made by the retired logo step (logo_step_key: a re-run would
+    start from the photo with its logo and redraw views no judge saw)."""
     return (_exists(client, f"{out}{sha}.slab.png") and not _exists(client, checked_key(out, sha))
-            and not _exists(client, logo_step_key(out, sha)))
+            and not _exists(client, f"{out}noslab/{sha}.json") and not _exists(client, logo_step_key(out, sha)))
+
+
+def made(client, out, sha):
+    """This photo's run already ended once, with a result or held, whether or not that result is worked on again (an
+    outdated one, a recheck): the input it was made from (start) is fixed from then on."""
+    return _exists(client, f"{out}{sha}.main.jpg") or _exists(client, f"{out}held/{sha}.json")
 
 
 def finished(client, out, sha):
@@ -154,8 +160,8 @@ def rework(client, out, sha, res, how):
     stand (only what is not stone changes, and publish copies what changed):
       - drawn the same by this version (a recheck stops before drawing): only the note, {"changed": false};
       - no whole slab on the re-run (held, a close-up, or a completion that is no open book this time): nothing is
-        written but a note that it is never run again: a recheck's {"kept": why} beside its result, a completion's
-        noslab/ (the result is judged and may be published: never held);
+        written but noslab/ (tried): it is never run again and stays as it is (it is judged and may be published: never
+        held);
       - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): written whole
         (write), then the note {"changed": true};
       - a completion drawn the same: what was judged (main, white, studio) stays; its close view, then which slab it is
@@ -165,9 +171,8 @@ def rework(client, out, sha, res, how):
         _note(client, out, sha, {"changed": False})
         return "outline unchanged"
     if res.held or not res.slab or (how == "complete" and res.kind != "open book"):
-        why = res.held or f"the re-run is a {res.kind}, no {'open book' if how == 'complete' else 'whole slab'}"
-        (tried if how == "complete" else kept)(client, out, sha, why)
-        return "no slab" if how == "complete" else "outline kept"
+        tried(client, out, sha, res.held or f"the re-run is a {res.kind}, no {'open book' if how == 'complete' else 'whole slab'}")
+        return "no slab"
     if res.changed:
         write(client, out, sha, res, {"changed": True})
         return "outline redrawn"
@@ -183,15 +188,10 @@ def rework(client, out, sha, res, how):
     return "completed"
 
 
-def kept(client, out, sha, reason):
-    """Note that a whole slab's recheck gave no whole slab: the stored result stays as it is and is never checked again
-    under this rule (never held/: it is judged and may be published)."""
-    _note(client, out, sha, {"changed": False, "kept": reason})
-
-
 def tried(client, out, sha, reason):
-    """Note that an outdated result was tried and gave no slab (noslab/<sha>.json), so it is never run again. Never
-    held/: the result is judged and may be published, and a hold would take it from every listing that has it."""
+    """Note that a result worked on again (rework: completed or rechecked) was tried and gave no slab, or failed
+    (noslab/<sha>.json), so it is never run again and stays as it is. Never held/: the result is judged and may be
+    published, and a hold would take it from every listing that has it."""
     client.put_object(Bucket=S3_BUCKET, Key=f"{out}noslab/{sha}.json", ContentType="application/json",
                       Body=json.dumps({"reason": reason}, sort_keys=True).encode())
 
@@ -440,12 +440,11 @@ def main() -> int:
                 return 1
             if action == "hold" and not survey:
                 why = f"error: {type(exc).__name__}: {exc}"[:500]
-                if not redo:
+                if redo:                               # a judged result is never held over: tried, not run again
+                    tried(client, out, sha, why)
+                else:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": why, "kind": ""}).encode())
-                elif gpu_error(exc):                   # it broke the GPU twice: never run again, its judged result kept
-                    (tried if redo == "complete" else kept)(client, out, sha, why)
-                # Any other failure of a redo is not noted: the next run tries it again (a problem of the round).
         spent.append(time.time() - started)
         if i % 10 == 0:
             print(f"   [{i + 1}/{len(sliced)}] {dict(tally)} median {np.median(spent):.1f}s per photo", flush=True)

@@ -83,11 +83,14 @@ until a produce runs that source again. A reset removes the list with the produc
 An open book made before its halves had a slab (a side view, no slab.png) is outdated: the next run sends it to the
 GPU once, which completes it from a re-run (its close view, then its slab, last). What was judged and published (main,
 white, studio) stays as it is, so its verdict and choice stand and no judge call is made; publish then adds its close
-view and 3D slab. A re-run that is no open book this time adds nothing and is noted in `noslab/<sha>.json`, so it is
-never run again; a judged result is never held. A re-run that fails is not noted: the next run tries it again, unless it
-broke the GPU twice (then it is noted as above). A completion cut short takes its close view off again while its slab is
-missing, and a passing storage error leaves it for the next run. Nothing is removed by hand. The completion and the
-recheck below are one path (`deploy.standardise_source.rework`).
+view and 3D slab. A re-run that is no open book this time, or that fails for the photo itself, adds nothing and is
+noted in `noslab/<sha>.json`, so it is never run again; a judged result is never held. A GPU error stops the slice as for
+any photo, and the same photo breaking it again is noted the same way. A completion cut short takes its close view off
+again while its slab is missing, and a passing storage error leaves it for the next run. Nothing is removed by hand.
+The completion and the recheck below are one path (`deploy.standardise_source.rework`), and a re-run starts from the
+input its result was made from (`deploy.standardise_source.start`): the retouch never searches a photo again once its
+retouch ended (retouched or refused) or its run made a result of it, so a photo it found nothing on, or one made before
+the retouch existed, is never retouched afresh for a re-run.
 
 ## A change of the slab's outline rule (a recheck)
 
@@ -103,9 +106,8 @@ object anywhere inside the fitted corners counted as stone, and the wall in such
 
 Every whole slab the GPU writes has a note `<run folder>outline-v2/<sha>.json` (`settings.OUTLINE_CHECKED`): it is
 drawn under this rule. `{"new": true}`: a new result; `{"changed": true}`: a result made before redrawn by this version;
-`{"changed": false}`: a result made before that this version draws the same, or an open book completed (above);
-`{"changed": false, "kept": why}`: a result made before whose re-run gave no whole slab, kept as it is. A whole slab
-without the note was made under the older rule and is outdated: it is not finished, so it is never judged, until the GPU
+`{"changed": false}`: a result made before that this version draws the same, or an open book completed (above). A
+whole slab without the note, not tried before (`noslab/`), was made under the older rule and is outdated: it is not finished, so it is never judged, until the GPU
 has worked on it once. What every listing on the sheet shows now (its owner choice that applies, else its valid choice
 record; never a listing the owner removed or of a source whose image pipeline is off) is among them: such a photo goes
 to the GPU without its listing being picked again (`deploy.standardise_run.live_choices`). The GPU works on it:
@@ -115,22 +117,22 @@ to the GPU without its listing being picked again (`deploy.standardise_run.live_
 - drawn differently: written whole, every file encoded before the first write, views it no longer makes (a close view)
   removed, then the note; publish copies the changed views, makes its 3D slab again (the slab's ETag changed, so the
   tiles cut from it render again) and the relink runs;
-- no whole slab on the re-run (held, a close-up): nothing written but a note that it is never run again (`kept`); never
-  held: the result is judged and may be published.
+- no whole slab on the re-run (held, a close-up), or a re-run that fails for the photo itself: nothing written but
+  `noslab/<sha>.json`, as for a completion (above), so it is never run again and stays as it is; never held: the result
+  is judged and may be published.
 
-A re-run that fails is not noted: the next run tries it again (a problem of the round), unless it broke the GPU twice,
-then it is noted as above and never run again. The verdict and the choice stand, and no judge call is made: only what is
+The verdict and the choice stand, and no judge call is made: only what is
 not stone changes. A result the retired logo step made (`logo-step/`) is never rechecked, as it is never completed: its
 re-run would start from the photo with its logo. A later rule change takes a new folder name, and every whole slab is
 checked once more.
 
-Cost: the first photos run after this release sends every whole slab without a note to the GPU once, the chosen ones of
-every live listing included, on top of its usual work. The driver is their number: each slice of `RUN_SLICE` of them is a
-retouch job and a standardise job, each booting a GPU and loading its models; the retouch looks for marks again on each
-photo it never retouched or refused (a photo with no marks has no record of its own), and the standardise job classifies
-it and runs the outline step (SAM and the text reader), then stops for a slab drawn the same; only the slabs drawn
-differently take the costly steps. The round is sized to the month's budget and window like any other: what does not
-fit goes on in the next run.
+Cost: the first photos run after this release sends to the GPU, on top of its usual work, the chosen whole slabs without
+a note of every live listing, and the whole slabs without a note among the candidates of the listings it picks (no valid
+choice yet); any other one is rechecked only when its listing is picked. The driver is their number: each slice of
+`RUN_SLICE` of them is a retouch job and a standardise job, each booting a GPU; the retouch never searches them again
+(a slice of nothing else loads no model), and the standardise job classifies each one and runs the outline step (SAM and the text reader), then
+stops for a slab drawn the same; only the slabs drawn differently take the costly steps. The round is sized to the
+month's budget and window like any other: what does not fit goes on in the next run.
 
 ## Tile listings
 
@@ -310,7 +312,7 @@ records are outside the tags and need nothing. Under `<env>/standardise-test/`:
 run.lock                            the running process (rewritten every 5 min)
 spend/<YYYY-MM>/<run id>.json       each run's spend of the month
 removed/<SKU>.json                  a listing the owner removed (SKU percent-encoded)
-<RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated open book tried once),
+<RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated result tried once),
                                     outline-v2/ (each whole slab drawn under the current outline rule, its note)
 <CLEAN_TAG>/<src>/...               cleaned/, attempts/, GPU results of cleaned copies, judged/ (unchanged)
 <CLEAN_TAG>/owner/<SKU>.json        the owner's photo choice of a listing (SKU percent-encoded): {tag, sha, at, listing,

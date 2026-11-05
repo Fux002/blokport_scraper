@@ -41,7 +41,7 @@ def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edi
     import threading
     r = object.__new__(sel.Round)
     r.prefix, r.finished, r.held, r.judged, r.slabs = prefix, set(finished), set(held), set(judged), set(slabs)
-    r.checked, r.logo_step = set(slabs) if checked is None else set(checked), set()
+    r.checked, r.logo_step, r.noslab = set(slabs) if checked is None else set(checked), set(), set()
     r.cleaned, r.attempts, r.edited, r.requested = set(cleaned), set(attempts), set(edited), set(requested)
     r._locks, r._guard = {}, threading.Lock()
     return r
@@ -746,6 +746,7 @@ def test_a_whole_slab_made_under_the_older_outline_rule_is_checked_once():
     from deploy import standardise_source as src
     assert not src.finished(_Bucket(_whole()), GPU, A) and src.again(_Bucket(_whole()), GPU, A) == "recheck"
     assert src.finished(_Bucket(_whole(src.checked_key(GPU, A))), GPU, A)
+    assert src.finished(_Bucket(_whole(f"{GPU}noslab/{A}.json")), GPU, A)              # tried once, kept as it is
     assert src.again(_Bucket(_open_book()), GPU, A) == "complete" and src.again(_Bucket({}), GPU, A) is None
 
 
@@ -795,15 +796,16 @@ def test_every_file_is_encoded_before_the_first_write(monkeypatch):
 
 
 @pytest.mark.parametrize("res", ["held", "close-up"])
-def test_a_recheck_that_gives_no_whole_slab_keeps_the_stored_result_and_is_not_checked_again(res):
+def test_a_recheck_that_gives_no_whole_slab_keeps_the_stored_result_noted_tried_like_a_completion(res):
     import numpy as np
     from deploy import standardise_source as src
     from stone_pipeline.standardise.photo import Result
     s3 = _Written(_whole())
     img = np.zeros((20, 30, 3), np.uint8)
     result = Result(held="two stones in one outline") if res == "held" else Result(kind="close-up", images={"main": img})
-    assert src.rework(s3, GPU, A, result, "recheck") == "outline kept"
-    assert s3.written == [src.checked_key(GPU, A)] and json.loads(s3.objects[src.checked_key(GPU, A)])["kept"]
+    assert src.rework(s3, GPU, A, result, "recheck") == "no slab"
+    assert s3.written == [f"{GPU}noslab/{A}.json"] and json.loads(s3.objects[f"{GPU}noslab/{A}.json"])["reason"]
+    assert src.finished(s3, GPU, A)
     assert all(s3.objects[f"{GPU}{A}.{v}"] == b"old" for v in ("main.jpg", "white.jpg", "slab.png"))
 
 
@@ -857,14 +859,16 @@ def _completing(monkeypatch, s3, standardise):
 
 
 @pytest.mark.parametrize("stored", ["open book", "older outline"])
-def test_a_redo_that_fails_is_never_held_over_the_published_result_nor_noted_and_is_retried(monkeypatch, stored):
+def test_a_redo_that_crashes_is_noted_tried_never_held_over_the_published_result(monkeypatch, stored):
+    from deploy import standardise_source as src
     s3 = _Slice(_open_book() if stored == "open book" else _whole())
 
     def crash(*a, **k):
         raise ValueError("the outline went wrong")
     assert _completing(monkeypatch, s3, crash) == 0
     assert f"{GPU}held/{A}.json" not in s3.objects                                   # the judged result stays usable
-    assert f"{GPU}noslab/{A}.json" not in s3.objects and not any(C.OUTLINE_CHECKED in k for k in s3.objects)   # retried
+    assert "the outline went wrong" in json.loads(s3.objects[f"{GPU}noslab/{A}.json"])["reason"]
+    assert src.finished(s3, GPU, A)                                                  # never run again
     assert all(f"{GPU}{A}.{v}.jpg" in s3.objects for v in ("main", "white", "studio"))
 
 
@@ -876,8 +880,7 @@ def test_a_redo_that_broke_the_gpu_twice_is_noted_and_never_run_again(monkeypatc
     def crash(*a, **k):
         raise RuntimeError("CUDA error: an illegal memory access")
     assert _completing(monkeypatch, s3, crash) == 0
-    note = f"{GPU}noslab/{A}.json" if stored == "open book" else src.checked_key(GPU, A)
-    assert "CUDA" in json.dumps(json.loads(s3.objects[note])) and f"{GPU}held/{A}.json" not in s3.objects
+    assert "CUDA" in json.loads(s3.objects[f"{GPU}noslab/{A}.json"])["reason"] and f"{GPU}held/{A}.json" not in s3.objects
     assert src.finished(s3, GPU, A)
 
 

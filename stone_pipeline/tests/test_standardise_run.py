@@ -712,6 +712,12 @@ def test_a_whole_slab_made_under_the_older_outline_rule_goes_to_the_gpu_once():
     assert s.gpu_todo() == {"sentas": [old]} and s.clean_todo() == {"sentas": [old]}
 
 
+def test_a_whole_slab_tried_once_is_never_rechecked_again():
+    # its recheck gave no whole slab or failed: noted in noslab/, like an open book's completion, and kept as it is
+    rnd = _round(finished={A, B}, slabs={A, B}, checked=(), noslab={A})
+    assert rnd.older_outline == {B} and rnd.outdated == {B}
+
+
 def test_a_whole_slab_the_retired_logo_step_made_is_never_rechecked():
     # its re-run would start from the photo with its logo and redraw views no judge saw
     rnd = _round(finished={A, B}, slabs={A, B}, checked=(), logo_step={A})

@@ -3,6 +3,8 @@
 standardised photo keeps the images it had. Only each listing's chosen photo is published."""
 from __future__ import annotations
 
+import pytest
+
 from stone_pipeline.config.settings import ENV_SEGMENT
 from stone_pipeline.io import imagestore
 from stone_pipeline.stages import images
@@ -89,6 +91,37 @@ def test_a_photo_already_retouched_or_refused_is_not_retouched_again():
     out = "dev/standardise-test/full/sentas/"
     bucket = _Bucket([f"{out}retouched/{A}.jpg", f"{out}retouch_held/{B}.json"])
     assert rt.retouched(bucket, out, A) and rt.retouched(bucket, out, B) and not rt.retouched(bucket, out, C_)
+
+
+def _retouch_job(monkeypatch, keys, sheet):
+    """deploy.standardise_retouch.main over one slice of sentas whose bucket holds `keys`: the photos it searched for
+    marks, None when it searched none (no model was loaded)."""
+    from deploy import standardise_retouch as rt
+    out = rt.run_prefix("sentas")
+    monkeypatch.setenv("SRC", "sentas")
+    monkeypatch.delenv("MARKS_SURVEY", raising=False)
+    monkeypatch.setattr(rt.boto3, "client", lambda *a, **k: _Bucket([f"{out}{k}" for k in keys]))
+    monkeypatch.setattr(rt, "sheet_photos", lambda client: {})
+    monkeypatch.setattr(rt, "_photo_keys", lambda client, src, photos: [f"dev/products/scraped/sentas/{s}.jpg" for s in sheet])
+    searched = []
+    monkeypatch.setattr(rt, "_find", lambda client, keys, o: searched.append([imagestore.sha_from_url(k) for k in keys]) or ({}, set()))
+    monkeypatch.setattr(rt.marks, "load_sam", lambda: pytest.fail("a model was loaded for a slice with nothing to search"))
+    assert rt.main() == 0
+    return searched[0] if searched else None
+
+
+def test_a_recheck_of_a_photo_the_retouch_already_handled_submits_no_retouch_work(monkeypatch):
+    """A whole slab drawn under the older outline rule is not finished (the GPU rechecks it), yet its input is fixed: the
+    retouched copy its result was made from, the refusal, or, with no record (nothing found on it, or made before the
+    retouch existed), the photo its run started from. Never searched again, and no model is loaded for nothing."""
+    whole = lambda sha: [f"{sha}.main.jpg", f"{sha}.slab.png"]
+    stored = whole(A) + [f"retouched/{A}.jpg"] + whole(B) + whole(C_)
+    assert _retouch_job(monkeypatch, stored, [A, B, C_]) is None
+
+
+def test_a_photo_without_a_result_is_still_searched_for_marks(monkeypatch):
+    D = "d" * 64
+    assert _retouch_job(monkeypatch, [f"{A}.main.jpg", f"{A}.slab.png"], [A, D]) == [D]
 
 
 def test_an_excluded_photo_is_never_published_whatever_chose_it():
