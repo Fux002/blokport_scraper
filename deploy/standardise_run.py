@@ -182,15 +182,15 @@ def _release(s3, etag):
 
 
 # --- the month's budget -----------------------------------------------------------------------------------------------
-def spend_prefix(month):
-    return f"{ROOT}{C.SPEND_DIR}/{month}/"
+def spend_prefix(directory, month):
+    return f"{ROOT}{directory}/{month}/"
 
 
-def month_spend(s3, run_id):
-    """This run's Spend against the month's budget. Each run keeps only its own file (<run id>.json, {"usd"}), so no run
-    can overwrite another's; the month's other runs are summed from their files, read again only when changed (ETag).
-    The month is the run's start (UTC), from its id (YYYYMMDDTHHMMSSZ)."""
-    prefix = spend_prefix(f"{run_id[:4]}-{run_id[4:6]}")
+def month_spend(s3, run_id, budget, directory):
+    """This run's Spend against one monthly budget whose runs keep their spend under `directory`. Each run keeps only its
+    own file (<run id>.json, {"usd"}), so no run can overwrite another's; the month's other runs are summed from their
+    files, read again only when changed (ETag). The month is the run's start (UTC), from its id (YYYYMMDDTHHMMSSZ)."""
+    prefix = spend_prefix(directory, f"{run_id[:4]}-{run_id[4:6]}")
     own, seen = f"{prefix}{run_id}.json", {}
 
     def others():
@@ -208,7 +208,7 @@ def month_spend(s3, run_id):
     def save(total):
         s3.put_object(Bucket=S3_BUCKET, Key=own, Body=json.dumps({"usd": round(total, 6)}).encode(),
                       ContentType="application/json")
-    return select.Spend(C.BUDGET_USD, others, save)
+    return select.Spend(budget, others, save)
 
 
 # --- what a run works on ----------------------------------------------------------------------------------------------
@@ -587,7 +587,7 @@ def main() -> int:
     # The runner's run id names the lock and the GPU jobs, so the runner can clear exactly what this run left if it
     # has to kill it; a process started by hand names itself.
     run_id = env.getenv("RUN_ID") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    spend = month_spend(s3, run_id)
+    spend = month_spend(s3, run_id, C.BUDGET_USD, C.SPEND_DIR)
     stop_on_signal(spend)                              # before the lock: a stop at any point releases it
     try:
         with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG], "close_only": close_only},
