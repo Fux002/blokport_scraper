@@ -552,15 +552,6 @@ def settle_one(client, cands, src, sha):
         kinds = ", ".join(p.get("kind", "?") for p in found.get("problems", [])) or found.get("verdict", "")
         discard(client, out, sha, f"the judge failed its redraw ({kinds}): kept as it was", rule)
     return True
-    found = verdict(client, cands, src, sha, C.CUTOUT_FORMAT)
-    if found is None or not judge.current(found):
-        return False
-    if judge.passed(found):
-        promote(client, cands.out, sha)
-    else:
-        kinds = ", ".join(p.get("kind", "?") for p in found.get("problems", [])) or found.get("verdict", "")
-        discard(client, cands.out, sha, f"the judge failed its redraw ({kinds}): kept as it was")
-    return True
 
 
 def judge_all(sel, spend, deadline):
