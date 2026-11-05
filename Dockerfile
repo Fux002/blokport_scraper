@@ -191,8 +191,10 @@ RUN chmod +x /app/deploy/run_pipeline.sh
 ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 
 # ---------------------------------------------------------------------------------------------------
-# Comparison image only: :standardise plus an open editing model, to judge against real photos. Not a production image.
-#   docker build --target standardise-edit -t blokport-scraper:standardise-edit .
+# The photo standardiser's GPU base: :standardise plus the open editing model (FLUX.2 Klein). Every production GPU image
+# is this base with a commit's code on top (deploy/standardise.Dockerfile, deploy/build_standardise_image.sh). A new
+# base is built here and pushed as standardise-base-<sha12> (kept by the ECR lifecycle), then pinned by digest there:
+#   docker build --platform linux/amd64 --target standardise-edit -t <registry>/blokport-scraper:standardise-base-<sha12> .
 FROM standardise AS standardise-edit
 RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python -c "from huggingface_hub import snapshot_download as d; \
     d('black-forest-labs/FLUX.2-klein-4B', revision='e7b7dc27f91deacad38e78976d1f2b499d76a294', local_dir='/app/models/flux2-klein-4b', ignore_patterns=['flux-2-klein-4b.safetensors','*.bin','*.md','*.png','*.jpg'])"
