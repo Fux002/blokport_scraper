@@ -60,7 +60,7 @@ dev_require_standard_photo = true
 # (standardise-edit-cbc576cf9ebd-x, registered by hand until now), under its protected pin tag: add the tag to that
 # image in ECR BEFORE applying (STANDARDISE_PROCESS.md, rollout). The process runs after each full produce only once
 # AUTO: on in both: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run). The
-# month's budget, hosted calls and GPU together, is the owner's (2026-11-02): prod 100 USD, dev 40 USD.
+# month's budget, hosted calls and GPU together, is the owner's: prod 100 USD (2026-11-02), dev 100 USD (2026-11-05).
 dev_standardise_image_tag  = "standardise-pin-f3dd3d19c2a7"
 prod_standardise_image_tag = "standardise-pin-f3dd3d19c2a7"
 dev_standardise_auto       = true
@@ -69,7 +69,7 @@ prod_standardise_auto      = true
 # listings whose photos all fail for a cleanable reason go to the review list instead.
 dev_standardise_clean       = false
 prod_standardise_clean      = false
-dev_standardise_budget_usd  = "40"
+dev_standardise_budget_usd  = "100"
 prod_standardise_budget_usd = "100"
 dev_standardise_gpu_vcpus   = 32
 prod_standardise_gpu_vcpus  = 128
