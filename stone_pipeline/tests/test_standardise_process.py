@@ -13,6 +13,7 @@ import sys
 import pytest
 from botocore.exceptions import ClientError
 
+from deploy import standardise_close as close
 from deploy import standardise_publish as pub
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
@@ -67,8 +68,14 @@ class _S3:
         objects = self.objects
 
         class _Pages:
-            def paginate(self, Bucket, Prefix):
-                return [{"Contents": [{"Key": k, "ETag": v["ETag"]} for k, v in sorted(objects.items()) if k.startswith(Prefix)]}]
+            def paginate(self, Bucket, Prefix, Delimiter=None):
+                keys = [k for k in sorted(objects) if k.startswith(Prefix)]
+                if Delimiter:
+                    folders = sorted({Prefix + k[len(Prefix):].split(Delimiter)[0] + Delimiter for k in keys
+                                      if Delimiter in k[len(Prefix):]})
+                    return [{"CommonPrefixes": [{"Prefix": f} for f in folders],
+                             "Contents": [{"Key": k, "ETag": objects[k]["ETag"]} for k in keys if Delimiter not in k[len(Prefix):]]}]
+                return [{"Contents": [{"Key": k, "ETag": objects[k]["ETag"]} for k in keys]}]
         return _Pages()
 
 
@@ -719,6 +726,81 @@ def test_a_run_cut_short_at_any_write_is_finished_cleanly_by_the_next(monkeypatc
         _, asked = _photos_run(monkeypatch, s3, owned, _redrawn(), verdict)
         assert _state(s3) == reference, seen[n - 1]
         assert not (judged and asked), seen[n - 1]
+
+
+def _killed_at(s3, method, key):
+    """s3 whose `method` call on `key` kills the run there."""
+    real = getattr(s3, method)
+
+    def cut(*a, **k):
+        if k["Key"] == key:
+            raise _Killed(key)
+        return real(*a, **k)
+    setattr(s3, method, cut)
+    return lambda: setattr(s3, method, real)
+
+
+@pytest.mark.parametrize("close_only", [False, True])
+def test_a_promotion_cut_short_is_finished_before_either_kind_of_run_publishes(monkeypatch, close_only):
+    """Killed half way through its copies: the next run, a photos run or a close-only one (which settles nothing),
+    finishes the promotion first, with no paid call, so a half-new set is never published."""
+    from deploy import standardise_source as src
+    s3, owned = _older_whole_slab_chosen(False)
+    s3._store(imagestore.conflicts_key("sentas"), b"{}")
+    before = _published(s3)
+    restore = _killed_at(s3, "copy_object", f"{RUN}{A}.main.jpg")          # its views copied before main, main not
+    with pytest.raises(_Killed):
+        _photos_run(monkeypatch, s3, owned, _redrawn(), "pass")
+    restore()
+    assert _published(s3) == before and src.pending(s3, RUN, A)
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc.gpu, "run_round", lambda batch, client, tag, todo, *a, **k: [] if not todo else pytest.fail(
+        f"sent {todo} to the GPU: nothing is left to do"))
+    monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("a paid call"))
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("one", A)])
+    monkeypatch.setattr(close, "undone", lambda client, records: [])                  # every close-up made already
+    import time
+    proc.process(s3, None, select.Spend(5.0), "R2", time.monotonic() + 3600, say=lambda m: None, close_only=close_only)
+    assert not src.pending(s3, RUN, A)
+    for view in ("main", "white", "studio"):
+        assert s3.objects[imagestore.standard_key("sentas", A, view)]["Body"] == s3.objects[f"{RUN}{A}.{view}.jpg"]["Body"]
+        assert s3.objects[f"{RUN}{A}.{view}.jpg"]["Body"] != b"old " + view.encode()
+
+
+@pytest.mark.parametrize("verdict", ["pass", "fail"])
+def test_a_candidate_drawn_under_an_older_rule_is_removed_unjudged_and_its_slab_checked_again(monkeypatch, verdict):
+    """A candidate pending when a later rule is deployed: removed without a note and without a judge call, so the photo
+    is due again and is checked under the new rule."""
+    from deploy import standardise_source as src
+    s3, owned = _older_whole_slab_chosen(False)
+    assert src.rework(s3, RUN, A, _redrawn(), "recheck") == "redrawn for the judge"     # under outline-v2
+    monkeypatch.setattr(C, "OUTLINE_CHECKED", "outline-v3/")
+    before = _state(s3)
+    assert _photos_run(monkeypatch, s3, owned) == ([], [])                               # removed, nothing judged
+    after = _state(s3)
+    assert not any(k.startswith(src.candidate_prefix(RUN)) for k in after)
+    assert {k: v for k, v in after.items() if k != f"{ROOT}tracked.csv"} == \
+        {k: v for k, v in before.items() if not k.startswith(src.candidate_prefix(RUN))}
+    sent, asked = _photos_run(monkeypatch, s3, owned, _redrawn(), verdict)
+    assert sent == [A] and len(asked) == 1                                              # checked under outline-v3
+    assert f"{RUN}outline-v3/{A}.json" in s3.objects and _photos_run(monkeypatch, s3, owned) == ([], [])
+
+
+def test_a_removal_cut_short_after_a_pass_then_a_later_rule_never_stalls_the_runs(monkeypatch):
+    """Its note (outline-v2) written, its candidate half removed: under a later rule it is removed, never promoted
+    again from files already gone, and the photo is checked under the new rule."""
+    from deploy import standardise_source as src
+    s3, owned = _older_whole_slab_chosen(False)
+    restore = _killed_at(s3, "delete_object", f"{src.candidate_prefix(RUN)}{A}.white.jpg")
+    with pytest.raises(_Killed):
+        _photos_run(monkeypatch, s3, owned, _redrawn(), "pass")
+    restore()
+    assert json.loads(s3.objects[src.checked_key(RUN, A)]["Body"]) == {"changed": True} and src.pending(s3, RUN, A)
+    monkeypatch.setattr(C, "OUTLINE_CHECKED", "outline-v3/")
+    assert _photos_run(monkeypatch, s3, owned) == ([], []) and not src.pending(s3, RUN, A)
+    sent, _ = _photos_run(monkeypatch, s3, owned, _redrawn(), "pass")
+    assert sent == [A] and _photos_run(monkeypatch, s3, owned) == ([], [])
 
 
 @pytest.mark.parametrize("bump", [False, True])

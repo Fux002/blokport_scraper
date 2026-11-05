@@ -30,7 +30,7 @@ import httpx
 
 from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, pool_map, read_exclude
 from deploy.standardise_source import (LOGO_STEP, REDRAW, candidate_prefix, discard, promote, remove_candidate,
-                                       round_prefix)
+                                       round_prefix, undecided)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import clean, judge
@@ -124,11 +124,17 @@ class Candidates(_Locks):
     verdict judges one as it judges a result; complete: those whose completion marker is written."""
 
     def __init__(self, out, keys):
-        self.prefix = candidate_prefix(out)
+        self.out, self.prefix = out, candidate_prefix(out)
         inner = [k[len(REDRAW):] for k in keys if k.startswith(REDRAW)]
         self.complete = {k[:64] for k in inner if k.endswith(".done.json") and "/" not in k and _SHA.match(k)}
         self.judged = _shas(inner, "judged/")
         self._locks, self._guard = {}, threading.Lock()
+
+
+def read_candidates(client, out):
+    """The Candidates of one run folder `out`, its candidate folder alone listed."""
+    pages = client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=candidate_prefix(out))
+    return Candidates(out, [o["Key"][len(out):] for page in pages for o in page.get("Contents", [])])
 
 
 class Round(_Locks):
@@ -500,32 +506,48 @@ def settle(sel, spend, deadline):
     deploy.standardise_source.draw_candidate) judged through verdict, as a new result is, each started before the
     deadline; then each settled (settle_one). A promotion or removal that fails stops the run loud, before report and
     publish: the next run finishes it. The rounds are read again after."""
-    found = [{"key": f"{tag}/{src}/{sha}", "rnd": rnd, "source": src, "sha": sha}
+    found = [{"key": f"{tag}/{src}/{sha}", "cands": rnd.redraw, "source": src, "sha": sha}
              for tag, by_source in sel.rounds for src, rnd in sorted(by_source.items()) for sha in sorted(rnd.redrawn)]
-    judged = lambda c: verdict(sel.client, c["rnd"].redraw, c["source"], c["sha"], C.CUTOUT_FORMAT, spend)
-    failures, stopped = _each([c for c in found if c["sha"] not in c["rnd"].checked], judged, deadline)
+    judged = lambda c: verdict(sel.client, c["cands"], c["source"], c["sha"], C.CUTOUT_FORMAT, spend)
+    failures, stopped = _each([c for c in found if undecided(sel.client, c["cands"].out, c["sha"])], judged, deadline)
     for c in found:
-        settle_one(sel.client, c["rnd"], c["source"], c["sha"])
+        settle_one(sel.client, c["cands"], c["source"], c["sha"])
     sel.refresh()
     return failures, stopped
 
 
-def settle_one(client, rnd, src, sha):
-    """One complete candidate by its stored verdict: a pass promoted over its result, a current fail discarded (the
-    result kept as it is); one settled before (the note written) whose removal was cut short removed; no verdict yet
-    (the budget, the window) left for the next run. The owner's choice and the judge's are settled alike: the choice is
-    the photo, whichever result it shows."""
-    if sha in rnd.checked:
-        remove_candidate(client, rnd.prefix, sha)
-        return
-    found = verdict(client, rnd.redraw, src, sha, C.CUTOUT_FORMAT)
+def finish(client, tags):
+    """At the start of every run, before anything else (a close-only run settles nothing, a run can stop before its
+    settle): every complete candidate of the run tags settled by its stored verdict (settle_one), with no paid call,
+    so a promotion cut short is never published half done. The number settled or removed."""
+    done = 0
+    for tag in tags:
+        root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{tag}/"
+        pages = client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=root, Delimiter="/")
+        for out in [p["Prefix"] for page in pages for p in page.get("CommonPrefixes", [])]:
+            cands = read_candidates(client, out)
+            done += sum(settle_one(client, cands, out[len(root):-1], sha) for sha in sorted(cands.complete))
+    return done
+
+
+def settle_one(client, cands, src, sha):
+    """One complete candidate (of `cands`) by its stored verdict, never a paid call: a pass promoted over its result, a
+    current fail discarded (the result kept as it is); one the judge no longer decides (undecided: drawn under an
+    earlier rule, or settled and its removal cut short) removed, no note written; no verdict yet (the budget, the
+    window) left for the next run. Whether it was settled or removed. The owner's choice and the judge's are settled
+    alike: the choice is the photo, whichever result it shows."""
+    if not undecided(client, cands.out, sha):
+        remove_candidate(client, cands.out, sha)
+        return True
+    found = verdict(client, cands, src, sha, C.CUTOUT_FORMAT)
     if found is None or not judge.current(found):
-        return
+        return False
     if judge.passed(found):
-        promote(client, rnd.prefix, sha)
+        promote(client, cands.out, sha)
     else:
         kinds = ", ".join(p.get("kind", "?") for p in found.get("problems", [])) or found.get("verdict", "")
-        discard(client, rnd.prefix, sha, f"the judge failed its redraw ({kinds}): kept as it was")
+        discard(client, cands.out, sha, f"the judge failed its redraw ({kinds}): kept as it was")
+    return True
 
 
 def judge_all(sel, spend, deadline):

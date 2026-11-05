@@ -130,10 +130,13 @@ is off) is among them: such a photo goes to the GPU without its listing being pi
 - no whole slab on the re-run (held, a close-up), or a re-run that fails for the photo itself: the note, kept as it is
   (`{"changed": false, "kept": why}`), never `noslab/` over a live result, so it is never run again; never held.
 
-Cut short anywhere, the next run finishes cleanly: a candidate without its marker is ignored, removed and drawn again
-by the next recheck; a promotion is safe to repeat (the same copies again) and is finished by the next settle, which
-runs before anything is published (a promotion that fails stops the run before report and publish); a settled
-candidate whose removal was cut short is removed by the next settle. No verdict is paid for twice.
+Cut short anywhere, the next run finishes cleanly: a candidate without its marker is ignored, removed and drawn again by
+the next recheck; a promotion is safe to repeat (the same copies again) and is finished at the start of the next run of
+either kind, photos or close-only (`select.finish`, before anything else and with no paid call), so a half promoted set
+is never published (a promotion that fails also stops its own run before report and publish); a settled candidate whose
+removal was cut short is removed. Every candidate's marker names the rule it was drawn under: one drawn under an earlier
+rule (a later rule deployed while it waited, or its removal cut short) is only removed, no note written, so the photo is
+checked again under the current rule. No verdict is paid for twice.
 
 Drawn the same, the verdict and the choice stand and no judge call is made. A result the retired logo step made
 (`logo-step/`) is never rechecked, as it is never completed: its re-run would start from the photo with its logo. A
@@ -416,13 +419,14 @@ a job's name; scoping to the process's own jobs would need tags on submit (`batc
 
 ### At the deploy that retired the logo step: mark every result it made (once per environment)
 
-Three steps add views to a stored result from a re-run of its photo, unjudged: completing an outdated open book (its
-close view and 3D slab), rechecking a whole slab made under an older outline rule (its views redrawn) and the close-only
-run (its close-up, under every close-up rule). A result the retired logo step made
-(RUN_TAG, a watermarked source) would be re-run without that step. Before the first photos run of that release on an
-environment, run `python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first, then `false`; the environment's usual
-`SCRAPER_` settings). It writes `logo-step/<sha>.json` beside each such result; a marked result is never completed,
-never rechecked and its close-up never made again, whatever `CLOSEUP_VERSION` says: it keeps its judged views, its choice and its
+Later steps make views of a stored result again from a re-run of its photo: completing an outdated open book (its close
+view and 3D slab, unjudged), the close-only run (its close-up, under every close-up rule, unjudged) and the outline
+recheck (a whole slab drawn differently is redrawn as a candidate the judge scores before it replaces the result). A
+result the retired logo step made (RUN_TAG, a watermarked source) would be re-run without that step, from the photo with
+its logo, not the logo-free copy it was judged as. Before the first photos run of that release on an environment, run
+`python -m deploy.mark_logo_step_results` (`DRY_RUN=true` first, then `false`; the environment's usual `SCRAPER_`
+settings). It writes `logo-step/<sha>.json` beside each such result; a marked result is never completed, never rechecked
+and its close-up never made again, whatever `CLOSEUP_VERSION` says: it keeps its judged views, its choice and its
 `close.jpg` as they are. It reads the watermarked sources from a config.db snapshot taken before the migration; for dev
 pass prod's too (`CONFIG_DB_SNAPSHOTS`, see the script), since dev's varsha results were made by prod's run. Dry run on
 2026-11-03: 1278 in prod, 1187 in dev, all varsha `v2` results. Idempotent.

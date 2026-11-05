@@ -366,8 +366,8 @@ def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
     """The GPU and hosted steps, then the report: (problems, report). A step starts only inside the work window and while
     the budget lasts; the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
     GPU round the outline recheck's candidates are settled (select.settle); the report always runs, so what is chosen is
-    recorded and published, unless a promotion failed (raised: the next run finishes it before anything is
-    published)."""
+    recorded and published, unless a promotion failed: raised, and the next run of either kind finishes it at its start
+    (select.finish, in process) before anything is published."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
     steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.settle, sel, spend, deadline),
@@ -471,6 +471,8 @@ def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
     root = f"{ROOT}{C.CLEAN_TAG}/"
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
+    if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):    # no job writes now: a promotion cut short is finished
+        say(f"==> finished {settled} outline rechecks an earlier run left half settled")
     sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
     listings = photo_listings(sheet, photos)
     decisions = read_decisions(s3, root, listings)

@@ -824,8 +824,8 @@ def test_a_new_whole_slab_is_noted_as_drawn_under_the_current_outline_rule_and_a
     img = np.zeros((20, 30, 3), np.uint8)
     whole, close = _Written({}), _Written({})
     src.write(whole, GPU, A, Result(kind="slab", images={"main": img, "white": img}, slab=(img, np.ones((20, 30), np.float32)),
-                                    chosen=(0, 1)), {"new": True})
-    src.write(close, GPU, A, Result(kind="close-up", images={"main": img, "white": img}), {"new": True})
+                                    chosen=(0, 1)))
+    src.write(close, GPU, A, Result(kind="close-up", images={"main": img, "white": img}))
     assert whole.written == [src.slab_record_key(GPU, A), f"{GPU}{A}.slab.png", f"{GPU}{A}.white.jpg", f"{GPU}{A}.main.jpg",
                              src.checked_key(GPU, A)]
     assert json.loads(whole.objects[src.checked_key(GPU, A)]) == {"new": True}

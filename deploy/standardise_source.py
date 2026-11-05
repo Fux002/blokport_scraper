@@ -164,16 +164,16 @@ def _views_not_in(client, out, sha, names):
             if f"{view}.jpg" not in names and _exists(client, f"{out}{sha}.{view}.jpg")]
 
 
-def write(client, out, sha, res, note):
+def write(client, out, sha, res):
     """A new result written whole: its files (_files), the views an earlier result of the photo had and this one does
-    not make removed, then, for a whole slab, `note`: it is drawn under the current outline rule (written last: missing,
-    the slab is checked once more, never wrong)."""
+    not make removed, then, for a whole slab, the note {"new": true}: it is drawn under the current outline rule
+    (written last: missing, the slab is checked once more, never wrong)."""
     files = _files(res)
     _put(client, out, sha, files)
     for key in _views_not_in(client, out, sha, {name for name, _, _ in files}):
         client.delete_object(Bucket=S3_BUCKET, Key=key)
     if res.slab:
-        _note(client, out, sha, note)
+        _note(client, out, sha, {"new": True})
 
 
 def _note(client, out, sha, note):
@@ -202,11 +202,21 @@ def clear_candidate(client, out, sha):
 
 def draw_candidate(client, out, sha, res):
     """A result this version draws differently written as a candidate (candidate_prefix), never over the result: every
-    file encoded first, then written as a result's are, then its completion marker, last."""
+    file encoded first, then written as a result's are, then its completion marker, last, naming its files and the rule
+    it was drawn under (C.OUTLINE_CHECKED)."""
     files = _files(res)
     _put(client, candidate_prefix(out), sha, files)
+    marker = {"files": [[name, kind] for name, _, kind in files], "rule": C.OUTLINE_CHECKED}
     client.put_object(Bucket=S3_BUCKET, Key=candidate_key(out, sha), ContentType="application/json",
-                      Body=json.dumps({"files": [[name, kind] for name, _, kind in files]}, sort_keys=True).encode())
+                      Body=json.dumps(marker, sort_keys=True).encode())
+
+
+def undecided(client, out, sha):
+    """Whether the judge still decides this complete candidate: drawn under the current rule and its result not noted
+    yet. Any other (drawn under an earlier rule, or settled and its removal cut short) is only removed
+    (remove_candidate), no note written: under a later rule the photo is due again."""
+    marker = json.loads(_get(client, candidate_key(out, sha)))
+    return marker.get("rule") == C.OUTLINE_CHECKED and not _exists(client, checked_key(out, sha))
 
 
 def promote(client, out, sha):
@@ -518,7 +528,7 @@ def main() -> int:
                                       Body=json.dumps({"reason": res.held, "kind": res.kind}, sort_keys=True).encode())
                     tally["held"] += 1
                 else:
-                    write(client, out, sha, res, {"new": True})
+                    write(client, out, sha, res)
                     tally[res.kind] += 1
             storage_in_a_row = 0
         except Exception as exc:                       # one bad photo never stops the slice (after_failure)
