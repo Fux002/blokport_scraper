@@ -603,6 +603,15 @@ def test_a_retouchs_fills_are_told_from_its_jpeg():
     assert not photo.retouch_fills(retouched[50:550, 50:850], made_from).any()   # cropped clear of its marks: nothing filled
 
 
+def _found_flats(monkeypatch, flats, changed=True):
+    """photo.standardise's outline step finds `flats` (a reason str: no whole slab), drawn differently from the older
+    outline rule or not (changed); the models it needs stood in."""
+    found = object()                                                 # the outline step's result (not a reason)
+    monkeypatch.setattr(layout, "slab_outline", lambda rgb, seg, det, size: flats if isinstance(flats, str) else found)
+    monkeypatch.setattr(layout, "drawn_differently", lambda f: changed)
+    monkeypatch.setattr(layout, "flats_from", lambda rgb, f, lama: flats)
+
+
 class _Esr:
     """Stands in for Real-ESRGAN: 4x, plain cubic."""
     def enhance(self, bgr):
@@ -614,7 +623,7 @@ def test_the_close_up_leaves_every_other_view_as_it_was(monkeypatch):
     full, alpha = _sharp_stone(1100, 1700)                   # pixels enough for a close-up, still enlarged by the layout
     flats = [layout.Flat(full, alpha, np.eye(3), full)]
     monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.99))
-    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, seg, det, lama, size=None: flats)
+    _found_flats(monkeypatch, flats)
     monkeypatch.setattr(blend, "blend", lambda img, solid, stand, pipe, seed: img)
     m = standardise_models.Models(seg=None, det=None, lama=None, esr=_Esr(), clip=None, inpaint=None)
     asked = []                                          # where the start photo is not as shot: asked only for a close-up
@@ -1304,13 +1313,14 @@ def test_a_whole_slab_framed_tightly_is_never_cropped_either():
 
 
 # --- the 3D slab of a photo -------------------------------------------------------------------------------------------
-def _standardised(monkeypatch, slabs, kind_found=None, drawn=None):
+def _standardised(monkeypatch, slabs, kind_found=None, drawn=None, redo=None, changed=True):
     """photo.standardise on found slabs (or a close-up), the models and the expensive steps stood in: (its result, the
-    slabs the close view was made from). drawn: the slabs as enlarged draws them; the found ones when not given."""
+    slabs the close view was made from). drawn: the slabs as enlarged draws them; the found ones when not given.
+    changed: whether the outline step draws them differently from the older rule."""
     from stone_pipeline.standardise import closeup, photo
     monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.9))
     flats = None if slabs is None else [layout.Flat(rgb, alpha, np.eye(3), rgb) for rgb, alpha in slabs]
-    monkeypatch.setattr(layout, "flat_slabs", lambda rgb, *m, size=None: flats if kind_found is None else "no outline")
+    _found_flats(monkeypatch, flats if kind_found is None else "no outline", changed)
     monkeypatch.setattr(layout, "enlarged", lambda flats, esr: slabs if drawn is None else drawn)
     monkeypatch.setattr(closeup, "closeup", lambda rgb, size, *m: kind_found)
     monkeypatch.setattr(photo, "_finished", lambda s, key, models, seed: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
@@ -1320,7 +1330,8 @@ def _standardised(monkeypatch, slabs, kind_found=None, drawn=None):
 
     class _Models:
         clip, cleaners, esr, seg, det, lama = None, (None, None, None, None), None, None, None, None
-    return photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models(), extra_views=True), closed
+    return photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models(), extra_views=True,
+                             redo=redo), closed
 
 
 def test_each_half_of_an_open_book_is_a_whole_slab_and_the_one_with_more_stone_gets_the_3d_and_the_close_view(monkeypatch):
@@ -1424,6 +1435,46 @@ def test_a_single_slab_keeps_its_own_slab_and_close_view(monkeypatch):
     res, closed = _standardised(monkeypatch, [one])
     assert res.kind == "slab" and res.slab is one and closed == [(id(one[0]), id(one[1]))]
     assert set(res.images) == {"main", "white", "studio", "close"}
+
+
+def test_a_recheck_drawn_the_same_draws_nothing(monkeypatch):
+    res, closed = _standardised(monkeypatch, [_slab(80, 100)], redo="recheck", changed=False)
+    assert res.unchanged and res.images == {} and res.slab == () and not res.held and closed == []
+
+
+@pytest.mark.parametrize("redo", ["recheck", "complete"])
+def test_a_redo_that_finds_no_whole_slab_is_held_never_turned_into_a_close_up(monkeypatch, redo):
+    res, _ = _standardised(monkeypatch, None, kind_found=[_slab(80, 100)], redo=redo)
+    assert res.held == "no outline" and res.images == {} and not res.unchanged
+
+
+def test_a_recheck_drawn_differently_is_drawn_in_full_and_says_so(monkeypatch):
+    one = _slab(80, 100)
+    res, _ = _standardised(monkeypatch, [one], redo="recheck")
+    assert res.kind == "slab" and res.slab is one and res.changed and set(res.images) == {"main", "white", "studio", "close"}
+
+
+@pytest.mark.parametrize("changed", [True, False])
+def test_a_completion_is_drawn_in_full_and_says_whether_this_version_draws_it_differently(monkeypatch, changed):
+    left, right = _slab(80, 100), _slab(80, 100)
+    res, _ = _standardised(monkeypatch, [left, right], redo="complete", changed=changed)
+    assert res.kind == "open book" and res.slab and not res.unchanged and res.changed is changed
+
+
+def test_a_close_up_is_never_said_to_be_drawn_differently(monkeypatch):
+    """Whole slabs found and drawn differently from the older rule, but not shown (two stones in one outline): the
+    close-up made instead has no whole slab, nothing a recheck redraws."""
+    from stone_pipeline.standardise import closeup, photo
+    monkeypatch.setattr(kinds, "classify", lambda clip, rgb: ("slab", 0.9))
+    _found_flats(monkeypatch, [layout.Flat(*_slab(80, 100), np.eye(3), None)], changed=True)
+    monkeypatch.setattr(layout, "enlarged", lambda flats, esr: "two stones in one outline")
+    monkeypatch.setattr(closeup, "closeup", lambda rgb, size, *m: [_slab(80, 100)])
+    monkeypatch.setattr(photo, "_finished", lambda s, key, models, seed: np.zeros((C.OUT_H, C.OUT_W, 3), np.uint8))
+
+    class _Models:
+        clip, cleaners, esr, seg, det, lama = None, (None, None, None, None), None, None, None, None
+    res = photo.standardise(np.zeros((60, 90, 3), np.uint8), fmt="slab", key="p", models=_Models())
+    assert res.kind == "close-up" and not res.changed and res.slab == ()
 
 
 def test_a_close_up_shows_only_part_of_a_slab_so_it_has_no_3d_and_no_close_view(monkeypatch):

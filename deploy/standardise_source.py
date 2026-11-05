@@ -65,14 +65,6 @@ def logo_step_key(out, sha):
     return f"{out}{LOGO_STEP}{sha}.json"
 
 
-def _store_slab(client, out, sha, res):
-    """The photo's whole slab (<sha>.slab.png, written last of the two: it marks a whole slab) and, before it, which of
-    the slabs found it is."""
-    client.put_object(Bucket=S3_BUCKET, Key=slab_record_key(out, sha), ContentType="application/json",
-                      Body=json.dumps({"index": res.chosen[0], "of": res.chosen[1]}, sort_keys=True).encode())
-    client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.slab.png", Body=_slab_png(res.slab), ContentType="image/png")
-
-
 def _get(client, key):
     return client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
 
@@ -89,32 +81,112 @@ def outdated(client, out, sha):
             and not _exists(client, f"{out}noslab/{sha}.json") and not _exists(client, logo_step_key(out, sha)))
 
 
+def checked_key(out, sha):
+    """The note that this photo's whole slab is drawn under the current outline rule (C.OUTLINE_CHECKED)."""
+    return f"{out}{C.OUTLINE_CHECKED}{sha}.json"
+
+
+def older_outline(client, out, sha):
+    """A whole slab made under the outline rule before C.OUTLINE_CHECKED: its slab and no note of the current rule, and
+    not made by the retired logo step (logo_step_key: a re-run would start from the photo with its logo and redraw views
+    no judge saw)."""
+    return (_exists(client, f"{out}{sha}.slab.png") and not _exists(client, checked_key(out, sha))
+            and not _exists(client, logo_step_key(out, sha)))
+
+
 def finished(client, out, sha):
     """This photo's run already ended, finished or held: a re-run, or results copied in from another environment's
-    run of the same photo, is never worked on again; only an outdated result is, once (complete)."""
+    run of the same photo, is never worked on again; only an outdated result is, once (complete), and a whole slab made
+    under an older outline rule, once (recheck)."""
     if _exists(client, f"{out}held/{sha}.json"):
         return True
-    return _exists(client, f"{out}{sha}.main.jpg") and not outdated(client, out, sha)
+    return (_exists(client, f"{out}{sha}.main.jpg") and not outdated(client, out, sha)
+            and not older_outline(client, out, sha))
 
 
-def complete(client, out, sha, res):
-    """Complete an outdated open-book result from its re-run: its close view, then its slab (written last: the result is
-    complete). What was judged and published (main, white, studio) stays as it is, so its verdict and choice stand. A
-    completion cut short takes its close view off again while the slab is missing, so half of one is never published.
-    A re-run that is no open book this time adds nothing and is noted in noslab/, so it is never run again."""
-    if res.kind == "open book" and res.slab:
-        try:
-            if "close" in res.images:
-                client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg", Body=_encode(res.images["close"]),
-                                  ContentType="image/jpeg")
-            _store_slab(client, out, sha, res)
-        except BaseException:
-            if not _exists(client, f"{out}{sha}.slab.png"):
-                client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg")
-            raise
-        return "completed"
-    tried(client, out, sha, res.held or f"the re-run is a {res.kind}, no open book")
-    return "no slab"
+def again(client, out, sha):
+    """How a stored result that is not finished is worked on again: "complete" (an open book made before its halves had a
+    slab) or "recheck" (a whole slab made under an older outline rule); None for a photo without a result."""
+    if not _exists(client, f"{out}{sha}.main.jpg"):
+        return None
+    return "complete" if outdated(client, out, sha) else "recheck"
+
+
+def _files(res):
+    """[(name, bytes, content type)] of a result's files, every one encoded before anything is written: for a whole slab,
+    which of the slabs found it is (slab.json: slab_record_key) and then the slab, marking a whole slab; its views, main
+    last (main means the photo is complete)."""
+    files = []
+    if res.slab:
+        files = [("slab.json", json.dumps({"index": res.chosen[0], "of": res.chosen[1]}, sort_keys=True).encode(),
+                  "application/json"),
+                 ("slab.png", _slab_png(res.slab), "image/png")]
+    return files + [(f"{name}.jpg", _encode(img), "image/jpeg")
+                    for name, img in sorted(res.images.items(), key=lambda kv: kv[0] == "main")]
+
+
+def _put(client, out, sha, files):
+    for name, body, kind in files:
+        client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{name}", Body=body, ContentType=kind)
+
+
+def write(client, out, sha, res, note):
+    """A result written whole: its files (_files), then the views an earlier result of the photo had and this one does
+    not make removed (a stale close view would be published with the new ones), then, for a whole slab, `note`: it is
+    drawn under the current outline rule (written last: missing, the slab is checked once more, never wrong)."""
+    files = _files(res)
+    _put(client, out, sha, files)
+    made = {name for name, _, _ in files}
+    for view in imagestore.STANDARD_VIEWS:
+        if f"{view}.jpg" not in made and _exists(client, f"{out}{sha}.{view}.jpg"):
+            client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{view}.jpg")
+    if res.slab:
+        _note(client, out, sha, note)
+
+
+def _note(client, out, sha, note):
+    client.put_object(Bucket=S3_BUCKET, Key=checked_key(out, sha), ContentType="application/json",
+                      Body=json.dumps(note, sort_keys=True).encode())
+
+
+def rework(client, out, sha, res, how):
+    """A stored result worked on again (how: again's "complete" or "recheck"), one path for both; its verdict and choice
+    stand (only what is not stone changes, and publish copies what changed):
+      - drawn the same by this version (a recheck stops before drawing): only the note, {"changed": false};
+      - no whole slab on the re-run (held, a close-up, or a completion that is no open book this time): nothing is
+        written but a note that it is never run again: a recheck's {"kept": why} beside its result, a completion's
+        noslab/ (the result is judged and may be published: never held);
+      - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): written whole
+        (write), then the note {"changed": true};
+      - a completion drawn the same: what was judged (main, white, studio) stays; its close view, then which slab it is
+        and its slab (the result complete), then the note {"changed": false}. Cut short, the close view comes off again
+        while the slab is missing, so half of one is never published."""
+    if res.unchanged:
+        _note(client, out, sha, {"changed": False})
+        return "outline unchanged"
+    if res.held or not res.slab or (how == "complete" and res.kind != "open book"):
+        why = res.held or f"the re-run is a {res.kind}, no {'open book' if how == 'complete' else 'whole slab'}"
+        (tried if how == "complete" else kept)(client, out, sha, why)
+        return "no slab" if how == "complete" else "outline kept"
+    if res.changed:
+        write(client, out, sha, res, {"changed": True})
+        return "outline redrawn"
+    made = {f[0]: f for f in _files(res)}
+    files = [made[name] for name in ("close.jpg", "slab.json", "slab.png") if name in made]   # the slab last: complete
+    try:
+        _put(client, out, sha, files)
+    except BaseException:
+        if not _exists(client, f"{out}{sha}.slab.png"):
+            client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.close.jpg")
+        raise
+    _note(client, out, sha, {"changed": False})
+    return "completed"
+
+
+def kept(client, out, sha, reason):
+    """Note that a whole slab's recheck gave no whole slab: the stored result stays as it is and is never checked again
+    under this rule (never held/: it is judged and may be published)."""
+    _note(client, out, sha, {"changed": False, "kept": reason})
 
 
 def tried(client, out, sha, reason):
@@ -319,7 +391,7 @@ def main() -> int:
         sha = imagestore.sha_from_url(key)
         info = photos[sha]
         started = time.time()
-        redo = False                                   # this photo is an outdated result being completed
+        redo = None                                    # complete or recheck: a result there, worked on again
         try:
             if not survey and finished(client, out, sha):
                 tally["already done"] += 1
@@ -329,11 +401,11 @@ def main() -> int:
                 rgb = photo.decode(_get(client, key))
                 tally[_survey(rgb, m) if info["format"] == "slab" else info["format"]] += 1
             else:
-                redo = _exists(client, f"{out}{sha}.main.jpg")     # made, yet not finished: outdated, to complete
+                redo = again(client, out, sha)
                 source_key, cleaned, refused = start(client, out, key, sha)
                 if refused:
                     if redo:
-                        tally[complete(client, out, sha, photo.Result(held=refused))] += 1
+                        tally[rework(client, out, sha, photo.Result(held=refused), redo)] += 1
                     else:
                         client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                           Body=json.dumps({"reason": refused, "kind": ""}, sort_keys=True).encode())
@@ -343,19 +415,15 @@ def main() -> int:
                 full = photo.read(_get(client, source_key))
                 res = photo.standardise(full, fmt=info["format"], key=info["key"], size=tuple(info["size"]) if info["size"] else None,
                                         models=m, extra_views=extra,
-                                        edits=lambda: start_edits(client, out, key, source_key, cleaned, full))
+                                        edits=lambda: start_edits(client, out, key, source_key, cleaned, full), redo=redo)
                 if redo:
-                    tally[complete(client, out, sha, res)] += 1
+                    tally[rework(client, out, sha, res, redo)] += 1
                 elif res.held:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": res.held, "kind": res.kind}, sort_keys=True).encode())
                     tally["held"] += 1
                 else:
-                    if res.slab:
-                        _store_slab(client, out, sha, res)
-                    # Written last, so "main" means this photo is complete.
-                    for name, img in sorted(res.images.items(), key=lambda kv: kv[0] == "main"):
-                        client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{name}.jpg", Body=_encode(img), ContentType="image/jpeg")
+                    write(client, out, sha, res, {"new": True})
                     tally[res.kind] += 1
             storage_in_a_row = 0
         except Exception as exc:                       # one bad photo never stops the slice (after_failure)
@@ -372,11 +440,12 @@ def main() -> int:
                 return 1
             if action == "hold" and not survey:
                 why = f"error: {type(exc).__name__}: {exc}"[:500]
-                if redo:                               # a judged result is never held over: tried, not run again
-                    tried(client, out, sha, why)
-                else:
+                if not redo:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": why, "kind": ""}).encode())
+                elif gpu_error(exc):                   # it broke the GPU twice: never run again, its judged result kept
+                    (tried if redo == "complete" else kept)(client, out, sha, why)
+                # Any other failure of a redo is not noted: the next run tries it again (a problem of the round).
         spent.append(time.time() - started)
         if i % 10 == 0:
             print(f"   [{i + 1}/{len(sliced)}] {dict(tally)} median {np.median(spent):.1f}s per photo", flush=True)
