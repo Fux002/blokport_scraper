@@ -206,7 +206,7 @@ def test_a_new_product_of_an_off_source_never_starts_hidden(config_db, ledger, m
 def test_the_photo_process_never_picks_a_listing_of_an_off_source(config_db):
     listings = [{"key": "s1", "sku": "SEN-1", "source": "sentas", "format": "slab", "photos": [A]},
                 {"key": "v1", "sku": "VAR-1", "source": "varsha", "format": "slab", "photos": [B]}]
-    pick = dict(exclude=set(), slabs=set(), removed=set(), conflicts=set(), picks={}, waiting=set())
+    pick = dict(exclude=set(), slabs=set(), removed=set(), conflicts=set(), picks={})
     assert [l["key"] for l in proc.todo(listings, {}, **pick)] == ["s1"]
     # nor a chosen close-up of an off source (the whole-slab look-again, #486)
     records = {"s1": {"sha": A, "tag": "v2", "prefix": "p/"}, "v1": {"sha": B, "tag": "v2", "prefix": "p/"}}

@@ -4,14 +4,13 @@ runner's `photos` stage, started after each full produce on the owner's button. 
   0. clear: GPU jobs an earlier, killed run left are stopped and the GPU pool's ceiling is set back to idle
   1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's or excluded,
      not the owner's choice, or a photo listings of several stones show that the owner did not assign), never one the
-     owner removed; the listings whose photo was redrawn after it was judged (rejudge/), so the judge sees the redraw;
-     and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept; only of the
-     sources whose image pipeline is on
+     owner removed; and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept;
+     only of the sources whose image pipeline is on
   2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG,
      and every chosen result outdated (a whole slab drawn under an older outline rule: live_choices), its listing not
-     picked again
-  3. judge: the owner's choice of a listing (judged only when redrawn), else its results in its own order until one
-     passes
+     picked again; then settle: a recheck drawn differently is a candidate beside its result, judged as a new result
+     is, promoted over it on a pass or discarded on a fail (select.settle)
+  3. judge: the owner's choice of a listing, else its results in its own order until one passes
   4. clean: a hosted edit of one fixable photo of each listing still without a pass
   5. GPU: the cleaned copies, through every step a scraped photo takes, under STANDARDISE.CLEAN_TAG
   6. judge: the cleaned copies' results
@@ -264,17 +263,14 @@ def valid_choice(l, r, exclude, conflicts, picks):
     return (l["source"], r["sha"]) not in conflicts
 
 
-def todo(listings, records, exclude, slabs, removed, conflicts, picks, waiting):
+def todo(listings, records, exclude, slabs, removed, conflicts, picks):
     """The listings a run works on, in sheet order, never one the owner removed (its SKU in `removed`). Those without a
-    valid chosen photo (valid_choice), and those whose photo (the owner's choice that applies, else the record) was
-    redrawn and waits for the judge (`waiting`: {(tag, source, sha)}, select.Round.rejudge): picked again as a listing
-    without a choice is, so the redraw is judged as a new result is (the owner's choice stands: select.owner_verdict). A
-    listing on the review list has no record, so every run looks at it again (its stored answers cost nothing; a change
-    that can help it reaches it). And a slab listing whose chosen photo is no whole slab (no <sha>.slab.png in `slabs`:
-    a close-up, no 3D slab), with that choice as "kept": its further photos may show the whole slab, and the choice
-    stays unless one of them passes; never one the owner chose a photo for (it stands). Its stored answers cost nothing
-    either, so it is simply looked at again by every run. A listing of a source whose image pipeline is off is never
-    picked: its products show the scraped photos, so nothing is spent on it."""
+    valid chosen photo (valid_choice). A listing on the review list has no record, so every run looks at it again (its stored
+    answers cost nothing; a change that can help it reaches it). And a slab listing whose chosen photo is no whole slab
+    (no <sha>.slab.png in `slabs`: a close-up, no 3D slab), with that choice as "kept": its further photos may show the
+    whole slab, and the choice stays unless one of them passes; never one the owner chose a photo for (it stands). Its
+    stored answers cost nothing either, so it is simply looked at again by every run. A listing of a source whose image
+    pipeline is off is never picked: its products show the scraped photos, so nothing is spent on it."""
     off = image_pipeline_off()
     out = []
     for l in listings:
@@ -284,10 +280,6 @@ def todo(listings, records, exclude, slabs, removed, conflicts, picks, waiting):
         if l["source"] in off:
             continue
         if not valid_choice(l, r, exclude, conflicts, picks):
-            out.append(l)
-            continue
-        tag, sha = picks.get(l["key"], (r["tag"], r["sha"]))
-        if (tag, l["source"], sha) in waiting:
             out.append(l)
         elif (l["key"] not in picks and l["format"] == C.CUTOUT_FORMAT
               and f"{r['prefix']}{r['sha']}.slab.png" not in slabs):
@@ -372,13 +364,17 @@ def hosted(step, sel, spend, deadline):
 
 def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
     """The GPU and hosted steps, then the report: (problems, report). A step starts only inside the work window and while
-    the budget lasts; the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; the report
-    always runs, so what is chosen is recorded and published."""
+    the budget lasts; the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
+    GPU round the outline recheck's candidates are settled (select.settle); the report always runs, so what is chosen is
+    recorded and published, unless a promotion failed (raised: the next run finishes it before anything is
+    published)."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
     steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
+             lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline),
              *([lambda: hosted(select.clean_all, sel, spend, deadline)] if C.CLEAN_ENABLED else []),
              lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, gpu_deadline, spend),
+             lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline)]
     problems = []
     for step in steps:
@@ -427,7 +423,7 @@ def photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisi
     (problems, counts, kept)."""
     removed, records = removed_listings(s3), choices(s3, root)
     found = todo(listings, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
-                 decisions.picks, select.redrawn(decisions.rounds))
+                 decisions.picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
                            live_choices(listings, records, removed, decisions))
     held_on = sum("kept" in l for l in found)

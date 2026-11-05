@@ -29,7 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, pool_map, read_exclude
-from deploy.standardise_source import LOGO_STEP, REJUDGE, rejudge_key, round_prefix
+from deploy.standardise_source import (LOGO_STEP, REDRAW, candidate_prefix, discard, promote, remove_candidate,
+                                       round_prefix)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import clean, judge
@@ -109,11 +110,31 @@ class Spend:
                 self._saved = version
 
 
-class Round:
+class _Locks:
+    """One lock per photo: a photo several listings share is judged and cleaned once, never by two threads at once."""
+
+    def lock(self, sha):
+        with self._guard:
+            return self._locks.setdefault(sha, threading.Lock())
+
+
+class Candidates(_Locks):
+    """The candidates of one run folder (`out`, its keys relative to it): what a recheck drew of whole slabs this
+    version draws differently (deploy.standardise_source.candidate_prefix), named as a run folder's results are, so
+    verdict judges one as it judges a result; complete: those whose completion marker is written."""
+
+    def __init__(self, out, keys):
+        self.prefix = candidate_prefix(out)
+        inner = [k[len(REDRAW):] for k in keys if k.startswith(REDRAW)]
+        self.complete = {k[:64] for k in inner if k.endswith(".done.json") and "/" not in k and _SHA.match(k)}
+        self.judged = _shas(inner, "judged/")
+        self._locks, self._guard = {}, threading.Lock()
+
+
+class Round(_Locks):
     """What one run tag holds for one source, its keys listed once: finished photos, the whole slabs among them, held
     ones, verdicts, cleaned copies and clean attempts ("<sha>.<model>": its check, its edited copy, its stored hosted
-    request). One lock per photo: a photo several listings share is judged and cleaned once, never by two threads at
-    once."""
+    request), and the candidates of an outline recheck (redraw)."""
 
     def __init__(self, client, tag, src):
         self.prefix = round_prefix(tag, src)
@@ -125,7 +146,8 @@ class Round:
         self.noslab = _shas(keys, "noslab/")
         self.logo_step = _shas(keys, LOGO_STEP)        # made by the retired logo step: never completed
         self.checked = _shas(keys, C.OUTLINE_CHECKED)  # whole slabs drawn under the current outline rule
-        self.rejudge = _shas(keys, REJUDGE)            # redrawn after they were judged: judged again before published
+        self.redraw = Candidates(self.prefix, keys)
+        self.redrawn = self.redraw.complete            # whole slabs whose candidate waits for the judge (settle)
         self.held = _shas(keys, "held/")
         self.judged = _shas(keys, "judged/")
         self.cleaned = _shas(keys, "cleaned/")
@@ -136,21 +158,24 @@ class Round:
 
     @functools.cached_property
     def older_outline(self):
-        """The whole slabs made under an older outline rule (no note of C.OUTLINE_CHECKED), not tried again before
-        (noslab/) unless a redraw of it was cut short (rejudge/ without the note), and not made by the retired logo step:
-        not finished until the GPU has checked them (deploy.standardise_source.rework), so never judged before that."""
-        return (self.finished & self.slabs) - self.checked - (self.noslab - self.rejudge) - self.held - self.logo_step
+        """The whole slabs made under an older outline rule (no note of C.OUTLINE_CHECKED, no candidate waiting for the
+        judge), not made by the retired logo step: the GPU checks each once (deploy.standardise_source.rework)."""
+        return (self.finished & self.slabs) - self.checked - self.redrawn - self.held - self.logo_step
+
+    @functools.cached_property
+    def unchecked(self):
+        """The whole slabs whose outline recheck is not settled (older_outline, or a candidate waiting for the judge):
+        not finished, so never judged before it is."""
+        return self.older_outline | self.redrawn
 
     @functools.cached_property
     def outdated(self):
         """The results the GPU works on again, once each (deploy.standardise_source.rework): those made before an open
-        book's halves had their slab (a side view, no slab, not tried again), and the older_outline ones; never one the
-        retired logo step made. Worked out once per Round: none of its sets change."""
-        return ((self.finished & self.studio) - self.slabs - self.noslab - self.held - self.logo_step) | self.older_outline
-
-    def lock(self, sha):
-        with self._guard:
-            return self._locks.setdefault(sha, threading.Lock())
+        book's halves had their slab (a side view, no slab, not tried again, not settled by an outline recheck, none
+        waiting for the judge), and the older_outline ones; never one the retired logo step made. Worked out once per
+        Round: settle reads the rounds again after it changes them."""
+        return ((self.finished & self.studio) - self.slabs - self.noslab - self.held - self.logo_step - self.checked
+                - self.redrawn) | self.older_outline
 
 
 def _attempts(keys, suffix):
@@ -190,23 +215,14 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
         if sha in rnd.judged:
             stored = _get_json(client, key)
             if judge.current(stored) or spend is None:     # a fail under an older, stricter bar is judged again
-                return _judged(client, rnd, sha, stored)
+                return stored
         elif spend is None:
             return None
         original, result = _original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg")   # read before paying
         found, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.judge(original, result, fmt), f"judge {src} {sha[:12]}")
         _put_json(client, key, {**found, "cost": cost})
         rnd.judged.add(sha)
-        return _judged(client, rnd, sha, found)
-
-
-def _judged(client, rnd, sha, found):
-    """A verdict's last step: a pass of a redrawn result (Round.rejudge) takes its marker off once the verdict is stored,
-    so publish copies it; a stored pass does it too when an earlier attempt could not."""
-    if sha in rnd.rejudge and judge.passed(found):
-        client.delete_object(Bucket=S3_BUCKET, Key=rejudge_key(rnd.prefix, sha))
-        rnd.rejudge.discard(sha)
-    return found
+        return found
 
 
 def paid(spend, price, call, what):
@@ -232,17 +248,17 @@ def candidates(listing, exclude):
 
 
 def choose(client, rounds, listing, exclude, spend=None, owner=None):
-    """((tag, sha) of the listing's photo to publish or None, whether the answer is final): the owner's choice when it
-    has one (Selection.owner_pick: it overrides the judge, nothing of the listing is judged but a redraw of it:
-    owner_verdict), else the standardiser's results of its candidates in order, then its cleaned copies' results, the
-    first the judge passes. A slab listing prefers a whole slab (its result has a 3D slab): a passing close-up is the
-    answer only while no whole slab passes, and once one is had (listing["kept"]: the choice a run made before, or the
-    first close-up passed here) only whole results are judged. A photo held by the standardiser is skipped; a photo with
-    no result yet, or no verdict yet, leaves the answer open (never read as "no good photo", which would send the
-    listing to the hosted edit or the tracked list). rounds = [(tag, {source: Round})], the scraped run first, then
-    (optionally) the cleaned run; exclude = the photos never chosen by themselves (Selection.blocked)."""
+    """((tag, sha) of the listing's photo to publish or None, whether the answer is final): the owner's choice when it has
+    one (Selection.owner_pick: it overrides the judge, nothing of the listing is judged), else the standardiser's
+    results of its candidates in order, then its cleaned copies' results, the first the judge passes. A slab listing
+    prefers a whole slab (its result has a 3D slab): a passing close-up is the answer only while no whole slab passes,
+    and once one is had (listing["kept"]: the choice a run made before, or the first close-up passed here) only whole
+    results are judged. A photo held by the standardiser is skipped; a photo with no result yet, or no verdict yet,
+    leaves the answer open (never read as "no good photo", which would send the listing to the hosted edit or the
+    tracked list). rounds = [(tag, {source: Round})], the scraped run first, then (optionally) the cleaned run; exclude =
+    the photos never chosen by themselves (Selection.blocked)."""
     if owner is not None:
-        return owner_verdict(client, rounds, listing, owner, spend)
+        return owner, True
     src = listing["source"]
     whole_wanted = listing["format"] == C.CUTOUT_FORMAT
     fallback, complete = listing.get("kept"), True
@@ -252,7 +268,7 @@ def choose(client, rounds, listing, exclude, spend=None, owner=None):
         for sha in shas:
             if sha in r.held:
                 continue
-            if sha not in r.finished or sha in r.older_outline:     # no result yet, or one the GPU checks first
+            if sha not in r.finished or sha in r.unchecked:     # no result yet, or its outline recheck not settled
                 complete = False
                 continue
             whole = sha in r.slabs
@@ -266,21 +282,6 @@ def choose(client, rounds, listing, exclude, spend=None, owner=None):
                     return (tag, sha), True
                 fallback = (tag, sha)
     return fallback, complete
-
-
-def owner_verdict(client, rounds, listing, owner, spend=None):
-    """(the owner's choice, whether the answer is final): it overrides the judge, nothing of the listing is judged,
-    except a redraw of it (Round.rejudge): judged once its redraw is written whole, as a new result is, so publish copies
-    it only after a pass. A fail leaves the choice as the owner made it and its redraw unpublished."""
-    tag, sha = owner
-    r = dict(rounds)[tag][listing["source"]]
-    if sha not in r.rejudge:
-        return owner, True
-    if sha in r.older_outline:                         # its redraw cut short: drawn again first
-        return owner, False
-    found = verdict(client, r, listing["source"], sha, listing["format"], spend)
-    return owner, found is not None and judge.current(found)
-
 
 def fixable(client, rnd, sha, exclude):
     """Whether a cleaned copy of this photo could pass: the judge failed its result only for reflections, marks or fills,
@@ -417,12 +418,6 @@ def read_rounds(client, tags, sources):
     return [(tag, {src: Round(client, tag, src) for src in sources}) for tag in tags]
 
 
-def redrawn(rounds):
-    """{(tag, source, sha)} of the results in `rounds` (read_rounds) redrawn after they were judged, waiting for the judge
-    (Round.rejudge)."""
-    return {(tag, src, sha) for tag, by_source in rounds for src, rnd in by_source.items() for sha in rnd.rejudge}
-
-
 def owner_choice(record, listing, exclude, conflicts, rounds):
     """(tag, sha) of the owner's choice record of a listing (deploy.standardise_decisions; by SKU, so a re-bind that moves
     the handle keeps it) while it still applies, else None; the one check, every run. It applies while its photo is one
@@ -498,6 +493,39 @@ def _by_source(pairs):
     for src, sha in sorted(set(pairs)):
         out.setdefault(src, []).append(sha)
     return out
+
+
+def settle(sel, spend, deadline):
+    """(failures, stopped): every complete candidate of the run tags (a recheck drawn differently:
+    deploy.standardise_source.draw_candidate) judged through verdict, as a new result is, each started before the
+    deadline; then each settled (settle_one). A promotion or removal that fails stops the run loud, before report and
+    publish: the next run finishes it. The rounds are read again after."""
+    found = [{"key": f"{tag}/{src}/{sha}", "rnd": rnd, "source": src, "sha": sha}
+             for tag, by_source in sel.rounds for src, rnd in sorted(by_source.items()) for sha in sorted(rnd.redrawn)]
+    judged = lambda c: verdict(sel.client, c["rnd"].redraw, c["source"], c["sha"], C.CUTOUT_FORMAT, spend)
+    failures, stopped = _each([c for c in found if c["sha"] not in c["rnd"].checked], judged, deadline)
+    for c in found:
+        settle_one(sel.client, c["rnd"], c["source"], c["sha"])
+    sel.refresh()
+    return failures, stopped
+
+
+def settle_one(client, rnd, src, sha):
+    """One complete candidate by its stored verdict: a pass promoted over its result, a current fail discarded (the
+    result kept as it is); one settled before (the note written) whose removal was cut short removed; no verdict yet
+    (the budget, the window) left for the next run. The owner's choice and the judge's are settled alike: the choice is
+    the photo, whichever result it shows."""
+    if sha in rnd.checked:
+        remove_candidate(client, rnd.prefix, sha)
+        return
+    found = verdict(client, rnd.redraw, src, sha, C.CUTOUT_FORMAT)
+    if found is None or not judge.current(found):
+        return
+    if judge.passed(found):
+        promote(client, rnd.prefix, sha)
+    else:
+        kinds = ", ".join(p.get("kind", "?") for p in found.get("problems", [])) or found.get("verdict", "")
+        discard(client, rnd.prefix, sha, f"the judge failed its redraw ({kinds}): kept as it was")
 
 
 def judge_all(sel, spend, deadline):

@@ -83,7 +83,7 @@ until a produce runs that source again. A reset removes the list with the produc
 An open book made before its halves had a slab (a side view, no slab.png) is outdated: the next run sends it to the GPU
 once, which completes it from a re-run (its close view, then its slab, last). What was judged and published (main,
 white, studio) stays as it is, so its verdict and choice stand and no judge call is made; publish then adds its close
-view and 3D slab. One this version draws differently is redrawn and judged again, as a recheck below. A re-run that is
+view and 3D slab. One this version draws differently is a candidate for the judge, as a recheck below. A re-run that is
 no open book this time, or that fails for the photo itself, adds nothing and is noted in `noslab/<sha>.json`, so it is
 never run again; a judged result is never held. A GPU error stops the slice as for any photo, and the same photo
 breaking it again is noted the same way. A completion cut short takes its close view off again while its slab is
@@ -106,30 +106,34 @@ never filled with stone (the owner, 2026-11-02: a broken or rounded corner shows
 object anywhere inside the fitted corners counted as stone, and the wall in such a corner was drawn opaque).
 
 Every whole slab the GPU writes has a note `<run folder>outline-v2/<sha>.json` (`settings.OUTLINE_CHECKED`): it is drawn
-under this rule. `{"new": true}`: a new result; `{"changed": true}`: a result made before redrawn by this version;
-`{"changed": false}`: a result made before that this version draws the same, or an open book completed (above). A whole
-slab without the note, not tried before (`noslab/`), was made under the older rule and is outdated: it is not finished,
-so it is never judged, until the GPU has worked on it once. What every listing on the sheet shows now (its owner choice
-that applies, else its valid choice record; never a listing the owner removed or of a source whose image pipeline is
-off) is among them: such a photo goes to the GPU without its listing being picked again
-(`deploy.standardise_run.live_choices`). The GPU works on it:
+under this rule. `{"new": true}`: a new result; `{"changed": true}`: a result made before, redrawn by this version and
+promoted (below); `{"changed": false}`: a result made before that this version draws the same, or an open book completed
+(above); `{"changed": false, "kept": why}`: a result made before kept as it is (its redraw failed the judge, or its
+recheck gave no whole slab). A whole slab without the note was made under the older rule and is outdated: it is not
+finished, so it is never judged, until its recheck is settled. What every listing on the sheet shows now (its owner
+choice that applies, else its valid choice record; never a listing the owner removed or of a source whose image pipeline
+is off) is among them: such a photo goes to the GPU without its listing being picked again
+(`deploy.standardise_run.live_choices`). A recheck never writes over a result's files. The GPU works on it:
 
 - drawn the same by this version (no wall in a corner, the sawn edge unchanged): only the note; its views stay as they
   are. A recheck stops before the costly steps (eraser, upscale, inpainting);
-- drawn differently: its stored verdict no longer applies (only judge-passed pixels are ever published). Every file is
-  encoded, then its marker `rejudge/<sha>.json` is written, its verdict removed, the result written whole (views it no
-  longer makes, a close view, removed) and the note last. From the marker on, publish copies nothing of it and keeps
-  what the listing is published with now. Once the note is written, the next run picks its listing again and judges the
-  redraw as it judges a new result (the same judge path, one judge call); a pass takes the marker off, and publish then
-  copies the new views and makes its 3D slab again (the slab's ETag changed, so the tiles cut from it render again),
-  and the relink runs. A fail is a chosen photo the judge failed, as for any listing: its next passing photo is chosen,
-  or it goes on the review list. The owner's choice stands whatever the judge says (it overrides the judge), but its
-  redraw is published only after a pass: a fail keeps what is published. A redraw cut short (the marker without the
-  note: old and new files side by side) is never judged or published, and is drawn again whole by the next run,
-  whatever noted it;
-- no whole slab on the re-run (held, a close-up), or a re-run that fails for the photo itself: nothing written but
-  `noslab/<sha>.json`, as for a completion (above), so it is never run again and stays as it is; never held: the result
-  is judged and may be published.
+- drawn differently: a complete candidate beside the result, `<run folder>redraw/<sha>.<file>` (which slab it is, the
+  slab, the views, main last), its completion marker `redraw/<sha>.done.json` written last. The result, its verdict
+  and what is published of it stay exactly as they are. After the GPU round the process settles each complete candidate
+  (`deploy.standardise_select.settle`): the judge scores it through the same path as a new result
+  (`redraw/judged/<sha>.json`). A pass promotes it: its files copied over the result's, the views it does not make
+  removed, its verdict copied over the result's, the note `{"changed": true}`, then the candidate removed (its marker
+  last); publish then copies the new files by their ETag and makes the 3D slab again (the tiles cut from it render
+  again), and the relink runs. A fail discards it: the note `{"changed": false, "kept": ...}`, then the candidate
+  removed; the result, its verdict, its choice and what is published stay untouched, and it is never redrawn or judged
+  again under this rule. The owner's choice and the judge's are settled alike: the choice is the photo;
+- no whole slab on the re-run (held, a close-up), or a re-run that fails for the photo itself: the note, kept as it is
+  (`{"changed": false, "kept": why}`), never `noslab/` over a live result, so it is never run again; never held.
+
+Cut short anywhere, the next run finishes cleanly: a candidate without its marker is ignored, removed and drawn again
+by the next recheck; a promotion is safe to repeat (the same copies again) and is finished by the next settle, which
+runs before anything is published (a promotion that fails stops the run before report and publish); a settled
+candidate whose removal was cut short is removed by the next settle. No verdict is paid for twice.
 
 Drawn the same, the verdict and the choice stand and no judge call is made. A result the retired logo step made
 (`logo-step/`) is never rechecked, as it is never completed: its re-run would start from the photo with its logo. A
@@ -138,11 +142,11 @@ later rule change takes a new folder name, and every whole slab is checked once 
 Cost: the first photos run after this release sends to the GPU, on top of its usual work, the chosen whole slabs without
 a note of every live listing, and the whole slabs without a note among the candidates of the listings it picks (no valid
 choice yet); any other one is rechecked only when its listing is picked. The driver is their number: each slice of
-`RUN_SLICE` of them is a retouch job and a standardise job, each booting a GPU; the retouch never searches them again
-(a slice of nothing else loads no model), and the standardise job classifies each one and runs the outline step (SAM
-and the text reader), then stops for a slab drawn the same; only the slabs drawn differently take the costly steps, and
-only they cost a judge call again (one each, by the next run). The round is sized to the month's budget and window like
-any other: what does not fit goes on in the next run.
+`RUN_SLICE` of them is a retouch job and a standardise job, each booting a GPU; the retouch never searches them again (a
+slice of nothing else loads no model), and the standardise job classifies each one and runs the outline step (SAM and
+the text reader), then stops for a slab drawn the same; only the slabs drawn differently take the costly steps, and only
+they cost a judge call (one each, its candidate's, in the same run). The round is sized to the month's budget and window
+like any other: what does not fit goes on in the next run.
 
 ## Tile listings
 
@@ -322,9 +326,9 @@ records are outside the tags and need nothing. Under `<env>/standardise-test/`:
 run.lock                            the running process (rewritten every 5 min)
 spend/<YYYY-MM>/<run id>.json       each run's spend of the month
 removed/<SKU>.json                  a listing the owner removed (SKU percent-encoded)
-<RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated result tried once),
+<RUN_TAG>/<src>/...                 GPU results, held/, judged/, noslab/ (an outdated open book tried once),
                                     outline-v2/ (each whole slab drawn under the current outline rule, its note),
-                                    rejudge/ (a redraw waiting for the judge: published only after a pass)
+                                    redraw/ (a recheck drawn differently: its candidate, then promoted or removed)
 <CLEAN_TAG>/<src>/...               cleaned/, attempts/, GPU results of cleaned copies, judged/ (unchanged)
 <CLEAN_TAG>/owner/<SKU>.json        the owner's photo choice of a listing (SKU percent-encoded): {tag, sha, at, listing,
                                     decided_on}

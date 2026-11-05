@@ -75,20 +75,12 @@ def _exists(client, prefix):
 
 def outdated(client, out, sha):
     """A result made before an open book's halves had their slab: a side view (studio) and no <sha>.slab.png, not tried
-    again before (noslab/) and not made by the retired logo step (logo_step_key). Every result made now that has a side
-    view has its slab, so nothing else matches."""
+    again before (noslab/), not made by the retired logo step (logo_step_key), and not settled by an outline recheck
+    (its note: a redraw the judge failed keeps it as it is) nor waiting for the judge (pending). Every result made now
+    that has a side view has its slab, so nothing else matches."""
     return (_exists(client, f"{out}{sha}.studio.jpg") and not _exists(client, f"{out}{sha}.slab.png")
-            and not _exists(client, f"{out}noslab/{sha}.json") and not _exists(client, logo_step_key(out, sha)))
-
-
-REJUDGE = "rejudge/"
-
-
-def rejudge_key(out, sha):
-    """The marker of a result redrawn after it was judged (rework): its stored verdict no longer applies. Written before
-    any of its files, it holds publish to what is published of it (deploy.standardise_publish) until the judge passes it
-    again, as a new result is (deploy.standardise_select.verdict takes it off)."""
-    return f"{out}{REJUDGE}{sha}.json"
+            and not _exists(client, f"{out}noslab/{sha}.json") and not _exists(client, logo_step_key(out, sha))
+            and not _exists(client, checked_key(out, sha)) and not pending(client, out, sha))
 
 
 def checked_key(out, sha):
@@ -96,14 +88,31 @@ def checked_key(out, sha):
     return f"{out}{C.OUTLINE_CHECKED}{sha}.json"
 
 
+REDRAW = "redraw/"
+
+
+def candidate_prefix(out):
+    """Where a recheck draws a result this version draws differently (a candidate) instead of over the result: a folder
+    named as a run folder is, <sha>.<file> and judged/<sha>.json, so the judge reads it as it reads a result."""
+    return f"{out}{REDRAW}"
+
+
+def candidate_key(out, sha):
+    """A candidate's completion marker, written last: without it the candidate is cut short, never judged."""
+    return f"{candidate_prefix(out)}{sha}.done.json"
+
+
+def pending(client, out, sha):
+    """A complete candidate of this photo waits for the judge (deploy.standardise_select.settle)."""
+    return _exists(client, candidate_key(out, sha))
+
+
 def older_outline(client, out, sha):
-    """A whole slab made under the outline rule before C.OUTLINE_CHECKED: its slab and no note of the current rule, not
-    tried again before (noslab/: kept as it is) unless a redraw of it was cut short (its marker, rejudge_key, without
-    the note: half of it is new, so it is drawn again whole), and not made by the retired logo step (logo_step_key: a
-    re-run would start from the photo with its logo and redraw views no judge saw)."""
+    """A whole slab made under the outline rule before C.OUTLINE_CHECKED: its slab, no note of the current rule and no
+    complete candidate waiting for the judge, not made by the retired logo step (logo_step_key: a re-run would start
+    from the photo with its logo and redraw views no judge saw)."""
     return (_exists(client, f"{out}{sha}.slab.png") and not _exists(client, checked_key(out, sha))
-            and (not _exists(client, f"{out}noslab/{sha}.json") or _exists(client, rejudge_key(out, sha)))
-            and not _exists(client, logo_step_key(out, sha)))
+            and not pending(client, out, sha) and not _exists(client, logo_step_key(out, sha)))
 
 
 def made(client, out, sha):
@@ -148,21 +157,22 @@ def _put(client, out, sha, files):
         client.put_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{name}", Body=body, ContentType=kind)
 
 
+def _views_not_in(client, out, sha, names):
+    """The photo's stored views that `names` (its new files) do not have: a stale close view would be published with the
+    new ones."""
+    return [f"{out}{sha}.{view}.jpg" for view in imagestore.STANDARD_VIEWS
+            if f"{view}.jpg" not in names and _exists(client, f"{out}{sha}.{view}.jpg")]
+
+
 def write(client, out, sha, res, note):
-    """A result written whole (_store of its files, every one encoded before the first write)."""
-    _store(client, out, sha, _files(res), bool(res.slab), note)
-
-
-def _store(client, out, sha, files, whole, note):
-    """A result's encoded files written, then the views an earlier result of the photo had and this one does not make
-    removed (a stale close view would be published with the new ones), then, for a whole slab, `note`: it is drawn under
-    the current outline rule (written last: missing, the slab is checked once more, never wrong)."""
+    """A new result written whole: its files (_files), the views an earlier result of the photo had and this one does
+    not make removed, then, for a whole slab, `note`: it is drawn under the current outline rule (written last: missing,
+    the slab is checked once more, never wrong)."""
+    files = _files(res)
     _put(client, out, sha, files)
-    names = {name for name, _, _ in files}
-    for view in imagestore.STANDARD_VIEWS:
-        if f"{view}.jpg" not in names and _exists(client, f"{out}{sha}.{view}.jpg"):
-            client.delete_object(Bucket=S3_BUCKET, Key=f"{out}{sha}.{view}.jpg")
-    if whole:
+    for key in _views_not_in(client, out, sha, {name for name, _, _ in files}):
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
+    if res.slab:
         _note(client, out, sha, note)
 
 
@@ -171,32 +181,92 @@ def _note(client, out, sha, note):
                       Body=json.dumps(note, sort_keys=True).encode())
 
 
+def _keys(client, prefix):
+    return sorted(o["Key"] for page in client.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+                  for o in page.get("Contents", []))
+
+
+def _candidate_files(client, out, sha):
+    """The keys of the photo's candidate: its files and its verdict, not its completion marker."""
+    verdict = f"{candidate_prefix(out)}judged/{sha}.json"
+    return [k for k in _keys(client, f"{candidate_prefix(out)}{sha}.") if k != candidate_key(out, sha)] + \
+        ([verdict] if _exists(client, verdict) else [])
+
+
+def clear_candidate(client, out, sha):
+    """A candidate cut short (no completion marker: a photo with a complete one is not worked on again) ignored and
+    removed before the photo is worked on again."""
+    for key in _candidate_files(client, out, sha):
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
+
+
+def draw_candidate(client, out, sha, res):
+    """A result this version draws differently written as a candidate (candidate_prefix), never over the result: every
+    file encoded first, then written as a result's are, then its completion marker, last."""
+    files = _files(res)
+    _put(client, candidate_prefix(out), sha, files)
+    client.put_object(Bucket=S3_BUCKET, Key=candidate_key(out, sha), ContentType="application/json",
+                      Body=json.dumps({"files": [[name, kind] for name, _, kind in files]}, sort_keys=True).encode())
+
+
+def promote(client, out, sha):
+    """A candidate the judge passed made the result, safe to cut short and run again (each step is the same copy or
+    removal again): its files copied over the result's (which slab it is and the slab, its views, main last), the views
+    it does not make removed, its verdict copied over the result's, the note {"changed": true}, then the candidate
+    removed (remove_candidate). Publish copies the new files by their ETag."""
+    cand = candidate_prefix(out)
+    files = json.loads(_get(client, candidate_key(out, sha)))["files"]
+    for name, kind in files:
+        _copy(client, f"{cand}{sha}.{name}", f"{out}{sha}.{name}", kind)
+    for key in _views_not_in(client, out, sha, {name for name, _ in files}):
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
+    _copy(client, f"{cand}judged/{sha}.json", f"{out}judged/{sha}.json", "application/json")
+    _note(client, out, sha, {"changed": True})
+    remove_candidate(client, out, sha)
+
+
+def _copy(client, source, target, kind):
+    client.copy_object(Bucket=S3_BUCKET, Key=target, CopySource={"Bucket": S3_BUCKET, "Key": source}, ContentType=kind,
+                       MetadataDirective="REPLACE")
+
+
+def discard(client, out, sha, reason):
+    """A candidate the judge failed set aside: the note that the result is kept as it is ({"changed": false, "kept":
+    why}: never redrawn or judged again under this rule), then the candidate removed. The result, its verdict, its
+    choice and what is published of it are never touched."""
+    _note(client, out, sha, {"changed": False, "kept": reason})
+    remove_candidate(client, out, sha)
+
+
+def remove_candidate(client, out, sha):
+    """A settled candidate (the note written) removed: its files and verdict, its completion marker last, so a removal
+    cut short is finished by the next settle."""
+    for key in _candidate_files(client, out, sha) + [candidate_key(out, sha)]:
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
+
+
 def rework(client, out, sha, res, how):
-    """A stored result worked on again (how: again's "complete" or "recheck"), one path for both:
+    """A stored result worked on again (how: again's "complete" or "recheck"), one path for both, a candidate cut short
+    before cleared first (clear_candidate):
       - drawn the same by this version (a recheck stops before drawing): only the note, {"changed": false};
-      - no whole slab on the re-run (held, a close-up, or a completion that is no open book this time): nothing is
-        written but noslab/ (tried): it is never run again and stays as it is (it is judged and may be published: never
-        held);
-      - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): its stored verdict
-        no longer applies. Every file encoded, then its marker (rejudge_key: publish keeps what is published of it), its
-        verdict removed, the files written whole (_store) and the note {"changed": true} last: only then is it judged
-        again, as a new result is, and published once the judge passes it;
+      - no whole slab on the re-run (held, a close-up, or a completion that is no open book this time): tried;
+      - drawn differently (res.changed: the wall in a corner, the sawn edge beside a broken corner): a candidate
+        (draw_candidate), never over the result: the judge scores it as it scores a new result, and it is promoted or
+        discarded (deploy.standardise_select.settle);
       - a completion drawn the same: what was judged (main, white, studio) stays; its close view, then which slab it is
         and its slab (the result complete), then the note {"changed": false}. Cut short, the close view comes off again
         while the slab is missing, so half of one is never published."""
+    clear_candidate(client, out, sha)
     if res.unchanged:
         _note(client, out, sha, {"changed": False})
         return "outline unchanged"
     if res.held or not res.slab or (how == "complete" and res.kind != "open book"):
-        tried(client, out, sha, res.held or f"the re-run is a {res.kind}, no {'open book' if how == 'complete' else 'whole slab'}")
+        wanted = "open book" if how == "complete" else "whole slab"
+        tried(client, out, sha, how, res.held or f"the re-run is a {res.kind}, no {wanted}")
         return "no slab"
     if res.changed:
-        files = _files(res)
-        client.put_object(Bucket=S3_BUCKET, Key=rejudge_key(out, sha), ContentType="application/json",
-                          Body=json.dumps({"reason": "outline redrawn"}, sort_keys=True).encode())
-        client.delete_object(Bucket=S3_BUCKET, Key=f"{out}judged/{sha}.json")
-        _store(client, out, sha, files, True, {"changed": True})
-        return "outline redrawn"
+        draw_candidate(client, out, sha, res)
+        return "redrawn for the judge"
     by_name = {f[0]: f for f in _files(res)}
     files = [by_name[n] for n in ("close.jpg", "slab.json", "slab.png") if n in by_name]   # the slab last: complete
     try:
@@ -209,10 +279,14 @@ def rework(client, out, sha, res, how):
     return "completed"
 
 
-def tried(client, out, sha, reason):
-    """Note that a result worked on again (rework: completed or rechecked) was tried and gave no slab, or failed
-    (noslab/<sha>.json), so it is never run again and stays as it is. Never held/: the result is judged and may be
-    published, and a hold would take it from every listing that has it."""
+def tried(client, out, sha, how, reason):
+    """Note that a result worked on again gave no slab, or failed, so it is never run again and stays as it is: a
+    completion in noslab/<sha>.json, a recheck in its note ({"changed": false, "kept": why}: never noslab/ over a live
+    result). Never held/: the result is judged and may be published, and a hold would take it from every listing that
+    has it."""
+    if how == "recheck":
+        _note(client, out, sha, {"changed": False, "kept": reason})
+        return
     client.put_object(Bucket=S3_BUCKET, Key=f"{out}noslab/{sha}.json", ContentType="application/json",
                       Body=json.dumps({"reason": reason}, sort_keys=True).encode())
 
@@ -462,7 +536,8 @@ def main() -> int:
             if action == "hold" and not survey:
                 why = f"error: {type(exc).__name__}: {exc}"[:500]
                 if redo:                               # a judged result is never held over: tried, not run again
-                    tried(client, out, sha, why)
+                    clear_candidate(client, out, sha)
+                    tried(client, out, sha, redo, why)
                 else:
                     client.put_object(Bucket=S3_BUCKET, Key=f"{out}held/{sha}.json", ContentType="application/json",
                                       Body=json.dumps({"reason": why, "kind": ""}).encode())
