@@ -241,45 +241,50 @@ def test_inventory_unparseable_count_without_area_is_undetermined(ref, cfg):
     assert any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
 
 
-def test_inventory_qualitative_in_stock_word_uses_the_fallback_and_lists(ref, cfg):
-    # a supplier that flags availability as a WORD ('Unlimited'/'In Stock') instead of a count is a real
-    # positive signal: seed the per-category made-to-order fallback so the product LISTS, never held.
-    from stone_pipeline.config.domain import active_pack
-    slab_fallback = active_pack().in_stock_fallback_qty["slab"]
-    for word in ("Unlimited", "Limited", "In Stock", "Made to Order"):
+def test_inventory_made_to_order_word_is_made_to_order_with_no_count(ref, cfg):
+    # a supplier word that means made to order or no limit ('Unlimited', 'Made to Order') is the same state as a
+    # free-size shape: on sale with no count (owner 2026-11-05). Never an invented number.
+    for word in ("Unlimited", "Made to Order", "made-to-order"):
         row = _slab_row(raw_stock_m2=word)           # the qualitative label the scraper captured
         derive.derive_inventory(row)
-        assert row.inventory_quantity == slab_fallback, word
-        assert row.inventory_method == "in_stock_word_fallback"
+        assert row.made_to_order, word
+        assert row.inventory_quantity is None, word
+        assert row.inventory_method == "made_to_order_word"
         assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags), word
 
 
-def test_in_stock_fallback_is_per_category_not_one_global(ref, cfg):
-    # the fallback COUNT is per category (a block is a single large piece; a slab is stocked in quantity),
-    # not one global magnitude. A block with an in-stock word gets the block count, a slab the slab count.
-    from stone_pipeline.config.domain import active_pack
-    fallback = active_pack().in_stock_fallback_qty
-    assert fallback["block"] == 1 and fallback["slab"] == 10   # locks the declared per-category values
-    block = _slab_row(raw_format="Block", raw_stock_m2="In Stock")
+def test_inventory_count_wins_over_a_made_to_order_word(ref, cfg):
+    # a real count is more specific than a word: the ladder's order is unchanged.
+    row = _slab_row(raw_slab_count="4", raw_stock_status="Made to Order")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 4 and not row.made_to_order
+
+
+def test_inventory_in_stock_word_on_a_single_piece_listing_is_one(ref, cfg):
+    # a block listing is one block (marenostone's numbered blocks): 'in stock' with no count is a count of 1,
+    # a fact about the listing, not an estimate.
+    block = _slab_row(raw_format="Block", raw_stock_status="in-stock")
     derive.derive_category(block, ref)                          # resolves format -> block
     derive.derive_inventory(block)
-    assert block.inventory_quantity == fallback["block"], "a block lists a single piece, not the slab count"
-    slab = _slab_row(raw_stock_m2="In Stock")
-    derive.derive_inventory(slab)
-    assert slab.inventory_quantity == fallback["slab"]
+    assert block.inventory_quantity == 1
+    assert block.inventory_method == "single_piece_in_stock"
+    assert not block.made_to_order
 
 
-def test_inventory_structured_in_stock_status_uses_the_fallback_and_lists(ref, cfg):
-    # a source's STRUCTURED availability flag (WooCommerce stock_status "in-stock") with no count or area is
-    # as authoritative as the free-text words: seed the same fallback so the product LISTS, never held. This
-    # is the marenostone travertine case that was being dropped -- the scraper read the flag but the adapter
-    # never mapped it, so the signal died before derive. (Guarded end-to-end by the adapter test below.)
-    from stone_pipeline.config.domain import active_pack
-    row = _slab_row(raw_stock_status="in-stock")     # no count, no area, no per-piece dims
-    derive.derive_inventory(row)
-    assert row.inventory_quantity == active_pack().in_stock_fallback_qty["slab"]
-    assert row.inventory_method == "in_stock_word_fallback"
-    assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags)
+def test_inventory_in_stock_word_without_a_count_holds_a_slab(ref, cfg):
+    # a slab or tile listing is stocked in a quantity the word does not give: held like a missing stock, never
+    # an invented count (owner 2026-11-05).
+    for word in ("In Stock", "Available", "Limited"):
+        row = _slab_row(raw_stock_m2=word)
+        derive.derive_inventory(row)
+        assert row.inventory_quantity is None, word
+        assert not row.made_to_order, word
+        flags = [f for f in row.review_flags if f.code == FlagCode.stock_undetermined]
+        assert flags and "in stock but gives no count" in flags[0].detail, word
+    status = _slab_row(raw_stock_status="in-stock")             # a structured WooCommerce flag, same rule
+    derive.derive_inventory(status)
+    assert status.inventory_quantity is None
+    assert any(f.code == FlagCode.stock_undetermined for f in status.review_flags)
 
 
 def test_inventory_structured_out_of_stock_status_is_trusted_sold_out(ref, cfg):

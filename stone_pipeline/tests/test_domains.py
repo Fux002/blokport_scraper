@@ -82,7 +82,6 @@ def _valid_pack_dict():
         "ambiguous_type_words": ["z"], "generic_descriptors": ["g"], "generic_material_word": "m",
         "default_finishes": ["F"], "fallback_color": "N",
         "last_resort_finishes": {"x": "F"}, "last_resort_quality": "A", "block_finish": "F",
-        "in_stock_fallback_qty": {"x": 5},
         "dimension_ranges": {"x": {"weight": [0.1, 0.3]}},
         "dimension_defaults": {"x": {"length": 1.0, "width": 1.0, "height": 0.02}},
         "finish_phrases": {"f": "p"}, "finish_phrase_default": "p", "default_density": 700})
@@ -127,7 +126,7 @@ def test_map_key_not_a_declared_category_fails_loud(tmp_path, monkeypatch):
     # V1 cross-check (reverse): a per-category map key that is not a declared category is also a pack bug.
     monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
     pack = _valid_pack_dict()
-    pack["in_stock_fallback_qty"]["ghost"] = 3                 # 'ghost' is not a category
+    pack["dimension_ranges"]["ghost"] = {"weight": [0.1, 0.3]}   # 'ghost' is not a category
     _write_pack(tmp_path, pack)
     with pytest.raises(ValueError, match="not in the declared categories"):
         domain.load_pack("bad")
@@ -184,13 +183,34 @@ def test_no_default_form_fails_loud(tmp_path, monkeypatch):
         domain.load_pack("bad")
 
 
+def test_single_piece_category_not_declared_fails_loud(tmp_path, monkeypatch):
+    # single_piece_categories names categories whose listing is one physical piece; a typo would silently hold
+    # every in-stock listing of the real category, so an undeclared name fails at load.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["single_piece_categories"] = ["ghost"]
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="single_piece_categories"):
+        domain.load_pack("bad")
+
+
+def test_a_stock_word_in_two_lists_fails_loud(tmp_path, monkeypatch):
+    # in stock, made to order and out of stock are three different states: one word cannot mean two of them.
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack = _valid_pack_dict()
+    pack["in_stock_words"] = ["available", "unlimited"]
+    pack["made_to_order_words"] = ["unlimited"]
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="unlimited"):
+        domain.load_pack("bad")
+
+
 def test_two_bulk_forms_fails_loud(tmp_path, monkeypatch):
     # V3: the bulk/solid form is singular; two is a pack bug (which one drives is_block?).
     monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
     pack = _valid_pack_dict()
     pack["categories"].append({**pack["categories"][0], "name": "y", "default_form": False, "bulk_form": True})
     pack["categories"][0]["bulk_form"] = True                 # two bulk_form categories now
-    pack["in_stock_fallback_qty"]["y"] = 1                    # keep V1 (per-category maps) satisfied
     pack["dimension_ranges"]["y"] = {"weight": [0.1, 0.3]}
     pack["dimension_defaults"]["y"] = {"length": 1.0, "width": 1.0, "height": 0.02}
     _write_pack(tmp_path, pack)
@@ -267,7 +287,6 @@ last_resort_finishes: {shirt: Standard, pants: Standard}
 last_resort_quality: Standard
 block_finish: Standard
 default_density: 300
-in_stock_fallback_qty: {shirt: 10, pants: 10}
 dimension_ranges:
   shirt: {weight: [0.1, 0.3], length: [0.5, 0.8], width: [0.4, 0.6], height: [0.01, 0.02]}
   pants: {weight: [0.2, 0.5], length: [0.9, 1.2], width: [0.3, 0.5], height: [0.01, 0.02]}

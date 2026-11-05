@@ -25,7 +25,7 @@ _DEFAULT_PACK = "stone"
 _REQUIRED = ("name", "attributes", "disambiguator", "leaf_attributes", "categories",
              "ambiguous_type_words", "generic_descriptors", "generic_material_word",
              "default_finishes", "fallback_color",
-             "last_resort_finishes", "last_resort_quality", "block_finish", "in_stock_fallback_qty",
+             "last_resort_finishes", "last_resort_quality", "block_finish",
              "dimension_ranges", "dimension_defaults", "finish_phrases", "finish_phrase_default",
              "default_density")
 
@@ -64,7 +64,6 @@ class DomainPack:
     last_resort_finishes: dict[str, str]   # branch -> flagged last-resort finish (unlisted branch uses slab's)
     last_resort_quality: str               # flagged last-resort quality when a source states none
     block_finish: str                      # the standard finish applied to a raw/unfinished block
-    in_stock_fallback_qty: dict[str, int]  # category -> flagged made-to-order piece count when in-stock but countless
     # format -> {weight|length|width|height: (lo, hi)} in metres/tonnes
     dimension_ranges: dict[str, dict[str, tuple[float, float]]]
     # format -> {length, height, thickness} fallback size in metres (derive fills a missing dim from this)
@@ -99,14 +98,17 @@ class DomainPack:
     # language-level and always stripped); spelling variants of ONE colour word (gray -> grey) so a spelling
     # never reads as a colour conflict; wrapper words dropped when composing a compound attribute value;
     # the attribute whose words count as colours for match blocking; the supplier words that mean in stock
-    # (a countless positive) and out of stock (a trusted sold-out).
+    # without a count, made to order (on sale with no count) and out of stock (a trusted sold-out); and the
+    # categories whose listing is one physical piece, so 'in stock' there is a count of 1.
     inventory_prefixes: tuple[str, ...] = ()
     trailing_render_tags: tuple[str, ...] = ()
     spelling_variants: dict[str, str] = dataclasses.field(default_factory=dict)
     join_noise_words: tuple[str, ...] = ()
     color_attribute: str = "color"
     in_stock_words: tuple[str, ...] = ()
+    made_to_order_words: tuple[str, ...] = ()
     out_of_stock_words: tuple[str, ...] = ()
+    single_piece_categories: frozenset[str] = frozenset()
     # Free size: a supplier word for a side cut to order ('Free' length), and per category the shapes such a
     # listing is offered in, one listing per shape (stages/free_size). A category with no entry offers none:
     # its free side stays a defaulted size, as before.
@@ -128,7 +130,9 @@ IDENTITY_ATTRIBUTE = "type"
 
 # the keys each category dict must carry (settings.py reads these to build a Category); the rest are optional.
 _VOCABULARY_LISTS = ("inventory_prefixes", "trailing_render_tags", "join_noise_words", "in_stock_words",
-                     "out_of_stock_words", "free_size_words")
+                     "made_to_order_words", "out_of_stock_words", "free_size_words")
+# The three stock states a supplier word can state; one word means one of them.
+_STOCK_WORD_LISTS = ("in_stock_words", "made_to_order_words", "out_of_stock_words")
 
 _CATEGORY_KEYS = ("name", "plural", "label", "backbone_filename", "base_image", "shares_variety_vocab", "fan_out")
 
@@ -161,11 +165,6 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
         for dim in ("length", "width", "height"):
             if not isinstance(dims.get(dim), (int, float)) or dims[dim] <= 0:
                 bad(f"dimension_defaults[{fmt!r}][{dim!r}] must be a positive number, got {dims.get(dim)!r}")
-    if not isinstance(data["in_stock_fallback_qty"], dict):
-        bad("'in_stock_fallback_qty' must be a mapping of category -> positive int")
-    for fmt, qty in data["in_stock_fallback_qty"].items():
-        if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
-            bad(f"in_stock_fallback_qty[{fmt!r}] must be a positive int, got {qty!r}")
     if not isinstance(data["default_density"], (int, float)) or isinstance(data["default_density"], bool) \
             or data["default_density"] <= 0:
         bad(f"default_density must be a positive number (kg/m3), got {data['default_density']!r}")
@@ -175,12 +174,17 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     cat_names = {cat["name"] for cat in data["categories"]}   # every category has 'name' (validated above)
     # V1: every category needs an entry in each per-category map, and no map may carry a non-category key.
     # last_resort_finishes is deliberately EXCLUDED -- a branch may be absent by design and fall back to slab's.
-    for map_name in ("dimension_ranges", "dimension_defaults", "in_stock_fallback_qty"):
+    for map_name in ("dimension_ranges", "dimension_defaults"):
         keys = set(data[map_name])
         if cat_names - keys:
             bad(f"{map_name} is missing an entry for categories {sorted(cat_names - keys)}")
         if keys - cat_names:
             bad(f"{map_name} has key(s) {sorted(keys - cat_names)} not in the declared categories {sorted(cat_names)}")
+    # a typo here would silently hold every in-stock listing of the real category
+    if not isinstance(data.get("single_piece_categories") or [], list):
+        bad("'single_piece_categories' must be a list of category names")
+    if unknown_pieces := set(data.get("single_piece_categories") or []) - cat_names:
+        bad(f"single_piece_categories {sorted(unknown_pieces)} are not declared categories {sorted(cat_names)}")
     # V2: the disambiguator (the identity attribute that drives the Key) must be one of the attributes.
     if data["disambiguator"] not in data["attributes"]:
         bad(f"disambiguator {data['disambiguator']!r} is not in attributes {list(data['attributes'])}")
@@ -195,6 +199,13 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     for words in _VOCABULARY_LISTS:
         if words in data and not isinstance(data[words], list):
             bad(f"'{words}' must be a list")
+    seen: dict[str, str] = {}
+    for words in _STOCK_WORD_LISTS:
+        for word in data.get(words) or []:
+            key = " ".join(str(word).strip().lower().split())
+            if key in seen and seen[key] != words:
+                bad(f"stock word {key!r} is in both {seen[key]} and {words}: one word states one stock state")
+            seen[key] = words
     shapes = data.get("free_size_shapes") or {}
     if not isinstance(shapes, dict):
         bad("'free_size_shapes' must be a mapping of category -> {ratios, long_side, max_length}")
@@ -285,7 +296,6 @@ def load_pack(name: str | None = None) -> DomainPack:
         last_resort_finishes=dict(data["last_resort_finishes"]),
         last_resort_quality=data["last_resort_quality"],
         block_finish=data["block_finish"],
-        in_stock_fallback_qty={fmt: int(qty) for fmt, qty in data["in_stock_fallback_qty"].items()},
         dimension_ranges=ranges,
         dimension_defaults={fmt: {k: float(v) for k, v in dims.items()}
                             for fmt, dims in data["dimension_defaults"].items()},
@@ -305,7 +315,9 @@ def load_pack(name: str | None = None) -> DomainPack:
         join_noise_words=_words(data.get("join_noise_words") or []),
         color_attribute=data.get("color_attribute", "color"),
         in_stock_words=_words(data.get("in_stock_words") or []),
+        made_to_order_words=_words(data.get("made_to_order_words") or []),
         out_of_stock_words=_words(data.get("out_of_stock_words") or []),
+        single_piece_categories=frozenset(data.get("single_piece_categories") or []),
         free_size_words=_words(data.get("free_size_words") or []),
         free_size_shapes={fmt: FreeSizeShapes(tuple(float(r) for r in spec["ratios"]), float(spec["long_side"]),
                                               float(spec["max_length"]))

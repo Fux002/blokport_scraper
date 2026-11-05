@@ -18,8 +18,13 @@ Vocabulary and defaults (see `config/domains/stone.yaml` for the canonical, full
   - `bulk_form: true` (at most one) - the uncut/solid form; drives `is_block` and the block-scale
     dimension/freight branch. A material with no such form declares it nowhere. Stone: `block`.
   - `mirror_of: <category>` - this category inherits the mirrored one's finishes. Stone: `tile` mirrors `slab`.
-- `dimension_ranges` / `dimension_defaults` / `in_stock_fallback_qty` - per-category (every category
-  needs an entry in each; pack-validated).
+- `dimension_ranges` / `dimension_defaults` - per-category (every category needs an entry in each;
+  pack-validated).
+- `in_stock_words` / `made_to_order_words` / `out_of_stock_words` - the supplier's stock words without a
+  count: in stock, made to order (on sale with no count, like a free-size shape), out of stock (a trusted 0).
+  One word states one state (pack-validated). `single_piece_categories` - the categories whose listing is one
+  physical piece, where an in-stock word is a count of 1 (stone: `block`); elsewhere such a row is held for a
+  count. No count is ever invented.
 - `generic_descriptors` / `generic_material_word` / `ambiguous_type_words` - name/alias vocabulary.
 - `default_finishes` / `fallback_color` / `last_resort_finishes` / `last_resort_quality` /
   `block_finish` / `finish_phrases` - attribute defaults and description phrasing.

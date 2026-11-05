@@ -48,6 +48,13 @@ def test_pack_stock_words_drive_the_availability_flags(monkeypatch):
     assert not derive._in_stock_word(CanonicalRow(src_site="x", surrogate_key="3", raw_stock_status="in stock"))
 
 
+def test_pack_made_to_order_words_drive_the_made_to_order_state(monkeypatch):
+    _pack_with(monkeypatch, made_to_order_words=("op bestelling",))
+    row = CanonicalRow(src_site="x", surrogate_key="1", raw_stock_status="Op Bestelling")
+    assert derive._made_to_order_word(row)
+    assert not derive._made_to_order_word(CanonicalRow(src_site="x", surrogate_key="2", raw_stock_status="unlimited"))
+
+
 def _stone_data():
     return yaml.safe_load(domain._pack_path("stone").read_text(encoding="utf-8"))
 

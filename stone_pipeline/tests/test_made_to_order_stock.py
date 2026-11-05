@@ -72,6 +72,22 @@ def test_a_made_to_order_row_has_no_count_and_allows_backorder_in_every_csv(cfg,
     assert cells == {"Variant Inventory Quantity": "", "Variant Manage Inventory": "true", "Variant Allow Backorder": "true"}
 
 
+def test_a_made_to_order_word_takes_the_same_path_as_a_free_size_shape(cfg, tmp_path):
+    # 'Unlimited' on a plain listing is the same stock state as a free-size shape: the same CSV cells and the
+    # same ledger stock, so Blokport sees one made-to-order mechanism whatever made the row made to order.
+    word = CanonicalRow(src_site="polonine", surrogate_key="W", variation_id="V1", handle="h-w",
+                        raw_stock_m2="Unlimited")
+    derive_inventory(word)
+    shape = _row("S", made_to_order=True)
+    columns = ("Variant Inventory Quantity", "Variant Manage Inventory", "Variant Allow Backorder")
+    assert {c: emit.COLUMN_MAP[c](word, cfg) for c in columns} == {c: emit.COLUMN_MAP[c](shape, cfg) for c in columns}
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _seed(ledger)
+        _synced(ledger, [word, shape], cfg)
+        stored = {r["sku"]: (r["qty"], r["made_to_order"]) for r in ledger.execute("SELECT * FROM inventory")}
+    assert stored == {"POL-W": (None, 1), "POL-S": (None, 1)}
+
+
 def test_the_ledger_render_of_a_made_to_order_delta_equals_emit(cfg, tmp_path):
     rows = [_row("A", made_to_order=True), _row("B", made_to_order=False)]
     direct = tmp_path / "direct.csv"

@@ -385,28 +385,35 @@ def _inventory_from_area(row: CanonicalRow) -> int | None:
     return max(1, int(total / (length * width)))
 
 
-# Positive availability WORDS a supplier may publish instead of a count. Cross-source: read from the same
-# raw stock fields the numeric ladder uses, so no per-source code. NOT a fabricated number -- the supplier
-# asserts the item IS available, we just have no count, so derive_inventory seeds a made-to-order fallback.
+# Availability WORDS a supplier may publish instead of a count, one pack list per stock state. Cross-source:
+# read from the same raw stock fields the numeric ladder uses (free text or a STRUCTURED flag such as a
+# WooCommerce "in-stock"), so no per-source code.
+def _stock_word(row: CanonicalRow, words: tuple[str, ...]) -> bool:
+    return any(" ".join((value or "").strip().lower().split()) in words
+               for value in (row.raw_stock_status, row.raw_stock_m2, row.raw_inventory_quantity))
+
+
 def _in_stock_word(row: CanonicalRow) -> bool:
-    """True when the scrape flags availability as one of the recognized positive WORDS (not a count) -- either
-    in a free-text stock field or in a source's STRUCTURED availability flag (raw_stock_status, e.g. a
-    WooCommerce "in-stock"). A negative flag ("out-of-stock") is not in the set, so a sold-out item never
-    matches and is never given fabricated stock."""
-    for value in (row.raw_stock_m2, row.raw_inventory_quantity, row.raw_stock_status):
-        if " ".join((value or "").strip().lower().split()) in domain.active_pack().in_stock_words:
-            return True
-    return False
+    """The supplier says the item is in stock but gives no count."""
+    return _stock_word(row, domain.active_pack().in_stock_words)
 
 
-# Definitive NEGATIVE availability a supplier may publish (structured flag or word). Cross-source: read from
+def _made_to_order_word(row: CanonicalRow) -> bool:
+    """The supplier says the item is made to order or unlimited: on sale with no count."""
+    return _stock_word(row, domain.active_pack().made_to_order_words)
+
+
 def _out_of_stock_flag(row: CanonicalRow) -> bool:
     """True when the scrape EXPLICITLY flags the item as unavailable (structured status or word). An unknown
     or missing status is NOT out of stock -- it returns False and the row falls through to the magnitude."""
-    for value in (row.raw_stock_status, row.raw_stock_m2, row.raw_inventory_quantity):
-        if " ".join((value or "").strip().lower().split()) in domain.active_pack().out_of_stock_words:
-            return True
-    return False
+    return _stock_word(row, domain.active_pack().out_of_stock_words)
+
+
+def _made_to_order(row: CanonicalRow, method: str) -> None:
+    row.made_to_order = True
+    row.inventory_quantity = None
+    row.inventory_method = method
+    row.inventory_confidence = _conf_name(Confidence.high)
 
 
 def derive_inventory(row: CanonicalRow) -> None:
@@ -419,7 +426,9 @@ def derive_inventory(row: CanonicalRow) -> None:
          so its published stock (an area of uncut stone) is not this shape's count.
       1. an explicit count (raw_slab_count, then raw_inventory_quantity), a deliberate magnitude incl. 0.
       2. a count DERIVED from an available stock AREA (raw_stock_m2 / per-piece face area).
-      3. a positive availability WORD/flag with no magnitude -> the made-to-order fallback qty.
+      3. a stock WORD with no magnitude: made to order / unlimited -> made to order, no count (as 0b); in stock
+         on a single-piece listing (a block listing is one block) -> 1; in stock elsewhere -> undetermined
+         below, because the word gives no count and none is ever invented.
     A parsed value INCLUDING 0 is a TRUSTED out-of-stock and ships as sold-out. Only when NO signal is present
     AND none can be derived is stock UNDETERMINED: left None + flagged stock_undetermined so validate HOLDS
     the row -- a missing measurement must never ship as a fabricated 0. Mirrors derive_dimensions' fill-but-
@@ -431,10 +440,7 @@ def derive_inventory(row: CanonicalRow) -> None:
         row.inventory_confidence = _conf_name(Confidence.high)
         return
     if row.is_free_size_shape:
-        row.made_to_order = True
-        row.inventory_quantity = None
-        row.inventory_method = "made_to_order"
-        row.inventory_confidence = _conf_name(Confidence.high)
+        _made_to_order(row, "made_to_order")
         return
     for candidate, method in ((row.raw_slab_count, "raw_slab_count"),
                               (row.raw_inventory_quantity, "raw_inventory_quantity")):
@@ -454,19 +460,19 @@ def derive_inventory(row: CanonicalRow) -> None:
         row.inventory_method = "stock_area_division"
         row.inventory_confidence = _conf_name(Confidence.medium)
         return
-    # Qualitative availability: a supplier that flags stock as a WORD ('Unlimited', 'In Stock', 'Made to
-    # Order') with no count. A real positive signal, so seed the made-to-order fallback and LIST (flagged
-    # low-confidence estimate) instead of holding -- distinct from a genuinely-absent stock, which still
-    # HOLDS below rather than shipping a fabricated number. The fallback COUNT is per category (a block is a
-    # single large piece; a slab/tile is stocked in modest quantity), not one global magnitude.
-    if _in_stock_word(row):
-        row.inventory_quantity = active_pack().in_stock_fallback_qty[dimension_category(row)]
-        row.inventory_method = "in_stock_word_fallback"
-        row.inventory_confidence = _conf_name(Confidence.low)
+    if _made_to_order_word(row):
+        _made_to_order(row, "made_to_order_word")
+        return
+    in_stock = _in_stock_word(row)
+    if in_stock and dimension_category(row) in domain.active_pack().single_piece_categories:
+        row.inventory_quantity = 1                     # the listing IS one piece, and the supplier says it is in stock
+        row.inventory_method = "single_piece_in_stock"
+        row.inventory_confidence = _conf_name(Confidence.high)
         return
     raw_present = any(str(c).strip() for c in (row.raw_slab_count, row.raw_inventory_quantity, row.raw_total_m2)
                       if c is not None)
-    reason = "a stock signal was present but unusable" if raw_present else "no stock signal in the scrape"
+    reason = ("the supplier says it is in stock but gives no count" if in_stock
+              else "a stock signal was present but unusable" if raw_present else "no stock signal in the scrape")
     row.inventory_quantity = None
     row.inventory_method = "undetermined"
     row.inventory_confidence = _conf_name(Confidence.none)
