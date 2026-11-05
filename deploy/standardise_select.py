@@ -40,7 +40,13 @@ _SHA = re.compile(r"[0-9a-f]{64}")
 
 
 class SpendCapReached(RuntimeError):
-    pass
+    """The process budget is reached: paid work of the whole run ends (the report still runs)."""
+    WHAT = "budget"
+
+
+class CleanCapReached(SpendCapReached):
+    """The cleaning cap is reached: only the clean step ends; the judge and the GPU go on within the process budget."""
+    WHAT = "cleaning cap"
 
 
 class Halted(RuntimeError):
@@ -57,8 +63,8 @@ class Spend:
     lock is held (a slow write never blocks the other calls), and a stop halts it without taking that lock (a SIGTERM
     may arrive while it is held)."""
 
-    def __init__(self, budget, others=None, save=None):
-        self.budget, self.others, self.save = budget, others, save
+    def __init__(self, budget, others=None, save=None, cap_error=SpendCapReached):
+        self.budget, self.others, self.save, self.cap_error = budget, others, save, cap_error
         self.before = others() if others else 0.0
         self.spent, self.reserved, self.capped = 0.0, 0.0, False
         self.uses = []
@@ -83,8 +89,8 @@ class Spend:
                 raise Halted(self._why)
             if self.before + self.spent + self.reserved + usd > self.budget:
                 self.capped = True
-                raise SpendCapReached(f"spend would pass the month's budget of ${self.budget:.2f} "
-                                      f"(spent ${self.before + self.spent:.2f})")
+                raise self.cap_error(f"spend would pass the month's {self.cap_error.WHAT} of ${self.budget:.2f} "
+                                     f"(spent ${self.before + self.spent:.2f})")
             self.reserved += usd
             self._version += 1
         self._keep()
@@ -634,9 +640,11 @@ def report(sel):
 
 def _each(listings, work, deadline, clock=time.monotonic):
     """work(listing) on every listing, WORKERS at a time: (failures, stopped). A failure is reported and the rest go on;
-    reaching the budget (or a stop) stops what has not started. A listing not started by the deadline (the process's
-    work window, on `clock`) is left as it is: the report counts it pending and the next run goes on with it."""
-    stop = threading.Event()
+    reaching a cap (or a stop) stops what has not started. stopped: the run's paid work has ended (the process budget,
+    a stop), so no step after this one starts; the cleaning cap ends only this step (CleanCapReached). A listing not
+    started by the deadline (the process's work window, on `clock`) is left as it is: the report counts it pending and
+    the next run goes on with it."""
+    stop, ended = threading.Event(), threading.Event()
     failures = []
 
     def one(listing):
@@ -644,8 +652,12 @@ def _each(listings, work, deadline, clock=time.monotonic):
             return
         try:
             work(listing)
+        except CleanCapReached as exc:
+            stop.set()
+            failures.append((listing["key"], str(exc)))
         except (SpendCapReached, Halted) as exc:
             stop.set()
+            ended.set()
             failures.append((listing["key"], str(exc)))
         except Exception as exc:                       # one listing never stops the others; the re-run retries it
             failures.append((listing["key"], f"{type(exc).__name__}: {exc}"))
@@ -657,4 +669,4 @@ def _each(listings, work, deadline, clock=time.monotonic):
         pool.shutdown(wait=False, cancel_futures=True)  # ceiling are released now, the process ends once they finish
         raise
     pool.shutdown(wait=True)
-    return failures, stop.is_set()
+    return failures, ended.is_set()

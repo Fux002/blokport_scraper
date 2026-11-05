@@ -296,10 +296,31 @@ def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_
     assert "at catalog size" in prompt
 
 
-def test_the_run_stops_its_steps_at_the_budget_and_still_reports_what_is_chosen(monkeypatch):
-    done = _steps(monkeypatch, cap_at="clean")
+def test_the_run_stops_its_steps_at_the_process_budget_and_still_reports_what_is_chosen(monkeypatch):
+    done = _steps(monkeypatch, cap_at="judge")
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
-    assert done == ["gpu v9", "settle", "judge", "clean", "report"]
+    assert done == ["gpu v9", "settle", "judge", "report"]
+
+
+def test_a_reached_cleaning_cap_ends_only_the_clean_step(monkeypatch):
+    # review of #524: the cap's error ended the whole run, so the cleaned copies made before it were never standardised
+    # or judged, and every later run of the month did the same
+    done = _steps(monkeypatch)
+    monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: (
+        done.append("clean"), sel_mod._each([{"key": "k"}], lambda l: spend.reserve(1.0), deadline))[1])
+    cap = sel_mod.Spend(0, cap_error=sel_mod.CleanCapReached)
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(100), cap, "R1", math.inf,
+                             say=lambda m: None)
+    assert done == ["gpu v9", "settle", "judge", "clean", "clean", "gpu v9-clean", "settle", "judge", "report"]
+    assert cap.capped and problems and all("cleaning cap" in p for p in problems)
+
+
+def test_the_process_budget_still_ends_the_run_in_any_step(monkeypatch):
+    done = _steps(monkeypatch)
+    monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (
+        done.append("judge"), sel_mod._each([{"key": "k"}], lambda l: spend.reserve(1.0), deadline))[1])
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(0), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    assert done == ["gpu v9", "settle", "judge", "report"]
 
 
 def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):

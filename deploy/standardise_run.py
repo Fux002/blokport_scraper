@@ -187,7 +187,7 @@ def spend_prefix(directory, month):
     return f"{ROOT}{directory}/{month}/"
 
 
-def month_spend(s3, run_id, budget, directory):
+def month_spend(s3, run_id, budget, directory, cap_error=select.SpendCapReached):
     """This run's Spend against one monthly budget whose runs keep their spend under `directory`. Each run keeps only its
     own file (<run id>.json, {"usd"}), so no run can overwrite another's; the month's other runs are summed from their
     files, read again only when changed (ETag). The month is the run's start (UTC), from its id (YYYYMMDDTHHMMSSZ)."""
@@ -209,7 +209,7 @@ def month_spend(s3, run_id, budget, directory):
     def save(total, uses):
         s3.put_object(Bucket=S3_BUCKET, Key=own, Body=json.dumps({"usd": round(total, 6), "uses": uses}).encode(),
                       ContentType="application/json")
-    return select.Spend(budget, others, save)
+    return select.Spend(budget, others, save, cap_error)
 
 
 # --- what a run works on ----------------------------------------------------------------------------------------------
@@ -596,7 +596,7 @@ def cleaning_cap(s3, run_id, close_only):
         print("==> no cleaning cap (SCRAPER_STANDARDISE_CLEAN_BUDGET_USD unset): no photo is sent to a paid clean-up edit "
               "this run", flush=True)
         return None
-    return month_spend(s3, run_id, C.CLEAN_BUDGET_USD, C.CLEAN_SPEND_DIR)
+    return month_spend(s3, run_id, C.CLEAN_BUDGET_USD, C.CLEAN_SPEND_DIR, select.CleanCapReached)
 
 
 def hand_over(summary):
