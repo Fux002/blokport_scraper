@@ -220,6 +220,17 @@ def _catalog_source_file(filename: str) -> Path:
 # Colour is NOT last-resorted here (it inherits the variety's texture-classified colour, 'Natural' floor).
 
 
+# --- Product descriptions (owner decision O3, report 21) ------------------------
+# A supplier description passes only as plain English prose: its share of these English function words must reach
+# DESCRIPTION_MIN_ENGLISH_SHARE (prod: English 0.20 to 0.45; the Spanish zucchi texts 0.014; internal notes 0.0).
+# 'no' is deliberately absent: it is also Spanish and Italian.
+DESCRIPTION_FUNCTION_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "in", "is", "it", "its", "of",
+    "on", "or", "that", "the", "this", "to", "which", "with",
+})
+DESCRIPTION_MIN_ENGLISH_SHARE = 0.10
+
+
 # --- Confidence enum with a fixed numeric mapping (section 3.4) ----------------
 class Confidence(IntEnum):
     """Four level confidence, high > medium > low > none, with numeric backing
@@ -251,12 +262,18 @@ class Paths:
     from_medusa_dir: Path = _FROM_MEDUSA
     review_dir: Path = _REVIEW
     outputs_dir: Path = _OUTPUTS
+    # curate's raw new + alias-update delta, read only by emit, which publishes to_upload/1_variants_update.csv
+    # from it as the cleaned subset of 1_variants_full.csv (one cleaning point; never uploaded itself).
+    curate_delta_csv: Path = _OUTPUTS / "curate_delta.csv"
     # small CSV samples the test suite reads (self-contained in the package).
     tests_fixtures_dir: Path = REPO_ROOT / "tests" / "fixtures"
 
     # attribute name -> Medusa id; lives in from_medusa/<env>/ because its ids come FROM
     # that env's Medusa (like the variants export), not hand-maintained like catalog_source/.
     attributes_csv: Path = _FROM_MEDUSA / "attributes.csv"
+    # which name field is a NAME and which an IDENTIFIER, published by the backend beside attributes.csv; the
+    # one map, read only by reference/loaders/field_kinds.py and fetched by every produce (no committed copy).
+    field_kinds_json: Path = _FROM_MEDUSA / "field-kinds.json"
     # The combined cross-category id-variants EXPORT (with Medusa Id), download-only:
     # the immutable "existing variants" the catalog reads. The UPLOAD files are PRODUCED
     # by the catalog (to_upload/) and never read back -- input and output never alias.

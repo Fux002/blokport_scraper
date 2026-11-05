@@ -17,7 +17,8 @@ import re
 
 from stone_pipeline.config import domain
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, Confidence, bulk_form_name, category, default_form_name
+from stone_pipeline.config.settings import (CATEGORIES, DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE,
+                                             SETTINGS, Confidence, bulk_form_name, category, default_form_name)
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
@@ -25,8 +26,8 @@ from stone_pipeline.core.numbers import normalize_unit, parse_number
 from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
-from stone_pipeline.core.text import slugify, title_case
-from stone_pipeline.reference.loaders import ReferenceData, resolve_iso
+from stone_pipeline.core.text import UnfoldableName, clean_description, slugify, title_case
+from stone_pipeline.reference.loaders import ReferenceData, field_kinds, resolve_iso
 
 log = logfmt.get_logger("derive")
 
@@ -608,8 +609,8 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         gate_rule = rule if vendor_iso else None   # an unresolvable primary_origin corroborates nothing
         if gate_rule and vendor_iso in gate_rule.countries:
             row.origin_country_code = vendor_iso
-            row.origin_city = gate_rule.city
-            row.origin_county = gate_rule.county
+            row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, gate_rule.city)
+            row.origin_county = _place(field_kinds.PRODUCT_ORIGIN_COUNTY, gate_rule.county)
             row.origin_source = "vendor_origin"
             row.origin_confidence = _conf_name(Confidence.high)
             return
@@ -628,8 +629,8 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         home = _to_iso(source_cfg.origin_default, ref) or ""
         iso, conf, flag = _select_origin(rule.countries, home)
         row.origin_country_code = iso
-        row.origin_city = rule.city
-        row.origin_county = rule.county
+        row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, rule.city)
+        row.origin_county = _place(field_kinds.PRODUCT_ORIGIN_COUNTY, rule.county)
         row.origin_source = "origin_map"
         row.origin_confidence = _conf_name(conf)
         if flag:
@@ -690,7 +691,13 @@ def collection_location(ref: ReferenceData, source_cfg: SourceConfig) -> tuple[s
     iso = _to_iso(country, ref)
     if not iso:
         raise ValueError(f"collection_country_default {country!r} does not resolve to a country")
-    return iso, city or None
+    # a source-level operator setting: a city with no ASCII form stops this source's run loudly (UnfoldableName)
+    return iso, _place(field_kinds.PRODUCT_COLLECTION_CITY, city) or None
+
+
+def _place(field: str, value: str | None) -> str | None:
+    """A city or county by its field's rule; empty stays empty. UnfoldableName propagates (the caller's guard)."""
+    return field_kinds.clean(field, value) if value else value
 
 
 def derive_collection(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
@@ -732,27 +739,37 @@ def derive_title(row: CanonicalRow) -> None:
     # stays only in the description, via _FORMAT_WORD). Finish is dropped for blocks (uncut stone has no
     # finish; avoids 'Carrara Raw'); material is omitted when the variety name already implies it
     # (_material_suffix). The handle keys off variety+finish INDEPENDENTLY (derive_handle).
+    # A title is an identifier built from parts: each part is written by its own field, then the whole by the
+    # title's rule (field-kinds.json), so an accent never reaches a title and an identifier part keeps its case.
     if not row.variation_name:
-        row.title = title_case(row.raw_name or "")
-        row.title_method = "raw_name_fallback"
+        try:
+            row.title = field_kinds.clean(field_kinds.PRODUCT_TITLE, title_case(row.raw_name or ""))
+            row.title_method = "raw_name_fallback"
+        except UnfoldableName:
+            row.title, row.title_method = "", "raw_name_unfoldable"     # never a half-folded title
         return
     variety = _primary_variety_name(row.variation_name)
-    parts = [variety]
+    parts = [field_kinds.display(field_kinds.VARIATION_NAME, variety)]
     if row.finish_name and not row.is_block:
-        parts.append(row.finish_name)
+        parts.append(field_kinds.display(field_kinds.FINISH_NAME, row.finish_name))
     if material := _material_suffix(variety, row.type_name):
-        parts.append(material)
-    row.title = title_case(" ".join(p for p in parts if p))
+        parts.append(field_kinds.display(field_kinds.TYPE_NAME, material))
+    row.title = field_kinds.clean(field_kinds.PRODUCT_TITLE, " ".join(p for p in parts if p))
     row.title_method = "construct"
 
 
 def derive_description(row: CanonicalRow) -> None:
-    if row.raw_description and len(row.raw_description.strip()) > 20:
-        row.description = row.raw_description.strip()
+    prose = clean_description(row.raw_description or "", DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE)
+    if prose and len(prose) > 20:
+        row.description = prose
         row.description_method = "passthrough"
         return
-    variety = title_case(_primary_variety_name(row.variation_name or row.raw_name
-                                               or f"This {active_pack().generic_material_word}"))
+    no_name = f"This {active_pack().generic_material_word}"
+    try:
+        variety = field_kinds.display(field_kinds.VARIATION_NAME,
+                                      _primary_variety_name(row.variation_name or row.raw_name or no_name))
+    except UnfoldableName:
+        variety = no_name                     # the existing no-name wording, never a half-folded name
     stone_type = (row.type_name or active_pack().generic_material_word).lower()  # generic material noun
     color = (row.color_name or "").lower()               # OMIT when unresolved -- never invent 'natural'
     material = f"{color} {stone_type}".strip()           # 'black marble', or just 'marble'
@@ -817,12 +834,17 @@ def _apply_overrides(row: CanonicalRow, ref: ReferenceData) -> None:
         else:
             log.warning("override origin_country_code did not resolve to a country; ignored",
                         extra={"extra_fields": {"value": v, "surrogate": row.surrogate_key}})
+    # An override passes its field's rule like a derived value; one that fails it raises, so the row guard
+    # dead-letters the row loudly instead of storing it or silently replacing it.
     if v := get("origin_city"):
-        row.origin_city = v
+        row.origin_city = _place(field_kinds.PRODUCT_ORIGIN_CITY, v)
     if v := get("title"):
-        row.title, row.title_method = v, "override"
+        row.title, row.title_method = field_kinds.clean(field_kinds.PRODUCT_TITLE, v), "override"
     if v := get("description"):
-        row.description, row.description_method = v, "override"
+        prose = clean_description(v, DESCRIPTION_FUNCTION_WORDS, DESCRIPTION_MIN_ENGLISH_SHARE)
+        if prose is None:
+            raise ValueError(f"description override for {row.surrogate_key!r} is not plain English prose")
+        row.description, row.description_method = prose, "override"
 
 
 def _provenance_gap(row: CanonicalRow) -> bool:

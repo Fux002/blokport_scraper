@@ -110,3 +110,17 @@ def test_idempotent_reingest_after_adding_variant(tmp_path, monkeypatch):
     # untouched row identical to run 1
     assert rows2[0].variation_id == rows1[0].variation_id
     assert rows2[0].type_name == rows1[0].type_name
+
+
+def test_an_attribute_override_carries_medusas_spelling_or_its_clean_form(ref):
+    # W21: an override that resolves carries the vocabulary's canonical spelling, not the operator's typing; one
+    # that does not resolve is stored by its field's rule and keeps its attr_unresolved flag.
+    ref.overrides = Overrides(by_key={("polonine", "1"): {"color_name": "bLACK"}})
+    resolvers = normalize.AttributeResolvers.build(ref)
+    row = CanonicalRow(src_site="polonine", surrogate_key="1", raw_color="x")
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.color_name == "Black"
+    ref.overrides = Overrides(by_key={("polonine", "1"): {"color_name": "Rosé Sparkle"}})
+    row = CanonicalRow(src_site="polonine", surrogate_key="1", raw_color="x")
+    normalize.normalize_row(row, resolvers, ref)
+    assert row.color_name == "Rose Sparkle" and row.color_id is None

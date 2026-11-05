@@ -39,6 +39,9 @@ failures.jsonl
 # (catalog_source/ and from_medusa/**/attributes.csv ARE committed: source of truth.)
 from_medusa/variants_export.csv
 from_medusa/**/variants_export.csv
+# The backend's field-kinds.json is fetched at run time only (deploy/fetch_inputs.py). A committed copy would ship in
+# the image and mask a failed fetch; the test fixture is the one committed copy.
+from_medusa/**/field-kinds.json
 
 # --- OS ---
 .DS_Store

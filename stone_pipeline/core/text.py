@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import unicodedata
 
-_NON_SLUG = re.compile(r"[^a-z0-9]+")
 _WS = re.compile(r"\s+")
 
 
@@ -162,13 +161,34 @@ def clean_name(text: str) -> str:
 
 def clean_identifier(text: str) -> str:
     """The display rule for an IDENTIFIER (a quality grade such as 'AA/BB', a finish or standard code, a title):
-    printable ASCII with its punctuation kept, whitespace collapsed. Keys like the original (match_key). Which
-    fields are identifiers is set per brand in the brand's configuration (owner, 2026-11-03). Expectations live in
+    printable ASCII with its punctuation kept, whitespace collapsed. Keys like the original (match_key). The kind
+    of each field comes from the backend's field-kinds.json (reference/loaders/field_kinds.py). Expectations live in
     the shared name-key vectors (`identifier`)."""
     return " ".join(_ascii_display(text).split())
 
+_HTML_RE = re.compile(r"<[A-Za-z/!][^>]*>|&[A-Za-z]+;|&#\d+;")
+_PROSE_WORD_RE = re.compile(r"[a-z']+")
 
-_BRACKET_ALIAS_RE = re.compile(r"[\(\[]\s*([^\)\]]+?)\s*[\)\]]")
+
+def clean_description(text: str, function_words, min_share: float) -> str | None:
+    """A supplier description as stored prose, or None when it is not plain English prose (owner decision O3): NFC,
+    format characters removed, line breaks unified to '\n', any other control character a space, spacing otherwise
+    kept. None for an HTML tag or entity, or when the share of English `function_words` among its words is below
+    `min_share` (another language, an internal note); the caller then uses the generated description."""
+    text = unicodedata.normalize("NFC", text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = "".join(" " if unicodedata.category(c) == "Cc" and c != "\n" else c for c in text
+                   if unicodedata.category(c) != "Cf").strip()
+    if not text or _HTML_RE.search(text):
+        return None
+    words = _PROSE_WORD_RE.findall(text.casefold())
+    if not words or sum(w in function_words for w in words) / len(words) < min_share:
+        return None
+    return text
+
+
+
+# ASCII and fullwidth round and square brackets
+_BRACKET_ALIAS_RE = re.compile("[(\\[\uff08\uff3b]\\s*([^)\\]\uff09\uff3d]+?)\\s*[)\\]\uff09\uff3d]")
 
 
 def split_bracket_alias(name: str) -> tuple[str, list[str]]:
@@ -184,49 +204,58 @@ def split_bracket_alias(name: str) -> tuple[str, list[str]]:
     return collapse_ws(_BRACKET_ALIAS_RE.sub(" ", text)), aliases
 
 
-# A '(In) <place> Market <: | called/known/named as> ' context prefix some imported aliases carry
+# A '(In) <place> Market <: | called/known/named as | called:> ' context prefix some imported aliases carry
 # before the actual local name, e.g. 'In China Market:(bai Si Hui Wang)', 'In Local Market: (Dolomit
-# Arbon', 'In China Stone Market Callled As (Caiyun Zhui Yue'. 'market' must be followed by a colon or
-# an explicit 'as' phrase, so a normal name that merely contains the word 'market' is never stripped.
+# Arbon', 'In China Stone Market Callled As (Caiyun Zhui Yue', 'In China Local Market Called: Bai Yu'. 'market'
+# must be followed by a colon or an explicit 'as' phrase, so a normal name that merely contains the word
+# 'market' is never stripped.
 _MARKET_CTX_RE = re.compile(
-    r"^\s*\(?\s*(?:in\s+)?(?:\w+\s+){0,3}market\b\s*(?::|(?:cal+led|known|named)\s+as)\s*[-(]?\s*", re.I)
-_EMPTY_BRACKETS_RE = re.compile(r"[\(\[]\s*[\)\]]")
+    r"^\s*\(?\s*(?:in\s+)?(?:\w+\s+){0,3}market\b\s*(?::|(?:cal+led|known|named)\s*(?:as\b|:))\s*[-(]?\s*", re.I)
+_EMPTY_BRACKETS_RE = re.compile("[(\\[\uff08\uff3b]\\s*[)\\]\uff09\uff3d]")
+# Every comma form one alias field may join several names with. The split comes BEFORE cleaning: cleaned whole,
+# a blob with one non-Latin half would be refused and lose its Latin half too.
+_ALIAS_SEPARATOR_RE = re.compile("[,\u060c\u3001\ufe10\ufe11\ufe50\ufe51\uff0c\uff64]")
 _ALNUM_RE = re.compile(r"[A-Za-z0-9]")
 
 
-def clean_alias_list(name: str, raw_aliases) -> list[str]:
+def clean_alias_list(name: str, raw_aliases, clean) -> tuple[list[str], list[str]]:
     """Normalize a variant's alias list into clean, de-duplicated alternative names:
-      - split a comma-joined blob into separate aliases ('Tropical Rain Forest, Rain Forest'),
+      - split a blob on every comma form ('Tropical Rain Forest, Rain Forest'), before cleaning,
       - drop a 'China market:' context prefix and pull any '(local name)' out of the brackets,
       - strip stray wrapping punctuation/brackets and junk (an alias with no letters or digits),
-      - drop any alias equal to the variant Name (redundant),
-      - title-case for DISPLAY (accents preserved) but de-duplicate on match_key, so a case- OR
-        accent-only difference (Rosé vs Rose) still collapses. First-seen order preserved.
-    Returns the cleaned alias list (possibly empty). title_case is resolved at call time."""
+      - clean each piece with `clean` (the alias field's display rule, which the caller passes in, so this module
+        holds no kind),
+      - drop any alias equal to the variant Name (redundant) and de-duplicate on match_key, first seen kept.
+    Returns (kept, dropped): a piece with no ASCII form (UnfoldableName) is dropped and returned for reporting."""
     name_key = match_key(name or "")
-    out: list[str] = []
+    kept: list[str] = []
+    dropped: list[str] = []
     seen: set[str] = set()
 
     def add(value: str) -> None:
         value = collapse_ws((value or "").strip(" ()[]{}:;-/.,").strip())
-        if not _ALNUM_RE.search(value):
+        if not _ALNUM_RE.search(value) and not any(c.isalpha() for c in value):
             return                                   # pure punctuation -> junk
-        value = title_case(value)
+        try:
+            value = clean(value)
+        except UnfoldableName:
+            dropped.append(value)
+            return
         key = match_key(value)
         if not key or key == name_key or key in seen:
             return                                   # empty, == Name, or already have it
         seen.add(key)
-        out.append(value)
+        kept.append(value)
 
     for raw in raw_aliases or []:
-        for piece in (raw or "").split(","):         # one alias may hold several comma-joined names
+        for piece in _ALIAS_SEPARATOR_RE.split(raw or ""):
             piece = _MARKET_CTX_RE.sub("", piece)
             piece = _EMPTY_BRACKETS_RE.sub(" ", piece)     # drop empty '()' / '[]' pairs
             base, bracketed = split_bracket_alias(piece)   # pull '(local name)' out as its own alias
             add(base)
             for b in bracketed:
                 add(b)
-    return out
+    return kept, dropped
 
 
 def _cap_word(word: str) -> str:
@@ -249,20 +278,21 @@ _TITLE_CONNECTORS = frozenset({"de", "do", "da", "di", "del", "della", "e", "y"}
 
 
 def title_case(text: str) -> str:
-    """Every word capitalized, rest lower-case, whitespace collapsed. Unicode-aware: source accents
-    are PRESERVED (Rosé stays Rosé, Macaúbas stays Macaúbas) so the display name reads as the name,
-    while IDENTITY folds accents separately (match_key / gen_key's slug), so 'Porriño' and 'Porrino'
-    are still one stone. Romance connectors (de/do/di/...) stay lower-case unless they lead the name.
-    Note: this preserves accents that are IN the source; it does not restore a missing one
-    (AZUL MACAUBAS -> Azul Macaubas, not Macaúbas -- that needs a canonical/synonym table)."""
+    """Every word capitalized, rest lower-case, whitespace collapsed: casing only. It decides no alphabet: a
+    name is cleaned to ASCII by its field's rule first (field_kinds.display), and review-card prose may carry raw
+    scraped text, which this never refuses. Romance connectors (de/do/di/...) stay lower-case unless they lead
+    the name."""
     words = (text or "").split()
     return " ".join(
         w.lower() if i and w.lower() in _TITLE_CONNECTORS else _cap_word(w)
         for i, w in enumerate(words))
 
 
-def slugify(text: str) -> str:
-    return _NON_SLUG.sub("-", ascii_fold(text or "").casefold()).strip("-")
+def slugify(text: str, sep: str = "-") -> str:
+    """A slug from the name's key words (match_key), so a slug, a Key and the match key read a name ONE way: a curly
+    and a straight apostrophe, or '&' and 'and', give one handle and one Key. `sep` is '-' for handles and '_' for
+    Keys and identity slugs."""
+    return sep.join(match_key(text).split())
 
 
 # strip stray edge punctuation, but NOT brackets -- a balanced '(Sunset Gold)' is meaningful

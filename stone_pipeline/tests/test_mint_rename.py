@@ -163,8 +163,13 @@ def test_statement_naming_the_pair_under_a_different_type_mints(config_db, monke
 
 def test_statement_with_the_same_spelling_is_a_plain_mint(config_db, monkeypatch):
     _card(); _vocab(monkeypatch, [])
+    # a name not in its clean form is refused with the clean form (W12, the backend's rule) ...
     code, body = server.dispatch("PUT", ["review", "decide"],
                                  {"source": "zucchi", "scraped": SCRAPED, "name": "honey  ONYX", "type": "Onyx"})
+    assert code == 400 and body["clean"] == "honey ONYX"
+    # ... and the same spelling stated clean is a plain mint: no rename, so no seed name
+    code, body = server.dispatch("PUT", ["review", "decide"],
+                                 {"source": "zucchi", "scraped": SCRAPED, "name": "Honey Onyx", "type": "Onyx"})
     assert code == 200 and body["result"] == "minted"
     assert views.seed_names() == {}
     assert views.confirm() == {("", "honey onyx"): "yes"}
@@ -276,3 +281,46 @@ def test_a_matched_row_without_a_decision_keeps_its_match(monkeypatch):
     res = curate.build_curation([_matched_row("Brown Granite", "Brown Granite")], loaders.load_all())
     for b in ("slab", "block", "tile"):
         assert _new(res, b) == [], (b, _new(res, b))
+
+
+def test_a_mint_name_is_written_by_the_variety_name_rule(monkeypatch):
+    # W5: the minted Name is the variety field's display (cleaned, title-cased), so no accent reaches a Name.
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {("", "honey onyx"): "Crème Honey"})
+    res = curate.build_curation([_row(SCRAPED, "t1")], loaders.load_all())
+    assert [r["Name"] for r in _new(res, "slab")] == ["Creme Honey"]
+
+
+def test_a_spelling_with_no_ascii_form_is_held_for_a_stated_name_never_minted(monkeypatch):
+    spelling = "Nero 黑 Onyx"
+    _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {})
+    res = curate.build_curation([_row(spelling, "t1")], loaders.load_all())
+    assert _new(res, "slab") == []
+    card = next(p for p in res.pending_confirm if p["kind"] == "new")
+    assert "no ASCII form" in card["reason"]
+    # the operator states an ASCII name for the same spelling: it mints under that name
+    _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {("", "nero onyx"): "Nero Marquina"})
+    res = curate.build_curation([_row(spelling, "t1")], loaders.load_all())
+    assert [r["Name"] for r in _new(res, "slab")] == ["Nero Marquina"]
+
+
+def test_a_mint_backbone_post_writes_each_value_by_its_field(monkeypatch):
+    # W6: observed colours, finishes and aliases are written clean; a colour with no ASCII form is dropped
+    # BEFORE the fallback chain, so the post still gets the pack's fallback colour.
+    from stone_pipeline.config.domain import active_pack
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
+    res = curate.build_curation([_row(SCRAPED, "t1", color_name="rosé", finish_name="polìshed")],
+                                loaders.load_all())
+    post = next(r for r in res.backbone_new["slab"] if r["variant"] == SCRAPED)
+    assert post["color"] == ["Rose"]
+    assert "Polished" in post["finishes"]
+    _isolate_curate(monkeypatch, {("", "honey onyx"): "yes"}, {})
+    res = curate.build_curation([_row(SCRAPED, "t1", color_name="黑")], loaders.load_all())
+    post = next(r for r in res.backbone_new["slab"] if r["variant"] == SCRAPED)
+    assert post["color"] == [active_pack().fallback_color]
+
+
+def test_a_stated_name_that_keys_like_the_spelling_still_mints_under_it(monkeypatch):
+    # W15 with W5: 'Nero 黑 Onyx' and its stated 'Nero Onyx' share one key; the stated name is minted.
+    _isolate_curate(monkeypatch, {("", "nero onyx"): "yes"}, {("", "nero onyx"): "Nero Onyx"})
+    res = curate.build_curation([_row("Nero 黑 Onyx", "t1")], loaders.load_all())
+    assert [r["Name"] for r in _new(res, "slab")] == ["Nero Onyx"]

@@ -8,8 +8,9 @@ from stone_pipeline.config.domain import active_pack
 from stone_pipeline.config.settings import category
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.schema import CanonicalRow, GapKind
-from stone_pipeline.core.text import title_case
+from stone_pipeline.core.text import UnfoldableName, clean_alias_list, title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.reference.loaders import field_kinds
 from stone_pipeline.stages.curate.context import Curation, CurationResult, spelling_of, variety_identity
 from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, core, gen_key, image_filename, image_url
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, named_with_types, review_card,
@@ -28,13 +29,22 @@ def mint(c: Curation, clean: str, stone_type: str, row, gap) -> None:
     does. Two different spellings renamed to ONE name mint one variety: the second only adds its spelling."""
     name = spelling_of(row)
     renamed = c.decisions.seed_name(row.src_site, name, clean) or ""
-    display = title_case(renamed) if renamed and proj.norm(renamed) != proj.norm(clean) else title_case(clean)
+    try:
+        # the stated name whenever there is one: a spelling with no ASCII form keys like its stated ASCII name
+        display = field_kinds.display(field_kinds.VARIATION_NAME, renamed or clean)
+    except UnfoldableName:
+        # Never minted under a half-folded name: the operator states the variety's ASCII name on a `new` card, and
+        # the next produce mints under it (the existing card kind, so the review UI needs nothing new).
+        c.pending_confirm.append(review_card(
+            "new", clean, "New variety with no ASCII form for its name: state the variety's name to add it.",
+            review_evidence(row), stone_type=stone_type, color=title_case(attr_surface(row, "color"))))
+        return
     owner = (proj.norm(display), proj.norm(stone_type))
     if proj.norm(display) != proj.norm(clean) and not c.decisions.scope(row.src_site, name, clean):
         # the scraped spelling rides onto the mint row via sib_aliases (owner[0] == norm(title)); for a
         # variety that does not exist yet emit_alias_rows finds no import row and skips it, as intended.
         # A rename made FOR one vendor attaches nothing here: that vendor's scoped alias binds its products.
-        c.alias_new.setdefault(owner, set()).add(title_case(clean))
+        c.alias_new.setdefault(owner, set()).add(clean)        # emit writes it by the alias rule (W3)
     if owner in c.minted_display:
         return                          # a second spelling of the same renamed variety: alias only
     c.minted_display.add(owner)
@@ -74,12 +84,28 @@ def _observed_attributes(c: Curation) -> dict[tuple[str, str], dict[str, set]]:
         u = obs_union.setdefault((proj.norm(st), proj.norm(clean)),
                                  {"colors": set(), "qualities": set(), "finishes": set()})
         if r.color_name:
-            u["colors"].add(title_case(r.color_name))
+            u["colors"].add(r.color_name.strip())
         if r.quality_name:
             u["qualities"].add(r.quality_name.strip())
         if r.finish_name:
-            u["finishes"].add(title_case(r.finish_name))
+            u["finishes"].add(r.finish_name.strip())
     return obs_union
+
+
+def _displayed(field: str, values) -> list[str]:
+    """`values` written by `field`'s rule, in order, de-duplicated; a value with no ASCII form is dropped and logged,
+    so the caller's fallback (the pack's colour, the last-resort quality) still applies."""
+    out: list[str] = []
+    for value in values:
+        try:
+            out.append(field_kinds.display(field, value))
+        except UnfoldableName:
+            log.warning("mint value dropped: no ASCII form", extra={"extra_fields": {"field": field, "value": value}})
+    return list(dict.fromkeys(out))
+
+
+def _alias_display(text: str) -> str:
+    return field_kinds.display(field_kinds.VARIATION_ALIAS_VALUE, text)
 
 
 def emit_new_variants(c: Curation, result: CurationResult) -> None:
@@ -115,15 +141,22 @@ def emit_new_variants(c: Curation, result: CurationResult) -> None:
         # its products are always priceable.
         seeded = c.decisions.seed_color(src, spelling, name)
         colors = ([seeded] if seeded
-                  else sorted(u["colors"]) or ([obs_color] if obs_color else []) or [pack.fallback_color])
-        qualities = sorted(u["qualities"]) or [obs_quality]
-        finishes = list(dict.fromkeys([*sorted(u["finishes"]),
-                                       *([obs_finish] if obs_finish else []), *pack.default_finishes]))
+                  else _displayed(field_kinds.COLOR_NAME, sorted(u["colors"]))
+                  or _displayed(field_kinds.COLOR_NAME, [obs_color] if obs_color else []) or [pack.fallback_color])
+        qualities = (_displayed(field_kinds.QUALITY_NAME, sorted(u["qualities"]))
+                     or _displayed(field_kinds.QUALITY_NAME, [obs_quality]) or [c.last_resort_quality])
+        finishes = list(dict.fromkeys([*_displayed(field_kinds.FINISH_NAME,
+                                                   [*sorted(u["finishes"]), *([obs_finish] if obs_finish else [])]),
+                                       *pack.default_finishes]))
         # A cross-branch sibling's variety already exists in another branch carrying the scraped spelling as
         # an alias (alias_new): carry that SAME alias onto the new sibling so its product resolves in ONE
         # upload. Match the FULL (name, type) owner: a same-name variety of another type must not inherit it.
-        sib_aliases = sorted({s for owner, sp in c.alias_new.items()
-                              if owner == (proj.norm(title), proj.norm(stone_type)) for s in sp})
+        sib_aliases, dropped = clean_alias_list(title, sorted({s for owner, sp in c.alias_new.items()
+                                                       if owner == (proj.norm(title), proj.norm(stone_type))
+                                                       for s in sp}), _alias_display)
+        if dropped:
+            log.warning("mint aliases dropped: no ASCII form", extra={"extra_fields": {"variant": title,
+                                                                                       "dropped": dropped}})
         for branch in active_branches():
             key = gen_key(branch, stone_type, title)
             if core(key, branch) in union_cores:
