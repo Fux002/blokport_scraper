@@ -50,9 +50,9 @@ fallback_color: Natural
 last_resort_finishes: {plank: Oiled, panel: Lacquered}
 last_resort_quality: A
 
-# In-stock fallback COUNT per category (made-to-order estimate when in-stock but countless). One entry per
-# category above. A bulk beam is a single piece (1); planks/panels stock in modest quantity.
-in_stock_fallback_qty: {plank: 10, beam: 1, panel: 10}
+# The categories whose listing is one physical piece (an in-stock word there is a count of 1). A bulk beam is
+# a single piece; planks and panels are stocked in a quantity, so an in-stock word without a count is held.
+single_piece_categories: [beam]
 
 # The standard finish for a raw/unfinished bulk form (beam), applied when a source gives none. Must exist in
 # attributes.csv + the beam backbone.
@@ -103,5 +103,6 @@ trailing_render_tags: [oiled, lacquered, waxed, brushed, sanded]
 spelling_variants: {gray: grey}
 join_noise_words: [dual, combination, combo, mixed, finish, finishes]
 color_attribute: color
-in_stock_words: [in stock, instock, in-stock, available, made to order, made-to-order]
+in_stock_words: [in stock, instock, in-stock, available]
+made_to_order_words: [unlimited, made to order, made-to-order]
 out_of_stock_words: [out of stock, outofstock, out-of-stock, sold out, soldout, sold-out, unavailable, discontinued]

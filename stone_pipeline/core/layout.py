@@ -76,8 +76,9 @@ def write_steps_md(layout: RunLayout, *, source: str, run_id: str, health: str,
         f"({g('products_new', 0)} new, {g('products_existing', 0)} already in Medusa).",
         "- When a Medusa product export is present, the list is split into",
         "  `medusa_import_new.csv` (create) and `medusa_import_existing.csv` (update).",
-        f"- {g('inventory_changed', 0)} existing products changed stock → "
-        "`inventory_update.csv` (SKU + quantity only, no full re-import).",
+        f"- {g('inventory_changed', 0)} existing products changed stock; those with a count → "
+        "`inventory_update.csv` (SKU + quantity only, no full re-import). Made to order has no count:",
+        "  it travels in the product import (Allow Backorder) and the sync lane.",
         f"- {g('rejected', 0)} not importable yet (their variant/combo is new) - they import on a",
         "  re-run once the catalog is synced. See `review/`.",
         "",

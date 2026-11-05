@@ -149,7 +149,7 @@ def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int
     ]
     discontinued = tuple((r["sku"], r["handle"] or "") for r in served if not r["on_sale"])
     emit.write_inventory_csv(changed, cfg, Path(path), discontinued=discontinued)
-    return len(changed) + len(discontinued)
+    return sum(map(emit.in_inventory_update, changed)) + len(discontinued)
 
 
 # --- combinations (a sync-render, not a round-trip) ---------------------------

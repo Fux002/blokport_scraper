@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from stone_pipeline.config.domain import FreeSizeShapes, active_pack
+from stone_pipeline.config.domain import FreeSizeShapes, active_pack, fold_word
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.reference.loaders import ReferenceData
 from stone_pipeline.stages.derive import dimension_category, parse_face, raw_face_texts
@@ -27,7 +27,7 @@ from stone_pipeline.stages.keys_dedupe import KeyCollisionError
 
 def _is_free(text: str) -> bool:
     """Whether a raw side value is the pack's word for a side cut to order ('Free')."""
-    return " ".join((text or "").strip().lower().split()) in active_pack().free_size_words
+    return fold_word(text) in active_pack().free_size_words
 
 
 def _shapes(row: CanonicalRow, ref: ReferenceData) -> list[tuple[float, float]]:

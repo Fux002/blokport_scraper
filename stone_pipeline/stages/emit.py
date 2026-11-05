@@ -189,13 +189,20 @@ INVENTORY_COLUMNS = ["Variant Sku", "Product Handle", "Variant Title",
                      "Inventory Quantity", "Reserved Quantity"]
 
 
+def in_inventory_update(row: CanonicalRow) -> bool:
+    """Whether a row can be written to the inventory update. The file is Blokport's manual inventory import: a
+    SKU and a quantity, no backorder column, and a blank quantity is refused. Made to order (no count) cannot be
+    stated there; the product import (Allow Backorder) and the sync lane carry it."""
+    return not row.made_to_order
+
+
 def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
                         discontinued: tuple[tuple[str, str], ...] = ()) -> Path:
     """Inventory-only update (item 5): for existing products whose stock changed, emit the
     inventory CSV. The importer uses only Variant Sku (which product) and Inventory Quantity, but
     the full structure is written so the file loads. `discontinued` (sku, handle) pairs -- products
     the supplier dropped -- are written at quantity 0: a reversible delist (a later scrape that
-    carries the stone again simply sets it back)."""
+    carries the stone again simply sets it back). A made-to-order row is left out (in_inventory_update)."""
     from stone_pipeline.stages.product_state import inventory_str, sku_for
 
     cells = [{
@@ -204,7 +211,7 @@ def write_inventory_csv(rows: list[CanonicalRow], cfg: SourceConfig, path: Path,
         "Variant Title": SETTINGS.backend.variant_title,
         "Inventory Quantity": inventory_str(row),  # read by importer
         "Reserved Quantity": "",
-    } for row in rows]
+    } for row in rows if in_inventory_update(row)]
     cells += [{
         "Variant Sku": sku, "Product Handle": handle_val,
         "Variant Title": SETTINGS.backend.variant_title,

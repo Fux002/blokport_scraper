@@ -371,8 +371,6 @@ class Thresholds:
     # partial scrape (delist refused)
     adapt_drop_abort_fraction: float = 0.5
     delist_max_fraction: float = 0.30
-    # (The in-stock made-to-order fallback COUNT moved to the domain pack as `in_stock_fallback_qty`, a
-    # per-category value -- a block is 1 piece, a slab/tile a modest quantity -- replacing the old single 999.)
     health_fill_drop_warn: float = 0.15
     health_fill_drop_fail: float = 0.40
     health_rowcount_floor: float = 0.50
