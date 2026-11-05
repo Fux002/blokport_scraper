@@ -29,7 +29,7 @@ prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
 # core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
-prod_image_tag     = "0ad1d896ca1e0f0263b596406a9731e0b8d56c52"     # + names (#498), empty-key matcher (#499), Pietra Grey seed (#502), release-leases (#505), deploy newest-wins (#504), tile floor lead (#507), free-size shapes + made to order, ledger v12 (#509, #510)
+prod_image_tag     = "d11da5b62972619db3f689f09d0936d3e54a93fd"     # + parallel scrape (#513), sentas Drive cards (#516), GPU image recipe (#508), #517-#521, corners (#514), status zeros (#522)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
@@ -57,20 +57,22 @@ prod_auto_texture = true
 dev_require_standard_photo = true
 
 # The standardised-photo process (STANDARDISE_PROCESS.md): the GPU image each env's standardise jobs run, built by
-# deploy/build_standardise_image.sh as standardise-pin-<sha12> of the commit it holds. Dev runs the corner fix (#514)
-# ahead of prod; its job definition is applied right after the merge, before the svc rolls (the release order).
+# deploy/build_standardise_image.sh as standardise-pin-<sha12> of the commit it holds. A job definition is applied
+# before its env's svc runs the matching code (the release order, STANDARDISE_PROCESS.md).
 # AUTO: on in both: the photo process follows each full produce (owner 2026-11-02: promote to prod after a clean dev run). The
-# month's budget, hosted calls and GPU together, is the owner's: prod 100 USD (2026-11-02), dev 100 USD (2026-11-05).
+# month's budget, hosted calls and GPU together, is the owner's: prod 400 USD for November's combined pass, dev 100 USD
+# (2026-11-05).
 dev_standardise_image_tag  = "standardise-pin-423d02f59c1d"
-prod_standardise_image_tag = "standardise-pin-f3dd3d19c2a7"
+prod_standardise_image_tag = "standardise-pin-423d02f59c1d"
 dev_standardise_auto       = true
 prod_standardise_auto      = true
 # The automatic clean-up of marks (FAL) stays off in both until the owner switches it on (owner 2026-11-02); a photo the
-# owner clicks is cleaned either way, within the cleaning cap below (owner 2026-11-05).
+# owner clicks is cleaned either way, within the cleaning cap below (owner 2026-11-05). Prod ran it ON once for the
+# combined pass of 2026-11-05 (owner: corner recheck + clean-up of the listings with no passing photo), then off.
 dev_standardise_clean       = false
 prod_standardise_clean      = false
 dev_standardise_budget_usd  = "100"
-prod_standardise_budget_usd = "100"
+prod_standardise_budget_usd = "400"
 # The clean-up edits' own monthly cap (owner 2026-11-05: $30 prod, $10 dev), apart from the budget above. It pays only
 # while dev_/prod_standardise_clean is on.
 dev_standardise_clean_budget_usd  = "10"
