@@ -740,46 +740,102 @@ def _killed_at(s3, method, key):
     return lambda: setattr(s3, method, real)
 
 
-@pytest.mark.parametrize("close_only", [False, True])
-def test_a_promotion_cut_short_is_finished_before_either_kind_of_run_publishes(monkeypatch, close_only):
-    """Killed half way through its copies: the next run, a photos run or a close-only one (which settles nothing),
-    finishes the promotion first, with no paid call, so a half-new set is never published."""
+def _process(monkeypatch, s3, mode, redraw=None, verdict=None):
+    """proc.process over listing "one", its GPU job stood in as in _photos_run: mode "photos", "halted" (a photos run
+    stopped in its first round: the run lock taken over, so nothing is settled after a GPU round) or "close-only" (every
+    close-up made already). Returns the photos sent to the GPU."""
+    from deploy import standardise_source as src
+    import time
+    sent = []
+
+    def run_round(batch, client, tag, todo, run_id, deadline, spend, work=None):
+        if mode == "halted":
+            raise select.Halted("the run lock was taken over")
+        for source, shas in todo.items():
+            for sha in shas:
+                assert redraw is not None, f"sent {sha[:12]} to the GPU"
+                out = src.round_prefix(tag, source)
+                sent.append(sha)
+                src.rework(client, out, sha, redraw, src.again(client, out, sha))
+        return []
+
+    def judged(original, result, fmt):
+        assert verdict is not None, "a paid call"
+        return {"verdict": verdict, "problems": [], "version": C.JUDGE_VERSION}, 0.02
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc.gpu, "run_round", run_round)
+    monkeypatch.setattr(select.judge, "judge", judged)
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("one", A)])
+    monkeypatch.setattr(close, "undone", lambda client, records: [])
+    spend = select.Spend(5.0)
+    if mode == "halted":
+        spend.halt("the run lock was taken over")
+    proc.process(s3, None, spend, "R2", time.monotonic() + 3600, say=lambda m: None, close_only=mode == "close-only")
+    return sent
+
+
+def _promotion_cut_short(monkeypatch):
+    """A chosen slab whose redraw passed and whose promotion was killed half way: its slab and its white and studio views
+    copied over the result, its main view not, the old close view still there, no note."""
     from deploy import standardise_source as src
     s3, owned = _older_whole_slab_chosen(False)
     s3._store(imagestore.conflicts_key("sentas"), b"{}")
     before = _published(s3)
-    restore = _killed_at(s3, "copy_object", f"{RUN}{A}.main.jpg")          # its views copied before main, main not
+    restore = _killed_at(s3, "copy_object", f"{RUN}{A}.main.jpg")
     with pytest.raises(_Killed):
         _photos_run(monkeypatch, s3, owned, _redrawn(), "pass")
     restore()
     assert _published(s3) == before and src.pending(s3, RUN, A)
-    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
-    monkeypatch.setattr(proc.gpu, "run_round", lambda batch, client, tag, todo, *a, **k: [] if not todo else pytest.fail(
-        f"sent {todo} to the GPU: nothing is left to do"))
-    monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("a paid call"))
-    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
-    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("one", A)])
-    monkeypatch.setattr(close, "undone", lambda client, records: [])                  # every close-up made already
-    import time
-    proc.process(s3, None, select.Spend(5.0), "R2", time.monotonic() + 3600, say=lambda m: None, close_only=close_only)
-    assert not src.pending(s3, RUN, A)
-    for view in ("main", "white", "studio"):
-        assert s3.objects[imagestore.standard_key("sentas", A, view)]["Body"] == s3.objects[f"{RUN}{A}.{view}.jpg"]["Body"]
-        assert s3.objects[f"{RUN}{A}.{view}.jpg"]["Body"] != b"old " + view.encode()
+    assert s3.objects[f"{RUN}{A}.white.jpg"]["Body"] != b"old white" and s3.objects[f"{RUN}{A}.main.jpg"]["Body"] == b"old main"
+    return s3
+
+
+def _published_whole(s3):
+    """Whether every published view of A is its run's, and all of them new: never old and new side by side."""
+    views = [v for v in imagestore.STANDARD_VIEWS if imagestore.standard_key("sentas", A, v) in s3.objects]
+    return views and all(s3.objects[imagestore.standard_key("sentas", A, v)]["Body"] == s3.objects[f"{RUN}{A}.{v}.jpg"]["Body"]
+                         != b"old " + v.encode() for v in views)
+
+
+@pytest.mark.parametrize("mode", ["halted", "close-only"])
+def test_a_promotion_cut_short_is_finished_before_either_kind_of_run_publishes(monkeypatch, mode):
+    """Killed half way through its copies: the next run, a photos run stopped in its first round or a close-only run
+    (neither settles after a GPU round), finishes the promotion first, with no paid call, so a half-new set is never
+    published."""
+    from deploy import standardise_source as src
+    s3 = _promotion_cut_short(monkeypatch)
+    assert _process(monkeypatch, s3, mode) == []
+    assert not src.pending(s3, RUN, A) and _published_whole(s3)
+    assert imagestore.standard_key("sentas", A, "close") not in s3.objects                # the redraw makes none
+
+
+def test_a_promotion_cut_short_then_a_later_rule_is_finished_under_its_own_rule_then_checked_whole(monkeypatch):
+    """The candidate is settled under the rule its marker names: promoted (its stored pass) and noted under that rule,
+    then the photo is due under the later rule and checked whole; never old and new views published side by side."""
+    from deploy import standardise_source as src
+    from stone_pipeline.standardise.photo import Result
+    s3 = _promotion_cut_short(monkeypatch)
+    monkeypatch.setattr(C, "OUTLINE_CHECKED", "outline-v3/")
+    assert _process(monkeypatch, s3, "photos", Result(kind="slab", unchanged=True)) == [A]
+    assert json.loads(s3.objects[f"{RUN}outline-v2/{A}.json"]["Body"]) == {"changed": True}
+    assert json.loads(s3.objects[f"{RUN}outline-v3/{A}.json"]["Body"]) == {"changed": False}
+    assert not src.pending(s3, RUN, A) and _published_whole(s3)
 
 
 @pytest.mark.parametrize("verdict", ["pass", "fail"])
-def test_a_candidate_drawn_under_an_older_rule_is_removed_unjudged_and_its_slab_checked_again(monkeypatch, verdict):
-    """A candidate pending when a later rule is deployed: removed without a note and without a judge call, so the photo
-    is due again and is checked under the new rule."""
+def test_a_candidate_drawn_under_an_older_rule_is_settled_under_it_unjudged_and_its_slab_checked_again(monkeypatch, verdict):
+    """A candidate pending when a later rule is deployed: never judged (no verdict of it), so it is discarded and noted
+    under the rule it was drawn under; the photo is due under the new rule and is checked whole."""
     from deploy import standardise_source as src
     s3, owned = _older_whole_slab_chosen(False)
     assert src.rework(s3, RUN, A, _redrawn(), "recheck") == "redrawn for the judge"     # under outline-v2
     monkeypatch.setattr(C, "OUTLINE_CHECKED", "outline-v3/")
     before = _state(s3)
-    assert _photos_run(monkeypatch, s3, owned) == ([], [])                               # removed, nothing judged
+    assert _photos_run(monkeypatch, s3, owned) == ([], [])                               # settled, nothing judged
     after = _state(s3)
-    assert not any(k.startswith(src.candidate_prefix(RUN)) for k in after)
+    note = json.loads(after.pop(f"{RUN}outline-v2/{A}.json"))
+    assert note["changed"] is False and "never judged" in note["kept"]
     assert {k: v for k, v in after.items() if k != f"{ROOT}tracked.csv"} == \
         {k: v for k, v in before.items() if not k.startswith(src.candidate_prefix(RUN))}
     sent, asked = _photos_run(monkeypatch, s3, owned, _redrawn(), verdict)

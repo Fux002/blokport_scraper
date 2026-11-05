@@ -29,8 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, pool_map, read_exclude
-from deploy.standardise_source import (LOGO_STEP, REDRAW, candidate_prefix, discard, promote, remove_candidate,
-                                       round_prefix, undecided)
+from deploy.standardise_source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, noted, promote,
+                                       remove_candidate, round_prefix, undecided)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import clean, judge
@@ -531,14 +531,27 @@ def finish(client, tags):
 
 
 def settle_one(client, cands, src, sha):
-    """One complete candidate (of `cands`) by its stored verdict, never a paid call: a pass promoted over its result, a
-    current fail discarded (the result kept as it is); one the judge no longer decides (undecided: drawn under an
-    earlier rule, or settled and its removal cut short) removed, no note written; no verdict yet (the budget, the
-    window) left for the next run. Whether it was settled or removed. The owner's choice and the judge's are settled
-    alike: the choice is the photo, whichever result it shows."""
-    if not undecided(client, cands.out, sha):
-        remove_candidate(client, cands.out, sha)
+    """One complete candidate (of `cands`) settled under the rule its marker names, by its stored verdict, never a paid
+    call: one already noted under that rule (its removal cut short) removed; a pass promoted over its result; a fail, or
+    a candidate of an earlier rule never judged, discarded (the result kept as it is); a candidate of the current rule
+    with no current verdict yet (the budget, the window) left for settle to judge. Noted under its own rule, a candidate
+    of an earlier rule leaves the photo due under the current one, checked whole. Whether it was settled or removed. The
+    owner's choice and the judge's are settled alike: the choice is the photo, whichever result it shows."""
+    out, rule = cands.out, candidate_rule(client, cands.out, sha)
+    if noted(client, out, sha, rule):
+        remove_candidate(client, out, sha)
         return True
+    found = verdict(client, cands, src, sha, C.CUTOUT_FORMAT)
+    if rule == C.OUTLINE_CHECKED and (found is None or not judge.current(found)):
+        return False
+    if found is not None and judge.passed(found):
+        promote(client, out, sha, rule)
+    elif found is None:
+        discard(client, out, sha, f"drawn under {rule}, never judged: kept as it was", rule)
+    else:
+        kinds = ", ".join(p.get("kind", "?") for p in found.get("problems", [])) or found.get("verdict", "")
+        discard(client, out, sha, f"the judge failed its redraw ({kinds}): kept as it was", rule)
+    return True
     found = verdict(client, cands, src, sha, C.CUTOUT_FORMAT)
     if found is None or not judge.current(found):
         return False

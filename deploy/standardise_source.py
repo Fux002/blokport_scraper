@@ -83,9 +83,10 @@ def outdated(client, out, sha):
             and not _exists(client, checked_key(out, sha)) and not pending(client, out, sha))
 
 
-def checked_key(out, sha):
-    """The note that this photo's whole slab is drawn under the current outline rule (C.OUTLINE_CHECKED)."""
-    return f"{out}{C.OUTLINE_CHECKED}{sha}.json"
+def checked_key(out, sha, rule=None):
+    """The note that this photo's whole slab is drawn under an outline rule (its folder: `rule`, the current one,
+    C.OUTLINE_CHECKED, when not given)."""
+    return f"{out}{rule or C.OUTLINE_CHECKED}{sha}.json"
 
 
 REDRAW = "redraw/"
@@ -176,8 +177,8 @@ def write(client, out, sha, res):
         _note(client, out, sha, {"new": True})
 
 
-def _note(client, out, sha, note):
-    client.put_object(Bucket=S3_BUCKET, Key=checked_key(out, sha), ContentType="application/json",
+def _note(client, out, sha, note, rule=None):
+    client.put_object(Bucket=S3_BUCKET, Key=checked_key(out, sha, rule), ContentType="application/json",
                       Body=json.dumps(note, sort_keys=True).encode())
 
 
@@ -211,19 +212,28 @@ def draw_candidate(client, out, sha, res):
                       Body=json.dumps(marker, sort_keys=True).encode())
 
 
+def candidate_rule(client, out, sha):
+    """The outline rule a complete candidate was drawn under (its marker): it is settled under that rule."""
+    return json.loads(_get(client, candidate_key(out, sha)))["rule"]
+
+
+def noted(client, out, sha, rule):
+    """Whether this photo's result has the note of `rule` (checked_key)."""
+    return _exists(client, checked_key(out, sha, rule))
+
+
 def undecided(client, out, sha):
-    """Whether the judge still decides this complete candidate: drawn under the current rule and its result not noted
-    yet. Any other (drawn under an earlier rule, or settled and its removal cut short) is only removed
-    (remove_candidate), no note written: under a later rule the photo is due again."""
-    marker = json.loads(_get(client, candidate_key(out, sha)))
-    return marker.get("rule") == C.OUTLINE_CHECKED and not _exists(client, checked_key(out, sha))
+    """Whether the judge still decides this complete candidate: drawn under the current rule and not settled yet (no
+    note of its rule). One drawn under an earlier rule is never judged: it is settled by its stored verdict alone."""
+    rule = candidate_rule(client, out, sha)
+    return rule == C.OUTLINE_CHECKED and not noted(client, out, sha, rule)
 
 
-def promote(client, out, sha):
+def promote(client, out, sha, rule):
     """A candidate the judge passed made the result, safe to cut short and run again (each step is the same copy or
     removal again): its files copied over the result's (which slab it is and the slab, its views, main last), the views
-    it does not make removed, its verdict copied over the result's, the note {"changed": true}, then the candidate
-    removed (remove_candidate). Publish copies the new files by their ETag."""
+    it does not make removed, its verdict copied over the result's, the note {"changed": true} of the rule it was drawn
+    under, then the candidate removed (remove_candidate). Publish copies the new files by their ETag."""
     cand = candidate_prefix(out)
     files = json.loads(_get(client, candidate_key(out, sha)))["files"]
     for name, kind in files:
@@ -231,7 +241,7 @@ def promote(client, out, sha):
     for key in _views_not_in(client, out, sha, {name for name, _ in files}):
         client.delete_object(Bucket=S3_BUCKET, Key=key)
     _copy(client, f"{cand}judged/{sha}.json", f"{out}judged/{sha}.json", "application/json")
-    _note(client, out, sha, {"changed": True})
+    _note(client, out, sha, {"changed": True}, rule)
     remove_candidate(client, out, sha)
 
 
@@ -240,11 +250,11 @@ def _copy(client, source, target, kind):
                        MetadataDirective="REPLACE")
 
 
-def discard(client, out, sha, reason):
-    """A candidate the judge failed set aside: the note that the result is kept as it is ({"changed": false, "kept":
-    why}: never redrawn or judged again under this rule), then the candidate removed. The result, its verdict, its
-    choice and what is published of it are never touched."""
-    _note(client, out, sha, {"changed": False, "kept": reason})
+def discard(client, out, sha, reason, rule):
+    """A candidate set aside: the note of the rule it was drawn under that the result is kept as it is ({"changed":
+    false, "kept": why}: never redrawn or judged again under that rule), then the candidate removed. The result, its
+    verdict, its choice and what is published of it are never touched."""
+    _note(client, out, sha, {"changed": False, "kept": reason}, rule)
     remove_candidate(client, out, sha)
 
 

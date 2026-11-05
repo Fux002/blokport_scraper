@@ -134,9 +134,11 @@ Cut short anywhere, the next run finishes cleanly: a candidate without its marke
 the next recheck; a promotion is safe to repeat (the same copies again) and is finished at the start of the next run of
 either kind, photos or close-only (`select.finish`, before anything else and with no paid call), so a half promoted set
 is never published (a promotion that fails also stops its own run before report and publish); a settled candidate whose
-removal was cut short is removed. Every candidate's marker names the rule it was drawn under: one drawn under an earlier
-rule (a later rule deployed while it waited, or its removal cut short) is only removed, no note written, so the photo is
-checked again under the current rule. No verdict is paid for twice.
+removal was cut short is removed. Every candidate's marker names the rule it was drawn under, and it is settled under
+that rule: noted there already, only removed; else promoted by its stored pass or discarded (a candidate of an earlier
+rule is never judged), and noted under that rule. A candidate of an earlier rule (a later rule deployed while it waited,
+or while its promotion was cut short) so leaves the photo due under the current rule, checked whole. No verdict is paid
+for twice.
 
 Drawn the same, the verdict and the choice stand and no judge call is made. A result the retired logo step made
 (`logo-step/`) is never rechecked, as it is never completed: its re-run would start from the photo with its logo. A
