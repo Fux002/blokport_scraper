@@ -1,7 +1,7 @@
 """Apply the owner's decisions on the hidden listings (the decision page's `decisions` collection, one document per
-listing, exported as a JSON array of {id: <listing handle>, action, source, sha, tag, at}) to the photo process's own
-stores, so the next photos run acts on them (STANDARDISE_PROCESS.md, "The owner's decisions"). Every record is keyed by
-the listing's SKU, which a variety re-bind never moves (the handle it does):
+listing, exported as a JSON array of {id: <listing handle>, action, source, sha, tag, at}, a clean without the tag) to
+the photo process's own stores, so the next photos run acts on them (STANDARDISE_PROCESS.md, "The owner's decisions").
+Every record is keyed by the listing's SKU, which a variety re-bind never moves (the handle it does):
   use     the owner's photo choice record, <clean tag root>owner/<SKU>.json = {tag, sha, at, listing, decided_on}: the
           process chooses that result for the listing before anything else and judges nothing of it, while the photo is
           one of the listing's and not excluded. A photo belongs to a stone and finish: the choice also reaches every
@@ -11,14 +11,24 @@ the listing's SKU, which a variety re-bind never moves (the handle it does):
   remove  a removal record, <env>/standardise-test/removed/<SKU>.json: the process never works on the listing again and
           the image stage links nothing standardised to it, even a sibling's published photo, so it stays hidden (reason
           no_photo). Its owner choice and its choice record go. Nothing is deleted from the catalog: Blokport deletes the product.
-The judge's verdicts are never touched. The owner's latest decision on a listing wins (a "use" lifts its removal, a
-"remove" drops its choice); a decision older than the one already stored for its listing is refused, so an old export
-applied again never undoes a later decision.
+  clean   the owner's click, <clean tag root>clicks/<SKU>.json = {sku, listing, source, sha, at}, stored and read only
+          by publish.write_click and read_clicks: the next photos run sends that photo to the hosted clean step, whose
+          gate (select.authorised) allows a click whatever kind of fix it needs and whatever the clean switch says; the
+          cleaned copy is judged, chosen on a pass, and on a fail the listing stays on the review list (its stored
+          attempts are read back, never paid again). Only for the listing decided on: a cleaned copy is the photo's, so
+          a listing of the same stone showing it finds it itself.
+The judge's verdicts are never touched. The owner's latest decision on a listing wins, and each replaces the other two:
+a "use" lifts its removal and its click; a "remove" drops its choice and its click; a "clean" lifts its removal and its
+owner choice with the choice record made from it (else that photo stays the listing's valid choice and the run never
+reaches the click). A decision older than the one already stored for its listing is refused, so an old export applied
+again never undoes a later decision.
 Every decision is checked first (the listing is on the product sheet, the action is known, exactly the page's fields,
 `at` an ISO UTC timestamp, the source is the listing's, the photo one of the listing's and not excluded, the tag's result
-exists, not older than what is stored); one bad decision refuses the whole file and nothing is written. Only what differs
-from the stores is written, so applying the same file again writes nothing. The plan is read and written inside the
-photo process's run lock; a write that fails half way is completed by running again.
+exists, for a clean the photo is no conflict photo and the run could use the click (select.click_problem: its result
+failed the judge only for what an edit fixes), not older than what is stored, no stored click that cannot be read); one
+bad decision refuses the whole file and nothing is written. Only what differs from the stores is written, so applying
+the same file again writes nothing. The plan is read and written inside the photo process's run lock; a write that
+fails half way is completed by running again.
 Env: SCRAPER_ENV (required, explicitly: the environment's bucket is printed first), DECISIONS_FILE (the export),
 DRY_RUN (true prints the plan and writes nothing, no lock taken; false applies).
 Exit 0 applied (or planned); 2 not configured, or the file or a decision is invalid; 4 a photos run holds the lock.
@@ -39,15 +49,17 @@ from botocore.config import Config
 
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import (EXCLUDE_PATH, NoConflictSet, chosen_prefix, owner_key, owner_prefix, read_conflicts,
-                                       read_exclude)
+from deploy.standardise_publish import (CLICK_FIELDS, EXCLUDE_PATH, NoConflictSet, chosen_prefix, clicks_prefix,
+                                       owner_key, owner_prefix, read_clicks, read_conflicts, read_exclude, write_click)
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import index
 
-# The page's document shape per action (its contract, not a setting): exactly these fields.
-FIELDS = {"use": {"id", "action", "source", "sha", "tag", "at"}, "remove": {"id", "action", "source", "at"}}
+# The page's document shape per action (its contract, not a setting): exactly these fields. A clean names no tag: the
+# clean step always edits the scraped photo whose standardised result failed (select.clean_listing).
+FIELDS = {"use": {"id", "action", "source", "sha", "tag", "at"}, "remove": {"id", "action", "source", "at"},
+          "clean": {"id", "action", "source", "sha", "at"}}
 TAGS = (C.RUN_TAG, C.CLEAN_TAG)                        # the process's tags, the only results a choice can name
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$")   # what the page writes: toISOString(), UTC
@@ -64,11 +76,12 @@ class Plan:
     """What applying the decisions changes; only what differs from the stores."""
     owner: dict[str, dict] = field(default_factory=dict)          # owner choice record key -> record to write
     removals: dict[str, dict] = field(default_factory=dict)       # removal record key -> record to write
-    deletions: list[str] = field(default_factory=list)            # owner choices, removals, choice records replaced
+    clicks: dict[str, dict] = field(default_factory=dict)         # SKU -> click record to write (write_click)
+    deletions: list[str] = field(default_factory=list)            # records a later decision replaces
     notes: list[str] = field(default_factory=list)                # what reaches whom, and what is left as it is
 
     def empty(self):
-        return not (self.owner or self.removals or self.deletions)
+        return not (self.owner or self.removals or self.clicks or self.deletions)
 
 
 def read_decisions(text):
@@ -112,7 +125,7 @@ def _shape(doc, listings):
         return []
     if not _SHA.match(doc["sha"]):
         return [f"sha {doc['sha']!r} is not a photo's sha256"]
-    if doc["tag"] not in TAGS:
+    if action == "use" and doc["tag"] not in TAGS:
         return [f"tag {doc['tag']!r} is not the process's ({' or '.join(TAGS)})"]
     if doc["sha"] not in listing["photos"]:
         return [f"photo {doc['sha'][:12]} is not one of the listing's photos"]
@@ -129,12 +142,15 @@ def _json(s3, key):
 
 
 class _Stores:
-    """The decisions already stored, read once: each SKU's owner choice and removal record."""
+    """The decisions already stored, read once: each SKU's owner choice, removal and click record (read_clicks: one that
+    cannot be read is {"error": why}), and the click files' keys by SKU, so a later decision removes the file there."""
 
     def __init__(self, s3):
         self.s3 = s3
         self.owner_keys, self.removal_keys = _keys(s3, owner_prefix(ROOT)), _keys(s3, imagestore.owner_removed_prefix())
-        self.record_keys = _keys(s3, chosen_prefix(ROOT))
+        self.record_keys, self.clicks = _keys(s3, chosen_prefix(ROOT)), read_clicks(s3, ROOT)
+        self.click_keys = {imagestore.sku_of(k, clicks_prefix(ROOT)): k for k in _keys(s3, clicks_prefix(ROOT))}
+        self.stored = self.owner_keys | self.removal_keys | self.record_keys
         self._read = {}
 
     def get(self, key, keys):
@@ -150,9 +166,12 @@ class _Stores:
     def removal(self, sku):
         return self.get(imagestore.owner_removed_key(sku), self.removal_keys)
 
+    def click(self, sku):
+        return self.clicks.get(sku)
+
     def latest(self, sku):
         """The time of the latest decision stored for a SKU, None without one."""
-        times = [moment(r["at"]) for r in (self.owner(sku), self.removal(sku)) if r is not None]
+        times = [moment(r["at"]) for r in (self.owner(sku), self.removal(sku), self.click(sku)) if r is not None]
         return max(times) if times else None
 
     def live(self, listing, exclude, conflicts):
@@ -162,10 +181,11 @@ class _Stores:
         return proc.valid_choice(listing, record, exclude, conflicts, {})
 
     def own_decision(self, listing):
-        """Whether the owner decided on this listing itself: a removal, or a choice made on it (not reached through
-        another listing of its stone)."""
-        choice = self.owner(listing["sku"])
-        return self.removal(listing["sku"]) is not None or (choice is not None and choice["decided_on"] == choice["listing"])
+        """Whether the owner decided on this listing itself: a removal, a click, or a choice made on it (not reached
+        through another listing of its stone)."""
+        sku, choice = listing["sku"], self.owner(listing["sku"])
+        return (self.removal(sku) is not None or self.click(sku) is not None
+                or (choice is not None and choice["decided_on"] == choice["listing"]))
 
 
 def _check(docs, listings, rounds, stores, exclude, shared):
@@ -176,10 +196,16 @@ def _check(docs, listings, rounds, stores, exclude, shared):
         found = _shape(doc, listings)
         if not found and key in seen:
             found = ["decided more than once in this file"]
-        elif not found and doc["action"] == "use" and doc["sha"] in exclude:
+        elif not found and doc["action"] != "remove" and doc["sha"] in exclude:
             found = [f"photo {doc['sha'][:12]} is on the exclude list"]
         elif not found and doc["action"] == "use" and doc["sha"] not in rounds(doc["tag"], doc["source"]).finished:
             found = [f"photo {doc['sha'][:12]} has no result under {doc['tag']}"]
+        elif not found and doc["action"] == "clean" and (
+                unfit := _unusable(doc, listings[key], shared, rounds(C.RUN_TAG, doc["source"]), exclude, stores.s3)):
+            found = unfit
+        elif not found and "error" in (broken := stores.click(listings[key]["sku"]) or {}):
+            found = [f"its stored click cannot be read ({broken['error']}): it has no time to order this decision "
+                     f"against; look at {stores.click_keys[listings[key]['sku']]} first"]
         elif not found and (stored := stores.latest(listings[key]["sku"])) is not None and moment(doc["at"]) < stored:
             found = [f"older than the decision already stored for it ({stored.isoformat()}): an old export"]
         if not found:
@@ -188,6 +214,22 @@ def _check(docs, listings, rounds, stores, exclude, shared):
     errors += _one_listing_per_conflict(docs, listings, shared, stores)
     if errors:
         raise InvalidDecisions("\n".join(errors))
+
+
+def click_record(listing, doc):
+    """The click a "clean" decision stores for its listing, in the one click shape (publish.CLICK_FIELDS)."""
+    return dict(zip(CLICK_FIELDS, (listing["sku"], listing["key"], listing["source"], doc["sha"], doc["at"])))
+
+
+def _unusable(doc, listing, shared, rnd, exclude, s3):
+    """Why the photos run would never use this clean, [] when it would: a conflict photo is never chosen by itself
+    (Selection.blocked), and otherwise the run's own test of a click (select.click_problem: a photo whose result failed
+    the judge only for what an edit fixes, or a hold an edit fixes)."""
+    group = shared.get((doc["source"], doc["sha"]))
+    if group is not None and group.kind == "conflict":
+        return [f"photo {doc['sha'][:12]} is a conflict photo, never chosen by itself: assign it with a use"]
+    problem = select.click_problem(s3, rnd, listing, click_record(listing, doc), exclude)
+    return [f"the photos run would not use this clean: {problem}"] if problem else []
 
 
 def _one_listing_per_conflict(docs, listings, shared, stores):
@@ -281,6 +323,8 @@ def plan(s3, docs, sheet, exclude):
                 out.notes.append(f"owner choice {sku} ({record['listing']}): same stone as {record['decided_on']}")
         if stores.removal(sku) is not None:
             out.deletions.append(imagestore.owner_removed_key(sku))
+        if sku in stores.click_keys:
+            out.deletions.append(stores.click_keys[sku])
     for doc in sorted((d for d in docs if d["action"] == "remove"), key=lambda d: d["id"]):
         listing = listings[doc["id"]]
         record = {"sku": listing["sku"], "listing": listing["key"], "source": listing["source"],
@@ -288,7 +332,18 @@ def plan(s3, docs, sheet, exclude):
         if stores.removal(listing["sku"]) != record:
             out.removals[imagestore.owner_removed_key(listing["sku"])] = record
         out.deletions += [k for k in (owner_key(ROOT, listing["sku"]), f"{chosen_prefix(ROOT)}{listing['key']}.json")
-                          if k in stores.owner_keys | stores.record_keys]
+                          if k in stores.stored]
+        if listing["sku"] in stores.click_keys:
+            out.deletions.append(stores.click_keys[listing["sku"]])
+    for doc in sorted((d for d in docs if d["action"] == "clean"), key=lambda d: d["id"]):
+        listing = listings[doc["id"]]
+        record = click_record(listing, doc)
+        if stores.click(listing["sku"]) != record:
+            out.clicks[listing["sku"]] = record
+        lifted = [imagestore.owner_removed_key(listing["sku"])]
+        if owner_key(ROOT, listing["sku"]) in stores.owner_keys:     # the owner's choice, with the record made from it
+            lifted += [owner_key(ROOT, listing["sku"]), f"{chosen_prefix(ROOT)}{listing['key']}.json"]
+        out.deletions += [k for k in lifted if k in stores.stored]
     return out
 
 
@@ -305,19 +360,24 @@ def describe(p, say=print):
             f"{record['tag']} {record['sha'][:12]}")
     for key, record in sorted(p.removals.items()):
         say(f"   removed {record['sku']} ({record['listing']}): {key}")
+    for record in sorted(p.clicks.values(), key=lambda r: r["sku"]):
+        say(f"   clean {record['sku']} ({record['listing']}): {record['sha'][:12]}")
     for key in sorted(p.deletions):
         say(f"   replaced by the owner's later decision: {key}")
     for note in p.notes:
         say(f"   {note}")
-    say(f"==> {len(p.owner)} owner choices, {len(p.removals)} removals, {len(p.deletions)} records replaced"
+    say(f"==> {len(p.owner)} owner choices, {len(p.removals)} removals, {len(p.clicks)} cleans, "
+        f"{len(p.deletions)} records replaced"
         + ("; nothing to change" if p.empty() else ""))
 
 
 def apply(s3, p):
-    """Write the plan: the new records first, then what they replace."""
+    """Write the plan: the new records first (a click through publish.write_click), then what they replace."""
     for key, record in sorted({**p.owner, **p.removals}.items()):
         s3.put_object(Bucket=S3_BUCKET, Key=key, Body=json.dumps(record, sort_keys=True).encode(),
                       ContentType="application/json")
+    for sku, record in sorted(p.clicks.items()):
+        write_click(s3, ROOT, **record)
     for key in sorted(p.deletions):
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
 
@@ -359,7 +419,8 @@ def main() -> int:
     except proc.RunActive as exc:
         print(f"ERROR: {exc}; apply after the photos run")
         return 4
-    print("==> applied: the next photos run (POST /config/v1/run {\"stage\": \"photos\"}) chooses, publishes and links them")
+    print("==> applied: the next photos run (POST /config/v1/run {\"stage\": \"photos\"}) cleans, chooses, publishes "
+          "and links them")
     return 0
 
 

@@ -364,7 +364,8 @@ removed/<SKU>.json                  a listing the owner removed (SKU percent-enc
                                     redraw/ (a recheck drawn differently: its candidate, then promoted or removed)
 <CLEAN_TAG>/<src>/...               cleaned/, attempts/, GPU results of cleaned copies, judged/ (unchanged)
 <CLEAN_TAG>/clicks/<SKU>.json       the owner's click to clean one photo of a listing (SKU percent-encoded): {sku, listing,
-                                    source, sha, at}; read by every photos run, written by the admin
+                                    source, sha, at}; written by publish.write_click (the owner's "clean"
+                                    decision), read by every photos run (publish.read_clicks)
 <CLEAN_TAG>/owner/<SKU>.json        the owner's photo choice of a listing (SKU percent-encoded): {tag, sha, at, listing,
                                     decided_on}
 <CLEAN_TAG>/chosen/<listing>.json   one record per listing with a good photo (what publish reads)
@@ -526,15 +527,20 @@ assigns it on the review page built after it.
 ## The owner's decisions
 
 The owner reviews the hidden listings (no chosen photo, not removed) on a decision page: per listing "Use this photo"
-(one of its standardised results) or "Remove listing"; a shared photo says which listings of the same stone it also
+(one of its standardised results), "Clean this photo" (one of its photos, by a hosted edit) or "Remove listing"; a
+shared photo says which listings of the same stone it also
 applies to, and the conflicts page names, per conflict photo, every listing that shows it, live ones included (one
 live now is hidden by the next run unless the owner assigns the photo to it). The page keeps one document per
-listing; its export (a JSON array of `{id: <listing handle>, action, source, sha, tag, at}`) is applied with
+listing; its export (a JSON array of `{id: <listing handle>, action, source, sha, tag, at}`, the fields per action
+below) is applied with
 `python -m deploy.standardise_decisions` (`SCRAPER_ENV` set explicitly, `DECISIONS_FILE=<export>`, `DRY_RUN=true|false`).
 It prints the environment and bucket first. It checks every decision before writing anything: the listing is on the
 sheet; the action is known with exactly the page's fields; `at` is an ISO UTC timestamp; the source is the listing's;
-the photo is one of the listing's and not excluded; the tag's result exists; and the decision is not older than the one
-already stored for the listing, so an old export applied again never undoes a later decision. One bad decision refuses
+the photo is one of the listing's and not excluded; the tag's result exists; for a clean, the photo is no conflict photo
+and the clean step would send it (`select.fixable`: its result failed the judge only for what an edit fixes, or a hold
+an edit fixes); and the decision is not older than the one already stored for the listing (its choice, removal or
+click), so an old export applied again never undoes a later decision. The latest decision wins, and each replaces the
+other two kinds: a listing holds at most one of them. One bad decision refuses
 the whole file (exit 2). It reads and writes inside the run lock (exit 4 while a photos run holds it), writes only what
 differs (applying again writes nothing), never touches the judge's verdicts, and the next photos run acts on it. Every
 record is keyed by the listing's SKU: a variety decided later re-binds the product and moves its handle, never its SKU.
@@ -545,12 +551,30 @@ record is keyed by the listing's SKU: a variety decided later re-binds the produ
   no longer applies is not read, the same as a choice record. The choice reaches each listing of the same stone that shows
   the photo, each with its own record (`decided_on` names the listing decided on; the dry run lists them), except one with
   its own decision (in the same file or stored) and one live with its own photo (never re-chosen). A conflict photo is
-  assigned to that one listing only. A "use" lifts the listing's removal.
+  assigned to that one listing only. A "use" lifts the listing's removal and its click. Fields
+  `{id, action: "use", source, sha, tag, at}`.
 - **remove**: a record `removed/<SKU>.json` (`{sku, listing, source, reason: "owner_removed", at}`); the listing's owner
-  choice and choice record go. The process never works on the listing, and the image stage links nothing standardised
+  choice, choice record and click go. Fields `{id, action: "remove", source, at}`. The process never works on the
+  listing, and the image stage links nothing standardised
   to the product (no standardised thumbnail, gallery, 3D or version, whatever `require_standard_photo` says), even a
   photo published for a listing of its stone: it keeps its own images and has no standardised photo, so it stays hidden
   with reason `no_photo`. Nothing is deleted from the catalog; Blokport deletes the product.
+- **clean**: the owner's click `<CLEAN_TAG>/clicks/<SKU>.json` (`{sku, listing, source, sha, at}`), stored through
+  `publish.write_click`, the one writer of a click; a later clean overwrites it. Fields `{id, action: "clean", source,
+  sha, at}`: no tag, as the clean step always edits the scraped photo whose standardised result (`RUN_TAG`) failed. The
+  next photos run carries it out through the clean step (step 6) like any click: when none of the listing's results
+  passes the judge, that photo goes to the hosted edit models cheapest first within the cleaning cap, whatever kind of
+  fix it needs and whatever the clean switch says; the cleaned copy goes through the GPU (`CLEAN_TAG`) and the judge,
+  and a pass is the listing's choice. A fail leaves the listing on the review list; the copies and checks are stored, so
+  no run pays for that photo again (until a new clean instruction, `CLEAN_VERSION`, makes its failed copies again), and
+  a newer clean of the same photo pays nothing either: only a clean of another of its photos tries again. Only the
+  listing decided on gets the click: a cleaned copy belongs to the photo, so a listing of the same stone that shows it
+  finds it by itself. A clean lifts the listing's removal, and its owner choice with the choice record made from it
+  (otherwise that photo would stay the listing's valid choice and the run would never reach the click). So a clean on a
+  listing with an owner-chosen photo takes that photo down: the next photos run publishes the listing again only when
+  the cleaned copy passes (or another of its results passes the judge), and until then it is hidden by the no_photo
+  rule. A listing whose photo already passes is not cleaned: the click waits, unpaid, until the listing is worked again.
+  A stored click that cannot be read refuses any decision on its listing until an operator has looked at the file.
 
 Why removals are a per-environment store and not a reviewed file like the exclude list: the exclude list is about a
 photo (its sha, the same in every environment) and is an engineering review; a removal is the owner's decision about one
