@@ -151,7 +151,7 @@ variable "standardise_enabled" {
 variable "standardise_clean" {
   type        = bool
   default     = false
-  description = "SCRAPER_STANDARDISE_CLEAN: the photo process may use the hosted clean-up edits. Off: a listing whose photos all fail for a cleanable reason goes to the review list instead."
+  description = "SCRAPER_STANDARDISE_CLEAN: the photo process cleans the marks on the stone without asking (hosted edits within the cleaning cap). Off: only the photos the owner clicks are cleaned."
 }
 
 variable "standardise_budget_usd" {

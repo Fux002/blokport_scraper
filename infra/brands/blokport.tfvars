@@ -65,8 +65,8 @@ dev_standardise_image_tag  = "standardise-pin-423d02f59c1d"
 prod_standardise_image_tag = "standardise-pin-f3dd3d19c2a7"
 dev_standardise_auto       = true
 prod_standardise_auto      = true
-# The hosted clean-up edits (FAL) stay off in both until the owner switches them on (owner 2026-11-02: no FAL spend now);
-# listings whose photos all fail for a cleanable reason go to the review list instead.
+# The automatic clean-up of marks (FAL) stays off in both until the owner switches it on (owner 2026-11-02); a photo the
+# owner clicks is cleaned either way, within the cleaning cap below (owner 2026-11-05).
 dev_standardise_clean       = false
 prod_standardise_clean      = false
 dev_standardise_budget_usd  = "100"

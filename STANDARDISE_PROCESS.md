@@ -217,14 +217,21 @@ spent on them) and its products show the scraped photos, re-hosted by the image 
 
 A logo, watermark or overlay text on a photo is no source setting: it is the judge's `leftover_mark` finding on the
 standardised result, which the clean step removes from the photo with a hosted edit (within the cleaning cap), like a
-sticker or a card. With the clean step off (`SCRAPER_STANDARDISE_CLEAN=false`) such a listing stays on the review list
-(`tracked.csv`: "judge fail (leftover_mark)") and hidden by the no_photo rule.
+sticker or a card. With the clean switch off (`SCRAPER_STANDARDISE_CLEAN=false`) such a listing stays on the review list
+(`tracked.csv`: "judge fail (leftover_mark)") and hidden by the no_photo rule until the owner clicks it.
 
-What is cleaned without asking (owner 2026-11-05): every mark on the stone, the judge's `leftover_mark` (labels,
-stickers, cards, writing, logos, tape, straps, film; a photo with a reflection besides the mark too, since the edit
-removes both) and the photos the retouch or the retired logo step held (`CLEAN_AUTO_KINDS`, `CLEAN_AUTO_HELD`). Any other
-fixable photo (a reflection or a bad fill alone) is cleaned only when the owner clicks it: `<CLEAN_TAG>/clicks/<SKU>.json`
-= {sku, listing, source, sha, at} names the photo, and the next photos run cleans it within the cap. Each paid call is
+What is cleaned without asking (owner 2026-11-05), while the clean switch is on: every mark on the stone, the judge's
+`leftover_mark` (labels, stickers, cards, writing, logos, tape, straps, film; a photo with a reflection besides the mark
+too, since the edit removes both) and the photos the retouch or the retired logo step held (`CLEAN_AUTO_KINDS`,
+`CLEAN_AUTO_HELD`). Any other fixable photo (a reflection or a bad fill alone) is cleaned only when the owner clicks it,
+and a click is cleaned whatever the switch says, within the cap: `<CLEAN_TAG>/clicks/<SKU>.json` = {sku, listing,
+source, sha, at} (written by `publish.write_click`, read by `publish.read_clicks`) names the photo, and the next photos
+run cleans it. One rule per listing (`clean_listing`): an edit already paid for is always collected and checked first
+(the payment is made, whatever the gate says now, and no new edit is sent for it); then the clicked photo goes first,
+then the marks, skipping any photo with no edit model left to try, one photo cleaned. A click that cannot be used
+(unreadable, no time, another SKU or listing than its file's, a photo not the listing's or not fixable) is never paid
+for and the listing's line in `tracked.csv` says why; a choice record that cannot be read leaves its listing out of the
+run, named in the run's problems. Each paid call is
 listed in the cleaning cap's spend file with its reason (`auto` or `click`, with the click's time) and what the edit
 fixes (`kinds` or `held`).
 

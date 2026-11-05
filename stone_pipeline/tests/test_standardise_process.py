@@ -109,7 +109,7 @@ def test_a_slab_listing_whose_chosen_photo_has_no_3d_slab_is_picked_again_with_i
 
 
 def _decided(exclude=(), conflicts=None, picks=None):
-    return proc.Decisions(set(exclude), {}, {}, conflicts or {}, [], picks or {})
+    return proc.Decisions(set(exclude), {}, {}, conflicts or {}, [], picks or {}, {})
 
 
 def test_what_the_live_listings_show_is_refreshed_and_nothing_else():
@@ -290,12 +290,42 @@ def test_the_summary_carries_the_cleaning_cap_s_spend():
     assert set(proc.clean_summary(None).values()) == {None}
 
 
-def test_the_owner_s_clicks_are_read_by_sku_beside_the_choices():
+def test_a_click_is_written_in_the_one_shape_every_run_reads():
     root = f"{proc.ROOT}{C.CLEAN_TAG}/"
-    s3 = _S3({f"{pub.clicks_prefix(root)}{imagestore.sku_file('MAR-P/06/22')}":
-              json.dumps({"sku": "MAR-P/06/22", "listing": "slab-1", "source": "marenostone", "sha": A, "at": "t"}).encode()})
-    assert proc.click_records(s3, root) == {"MAR-P/06/22": {"sku": "MAR-P/06/22", "listing": "slab-1",
-                                                           "source": "marenostone", "sha": A, "at": "t"}}
+    s3 = _S3()
+    pub.write_click(s3, root, "MAR-P/06/22", "slab-1", "marenostone", A, "t")
+    assert pub.read_clicks(s3, root) == {"MAR-P/06/22": {"sku": "MAR-P/06/22", "listing": "slab-1",
+                                                        "source": "marenostone", "sha": A, "at": "t"}}
+
+
+def test_an_unreadable_click_or_choice_record_fails_only_its_own_listing(capsys):
+    root = f"{proc.ROOT}{C.CLEAN_TAG}/"
+    s3 = _S3({f"{pub.clicks_prefix(root)}{imagestore.sku_file('SEN-BAD')}": b"{not json",
+              f"{pub.owner_prefix(root)}{imagestore.sku_file('SEN-BAD')}": b"[1, 2]"})
+    pub.write_click(s3, root, "SEN-OK", "ok", "sentas", A, "t")
+    clicks = pub.read_clicks(s3, root)
+    assert clicks["SEN-OK"]["sha"] == A and "not JSON" in clicks["SEN-BAD"]["error"]
+    owner, unreadable = proc.owner_records(s3, root)
+    assert owner == {} and unreadable == {"SEN-BAD": "not a JSON object"}
+    assert capsys.readouterr().out.count("SEN-BAD") == 2                              # each named loud with its key
+
+
+def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named(monkeypatch):
+    s3 = _S3({pub.owner_key(ROOT, "SEN-MINE"): b"{broken", imagestore.conflicts_key("sentas"): b"{}"})
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D)])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    worked = []
+
+    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+        worked.extend(l["key"] for l in sel.listings)
+        return [], {"chosen": [], "tracked": [], "pending": []}
+    monkeypatch.setattr(proc, "run", run)
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {"changed": False})
+    import time
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
+    stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
+    assert worked == [] and any("mine" in p and "cannot be read" in p for p in stored["problem_list"])
 
 
 def _configured(monkeypatch):
@@ -690,7 +720,7 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"])
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, set(), {}, rounds)) is not None}
-    decided = proc.Decisions(set(), owner, {}, {}, rounds, picks)
+    decided = proc.Decisions(set(), owner, {}, {}, rounds, picks, {})
     found = proc.todo(listings, records, set(), proc.whole_slabs(s3, records), set(), {}, picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, owner, {}, rounds,
                            proc.live_choices(listings, records, set(), decided), {})

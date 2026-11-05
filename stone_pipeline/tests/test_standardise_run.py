@@ -280,11 +280,12 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
     assert given == [("v9", gpu_end), ("judge", 10_000), ("v9-clean", gpu_end), ("judge", 10_000)]
 
 
-def test_with_the_clean_up_off_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
+def test_with_the_clean_switch_off_the_clean_step_still_runs_for_the_owner_s_clicks(monkeypatch):
+    # owner 2026-11-05: the switch governs only the automatic edits (select.authorised); a click is cleaned either way
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     done = _steps(monkeypatch)
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
-    assert done == ["gpu v9", "settle", "judge", "gpu v9-clean", "settle", "judge", "report"]
+    assert done == ["gpu v9", "settle", "judge", "clean", "gpu v9-clean", "settle", "judge", "report"]
 
 
 def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_not_see():

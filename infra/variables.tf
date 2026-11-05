@@ -209,13 +209,13 @@ variable "prod_standardise_auto" {
 variable "dev_standardise_clean" {
   type        = bool
   default     = false
-  description = "SCRAPER_STANDARDISE_CLEAN in dev: the photo process may use the hosted clean-up edits (FAL). Off unless the owner switches it on."
+  description = "SCRAPER_STANDARDISE_CLEAN in dev: marks on the stone are cleaned without asking (FAL, within the cleaning cap). Off: only the photos the owner clicks are cleaned."
 }
 
 variable "prod_standardise_clean" {
   type        = bool
   default     = false
-  description = "SCRAPER_STANDARDISE_CLEAN in prod: the photo process may use the hosted clean-up edits (FAL). Off unless the owner switches it on."
+  description = "SCRAPER_STANDARDISE_CLEAN in prod: marks on the stone are cleaned without asking (FAL, within the cleaning cap). Off: only the photos the owner clicks are cleaned."
 }
 
 variable "dev_standardise_budget_usd" {

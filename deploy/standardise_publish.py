@@ -59,6 +59,49 @@ def clicks_prefix(root):
     return f"{root}{C.CLICKS_DIR}/"
 
 
+# The owner's click to clean one photo of a listing: the one shape every writer makes (write_click) and every photos run
+# reads (read_clicks).
+CLICK_FIELDS = ("sku", "listing", "source", "sha", "at")
+
+
+def write_click(s3, root, sku, listing, source, sha, at):
+    """Record the owner's click to clean photo `sha` of a listing (by SKU; one click per listing, a new one replaces it):
+    the next photos run cleans it within the cleaning cap."""
+    record = dict(zip(CLICK_FIELDS, (sku, listing, source, sha, at)))
+    s3.put_object(Bucket=S3_BUCKET, Key=f"{clicks_prefix(root)}{imagestore.sku_file(sku)}",
+                  Body=json.dumps(record, sort_keys=True).encode(), ContentType="application/json")
+
+
+def read_clicks(s3, root):
+    """{SKU: click record} of every click under the clean tag's root; a click whose file cannot be read is
+    {"error": why}, so its listing reports it and is never paid for (the run goes on)."""
+    records, errors = records_by_sku(s3, clicks_prefix(root))
+    return {**records, **{sku: {"error": why} for sku, why in errors.items()}}
+
+
+def records_by_sku(s3, prefix):
+    """({SKU: record}, {SKU: why it could not be read}) of the <SKU>.json records under prefix. A file that is not a
+    JSON object fails only its own listing, named loud with its key; the others are read."""
+    keys = sorted(o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
+                  for o in page.get("Contents", []))
+
+    def one(key):
+        try:
+            record = json.loads(s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
+        except ValueError as exc:
+            return None, f"not JSON ({exc})"
+        return (record, None) if isinstance(record, dict) else (None, "not a JSON object")
+    records, errors = {}, {}
+    for key, (record, why) in zip(keys, pool_map(WORKERS, one, keys)):
+        sku = imagestore.sku_of(key, prefix)
+        if why is None:
+            records[sku] = record
+        else:
+            print(f"   ERROR: {key}: {why}; its listing is left out of this run's use of it", flush=True)
+            errors[sku] = why
+    return records, errors
+
+
 class NoConflictSet(RuntimeError):
     """A source on the sheet has no stored conflict set: no produce has stored it yet (every produce stores one per
     source, an empty one too), so nothing can tell which of its photos are conflicts."""

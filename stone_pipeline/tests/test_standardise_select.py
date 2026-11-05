@@ -243,7 +243,8 @@ def test_what_a_cleaned_copy_would_fix_is_named():
     assert sel.fixable(s3, rnd, B, set()) == {"held": "retouch: a strap the fill could not cover"}
 
 
-def test_a_mark_on_the_stone_is_cleaned_without_asking_anything_else_only_on_the_owner_s_click():
+def test_a_mark_on_the_stone_is_cleaned_without_asking_anything_else_only_on_the_owner_s_click(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_ENABLED", True)
     # owner 2026-11-05: logos, labels, stickers, tape, straps and film are cleaned automatically; the rest by click
     assert sel.authorised({"kinds": ["leftover_mark"]}, A, None) == "auto"
     assert sel.authorised({"kinds": ["leftover_mark", "light_reflection"]}, A, None) == "auto"   # the edit removes both
@@ -260,7 +261,7 @@ def test_a_reflection_waits_for_the_owner_s_click_then_is_cleaned_and_listed_as_
     spend = sel.Spend(10)
     sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
     assert edits == [] and spend.uses == []                                            # no click: nothing paid
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click={"sha": B, "at": "2026-11-05T18:00:00Z"})
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=_click(B))
     assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
     assert {(u["reason"], u["click_at"], tuple(u["kinds"])) for u in spend.uses} == {
         ("click", "2026-11-05T18:00:00Z", ("light_reflection",))}
@@ -281,6 +282,91 @@ def test_the_clean_step_hands_each_listing_its_own_click(monkeypatch):
     s.clicks = {"SEN-2": {"sha": B, "at": "t"}}
     sel.clean_all(s, sel.Spend(10), float("inf"))
     assert sorted(seen) == [("SEN-1", None), ("SEN-2", {"sha": B, "at": "t"})]
+
+
+def _click(sha, at="2026-11-05T18:00:00Z", **over):
+    return {"sku": "SEN-1", "listing": "slab-1", "source": "sentas", "sha": sha, "at": at, **over}
+
+
+def _all_models_failed(s3, rounds, sha):
+    for name in sel.clean.MODELS:
+        s3.objects[f"{CL}attempts/{sha}.{name}.json"] = json.dumps({"passes": False, "clean_version": C.CLEAN_VERSION}).encode()
+        rounds[1][1]["sentas"].attempts.add(f"{sha}.{name}")
+
+
+def test_the_clicked_photo_is_cleaned_before_an_earlier_mark(monkeypatch):
+    # review of #525: one photo per listing is cleaned, and an earlier mark photo always took the slot from the click
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{A}.json"] = _verdict("fail", "leftover_mark")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=_click(B))
+    assert {u["sha"] for u in spend.uses} == {B} and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
+
+
+def test_a_photo_with_no_model_left_never_takes_the_slot(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{A}.json"] = _verdict("fail", "leftover_mark")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "leftover_mark")
+    _all_models_failed(s3, rounds, A)
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == ["nano2"] and {u["sha"] for u in spend.uses} == {B}
+
+
+def test_with_the_clean_switch_off_a_mark_waits_and_a_click_is_cleaned(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_ENABLED", False)
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")                  # B: a mark
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == []
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), click=_click(B))
+    assert edits == ["nano2"]
+
+
+def test_with_the_clean_switch_on_a_mark_is_cleaned_without_a_click(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_ENABLED", True)
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == ["nano2"]
+
+
+@pytest.mark.parametrize("click, why", [
+    (_click(B, at=""), "no time"),
+    (_click(B, sku="SEN-9"), "names SKU"),
+    (_click(B, listing="slab-9"), "names listing"),
+    (_click(D), "not the listing's"),
+    (_click(A), "cannot fix"),                                                       # A is stacked: not fixable
+    ({"error": "not JSON (bad)"}, "cannot be read"),
+])
+def test_a_click_that_cannot_be_used_is_never_paid_for_and_the_listing_says_why(monkeypatch, click, why):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")       # needs a click
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=click)
+    assert edits == [] and spend.uses == []
+    assert why in sel.click_problem(s3, rounds[0][1]["sentas"], _listing(A, B), click, set())
+    assert "owner's click not used: " in sel.photo_notes(s3, rounds, _listing(A, B), set(), {}, click)
+
+
+def test_an_edit_paid_before_the_gate_is_always_collected_and_checked_and_nothing_new_is_sent(monkeypatch):
+    # review of #525: a request sent before the gate, for a photo that now needs a click, was never collected
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")       # no click: not authorised now
+    s3.objects[f"{CL}attempts/{B}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
+    rounds[1][1]["sentas"].requested.add(f"{B}.nano2")
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == [] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
+    assert [(u["reason"], u["call"]) for u in spend.uses] == [("paid", "check")]
+
+
+def test_a_paid_edit_that_fails_its_check_sends_no_new_one_without_a_reason(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")               # nano2's copy fails its check
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
+    s3.objects[f"{CL}attempts/{B}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
+    rounds[1][1]["sentas"].requested.add(f"{B}.nano2")
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == []
 
 
 def test_spend_never_passes_the_cap_even_with_calls_in_flight():
@@ -399,7 +485,7 @@ def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_list
     s3 = _S3({f"{GPU}judged/{A}.json": _verdict("pass"), f"{GPU}judged/{B}.json": _verdict("fail", "not_one_slab"),
               "r/chosen/other.json": b'{"key": "other"}', "r/chosen/two.json": b'{"key": "two"}'})
     s = object.__new__(sel.Selection)
-    s.client, s.exclude, s.root, s.owner, s.conflicts = s3, set(), "r/", {}, {}
+    s.client, s.exclude, s.root, s.owner, s.conflicts, s.clicks = s3, set(), "r/", {}, {}, {}
     s.listings = [_listing(A, key="one"), _listing(B, key="two")]
     s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
     result = sel.report(s)
@@ -583,7 +669,7 @@ def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch
     import time
     s3 = _S3({f"{GPU}judged/{s}.json": _verdict("pass") for s in (A, B, D, E)})
     s = object.__new__(sel.Selection)
-    s.client, s.exclude, s.root, s.owner, s.conflicts = s3, set(), "r/", {}, {}
+    s.client, s.exclude, s.root, s.owner, s.conflicts, s.clicks = s3, set(), "r/", {}, {}, {}
     s.listings = [_listing(x, key=k) for x, k in ((A, "one"), (B, "two"), (D, "three"), (E, "four"))]
     s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D, E), judged=(A, B, D, E))}), ("v9-clean", {"sentas": _round(CL)})]
     at_once, now, lock = [0], [0], threading.Lock()

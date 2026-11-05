@@ -244,21 +244,9 @@ def removed_listings(s3):
 
 
 def owner_records(s3, root):
-    """{SKU: the owner's photo choice record} under the clean tag's root (deploy.standardise_decisions)."""
-    return records_by_sku(s3, publish.owner_prefix(root))
-
-
-def click_records(s3, root):
-    """{SKU: the owner's click to clean one photo} under the clean tag's root (publish.clicks_prefix)."""
-    return records_by_sku(s3, publish.clicks_prefix(root))
-
-
-def records_by_sku(s3, prefix):
-    """{SKU: record} of the <SKU>.json records under prefix."""
-    keys = sorted(o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
-                  for o in page.get("Contents", []))
-    records = publish.pool_map(publish.WORKERS, lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
-    return {imagestore.sku_of(k, prefix): record for k, record in zip(keys, records)}
+    """({SKU: the owner's photo choice record}, {SKU: why its record could not be read}) under the clean tag's root
+    (deploy.standardise_decisions)."""
+    return publish.records_by_sku(s3, publish.owner_prefix(root))
 
 
 def valid_choice(l, r, exclude, conflicts, picks):
@@ -382,7 +370,7 @@ def hosted(step, sel, spend, deadline):
 def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monotonic):
     """The GPU and hosted steps, then the report: (problems, report). A step starts only inside the work window and while
     the budget lasts (the hosted clean-up edits and their checks on the cleaning cap, `clean`: None when it is not set,
-    and then no photo is sent to an edit); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
+    and then no photo is sent to an edit; the clean switch governs only the automatic edits, select.authorised); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
     GPU round the outline recheck's candidates are settled (select.settle); the report always runs, so what is chosen is
     recorded and published, unless a promotion failed: raised, and the next run of either kind finishes it at its start
     (select.finish, in process) before anything is published."""
@@ -390,7 +378,7 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline),
-             *([lambda: hosted(select.clean_all, sel, clean, deadline)] if C.CLEAN_ENABLED and clean is not None else []),
+             *([lambda: hosted(select.clean_all, sel, clean, deadline)] if clean is not None else []),
              lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline)]
@@ -415,7 +403,8 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
 @dataclass(frozen=True)
 class Decisions:
     """What a run decides by, read once: the exclude list, the owner's choice records ({SKU: record}), the owner's clicks
-    to clean a photo ({SKU: record}), the produce's
+    to clean a photo ({SKU: record}, publish.read_clicks), the listings whose choice record cannot be read ({SKU: why}:
+    left out of the run, never judged over the owner's head), the produce's
     conflict set ({(source, sha): handles}: photos listings of several stones show), the run tags' stores, and the owner's choices that apply
     ({listing key: (tag, sha)}, select.owner_choice). Both kinds of round and publish see the same."""
     exclude: set
@@ -424,32 +413,37 @@ class Decisions:
     conflicts: dict
     rounds: list
     picks: dict
+    unreadable: dict
 
 
 def read_decisions(s3, root, listings):
     """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
     re-classified; none stored yet: publish.NoConflictSet, nothing done."""
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
-    owner, clicks = owner_records(s3, root), click_records(s3, root)
+    (owner, unreadable), clicks = owner_records(s3, root), publish.read_clicks(s3, root)
     conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, exclude, conflicts, rounds)) is not None}
-    return Decisions(exclude, owner, clicks, conflicts, rounds, picks)
+    return Decisions(exclude, owner, clicks, conflicts, rounds, picks, unreadable)
 
 
 def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions):
-    """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed), work on them and report:
-    (problems, counts, kept)."""
+    """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed, nor one whose choice record
+    cannot be read: the owner's decision is unknown, so it is left as it is and named a problem), work on them and
+    report: (problems, counts, kept)."""
     removed, records = removed_listings(s3), choices(s3, root)
-    found = todo(listings, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
-                 decisions.picks)
+    unreadable = [l for l in listings if l["sku"] in decisions.unreadable]
+    found = todo([l for l in listings if l["sku"] not in decisions.unreadable], records, decisions.exclude,
+                 whole_slabs(s3, records), removed, decisions.conflicts, decisions.picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
                            live_choices(listings, records, removed, decisions), decisions.clicks)
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
     problems, result = run(batch, sel, spend, clean, run_id, deadline, say)
+    problems = [f"{l['key']}: the owner's choice record cannot be read ({decisions.unreadable[l['sku']]}): left as it is"
+                for l in unreadable] + problems
     counts = {"listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
               "pending": len(result["pending"]), "removed": sum(l["sku"] in removed for l in listings)}
     return problems, counts, {"pending_listings": result["pending"]}

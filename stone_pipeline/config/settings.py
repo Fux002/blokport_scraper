@@ -1117,7 +1117,8 @@ Your whole answer is one JSON object and nothing else:
     # $4/M, Opus 5.5), so parallel calls can never together pass the budget; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14
     CLEAN_PHOTOS_PER_LISTING = 1       # one good photo is enough: only the first fixable photo of a listing is cleaned
-    # Off: a run sends no photo to a hosted edit (a judge-only round: GPU, judge, cleaned copies already made).
+    # Off: no photo is cleaned without asking (the automatic marks, CLEAN_AUTO_*); the owner's click still is, within the
+    # cleaning cap (owner 2026-11-05). An edit already paid for is always collected and checked.
     CLEAN_ENABLED = _env_bool("SCRAPER_STANDARDISE_CLEAN", True)
     # The process (deploy.standardise_run) sends the GPU work to AWS Batch in slices of RUN_SLICE photos, each a retouch job
     # then a standardise job. The GPU pool's ceiling is raised to RUN_GPU_VCPUS while it works and always set back to

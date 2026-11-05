@@ -334,26 +334,64 @@ def fixable(client, rnd, sha, exclude):
 
 
 def authorised(cause, sha, click):
-    """Why this fixable photo may be sent to a paid edit, or None (owner 2026-11-05): "auto" for a mark on the stone
-    (CLEAN_AUTO_KINDS, CLEAN_AUTO_HELD; a mark with a reflection besides is cleaned too, the edit removes both), "click"
-    when the owner's click for the listing names this photo. Any other fixable photo waits for a click."""
-    if set(cause.get("kinds", ())) & set(C.CLEAN_AUTO_KINDS) or cause.get("held", "").startswith(C.CLEAN_AUTO_HELD):
-        return "auto"
-    if click is not None and click.get("sha") == sha:
+    """Why this fixable photo may be sent to a paid edit, or None (owner 2026-11-05): "click" when the owner's valid click
+    for the listing names this photo (always, within the cleaning cap, whatever the clean switch says); "auto" for a mark
+    on the stone (CLEAN_AUTO_KINDS, CLEAN_AUTO_HELD; a mark with a reflection besides is cleaned too, the edit removes
+    both) while the clean switch (CLEAN_ENABLED) is on. Any other fixable photo waits for a click."""
+    if click is not None and click["sha"] == sha:
         return "click"
+    if C.CLEAN_ENABLED and (set(cause.get("kinds", ())) & set(C.CLEAN_AUTO_KINDS)
+                            or cause.get("held", "").startswith(C.CLEAN_AUTO_HELD)):
+        return "auto"
     return None
 
 
-def clean_photo(client, cl, src, sha, spend, listing, why):
-    """Each model in turn until a cleaned copy passes the clean check; that copy becomes cleaned/<sha>.jpg. Returns
+def click_problem(client, rnd, listing, click, exclude):
+    """Why the owner's click for this listing cannot be used, or None when it can: its file could not be read, it has no
+    time, it names another SKU or listing than its own, or a photo that is not the listing's or that a cleaned copy
+    cannot fix. A click with a problem is never paid for; the listing's notes say why (photo_notes)."""
+    if "error" in click:
+        return f"its file cannot be read: {click['error']}"
+    if not click.get("at"):
+        return "it has no time (at)"
+    if click.get("sku") != listing["sku"]:
+        return f"it names SKU {click.get('sku')!r}, not its file's {listing['sku']!r}"
+    if click.get("listing") != listing["key"]:
+        return f"it names listing {click.get('listing')!r}, not {listing['key']!r}"
+    if click.get("sha") not in listing["photos"]:
+        return "it names a photo that is not the listing's"
+    if fixable(client, rnd, click["sha"], exclude) is None:
+        return "it names a photo a cleaned copy cannot fix"
+    return None
+
+
+def _current(attempt):
+    """Whether a stored attempt stands: it passed, or it failed under the current clean instruction (CLEAN_VERSION)."""
+    return attempt.get("passes") or attempt.get("clean_version", 1) >= C.CLEAN_VERSION
+
+
+def models_left(client, cl, sha):
+    """The edit models not yet tried on this photo under the current instruction: none left, nothing more can be paid."""
+    return [name for name in clean.MODELS
+            if f"{sha}.{name}" not in cl.attempts or not _current(_get_json(client, f"{cl.prefix}attempts/{sha}.{name}.json"))]
+
+
+def paid_unchecked(cl, sha):
+    """The models whose edit of this photo is paid (requested or made) and not checked yet."""
+    return [name for name in clean.MODELS
+            if (ident := f"{sha}.{name}") not in cl.attempts and (ident in cl.requested or ident in cl.edited)]
+
+
+def clean_photo(client, cl, src, sha, spend, listing, why, models=clean.MODELS):
+    """Each of `models` in turn until a cleaned copy passes the clean check; that copy becomes cleaned/<sha>.jpg. Returns
     whether one passed. spend is the cleaning cap's; each paid call is listed there for the listing that asked for it,
-    with why it was sent (`why`: its reason, auto or click, and what the edit fixes)."""
+    with why it was sent (`why`: its reason, auto, click or paid, and what the edit fixes)."""
     with cl.lock(sha):
         if sha in cl.cleaned:
             return True
         original = _original(client, src, sha)
         use = {"source": src, "sha": sha, "sku": listing["sku"], "listing": listing["key"], **why}
-        for name in clean.MODELS:
+        for name in models:
             if _attempt(client, cl, sha, name, original, spend, use)["passes"]:
                 client.copy_object(Bucket=S3_BUCKET, Key=f"{cl.prefix}cleaned/{sha}.jpg", ContentType="image/jpeg",
                                    CopySource={"Bucket": S3_BUCKET, "Key": f"{cl.prefix}attempts/{sha}.{name}.jpg"},
@@ -373,7 +411,7 @@ def _attempt(client, cl, sha, name, original, spend, use):
     att, ident = f"{cl.prefix}attempts/{sha}.{name}", f"{sha}.{name}"
     if ident in cl.attempts:
         stored = _get_json(client, f"{att}.json")
-        if stored.get("passes") or stored.get("clean_version", 1) >= C.CLEAN_VERSION:
+        if _current(stored):
             return stored
         cl.edited.discard(ident)                       # failed under an older instruction: made again with the current one
         cl.requested.discard(ident)
@@ -429,9 +467,12 @@ def _failed(client, cl, att, ident, name, why):
 
 
 def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=None):
-    """A listing with no good photo from the standardiser: its first CLEAN_PHOTOS_PER_LISTING fixable photos that may be
-    paid for (authorised: a mark on the stone, or the one the owner's click names) are cleaned (one is enough). Nothing
-    to do when the owner chose its photo, or when it already has a cleaned copy (its result is judged later)."""
+    """A listing with no good photo from the standardiser. First an edit already paid for is always collected and
+    checked (the payment is made, whatever the gate says now), no new one sent for it. Then its first
+    CLEAN_PHOTOS_PER_LISTING fixable photos that may be paid for (authorised: the photo the owner's valid click names
+    first, then a mark on the stone) and still have a model left to try are cleaned (one is enough). Nothing to do when
+    the owner chose its photo, or when it already has a cleaned copy (its result is judged later). `click` is the
+    listing's click record as read (an invalid one is never used: click_problem)."""
     (_, gpu), (_, cl) = rounds
     src = listing["source"]
     if owner is not None or any(sha in cl[src].cleaned for sha in listing["photos"]):
@@ -441,15 +482,23 @@ def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=Non
         return
     if not complete:
         raise RuntimeError("its first photos have no standardiser result or verdict yet: nothing is cleaned before they do")
+    for sha in listing["photos"]:
+        if sha not in exclude and (models := paid_unchecked(cl[src], sha)):
+            if clean_photo(client, cl[src], src, sha, spend, listing, {"reason": "paid"}, models):
+                return
+    if click is not None and click_problem(client, gpu[src], listing, click, exclude) is not None:
+        click = None
     sent = [(sha, {"reason": why, **cause, **({"click_at": click["at"]} if why == "click" else {})})
             for sha in listing["photos"]
             if (cause := fixable(client, gpu[src], sha, exclude)) is not None and (why := authorised(cause, sha, click))]
-    for sha, why in sent[:C.CLEAN_PHOTOS_PER_LISTING]:
+    sent.sort(key=lambda item: item[1]["reason"] != "click")       # the owner's clicked photo first (stable otherwise)
+    for sha, why in [item for item in sent if models_left(client, cl[src], item[0])][:C.CLEAN_PHOTOS_PER_LISTING]:
         if clean_photo(client, cl[src], src, sha, spend, listing, why):
             return
 
-def photo_notes(client, rounds, listing, exclude, conflicts):
-    """What happened to each of a listing's photos, for a person reading the tracked list."""
+def photo_notes(client, rounds, listing, exclude, conflicts, click=None):
+    """What happened to each of a listing's photos, for a person reading the tracked list, and the owner's click on it:
+    which photo, or why it cannot be used (click_problem)."""
     notes = []
     src = listing["source"]
     for sha in listing["photos"]:
@@ -475,6 +524,10 @@ def photo_notes(client, rounds, listing, exclude, conflicts):
             if tried:
                 parts.append("cleaned by " + ", ".join(a.split(".", 1)[1] for a in tried) + ("; a copy passed" if sha in r.cleaned else "; none passed"))
         notes.append(f"{sha[:12]}: " + ("; ".join(parts) or "no result"))
+    if click is not None:
+        blocked = exclude | {sha for sha in listing["photos"] if (src, sha) in conflicts}     # as the clean step sees it
+        problem = click_problem(client, rounds[0][1][src], listing, click, blocked)
+        notes.append(f"owner's click not used: {problem}" if problem else f"owner's click: clean {click['sha'][:12]}")
     return " | ".join(notes)
 
 
@@ -647,7 +700,8 @@ def report(sel):
         if complete:
             sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")
             return "tracked", {"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
-                               "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude, sel.conflicts)}
+                               "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude, sel.conflicts,
+                                                            sel.clicks.get(l["sku"]))}
         return "pending", l["key"]
     outcomes = pool_map(C.SELECT_WORKERS, one, sel.listings)   # a few S3 reads per listing, in the listings' order
     chosen, tracked, pending = ([item for kind, item in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
