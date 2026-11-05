@@ -40,9 +40,9 @@ PRODUCT_PAGE = """
   </div></div>
 <div class="stock-stat-box"><img src="https://sentasmarble.com/assets/web/upload/icon_pieces.gif" alt="pieces">
   <div class="fw-bold text-dark mt-1 stat-main-val">78</div><div class="stat-sub-val">Pieces</div></div>
-<a href="https://docs.google.com/spreadsheets/d/1XI/edit?usp=drive_web" class="action-card-item card-drive"><div class="action-card-title">Packing List</div><div class="action-card-sub">Google Drive Folder</div></a>
-<a href="https://drive.google.com/drive/u/0/folders/1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT" target="_blank" class="action-card-item card-drive"><div class="action-card-title">Google Drive</div><div class="action-card-sub">Google Drive Folder</div></a>
-<a href="https://drive.google.com/open?id=1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw&amp;usp=drive_fs" target="_blank" class="action-card-item card-drive"><div class="action-card-title">Scanner Photo</div><div class="action-card-sub">Google Drive Folder</div></a>
+<a href="https://docs.google.com/spreadsheets/d/1XI/edit?usp=drive_web" target="_blank" rel="noopener noreferrer" class="action-card-item card-drive w-100"> <div class="action-card-icon"><i class="lab la-google-drive"></i></div> <div class="action-card-content"> <div class="action-card-title text-truncate">Packing List</div> <div class="action-card-sub">View slab images and packing list</div> </div> </a>
+<a href="https://drive.google.com/drive/u/0/folders/1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT?usp=drive_link" target="_blank" rel="noopener noreferrer" class="action-card-item card-drive w-100"> <div class="action-card-icon"><i class="lab la-google-drive"></i></div> <div class="action-card-content"> <div class="action-card-title text-truncate">Drive Link</div> <div class="action-card-sub">View slab images and packing list</div> </div> </a>
+<a href="https://drive.google.com/open?id=1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw&amp;usp=drive_fs" target="_blank" rel="noopener noreferrer" class="action-card-item card-drive w-100"> <div class="action-card-icon"><i class="lab la-google-drive"></i></div> <div class="action-card-content"> <div class="action-card-title text-truncate">Scanner Photo</div> <div class="action-card-sub">View slab images and packing list</div> </div> </a>
 <a href="https://api.whatsapp.com/send?phone=1" class="action-card-item card-whatsapp"><div>WhatsApp</div></a>
 <table><tr><td class="spec-label text-muted" style="width: 140px;">Thickness:</td><td class="spec-val fw-bold">
       2 cm
@@ -127,7 +127,8 @@ def test_product_page_parses_every_fact():
     # the JSON-LD Product image list only (not the similar-products carousel), deduped, in order
     assert d["image_urls"] == ["https://sentasmarble.com/upload/media/images/2026/10/a.webp",
                                "https://sentasmarble.com/upload/media/images/2026/10/b.webp"]
-    # both Drive photo folders, in page order, in either url form; the packing-list sheet is not one
+    # both Drive photo folders, in page order, in either url form, whatever the card says (the site relabelled them
+    # 2026-11-05: 'Google Drive Folder' became 'View slab images and packing list'); the packing-list sheet is not one
     assert d["drive_folders"] == ["1mqZ47Z0KmbZ3B9o1st9w0FCzdr8_h2QT", "1O7Os9fzTHYah1s51-5SndIZSbxJ2PUWw"]
 
 

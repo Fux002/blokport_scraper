@@ -95,7 +95,7 @@ _DIM = re.compile(r'<span class="dim-label">(Height|Width|Thickness)\s*:</span>.
 _FIGURE = re.compile(r'icon_(sqm|weight|pieces)\.gif.*?<div[^>]*stat-main-val[^>]*>\s*([\d.,]+)', re.DOTALL)
 _SPEC = re.compile(r'<td[^>]*spec-label[^>]*>(Surface Finish|Thickness|Colors):</td>\s*<td[^>]*>(.*?)</td>', re.DOTALL)
 _JSON_LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL)
-# The product page's Drive action cards: a folder link in either of Drive's url forms, labelled by the card.
+# The product page's action cards (Drive folders, the packing-list Sheet, video, chat); a Drive folder in either url form.
 _ACTION_CARD = re.compile(r'<a href="([^"]+)"[^>]*class="action-card-item[^"]*"[^>]*>(.*?)</a>', re.DOTALL)
 _DRIVE_FOLDER_ID = re.compile(r"drive\.google\.com/(?:drive/(?:u/\d+/)?folders/|open\?id=)([A-Za-z0-9_-]+)")
 _DRIVE_ENTRY = re.compile(r'<div class="flip-entry" id="entry-([^"]+)".*?<div class="flip-entry-title">([^<]*)</div>',
@@ -136,11 +136,14 @@ def _gallery(page: str) -> list[str]:
 
 
 def _drive_folders(page: str) -> list[str]:
-    """Folder ids of the page's Drive photo cards, in page order (the packing-list sheet is not a folder)."""
+    """Folder ids of the page's Drive photo cards, in page order: every action card that links a Drive folder (the
+    packing-list card links a Sheet, never a folder). Read from the link, never the card's words, which the site
+    changes (2026-11-05: 'Google Drive Folder' became 'View slab images and packing list' and every folder was
+    missed)."""
     ids = []
-    for href, body in _ACTION_CARD.findall(page):
+    for href, _body in _ACTION_CARD.findall(page):
         found = _DRIVE_FOLDER_ID.search(html.unescape(href))
-        if found and "Drive Folder" in _text(body):
+        if found:
             ids.append(found.group(1))
     return list(dict.fromkeys(ids))
 
