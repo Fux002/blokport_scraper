@@ -1348,7 +1348,7 @@ Your whole answer is one JSON object and nothing else:
     TILE_CUT_STEP, TILE_ROW_SEED = 7, 20261102      # neighbours along a row step by this many faces; rows by a hashed offset
     TILE_LEVELS = 6                    # texture pyramid levels for minified (far) tiles
     TILE_SUPERSAMPLE = 2               # the studio view is drawn this many times larger, then reduced
-    # The single tile on white (white view; the main view when the faces are too few) and its 3/4 studio view.
+    # The single tile on white (white view) and its 3/4 studio view.
     TILE_WHITE_MARGIN = 0.12
     TILE_MAX_UPSCALE = 2.5             # the single-tile views never enlarge the real pixels more than this
     TILE_SIDE_ANGLES = (32.0, 24.0)    # azimuth, elevation (degrees) of the 3/4 view of one tile lying flat
