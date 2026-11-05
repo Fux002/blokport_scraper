@@ -885,6 +885,8 @@ class STANDARDISE:
     STUDIO_FRAME = (510.0, 110.0, 900.0)   # the studio camera (base image px): centre x, highest top edge, bottom edge ...
     STUDIO_HEADROOM = 70.0             # ... raised to keep this much white above a tall slab
     STUDIO_EDGE_LIGHT = 0.6            # the sawn edge facing away from the light, this bright relative to the face
+    STUDIO_EDGE_STRIP = 200            # the sawn edge is the slab's last (width // this) columns of stone ...
+    STUDIO_EDGE_STRIP_MIN = 2          # ... and at least this many
     WHITE_MARGIN = 0.05                # on white, the slab's border (share of the canvas)
     WHITE_SEAM = 4                     # an open book's gap on white (px)
     WHITE_SHADOWS = ((26, 12, 0.30), (5, 3, 0.28))   # blur, drop (px), strength: a soft shadow and a tight contact one
@@ -913,6 +915,13 @@ class STANDARDISE:
     RUN_TAG = "v2"
     CLEAN_TAGS = {"dev": "v2-clean", "prod": "v2-clean2"}
     CLEAN_TAG = CLEAN_TAGS[ENV_SEGMENT]
+    # The slab outline's rule (layout.outline_with_erased): an erased mark is stone only within the stone's own hull, so
+    # the wall in a rounded or broken corner never shows (2026-11-02; before it, the fitted corners counted). A whole slab
+    # made under it has a note <run folder><this><sha>.json; one without the note was made under the older rule and goes
+    # to the GPU once, which checks its outline and redraws it only when this version draws it differently (the wall in a
+    # corner, or the studio's sawn edge beside a broken right corner); its verdict stands: only what is not stone changes.
+    # A later rule change = a new folder name, and every whole slab is checked once again.
+    OUTLINE_CHECKED = "outline-v2/"
     # On: the runner starts the photo process after each full produce (stage all, the owner's button), never after the
     # republish Blokport's Publish button runs (it must never find the run slot taken).
     AUTO = _env_bool("SCRAPER_STANDARDISE_AUTO", False)

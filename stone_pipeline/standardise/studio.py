@@ -79,6 +79,25 @@ def to_frame(pt, q):
     return (pt[0] - x0) * C.OUT_W / fw, (pt[1] - y0) * C.OUT_H / fh
 
 
+def edge_width(width):
+    """How many of a slab's last columns its sawn edge is drawn from, for a slab this many px wide."""
+    return max(C.STUDIO_EDGE_STRIP_MIN, width // C.STUDIO_EDGE_STRIP)
+
+
+def edge_rows(alpha):
+    """Where the sawn edge is (1) over the slab's last edge_width columns: the rows whose stone reaches its right side.
+    Beside a rounded or broken corner the stone stops short of it, so no edge is drawn there (it would show the photo's
+    wall). A run of rows shorter than the strip is wide is the outline's own pixel rounding at a square corner, no
+    break."""
+    n = edge_width(alpha.shape[1])
+    reach = alpha[:, -n:].max(axis=1) > 0.5
+    count, labels, stats, _ = cv2.connectedComponentsWithStats((~reach).astype(np.uint8)[:, None])
+    for i in range(1, count):
+        if stats[i, cv2.CC_STAT_HEIGHT] < n:
+            reach[labels[:, 0] == i] = True
+    return np.repeat(reach[:, None], n, axis=1).astype(np.float32)
+
+
 def place(slabs):
     """The finished studio image of one slab, or an open book joined into one face."""
     rgb = np.concatenate([s for s, _ in slabs], axis=1).astype(np.float32)
@@ -101,11 +120,11 @@ def place(slabs):
     # The sawn edge on the right is the same stone: its last columns stretched across the scene's thickness, in less light.
     off_top, off_bottom = (EDGE_OUT - FACE[1:3]) * np.float32([C.OUT_W / fw, C.OUT_H / fh])
     tr, br = dst[1], dst[2]
-    strip = np.ascontiguousarray(rgb[:, -max(2, tw // 200):])
+    strip = np.ascontiguousarray(rgb[:, -edge_width(tw):])
     E = cv2.getPerspectiveTransform(np.float32([[0, 0], [strip.shape[1], 0], [strip.shape[1], th], [0, th]]),
                                     np.float32([tr, tr + off_top, br + off_bottom, br]))
     edge = cv2.warpPerspective(strip, E, size, flags=cv2.INTER_LINEAR) * C.STUDIO_EDGE_LIGHT
-    side = cv2.warpPerspective(np.ones(strip.shape[:2], np.float32), E, size, flags=cv2.INTER_LINEAR)[..., None]
+    side = cv2.warpPerspective(edge_rows(alpha), E, size, flags=cv2.INTER_LINEAR)[..., None]
     out = out * (1 - side) + edge * side
     out = out * (1 - a) + stone * a
     out = out * (1 - keep) + warp(base, S) * keep                     # the clips stand in front of the slab's foot

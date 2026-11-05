@@ -92,19 +92,79 @@ def test_a_labels_square_bite_is_filled_but_a_strip_along_a_side_is_not():
 def test_a_card_erased_on_the_slabs_edge_leaves_no_bite():
     outline = np.ones((800, 1200), np.uint8)
     outline[:60, 500:800] = 0                          # SAM saw the card on the top edge as not stone
-    inside = np.ones((800, 1200), np.uint8)
-    marks = np.zeros((800, 1200), np.uint8)
-    marks[:70, 490:810] = 1                            # the card, erased and filled with stone
-    assert layout.outline_with_erased(outline, marks, inside)[30, 650] == 1
+    inside = stone = np.ones((800, 1200), np.uint8)    # stone on both sides of it: the hull bridges the card
+    objects = np.zeros((800, 1200), np.uint8)
+    objects[:70, 490:810] = 1                          # the card, erased and filled with stone
+    assert layout.outline_with_erased(outline, np.zeros_like(objects), objects, inside, stone)[30, 650] == 1
 
 
 def test_a_mark_outside_the_slab_does_not_grow_it():
     outline = np.zeros((800, 1200), np.uint8)
     outline[100:700, 100:1100] = 1
-    inside = outline.copy()
     marks = np.zeros((800, 1200), np.uint8)
     marks[20:60, 300:500] = 1                          # a painted code on the floor
-    assert layout.outline_with_erased(outline, marks, inside)[40, 400] == 0
+    stone = np.ones_like(outline)                      # even where the stone's hull would take it in
+    assert layout.outline_with_erased(outline, marks, marks, outline.copy(), stone)[40, 400] == 0
+
+
+def _rounded_corner():
+    """(outline, inside, stone, objects) of a slab whose top-right corner is rounded off: the fitted corners make the full
+    rectangle, the stone stops at the arc, and the wall left in the corner was taken for a label (foreign_objects)."""
+    inside = np.zeros((800, 1200), np.uint8)
+    inside[100:700, 100:1100] = 1
+    outline = inside.copy()
+    outline[100:300, 900:1100] = 0
+    cv2.circle(outline, (900, 300), 200, 1, -1)
+    outline &= inside
+    stone = cv2.fillConvexPoly(np.zeros_like(outline), cv2.convexHull(cv2.findNonZero(outline)), 1)
+    objects = cv2.dilate(inside & (1 - outline), np.ones((9, 9), np.uint8))
+    return outline, inside, stone, objects
+
+
+def test_the_wall_in_a_rounded_corner_is_never_counted_as_stone():
+    outline, inside, stone, objects = _rounded_corner()
+    cards = np.zeros_like(objects)
+    grown = layout.outline_with_erased(outline, cards, objects, inside, stone)
+    assert grown[110, 1090] == 0 and not (grown & (1 - stone)).any()    # the corner stays the wall's: transparent
+    assert layout.wall_in_corners(cards, objects, inside, stone)[110, 1090] == 1   # what the older rule filled with it
+
+
+def test_a_printed_card_on_a_corner_is_filled_whole():
+    outline, inside, stone, _ = _rounded_corner()
+    cards = np.zeros_like(outline)
+    cards[100:260, 940:1100] = 1                       # a label read as text, over the corner: it sits on stone
+    grown = layout.outline_with_erased(outline, cards, cards, inside, stone)
+    assert grown[110, 1090] == 1 and not layout.wall_in_corners(cards, cards, inside, stone).any()
+
+
+def test_a_slab_with_square_corners_has_no_wall_in_its_corners():
+    inside = np.zeros((800, 1200), np.uint8)
+    inside[100:700, 100:1100] = 1
+    objects = np.zeros_like(inside)
+    objects[100:170, 500:700] = 1                      # a sticker on the top edge
+    assert not layout.wall_in_corners(np.zeros_like(objects), objects, inside, inside.copy()).any()
+
+
+def _open_book_with_inner_corners():
+    """(body, quads) of an open book whose two halves are rounded where they meet at the top (radius 100): the wall
+    shows in the notch between them at the seam (x = 800)."""
+    body = np.zeros((800, 1600), np.uint8)
+    body[100:700, 100:1500] = 1
+    body[100:200, 700:900] = 0                         # the two inner top corners, squared off ...
+    cv2.circle(body, (700, 200), 100, 1, -1)           # ... and rounded: the left half's top-right
+    cv2.circle(body, (900, 200), 100, 1, -1)           # the right half's top-left
+    body[:100] = 0
+    quads = [np.float32([[100, 100], [799, 100], [799, 699], [100, 699]]),
+             np.float32([[800, 100], [1499, 100], [1499, 699], [800, 699]])]
+    return body, quads
+
+
+def test_an_open_book_s_inner_corners_are_no_stone_of_either_half():
+    body, quads = _open_book_with_inner_corners()
+    stone = layout.stone_hulls(body, quads)
+    one = cv2.fillConvexPoly(np.zeros_like(body), cv2.convexHull(cv2.findNonZero(body)), 1)
+    assert body[105, 795] == 0 and one[105, 795] == 1                   # one hull over both halves bridges the notch
+    assert stone[105, 795] == 0 and stone[105, 805] == 0 and stone[400, 795] == 1
 
 
 def test_a_real_corner_chip_stays():
@@ -974,6 +1034,43 @@ def test_the_studio_slab_keeps_its_proportions_and_stands_on_the_feet():
         q = studio.face(w / h)
         assert np.allclose(q[2:], studio.FACE[2:], atol=0.5)        # the same foot line, the clips under it
         assert abs(studio.true_aspect(q) - w / h) < 0.03 * w / h
+
+
+def test_the_sawn_edge_runs_only_where_the_stone_reaches_the_slab_s_side():
+    alpha = np.ones((300, 500), np.float32)
+    alpha[:60, 440:] = 0                               # a broken top-right corner
+    rows = studio.edge_rows(alpha)
+    assert rows.shape == (300, studio.edge_width(500)) and rows[:60].max() == 0 and rows[60:].min() == 1
+
+
+def test_a_square_corner_s_pixel_rounding_is_no_broken_corner():
+    alpha = np.ones((300, 1600), np.float32)           # a strip of 8 columns
+    alpha[:2, -3:] = 0                                 # the outline's corner a pixel or two short of the side
+    assert (studio.edge_rows(alpha) == 1).all()
+
+
+def test_the_sawn_edge_strip_is_one_width_set_in_settings(monkeypatch):
+    assert studio.edge_width(1600) == 1600 // C.STUDIO_EDGE_STRIP and studio.edge_width(100) == C.STUDIO_EDGE_STRIP_MIN
+    monkeypatch.setattr(C, "STUDIO_EDGE_STRIP", 100)
+    assert studio.edge_width(1600) == 16 and studio.edge_rows(np.ones((10, 1600), np.float32)).shape == (10, 16)
+
+
+def test_a_whole_slab_s_sawn_edge_is_the_full_strip_as_before():
+    alpha = np.ones((300, 500), np.float32)
+    alpha[:, -1] = 0.2                                 # the photo's mixed last column: the stone still reaches the side
+    rows = studio.edge_rows(alpha)
+    assert rows.dtype == np.float32 and (rows == np.ones((300, studio.edge_width(500)), np.float32)).all()
+
+
+def test_the_studio_shows_no_sawn_edge_beside_a_broken_corner():
+    rgb, alpha = _slab(400, 650)
+    broken = alpha.copy()
+    broken[:120, 560:] = 0
+    whole_img, broken_img = studio.place([(rgb, alpha)]), studio.place([(rgb, broken)])
+    q = cv2.perspectiveTransform(studio.face(650 / 400)[None], np.float32([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))[0]
+    x, y = (int(round(v)) for v in studio.to_frame((q[1][0] + 4, q[1][1] + 15), q))     # on the edge face, near the top
+    assert np.abs(whole_img[y, x].astype(int) - broken_img[y, x].astype(int)).max() > 20
+    assert (broken_img[y, x] > 230).all()                           # the white backdrop, not stone or wall
 
 
 def test_the_old_slab_is_gone_and_the_clips_stay():

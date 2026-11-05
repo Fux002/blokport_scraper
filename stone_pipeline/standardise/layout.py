@@ -12,6 +12,7 @@ from PIL import Image
 
 from stone_pipeline.standardise import outline as openbook
 from stone_pipeline.standardise import marks as proto
+from stone_pipeline.standardise import studio
 
 HERE = Path(__file__).parent
 ROOM_DIR = HERE / "assets" / "rooms"   # the user's showroom, fixed assets (made once from their example photo)
@@ -78,10 +79,39 @@ def upscale(rgb, esr, factor):
     return np.clip(cv2.cvtColor(base, cv2.COLOR_LAB2RGB) * 255 + 0.5, 0, 255).astype(np.uint8)
 
 
-def outline_with_erased(outline, marks, inside):
-    """The slab's outline including what was erased on it: a card or sticker on the edge is not a bite out of the
-    stone, its place is filled with stone. Only within the fitted slab, so a mark on the floor never grows it."""
-    return outline | (marks & inside)
+def outline_with_erased(outline, cards, objects, inside, stone):
+    """The slab's outline including what was erased on it, inside the fitted slab (a mark on the floor never grows it):
+    a printed card or label (cards: the text marks) sits on the stone and is filled whole, also on a corner; an object
+    SAM did not count as stone (objects: foreign_objects) only within the stone's own hull (stone, one per slab): on an
+    edge it has stone on both sides of it, but where the stone itself stops short of the fitted corners (a rounded,
+    chipped or broken corner, an open book's inner corner) what the photo shows there is the wall behind, never stone;
+    it stays out, so the corner keeps its true shape."""
+    return outline | ((cards | (objects & stone)) & inside)
+
+
+def wall_in_corners(cards, objects, inside, stone):
+    """What the rule before OUTLINE_CHECKED counted as stone and this one leaves out: objects inside the fitted slab,
+    outside the stone's own hull, not under a card (the wall in a rounded or broken corner)."""
+    return objects & inside & (stone == 0) & (cards == 0)
+
+
+def stone_hulls(body, quads):
+    """The stone's own hull, one per slab: the convex hull of what SAM saw as stone inside each fitted slab, joined. One
+    hull over an open book would bridge the corners where its halves meet, and take the wall there in."""
+    out = np.zeros_like(body)
+    for q in quads:
+        part = body & cv2.fillConvexPoly(np.zeros_like(body), q.astype(np.int32), 1)
+        if part.any():
+            cv2.fillConvexPoly(out, cv2.convexHull(cv2.findNonZero(part)), 1)
+    return out
+
+
+def side_reached(outline, q, aspect):
+    """Whether the stone reaches the slab's right side on every row, squared as the slab is: beside a broken right corner
+    it does not, and the studio draws no sawn edge there (studio.edge_rows), where the rule before OUTLINE_CHECKED drew
+    one from the wall."""
+    flat, _ = openbook._flat(outline.astype(np.float32), q, aspect)
+    return studio.edge_rows(flat).min() == 1
 
 
 def hollow(alpha):
@@ -122,10 +152,26 @@ def two_stones(rgb, alpha):
             and (ring & (labels == piece)).sum() >= C.TWO_STONES_BORDER * ring.sum())
 
 
-def flat_slabs(rgb, seg, det, lama, size=None):
-    """One/two Flat slabs squared from the work copy rgb (a pair at one height), cleaned, or the reason (str) no whole
-    slab was found. size = (length, width): a slab shot at a steep angle is squared to it. The alpha is the slab's own
-    outline: a chipped corner shows the plate, never the warehouse behind it."""
+@dataclass(frozen=True)
+class Outline:
+    """The outline step of a photo (slab_outline): the fitted slabs and what is stone in them, before anything is drawn."""
+    quads: list        # the fitted slabs (one, or an open book's two)
+    aspects: list      # each one's width/height to square it at (steep_aspect), None: its sides measure it
+    inside: np.ndarray   # the fitted slabs' area
+    hull: np.ndarray     # the convex hull of what SAM saw as stone (and the straps on it): where marks are read
+    stone: np.ndarray    # the stone's own hull, one per slab (stone_hulls): what an erased object may grow into
+    seen: np.ndarray     # what SAM saw as stone, closed over thin notches, holes filled
+    cards: np.ndarray    # the printed cards and labels (text marks)
+    objects: np.ndarray  # what SAM did not count as stone inside each slab (foreign_objects)
+
+    def outline(self):
+        """The slab's outline, what was erased on it included (outline_with_erased)."""
+        return outline_with_erased(self.seen, self.cards, self.objects, self.inside, self.stone)
+
+
+def slab_outline(rgb, seg, det, size=None):
+    """The outline step (Outline) of the work copy rgb, or the reason (str) no whole slab was found. size = (length,
+    width): a slab shot at a steep angle is squared to it."""
     quads, mask, raw, straps, reason = openbook.find_slabs(seg, det, rgb)
     if not quads:
         return reason
@@ -142,16 +188,38 @@ def flat_slabs(rgb, seg, det, lama, size=None):
     body = mask | (straps & inside)
     hull = cv2.fillConvexPoly(np.zeros_like(mask), cv2.convexHull(cv2.findNonZero(body)), 1)
     k = max(3, int(C.OUTLINE_CLOSE * max(rgb.shape[:2])))
-    seen = cv2.morphologyEx((raw | straps) & hull, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
-    contours, _ = cv2.findContours(seen, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    outline = cv2.drawContours(np.zeros_like(mask), contours, -1, 1, -1)
+    closed = cv2.morphologyEx((raw | straps) & hull, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    seen = cv2.drawContours(np.zeros_like(mask), contours, -1, 1, -1)
     # One erase of everything foreign: text is read on the photo as shot (a half-erased label no longer reads
     # as text), plus the labels/clips SAM did not count as stone inside each slab.
-    marks = proto.mark_mask(rgb, hull)                 # lamp reflections are the retouch model's (retouch.reflections)
+    cards = proto.mark_mask(rgb, hull)                 # lamp reflections are the retouch model's (retouch.reflections)
+    objects = np.zeros_like(mask)
     for q in quads:
-        marks |= proto.foreign_objects(q, raw)
-    rgb = proto.erase(rgb, marks, lama, hull)
-    outline = outline_with_erased(outline, marks, inside)
+        objects |= proto.foreign_objects(q, raw)
+    return Outline(quads, aspects, inside, hull, stone_hulls(body, quads), seen, cards, objects)
+
+
+def drawn_differently(found):
+    """Whether this version draws the slab differently from the rule before OUTLINE_CHECKED: the wall in a corner left
+    out, or the studio's sawn edge stopping beside a broken right corner."""
+    return bool(wall_in_corners(found.cards, found.objects, found.inside, found.stone).any()) or \
+        not side_reached(found.outline(), found.quads[-1], found.aspects[-1])
+
+
+def flat_slabs(rgb, seg, det, lama, size=None):
+    """One/two Flat slabs squared from the work copy rgb (a pair at one height), cleaned, or the reason (str) no whole
+    slab was found. size = (length, width): a slab shot at a steep angle is squared to it. The alpha is the slab's own
+    outline: a chipped corner shows the plate, never the warehouse behind it."""
+    found = slab_outline(rgb, seg, det, size)
+    return found if isinstance(found, str) else flats_from(rgb, found, lama)
+
+
+def flats_from(rgb, found, lama):
+    """flat_slabs from its outline step (slab_outline): the marks erased, each slab squared, a pair at one height."""
+    quads, aspects = found.quads, found.aspects
+    rgb = proto.erase(rgb, found.cards | found.objects, lama, found.hull)
+    outline = found.outline()
     flats, alphas, squares = [], [], []
     for q, aspect in zip(quads, aspects):
         f, H = openbook._flat(rgb, q, aspect)
