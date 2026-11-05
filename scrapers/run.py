@@ -1,8 +1,8 @@
-"""Scraper runner: run one site, all sites, or a custom order.
+"""Scraper runner: run one site, all sites, or a list of sites, all at once.
 
     python -m scrapers.run marenostone            # one
     python -m scrapers.run all                     # all (registry order)
-    python -m scrapers.run zucchi varsha           # explicit order
+    python -m scrapers.run zucchi varsha           # these
 
 Each scraper writes to data/<source>/<timestamp>/products.csv and declares its
 format (slab/block/tile) so blocks, slabs, and tiles are tagged correctly per
@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Type
 
 # Resolve the import path ONCE: `-m scrapers.run` gives the `scrapers.` package; running the file directly
@@ -29,8 +30,8 @@ except ImportError:
 
 # ONE source of truth: the sources the runner scrapes. A source is listed ONLY once it is fully onboarded --
 # a ScraperBase module AND an adapter + config entry (NEW_SOURCE_CHECKLIST). The class is DISCOVERED from the
-# module (mirrors adapter auto-discovery), so there is no import list to keep in sync. Order is the `all` run
-# order. slabware (helper) + stonevip (empty) are not scrapers.
+# module (mirrors adapter auto-discovery), so there is no import list to keep in sync. Order is the order
+# `all` reports results in (the sources scrape at once). slabware (helper) + stonevip (empty) are not scrapers.
 # develi / ferraz / temmer / tureks / brumagran have ScraperBase modules but NO adapter/config yet, so
 # they are deliberately NOT listed: an adapter-less source can never reach the pipeline (stone_pipeline.run
 # builds its work list from the ADAPTER registry), and listing one here would only let a `scrape all` on an
@@ -115,16 +116,28 @@ def _stderr_logger() -> logging.Logger:
 log = _stderr_logger()
 
 
+def _scrape(source: str) -> str | None:
+    """One source's run folder, or None once the cause is logged: one site failing never stops the others."""
+    try:
+        return str(run_one(source))
+    except SystemExit as exc:
+        log.error("%s exited: %s", source, exc)
+    except Exception as exc:
+        log.error("%s failed: %s", source, exc, exc_info=True)   # the traceback names the real cause
+    return None
+
+
 def run_many(order: list[str]) -> dict[str, str]:
-    results: dict[str, str] = {}
-    for source in order:
-        try:
-            results[source] = str(run_one(source))
-        except SystemExit as exc:
-            log.error("%s exited: %s", source, exc)
-        except Exception as exc:  # one site failing never stops the others
-            log.error("%s failed: %s", source, exc, exc_info=True)   # the traceback names the real cause
-    return results
+    """{source: run folder} of the sources in `order` that scraped, in that order. Every source scrapes at once, a
+    thread each: a scrape is waiting on one supplier's site, which it throttles itself, so side by side a run takes
+    its slowest source instead of the sum (2026-11-02: 79 min one after another, the slowest source 23). A source
+    listed twice scrapes once: two at once would write the same data/<source>/<timestamp> folder."""
+    sources = list(dict.fromkeys(order))
+    if not sources:
+        return {}
+    with ThreadPoolExecutor(max_workers=len(sources), thread_name_prefix="scrape") as pool:
+        folders = dict(zip(sources, pool.map(_scrape, sources)))
+    return {source: folder for source, folder in folders.items() if folder is not None}
 
 
 def main(argv: list[str] | None = None) -> int:
