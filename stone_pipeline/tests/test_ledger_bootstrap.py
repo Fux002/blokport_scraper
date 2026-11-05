@@ -43,3 +43,12 @@ def test_seed_variations_carry_medusa_ids(tmp_path):
         assert row["state"] == "synced"
         assert row["branch"] == "block"
         assert len(row["medusa_id"]) >= 20, f"medusa_id does not look like an id: {row['medusa_id']!r}"
+
+
+def test_seed_variations_is_dormant_when_the_export_is_absent(tmp_path):
+    # A factory reset deletes variants_export.csv on purpose (lifecycle._prune_stale_medusa_export: its stale
+    # ids would re-hydrate ghost variations), so the cold start that follows must seed zero variations from it,
+    # exactly as seed_products and restore_attribute_ids do when their file is absent, not crash the boot.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        assert seed_variations(ledger, tmp_path / "absent_variants_export.csv") == 0
+        assert ledger.execute("SELECT COUNT(*) AS n FROM variation").fetchone()["n"] == 0

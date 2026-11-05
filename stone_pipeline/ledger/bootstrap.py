@@ -89,8 +89,12 @@ def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
     `variation` table, each `synced` with its Medusa Id (the variation half of the
     bootstrap full load). branch is parsed from the Key; type is left blank, since
     the export does not carry the canonical stone type (the canonical-row populate
-    fills it later)."""
+    fills it later). Dormant when the export is absent (returns 0): a factory reset
+    deletes it so its stale ids can never re-hydrate ghost variations, and the cold
+    start after it seeds none until Medusa publishes a fresh one."""
     path = Path(path or SETTINGS.paths.variants_export_csv)
+    if not path.exists():
+        return 0
     now = now_iso()
     n = 0
     with path.open(encoding="utf-8-sig", newline="") as handle:
