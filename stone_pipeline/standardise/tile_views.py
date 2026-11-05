@@ -2,7 +2,7 @@
 
   close    the laid tiles from straight above at true scale, a few tiles and their joints, real pixels enlarged at most
            TILE_CLOSE_MAX_UPSCALE (the main view: the catalog card)
-  single   one tile, face-on, on white with the slab views' soft navy shadow (white; main when the faces are too few)
+  single   one tile, face-on, on white with the slab views' soft navy shadow (white)
   side     one tile lying flat in a 3/4 view, its true thickness on two sawn edges (studio)
   model    the 3D tile: the single face as a cut-out, its horizontal axis the listing's stored length
 
