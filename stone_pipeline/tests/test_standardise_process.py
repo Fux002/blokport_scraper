@@ -274,6 +274,9 @@ def test_the_cleaning_cap_is_its_own_monthly_budget_and_a_close_only_run_has_non
     _spent(s3, "2026-11", "20261101T000000Z", 99.0)                      # the process budget's runs never count here
     cap = proc.cleaning_cap(s3, "20261102T120000Z", close_only=False)
     assert cap.budget == 30.0 and cap.before == 0.0
+    assert cap.cap_error is select.CleanCapReached                         # reaching it ends only the clean step
+    with pytest.raises(select.CleanCapReached):
+        cap.reserve(31.0)
     assert proc.cleaning_cap(s3, "20261102T120000Z", close_only=True) is None
 
 
