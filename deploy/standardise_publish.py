@@ -64,10 +64,15 @@ def clicks_prefix(root):
 CLICK_FIELDS = ("sku", "listing", "source", "sha", "at")
 
 
+def click_record(sku, listing, source, sha, at):
+    """The owner's click to clean photo `sha` of a listing, each value in its named field (CLICK_FIELDS)."""
+    return {"sku": sku, "listing": listing, "source": source, "sha": sha, "at": at}
+
+
 def write_click(s3, root, sku, listing, source, sha, at):
     """Record the owner's click to clean photo `sha` of a listing (by SKU; one click per listing, a new one replaces it):
     the next photos run cleans it within the cleaning cap."""
-    record = dict(zip(CLICK_FIELDS, (sku, listing, source, sha, at)))
+    record = click_record(sku, listing, source, sha, at)
     s3.put_object(Bucket=S3_BUCKET, Key=f"{clicks_prefix(root)}{imagestore.sku_file(sku)}",
                   Body=json.dumps(record, sort_keys=True).encode(), ContentType="application/json")
 

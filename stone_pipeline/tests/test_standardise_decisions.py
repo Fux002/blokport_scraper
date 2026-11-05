@@ -1,6 +1,7 @@
 """The owner's decisions on the hidden listings (deploy.standardise_decisions), with an S3 stand-in: a "use" becomes the
 owner's choice record of the listing (by SKU), extended to the listings of the same stone that show the photo and never
-to a listing of another stone; a "remove" becomes a removal record by SKU. The judge's verdicts are never touched. Every
+to a listing of another stone; a "remove" becomes a removal record by SKU; a "clean" becomes the owner's click record by
+SKU, written and read only by publish.write_click and read_clicks. The judge's verdicts are never touched. Every
 decision is checked against the product sheet, the stored results and the stored decisions before anything is written;
 a bad or out-of-date one refuses the whole file. Applying twice changes nothing, a dry run writes nothing, nothing is
 applied while a photos run holds the lock, and nothing runs without an explicit environment."""
@@ -90,6 +91,10 @@ def _remove(key, at=AT, **extra):
     return {"id": key, "action": "remove", "source": "sentas", "at": at, **extra}
 
 
+def _clean(key, sha, at=AT, **extra):
+    return {"id": key, "action": "clean", "source": "sentas", "sha": sha, "at": at, **extra}
+
+
 def _apply(s3, decisions, listings=LISTINGS):
     dec.apply(s3, dec.plan(s3, decisions, listings, exclude=set()))
 
@@ -97,6 +102,10 @@ def _apply(s3, decisions, listings=LISTINGS):
 def _owner(s3, sku):
     key = pub.owner_key(ROOT, sku)
     return json.loads(s3.objects[key]) if key in s3.objects else None
+
+
+def _click(s3, sku):
+    return pub.read_clicks(s3, ROOT).get(sku)
 
 
 def _judged(s3):
@@ -138,6 +147,127 @@ def test_a_later_use_lifts_a_removal():
     _apply(s3, [_remove("one")])
     _apply(s3, [_use("one", B, at=LATER)])
     assert imagestore.owner_removed_key("SEN-ONE") not in s3.objects and _owner(s3, "SEN-ONE")["sha"] == B
+
+
+def test_a_clean_is_the_listing_s_click_record_by_sku_the_one_the_photos_run_reads():
+    s3 = _bucket()
+    judged = _judged(s3)
+    _apply(s3, [_clean("one", B)])
+    record = {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "sha": B, "at": AT}
+    assert pub.read_clicks(s3, ROOT) == {"SEN-ONE": record} and _judged(s3) == judged
+    assert select.click_problem(s3, select.Round(s3, C.RUN_TAG, "sentas"), LISTINGS[0], record, set()) is None
+    assert select.authorised({"kinds": ["light_reflection"]}, B, record) == "click"      # the run's own gate takes it
+
+
+def test_a_clean_is_stored_only_through_the_one_click_writer(monkeypatch):
+    s3, written = _bucket(), []
+    monkeypatch.setattr(dec, "write_click", lambda client, root, **record: written.append((client, root, record)))
+    _apply(s3, [_clean("one", B)])
+    assert written == [(s3, ROOT, {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "sha": B, "at": AT})]
+
+
+def test_a_decision_on_a_listing_whose_stored_click_cannot_be_read_is_refused():
+    # it has no time to order the new decision against: an operator looks at the file first
+    s3 = _bucket()
+    _apply(s3, [_clean("one", B)])
+    s3.objects[next(k for k in s3.objects if "/clicks/" in k)] = b"not json"
+    before, s3.written = dict(s3.objects), []
+    with pytest.raises(dec.InvalidDecisions, match="its stored click cannot be read"):
+        dec.plan(s3, [_use("one", A, at=LATER)], LISTINGS, exclude=set())
+    assert s3.objects == before
+
+
+def test_a_clean_lifts_the_owner_s_choice_and_the_choice_record_made_from_it():
+    # else the owner's earlier photo stays the listing's valid choice and the run never reaches the click
+    s3 = _bucket()
+    _apply(s3, [_use("one", A)])
+    s3.objects[f"{CHOSEN}one.json"] = json.dumps({"key": "one", "sha": A, "tag": C.RUN_TAG}).encode()
+    _apply(s3, [_clean("one", B, at=LATER)])
+    assert _owner(s3, "SEN-ONE") is None and f"{CHOSEN}one.json" not in s3.objects and _click(s3, "SEN-ONE")["sha"] == B
+
+
+def test_a_clean_lifts_a_removal():
+    s3 = _bucket()
+    _apply(s3, [_remove("one")])
+    _apply(s3, [_clean("one", B, at=LATER)])
+    assert imagestore.owner_removed_key("SEN-ONE") not in s3.objects and _click(s3, "SEN-ONE")["sha"] == B
+
+
+@pytest.mark.parametrize("later", [_use("one", A, at=LATER), _remove("one", at=LATER)])
+def test_a_later_use_or_removal_withdraws_the_click(later):
+    s3 = _bucket()
+    _apply(s3, [_clean("one", B)])
+    _apply(s3, [later])
+    assert _click(s3, "SEN-ONE") is None
+
+
+def test_a_later_clean_replaces_the_earlier_one():
+    s3 = _bucket()
+    _apply(s3, [_clean("one", A)])
+    _apply(s3, [_clean("one", B, at=LATER)])
+    assert _click(s3, "SEN-ONE") == {"sku": "SEN-ONE", "listing": "one", "source": "sentas", "sha": B, "at": LATER}
+
+
+@pytest.mark.parametrize("stored, older", [(_clean("one", B, at=LATER), _use("one", A)),
+                                          (_use("one", A, at=LATER), _clean("one", B)),
+                                          (_clean("one", B, at=LATER), _remove("one")),
+                                          (_remove("one", at=LATER), _clean("one", B))])
+def test_a_decision_older_than_a_stored_clean_or_than_what_a_clean_replaces_is_refused(stored, older):
+    s3 = _bucket()
+    _apply(s3, [stored])
+    before, s3.written = dict(s3.objects), []
+    with pytest.raises(dec.InvalidDecisions, match="older than the decision already stored"):
+        dec.plan(s3, [older], LISTINGS, exclude=set())
+    assert s3.objects == before
+
+
+def test_a_use_never_reaches_a_sibling_the_owner_asked_to_clean():
+    s3 = _bucket()
+    _apply(s3, [_clean("block-2", F)])
+    p = dec.plan(s3, [_use("block-1", F, at=LATER)], LISTINGS, exclude=set())
+    assert list(p.owner) == [pub.owner_key(ROOT, "SEN-BLOCK-1")]
+    assert "block-2: same stone as block-1, not reached: its own decision stands" in p.notes
+
+
+def test_applying_the_same_clean_again_writes_nothing_also_after_the_run_chose_a_photo():
+    s3 = _bucket()
+    decisions = [_clean("one", B), _clean("block-1", F)]
+    _apply(s3, [_use("one", A)])
+    s3.objects[f"{CHOSEN}one.json"] = json.dumps({"key": "one", "sha": A, "tag": C.RUN_TAG}).encode()
+    _apply(s3, [{**d, "at": LATER} for d in decisions])
+    s3.objects[f"{CHOSEN}one.json"] = json.dumps({"key": "one", "sha": B, "tag": C.CLEAN_TAG}).encode()  # its pass
+    before, s3.written = dict(s3.objects), []
+    assert dec.plan(s3, [{**d, "at": LATER} for d in decisions], LISTINGS, exclude=set()).empty()
+    _apply(s3, [{**d, "at": LATER} for d in decisions])
+    assert s3.written == [] and s3.objects == before
+
+
+@pytest.mark.parametrize("store", ["owner", "removed"])
+def test_a_decision_on_a_listing_whose_stored_choice_or_removal_cannot_be_read_is_refused(store):
+    # read through the photo process's isolated reader (publish.records_by_sku), never a bare read that crashes here
+    s3 = _bucket()
+    key = pub.owner_key(ROOT, "SEN-ONE") if store == "owner" else imagestore.owner_removed_key("SEN-ONE")
+    s3.objects[key] = b"{broken"
+    before, s3.written = dict(s3.objects), []
+    with pytest.raises(dec.InvalidDecisions, match=f"cannot be read .*look at {key} first"):
+        dec.plan(s3, [_clean("one", B, at=LATER)], LISTINGS, exclude=set())
+    assert s3.objects == before
+
+
+def test_a_use_never_reaches_a_sibling_whose_stored_choice_cannot_be_read():
+    s3 = _bucket()
+    s3.objects[pub.owner_key(ROOT, "SEN-BLOCK-2")] = b"[1, 2]"
+    p = dec.plan(s3, [_use("block-1", F)], LISTINGS, exclude=set())
+    assert list(p.owner) == [pub.owner_key(ROOT, "SEN-BLOCK-1")]
+    assert "block-2: same stone as block-1, not reached: its own decision stands" in p.notes
+
+
+def test_a_conflict_photo_is_refused_while_a_partner_s_stored_choice_cannot_be_read():
+    # the partner may hold it (the photos run leaves such a listing exactly as published): never a second holder
+    s3 = _bucket()
+    s3.objects[pub.owner_key(ROOT, "SEN-LEATHERED")] = b"{broken"
+    with pytest.raises(dec.InvalidDecisions, match="leathered's stored owner choice cannot be read"):
+        dec.plan(s3, [_use("polished", E)], LISTINGS, exclude=set())
 
 
 def test_a_removal_of_a_listing_whose_sku_has_slashes_is_one_record():
@@ -240,6 +370,12 @@ def test_a_dry_run_names_every_listing_a_use_reaches_and_every_conflict_partner(
     (_use("one", "not-a-sha"), "sha"),
     (_use("one", A, at="yesterday"), "UTC timestamp"),
     (_use("one", A, at="2026-11-02T10:00:00+02:00"), "UTC timestamp"),
+    (_clean("one", B, tag=C.RUN_TAG), "fields"),
+    (_clean("one", D), "not one of the listing's photos"),
+    (_clean("one", "not-a-sha"), "sha"),
+    (_clean("one", B, source="zucchi"), "source"),
+    (_clean("three", "c" * 64), "a cleaned copy cannot fix"),
+    (_clean("leathered", E), "conflict photo"),
 ])
 def test_a_bad_decision_refuses_the_whole_file_and_nothing_is_written(bad, why):
     s3 = _bucket()
@@ -256,6 +392,15 @@ def test_a_listing_decided_twice_in_one_file_is_refused():
 def test_an_excluded_photo_is_refused():
     with pytest.raises(dec.InvalidDecisions, match="on the exclude list"):
         dec.plan(_bucket(), [_use("one", A)], LISTINGS, exclude={A})
+    with pytest.raises(dec.InvalidDecisions, match="on the exclude list"):
+        dec.plan(_bucket(), [_clean("one", A)], LISTINGS, exclude={A})
+
+
+def test_a_clean_of_a_photo_the_judge_passed_is_refused():
+    s3 = _bucket()
+    s3.objects[f"{RUN}judged/{B}.json"] = _verdict("pass")
+    with pytest.raises(dec.InvalidDecisions, match="a cleaned copy cannot fix"):
+        dec.plan(s3, [_clean("one", B)], LISTINGS, exclude=set())
 
 
 def test_an_old_file_applied_again_never_undoes_a_later_decision():
@@ -306,11 +451,12 @@ def _main(monkeypatch, tmp_path, decisions, dry="false", lock=None, env="product
 
 
 def test_a_dry_run_prints_the_environment_and_the_plan_and_writes_nothing(monkeypatch, tmp_path, capsys):
-    rc, s3, held = _main(monkeypatch, tmp_path, [_use("one", B), _remove("three")], dry="true")
+    rc, s3, held = _main(monkeypatch, tmp_path, [_use("one", B), _remove("three"), _clean("two", D)], dry="true")
     out = capsys.readouterr().out
     assert rc == 0 and s3.written == [] and held == []
     assert out.startswith(f"==> environment {dec.ENV_NAME}, bucket {dec.S3_BUCKET}")
     assert "owner choice" in out and "SEN-THREE" in out and "DRY_RUN" in out
+    assert f"clean SEN-TWO (two): {D[:12]}" in out and "1 cleans" in out
 
 
 def test_the_decisions_are_applied_inside_the_run_lock(monkeypatch, tmp_path):
