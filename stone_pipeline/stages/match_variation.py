@@ -8,9 +8,9 @@ matcher via STANDALONE_MATCHERS instead. The matcher blocks on category, then ty
 and colour; the input is variety_match_key; aliases participate in every tier.
 
 Outcomes (section 5A.3):
-  - at or above auto_accept: accept, set method to the winning tier, write the
-    scraped spelling back as a new alias (in-memory for this run AND persisted to
-    state/ for the next) so it is an exact alias hit next time.
+  - at or above auto_accept: accept, set method to the winning tier; a phonetic or
+    fuzzy accept also writes the scraped spelling back as a new alias (persisted to
+    state/ for the next run) so it is an exact alias hit next time.
   - in the review band: route to review with the top candidates.
   - below the floor or no candidate: route to the tree-gap queue as
     missing_variation, carrying the nearest candidate and score.
@@ -33,7 +33,7 @@ from stone_pipeline.matching.engine import VariationEngine, VariationMatch
 from stone_pipeline.matching.index import build_variation_index
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import ReferenceData
-from stone_pipeline.state.writeback import WriteBack, load_alias_writeback
+from stone_pipeline.state.writeback import WriteBack, is_learned, load_alias_writeback
 
 log = logfmt.get_logger("match_variation")
 
@@ -296,14 +296,14 @@ class VariationStage:
             row.variation_name = match.canonical
             row.variation_confidence = Confidence(match.confidence).name
             row.variation_method = match.method
-            # write-back: a non-exact confirmed match learns the scraped spelling, PERSISTED for the
-            # next run (section 8.4). NOT added to the live index mid-run: doing so made a later
-            # identical query resolve via 'exact'(high) instead of 'fuzzy'(medium) purely by batch
-            # order -- same cid, but an order-dependent method/confidence that skews review routing.
-            # Same-run repeats now resolve identically; the persisted alias takes effect next run.
-            if match.method not in ("exact", "override"):
-                # record the learning method as provenance -> a persisted fuzzy/phonetic guess is auditable
-                # and reversible (state.writeback.forget_alias), never an invisible permanent exact alias.
+            # write-back: a confirmed GUESS (phonetic/fuzzy, writeback.is_learned) learns the scraped spelling,
+            # PERSISTED for the next run (section 8.4). A bind the seed already decides (exact, narrowed by
+            # name/type/colour/origin, projection, override) is re-derived every run, so it is never saved: a
+            # saved pick would outlive a later seed correction. NOT added to the live index mid-run: doing so
+            # made a later identical query resolve via 'exact'(high) instead of 'fuzzy'(medium) purely by
+            # batch order. Same-run repeats resolve identically; the persisted alias takes effect next run.
+            if is_learned(match.method):
+                # the learning method is recorded as provenance -> auditable and reversible (forget_alias)
                 self.writeback.add_alias(match.cid, query, method=match.method)
             return
 

@@ -1,6 +1,6 @@
 """Outbound write-back (section 8.4).
 
-A confirmed fuzzy/projection/review variation match appends the scraped spelling
+A confirmed phonetic or fuzzy variation match appends the scraped spelling
 to that variation's alias list. This is what makes the system more consistent every
 run instead of re-reviewing the same names forever. Write-backs are recorded in the
 manifest. (Origin is NOT written back automatically -- origin_map.csv is hand-maintained
@@ -11,10 +11,16 @@ aliases are appended to state/alias_writeback.csv. The variation index loader
 reads this file in addition to the exports, so the next run resolves the spelling
 as an exact alias hit for free.
 
-Each row records the MATCH METHOD that learned it (fuzzy / phonetic / projection_*), so a
-learned alias is auditable and distinguishable from a hand-curated export alias, and can be
-reversed with `forget_alias` if a wrong high-scoring fuzzy guess was persisted. Recording the
-method does NOT change matching: the loader still yields the same (variation_id, alias) pairs.
+Each row records the MATCH METHOD that learned it, so a learned alias is auditable and
+distinguishable from a hand-curated export alias, and can be reversed with `forget_alias` if a
+wrong high-scoring fuzzy guess was persisted.
+
+ONLY a learned GUESS is kept (is_learned): a phonetic or fuzzy match, the tiers where the index
+could not name the variety by a known surface. Every other bind (exact, exact narrowed by name,
+type, colour or origin, projection, override) is re-derived from the seed on every run, so
+persisting it adds nothing but stickiness: a later seed correction (an alias moved to its right
+owner) would be undone by the saved pick. Rows recorded before this rule are not applied and are
+dropped from the file on the next flush.
 """
 
 from __future__ import annotations
@@ -24,10 +30,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.core import logfmt
 from stone_pipeline.core.csvio import atomic_write
+
+log = logfmt.get_logger("writeback")
 
 ALIAS_WRITEBACK = "alias_writeback.csv"
 _FIELDS = ["variation_id", "alias", "method"]
+
+# The engine tiers that GUESS (matching/engine.py: "phonetic" tier 4, "fuzzy" / "fuzzy_origin" tiers 5-6).
+LEARNED_TIERS = ("phonetic", "fuzzy")
+# The prefixes the matcher stage puts in front of an engine method (stages/match_variation.py:
+# _match_identity "clean_variety_", the operator-type retry "operator_type_"); the tier is what follows.
+_METHOD_WRAPPERS = ("clean_variety_", "operator_type_")
+
+
+def is_learned(method: str) -> bool:
+    """True when `method` is a guess worth keeping as an alias: its engine tier is phonetic or fuzzy."""
+    method = (method or "").strip()
+    for wrapper in _METHOD_WRAPPERS:
+        if method.startswith(wrapper):
+            method = method[len(wrapper):]
+            break
+    return method.startswith(LEARNED_TIERS)
 
 
 def _writeback_path(name: str) -> Path:
@@ -52,20 +77,23 @@ class WriteBack:
         self.aliases.append((variation_id, alias, (method or "").strip()))
 
     def flush(self, path: Path | None = None) -> int:
-        """Persist newly-learned aliases, skipping ones already recorded. Returns the count actually
-        written. Idempotent: with nothing new it does not touch the file, so a re-run is a no-op. When
-        there IS something new the whole file is rewritten under the current schema (this also upgrades a
-        legacy two-column file in place), which is deterministic -- same runs produce the same file."""
-        if not self.aliases:
-            return 0
+        """Persist newly-learned aliases, skipping ones already recorded, and drop recorded rows that are
+        not learned guesses (is_learned). Returns the count of new aliases written. Idempotent: with nothing
+        new and nothing to drop it does not touch the file, so a re-run is a no-op. Otherwise the whole file
+        is rewritten under the current schema, which is deterministic -- same runs produce the same file."""
         path = Path(path or _writeback_path(ALIAS_WRITEBACK))
-        existing = load_alias_writeback_records(path)
-        existing_keys = {(vid, alias.casefold()) for vid, alias, _ in existing}
+        recorded = load_alias_writeback_records(path)
+        kept = [record for record in recorded if is_learned(record[2])]
+        kept_keys = {(vid, alias.casefold()) for vid, alias, _ in kept}
         new = [(vid, alias, method) for vid, alias, method in self.aliases
-               if (vid, alias.casefold()) not in existing_keys]
-        if not new:
+               if is_learned(method) and (vid, alias.casefold()) not in kept_keys]
+        dropped = len(recorded) - len(kept)
+        if not new and not dropped:
             return 0
-        _write_records(path, existing + new)
+        if dropped:
+            log.info("alias write-back: dropped rows that are not learned guesses",
+                     extra={"extra_fields": {"dropped": dropped, "kept": len(kept)}})
+        _write_records(path, kept + new)
         return len(new)
 
 
@@ -99,9 +127,9 @@ def load_alias_writeback_records(path: Path | None = None) -> list[tuple[str, st
 
 
 def load_alias_writeback(path: Path | None = None) -> list[tuple[str, str]]:
-    """The (variation_id, alias) pairs the matcher applies -- the stable contract the index loader reads.
-    Unchanged by the method column: provenance is for audit, not matching."""
-    return [(vid, alias) for vid, alias, _ in load_alias_writeback_records(path)]
+    """The (variation_id, alias) pairs the matcher applies -- the stable contract the index loader reads:
+    the learned guesses only, so a row recorded before the rule never binds even before the file is healed."""
+    return [(vid, alias) for vid, alias, method in load_alias_writeback_records(path) if is_learned(method)]
 
 
 def forget_alias(variation_id: str, alias: str, path: Path | None = None) -> bool:

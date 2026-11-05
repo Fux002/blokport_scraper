@@ -41,7 +41,7 @@ def test_records_the_learning_method_as_provenance(tmp_path, monkeypatch):
 def test_forget_alias_reverses_a_wrong_learn(tmp_path, monkeypatch):
     path = _path(tmp_path, monkeypatch)
     w = wb.WriteBack()
-    w.add_alias("vid-1", "Keep This", method="projection_compact")
+    w.add_alias("vid-1", "Keep This", method="phonetic")
     w.add_alias("vid-2", "Wrong Guess", method="fuzzy")
     w.flush()
 
@@ -57,15 +57,15 @@ def test_forget_on_absent_file_is_a_no_op(tmp_path, monkeypatch):
 
 
 def test_flush_upgrades_a_legacy_two_column_file(tmp_path, monkeypatch):
-    # a pre-existing 2-column file (variation_id, alias) still loads; a new learning rewrites it under the
-    # current 3-column schema, method blank for the old rows, and the old row is not duplicated.
+    # a pre-existing 2-column file (variation_id, alias) still reads; its rows carry no learning method, so
+    # they are not provably guesses: not applied, and dropped when a new learning rewrites the file under the
+    # current 3-column schema.
     path = _path(tmp_path, monkeypatch)
     path.write_text("variation_id,alias\nvid-old,Legacy Name\n", encoding="utf-8")
-    assert wb.load_alias_writeback(path) == [("vid-old", "Legacy Name")]
+    assert wb.load_alias_writeback_records(path) == [("vid-old", "Legacy Name", "")]
+    assert wb.load_alias_writeback(path) == []
 
     w = wb.WriteBack()
-    w.add_alias("vid-old", "Legacy Name", method="fuzzy")   # already present -> not re-added
     w.add_alias("vid-new", "New Name", method="phonetic")
     assert w.flush() == 1
-    assert wb.load_alias_writeback_records(path) == [
-        ("vid-old", "Legacy Name", ""), ("vid-new", "New Name", "phonetic")]
+    assert wb.load_alias_writeback_records(path) == [("vid-new", "New Name", "phonetic")]

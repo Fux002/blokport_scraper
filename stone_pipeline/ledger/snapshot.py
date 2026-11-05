@@ -303,7 +303,7 @@ def wipe_artifacts(env: str = ENV_NAME, outputs_dir=None, data_dir=None) -> dict
 
 
 # -- learned-alias write-back (matcher consistency) ---------------------------
-# state/alias_writeback.csv holds confirmed fuzzy/phonetic/projection spellings the matcher learned, so a
+# state/alias_writeback.csv holds confirmed fuzzy/phonetic spellings the matcher learned, so a
 # next run resolves them as exact hits instead of re-reviewing (section 8.4). It lives on the task's
 # EPHEMERAL disk, so a roll dropped it and the accumulated consistency was lost. Persist it like the ledger.
 # ONLY this file is durable: state/ also holds magnitude_baselines.json, a DATA-derived drift baseline that
