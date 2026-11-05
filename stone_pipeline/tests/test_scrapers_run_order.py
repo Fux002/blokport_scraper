@@ -100,7 +100,7 @@ def test_a_source_listed_twice_is_scraped_once(monkeypatch):
             return "/data/once/1"
 
     monkeypatch.setattr(scrapers_run, "REGISTRY", {"once": Once})
-    assert scrapers_run.run_many(["once", "once"]) == {"once": "/data/once/1"}
+    assert scrapers_run.main(["once", "once"]) == 0
     assert len(runs) == 1
 
 

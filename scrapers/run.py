@@ -99,7 +99,7 @@ class _LiveStderr(logging.StreamHandler):
 
 
 def _stderr_logger() -> logging.Logger:
-    """The runner's own logger, on STDERR with the per-scraper line format (ScraperBase._make_logger). The
+    """The runner's own logger, on STDERR, each line naming its source in the message. The
     produce runner streams only the subprocess's stderr to CloudWatch, so a failure printed to stdout never
     reached the operator: a live scrape aborted with 'live scrape failed' and no cause anywhere in the logs.
     Everything about a source's outcome goes through here so the cause lands next to the scraper's own lines."""
@@ -117,7 +117,7 @@ log = _stderr_logger()
 
 
 def _scrape(source: str) -> str | None:
-    """One source's run folder, or None once the cause is logged: one site failing never stops the others."""
+    """One source's products file, or None once the cause is logged: one site failing never stops the others."""
     try:
         return str(run_one(source))
     except SystemExit as exc:
@@ -128,16 +128,14 @@ def _scrape(source: str) -> str | None:
 
 
 def run_many(order: list[str]) -> dict[str, str]:
-    """{source: run folder} of the sources in `order` that scraped, in that order. Every source scrapes at once, a
-    thread each: a scrape is waiting on one supplier's site, which it throttles itself, so side by side a run takes
-    its slowest source instead of the sum (2026-11-02: 79 min one after another, the slowest source 23). A source
-    listed twice scrapes once: two at once would write the same data/<source>/<timestamp> folder."""
-    sources = list(dict.fromkeys(order))
-    if not sources:
+    """{source: products file} of the distinct sources in `order` that scraped, in that order. Every source scrapes
+    at once, a thread each: a scrape is waiting on one supplier's site, which it throttles itself, so side by side a
+    run takes its slowest source instead of the sum (2026-11-02: 79 min one after another, the slowest source 23)."""
+    if not order:
         return {}
-    with ThreadPoolExecutor(max_workers=len(sources), thread_name_prefix="scrape") as pool:
-        folders = dict(zip(sources, pool.map(_scrape, sources)))
-    return {source: folder for source, folder in folders.items() if folder is not None}
+    with ThreadPoolExecutor(max_workers=len(order), thread_name_prefix="scrape") as pool:
+        files = dict(zip(order, pool.map(_scrape, order)))
+    return {source: file for source, file in files.items() if file is not None}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         print(__doc__)
         print("registered:", sorted(REGISTRY))
         return 0
-    order = _enabled_order() if argv == ["all"] else argv
+    # a source asked twice scrapes once: two scrapes of it at once would write the same data/<source>/<timestamp>
+    order = _enabled_order() if argv == ["all"] else list(dict.fromkeys(argv))
     results = run_many(order)
     log.info("scraped %d source(s): %s", len(results),
              ", ".join(f"{src} -> {path}" for src, path in results.items()) or "none")
