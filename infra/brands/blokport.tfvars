@@ -71,8 +71,12 @@ dev_standardise_clean       = false
 prod_standardise_clean      = false
 dev_standardise_budget_usd  = "100"
 prod_standardise_budget_usd = "100"
-dev_standardise_gpu_vcpus   = 32
-prod_standardise_gpu_vcpus  = 128
+# The clean-up edits' own monthly cap (owner 2026-11-05: $30 prod, $10 dev), apart from the budget above. It pays only
+# while dev_/prod_standardise_clean is on.
+dev_standardise_clean_budget_usd  = "10"
+prod_standardise_clean_budget_usd = "30"
+dev_standardise_gpu_vcpus         = 32
+prod_standardise_gpu_vcpus        = 128
 # The overnight photos run (deploy.start_photos_run, infra/modules/sync_service/photos_nightly.tf): the schedule exists
 # in both environments and is off until the owner switches it on; on or off is one apply that never rolls the service.
 dev_photos_nightly  = false

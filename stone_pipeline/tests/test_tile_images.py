@@ -653,7 +653,7 @@ def test_a_tile_s_problem_is_on_the_run_s_problem_list(monkeypatch):
     monkeypatch.setattr(proc, "run", lambda *a, **k: ([], {"chosen": [], "tracked": [], "pending": []}))
     monkeypatch.setattr(proc.publish, "publish", lambda *a, **k: {"changed": True, "tiles_hidden": {"x": "no slab"},
                                                              "tiles_problems": {"t": "RuntimeError: boom"}})
-    summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 60, say=lambda m: None)
+    summary = proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 60, say=lambda m: None)
     kept = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
     assert summary["problems"] == 1 and kept["problem_list"] == ["tile t: RuntimeError: boom"]
     assert kept["tiles_hidden"] == {"x": "no slab"}

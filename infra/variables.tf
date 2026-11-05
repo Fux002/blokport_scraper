@@ -230,6 +230,18 @@ variable "prod_standardise_budget_usd" {
   description = "SCRAPER_STANDARDISE_BUDGET_USD in prod: the month's hosted budget (USD), the owner's number. Empty = the process refuses to start."
 }
 
+variable "dev_standardise_clean_budget_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_CLEAN_BUDGET_USD in dev: the month's cap of the clean-up edits and their checks (USD). Empty = no edit is paid."
+}
+
+variable "prod_standardise_clean_budget_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_CLEAN_BUDGET_USD in prod: the month's cap of the clean-up edits and their checks (USD), the owner's number. Empty = no edit is paid."
+}
+
 variable "dev_standardise_gpu_vcpus" {
   type        = number
   default     = 32

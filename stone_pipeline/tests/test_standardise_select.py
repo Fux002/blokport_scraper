@@ -179,6 +179,47 @@ def test_a_paid_edit_whose_check_was_not_made_is_reused(monkeypatch):
     assert edits == [] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
 
 
+def test_an_edit_is_reserved_with_its_check_so_the_cap_never_sends_one_it_cannot_check(monkeypatch):
+    # owner 2026-11-05: the cleaning has its own cap; a copy paid for and then left unchecked would be money for nothing
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    spend = sel.Spend(C.CLEAN_PRICE_USD["nano2"] + C.JUDGE_PRICE_USD - 0.01)       # covers the edit, not its check too
+    with pytest.raises(sel.SpendCapReached):
+        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == [] and spend.spent == 0 and spend.reserved == 0 and spend.capped
+
+
+def test_every_paid_clean_up_call_is_listed_for_the_listing_that_asked_for_it(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    listed = [(u["model"], u["call"], u["usd"]) for u in spend.uses]
+    assert listed == [("nano2", "edit", C.CLEAN_PRICE_USD["nano2"]), ("nano2", "check", 0.02),
+                      ("kontext", "edit", C.CLEAN_PRICE_USD["kontext"]), ("kontext", "check", 0.02)]
+    assert {(u["source"], u["sha"], u["sku"], u["listing"]) for u in spend.uses} == {("sentas", B, "SEN-1", "slab-1")}
+    assert all(u["at"] for u in spend.uses) and spend.spent == pytest.approx(sum(u["usd"] for u in spend.uses))
+    assert spend.reserved == pytest.approx(0, abs=1e-9)                       # every reservation settled or released
+
+
+def test_a_failed_edit_is_listed_at_its_price_and_its_check_s_share_goes_back_to_the_cap(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(TimeoutError("no answer")))
+    spend = sel.Spend(10)
+    with pytest.raises(TimeoutError):
+        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert [(u["call"], u["usd"], u.get("failed")) for u in spend.uses] == [("edit", C.CLEAN_PRICE_USD["nano2"], True)]
+    assert spend.reserved == pytest.approx(0, abs=1e-9)
+
+
+def test_an_edit_collected_in_a_later_run_has_its_check_reserved_then(monkeypatch):
+    # the run that sent it could not collect it; the next run's check is paid from the cap like any call, and listed
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{CL}attempts/{B}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
+    rounds[1][1]["sentas"].requested.add(f"{B}.nano2")
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == [] and [(u["call"], u["usd"]) for u in spend.uses] == [("check", 0.02)] and spend.reserved == 0
+
+
 def test_a_listing_not_fully_judged_is_never_cleaned(monkeypatch):
     monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned before judging"))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
@@ -376,7 +417,7 @@ def test_the_budget_counts_what_earlier_runs_of_the_month_spent():
 
 def test_the_run_s_total_is_kept_after_every_change_a_reserve_counting_as_spent():
     kept = []
-    spend = sel.Spend(1.0, save=kept.append)
+    spend = sel.Spend(1.0, save=lambda total, uses: kept.append(total))
     spend.reserve(0.14)
     spend.settle(0.14, 0.02)
     assert kept == [pytest.approx(0.14), pytest.approx(0.02)]
@@ -410,7 +451,7 @@ def test_the_spend_is_saved_and_the_month_summed_outside_its_lock():
             spend._lock.release()
         held.append(not got)
         return 0.0
-    spend = sel.Spend(10, save=lambda total: free())
+    spend = sel.Spend(10, save=lambda total, uses: free())
     spend.others = free
     spend.reserve(0.14)
     spend.settle(0.14, 0.02)
@@ -421,7 +462,7 @@ def test_the_last_total_saved_is_the_latest_even_when_saves_overlap():
     import threading
     saved, gate = [], threading.Event()
 
-    def save(total):
+    def save(total, uses):
         if not saved:
             gate.wait(0.5)                                  # the first save is slow
         saved.append(total)

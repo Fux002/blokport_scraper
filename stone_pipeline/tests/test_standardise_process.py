@@ -252,6 +252,44 @@ def test_two_budgets_keep_their_runs_apart():
     assert f"{proc.spend_prefix('another-spend', '2026-11')}20261102T120000Z.json" in s3.objects
 
 
+def test_each_run_s_spend_file_lists_its_paid_calls():
+    s3 = _S3()
+    spend = proc.month_spend(s3, "20261102T120000Z", 10.0, C.CLEAN_SPEND_DIR)
+    spend.reserve(0.5)
+    spend.settle(0.5, 0.12)
+    spend.record({"call": "edit", "usd": 0.12})
+    stored = json.loads(s3.objects[f"{proc.spend_prefix(C.CLEAN_SPEND_DIR, '2026-11')}20261102T120000Z.json"]["Body"])
+    assert stored["usd"] == pytest.approx(0.12) and [u["call"] for u in stored["uses"]] == ["edit"]
+
+
+def test_without_a_cleaning_cap_no_edit_can_be_paid_and_the_run_says_so_once(monkeypatch, capsys):
+    monkeypatch.setattr(C, "CLEAN_BUDGET_USD", None)
+    assert proc.cleaning_cap(_S3(), "20261102T120000Z", close_only=False) is None
+    assert capsys.readouterr().out.count("SCRAPER_STANDARDISE_CLEAN_BUDGET_USD unset") == 1
+
+
+def test_the_cleaning_cap_is_its_own_monthly_budget_and_a_close_only_run_has_none(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_BUDGET_USD", 30.0)
+    s3 = _S3()
+    _spent(s3, "2026-11", "20261101T000000Z", 99.0)                      # the process budget's runs never count here
+    cap = proc.cleaning_cap(s3, "20261102T120000Z", close_only=False)
+    assert cap.budget == 30.0 and cap.before == 0.0
+    assert cap.cap_error is select.CleanCapReached                         # reaching it ends only the clean step
+    with pytest.raises(select.CleanCapReached):
+        cap.reserve(31.0)
+    assert proc.cleaning_cap(s3, "20261102T120000Z", close_only=True) is None
+
+
+def test_the_summary_carries_the_cleaning_cap_s_spend():
+    cap = select.Spend(30.0, others=lambda: 4.0)
+    cap.reserve(0.26)
+    cap.settle(0.26, 0.14)
+    cap.record({"call": "edit", "usd": 0.12})
+    assert proc.clean_summary(cap) == {"clean_run_spent_usd": 0.14, "clean_month_spent_usd": 4.14, "clean_budget_usd": 30.0,
+                                       "clean_budget_reached": False, "clean_uses": 1}
+    assert set(proc.clean_summary(None).values()) == {None}
+
+
 def _configured(monkeypatch):
     for name, value in (("SCRAPER_GPU_QUEUE", "q"), ("SCRAPER_STANDARDISE_JOBDEF", "jd"), ("FAL_KEY", "k")):
         monkeypatch.setenv(name, value)
@@ -445,12 +483,12 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
     cleared, worked = [], []
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: cleared.append(run_id) or [])
 
-    def run(batch, sel, spend, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
         return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"]}
     monkeypatch.setattr(proc, "run", run)
     import time
-    summary = proc.process(s3, None, select.Spend(5.0, others=lambda: 1.0), "R1", time.monotonic() + 3600, say=lambda m: None)
+    summary = proc.process(s3, None, select.Spend(5.0, others=lambda: 1.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
     assert cleared == ["R1"] and worked == ["new"]                       # an earlier run's jobs are stopped first
     assert summary["listings"] == 1 and summary["pending"] == 1 and summary["problems"] == 1 and summary["removed"] == 1
     assert summary["published"]["changed"] and summary["month_spent_usd"] == 1.0
@@ -467,12 +505,12 @@ def test_the_run_hands_the_live_listings_choices_to_the_gpu_so_an_older_outline_
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     seen = {}
 
-    def run(batch, sel, spend, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(listings=sel.listings, todo=sel.gpu_todo())
         return [], {"chosen": [], "tracked": [], "pending": []}
     monkeypatch.setattr(proc, "run", run)
     import time
-    proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None)
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
     assert seen == {"listings": [], "todo": {"sentas": [A]}}         # its listing not picked; its photo checked once
 
 
@@ -486,14 +524,14 @@ def test_the_run_reads_the_owner_s_choices_by_sku_and_the_conflicts_the_produce_
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     seen, handed = {}, {}
 
-    def run(batch, sel, spend, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(owner=sel.owner, conflicts=sel.conflicts)
         return [], {"chosen": [], "tracked": [], "pending": []}
     monkeypatch.setattr(proc, "run", run)
     monkeypatch.setattr(proc.publish, "publish",
                         lambda s3, root, sheet, photos, say, assigned: handed.update(assigned) or {"changed": False})
     import time
-    proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None)
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
     assert seen["owner"] == {"SEN-MINE": _owned(D)} and seen["conflicts"] == {("sentas", D): ("mine", "partner")}
     assert handed == {("sentas", D): ["SEN-MINE"]}
 
@@ -507,14 +545,14 @@ def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     seen = []
 
-    def run(batch, sel, spend, run_id, deadline, say=print):
+    def run(batch, sel, spend, clean, run_id, deadline, say=print):
         time.sleep(0.2)                                                     # the window (0.05 s) ends while working
         with pytest.raises(select.Halted, match="work window"):
             spend.reserve(0.01)
         seen.append(1)
         return [], {"chosen": [], "tracked": [], "pending": []}
     monkeypatch.setattr(proc, "run", run)
-    proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 0.05, say=lambda m: None)
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 0.05, say=lambda m: None)
     assert seen == [1]
 
 
@@ -648,7 +686,7 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
     found = proc.todo(listings, records, set(), proc.whole_slabs(s3, records), set(), {}, picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, owner, {}, rounds,
                            proc.live_choices(listings, records, set(), decided))
-    proc.run(None, sel, select.Spend(5.0), "R1", float("inf"), say=lambda m: None)
+    proc.run(None, sel, select.Spend(5.0), None, "R1", float("inf"), say=lambda m: None)
     pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     return sent, asked
 
@@ -782,7 +820,7 @@ def _process(monkeypatch, s3, mode, redraw=None, verdict=None):
     spend = select.Spend(5.0)
     if mode == "halted":
         spend.halt("the run lock was taken over")
-    proc.process(s3, None, spend, "R2", time.monotonic() + 3600, say=lambda m: None, close_only=mode == "close-only")
+    proc.process(s3, None, spend, None, "R2", time.monotonic() + 3600, say=lambda m: None, close_only=mode == "close-only")
     return sent
 
 
@@ -900,7 +938,7 @@ def test_a_close_only_run_makes_the_close_ups_again_in_the_same_process_then_pub
                         rounds.append((tag, todo, run_id, work)) or [])
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
     monkeypatch.setattr(proc.select, "Selection", lambda *a, **k: pytest.fail("a close-only run picks no listings"))
-    summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
+    summary = proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert rounds == [(C.CLEAN_TAG, {"sentas": [A, B]}, "R1", proc.gpu.CLOSE_ROUND)]
     assert summary["close_only"] and summary["photos"] == 2 and summary["to_do"] == 2 and summary["published"]["changed"]
     assert f"{ROOT}close-summary.json" in s3.objects and f"{ROOT}summary.json" not in s3.objects   # the photos run's stays
@@ -923,7 +961,7 @@ def test_a_close_only_run_slices_only_the_photos_whose_close_up_is_not_made_yet(
     monkeypatch.setattr(proc.gpu, "run_round", lambda batch, client, tag, todo, run_id, deadline, spend, work:
                         rounds.append(todo) or [])
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
-    summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
+    summary = proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert rounds == [{"sentas": [B, D]}] and summary["photos"] == 3 and summary["to_do"] == 2
 
 
@@ -933,7 +971,7 @@ def test_a_close_only_run_with_every_close_up_made_starts_no_gpu_job(monkeypatch
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
     monkeypatch.setattr(proc.gpu, "run_round", lambda *a, **k: pytest.fail("a GPU round for photos already done"))
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
-    summary = proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
+    summary = proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert summary["photos"] == 1 and summary["to_do"] == 0 and summary["problems"] == 0
 
 
@@ -950,7 +988,7 @@ def test_a_close_only_run_publishes_only_the_conflict_photos_the_owner_assigned(
     handed = {}
     monkeypatch.setattr(proc.publish, "publish",
                         lambda s3, root, sheet, photos, say, assigned: handed.update(assigned) or {"changed": False})
-    proc.process(s3, None, select.Spend(5.0), "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert handed == {("sentas", D): ["SEN-MINE"]}
 
 
@@ -989,7 +1027,7 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
     steps = [] if steps is None else steps
     monkeypatch.setattr(proc.gpu, "set_idle", lambda batch: steps.append("idle"))
     monkeypatch.setattr(proc, "unconfigured", lambda close_only=False: [])
-    monkeypatch.setattr(proc, "stop_on_signal", lambda spend: None)
+    monkeypatch.setattr(proc, "stop_on_signal", lambda *spends: None)
     monkeypatch.setattr(proc.boto3, "client", _Clients(_S3()))
     monkeypatch.setattr(C, "BUDGET_USD", 10.0)
     monkeypatch.setattr(writethrough, "enabled", lambda: writethrough_on)
@@ -1000,7 +1038,7 @@ def _main(monkeypatch, tmp_path=None, changed=True, capped=False, problems=0, re
     relinks = []
     monkeypatch.setattr(proc, "relink", lambda: relinks.append(1) or steps.append("relink") or relink_rc)
 
-    def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
+    def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False):
         spend.capped = capped
         return {"problems": problems, "pending": 0, "budget_reached": capped, "published": {"changed": changed}}
     if not keep_process:
@@ -1054,7 +1092,7 @@ def test_the_process_is_named_by_the_runner_s_run_id_in_its_lock_and_its_jobs(mo
     real = proc.exclusive
     monkeypatch.setattr(proc, "exclusive", lambda s3, owner, on_lost: seen.update(owner=owner) or real(s3, owner, on_lost))
     _main(monkeypatch)
-    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, run_id, deadline, say=print, close_only=False: seen.update(run_id=run_id) or
+    monkeypatch.setattr(proc, "process", lambda s3, batch, spend, clean, run_id, deadline, say=print, close_only=False: seen.update(run_id=run_id) or
                         {"problems": 0, "pending": 0, "budget_reached": False, "published": {"changed": False}})
     proc.main()
     assert seen["owner"]["run_id"] == "20261102120000123" and seen["run_id"] == "20261102120000123"
