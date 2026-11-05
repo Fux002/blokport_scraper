@@ -241,10 +241,41 @@ def test_run_missing_export_writes_empty_not_abort(tmp_path, monkeypatch):
     monkeypatch.setattr(tree_build, "SETTINGS", fake)
     ret = tree_build.run()                                  # must not raise
     assert ret == tmp_path / "2_valid_combinations.csv"
-    for name in ("2_valid_combinations.csv", "2_valid_combinations_update.csv",
-                 "2_valid_combinations_products_only.csv"):
+    for name in ("2_valid_combinations.csv", "2_valid_combinations_products_only.csv"):
         rows = list(csv.reader((tmp_path / name).open(encoding="utf-8-sig")))
         assert rows == [list(tree_build.COMBINATION_COLUMNS)]    # header only, zero data rows
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["2_valid_combinations.csv",
+                                                           "2_valid_combinations_products_only.csv"]
+
+
+def test_run_writes_the_full_set_and_no_delta(tmp_path, monkeypatch):
+    # Blokport's import always replaces, keyed on the manifest's sha256 of the FULL set, so the build writes
+    # exactly the full set (plus the testing one-off) and no "new since the last build" delta. A previous
+    # build's file is overwritten, never diffed against.
+    import types
+    from stone_pipeline.config import decisions_store
+    from stone_pipeline.stages import decisions
+    export = tmp_path / "variants_export.csv"
+    export.write_text("Id\n", encoding="utf-8")
+    attrs = tmp_path / "attributes.csv"
+    attrs.write_text("category,value,sourceid\n", encoding="utf-8")
+    to_upload, review = tmp_path / "to_upload", tmp_path / "review"
+    to_upload.mkdir(); review.mkdir()
+    tree_build.write_combinations({("c", "t", "old", "f", "k", "q")}, to_upload / "2_valid_combinations.csv")
+    fake = types.SimpleNamespace(paths=types.SimpleNamespace(
+        export_file=export, to_upload_dir=to_upload, review_dir=review, attributes_csv=attrs,
+        catalog_source_dir=tmp_path / "catalog_source"))
+    monkeypatch.setattr(tree_build, "SETTINGS", fake)
+    monkeypatch.setattr(tree_build, "CATEGORIES", ())
+    monkeypatch.setattr(decisions, "load_retired", lambda: set())
+    monkeypatch.setattr(decisions_store, "backbone_leaf_overlay", lambda: {})
+    built = {("c", "t", "v1", "f", "k", "q")}
+    monkeypatch.setattr(tree_build, "build_combinations", lambda *a, **k: (built, {}, []))
+    assert tree_build.run() == to_upload / "2_valid_combinations.csv"
+    rows = list(csv.reader((to_upload / "2_valid_combinations.csv").open(encoding="utf-8-sig")))
+    assert rows == [list(tree_build.COMBINATION_COLUMNS), ["c", "t", "v1", "f", "k", "q"]]
+    assert sorted(p.name for p in to_upload.iterdir()) == ["2_valid_combinations.csv",
+                                                            "2_valid_combinations_products_only.csv"]
 
 
 # --- wave 3c: no value is guessed into a combination ---------------------------------------------------

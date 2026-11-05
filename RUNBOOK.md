@@ -56,8 +56,7 @@ You scrape ONCE (shared), then build the catalog/combinations per env:
 ```
 1_variants_full.csv      complete variant list (first / full import)
 1_variants_update.csv    only the new + alias updates (incremental; Medusa upserts on Key)
-2_valid_combinations.csv          one row per valid combination — FULL set (one-time bulk load / resync)
-2_valid_combinations_update.csv   ONLY combinations new since the last build — the DAILY upload (delta)
+2_valid_combinations.csv          one row per valid combination: the FULL set (Blokport replaces its set with it)
 2_valid_combinations_products_only.csv  TESTING one-off (combos for the product sheet only; drops off in prod)
 3_products_all.csv       every source's products combined
 3_products_<source>.csv  per source (set a company per supplier in config/sources.yaml)
@@ -119,9 +118,7 @@ LOOP:
           the consistency gate verifies every product + combination matches the export
 
   5. Upload combinations, THEN products (combinations must exist before the products that use them):
-       - first time / resync :  2_valid_combinations.csv          (FULL — large, once)
-       - every day after     :  2_valid_combinations_update.csv   (DELTA — only new combos;
-                                                                   EMPTY when nothing changed)
+       - 2_valid_combinations.csv   (the FULL set; load it only when manifest.json's sha256 for it changed)
        - then                :  3_products_all.csv   (or 3_products_<source>.csv per source)
 
   (Images are a separate lane, any time — see "Images & S3" below.)
@@ -146,20 +143,20 @@ the colour(s) we know x quality. The few variations whose type can't be resolved
 
 ## Daily production loop (incremental)
 
-After the initial full load, the daily run is cheap because everything ships as a DELTA:
+After the initial full load, the daily run is cheap: variants ship as a delta, and combinations are
+re-loaded only when their content changed:
 
 ```
 python -m stone_pipeline.build         # scrape + rebuild + gate
   -> 1_variants_update.csv             upload (new variants only; upserts on Key)
   -> re-export to variants_export.csv
 python -m stone_pipeline.build         # ids resolve; gate verifies
-  -> 2_valid_combinations_update.csv   upload (ONLY new combinations — usually tiny or EMPTY)
+  -> 2_valid_combinations.csv          load ONLY when manifest.json's sha256 for it changed (a replace)
   -> 3_products_all.csv                upload (products)
 ```
 
-You never re-upload the ~2M-row full combinations file day to day — only the delta of new
-combinations since the last build (the previous build is the baseline; `delta = current - previous`).
-If a daily delta is ever skipped, upload the full `2_valid_combinations.csv` once to resync.
+The ~2M-row combinations file is re-loaded only when its sha256 in `manifest.json` changed, and the
+load replaces the whole set, so a skipped day can never leave Blokport's set behind.
 
 ## Consistency gate (self-verifying — no manual checking)
 

@@ -914,9 +914,6 @@ def boot(config_db, ledger_path) -> None:
     # ...and the learned-alias write-back (state/alias_writeback.csv): matcher consistency accumulated over
     # prior runs, on the same ephemeral disk. No-op when a local one already exists or none was snapshotted.
     snapshot.restore_state()
-    # ...and the last published big-list combinations file, which tree_build diffs against to emit only the
-    # NEW combinations ("build on it"). Without it a cold task re-emits the whole ~2M set as the delta.
-    snapshot.restore_combinations_baseline()
     # E15: refresh the attribute vocab (attributes.csv) from S3 on boot so the review-decision endpoint
     # validates colours/types against Medusa's CURRENT set from container start. Otherwise every deploy
     # reverts the on-disk vocab to the committed baseline (which lags Medusa's newer colours), so a
