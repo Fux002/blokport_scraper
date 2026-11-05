@@ -153,7 +153,7 @@ class FuleistoneScraper(ScraperBase):
             "slab_count": pcs.group(1) if pcs else "",        # real piece count (preferred over the area estimate)
             "categories": " | ".join((c.get("name") or "") for c in (p.get("categories") or []) if c.get("name")),
             "is_in_stock": p.get("is_in_stock"),
-            "stock_status": (stock.get("class", "") or "").strip(),   # 'in-stock' -> derive stock fallback
+            "stock_status": (stock.get("class", "") or "").strip(),   # 'in-stock' / 'out-of-stock': a stock word
             "image_urls_thumb": " | ".join(thumbs),
             # base reads these:
             "image_urls": fulls,

@@ -253,6 +253,14 @@ def test_inventory_made_to_order_word_is_made_to_order_with_no_count(ref, cfg):
         assert not any(f.code == FlagCode.stock_undetermined for f in row.review_flags), word
 
 
+def test_inventory_out_of_stock_beats_a_made_to_order_word(ref, cfg):
+    # a supplier that says unavailable is unavailable, even when another field still says 'Unlimited'.
+    row = _slab_row(raw_stock_m2="Unlimited", raw_stock_status="out-of-stock")
+    derive.derive_inventory(row)
+    assert row.inventory_quantity == 0 and not row.made_to_order
+    assert row.inventory_method == "out_of_stock_flag"
+
+
 def test_inventory_count_wins_over_a_made_to_order_word(ref, cfg):
     # a real count is more specific than a word: the ladder's order is unchanged.
     row = _slab_row(raw_slab_count="4", raw_stock_status="Made to Order")

@@ -202,7 +202,7 @@ def _validate_shape(name: str, path: Path, data: dict) -> None:
     seen: dict[str, str] = {}
     for words in _STOCK_WORD_LISTS:
         for word in data.get(words) or []:
-            key = " ".join(str(word).strip().lower().split())
+            key = fold_word(word)
             if key in seen and seen[key] != words:
                 bad(f"stock word {key!r} is in both {seen[key]} and {words}: one word states one stock state")
             seen[key] = words
@@ -325,8 +325,14 @@ def load_pack(name: str | None = None) -> DomainPack:
     )
 
 
+def fold_word(text) -> str:
+    """The one form a pack word and the supplier text it is matched against are compared in: lower case, single
+    spaces, no edge whitespace. The pack loader stores words in it and derive folds the supplier text the same way."""
+    return " ".join(str(text or "").lower().split())
+
+
 def _words(raw) -> tuple[str, ...]:
-    return tuple(str(w).strip().lower() for w in raw if str(w).strip())
+    return tuple(w for w in map(fold_word, raw) if w)
 
 
 @functools.lru_cache(maxsize=1)

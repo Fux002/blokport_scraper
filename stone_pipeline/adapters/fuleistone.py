@@ -135,11 +135,11 @@ class FuleistoneAdapter(AdapterBase):
         "raw_dimensions": lambda r: AdapterBase.build_dims(
             r.get("dimensions_length"), r.get("dimensions_height"), unit="mm", blank_na=True),
         # live-inventory lots carry a REAL piece count (Quantity '…, 83pcs'); derive prefers it over the area
-        # estimate. The general catalogue has neither -> the in-stock flag seeds the per-category fallback.
+        # estimate. The general catalogue has neither -> its in-stock flag alone holds a slab for a count.
         "raw_slab_count": lambda r: AdapterBase.clean(r.get("slab_count")),
         # total available area (m2) from the product name -> derive divides it into a count when no count exists
         "raw_stock_m2": lambda r: AdapterBase.clean(r.get("stock_m2")),
-        # structured availability ('in-stock') -> derive's stock fallback when no area/count is present
+        # structured availability ('in-stock' / 'out-of-stock'), read by derive as a stock word
         "raw_stock_status": lambda r: AdapterBase.clean(r.get("stock_status")),
         # NB: no raw_description -- fuleistone's description is byte-identical Divi boilerplate on every product
         # (see the scraper), so derive builds the templated description rather than shipping the same FAQ.

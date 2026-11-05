@@ -169,9 +169,9 @@ class CanonicalRow(BaseModel):
     # SEPARATE from raw_total_m2 (a bundle's total area, which feeds bundle_size) so stock never corrupts it.
     raw_stock_m2: Optional[str] = None
     # a source's STRUCTURED availability flag (e.g. WooCommerce stock_status "in-stock"/"out-of-stock"), as
-    # opposed to a count or an area. When no count/area is derivable, an authoritative "in-stock" here lets
-    # derive_inventory seed the same made-to-order fallback the availability WORDS do (never a fabricated
-    # count); a non-positive flag ("out-of-stock") does NOT match, so a sold-out item is never given stock.
+    # opposed to a count or an area. Read by derive_inventory like the free-text stock WORDS (the pack's
+    # in-stock, made-to-order and out-of-stock lists): "out-of-stock" is a trusted 0, and "in-stock" with no
+    # count or area is 1 on a single-piece listing and held for a count elsewhere. A count is never invented.
     raw_stock_status: Optional[str] = None
     raw_slab_count: Optional[str] = None
     # how many of the source's pieces are on record as SOLD (e.g. a packing list's TOTAL - IN STOCK); None when
@@ -247,7 +247,8 @@ class CanonicalRow(BaseModel):
     inventory_quantity: Optional[int] = None
     inventory_confidence: str = "none"
     inventory_method: str = ""
-    # Cut to order: on sale with no count (inventory_quantity None). Set by derive for a free-size shape.
+    # On sale with no count (inventory_quantity None). Set by derive for a free-size shape (cut to order) and
+    # for a made-to-order stock word ('Unlimited', 'Made to order').
     made_to_order: bool = False
     # A free-size shape's size in metres (stages/free_size): its long side and its short side; None on every
     # other listing. derive takes both faces from it.

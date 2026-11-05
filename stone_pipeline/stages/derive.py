@@ -389,7 +389,7 @@ def _inventory_from_area(row: CanonicalRow) -> int | None:
 # read from the same raw stock fields the numeric ladder uses (free text or a STRUCTURED flag such as a
 # WooCommerce "in-stock"), so no per-source code.
 def _stock_word(row: CanonicalRow, words: tuple[str, ...]) -> bool:
-    return any(" ".join((value or "").strip().lower().split()) in words
+    return any(domain.fold_word(value) in words
                for value in (row.raw_stock_status, row.raw_stock_m2, row.raw_inventory_quantity))
 
 

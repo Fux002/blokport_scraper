@@ -60,8 +60,8 @@ class MarenostoneAdapter(AdapterBase):
         "raw_stock_m2": lambda r: AdapterBase.clean(r.get("ready_stock_sqm")),
         # STRUCTURED availability the WooCommerce Store API always sets (stock_availability.class). Most
         # products resolve via the area above; the ~9% with no published Ready Stock still carry this
-        # authoritative flag, so map it so derive can seed the made-to-order fallback instead of holding an
-        # item the site says IS available. The class can carry trailing THEME classes ("out-of-stock
+        # authoritative flag, which derive reads as a stock word (in stock: 1 for a single block, held for a
+        # count on a slab or tile; out of stock: 0). The class can carry trailing THEME classes ("out-of-stock
         # wd-style-with-bg"), so keep only the FIRST token -- the availability keyword ("in-stock"/
         # "out-of-stock") -- so the value is clean regardless of theme markup (a sold-out flag won't match
         # the positive-word set downstream).

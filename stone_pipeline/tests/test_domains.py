@@ -205,6 +205,26 @@ def test_a_stock_word_in_two_lists_fails_loud(tmp_path, monkeypatch):
         domain.load_pack("bad")
 
 
+def test_a_pack_word_is_normalised_as_derive_matches_it(tmp_path, monkeypatch):
+    # a pack word with stray or doubled spaces or capitals must match the supplier text derive folds the same
+    # way; and the two-lists check sees the same folded word, so 'Made  to Order' collides with 'made to order'.
+    from stone_pipeline.core.schema import CanonicalRow
+    from stone_pipeline.stages import derive
+    import yaml
+    pack = yaml.safe_load(domain._pack_path("stone").read_text(encoding="utf-8"))   # a loadable pack
+    monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)
+    pack["made_to_order_words"] = ["  Made  to   Order "]
+    _write_pack(tmp_path, pack)
+    loaded = domain.load_pack("bad")
+    assert loaded.made_to_order_words == ("made to order",)
+    monkeypatch.setattr(domain, "active_pack", lambda: loaded)
+    assert derive._made_to_order_word(CanonicalRow(src_site="x", surrogate_key="1", raw_stock_m2="made to  order"))
+    pack["in_stock_words"] = ["made to order"]
+    _write_pack(tmp_path, pack)
+    with pytest.raises(ValueError, match="made to order"):
+        domain.load_pack("bad")
+
+
 def test_two_bulk_forms_fails_loud(tmp_path, monkeypatch):
     # V3: the bulk/solid form is singular; two is a pack bug (which one drives is_block?).
     monkeypatch.setattr(domain, "_DOMAINS_DIR", tmp_path)

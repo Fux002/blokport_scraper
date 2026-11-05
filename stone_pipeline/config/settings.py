@@ -371,8 +371,6 @@ class Thresholds:
     # partial scrape (delist refused)
     adapt_drop_abort_fraction: float = 0.5
     delist_max_fraction: float = 0.30
-    # (Stock words without a count live in the domain pack: made_to_order_words, in_stock_words and
-    # single_piece_categories. No count is ever invented.)
     health_fill_drop_warn: float = 0.15
     health_fill_drop_fail: float = 0.40
     health_rowcount_floor: float = 0.50
