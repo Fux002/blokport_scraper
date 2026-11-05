@@ -403,9 +403,8 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
 
 def write_combinations(combinations: set, path: Path) -> int:
     """Write the valid-combination rows (sorted for a deterministic file), ATOMICALLY -- a crash
-    mid-write must never leave a truncated file, because this same file is the baseline the next
-    run diffs against (a partial write would poison the next delta and crash the image gate).
-    Returns the row count."""
+    mid-write must never leave a truncated file for the consistency gate to check or the publish to
+    hand Blokport as the whole set. Returns the row count."""
     return csvio.write_rows(path, COMBINATION_COLUMNS, sorted(combinations))
 
 
@@ -416,16 +415,6 @@ def _backbone_paths() -> list[Path]:
     if additions.exists():
         paths += sorted(additions.glob("*.json"))
     return paths
-
-
-def _load_combination_set(path: Path) -> set[tuple[str, ...]]:
-    """Read a combinations CSV back into a set of string-tuples (to diff builds). Empty if absent."""
-    if not path.exists():
-        return set()
-    with path.open(encoding="utf-8-sig", newline="") as h:
-        rows = csv.reader(h)
-        next(rows, None)  # skip header
-        return {tuple(row) for row in rows if row}
 
 
 def _product_variation_ids(products_csv: Path) -> set[str]:
@@ -439,9 +428,8 @@ def _product_variation_ids(products_csv: Path) -> set[str]:
 
 def run() -> Path:
     """Build the valid combinations and write the upload set to to_upload/:
-      2_valid_combinations.csv          FULL set  -- one-time bulk load / resync (huge)
-      2_valid_combinations_update.csv   DELTA     -- only combinations NEW since the last build; this
-                                                    is the DAILY upload (add into the existing set)
+      2_valid_combinations.csv          FULL set  -- Blokport replaces its set with it when the manifest's
+                                                    sha256 changed (no delta: an import never adds into a set)
       2_valid_combinations_products_only.csv      TESTING one-off (drops off in production): combos
                                                     for just the variations the product sheet uses.
     """
@@ -456,8 +444,7 @@ def run() -> Path:
         log.warning("no variants export; writing EMPTY combinations (cold start: nothing to build against "
                     "until Medusa mints this produce's variations)",
                     extra={"extra_fields": {"export": str(export)}})
-        for name in ("2_valid_combinations.csv", "2_valid_combinations_update.csv",
-                     "2_valid_combinations_products_only.csv"):
+        for name in ("2_valid_combinations.csv", "2_valid_combinations_products_only.csv"):
             write_combinations(set(), to_upload / name)
         return to_upload / "2_valid_combinations.csv"
     products = SETTINGS.paths.to_upload_dir / "3_products_all.csv"
@@ -482,39 +469,18 @@ def run() -> Path:
 
     to_upload = SETTINGS.paths.to_upload_dir
     path = to_upload / "2_valid_combinations.csv"
-    # build_combinations already emits string-id tuples, so the set IS the string-tuple set the CSV
-    # baseline diffs against -- reuse it, don't materialise a second 2M-row copy (that duplicate was a
-    # big slice of the produce memory peak). Defensive: if a non-str id ever slips in, normalise once so
-    # the diff stays correct -- an O(1) check on one element, not a full re-copy in the common case.
-    current = combinations
-    if current and not all(isinstance(x, str) for x in next(iter(current))):
-        current = {tuple(str(x) for x in c) for c in current}
-    previous = _load_combination_set(path)                              # empty on a fresh host -> no 2M baseline
-    write_combinations(current, path)                                   # FULL: bulk load / resync
-
-    # INCREMENTAL delta -- only the combinations NEW vs the last build, so the daily upload adds into
-    # the existing Medusa set instead of re-sending ~2M rows. First build (no baseline) -> delta is
-    # the full set. If a daily delta is ever skipped, re-upload the FULL file once to resync. Count the
-    # removed set (not retained) and free the baseline right after the diff, so current + previous +
-    # additions are never all live together.
-    additions = current - previous
-    removed_count = len(previous - current)
-    del previous
-    write_combinations(additions, to_upload / "2_valid_combinations_update.csv")
-    added_count = len(additions)
-    del additions
+    write_combinations(combinations, path)
 
     # TESTING one-off (drops off in production): combinations for ONLY the product sheet's variations.
     vidx = COMBINATION_COLUMNS.index("variation_id")
     prod_vids = _product_variation_ids(products)
-    products_only = {c for c in current if c[vidx] in prod_vids} if prod_vids else set()
+    products_only = {c for c in combinations if c[vidx] in prod_vids} if prod_vids else set()
     write_combinations(products_only, to_upload / "2_valid_combinations_products_only.csv")
 
     # SURFACE the variations that got no combination (no resolvable type) so they are never silently
     # dropped -- the user fills 'assign_type' and they get allocated next run.
     _write_uncovered(uncovered, uncovered_file)
-    stats.update(uncovered_variations=len(uncovered), combinations_total=len(current),
-                 combinations_added=added_count, combinations_removed=removed_count,
+    stats.update(uncovered_variations=len(uncovered), combinations_total=len(combinations),
                  combinations_products_only=len(products_only))
     log.info("valid combinations built", extra={"extra_fields": stats})
     return path

@@ -22,7 +22,7 @@ import threading
 import time
 from pathlib import Path
 
-from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, S3_REGION
+from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION
 from stone_pipeline.core import logfmt
 from stone_pipeline.io.storage import s3_error_is_missing
 
@@ -113,7 +113,7 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -
 def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None,
             required: bool = False) -> bool:
     """Restore a single file from its latest S3 snapshot into `ledger_path` (the ledger by default; `key`
-    targets another -- config.db, or the combinations baseline), IF the local file is absent and a snapshot
+    targets another -- config.db, the learned-alias write-back), IF the local file is absent and a snapshot
     exists. Atomic (download to a temp then rename). Returns True if a restore happened; False (leaving the
     caller to bootstrap fresh) when the file already exists or there is no snapshot.
 
@@ -122,7 +122,7 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
     between head and download it is safe to start fresh; anything else (transient / throttle / permission)
     must FAIL LOUD (raise -> non-zero boot -> ECS restarts the task and retries), because booting a fresh
     base-only store would let the guardless periodic save() clobber the good snapshot and silently drop the
-    acked ids / pending removals. Non-required callers (an optimization baseline, the ops CLI) stay
+    acked ids / pending removals. Non-required callers (the alias write-back, the ops CLI) stay
     best-effort and never crash boot."""
     ledger_path = Path(ledger_path)
     if ledger_path.exists():
@@ -345,27 +345,6 @@ def restore_state(env: str = ENV_NAME) -> bool:
     No-op when a local write-back already exists (a warm task's is fresher) or nothing has been snapshotted
     yet. Best-effort: a learned alias is self-regenerating, so a lost restore only costs one run's re-learn."""
     return restore(_writeback_path(env), env, key=state_writeback_key(env))
-
-
-# -- combinations delta baseline ----------------------------------------------
-# tree_build emits the incremental 2_valid_combinations_update.csv by diffing the new set against the
-# PREVIOUS build's to_upload/2_valid_combinations.csv. On a cold task that file is gone, so the "delta"
-# balloons to the whole ~2M set (the whole point of "build on it" is to avoid that). The full file is
-# already published to S3 every produce for Blokport's import (deploy.upload_artifacts), so that SAME
-# object is the durable baseline -- restore it, no second snapshot.
-def combinations_baseline_key() -> str:
-    """S3 key of the published big-list, which doubles as the delta baseline. ENV_SEGMENT (dev/prod) is the
-    Blokport-facing publish prefix that deploy.upload_artifacts writes to."""
-    return f"{ENV_SEGMENT}/scraper/to_upload/2_valid_combinations.csv"
-
-
-def restore_combinations_baseline() -> bool:
-    """Restore the last published big-list onto a cold task so the next produce's delta ('build on it')
-    stays a small increment, not the full ~2M set. No-op when a local copy already exists (a warm task's is
-    fresher) or nothing has been published yet."""
-    from stone_pipeline.config.settings import SETTINGS
-    return restore(SETTINGS.paths.to_upload_dir / "2_valid_combinations.csv",
-                   key=combinations_baseline_key())
 
 
 class PeriodicSnapshot(threading.Event):

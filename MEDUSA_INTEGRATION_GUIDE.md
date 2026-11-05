@@ -465,8 +465,8 @@ LAST, `manifest.json` next to them:
   there. A produce landing mid-import shows as a stream-hash mismatch on your side: fail loud,
   retry. Key your "combinations changed?" guard on `files["2_valid_combinations.csv"].sha256`
   against the hash you last loaded, never on timestamps.
-- The former `2_valid_combinations_update.csv` was the delta since the scraper's last BUILD,
-  not since your last load, and is retired; ignore it until it stops being written.
+- The former `2_valid_combinations_update.csv` (the delta since the scraper's last BUILD, not since
+  your last load) is no longer written or listed in the manifest.
 - `standardise_photo_list.json` (each product's own photos, for the scraper's photo process) is
   listed like every file there; it is not an import file, ignore it.
 
