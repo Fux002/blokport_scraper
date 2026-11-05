@@ -157,7 +157,13 @@ variable "standardise_clean" {
 variable "standardise_budget_usd" {
   type        = string
   default     = ""
-  description = "SCRAPER_STANDARDISE_BUDGET_USD: the month's hosted budget (judge + clean-up edits), all runs together. Empty = not configured: the process refuses to start (no default spend)."
+  description = "SCRAPER_STANDARDISE_BUDGET_USD: the month's budget of the photo process (the judge and GPU time), all runs together. Empty = not configured: the process refuses to start (no default spend)."
+}
+
+variable "standardise_clean_budget_usd" {
+  type        = string
+  default     = ""
+  description = "SCRAPER_STANDARDISE_CLEAN_BUDGET_USD: the month's cap of the hosted clean-up edits and their checks, all runs together, apart from the process budget (owner 2026-11-05). Empty = no edit is paid."
 }
 
 variable "standardise_job_definition_name" {

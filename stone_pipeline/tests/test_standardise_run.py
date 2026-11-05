@@ -244,8 +244,28 @@ def _steps(monkeypatch, cap_at=None):
 
 def test_the_steps_run_in_order(monkeypatch):
     done = _steps(monkeypatch)
-    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), sel_mod.Spend(10), "R1", math.inf,
+                             say=lambda m: None)
     assert done == ["gpu v9", "settle", "judge", "clean", "gpu v9-clean", "settle", "judge", "report"] and not problems
+
+
+def test_without_a_cleaning_cap_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
+    # owner 2026-11-05: the clean-up edits have their own monthly cap; no cap set, no edit is paid
+    done = _steps(monkeypatch)
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
+    assert done == ["gpu v9", "settle", "judge", "gpu v9-clean", "settle", "judge", "report"]
+
+
+def test_the_clean_up_edits_are_paid_from_the_cleaning_cap_and_the_judge_from_the_process_budget(monkeypatch):
+    process, cleaning = sel_mod.Spend(10), sel_mod.Spend(10)
+    given = {}
+    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: ([], False))
+    monkeypatch.setattr(runner.select, "settle", lambda sel, spend, deadline: ([], False))
+    monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: given.setdefault("judge", spend) and ([], False))
+    monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: given.setdefault("clean", spend) and ([], False))
+    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": []})
+    runner.run(_Batch(), _selection([_listing(A)]), process, cleaning, "R1", math.inf, say=lambda m: None)
+    assert given["judge"] is process and given["clean"] is cleaning
 
 
 def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge_keeps_it(monkeypatch):
@@ -255,7 +275,7 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (given.append(("judge", deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: ([], False))
     monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": []})
-    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", 10_000, say=lambda m: None, clock=lambda: 0)
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", 10_000, say=lambda m: None, clock=lambda: 0)
     gpu_end = 10_000 - C.JUDGE_WINDOW_SECONDS
     assert given == [("v9", gpu_end), ("judge", 10_000), ("v9-clean", gpu_end), ("judge", 10_000)]
 
@@ -263,7 +283,7 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
 def test_with_the_clean_up_off_no_photo_is_sent_to_a_hosted_edit(monkeypatch):
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     done = _steps(monkeypatch)
-    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
     assert done == ["gpu v9", "settle", "judge", "gpu v9-clean", "settle", "judge", "report"]
 
 
@@ -278,21 +298,21 @@ def test_the_judge_bar_accepts_the_corrected_proportions_and_what_a_buyer_would_
 
 def test_the_run_stops_its_steps_at_the_budget_and_still_reports_what_is_chosen(monkeypatch):
     done = _steps(monkeypatch, cap_at="clean")
-    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
     assert done == ["gpu v9", "settle", "judge", "clean", "report"]
 
 
 def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
     _steps(monkeypatch)
     monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"]})
-    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", math.inf, say=lambda m: None)
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
     assert problems == ["2 listings not fully judged (listed in r/summary.json)"]
 
 
 def test_no_step_starts_after_the_work_window_and_the_report_still_runs(monkeypatch):
     done = _steps(monkeypatch)
     times = iter([0, 0, 0, 100])                                    # the window (50 s) ends during the judge step
-    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), "R1", 50, say=lambda m: None,
+    problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", 50, say=lambda m: None,
                              clock=lambda: next(times))
     assert done == ["gpu v9", "settle", "judge", "report"]
     assert problems == [f"the work window ({C.WORK_SECONDS}s) ended: the next run goes on"]
@@ -413,7 +433,7 @@ def test_a_round_never_settles_above_what_it_reserved(monkeypatch):
     jobs = [f"job{i}" for i in range(1, 11)]                                       # 5 slices, 10 jobs
     busy_ms = 2 * window * 1000 // len(jobs)                                        # 2 GPUs x the window, shared
     batch.times = {j: {"startedAt": i * busy_ms, "stoppedAt": (i + 1) * busy_ms} for i, j in enumerate(jobs)}
-    spend = sel_mod.Spend(1000, save=kept.append)
+    spend = sel_mod.Spend(1000, save=lambda total, uses: kept.append(total))
     photos = [c * 64 for c in "12345"]
     gpu.run_round(batch, _S3(), "v9", {"sentas": photos}, "R1", window, spend, clock=lambda: 0)
     assert spend.spent <= kept[0] + 1e-9
@@ -425,7 +445,7 @@ def test_a_round_settles_what_its_jobs_ran_plus_each_job_s_allowance(monkeypatch
     batch = _Batch()
     batch.times = {"job1": {"startedAt": 0, "stoppedAt": 1_800_000}, "job2": {"startedAt": 1_800_000, "stoppedAt": 5_400_000}}
     kept = []
-    spend = sel_mod.Spend(100, save=kept.append)
+    spend = sel_mod.Spend(100, save=lambda total, uses: kept.append(total))
     gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", 7200, spend, clock=lambda: 0)
     assert kept[0] == pytest.approx(2.4)                                           # reserved: the 2 h window + 2 allowances
     assert spend.spent == pytest.approx(1.9) and spend.reserved == 0               # ran 0.5 h + 1 h, + 2 allowances
@@ -436,7 +456,7 @@ def test_a_round_is_sized_to_the_budget_left(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 1)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
     batch, kept = _Batch(), []
-    spend = sel_mod.Spend(5.0, save=kept.append)                                   # 2 slices of 2.40 fit, not 3
+    spend = sel_mod.Spend(5.0, save=lambda total, uses: kept.append(total))                                   # 2 slices of 2.40 fit, not 3
     gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B, D]}, "R1", 7200, spend, clock=lambda: 0)
     assert len(batch.submitted) == 4 and kept[0] == pytest.approx(4.8) and not spend.capped
 

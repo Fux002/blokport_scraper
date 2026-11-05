@@ -22,15 +22,16 @@ round instead: every chosen photo's close-up not made yet under the current rule
 started from (deploy.standardise_close, a GPU job per slice, under the same lock, budget, window and run id), then
 publish and relink as above; its summary is close-summary.json.
 Every step stores what it did, so a run that stops is run again and goes on where it stopped, paying nothing twice. The
-GPU and hosted steps work at most STANDARDISE.WORK_SECONDS: after it no hosted call and no GPU round starts. Hosted calls
-and GPU rounds together never take the month past STANDARDISE.BUDGET_USD (each run's spend of the month is its own file
-under <env>/standardise-test/spend/<YYYY-MM>/).
+GPU and hosted steps work at most STANDARDISE.WORK_SECONDS: after it no hosted call and no GPU round starts. The judge
+and GPU rounds together never take the month past STANDARDISE.BUDGET_USD, and the clean-up edits with their checks never
+past STANDARDISE.CLEAN_BUDGET_USD (each run's spend of the month is its own file under <env>/standardise-test/spend/ and
+clean-spend/<YYYY-MM>/, the latter listing every paid call).
 One process at a time per environment: it holds <env>/standardise-test/run.lock (written only if absent, rewritten every
 LOCK_HEARTBEAT_SECONDS while it runs, taken over only when not rewritten for the runner's ceiling: its run was killed)
 and removes it, if it is still its own, when publish has ended. SIGTERM (the service stopping) unwinds the same way: the
 round's jobs are stopped, the ceiling set back, the spend kept, the lock released.
 Env: SCRAPER_GPU_QUEUE, SCRAPER_STANDARDISE_JOBDEF, FAL_KEY (not for a close-only run), SCRAPER_STANDARDISE_BUDGET_USD
-(all required); SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record;
+(all required); SCRAPER_STANDARDISE_CLEAN_BUDGET_USD (unset: no edit is paid); SCRAPER_RUN_SUMMARY (set by the runner): where the run's summary is handed back for its run record;
 SCRAPER_STANDARDISE_CLOSE_ONLY (set by the runner, true only for a close_only run): the close-up round instead of 1 to 7.
 Exit 0 the run went through (pending listings, problems and a reached budget are in its summary); 2 not configured,
 or no produce has stored the conflict set yet;
@@ -205,8 +206,8 @@ def month_spend(s3, run_id, budget, directory):
                 total += seen[o["Key"]][1]
         return total
 
-    def save(total):
-        s3.put_object(Bucket=S3_BUCKET, Key=own, Body=json.dumps({"usd": round(total, 6)}).encode(),
+    def save(total, uses):
+        s3.put_object(Bucket=S3_BUCKET, Key=own, Body=json.dumps({"usd": round(total, 6), "uses": uses}).encode(),
                       ContentType="application/json")
     return select.Spend(budget, others, save)
 
@@ -322,12 +323,19 @@ def assignments(listings, picks, conflicts):
 
 
 # --- the steps --------------------------------------------------------------------------------------------------------
-def stop_on_signal(spend):
+def halt(spends, why):
+    """No paid call may start any more on any of the run's budgets (the process's and the cleaning cap's)."""
+    for spend in spends:
+        if spend is not None:
+            spend.halt(why)
+
+
+def stop_on_signal(*spends):
     """SIGTERM (the service stopping: the config server passes it on) unwinds like an error: no paid call may start any
     more, the round's jobs are stopped, and the GPU pool's ceiling, the spend and the run lock are settled by their
     finally blocks (which a bare SIGTERM would skip)."""
     def stopped(signum, frame):
-        spend.halt(f"stopped by signal {signum}")
+        halt(spends, f"stopped by signal {signum}")
         raise SystemExit(f"stopped by signal {signum}")
     signal.signal(signal.SIGTERM, stopped)
 
@@ -362,9 +370,10 @@ def hosted(step, sel, spend, deadline):
     return [f"{key}: {why}" for key, why in failures], stopped
 
 
-def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
+def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monotonic):
     """The GPU and hosted steps, then the report: (problems, report). A step starts only inside the work window and while
-    the budget lasts; the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
+    the budget lasts (the hosted clean-up edits and their checks on the cleaning cap, `clean`: None when it is not set,
+    and then no photo is sent to an edit); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has its share; after each
     GPU round the outline recheck's candidates are settled (select.settle); the report always runs, so what is chosen is
     recorded and published, unless a promotion failed: raised, and the next run of either kind finishes it at its start
     (select.finish, in process) before anything is published."""
@@ -372,7 +381,7 @@ def run(batch, sel, spend, run_id, deadline, say=print, clock=time.monotonic):
     steps = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline),
-             *([lambda: hosted(select.clean_all, sel, spend, deadline)] if C.CLEAN_ENABLED else []),
+             *([lambda: hosted(select.clean_all, sel, clean, deadline)] if C.CLEAN_ENABLED and clean is not None else []),
              lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, gpu_deadline, spend),
              lambda: hosted(select.settle, sel, spend, deadline),
              lambda: hosted(select.judge_all, sel, spend, deadline)]
@@ -418,7 +427,7 @@ def read_decisions(s3, root, listings):
     return Decisions(exclude, owner, conflicts, rounds, picks)
 
 
-def photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisions):
+def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions):
     """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed), work on them and report:
     (problems, counts, kept)."""
     removed, records = removed_listings(s3), choices(s3, root)
@@ -429,7 +438,7 @@ def photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisi
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
-    problems, result = run(batch, sel, spend, run_id, deadline, say)
+    problems, result = run(batch, sel, spend, clean, run_id, deadline, say)
     counts = {"listings": len(found), "chosen": len(result["chosen"]), "review": len(result["tracked"]),
               "pending": len(result["pending"]), "removed": sum(l["sku"] in removed for l in listings)}
     return problems, counts, {"pending_listings": result["pending"]}
@@ -462,7 +471,7 @@ def close_round(s3, batch, spend, run_id, deadline, root, say):
     return problems, {"close_only": True, "photos": photos, "to_do": to_do}, {}
 
 
-def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
+def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=False):
     """Clear, work (photos_round, or close_round when close_only), report and publish (steps 0 to 8), inside the lock: the
     run's summary (counts), also kept with what is pending and the problems under the clean tag (summary.json, or
     close-summary.json for a close-only run). Both publish only the conflict photos the owner assigned (assignments):
@@ -477,14 +486,14 @@ def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
     listings = photo_listings(sheet, photos)
     decisions = read_decisions(s3, root, listings)
     assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
-    closing = threading.Timer(max(0.0, deadline - time.monotonic()), spend.halt, ("the work window ended",))
+    closing = threading.Timer(max(0.0, deadline - time.monotonic()), halt, ((spend, clean), "the work window ended"))
     closing.daemon = True
     closing.start()
     try:
         if close_only:
             problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say)
         else:
-            problems, counts, kept = photos_round(s3, batch, spend, run_id, deadline, root, say, listings, decisions)
+            problems, counts, kept = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions)
     finally:
         closing.cancel()
     problems += conflicted
@@ -499,12 +508,22 @@ def process(s3, batch, spend, run_id, deadline, say=print, close_only=False):
         say(f"   {p}")
     summary = {"run_id": run_id, **counts, "problems": len(problems), "published": published,
                "run_spent_usd": round(spend.spent, 4), "month_spent_usd": round(spend.before + spend.spent, 4),
-               "budget_usd": spend.budget, "budget_reached": spend.capped}
+               "budget_usd": spend.budget, "budget_reached": spend.capped, **clean_summary(clean)}
     s3.put_object(Bucket=S3_BUCKET, Key=f"{root}{'close-summary' if close_only else 'summary'}.json",
                   Body=json.dumps({**summary, **kept, "problem_list": problems, "tiles_hidden": hidden},
                                   sort_keys=True).encode(),
                   ContentType="application/json")
     return summary
+
+
+def clean_summary(clean):
+    """The cleaning cap's part of the run's summary: what this run and the month spent on edits and their checks, the
+    cap, whether it was reached, and how many paid calls the run listed. All None when no cap is set."""
+    if clean is None:
+        return {"clean_run_spent_usd": None, "clean_month_spent_usd": None, "clean_budget_usd": None,
+                "clean_budget_reached": None, "clean_uses": None}
+    return {"clean_run_spent_usd": round(clean.spent, 4), "clean_month_spent_usd": round(clean.before + clean.spent, 4),
+            "clean_budget_usd": clean.budget, "clean_budget_reached": clean.capped, "clean_uses": len(clean.uses)}
 
 
 def relink():
@@ -567,6 +586,19 @@ def unconfigured(close_only=False):
     return missing
 
 
+def cleaning_cap(s3, run_id, close_only):
+    """This run's Spend against the month's cleaning cap (owner 2026-11-05: the hosted clean-up edits and their checks
+    have their own cap), or None when no edit can be paid: no cap set (said once, here), or a close-only run (it makes
+    no hosted call)."""
+    if close_only:
+        return None
+    if C.CLEAN_BUDGET_USD is None:
+        print("==> no cleaning cap (SCRAPER_STANDARDISE_CLEAN_BUDGET_USD unset): no photo is sent to a paid clean-up edit "
+              "this run", flush=True)
+        return None
+    return month_spend(s3, run_id, C.CLEAN_BUDGET_USD, C.CLEAN_SPEND_DIR)
+
+
 def hand_over(summary):
     """The run's summary to the runner (SCRAPER_RUN_SUMMARY), for its run record; nothing when run by hand."""
     path = env.getenv("RUN_SUMMARY")
@@ -588,11 +620,12 @@ def main() -> int:
     # has to kill it; a process started by hand names itself.
     run_id = env.getenv("RUN_ID") or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     spend = month_spend(s3, run_id, C.BUDGET_USD, C.SPEND_DIR)
-    stop_on_signal(spend)                              # before the lock: a stop at any point releases it
+    clean = cleaning_cap(s3, run_id, close_only)
+    stop_on_signal(spend, clean)                       # before the lock: a stop at any point releases it
     try:
         with exclusive(s3, {"run_id": run_id, "tags": [C.RUN_TAG, C.CLEAN_TAG], "close_only": close_only},
-                       on_lost=lambda: spend.halt("the run lock was taken over")):
-            summary = process(s3, batch, spend, run_id, deadline, close_only=close_only)
+                       on_lost=lambda: halt((spend, clean), "the run lock was taken over")):
+            summary = process(s3, batch, spend, clean, run_id, deadline, close_only=close_only)
     except RunActive as exc:
         print(f"ERROR: {exc}; not started")
         return 4
@@ -602,6 +635,11 @@ def main() -> int:
     print(f"==> spent ${spend.spent:.2f} this run, ${spend.before + spend.spent:.2f} of ${spend.budget:.2f} this month"
           + ("; the month's budget is reached: the rest waits for next month or a higher budget" if spend.capped else ""),
           flush=True)
+    if clean is not None:
+        print(f"==> cleaning: spent ${clean.spent:.2f} this run in {len(clean.uses)} paid calls, "
+              f"${clean.before + clean.spent:.2f} of ${clean.budget:.2f} this month"
+              + ("; the cleaning cap is reached: further edits wait for next month or a higher cap" if clean.capped else ""),
+              flush=True)
     rc, summary["relinked"] = 0, False
     if summary["published"]["changed"]:
         if not writethrough.enabled():

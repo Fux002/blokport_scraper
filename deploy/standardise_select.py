@@ -25,6 +25,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 import httpx
 
@@ -50,8 +51,9 @@ class Spend:
     """Spend against the month's budget (hosted calls and GPU rounds): `before` is what the month's other runs spent
     (others(), summed again at every settle, so a run written since is never missed), then this run's. A price is
     reserved before the call or round and settled to what it cost, so parallel calls can never together pass the
-    budget. save(total) keeps this run's total after every change, a reserve counting as spent until it is settled, so
-    a run that dies leaves an upper bound of what it spent, never too little. Storage is never asked while the spend's
+    budget. save(total, uses) keeps this run's total after every change, a reserve counting as spent until it is settled,
+    so a run that dies leaves an upper bound of what it spent, never too little; uses are the paid calls the run listed
+    (record), kept by the same write. Storage is never asked while the spend's
     lock is held (a slow write never blocks the other calls), and a stop halts it without taking that lock (a SIGTERM
     may arrive while it is held)."""
 
@@ -59,6 +61,7 @@ class Spend:
         self.budget, self.others, self.save = budget, others, save
         self.before = others() if others else 0.0
         self.spent, self.reserved, self.capped = 0.0, 0.0, False
+        self.uses = []
         self._halt, self._why = threading.Event(), ""
         self._lock, self._io = threading.Lock(), threading.Lock()
         self._version = self._saved = 0               # changes made / the change the stored total is of
@@ -97,6 +100,13 @@ class Spend:
                 self.before = before
         self._keep()
 
+    def record(self, use):
+        """List one paid call (its fields as given, stamped with when it was paid), kept with the run's total."""
+        with self._lock:
+            self.uses.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **use})
+            self._version += 1
+        self._keep()
+
     def _keep(self):
         """Store this run's total, outside the spend's lock: one write at a time, and only a total newer than the one
         stored, so overlapping calls can never leave an older total last."""
@@ -104,9 +114,9 @@ class Spend:
             return
         with self._io:
             with self._lock:
-                total, version = self.spent + self.reserved, self._version
+                total, uses, version = self.spent + self.reserved, list(self.uses), self._version
             if version > self._saved:
-                self.save(total)
+                self.save(total, uses)
                 self._saved = version
 
 
@@ -231,20 +241,29 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
         return found
 
 
-def paid(spend, price, call, what):
-    """(answer, cost) of one hosted call returning (answer, cost): its price reserved first, then settled to what it
-    cost. A call that fails may have been billed (sent, then lost), and an answer without its cost has one: both count at
-    the reserved price, never as free."""
+def paid(spend, price, call, what, use=None):
+    """(answer, cost) of one hosted call returning (answer, cost): its price reserved first, then settled (settled)."""
     spend.reserve(price)
+    return settled(spend, price, call, what, use)
+
+
+def settled(spend, price, call, what, use=None):
+    """(answer, cost) of one hosted call whose price is already reserved, settled to what it cost. A call that fails may
+    have been billed (sent, then lost), and an answer without its cost has one: both count at the reserved price, never
+    as free. With `use`, the call is listed in the spend (record) at what it counted, a failed one included."""
     try:
         answer, cost = call()
     except BaseException:
         spend.settle(price, price)
+        if use is not None:
+            spend.record({**use, "usd": price, "failed": True})
         raise
     if cost is None:
         print(f"   WARNING: {what}: the answer carries no usage.cost; counted at the reserved ${price:.2f}", flush=True)
         cost = price
     spend.settle(price, cost)
+    if use is not None:
+        spend.record({**use, "usd": cost})
     return answer, cost
 
 def candidates(listing, exclude):
@@ -304,15 +323,16 @@ def fixable(client, rnd, sha, exclude):
     return False
 
 
-def clean_photo(client, cl, src, sha, spend):
+def clean_photo(client, cl, src, sha, spend, listing):
     """Each model in turn until a cleaned copy passes the clean check; that copy becomes cleaned/<sha>.jpg. Returns
-    whether one passed."""
+    whether one passed. spend is the cleaning cap's; each paid call is listed there for the listing that asked for it."""
     with cl.lock(sha):
         if sha in cl.cleaned:
             return True
         original = _original(client, src, sha)
+        use = {"source": src, "sha": sha, "sku": listing["sku"], "listing": listing["key"]}
         for name in clean.MODELS:
-            if _attempt(client, cl, sha, name, original, spend)["passes"]:
+            if _attempt(client, cl, sha, name, original, spend, use)["passes"]:
                 client.copy_object(Bucket=S3_BUCKET, Key=f"{cl.prefix}cleaned/{sha}.jpg", ContentType="image/jpeg",
                                    CopySource={"Bucket": S3_BUCKET, "Key": f"{cl.prefix}attempts/{sha}.{name}.jpg"},
                                    MetadataDirective="REPLACE")
@@ -321,11 +341,13 @@ def clean_photo(client, cl, src, sha, spend):
         return False
 
 
-def _attempt(client, cl, sha, name, original, spend):
+def _attempt(client, cl, sha, name, original, spend, use):
     """The clean check of model `name`'s copy of the photo, made once. A stored check is read back, a stored copy is
     checked, a stored request is collected; only a photo never sent is sent, its price counted as soon as the queue
     accepts it (it is paid even if collecting it fails later). A request the queue no longer has is forgotten, so the
-    next run sends it again."""
+    next run sends it again. A photo sent here has its edit and its clean check reserved together, so the cap never
+    leaves a paid copy unchecked in the run that paid for it; the check's share is released when no check is made.
+    Every paid call is listed (spend.record, with `use`)."""
     att, ident = f"{cl.prefix}attempts/{sha}.{name}", f"{sha}.{name}"
     if ident in cl.attempts:
         stored = _get_json(client, f"{att}.json")
@@ -333,32 +355,44 @@ def _attempt(client, cl, sha, name, original, spend):
             return stored
         cl.edited.discard(ident)                       # failed under an older instruction: made again with the current one
         cl.requested.discard(ident)
-    if ident in cl.edited:
-        copy = _get(client, f"{att}.jpg")
-    else:
-        if ident in cl.requested:
-            job = _get_json(client, f"{att}.request.json")
+    held = 0.0                                         # the check's price, reserved with an edit sent here
+    try:
+        if ident in cl.edited:
+            copy = _get(client, f"{att}.jpg")
         else:
-            price = C.CLEAN_PRICE_USD[name]                # an edit is billed at its list price once the queue has it
-            job, _ = paid(spend, price, lambda: (clean.submit(name, original), price), f"edit {name} {sha[:12]}")
-            _put_json(client, f"{att}.request.json", job)
-            cl.requested.add(ident)
-        try:
-            copy = clean.collect(job)
-        except httpx.HTTPStatusError as exc:
-            code = exc.response.status_code
-            if code in (404, 410):                     # the queue no longer has it: the next run sends it again
-                client.delete_object(Bucket=S3_BUCKET, Key=f"{att}.request.json")
-                cl.requested.discard(ident)
-                raise
-            if code in C.CLEAN_FAILED_CODES:           # the model refused this photo for good: the next model
-                return _failed(client, cl, att, ident, name, f"the edit failed ({code})")
-            raise                                      # anything else (auth, balance, 5xx, 429): loud, collected again
-        except clean.NoImage as exc:
-            return _failed(client, cl, att, ident, name, str(exc))
-        _put(client, f"{att}.jpg", copy, "image/jpeg")
-        cl.edited.add(ident)
-    check, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.check_clean(original, copy), f"clean check {name} {sha[:12]}")
+            if ident in cl.requested:
+                job = _get_json(client, f"{att}.request.json")
+            else:
+                price = C.CLEAN_PRICE_USD[name]            # an edit is billed at its list price once the queue has it
+                spend.reserve(price + C.JUDGE_PRICE_USD)
+                held = C.JUDGE_PRICE_USD
+                job, _ = settled(spend, price, lambda: (clean.submit(name, original), price), f"edit {name} {sha[:12]}",
+                                 {**use, "model": name, "call": "edit"})
+                _put_json(client, f"{att}.request.json", job)
+                cl.requested.add(ident)
+            try:
+                copy = clean.collect(job)
+            except httpx.HTTPStatusError as exc:
+                code = exc.response.status_code
+                if code in (404, 410):                 # the queue no longer has it: the next run sends it again
+                    client.delete_object(Bucket=S3_BUCKET, Key=f"{att}.request.json")
+                    cl.requested.discard(ident)
+                    raise
+                if code in C.CLEAN_FAILED_CODES:       # the model refused this photo for good: the next model
+                    return _failed(client, cl, att, ident, name, f"the edit failed ({code})")
+                raise                                  # anything else (auth, balance, 5xx, 429): loud, collected again
+            except clean.NoImage as exc:
+                return _failed(client, cl, att, ident, name, str(exc))
+            _put(client, f"{att}.jpg", copy, "image/jpeg")
+            cl.edited.add(ident)
+        call, what = (lambda: judge.check_clean(original, copy)), f"clean check {name} {sha[:12]}"
+        listed = {**use, "model": name, "call": "check"}
+        reserved, held = held, 0.0
+        check, cost = (settled(spend, reserved, call, what, listed) if reserved
+                       else paid(spend, C.JUDGE_PRICE_USD, call, what, listed))
+    finally:
+        if held:                                       # no check was made: its share goes back to the cap
+            spend.settle(held, 0.0)
     _put_json(client, f"{att}.json", {**check, "edit_model": name, "check_cost": cost, "clean_version": C.CLEAN_VERSION})
     cl.attempts.add(ident)
     return check
@@ -386,7 +420,7 @@ def clean_listing(client, rounds, listing, exclude, spend, owner=None):
     if not complete:
         raise RuntimeError("its first photos have no standardiser result or verdict yet: nothing is cleaned before they do")
     for sha in [sha for sha in listing["photos"] if fixable(client, gpu[src], sha, exclude)][:C.CLEAN_PHOTOS_PER_LISTING]:
-        if clean_photo(client, cl[src], src, sha, spend):
+        if clean_photo(client, cl[src], src, sha, spend, listing):
             return
 
 def photo_notes(client, rounds, listing, exclude, conflicts):

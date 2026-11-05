@@ -258,8 +258,17 @@ and the problems, is kept in `<clean root>/summary.json`.
 
 ## Budget
 
-One budget per calendar month (UTC) per environment, `SCRAPER_STANDARDISE_BUDGET_USD`, for everything the process pays:
-hosted calls (judge as billed, edits at list price) and GPU time (each job's running time from Batch's start and stop
+Two monthly budgets (UTC calendar month) per environment, each with its own spend files:
+
+- `SCRAPER_STANDARDISE_BUDGET_USD`, the process budget: the judge (as billed) and GPU time.
+- `SCRAPER_STANDARDISE_CLEAN_BUDGET_USD`, the cleaning cap (owner 2026-11-05): the hosted clean-up edits (at list price)
+  and their clean checks. Each run keeps it in `<env>/standardise-test/clean-spend/<YYYY-MM>/<run id>.json`, which also
+  lists every paid call (`uses`: when, source, photo, SKU, listing, model, edit or check, what it cost, a failed call
+  included at the price it counted). An edit is reserved together with its check, so the cap never sends a copy the run
+  cannot then check; a reached cap stops only the cleaning, the judge and the GPU go on. Unset: no edit is paid, and the
+  run says so once. The edits also need the clean step on (`SCRAPER_STANDARDISE_CLEAN`).
+
+The process budget covers the judge and GPU time (each job's running time from Batch's start and stop
 times, read once the jobs have actually stopped, plus `GPU_JOB_ALLOWANCE_SECONDS` (12 min) per job that started, for
 the boot, the image pull and the pool's idle tail, at `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` per vCPU-hour, default
 0.147: g4dn.xlarge on demand). No default budget: unset, the process refuses to start.
@@ -350,7 +359,8 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 | setting | env | dev / prod |
 |---|---|---|
 | AUTO | `SCRAPER_STANDARDISE_AUTO` | off / off (owner's call) |
-| BUDGET_USD | `SCRAPER_STANDARDISE_BUDGET_USD` | 20 / 100 (owner, 2026-11-02; hosted + GPU, required) |
+| BUDGET_USD | `SCRAPER_STANDARDISE_BUDGET_USD` | 100 / 100 (owner, 2026-11-05; judge + GPU, required) |
+| CLEAN_BUDGET_USD | `SCRAPER_STANDARDISE_CLEAN_BUDGET_USD` | 10 / 30 (owner, 2026-11-05; clean-up edits + their checks) |
 | RUN_GPU_VCPUS | `SCRAPER_STANDARDISE_GPU_VCPUS` | 32 / 128 |
 | GPU_VCPU_HOUR_USD | `SCRAPER_STANDARDISE_GPU_VCPU_HOUR_USD` | 0.147 (default) |
 | WORK_SECONDS | `SCRAPER_STANDARDISE_WORK_SECONDS` | 7200 (default) |

@@ -936,6 +936,7 @@ class STANDARDISE:
     JUDGE_WINDOW_SECONDS = 2400
     LOCK_HEARTBEAT_SECONDS = 300       # the run lock is rewritten this often while the process runs (its sign of life)
     SPEND_DIR = "spend"                # <env>/<TEST_PREFIX>/<this>/<YYYY-MM>/<run id>.json: each run's spend of the month
+    CLEAN_SPEND_DIR = "clean-spend"    # the same per run for the cleaning cap, with every paid call listed ("uses")
     # The listings the owner removed on the hidden-listings page (deploy.standardise_decisions): <env>/<TEST_PREFIX>/<this>/
     # <SKU>.json each (percent-encoded), per environment and outside the run tags (a removal is about the listing, not a
     # run's results). The process never works on them and the image stage gives them no standardised photo, so they stay
@@ -1096,10 +1097,14 @@ on two questions:
    invented, nothing smeared or blurred, slab outline unchanged)? (true/false)
 Your whole answer is one JSON object and nothing else:
 {"clean": true|false, "faithful": true|false, "problems": "<short, empty if none>"}"""
-    # The month's (UTC) budget of an environment's photo process, all runs together: hosted calls (judge as billed, edits
-    # at list price) and GPU time (GPU_VCPU_HOUR_USD). A call or a GPU round that would take the month's total past it is
-    # not made. No default: unset, the process does not start.
+    # The month's (UTC) budget of an environment's photo process, all runs together: the judge (as billed) and GPU time
+    # (GPU_VCPU_HOUR_USD). A call or a GPU round that would take the month's total past it is not made. No default: unset,
+    # the process does not start.
     BUDGET_USD = _env_float("SCRAPER_STANDARDISE_BUDGET_USD", None)
+    # The month's cap of the hosted clean-up edits and their clean checks, all runs together, kept apart from BUDGET_USD
+    # (owner 2026-11-05: the cleaning has its own cap). An edit is reserved with its check, so a copy paid for is always
+    # checked in the run that paid for it. No default: unset, no photo is sent to an edit (the run says so once).
+    CLEAN_BUDGET_USD = _env_float("SCRAPER_STANDARDISE_CLEAN_BUDGET_USD", None)
     # A judge call's cost reserved before it is made: its worst case (JUDGE_MAX_TOKENS out at $20/M plus two images in at
     # $4/M, Opus 5.5), so parallel calls can never together pass the budget; Opus bills ~0.016 on average.
     JUDGE_PRICE_USD = 0.14
