@@ -435,22 +435,24 @@ def read_decisions(s3, root, listings):
     return Decisions(exclude, owner, clicks, conflicts, rounds, picks, unreadable, chosen)
 
 
-def unreadable_problems(listings, decisions):
-    """The run's problem line for each listing whose choice record cannot be read (every kind of run names them)."""
+def unreadable_problems(frozen, decisions):
+    """The run's problem line for each listing whose choice record cannot be read (`frozen`; every kind of run names
+    them)."""
     return [f"{l['key']}: the owner's choice record cannot be read ({decisions.unreadable[l['sku']]}): left exactly as "
-            "published" for l in listings if l["sku"] in decisions.unreadable]
+            "published" for l in frozen]
 
 
-def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions):
-    """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed, nor one whose choice record
-    cannot be read: the owner's decision is unknown, so it is left exactly as published), work on them and report:
-    (problems, counts, kept)."""
+def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen):
+    """Steps 1 to 7: pick the listings without a valid choice (never one the owner removed, nor one of `frozen`, whose
+    choice record cannot be read: the owner's decision is unknown, so it is left exactly as published, its photos'
+    pending redraws included), work on them and report: (problems, counts, kept)."""
     removed, records = removed_listings(s3), decisions.chosen
-    workable = [l for l in listings if l["sku"] not in decisions.unreadable]
+    workable = [l for l in listings if l not in frozen]
     found = todo(workable, records, decisions.exclude, whole_slabs(s3, records), removed, decisions.conflicts,
                  decisions.picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, decisions.owner, decisions.conflicts, decisions.rounds,
-                           live_choices(workable, records, removed, decisions), decisions.clicks)
+                           live_choices(workable, records, removed, decisions), decisions.clicks,
+                           {(l["source"], sha) for l in frozen for sha in l["photos"]})
     held_on = sum("kept" in l for l in found)
     say(f"==> standardise process {run_id}: {len(found) - held_on} listings without a chosen photo, {held_on} whose chosen "
         f"photo is no whole slab; {C.RUN_TAG} then {C.CLEAN_TAG}")
@@ -502,19 +504,20 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
     listings = photo_listings(sheet, photos)
     decisions = read_decisions(s3, root, listings)
+    frozen = [l for l in listings if l["sku"] in decisions.unreadable]   # left exactly as published, in every run kind
     assigned, conflicted = assignments(listings, decisions.picks, decisions.conflicts)
     closing = threading.Timer(max(0.0, deadline - time.monotonic()), halt, ((spend, clean), "the work window ended"))
     closing.daemon = True
     closing.start()
     try:
         if close_only:
-            frozen = {l["key"] for l in listings if l["sku"] in decisions.unreadable}
-            problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say, frozen)
+            problems, counts, kept = close_round(s3, batch, spend, run_id, deadline, root, say, {l["key"] for l in frozen})
         else:
-            problems, counts, kept = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions)
+            problems, counts, kept = photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions,
+                                                  frozen)
     finally:
         closing.cancel()
-    problems += conflicted + unreadable_problems(listings, decisions)
+    problems += conflicted + unreadable_problems(frozen, decisions)
     try:
         published = publish.publish(s3, root, sheet, photos, say, assigned=assigned)
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish

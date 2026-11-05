@@ -555,14 +555,15 @@ class Selection:
     listing keys} of the photos listings of several stones show (index.shared_photos); chosen = [(tag, source, sha)] of
     what the listings a run may publish show now (deploy.standardise_run.live_choices): an outdated one goes to the GPU
     too, its listing not picked again (its verdict and choice stand); clicks = {SKU: the owner's click to clean one
-    photo} (publish.clicks_prefix)."""
+    photo} (publish.clicks_prefix); frozen = {(source, sha)} of the photos of the listings whose choice record cannot be
+    read (deploy.standardise_run): left exactly as published, so their pending redraws wait (settle)."""
 
-    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen, clicks):
+    def __init__(self, client, listings, run_tag, clean_tag, owner, conflicts, rounds, chosen, clicks, frozen):
         if not run_tag or not clean_tag or run_tag == clean_tag:
             raise ValueError("two different run tags are required: the scraped photos' run and the cleaned copies' run")
         self.client, self.listings, self.tags = client, listings, (run_tag, clean_tag)
         self.owner, self.conflicts, self.rounds, self.chosen = owner, conflicts, rounds, sorted(set(chosen))
-        self.clicks = clicks
+        self.clicks, self.frozen = clicks, frozen
         self.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in self.chosen})
         self.exclude = read_exclude(EXCLUDE_PATH.read_text())
         self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
@@ -622,9 +623,12 @@ def settle(sel, spend, deadline):
     """(failures, stopped): every complete candidate of the run tags (a recheck drawn differently:
     deploy.standardise_source.draw_candidate) judged through verdict, as a new result is, each started before the
     deadline; then each settled (settle_one). A promotion or removal that fails stops the run loud, before report and
-    publish: the next run finishes it. The rounds are read again after."""
+    publish: the next run finishes it. A photo of a listing left exactly as published (sel.frozen) is skipped, its
+    candidate kept: it settles normally once that listing's choice record can be read again. The rounds are read again
+    after."""
     found = [{"key": f"{tag}/{src}/{sha}", "cands": rnd.redraw, "source": src, "sha": sha}
-             for tag, by_source in sel.rounds for src, rnd in sorted(by_source.items()) for sha in sorted(rnd.redrawn)]
+             for tag, by_source in sel.rounds for src, rnd in sorted(by_source.items()) for sha in sorted(rnd.redrawn)
+             if (src, sha) not in sel.frozen]
     judged = lambda c: verdict(sel.client, c["cands"], c["source"], c["sha"], C.CUTOUT_FORMAT, spend)
     failures, stopped = _each([c for c in found if undecided(sel.client, c["cands"].out, c["sha"])], judged, deadline)
     for c in found:
