@@ -220,11 +220,13 @@ def test_an_edit_collected_in_a_later_run_has_its_check_reserved_then(monkeypatc
     assert edits == [] and [(u["call"], u["usd"]) for u in spend.uses] == [("check", 0.02)] and spend.reserved == 0
 
 
-def test_a_listing_not_fully_judged_is_never_cleaned(monkeypatch):
+def test_a_listing_not_fully_judged_is_never_cleaned_and_is_no_problem_of_the_clean_step(monkeypatch):
+    # waiting is a normal state: the report counts the listing pending once, the clean step adds no line for it
     monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned before judging"))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
-    with pytest.raises(RuntimeError, match="nothing is cleaned before they do"):
-        sel.clean_listing(_S3(), rounds, _listing(A), set(), sel.Spend(10))
+    sel.clean_listing(_S3(), rounds, _listing(A), set(), sel.Spend(10))
+    s = _selection(_S3(), [_listing(A)], rounds)
+    assert sel.clean_all(s, sel.Spend(10), float("inf")) == ([], False)
 
 
 def test_a_photo_held_by_the_retouch_or_the_retired_logo_step_is_worth_cleaning_one_held_for_its_outline_is_not():
@@ -319,8 +321,11 @@ def test_with_the_clean_switch_off_a_mark_waits_and_a_click_is_cleaned(monkeypat
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")                  # B: a mark
     sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == []
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), click=_click(B))
-    assert edits == ["nano2"]
+    spend = sel.Spend(10)
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=_click(B))       # a clicked mark: a click always works
+    assert edits == ["nano2"] and {u["reason"] for u in spend.uses} == {"click"}
+    assert sel.authorised({"kinds": ["leftover_mark"]}, B, _click(B)) == "click"
+    assert sel.authorised({"held": "logo: still visible"}, B, None) is None             # switch off: no automatic edit
 
 
 def test_with_the_clean_switch_on_a_mark_is_cleaned_without_a_click(monkeypatch):
@@ -344,8 +349,19 @@ def test_a_click_that_cannot_be_used_is_never_paid_for_and_the_listing_says_why(
     spend = sel.Spend(10)
     sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=click)
     assert edits == [] and spend.uses == []
-    assert why in sel.click_problem(s3, rounds[0][1]["sentas"], _listing(A, B), click, set())
-    assert "owner's click not used: " in sel.photo_notes(s3, rounds, _listing(A, B), set(), {}, click)
+    issue = sel.click_problem(s3, rounds[0][1]["sentas"], _listing(A, B), click, set())
+    assert why in issue
+    assert f"owner's click not used: {issue}" in sel.photo_notes(s3, rounds, _listing(A, B), set(), {}, click, issue)
+
+
+def test_a_click_that_cannot_be_used_is_reported_for_a_pending_listing_too():
+    # review of #525: only listings on the review list said so; a listing not fully judged said nothing
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]   # A not judged
+    s = _selection(_S3(), [_listing(A)], rounds)
+    s.root, s.clicks = "r/", {"SEN-1": _click(D)}
+    out = sel.report(s)
+    assert out["pending"] == ["slab-1"] and out["click_problems"] == [
+        "slab-1: owner's click not used: it names a photo that is not the listing's"]
 
 
 def test_an_edit_paid_before_the_gate_is_always_collected_and_checked_and_nothing_new_is_sent(monkeypatch):
@@ -723,8 +739,7 @@ def test_a_listing_with_an_outdated_fail_is_never_cleaned_before_it_is_judged_ag
     monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned on an outdated verdict"))
     old_fail = json.dumps({"verdict": "fail", "problems": [{"kind": "light_reflection"}], "version": 1}).encode()
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
-    with pytest.raises(RuntimeError, match="nothing is cleaned before they do"):
-        sel.clean_listing(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set(), sel.Spend(10))
+    sel.clean_listing(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set(), sel.Spend(10))
 
 
 def test_an_attempt_that_failed_under_an_older_instruction_is_made_again_and_a_pass_stands(monkeypatch):
@@ -813,7 +828,7 @@ def test_a_listing_with_a_close_up_pass_is_never_sent_to_a_hosted_edit(monkeypat
 def _reported(objects, listing, rnd):
     s3 = _S3(objects)
     s = object.__new__(sel.Selection)
-    s.client, s.exclude, s.root, s.listings, s.owner, s.conflicts = s3, set(), "r/", [listing], {}, {}
+    s.client, s.exclude, s.root, s.listings, s.owner, s.conflicts, s.clicks = s3, set(), "r/", [listing], {}, {}, {}
     s.rounds = [("v9", {"sentas": rnd}), ("v9-clean", {"sentas": _round(CL)})]
     return s3, sel.report(s)
 

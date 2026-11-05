@@ -230,8 +230,11 @@ run cleans it. One rule per listing (`clean_listing`): an edit already paid for 
 (the payment is made, whatever the gate says now, and no new edit is sent for it); then the clicked photo goes first,
 then the marks, skipping any photo with no edit model left to try, one photo cleaned. A click that cannot be used
 (unreadable, no time, another SKU or listing than its file's, a photo not the listing's or not fixable) is never paid
-for and the listing's line in `tracked.csv` says why; a choice record that cannot be read leaves its listing out of the
-run, named in the run's problems. Each paid call is
+for, and the run's problems say why for any listing it names (its line in `tracked.csv` too). A listing whose choice
+record cannot be read stays exactly as published (its photo, its conflict-photo assignment and its files untouched, in
+every kind of run) and every run names it in its problems. A listing not fully judged is simply not cleaned yet (the
+report counts it pending); an edit already paid for is not collected once its listing has a passing photo or the
+owner's choice, since it is no longer needed. Each paid call is
 listed in the cleaning cap's spend file with its reason (`auto` or `click`, with the click's time) and what the edit
 fixes (`kinds` or `held`).
 

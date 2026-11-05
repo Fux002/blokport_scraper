@@ -109,7 +109,7 @@ def test_a_slab_listing_whose_chosen_photo_has_no_3d_slab_is_picked_again_with_i
 
 
 def _decided(exclude=(), conflicts=None, picks=None):
-    return proc.Decisions(set(exclude), {}, {}, conflicts or {}, [], picks or {}, {})
+    return proc.Decisions(set(exclude), {}, {}, conflicts or {}, [], picks or {}, {}, {})
 
 
 def test_what_the_live_listings_show_is_refreshed_and_nothing_else():
@@ -310,6 +310,29 @@ def test_an_unreadable_click_or_choice_record_fails_only_its_own_listing(capsys)
     assert capsys.readouterr().out.count("SEN-BAD") == 2                              # each named loud with its key
 
 
+@pytest.mark.parametrize("close_only", [False, True])
+def test_a_listing_whose_choice_record_cannot_be_read_stays_exactly_as_published(monkeypatch, close_only):
+    # review of #525: its conflict photo dropped out of the assignments, so publish unpublished it and removed the file
+    import time
+    s3 = _S3({f"{RUN}{D}.main.jpg": b"m", f"{RUN}{D}.white.jpg": b"w", f"{ROOT}chosen/mine.json": _record("mine", D),
+              imagestore.conflicts_key("sentas"): json.dumps({D: ["mine", "partner"]}).encode()})
+    pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={("sentas", D): ["SEN-MINE"]})   # as published
+    s3._store(pub.owner_key(ROOT, "SEN-MINE"), b"{broken")
+    published = {k: v for k, v in s3.objects.items() if k.startswith(("dev/products/", "prod/products/"))}
+    assert imagestore.assigned_key("sentas", D) in published
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D), _listing("partner", D)])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc, "run", lambda batch, sel, spend, clean, run_id, deadline, say=print: (
+        [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}))
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None,
+                 close_only=close_only)
+    assert {k: v for k, v in s3.objects.items() if k.startswith(("dev/products/", "prod/products/"))} == published
+    assert json.loads(s3.objects[f"{ROOT}chosen/mine.json"]["Body"])["sha"] == D
+    summary = json.loads(s3.objects[f"{ROOT}{'close-summary' if close_only else 'summary'}.json"]["Body"])
+    assert any(p.startswith("mine: the owner's choice record cannot be read") for p in summary["problem_list"])
+
+
 def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named(monkeypatch):
     s3 = _S3({pub.owner_key(ROOT, "SEN-MINE"): b"{broken", imagestore.conflicts_key("sentas"): b"{}"})
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
@@ -319,7 +342,7 @@ def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
-        return [], {"chosen": [], "tracked": [], "pending": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {"changed": False})
     import time
@@ -523,7 +546,7 @@ def test_the_process_works_the_picked_listings_then_publishes_and_writes_its_sum
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         worked.extend(l["key"] for l in sel.listings)
-        return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"]}
+        return ["sentas d: no result after the GPU round"], {"chosen": [], "tracked": [], "pending": ["new"], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     import time
     summary = proc.process(s3, None, select.Spend(5.0, others=lambda: 1.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
@@ -545,7 +568,7 @@ def test_the_run_hands_the_live_listings_choices_to_the_gpu_so_an_older_outline_
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(listings=sel.listings, todo=sel.gpu_todo())
-        return [], {"chosen": [], "tracked": [], "pending": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     import time
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
@@ -564,7 +587,7 @@ def test_the_run_reads_the_owner_s_choices_by_sku_and_the_conflicts_the_produce_
 
     def run(batch, sel, spend, clean, run_id, deadline, say=print):
         seen.update(owner=sel.owner, conflicts=sel.conflicts)
-        return [], {"chosen": [], "tracked": [], "pending": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     monkeypatch.setattr(proc.publish, "publish",
                         lambda s3, root, sheet, photos, say, assigned: handed.update(assigned) or {"changed": False})
@@ -588,7 +611,7 @@ def test_no_hosted_call_starts_after_the_work_window(monkeypatch):
         with pytest.raises(select.Halted, match="work window"):
             spend.reserve(0.01)
         seen.append(1)
-        return [], {"chosen": [], "tracked": [], "pending": []}
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 0.05, say=lambda m: None)
     assert seen == [1]
@@ -720,7 +743,7 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"])
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, set(), {}, rounds)) is not None}
-    decided = proc.Decisions(set(), owner, {}, {}, rounds, picks, {})
+    decided = proc.Decisions(set(), owner, {}, {}, rounds, picks, {}, records)
     found = proc.todo(listings, records, set(), proc.whole_slabs(s3, records), set(), {}, picks)
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, owner, {}, rounds,
                            proc.live_choices(listings, records, set(), decided), {})

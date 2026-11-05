@@ -478,10 +478,8 @@ def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=Non
     if owner is not None or any(sha in cl[src].cleaned for sha in listing["photos"]):
         return
     picked, complete = choose(client, rounds[:1], listing, exclude)
-    if picked is not None:
+    if picked is not None or not complete:             # not fully judged: nothing is cleaned yet (the report counts it pending)
         return
-    if not complete:
-        raise RuntimeError("its first photos have no standardiser result or verdict yet: nothing is cleaned before they do")
     for sha in listing["photos"]:
         if sha not in exclude and (models := paid_unchecked(cl[src], sha)):
             if clean_photo(client, cl[src], src, sha, spend, listing, {"reason": "paid"}, models):
@@ -496,9 +494,9 @@ def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=Non
         if clean_photo(client, cl[src], src, sha, spend, listing, why):
             return
 
-def photo_notes(client, rounds, listing, exclude, conflicts, click=None):
+def photo_notes(client, rounds, listing, exclude, conflicts, click=None, issue=None):
     """What happened to each of a listing's photos, for a person reading the tracked list, and the owner's click on it:
-    which photo, or why it cannot be used (click_problem)."""
+    which photo, or why it cannot be used (`issue`, click_problem)."""
     notes = []
     src = listing["source"]
     for sha in listing["photos"]:
@@ -525,9 +523,7 @@ def photo_notes(client, rounds, listing, exclude, conflicts, click=None):
                 parts.append("cleaned by " + ", ".join(a.split(".", 1)[1] for a in tried) + ("; a copy passed" if sha in r.cleaned else "; none passed"))
         notes.append(f"{sha[:12]}: " + ("; ".join(parts) or "no result"))
     if click is not None:
-        blocked = exclude | {sha for sha in listing["photos"] if (src, sha) in conflicts}     # as the clean step sees it
-        problem = click_problem(client, rounds[0][1][src], listing, click, blocked)
-        notes.append(f"owner's click not used: {problem}" if problem else f"owner's click: clean {click['sha'][:12]}")
+        notes.append(f"owner's click not used: {issue}" if issue else f"owner's click: clean {click['sha'][:12]}")
     return " | ".join(notes)
 
 
@@ -573,6 +569,13 @@ class Selection:
 
     def refresh(self):
         self.rounds = read_rounds(self.client, self.tags, self.sources)
+
+    def click_issue(self, listing):
+        """(the listing's click or None, why it cannot be used or None): click_problem, as the clean step sees it."""
+        click = self.clicks.get(listing["sku"])
+        if click is None:
+            return None, None
+        return click, click_problem(self.client, self.rounds[0][1][listing["source"]], listing, click, self.blocked(listing))
 
     def owner_pick(self, listing):
         """(tag, sha) of the owner's choice for this listing while it applies (owner_choice), else None."""
@@ -681,14 +684,15 @@ def clean_all(sel, spend, deadline):
 
 
 def report(sel):
-    """{"chosen", "tracked", "pending"} of this run's listings. Each listing with a good photo gets its choice record (a
+    """{"chosen", "tracked", "pending", "click_problems"} of this run's listings. Each listing with a good photo gets its choice record (a
     kept close-up's stays as it is unless a whole slab passed), a listing now without one loses its record (and is in
     tracked.csv, this run's list of listings with no good photo); a listing not fully judged is neither and its record
     is left as it is. Listings outside this run are untouched."""
     prefix = chosen_prefix(sel.root)
 
     def one(l):
-        """(outcome, what goes in its list) of one listing, from its stored answers only."""
+        """(outcome, what goes in its list, why its click cannot be used) of one listing, from its stored answers only."""
+        click, issue = sel.click_issue(l)
         picked, complete = choose(sel.client, sel.rounds, l, sel.blocked(l), owner=sel.owner_pick(l))
         if picked:
             tag, sha = picked
@@ -696,21 +700,22 @@ def report(sel):
                       "prefix": round_prefix(tag, l["source"])}
             if picked != l.get("kept"):                # a kept choice is its record already: never written again
                 _put_json(sel.client, f"{prefix}{l['key']}.json", record)
-            return "chosen", record
+            return "chosen", record, issue
         if complete:
             sel.client.delete_object(Bucket=S3_BUCKET, Key=f"{prefix}{l['key']}.json")
             return "tracked", {"source": l["source"], "listing": l["key"], "format": l["format"], "photos": len(l["photos"]),
                                "what_happened": photo_notes(sel.client, sel.rounds, l, sel.exclude, sel.conflicts,
-                                                            sel.clicks.get(l["sku"]))}
-        return "pending", l["key"]
+                                                            click, issue)}, issue
+        return "pending", l["key"], issue
     outcomes = pool_map(C.SELECT_WORKERS, one, sel.listings)   # a few S3 reads per listing, in the listings' order
-    chosen, tracked, pending = ([item for kind, item in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
+    chosen, tracked, pending = ([item for kind, item, _ in outcomes if kind == want] for want in ("chosen", "tracked", "pending"))
+    clicks = [f"{l['key']}: owner's click not used: {issue}" for l, (_, _, issue) in zip(sel.listings, outcomes) if issue]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=["source", "listing", "format", "photos", "what_happened"])
     writer.writeheader()
     writer.writerows(tracked)
     _put(sel.client, f"{sel.root}tracked.csv", out.getvalue().encode(), "text/csv")
-    return {"chosen": chosen, "tracked": tracked, "pending": pending}
+    return {"chosen": chosen, "tracked": tracked, "pending": pending, "click_problems": clicks}
 
 
 def _each(listings, work, deadline, clock=time.monotonic):
