@@ -499,7 +499,9 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     root = f"{ROOT}{C.CLEAN_TAG}/"
     if left := gpu.clear_leftovers(batch, run_id):
         say(f"==> stopped {len(left)} GPU jobs an earlier run left")
-    if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):    # no job writes now: a promotion cut short is finished
+    # No job writes now: a promotion cut short is finished, a frozen listing's too (decided before, only completed: a
+    # half-written published photo would be worse; frozen means no new decision, see settle).
+    if settled := select.finish(s3, (C.RUN_TAG, C.CLEAN_TAG)):
         say(f"==> finished {settled} outline rechecks an earlier run left half settled")
     sheet, photos = sheet_and_photos(s3)               # read once: the work step and publish (tiles) see the same sheet
     listings = photo_listings(sheet, photos)
