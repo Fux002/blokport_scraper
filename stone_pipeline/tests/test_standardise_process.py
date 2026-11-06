@@ -280,6 +280,14 @@ def test_the_cleaning_cap_is_its_own_monthly_budget_and_a_close_only_run_has_non
     assert proc.cleaning_cap(s3, "20261102T120000Z", close_only=True) is None
 
 
+def test_the_paid_calls_counted_leave_out_the_refused_ones():
+    # review of #530: a refused call is listed at $0 and is no paid call
+    cap = select.Spend(10)
+    cap.record({"call": "edit", "usd": 0.0, "refused": 422})
+    cap.record({"call": "edit", "usd": 0.12})
+    assert cap.paid_calls() == 1 and proc.clean_summary(cap)["clean_uses"] == 1
+
+
 def test_the_summary_carries_the_cleaning_cap_s_spend():
     cap = select.Spend(30.0, others=lambda: 4.0)
     cap.reserve(0.26)

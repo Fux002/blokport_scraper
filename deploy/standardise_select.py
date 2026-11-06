@@ -107,6 +107,11 @@ class Spend:
                 self.before = before
         self._keep()
 
+    def paid_calls(self):
+        """How many of the listed calls were paid for (a refused one is listed at $0 and is none)."""
+        with self._lock:
+            return sum(1 for use in self.uses if not use.get("refused"))
+
     def record(self, use):
         """List one paid call (its fields as given, stamped with when it was paid), kept with the run's total."""
         with self._lock:
@@ -254,16 +259,26 @@ def paid(spend, price, call, what, use=None):
     return settled(spend, price, call, what, use)
 
 
+def refused(exc):
+    """The status when a hosted call was refused before any work was done (HOSTED_REFUSED_CODES: a model refusing the
+    photo as much as an auth, balance or rate refusal), so nothing was billed; None for any other failure."""
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in C.HOSTED_REFUSED_CODES:
+        return exc.response.status_code
+    return None
+
+
 def settled(spend, price, call, what, use=None):
-    """(answer, cost) of one hosted call whose price is already reserved, settled to what it cost. A call that fails may
-    have been billed (sent, then lost), and an answer without its cost has one: both count at the reserved price, never
-    as free. With `use`, the call is listed in the spend (record) at what it counted, a failed one included."""
+    """(answer, cost) of one hosted call whose price is already reserved, settled to what it cost. A call refused before
+    any work (refused: HOSTED_REFUSED_CODES) costs nothing. Any other failure may have been billed (sent, then lost),
+    and an answer without its cost has one: both count at the reserved price, never as free. With `use`, the call is
+    listed in the spend (record) at what it counted, a failed or refused one included."""
     try:
         answer, cost = call()
-    except BaseException:
-        spend.settle(price, price)
+    except BaseException as exc:
+        code = refused(exc)
+        spend.settle(price, 0.0 if code else price)
         if use is not None:
-            spend.record({**use, "usd": price, "failed": True})
+            spend.record({**use, "usd": 0.0, "refused": code} if code else {**use, "usd": price, "failed": True})
         raise
     if cost is None:
         print(f"   WARNING: {what}: the answer carries no usage.cost; counted at the reserved ${price:.2f}", flush=True)
@@ -427,21 +442,25 @@ def _attempt(client, cl, sha, name, original, spend, use):
                 price = C.CLEAN_PRICE_USD[name]            # an edit is billed at its list price once the queue has it
                 spend.reserve(price + C.JUDGE_PRICE_USD)
                 held = C.JUDGE_PRICE_USD
-                job, _ = settled(spend, price, lambda: (clean.submit(name, original), price), f"edit {name} {sha[:12]}",
-                                 {**use, "model": name, "call": "edit"})
+                try:
+                    job, _ = settled(spend, price, lambda: (clean.submit(name, original), price),
+                                     f"edit {name} {sha[:12]}", {**use, "model": name, "call": "edit"})
+                except httpx.HTTPStatusError as exc:
+                    if (code := given_up(exc)) is None:
+                        raise                          # loud (auth, balance, rate, 5xx): sent again next run
+                    return _failed(client, cl, att, ident, name, f"the edit was refused ({code})")
                 _put_json(client, f"{att}.request.json", job)
                 cl.requested.add(ident)
             try:
                 copy = clean.collect(job)
             except httpx.HTTPStatusError as exc:
-                code = exc.response.status_code
-                if code in (404, 410):                 # the queue no longer has it: the next run sends it again
+                if exc.response.status_code in (404, 410):     # the queue no longer has it: the next run sends it again
                     client.delete_object(Bucket=S3_BUCKET, Key=f"{att}.request.json")
                     cl.requested.discard(ident)
                     raise
-                if code in C.CLEAN_FAILED_CODES:       # the model refused this photo for good: the next model
-                    return _failed(client, cl, att, ident, name, f"the edit failed ({code})")
-                raise                                  # anything else (auth, balance, 5xx, 429): loud, collected again
+                if (code := given_up(exc)) is None:
+                    raise                              # anything else (auth, balance, 5xx, 429): loud, collected again
+                return _failed(client, cl, att, ident, name, f"the edit failed ({code})")
             except clean.NoImage as exc:
                 return _failed(client, cl, att, ident, name, str(exc))
             _put(client, f"{att}.jpg", copy, "image/jpeg")
@@ -458,6 +477,14 @@ def _attempt(client, cl, sha, name, original, spend, use):
     cl.attempts.add(ident)
     return check
 
+
+def given_up(exc):
+    """The status of an edit's HTTP error when the model refused this photo for good (CLEAN_FAILED_CODES), at submit or
+    at collect: the attempt is a failed one and the next model gets its turn; None for any other status."""
+    code = exc.response.status_code
+    return code if code in C.CLEAN_FAILED_CODES else None
+
+
 def _failed(client, cl, att, ident, name, why):
     """A hosted edit that failed for good, recorded as a failed attempt: the next model gets its turn, now and on re-runs."""
     check = {"clean": False, "faithful": False, "passes": False, "problems": why, "edit_model": name, "check_cost": 0.0,
@@ -467,16 +494,28 @@ def _failed(client, cl, att, ident, name, why):
     return check
 
 
+def cleaned_copies(cl, listing, click):
+    """The cleaned copies (of the clean round `cl`) that are the listing's cleaned photo: of the clicked photo alone when
+    the owner clicked one (the click's photo is the unit: a copy of another photo leaves the click to do), else of any
+    of its photos (one photo per listing is cleaned)."""
+    return [sha for sha in ([click["sha"]] if click is not None else listing["photos"]) if sha in cl.cleaned]
+
+
 def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=None):
     """A listing with no good photo from the standardiser. First an edit already paid for is always collected and
     checked (the payment is made, whatever the gate says now), no new one sent for it. Then its first
     CLEAN_PHOTOS_PER_LISTING fixable photos that may be paid for (authorised: the photo the owner's valid click names
     first, then a mark on the stone) and still have a model left to try are cleaned (one is enough). Nothing to do when
-    the owner chose its photo, or when it already has a cleaned copy (its result is judged later). `click` is the
-    listing's click record as read (an invalid one is never used: click_problem)."""
+    the owner chose its photo, or when it already has its cleaned copy (cleaned_copies: of the clicked photo when the
+    owner clicked one; its result is judged later). `click` is the listing's click record as read (an invalid one is
+    never used: click_problem)."""
     (_, gpu), (_, cl) = rounds
     src = listing["source"]
-    if owner is not None or any(sha in cl[src].cleaned for sha in listing["photos"]):
+    if owner is not None:
+        return
+    if click is not None and click_problem(client, gpu[src], listing, click, exclude) is not None:
+        click = None
+    if cleaned_copies(cl[src], listing, click):
         return
     picked, complete = choose(client, rounds[:1], listing, exclude)
     if picked is not None or not complete:             # not fully judged: nothing is cleaned yet (the report counts it pending)
@@ -485,8 +524,6 @@ def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=Non
         if sha not in exclude and (models := paid_unchecked(cl[src], sha)):
             if clean_photo(client, cl[src], src, sha, spend, listing, {"reason": "paid"}, models):
                 return
-    if click is not None and click_problem(client, gpu[src], listing, click, exclude) is not None:
-        click = None
     sent = [(sha, {"reason": why, **cause, **({"click_at": click["at"]} if why == "click" else {})})
             for sha in listing["photos"]
             if (cause := fixable(client, gpu[src], sha, exclude)) is not None and (why := authorised(cause, sha, click))]

@@ -380,23 +380,33 @@ def finish_price(todo, listings, window):
 def clicks_to_finish(sel, left, window):
     """({SKU: click} of the clicks this run finishes before any other work, [the listings whose click waits])
     (scraper 1a 2026-11-06: the owner's word goes before the automatic work, and nothing is paid that cannot finish).
-    A click whose cleaned copy a run before made costs no edit: it always goes, its copies the GPU has not run counted.
-    Then each new click in sheet order, while the month's budget left (`left`) covers the GPU round and the judge of
-    every click taken with it (finish_price); with less than a GPU round's minimum of the window left, none. A click
-    not taken is not paid: it waits for next month or a higher budget."""
+    A click whose photo a run before cleaned (select.cleaned_copies: the clicked photo's own copy) costs no edit: it
+    always goes. Then each new click in sheet order, while the month's budget left (`left`) covers the GPU round and the
+    judge of every click taken with it (finish_price); with less than a GPU round's minimum of the window left, none.
+    The GPU round counted is exactly what the clicks' round runs: each taken listing's cleaned copies the GPU has not
+    run (made), and the clicked photo's copy to come. A click not taken is not paid: it waits for next month or a
+    higher budget."""
     cl = sel.rounds[1][1]
     todo, taken, waiting = {}, {}, []
     clicks = sel.usable_clicks()
-    copies = {l["sku"]: [sha for sha in l["photos"] if sha in cl[l["source"]].cleaned] for l, _ in clicks}
+    copies = {l["sku"]: select.cleaned_copies(cl[l["source"]], l, click) for l, click in clicks}
+
+    def made(l):
+        """The listing's cleaned copies the GPU has not run: what the clicks' GPU round runs of it (clean_todo)."""
+        rnd = cl[l["source"]]
+        return [sha for sha in l["photos"] if sha in rnd.cleaned and select.needs_gpu(rnd, sha)]
+    def adding(todo, l, shas):
+        """todo with the listing's photos added once each (listings of one stone may show the same photo)."""
+        listed = todo.get(l["source"], [])
+        return {**todo, l["source"]: listed + [sha for sha in dict.fromkeys(shas) if sha not in listed]}
     for l, click in clicks:
         if copies[l["sku"]]:
             taken[l["sku"]] = click
-            rnd = cl[l["source"]]
-            todo.setdefault(l["source"], []).extend(sha for sha in copies[l["sku"]] if select.needs_gpu(rnd, sha))
+            todo = adding(todo, l, made(l))
     for l, click in clicks:
         if copies[l["sku"]]:
             continue
-        trial = {**todo, l["source"]: todo.get(l["source"], []) + [click["sha"]]}
+        trial = adding(todo, l, made(l) + [click["sha"]])
         if window >= C.GPU_MIN_WINDOW_SECONDS and finish_price(trial, len(taken) + 1, window) <= left:
             todo, taken[l["sku"]] = trial, click
         else:
@@ -608,7 +618,7 @@ def clean_summary(clean):
         return {"clean_run_spent_usd": None, "clean_month_spent_usd": None, "clean_budget_usd": None,
                 "clean_budget_reached": None, "clean_uses": None}
     return {"clean_run_spent_usd": round(clean.spent, 4), "clean_month_spent_usd": round(clean.before + clean.spent, 4),
-            "clean_budget_usd": clean.budget, "clean_budget_reached": clean.capped, "clean_uses": len(clean.uses)}
+            "clean_budget_usd": clean.budget, "clean_budget_reached": clean.capped, "clean_uses": clean.paid_calls()}
 
 
 def relink():
@@ -721,7 +731,7 @@ def main() -> int:
           + ("; the month's budget is reached: the rest waits for next month or a higher budget" if spend.capped else ""),
           flush=True)
     if clean is not None:
-        print(f"==> cleaning: spent ${clean.spent:.2f} this run in {len(clean.uses)} paid calls, "
+        print(f"==> cleaning: spent ${clean.spent:.2f} this run in {clean.paid_calls()} paid calls, "
               f"${clean.before + clean.spent:.2f} of ${clean.budget:.2f} this month"
               + ("; the cleaning cap is reached: further edits wait for next month or a higher cap" if clean.capped else ""),
               flush=True)
