@@ -351,9 +351,19 @@ resource "aws_ecs_service" "this" {
   # is never on by accident; the task role below gains the ssmmessages channel actions only when set.
   enable_execute_command = var.enable_execute_command
 
+  # ONE writer at a time: a roll stops the old task BEFORE it starts the new one. config.db and the ledger are SQLite
+  # files on the task's local disk, carried across tasks only by S3 snapshots. With the default 100/200 limits the new
+  # task started first, restored the snapshots (up to one snapshot interval old) before the old task's final save on
+  # SIGTERM, and its own first save then overwrote that final save: the decisions and acks of the gap were lost, and
+  # Cloud Map served both tasks' IPs meanwhile. Stopping first means the new task restores the old task's final save.
+  # The price is a short outage per roll: the old task's stop (up to its stopTimeout) plus the new task's boot.
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
   # A task that dies at boot (an import error in serve(), a required restore that fails) must not take the
-  # service down: ECS marks the deployment failed and rolls back to the last stable task set instead of
-  # retrying the broken image forever. The ledger/config volume is unaffected (the old task keeps it).
+  # service down for good: ECS marks the deployment failed and rolls back to the last stable task definition
+  # instead of retrying the broken image forever. With the limits above the old task is already stopped by then,
+  # so the rollback starts it again, restoring from the S3 snapshots.
   deployment_circuit_breaker {
     enable   = true
     rollback = true

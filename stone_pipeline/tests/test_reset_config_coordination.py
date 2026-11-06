@@ -98,7 +98,7 @@ def test_global_reset_snapshots_both_stores_immediately_scoped_does_not(tmp_path
     monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
     calls: list[str] = []
     monkeypatch.setattr(lifecycle, "_snapshot_ledger", lambda: calls.append("ledger"))
-    monkeypatch.setattr(lifecycle, "_snapshot_config", lambda: calls.append("config"))
+    monkeypatch.setattr(lifecycle, "snapshot_config", lambda: calls.append("config"))
 
     lifecycle.reset(sources=["polonine"], hard=False)     # SCOPED -> config.db untouched -> no cross-store snapshot
     assert calls == []

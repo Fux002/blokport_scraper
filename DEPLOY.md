@@ -112,9 +112,20 @@ change" and never restart the running task, leaving the new code in ECR but **no
 The Deploy workflow now closes this automatically: after the `:core` push, the **"Roll dev service"**
 step (`.github/workflows/deploy.yml`, `push` events only) runs `update-service --force-new-deployment`
 and `wait services-stable`, so a green Deploy means the task ACTUALLY rolled, not just that the image was
-pushed. This is safe: `config.db` (sources + review decisions) and the ledger restore from their S3
-snapshots on restart, so nothing is lost. The CI deploy role is granted `ecs:UpdateService` (scoped to
-ONLY the dev scraper service) + `ecs:DescribeServices` in `infra/main.tf`.
+pushed. The CI deploy role is granted `ecs:UpdateService` (scoped to ONLY the dev scraper service) +
+`ecs:DescribeServices` in `infra/main.tf`.
+
+**What a roll keeps, and what it costs.** `config.db` (sources + review decisions) and the ledger live on the
+task's local disk and cross a roll only as S3 snapshots: each is saved every 5 minutes (only when changed), on
+the task's stop (SIGTERM), and config.db also right after every operator decision and lifecycle verb. The
+service rolls one task at a time (`deployment_minimum_healthy_percent = 0`, `deployment_maximum_percent = 100`
+in `infra/modules/sync_service/main.tf`): the old task stops and saves first, then the new task restores those
+saves. So a roll loses nothing the old task wrote, but the service is **down for the roll** (the old task's
+stop, up to its 120 s stopTimeout, plus the new task's boot and restore) and a running produce or photos run
+is stopped (it reads `interrupted` after the boot). A task that is killed without its stop (a crash, an OOM)
+loses at most the last snapshot interval of writes not saved at once (ledger acks re-serve and re-ack to the
+same external_id, see `stone_pipeline/ledger/snapshot.py`); its decisions were saved when they were made
+(best-effort: a failed save is logged and the periodic save retries).
 
 If you ever need to roll by hand (e.g. a manual `imageproc`/`gpu` dispatch, which deliberately does NOT
 roll the app task):

@@ -15,6 +15,7 @@ em dashes (design principle 2).
 
 from __future__ import annotations
 
+import functools
 import hmac
 import json
 from stone_pipeline.core import env
@@ -148,6 +149,22 @@ def _dict(body) -> dict:
 
 def _sources_of(body):
     return body.get("sources") if isinstance(body, dict) else None
+
+
+def _durable(handler):
+    """A route that records an operator decision in config.db snapshots it to S3 as soon as the write succeeds, by the
+    lifecycle verbs' one mechanism (lifecycle.snapshot_config; a no-op off the config server). The periodic save alone
+    leaves up to one interval of decisions on the task's disk, lost when the task dies or a roll replaces it first.
+    A refused write changed nothing, so it snapshots nothing."""
+    @functools.wraps(handler)
+    def durable(params, body, query):
+        code, payload = handler(params, body, query)
+        if 200 <= code < 300:
+            from stone_pipeline import lifecycle
+            lifecycle.snapshot_config()
+        return code, payload
+    durable.snapshots_config = True
+    return durable
 
 
 # -- run: the produce trigger ------------------------------------------------------------------------------
@@ -679,6 +696,8 @@ def _delete_source(params, body, query):
     return code, result
 
 
+# _durable: the route records an operator decision in config.db, snapshotted as soon as it succeeds. The lifecycle verbs
+# (reset, delist, pause, resume, remove a source) snapshot it themselves.
 _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("POST", ("run",), _post_run),
     ("GET", ("run",), _get_run),
@@ -693,32 +712,32 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("POST", ("pause",), _post_pause),
     ("POST", ("resume",), _post_resume),
     ("GET", ("variations", "minted"), _get_variations_minted),
-    ("POST", ("variations", "unmint"), _post_variations_unmint),
-    ("POST", ("variations", "{key}", "{verb}"), _post_variation_verb),
+    ("POST", ("variations", "unmint"), _durable(_post_variations_unmint)),
+    ("POST", ("variations", "{key}", "{verb}"), _durable(_post_variation_verb)),
     ("GET", ("review", "variants"), _get_review_variants),
-    ("PUT", ("review", "variants", "{variant}"), _put_review_variant),
+    ("PUT", ("review", "variants", "{variant}"), _durable(_put_review_variant)),
     ("GET", ("review", "attributes"), _get_review_attributes),
-    ("PUT", ("review", "attributes", "{value}"), _put_review_attribute),
-    ("PUT", ("review", "decide"), _put_review_decide),
-    ("DELETE", ("review", "decide"), _delete_review_decide),
+    ("PUT", ("review", "attributes", "{value}"), _durable(_put_review_attribute)),
+    ("PUT", ("review", "decide"), _durable(_put_review_decide)),
+    ("DELETE", ("review", "decide"), _durable(_delete_review_decide)),
     ("GET", ("review", "resolved"), _get_review_resolved),
     ("GET", ("review", "backbone"), _get_review_backbone),
     ("GET", ("review", "backbone", "decided"), _get_review_backbone_decided),
-    ("POST", ("review", "backbone", "approve_all"), _post_review_backbone_approve_all),
-    ("PUT", ("review", "backbone", "{ref}"), _put_review_backbone_leaf),
+    ("POST", ("review", "backbone", "approve_all"), _durable(_post_review_backbone_approve_all)),
+    ("PUT", ("review", "backbone", "{ref}"), _durable(_put_review_backbone_leaf)),
     ("GET", ("review", "lots"), _get_review_lots),
-    ("PUT", ("review", "lots", "{ref}"), _put_review_lot),
+    ("PUT", ("review", "lots", "{ref}"), _durable(_put_review_lot)),
     ("GET", ("origins",), _get_origins),
     ("GET", ("origins", "lookup"), _get_origins_lookup),
-    ("PUT", ("origins", "{ref}"), _put_origin),
-    ("DELETE", ("origins", "{ref}"), _delete_origin),
+    ("PUT", ("origins", "{ref}"), _durable(_put_origin)),
+    ("DELETE", ("origins", "{ref}"), _durable(_delete_origin)),
     ("GET", ("varieties",), _get_varieties),
     ("GET", ("adapters",), _get_adapters),
     ("GET", ("colors",), _get_colors),
     ("GET", ("types",), _get_types),
     ("GET", ("sources",), _get_sources),
     ("GET", ("sources", "{name}"), _get_source),
-    ("PUT", ("sources", "{name}"), _put_source),
+    ("PUT", ("sources", "{name}"), _durable(_put_source)),
     ("DELETE", ("sources", "{name}"), _delete_source),
 )
 
@@ -950,11 +969,11 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     config_db = store.config_db_path()
     boot(config_db, writethrough.ledger_path())
     # keep config.db durable: a periodic snapshot backstop, stopped and flushed by the SIGTERM handler
-    # (the lifecycle verbs also snapshot immediately after a pause/delist so a crash never loses one).
+    # (the lifecycle verbs and the decision routes also snapshot immediately, so a crash or a roll never loses one).
     periodic = snapshot.start_periodic(config_db, key=snapshot.config_key())
     signal.signal(signal.SIGTERM, lambda *_: shutdown(config_db, periodic))
     from stone_pipeline import lifecycle
-    lifecycle.enable_config_snapshots()   # now a pause/delist also snapshots immediately (server context only)
+    lifecycle.enable_config_snapshots()   # now a pause/delist or a decision snapshots immediately (server context only)
     httpd = ThreadingHTTPServer((host, port), ConfigHandler)
     httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
     log.info("config server listening", extra={"extra_fields": {
