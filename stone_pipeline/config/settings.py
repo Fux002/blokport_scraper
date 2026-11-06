@@ -84,6 +84,9 @@ _FROM_MEDUSA = WORKSPACE_ROOT / "from_medusa" / ENV_NAME   # the env's Medusa do
 _TO_UPLOAD = WORKSPACE_ROOT / "to_upload" / ENV_NAME       # the env's upload files
 _REVIEW = WORKSPACE_ROOT / "review" / ENV_NAME             # the env's look-before-upload
 _OUTPUTS = REPO_ROOT / "outputs" / ENV_NAME                # the env's per-source staging
+# The variety base's file name: the same name in from_medusa/<env>/ (the base a produce reads and settles) and in
+# to_upload/<env>/ (the copy of it published as a manifest-listed deliverable).
+VARIANTS_BASE_FILE = "variants_export_base.csv"
 
 # Blokport change 1 (VE2) adds status/internal columns to attributes.csv. While False an absent column reads as
 # active and not internal; step C flips this once Blokport change 1 is live on prod, so a missing column fails loud.
@@ -277,7 +280,10 @@ class Paths:
     # The committed, Id-free SOURCE OF TRUTH: the complete variant set (base == the full catalog). The
     # catalog seeds from THIS, not the live export -- so a cold start (Medusa emptied -> thin live export)
     # still rebuilds the whole catalog and only grows from there. sync_variants_base keeps it == full.
-    variants_export_base_csv: Path = _FROM_MEDUSA / "variants_export_base.csv"
+    variants_export_base_csv: Path = _FROM_MEDUSA / VARIANTS_BASE_FILE
+    # The deliverable copy of the base this produce settled (catalog, after sync_variants_base), byte for byte, so
+    # the manifest lists it beside 1_variants_full.csv and Blokport's "restore base" import can verify it.
+    variants_base_deliverable_csv: Path = _TO_UPLOAD / VARIANTS_BASE_FILE
     # PRISTINE, read-only copy of the base, baked at image build (Dockerfile) and never written at runtime
     # (the live base above self-mutates: base := 1_variants_full each produce). The factory reset reconciles
     # the ledger against THIS so a seed cleanup actually reaches the running ledger. Absent locally -> the

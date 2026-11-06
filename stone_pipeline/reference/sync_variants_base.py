@@ -1,7 +1,8 @@
 """variants_export_base.csv = the full variant list. There is ONE list, not three:
 
   * 1_variants_full.csv      the complete, gated, S3-imaged, Id-free variant set built each run
-  * variants_export_base.csv THE SAME set, persisted as the committed seed of truth (base == full)
+  * variants_export_base.csv THE SAME set, persisted as the committed seed of truth (base == full); its
+                             settled bytes are also published as a deliverable (to_upload/, see write_deliverable)
   * 1_variants_update.csv     just the NEW slice of that set (a subset of full), for incremental load
   * variants_export.csv       the live Medusa state WITH ids (matching + round-trip)
 
@@ -19,7 +20,7 @@ import csv
 from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS, THIN_COPY_MIN_FRACTION
-from stone_pipeline.core import logfmt
+from stone_pipeline.core import csvio, logfmt
 
 log = logfmt.get_logger("sync_variants_base")
 
@@ -28,6 +29,7 @@ log = logfmt.get_logger("sync_variants_base")
 # the dev folder. from_medusa_dir follows ENV_NAME, so dev and prod each use their own base.
 BASE = SETTINGS.paths.from_medusa_dir / "variants_export_base.csv"
 FULL = SETTINGS.paths.to_upload_dir / "1_variants_full.csv"
+DELIVERABLE = SETTINGS.paths.variants_base_deliverable_csv
 # base carries exactly the upload columns and NO Medusa Id (Medusa mints ids on import)
 COLS = ["Key", "Name", "Image", "Aliases", "Volume per kg (m³/kg)"]
 # Corruption guard: the base is the source of truth and a cold start seeds FROM it, so 1_variants_full can
@@ -62,28 +64,6 @@ def publish_base_to_s3(base_path: Path) -> bool:
         return False
 
 
-def publish_base_to_import(base_path: Path) -> bool:
-    """Publish the base to the IMPORT namespace (to_upload/variants_export_base.csv), the key Medusa's
-    bulk-restore reads (POST /admin/variations/restore, scraper_file='variants_export_base'). ONLY the
-    pristine reset writes here -- so to_upload/ always holds the pristine SEED, never the produce-grown base
-    (publish_base_to_s3 keeps from_medusa/ current for the matcher; this keeps to_upload/ pinned to seed) --
-    and a 'Restore Medusa to base' therefore always restores Medusa to the seed. Best effort: a failed
-    publish logs LOUD; the restore then reads a stale/absent base (its own truncation guard refuses to delete
-    on a thin CSV), and the operator re-runs the reset -- it never restores a wrong catalog."""
-    from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION
-    key = f"{ENV_SEGMENT}/scraper/to_upload/variants_export_base.csv"
-    try:
-        import boto3
-        boto3.client("s3", region_name=S3_REGION).upload_file(str(base_path), S3_BUCKET, key)
-        log.info("base seed published to the import namespace (Medusa bulk-restore source)",
-                 extra={"extra_fields": {"key": key}})
-        return True
-    except Exception:
-        log.exception("base import-namespace publish FAILED: Medusa bulk-restore would read a stale/absent "
-                      "base until the reset is re-run", extra={"extra_fields": {"key": key}})
-        return False
-
-
 def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, publish: bool = True) -> dict:
     """base := 1_variants_full (the one complete list). No-op if full hasn't been built yet; a corruption
     guard refuses a produce that would collapse the base below THIN_COPY_MIN_FRACTION of its current size. When
@@ -111,6 +91,23 @@ def sync(full_path: Path = FULL, base_path: Path = BASE, write: bool = True, pub
     stats = {"base_rows": len(rows), "skipped": False}
     log.info("base seed updated (base == 1_variants_full)", extra={"extra_fields": stats})
     return stats
+
+
+def write_deliverable(base_path: Path | None = None, deliverable_path: Path | None = None) -> None:
+    """Copy the base this produce settled into to_upload/ byte for byte, so the manifest lists it (sha256, rows)
+    like every deliverable and an importer verifying it against the manifest reads exactly the base the produce
+    used. Called once the base is settled (after sync, whose guard may keep the fetched base). Text round trip
+    with newline="" and plain utf-8 keeps BOM, line endings and every byte; a non-UTF-8 base fails loud. An absent
+    base fails loud and first drops the previous produce's copy, so no publish can list a base that is not this
+    produce's."""
+    base = Path(base_path or BASE)
+    deliverable = Path(deliverable_path or DELIVERABLE)
+    if not base.exists():
+        deliverable.unlink(missing_ok=True)
+        raise FileNotFoundError(f"no settled {base.name} at {base}: the catalog cannot publish the variety base")
+    with base.open(encoding="utf-8", newline="") as h:
+        text = h.read()
+    csvio.atomic_write(deliverable, lambda out: out.write(text))
 
 
 if __name__ == "__main__":
