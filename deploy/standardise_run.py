@@ -340,8 +340,9 @@ def stop_on_signal(*spends):
 
 def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     """The GPU round for `todo`, then the stores re-read: (problems, stopped). Problems: failed jobs, a round stopped at
-    the work window or stuck, a round skipped (too little window left, or the budget left covers not one slice: the
-    hosted steps still judge what is finished, within their own reservations), listed photos left without a result.
+    the work window or stuck, a round Batch refused or failed (review 2026-11-06, A2.7: never the run's end), a round
+    skipped (too little window left, or the budget left covers not one slice: the hosted steps still judge what is
+    finished, within their own reservations), listed photos left without a result.
     stopped: paid work has ended (the window, a stop, a lost lock), so no step after it starts."""
     try:
         problems = [f"GPU job {name} failed: {why}"
@@ -352,6 +353,8 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
         return [f"GPU round {tag} not started: {exc}"], False
     except TimeoutError as exc:                        # its jobs were stopped; what they finished stays
         problems = [f"GPU round {tag} stopped: {exc}"]
+    except (BotoCoreError, ClientError) as exc:        # Batch refused or failed: its jobs were stopped and settled
+        problems = [f"GPU round {tag} failed: {exc}"]
     sel.refresh()
     rnd = dict(sel.rounds)[tag]
     problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas

@@ -1169,6 +1169,16 @@ def test_an_open_book_made_before_its_halves_had_a_slab_goes_to_the_gpu_again_on
     assert s.clean_todo() == {"sentas": [old]}
 
 
+def test_a_batch_error_in_a_round_is_a_problem_and_the_run_goes_on(monkeypatch):
+    # review 2026-11-06 (A2.7): a Batch ClientError ended the run before its report, so nothing finished was published
+    from botocore.exceptions import ClientError
+    refused = ClientError({"Error": {"Code": "ClientException", "Message": "queue disabled"}}, "SubmitJob")
+    monkeypatch.setattr(runner.gpu, "run_round", lambda *a: (_ for _ in ()).throw(refused))
+    s = _selection([_listing(A)])
+    problems, stopped = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10))
+    assert not stopped and problems[0].startswith("GPU round v9 failed: ") and "queue disabled" in problems[0]
+
+
 def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkeypatch):
     monkeypatch.setattr(runner.gpu, "run_round", lambda *a: [])
     s = _selection([_listing(A)], gpu_round=_round(finished={A}, studio={A}))

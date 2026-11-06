@@ -190,7 +190,7 @@ def main() -> int:
     keys = source.only(source.scraped_keys(client, src), wanted)
     missing = sorted(set(wanted) - {imagestore.sha_from_url(k) for k in keys})
     sheet = source.sheet_photos(client)
-    m = models.load(survey_only=True)
+    m = models.load("survey")
     failed = []
     print(f"==> outline diagnostic {src}: {len(keys)} photos -> {diag_prefix()}", flush=True)
     for key in keys:
