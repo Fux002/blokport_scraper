@@ -73,8 +73,8 @@ dev_standardise_clean       = false
 prod_standardise_clean      = false
 dev_standardise_budget_usd  = "100"
 prod_standardise_budget_usd = "400"
-# The clean-up edits' own monthly cap (owner 2026-11-05: $30 prod, $10 dev), apart from the budget above. It pays only
-# while dev_/prod_standardise_clean is on.
+# The clean-up edits' own monthly cap (owner 2026-11-05: $30 prod, $10 dev), apart from the budget above. It pays for the
+# owner's clicks always, and for the automatic marks only while dev_/prod_standardise_clean is on.
 dev_standardise_clean_budget_usd  = "10"
 prod_standardise_clean_budget_usd = "30"
 dev_standardise_gpu_vcpus         = 32
