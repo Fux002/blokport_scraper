@@ -18,7 +18,8 @@ from pathlib import Path
 
 from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.core.numbers import parse_number
-from stone_pipeline.ledger.db import Ledger, now_iso, payload_hash
+from stone_pipeline.ledger.db import Ledger, now_iso
+from stone_pipeline.ledger.payloads import variation_hash
 
 
 def _branch_of(key: str) -> str:
@@ -119,10 +120,12 @@ def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
                 "image_model": None,
                 "volume": volume,
                 "medusa_id": medusa_id or None,
-                # image_sha256 (None here: the export carries no fingerprint) is in the formula so it
-                # matches populate_variations_full; the first produce fills the real fingerprint from S3,
-                # which re-serves any variant Medusa holds without its now-existing texture.
-                "payload_hash": payload_hash([branch, "", name, sorted(aliases), image_url, None, volume]),
+                # the one hash of populate_variations_full (payloads.variation_hash). image_sha256 is None here
+                # (the export carries no fingerprint); the first produce fills the real fingerprint from S3, which
+                # re-serves any variant Medusa holds without its now-existing texture.
+                "payload_hash": variation_hash({"branch": branch, "type": "", "name": name,
+                                                "aliases": json.dumps(aliases), "image_url": image_url,
+                                                "image_sha256": None}),
                 "state": "synced",
                 "first_seen": now,
                 "last_synced": now,

@@ -162,7 +162,9 @@ def test_ack_done_keeps_tombstone_if_variety_re_acquired_a_child(tmp_path):
                                   "created_at": now, "updated_at": now}, pk=("sku",))   # raced re-link
         assert ack(ledger, "removed", "K", status_="done") == 0                # refused: kept, not deleted
         assert ledger.get("variation", "key", "K") is not None                 # variety NOT orphan-deleted
-        assert [t["external_id"] for t in ready(ledger, "removed")] == ["K"]   # tombstone survives to re-serve
+        assert ledger.get("removed", "external_id", "K")["sync_attempts"] == 1  # tombstone kept, waits like a block
+        ledger.execute("UPDATE removed SET retry_after = '2000-01-01T00:00:00+00:00'")
+        assert [t["external_id"] for t in ready(ledger, "removed")] == ["K"]   # re-serves after the wait
         ledger.execute("DELETE FROM product WHERE sku = 'ZUC-9'")              # next produce moved the child off
         assert ack(ledger, "removed", "K", status_="done") == 1                # now childless -> completes
         assert ledger.get("variation", "key", "K") is None

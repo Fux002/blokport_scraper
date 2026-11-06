@@ -50,10 +50,9 @@ CREATE TABLE IF NOT EXISTS ledger_meta (
 -- (Medusa external_id). A type or canonical-name correction is a NEW Key (a
 -- re-key, design section 5C), not an update of this row.
 --
--- payload_hash covers: (branch, name, sorted(aliases), image_url, volume)
---   where image_url is the live url derived from the linked texture image. NB: `type` is NOT
---   hashed (it is empty at seed/produce time and filled later by fill_variation_types); a type
---   change therefore re-serves via an explicit synced->dirty flip, not via the hash.
+-- payload_hash covers exactly the served payload (ledger/payloads.variation_hash: category, type, name,
+--   aliases, image_url) plus image_sha256 (a texture re-made at the same url). volume is not served, so
+--   not hashed. fill_variation_types re-hashes the row when it fills the type.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS variation (
     key           TEXT PRIMARY KEY,                    -- {branch}_{slug(type)}_{slug(name)}_{uuid5}
@@ -142,11 +141,10 @@ CREATE INDEX IF NOT EXISTS idx_combination_variation ON combination (variation_k
 -- uppercased). SKU is stable across a variation re-key, so a product re-points
 -- onto the new variation_key rather than being recreated (design section 5C).
 --
--- payload_hash covers: (variation_key, color, finish, quality, type, title, description,
---   handle, weight, length, width, height, origin_country_code, product_image_keys,
---   oriented_image_keys, company_id, sales_channel_id, category, bundle_size, ports, model_3d_key,
---   standard_version: the ETags of the standardised files, not stored). Not photo_ready: Blokport reads it at
---   create only (the stock lane owns visibility afterwards), so a change of it never re-serves a product.
+-- payload_hash covers exactly the served payload (ledger/payloads.product_hash) except photo_ready and
+--   made_to_order (Blokport reads them at create only; the stock lane owns them afterwards), plus the payload
+--   contract and standard_version (the ETags of the standardised files, not stored). sales_channel_id is not
+--   served, so not hashed.
 -- ---------------------------------------------------------------------------
 --
 -- Two groups of columns. The DESIGN fields (name-based: color/finish/quality/

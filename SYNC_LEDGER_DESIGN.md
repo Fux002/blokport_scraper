@@ -250,12 +250,13 @@ variation to `gap_held` with an `image_generation_failed` gap (fixes H2,
 section 6A).
 
 **`payload_hash` inputs (fixes M3).** The dirty-vs-synced decision rests on this
-hash, so it covers exactly the fields in the entity's section 8.3 payload and only
-those: variation `(branch, type, name, sorted(aliases), image_url, volume)`;
-combination `(category_pcat, type, variation_key, color, finish, quality)`; product
-`(variation_key, color, finish, quality, title, description, handle, weight,
-length, width, height, origin_country_code, ordered(image_urls), company_id,
-sales_channel_id, category, bundle_size, ports)`. Inventory uses no hash: the
+hash, so it covers exactly the served payload and only that: `ledger/payloads.py`
+builds each payload once, the serve sends it and the hash is taken over the same
+dict. Beside it the hash takes the versions of content behind a url that does not
+change when its bytes do (a variety texture's fingerprint, a product's standardised
+files' ETags) and the product contract; a product's `photo_ready` and
+`made_to_order` are served but read at create only, so they stay out. Combination
+`(category_pcat, type, variation_key, color, finish, quality)`. Inventory uses no hash: the
 compare of the stock `(qty, made_to_order, reason, replaced_by_lot_code)` with the last synced stock drives it
 (`db.STOCK_DELTA_SQL`). A field Medusa applies must be in the
 hash or a real change never re-syncs; a volatile field must be out of it or every
@@ -661,7 +662,7 @@ why a re-seed needs no special handling.
   not have yet; Medusa creates the value and acks its id (fixes C3). Existing
   values are not re-sent.
 - `variation`: `external_id` = Key, `branch`, `type` (canonical name), `name`,
-  `aliases[]`, `image_url` (a live-bucket texture url), `volume`. Medusa upserts by
+  `aliases[]`, `image_url` (a live-bucket texture url). Medusa upserts by
   `external_id`, mints or matches the variation id, acks it.
 - `combination`: `external_id` = combo_key, the canonical `category` and `type`
   names, `variation_external_id` = variation Key, and the canonical `color`,
@@ -673,7 +674,7 @@ why a re-seed needs no special handling.
   `variation_external_id` = variation Key, canonical `color`/`finish`/`quality`
   names, `title`, `description`, `handle`, dims (`weight,length,width,height`),
   `origin_country_code`, `image_urls[]` (ordered live-bucket urls), `company_id`,
-  `sales_channel_id`, `category` (canonical), `bundle_size`, ports, `made_to_order`
+  `vendor`, `category` (canonical), `bundle_size`, ports, `made_to_order`
   (read at create: the variant takes backorders). Served only
   after the variation and its combination are `synced`, its referenced attributes
   are `synced`, and its scraped photos are `promoted`.

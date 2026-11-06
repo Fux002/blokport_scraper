@@ -349,17 +349,21 @@ POST /sync/v1/ack
 ]
 ```
 
-Response: `{ "acked": 3 }`.
+Response: `{ "acked": 3, "missed": 0, "skipped": 0 }` (`missed`: unknown id, or refused as out of
+order or stale; `skipped`: not applied, see below).
 
-- `medusa_id` is required for `variations` and `products`; omit for `inventory`.
-- `status`: `created`/`updated`/`skipped` (success) or `failed` (returns the entity to
-  the queue for the next pull).
+- `medusa_id` is required for `variations` and `products`; omit for `inventory`. A success ack on
+  `variations`/`products` without it is skipped: it never clears the id the pipeline holds.
+- `status` is a closed set per lane: `variations`/`products` take `created`/`updated`/`skipped`
+  (success) or `failed` (returns the entity to the queue for the next pull); `inventory` takes
+  `updated`/`skipped` or `failed`; `removed` takes `done`, or `blocked`/`failed` (below). A status
+  outside its lane's set is skipped, not applied. An ack that names no status counts as a success.
 - An inventory ack that is `failed`, or that the quantity echo refuses (the echoed stock is not the
   current one), waits like a failed product (5, 10, 20, 40 min) and dead-letters after five; it is then
   listed in `GET /sync/v1/failures` with type `inventory`, and `POST /sync/v1/requeue` (no type, or
   `{"type": "inventory"}`) offers it again, or `POST /sync/v1/abandon` drops it like any failure row.
   A stock that moved between your pull and your ack is refused and waits one backoff (5 min).
-- `removed` lane acks use their own statuses: `done` (Medusa deleted it; the tombstone retires) or `blocked` (an open reservation prevents the delete; the tombstone re-serves and dead-letters after five blocks). Do not send `created`/`updated`/`skipped` on this lane.
+- `removed` lane acks use their own statuses: `done` (Medusa deleted it; the tombstone retires) or `blocked`/`failed` (the delete did not happen, e.g. an open reservation; the tombstone re-serves after the same wait as a failed product and dead-letters after five). A `done` on a variety that has products in the pipeline again is refused and waits the same way. A dead tombstone is listed in `GET /sync/v1/failures` and `POST /sync/v1/requeue` (no type, or `{"type": "removed"}`) offers it again. Do not send `created`/`updated`/`skipped` on this lane.
 
 **Ack AFTER you commit.** Persist the `external_id -> entity` mapping in Medusa before
 you ack. If you ack and then crash before committing, the ledger marks it synced while
