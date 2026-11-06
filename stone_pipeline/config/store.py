@@ -67,9 +67,10 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 9     # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+SCHEMA_VERSION = 10    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
 #                        6: source.lots (a per-vendor lot switch); 7: lot_sold_answer; 8: source.lots dropped;
-#                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped
+#                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped;
+#                        10: every source with enabled 0 is labelled (lifecycle 'paused' unless paused/delisted)
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -121,6 +122,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "lifecycle" not in cols:   # active | paused | delisted -- the label Medusa reads (NULL == active)
         conn.execute("ALTER TABLE source ADD COLUMN lifecycle TEXT")
         conn.commit()
+    # the label is exactly active | paused | delisted: a legacy row with the run flag off and no label (or 'active',
+    # from a settings save that flipped the flag alone) is a paused source. Idempotent.
+    conn.execute("UPDATE source SET lifecycle = 'paused' "
+                 "WHERE enabled = 0 AND (lifecycle IS NULL OR lifecycle = 'active')")
+    conn.commit()
     if "image_pipeline" not in cols:   # per-source switch of the photo process: ON for every existing source (owner
         # 2026-11-02; the retired enhance is NOT carried over: its zeros only stopped the old enhancer's spend)
         conn.execute("ALTER TABLE source ADD COLUMN image_pipeline INTEGER NOT NULL DEFAULT 1")
@@ -426,6 +432,19 @@ def read_sources(path: str | Path | None = None) -> dict[str, SourceConfig]:
         return {r["source"]: _row_to_cfg(r) for r in conn.execute("SELECT * FROM source")}
 
 
+_LIFECYCLE_OFF = ("paused", "delisted")
+
+
+def effective_lifecycle(lifecycle: str | None, enabled) -> str:
+    """THE derivation of a source's lifecycle, exactly one of active | paused | delisted, read by the admin listing
+    (_row_dict) and the run guard (inactive_sources) alike, so neither can call a source active while the other
+    refuses it: the stored lifecycle when it is paused or delisted; else 'active' when the run flag is on, 'paused'
+    when it is off (schema 10 labels such rows and set_state never writes one, so this is the reading's own rule)."""
+    if lifecycle in _LIFECYCLE_OFF:
+        return lifecycle
+    return "active" if enabled else "paused"
+
+
 def _row_dict(r: sqlite3.Row) -> dict:
     """JSON-friendly row for the admin API (includes enabled)."""
     return {
@@ -441,8 +460,8 @@ def _row_dict(r: sqlite3.Row) -> dict:
         # last run (for the admin list's "last run" label); null until this source has ever been produced.
         "last_run_at": r["last_run_at"], "last_run_status": r["last_run_status"],
         "last_run_stage": r["last_run_stage"],
-        # lifecycle label Medusa reads: active | paused | delisted. NULL (legacy rows, never paused) == active.
-        "lifecycle": r["lifecycle"] or "active",
+        # lifecycle label Medusa reads: exactly active | paused | delisted (see effective_lifecycle)
+        "lifecycle": effective_lifecycle(r["lifecycle"], r["enabled"]),
     }
 
 
@@ -459,7 +478,8 @@ def get_row(source: str, path: str | Path | None = None) -> dict | None:
 
 def upsert_row(data: dict, path: str | Path | None = None) -> None:
     """Upsert from an admin-UI payload dict (the inverse of _row_dict). The retired enhancer's fields an admin built before
-    their removal still sends are ignored, as every unknown field is, and named in a warning so the leftover is seen."""
+    their removal still sends are ignored, as every unknown field is, and named in a warning so the leftover is seen.
+    `enabled` and `lifecycle` are not settings: set_state owns them (the lifecycle verbs), so they are not read here."""
     if retired := sorted(_RETIRED_FIELDS & set(data)):
         log.warning(f"source {data.get('source')!r}: ignored the retired field(s) {', '.join(retired)}")
     cfg = SourceConfig(
@@ -477,7 +497,20 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
     )
     # re-adding a source clears any prior removal tombstone (in ONE transaction with the upsert, so a crash
     # between the two can't leave the source added yet still tombstoned).
-    upsert_source(cfg, enabled=bool(data.get("enabled", True)), clear_removed=True, path=path)
+    upsert_source(cfg, clear_removed=True, path=path)
+
+
+def inactive_sources(names, path: str | Path | None = None) -> dict[str, str]:
+    """{name: state} for each of `names` whose effective_lifecycle is not 'active' (paused or delisted).
+    Names the store does not hold, or an absent store, are not inactive (a pure read: it never creates config.db)."""
+    names = list(names)
+    if not names:
+        return {}
+    marks = ",".join("?" * len(names))
+    with closing(read_store(path)) as conn:
+        rows = conn.execute(f"SELECT source, enabled, lifecycle FROM source WHERE source IN ({marks})", names)
+        states = {r["source"]: effective_lifecycle(r["lifecycle"], r["enabled"]) for r in rows}
+    return {name: state for name, state in states.items() if state != "active"}
 
 
 def enabled_names(path: str | Path | None = None) -> set[str] | None:
@@ -492,12 +525,13 @@ def enabled_names(path: str | Path | None = None) -> set[str] | None:
 
 # -- writes (used by the seed + the admin API) ---------------------------------
 
-def upsert_source(cfg: SourceConfig, *, enabled: bool = True,
-                  clear_removed: bool = False, path: str | Path | None = None) -> None:
-    p = _params(cfg, enabled)
+def upsert_source(cfg: SourceConfig, *, clear_removed: bool = False, path: str | Path | None = None) -> None:
+    """Write a source's settings. A new source starts enabled (active); an existing one keeps its run state, which
+    only set_state changes: a settings save that also wrote `enabled` re-enabled a delisted vendor."""
+    p = _params(cfg, enabled=True)
     cols = ", ".join(p)
     placeholders = ", ".join(f":{c}" for c in p)
-    updates = ", ".join(f"{c} = :{c}" for c in p if c != "source")
+    updates = ", ".join(f"{c} = :{c}" for c in p if c not in ("source", "enabled"))
     with closing(open_store(path)) as conn:
         conn.execute(
             f"INSERT INTO source ({cols}) VALUES ({placeholders}) "
@@ -513,7 +547,8 @@ def set_state(source: str, *, lifecycle: str | None = None, enabled: bool | None
               mode: str | None = None, path: str | Path | None = None) -> None:
     """The ONE source-state mutation: set `lifecycle` ('active'|'paused'|'delisted', the label Medusa
     reads), `enabled` (the mechanical run flag), and/or `mode` ('review'|'auto', the trust ladder) in a
-    single write; any omitted leaves it unchanged. The lifecycle verbs and the admission auto-demote go
+    single write; any omitted leaves it unchanged, except that switching the flag off without a lifecycle labels
+    the source 'paused' (unless it is paused or delisted already): enabled 0 never goes unlabelled. The lifecycle verbs and the admission auto-demote go
     through here."""
     sets: list[str] = []
     params: list = []
@@ -521,6 +556,9 @@ def set_state(source: str, *, lifecycle: str | None = None, enabled: bool | None
         sets.append("lifecycle = ?"); params.append(lifecycle)
     if enabled is not None:
         sets.append("enabled = ?"); params.append(1 if enabled else 0)
+    if enabled is False and lifecycle is None:
+        # never the run flag off without a label: a source switched off is paused, unless already paused or delisted
+        sets.append("lifecycle = CASE WHEN lifecycle IN ('paused', 'delisted') THEN lifecycle ELSE 'paused' END")
     if mode is not None:
         sets.append("mode = ?"); params.append(mode)
     if not sets:

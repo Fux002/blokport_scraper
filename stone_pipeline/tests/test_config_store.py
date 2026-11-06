@@ -245,12 +245,13 @@ def test_config_api_dispatch(tmp_path, monkeypatch):
     code, body = server.dispatch("GET", ["sources", "polonine"], None)
     assert code == 200 and body["vendor"] == "Polonine Stone Co"
 
-    # the UI disables a scraper + edits a setting (PUT updates the named fields). ports are a hard requirement.
+    # the UI edits a setting, sending `enabled` back at its current value (PUT updates the named fields; the run
+    # state is pause/resume/delist's). ports are a hard requirement.
     code, body = server.dispatch("PUT", ["sources", "varsha"],
-                                 {"enabled": False,  "source_code": "var",
+                                 {"enabled": True,  "source_code": "var",
                                   "vendor": "Varsha Stones", "ports": ["Brindisi"]})
-    assert code == 200 and body["enabled"] is False
-    assert store.enabled_names() == {"polonine"}   # varsha no longer runs
+    assert code == 200 and body["enabled"] is True and body["vendor"] == "Varsha Stones"
+    assert store.enabled_names() == {"polonine", "varsha"}
 
     assert server.dispatch("GET", ["sources", "nope"], None)[0] == 404
     assert server.dispatch("PUT", ["sources", "x"], "not-a-dict")[0] == 400
