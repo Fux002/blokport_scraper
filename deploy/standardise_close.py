@@ -30,11 +30,10 @@ import json
 import os
 import sys
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 
-from deploy.standardise_publish import _objects, chosen_prefix
+from deploy.standardise_publish import _objects, chosen_prefix, read_choices
 from deploy.standardise_source import (LOGO_STEP, _encode, _get, gpu_error, logo_step_key, own_input,
                                        passing_storage_error, read_slab, sheet_photos, slab_record_key, start,
                                        start_edits)
@@ -42,7 +41,6 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, ST
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import models, photo
 
-WORKERS = 32                 # parallel reads of the choice records
 PROGRESS_EVERY = 25          # photos between progress lines
 NO_CLOSE_UP = "the close-up rule gives this photo none"
 NO_SLAB = "its run made no whole single slab of it"
@@ -75,9 +73,10 @@ def summary_key(root, src, only):
 
 
 def chosen(client, root):
-    """Every choice record under the tag root."""
-    with ThreadPoolExecutor(WORKERS) as pool:
-        return list(pool.map(lambda k: json.loads(_get(client, k)), sorted(_objects(client, chosen_prefix(root)))))
+    """Every choice record under the tag root that can be read (publish.read_choices: one that cannot is named loud and
+    its listing left as it is)."""
+    records, _ = read_choices(client, root)
+    return [records[key] for key in sorted(records)]
 
 
 def undone(client, records):

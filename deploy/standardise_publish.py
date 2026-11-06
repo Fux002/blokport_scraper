@@ -85,8 +85,20 @@ def read_clicks(s3, root):
 
 
 def records_by_sku(s3, prefix):
-    """({SKU: record}, {SKU: why it could not be read}) of the <SKU>.json records under prefix. A file that is not a
-    JSON object fails only its own listing, named loud with its key; the others are read."""
+    """({SKU: record}, {SKU: why it could not be read}) of the <SKU>.json records under prefix (read_records)."""
+    return read_records(s3, prefix, lambda key: imagestore.sku_of(key, prefix))
+
+
+def read_choices(s3, root):
+    """({listing key: its choice record}, {listing key: why it could not be read}) of the choice records under the
+    clean tag's root (<root>chosen/<listing>.json, read_records)."""
+    prefix = chosen_prefix(root)
+    return read_records(s3, prefix, lambda key: key[len(prefix):-len(".json")])
+
+
+def read_records(s3, prefix, name):
+    """({name: record}, {name: why it could not be read}) of the JSON records under prefix, each named by name(key). A
+    file that is not a JSON object fails only its own listing, named loud with its key; the others are read."""
     keys = sorted(o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=prefix)
                   for o in page.get("Contents", []))
 
@@ -98,12 +110,11 @@ def records_by_sku(s3, prefix):
         return (record, None) if isinstance(record, dict) else (None, "not a JSON object")
     records, errors = {}, {}
     for key, (record, why) in zip(keys, pool_map(WORKERS, one, keys)):
-        sku = imagestore.sku_of(key, prefix)
         if why is None:
-            records[sku] = record
+            records[name(key)] = record
         else:
             print(f"   ERROR: {key}: {why}; its listing is left out of this run's use of it", flush=True)
-            errors[sku] = why
+            errors[name(key)] = why
     return records, errors
 
 
@@ -451,9 +462,11 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
     folder would be emptied). assigned = {(source, sha): SKUs} of every photo listings of several stones show (the
     produce's conflict set): one is published only when the owner assigned it to someone, with a file naming who, so the
     produce links it for those products only (a record that names it otherwise is a choice made before it was a
-    conflict: not published)."""
-    records = list(_objects(client, chosen_prefix(root)))
-    chosen = pool_map(WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), records)
+    conflict: not published). A choice record that cannot be read ("unreadable": {listing key: why}) leaves its
+    listing's files as they are: which published files are its cannot be told, so nothing is removed while one is
+    unreadable (what is chosen is still published)."""
+    by_key, unreadable = read_choices(client, root)
+    chosen = [by_key[key] for key in sorted(by_key)]
     if not chosen:
         raise NoChoiceRecords(f"no choice records under {chosen_prefix(root)}: nothing published or removed")
     # a tile listing chosen before tiles were rendered is shown from its stone now, never from its own photo
@@ -485,8 +498,9 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
     slab_3d = {k for s in todo for k in cutout_keys(s)}
     cutouts = {k: t for k, t in _objects(client, imagestore.cutout_prefix()).items() if k in slab_3d}
     tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
-    gone = stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"])
+    gone = [] if unreadable else stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"])
     pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
+    unassigned = [] if unreadable else unassigned      # the same: an unreadable record may still need its assignment
     for key in unassigned:                             # only once the views it covered are gone
         client.delete_object(Bucket=S3_BUCKET, Key=key)
     say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
@@ -496,5 +510,5 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
               | {"hidden": len(tiles["hidden"]), "failed": len(tiles["failed"]),
                  "failed_listings": tiles["failed"][:C.TILE_FAILED_LISTED]})
     return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone), "tiles": counts,
-            "tiles_hidden": tiles["hidden"], "tiles_problems": tiles["problems"],
+            "tiles_hidden": tiles["hidden"], "tiles_problems": tiles["problems"], "unreadable": unreadable,
             "changed": bool(fresh or remake or gone or tiles["rendered"] or writes or unassigned)}

@@ -193,7 +193,7 @@ def test_the_owner_s_removals_are_read_by_sku_from_their_own_store():
 
 def test_the_choice_records_are_read_from_the_clean_root():
     s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{ROOT}tracked.csv": b"source\n", f"{ROOT}sentas/x.json": b"{}"})
-    assert proc.choices(s3, ROOT) == {"one": json.loads(_record("one", A))}
+    assert proc.choices(s3, ROOT) == ({"one": json.loads(_record("one", A))}, {})
 
 
 def test_the_process_continues_in_the_tags_the_published_results_came_from():
@@ -375,6 +375,62 @@ def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
     stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
     assert worked == [] and any("mine" in p and "cannot be read" in p for p in stored["problem_list"])
+
+
+# --- one corrupt choice record (review 2026-11-06, A2.8) --------------------------------------------------------------
+# A choice record that was not JSON crashed every run and every publish.
+def test_a_choice_record_that_cannot_be_read_fails_only_its_own_listing():
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{ROOT}chosen/two.json": b"{broken"})
+    records, unreadable = proc.choices(s3, ROOT)
+    assert records == {"one": json.loads(_record("one", A))} and list(unreadable) == ["two"]
+    assert "not JSON" in unreadable["two"]
+
+
+def test_a_listing_whose_own_choice_record_cannot_be_read_is_left_as_published_and_named(monkeypatch):
+    s3 = _S3({f"{ROOT}chosen/mine.json": b"{broken", imagestore.conflicts_key("sentas"): b"{}"})
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [_listing("mine", D)])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    worked = []
+
+    def run(batch, sel, spend, clean, run_id, deadline, say=print):
+        worked.extend(l["key"] for l in sel.listings)
+        return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
+    monkeypatch.setattr(proc, "run", run)
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {"changed": False})
+    import time
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
+    stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
+    assert worked == []
+    assert any(p.startswith("mine: its choice record cannot be read") for p in stored["problem_list"])
+
+
+def test_publish_removes_nothing_while_a_choice_record_cannot_be_read_and_says_so():
+    s3 = _published_bucket()
+    s3._store(f"{ROOT}chosen/two.json", b"{broken")
+    s3._store(imagestore.standard_key("sentas", B, "main"), b"maybe two's")             # whose it is cannot be told
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
+    assert out["removed"] == 0 and imagestore.standard_key("sentas", B, "main") in s3.objects
+    assert list(out["unreadable"]) == ["two"]
+
+
+def test_the_run_says_publish_removed_nothing_because_a_choice_record_cannot_be_read(monkeypatch):
+    s3 = _S3({imagestore.conflicts_key("sentas"): b"{}"})
+    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
+    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [])
+    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
+    monkeypatch.setattr(proc, "run", lambda *a, **k: ([], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}))
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {
+        "changed": False, "unreadable": {"two": "not JSON (x)"}})
+    import time
+    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
+    stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
+    assert "publish removed nothing: the choice records of two cannot be read" in stored["problem_list"]
+
+
+def test_a_close_only_run_reads_the_choice_records_it_can():
+    s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), f"{ROOT}chosen/two.json": b"{broken"})
+    assert [r["key"] for r in close.chosen(s3, ROOT)] == ["one"]
 
 
 def _configured(monkeypatch):
@@ -669,7 +725,7 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
     monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
 
     def picked():
-        records = proc.choices(s3, ROOT)
+        records = proc.choices(s3, ROOT)[0]
         return proc.todo([_listing("one", A, B, D)], records, set(), proc.whole_slabs(s3, records), set(), {}, {})
     found = picked()
     assert [l["kept"] for l in found] == [(C.RUN_TAG, A)]
@@ -693,7 +749,7 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
                                                    "version": C.JUDGE_VERSION}).encode()})
     monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("paid again"))
     monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
-    records = proc.choices(s3, ROOT)
+    records = proc.choices(s3, ROOT)[0]
     sel = select.Selection(s3, proc.todo([_listing("one", A, B)], records, set(), proc.whole_slabs(s3, records), set(), {}, {}),
                            C.RUN_TAG, C.CLEAN_TAG, {}, {}, select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {}, set())
     spend = select.Spend(5.0)
@@ -709,7 +765,7 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     s3 = _S3({f"{ROOT}chosen/one.json": _record("one", A), **{f"{RUN}{A}.{v}.jpg": v.encode() for v in ("main", "white", "studio")},
               f"{RUN}judged/{A}.json": json.dumps({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}).encode()})
     monkeypatch.setattr(select.judge, "judge", lambda *a: pytest.fail("judged again"))
-    records = proc.choices(s3, ROOT)
+    records = proc.choices(s3, ROOT)[0]
     found = proc.todo([_listing("one", A)], records, set(), proc.whole_slabs(s3, records), set(), {}, {})
     sel = select.Selection(s3, found, C.RUN_TAG, C.CLEAN_TAG, {}, {},
                            select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"]), [], {}, set())
@@ -778,7 +834,7 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
         return {"verdict": verdict, "problems": [], "version": C.JUDGE_VERSION}, 0.02
     monkeypatch.setattr(proc.gpu, "run_round", run_round)
     monkeypatch.setattr(select.judge, "judge", judged)
-    listings, records = [_listing("one", A)], proc.choices(s3, ROOT)
+    listings, records = [_listing("one", A)], proc.choices(s3, ROOT)[0]
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), ["sentas"])
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, set(), {}, rounds)) is not None}

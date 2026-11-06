@@ -217,11 +217,9 @@ def month_spend(s3, run_id, budget, directory, cap_error=select.SpendCapReached)
 
 # --- what a run works on ----------------------------------------------------------------------------------------------
 def choices(s3, root):
-    """{listing key: its choice record} under the clean tag's root."""
-    keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=publish.chosen_prefix(root))
-            for o in page.get("Contents", [])]
-    records = publish.pool_map(publish.WORKERS, lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
-    return {r["key"]: r for r in records}
+    """({listing key: its choice record}, {listing key: why it cannot be read}) under the clean tag's root
+    (publish.read_choices)."""
+    return publish.read_choices(s3, root)
 
 
 def whole_slabs(s3, records):
@@ -535,10 +533,14 @@ def read_decisions(s3, root, listings):
     """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
     re-classified; none stored yet: publish.NoConflictSet, nothing done."""
     exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
-    (owner, unreadable), clicks = owner_records(s3, root), publish.read_clicks(s3, root)
+    (owner, broken), clicks = owner_records(s3, root), publish.read_clicks(s3, root)
     conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
-    chosen = choices(s3, root)
+    chosen, broken_choices = choices(s3, root)
+    # a listing whose own choice record or the owner's choice record cannot be read stays exactly as published
+    unreadable = ({sku: f"the owner's choice record cannot be read ({why})" for sku, why in broken.items()}
+                  | {l["sku"]: f"its choice record cannot be read ({broken_choices[l['key']]})" for l in listings
+                     if l["key"] in broken_choices})
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, exclude, conflicts, rounds)) is not None}
     picks |= {l["key"]: (r["tag"], r["sha"]) for l in listings
@@ -549,8 +551,7 @@ def read_decisions(s3, root, listings):
 def unreadable_problems(frozen, decisions):
     """The run's problem line for each listing whose choice record cannot be read (`frozen`; every kind of run names
     them)."""
-    return [f"{l['key']}: the owner's choice record cannot be read ({decisions.unreadable[l['sku']]}): left exactly as "
-            "published" for l in frozen]
+    return [f"{l['key']}: {decisions.unreadable[l['sku']]}: left exactly as published" for l in frozen]
 
 
 def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen):
@@ -636,6 +637,8 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}
+    if held := published.pop("unreadable", {}):
+        problems.append(f"publish removed nothing: the choice records of {', '.join(sorted(held))} cannot be read")
     hidden = published.pop("tiles_hidden", {})
     problems += [f"tile {key}: {why}" for key, why in sorted(published.pop("tiles_problems", {}).items())]
     for p in problems:
