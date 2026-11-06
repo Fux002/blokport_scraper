@@ -555,6 +555,27 @@ def test_of_two_clicks_the_budget_finishes_the_first_and_the_other_waits_unpaid(
     assert not any(p.startswith("slab-1: the owner's click waits") for p in problems)
 
 
+def test_a_click_is_new_work_though_another_photo_of_its_listing_has_a_cleaned_copy():
+    # review 2026-11-06 (A2.1): the other photo's copy made the click count as finished, and nothing paid it
+    s, _ = _clicked_selection()
+    s.listings[0]["photos"] = [A, E]
+    s.rounds[1][1]["sentas"].cleaned.add(E)
+    assert runner.clicks_to_finish(s, 0.0, math.inf) == ({}, [s.listings[0]])             # it needs an edit: the budget
+    taken, waiting = runner.clicks_to_finish(s, _finish_price(1, 1), math.inf)
+    assert list(taken) == ["SEN-1"] and waiting == []
+
+
+def test_a_click_s_price_counts_every_copy_its_gpu_round_runs(monkeypatch):
+    # the clicks' GPU round runs the listing's older cleaned copy too (clean_todo): its slice is part of the price
+    monkeypatch.setattr(C, "RUN_SLICE", 1)
+    s, _ = _clicked_selection()
+    s.listings[0]["photos"] = [A, E]
+    s.rounds[1][1]["sentas"].cleaned.add(E)                                               # made, not yet through the GPU
+    assert runner.clicks_to_finish(s, _finish_price(1, 1), math.inf) == ({}, [s.listings[0]])
+    taken, _ = runner.clicks_to_finish(s, _finish_price(2, 1), math.inf)
+    assert list(taken) == ["SEN-1"]
+
+
 def test_no_new_click_is_paid_when_too_little_window_is_left_for_its_gpu_round():
     s, _ = _clicked_selection()
     assert runner.clicks_to_finish(s, 100.0, C.GPU_MIN_WINDOW_SECONDS - 1) == ({}, [s.listings[0]])

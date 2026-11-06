@@ -1095,7 +1095,7 @@ Your whole answer is one JSON object and nothing else:
     # mark. Any other fixable photo (a reflection, a bad fill) is cleaned only when the owner clicks it (CLICKS_DIR).
     CLEAN_AUTO_KINDS = ("leftover_mark",)
     CLEAN_AUTO_HELD = ("retouch:", "logo:")
-    CLEAN_FAILED_CODES = (400, 422)    # a queued edit the model refused for good; any other error is loud and retried
+    CLEAN_FAILED_CODES = (400, 422)    # the model refused the photo for good (at submit or collect): the next model's turn
     CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
 straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and
 foreign marks (labels, stickers, sample cards, tape, protective film, writing, logos) from the stone, and nothing else. Judge image 2

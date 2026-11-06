@@ -231,7 +231,11 @@ and a click is cleaned whatever the switch says, within the cap: `<CLEAN_TAG>/cl
 source, sha, at} (written by `publish.write_click`, read by `publish.read_clicks`) names the photo, and the next photos
 run cleans it. One rule per listing (`clean_listing`): an edit already paid for is always collected and checked first
 (the payment is made, whatever the gate says now, and no new edit is sent for it); then the clicked photo goes first,
-then the marks, skipping any photo with no edit model left to try, one photo cleaned. A click that cannot be used
+then the marks, skipping any photo with no edit model left to try, one photo cleaned. The clicked photo is the unit
+(`select.cleaned_copies`): a listing with a click is done only once that photo has its cleaned copy, whatever copies
+of its other photos exist; without a click any cleaned copy of the listing is its one photo. A model that refuses the
+photo for good (`CLEAN_FAILED_CODES`, 400 or 422, at submit or when collected) is a failed attempt and the next model
+gets its turn; refused at submit, it cost nothing. A click that cannot be used
 (unreadable, no time, another SKU or listing than its file's, a photo not the listing's or not fixable) is never paid
 for, and the run's problems say why for any listing it names (its line in `tracked.csv` too). A listing whose choice
 record cannot be read stays exactly as published (its photo, its conflict-photo assignment and its files untouched, in
@@ -298,7 +302,9 @@ Two monthly budgets (UTC calendar month) per environment, each with its own spen
 - `SCRAPER_STANDARDISE_CLEAN_BUDGET_USD`, the cleaning cap (owner 2026-11-05): the hosted clean-up edits (at list price)
   and their clean checks. Each run keeps it in `<env>/standardise-test/clean-spend/<YYYY-MM>/<run id>.json`, which also
   lists every paid call (`uses`: when, source, photo, SKU, listing, model, edit or check, what it cost, a failed call
-  included at the price it counted). An edit is reserved together with its check, so the cap never sends a copy the run
+  included at the price it counted). A call the service answered with a 4xx did no work and costs nothing (`usd` 0,
+  `refused` its status), for the judge as for an edit; any other failure may have been billed and counts at its
+  price. An edit is reserved together with its check, so the cap never sends a copy the run
   cannot then check; a reached cap stops only the cleaning, the judge and the GPU go on. Unset: no edit is paid, and the
   run says so once. The edits also need the clean step on (`SCRAPER_STANDARDISE_CLEAN`).
 
