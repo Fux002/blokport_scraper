@@ -51,9 +51,11 @@ idempotent, and convergent**.
 | **B. Inventory sync** | `inventory` | Updates the stock quantity of products **already listed** in Medusa | Frequent (e.g. hourly), independent |
 
 **Inventory sync never creates a product.** Enforced server-side: the `inventory`
-endpoint only serves stock for products **already in Medusa** (you acked their id; a product
-re-served for an update still gets its stock moves). A not-yet-created product does not appear in
-the inventory feed, so an inventory run cannot add a listing. Adding and updating listings is only ever the catalog flow.
+endpoint only serves stock for products **already in Medusa** (you acked their id, or you hold them by
+SKU from the product export). A product re-served for an update still gets its count moves and its
+hides, but a stock that brings a hidden product back on sale waits until that product's own update is
+acked, so it never shows again with its old data. A not-yet-created product does not appear in the
+inventory feed, so an inventory run cannot add a listing. Adding and updating listings is only ever the catalog flow.
 
 ---
 
@@ -355,7 +357,8 @@ Response: `{ "acked": 3 }`.
 - An inventory ack that is `failed`, or that the quantity echo refuses (the echoed stock is not the
   current one), waits like a failed product (5, 10, 20, 40 min) and dead-letters after five; it is then
   listed in `GET /sync/v1/failures` with type `inventory`, and `POST /sync/v1/requeue` (no type, or
-  `{"type": "inventory"}`) offers it again.
+  `{"type": "inventory"}`) offers it again, or `POST /sync/v1/abandon` drops it like any failure row.
+  A stock that moved between your pull and your ack is refused and waits one backoff (5 min).
 - `removed` lane acks use their own statuses: `done` (Medusa deleted it; the tombstone retires) or `blocked` (an open reservation prevents the delete; the tombstone re-serves and dead-letters after five blocks). Do not send `created`/`updated`/`skipped` on this lane.
 
 **Ack AFTER you commit.** Persist the `external_id -> entity` mapping in Medusa before
@@ -383,7 +386,8 @@ POST can be retried safely.
     yet). These need an operator action on the **pipeline** side, not a Medusa fix.
   - `synced` = applied and acked.
   - inventory `delta` = the stock deltas the inventory lane would serve now (stock that moved since the
-    last sync, for a product in Medusa, not waiting out a failure).
+    last sync, for a product in Medusa, not waiting out a failure); inventory `dead` = stock rows
+    dead-lettered after repeated failures (like `gap_held`; listed in `GET /sync/v1/failures`).
 
   `pending`/`dirty`/`delta` all at zero means the two systems are in sync. Poll it to
   confirm convergence, and alarm on a rising `gap_held` or a stuck `pending` (the signal

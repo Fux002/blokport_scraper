@@ -36,30 +36,38 @@ SCHEMA_VERSION = 13  # v6: product.collection_country_code/collection_city -- su
 #                      v12: made to order -- inventory.qty nullable + made_to_order + last_synced_made_to_order,
 #                           product.made_to_order;
 #                      v13: the inventory lane's sync bookkeeping -- inventory.last_synced_reason/last_synced_lot_code
-#                           (the stock includes its reason) + sync_attempts/sync_error/retry_after (the failure wait)
+#                           (the stock includes its reason) + sync_attempts/sync_error/retry_after/abandoned_at
+#                           (the failure wait and dead-letter)
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-
-# The inventory rows whose stock differs from the last synced stock, or was never synced (last_synced_made_to_order
-# NULL). The stock is everything the lane serves: (qty, made_to_order, reason, replaced_by_lot_code), so a reason or
-# lot that changes at an unchanged count is a delta too. Over the inventory table aliased `i`; the one definition.
-STOCK_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
-                   "OR i.last_synced_qty IS NOT i.qty OR i.last_synced_reason IS NOT i.reason "
-                   "OR i.last_synced_lot_code IS NOT i.replaced_by_lot_code)")
-# Record the current stock as synced (a successful inventory ack).
-RECORD_SYNCED_STOCK_SQL = ("last_synced_qty = qty, last_synced_made_to_order = made_to_order, "
-                           "last_synced_reason = reason, last_synced_lot_code = replaced_by_lot_code")
-# Clear an inventory row's failure bookkeeping (the product lane's sync_attempts/sync_error/retry_after): a success,
-# a requeue, or a new stock (the failures counted belong to the stock that failed, not to the one now to serve).
-CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = NULL"
-# Forget the last synced stock, so the row serves again from zero (a reset).
-FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
-                           "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
-
 
 def on_sale_sql(alias: str) -> str:
     """The one rule for an inventory row (aliased `alias`) on sale: stock above 0, or made to order (no count).
     Its negation is stock 0, the reversible delist (qty is never negative, and NULL only when made to order)."""
     return f"({alias}.qty > 0 OR {alias}.made_to_order = 1)"
+
+
+# The inventory rows whose count (qty, made_to_order) differs from the last synced count, or was never synced
+# (last_synced_made_to_order NULL): all the inventory CSV (4_inventory_update.csv: SKU + quantity) can carry.
+COUNT_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
+                   "OR i.last_synced_qty IS NOT i.qty)")
+# The inventory rows whose stock differs from the last synced stock. The stock is everything the sync lane serves:
+# (qty, made_to_order, reason, replaced_by_lot_code), so a reason or lot that changes at an unchanged count is a delta
+# too. Over the inventory table aliased `i`; the one definition.
+STOCK_DELTA_SQL = (f"({COUNT_DELTA_SQL} OR i.last_synced_reason IS NOT i.reason "
+                   "OR i.last_synced_lot_code IS NOT i.replaced_by_lot_code)")
+# An un-hide: the stock is on sale (on_sale_sql) while the last synced one was not (stock 0 with any reason, or never
+# synced). The same rule as on_sale_sql, over the last synced columns; NULL (never synced) reads as not on sale.
+UNHIDE_SQL = f"({on_sale_sql('i')} AND NOT COALESCE(i.last_synced_qty > 0 OR i.last_synced_made_to_order = 1, 0))"
+# Record the current stock as synced (a successful inventory ack).
+RECORD_SYNCED_STOCK_SQL = ("last_synced_qty = qty, last_synced_made_to_order = made_to_order, "
+                           "last_synced_reason = reason, last_synced_lot_code = replaced_by_lot_code")
+# Clear an inventory row's failure bookkeeping (the product lane's sync_attempts/sync_error/retry_after/abandoned_at):
+# a success, a requeue, a reset, or a new stock (the failures counted belong to the stock that failed, not to the one
+# now to serve, as new product content clears a product's).
+CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = NULL, abandoned_at = NULL"
+# Forget the last synced stock, so the row serves again from zero (a reset).
+FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
+                           "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
 
 
 class LedgerError(Exception):
@@ -211,7 +219,7 @@ class Ledger:
         # earlier ledger never sent; a row with neither matches NULL and serves nothing new.
         for col, ddl in (("last_synced_reason", "TEXT"), ("last_synced_lot_code", "TEXT"),
                          ("sync_attempts", "INTEGER NOT NULL DEFAULT 0"), ("sync_error", "TEXT"),
-                         ("retry_after", "TEXT")):
+                         ("retry_after", "TEXT"), ("abandoned_at", "TEXT")):
             if col not in inv_cols:
                 self.conn.execute(f"ALTER TABLE inventory ADD COLUMN {col} {ddl}")
         prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}

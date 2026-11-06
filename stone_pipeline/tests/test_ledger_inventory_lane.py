@@ -12,7 +12,8 @@ from stone_pipeline.ledger.populate import populate_discontinued
 from stone_pipeline.ledger.server import dispatch
 
 PAST = "2000-01-01T00:00:00+00:00"
-_NEW_COLUMNS = {"last_synced_reason", "last_synced_lot_code", "sync_attempts", "sync_error", "retry_after"}
+_NEW_COLUMNS = {"last_synced_reason", "last_synced_lot_code", "sync_attempts", "sync_error", "retry_after",
+                "abandoned_at"}
 
 
 def _product(ledger, sku, state="synced", medusa_id="M", lot_code=None):
@@ -148,19 +149,109 @@ def test_a_reason_cleared_at_stock_0_is_served(tmp_path):
             {"sku": "S-1", "quantity": 0, "made_to_order": False}]
 
 
+def test_the_inventory_csv_render_sticks_to_count_changes(tmp_path):
+    # 4_inventory_update.csv carries SKU + quantity only, so a reason or lot change at an unchanged count is no row
+    from stone_pipeline.config.sources import load_source
+    from stone_pipeline.ledger.render import render_inventory
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _product(ledger, "POL-1", lot_code=None)
+        _product(ledger, "POL-2")
+        _stock(ledger, "POL-1", 0, reason="replaced_by_lot", lot="L1", synced=(0, 0, None, None))   # reason only
+        _stock(ledger, "POL-2", 3, synced=(5, 0, None, None))                                        # a count move
+        assert render_inventory(ledger, load_source("polonine"), tmp_path / "inv.csv") == 1
+
+
 # --- defect 7: stock moves for every product Medusa holds -------------------------------------------------------
 
 def test_stock_moves_for_a_product_medusa_holds_whatever_its_sync_state(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         for sku, state in (("D-1", "dirty"), ("S-1", "syncing"), ("G-1", "gap_held")):
             _product(ledger, sku, state=state, medusa_id="M-" + sku)
-            _stock(ledger, sku, 3)
-        _product(ledger, "N-1", state="synced", medusa_id=None)       # never acked: Medusa does not hold it
-        _stock(ledger, "N-1", 3)
+            _stock(ledger, sku, 3, synced=(5, 0, None, None))             # a count move of a listed product
+        _product(ledger, "E-1", state="pending", medusa_id="")            # an empty id is no id: never sent
+        _stock(ledger, "E-1", 3)
         assert _lane(ledger) == ["D-1", "G-1", "S-1"]
         assert sync.ack(ledger, "inventory", "D-1", status_="updated", quantity=3) == 1
-        assert sync.ack(ledger, "inventory", "N-1", status_="updated", quantity=3) == 0
-        assert _row(ledger, "N-1")["last_synced_qty"] is None
+        assert sync.ack(ledger, "inventory", "E-1", status_="updated", quantity=3) == 0
+        assert _row(ledger, "E-1")["last_synced_qty"] is None
+
+
+def test_a_synced_product_without_an_id_is_in_medusa_its_delist_flows(tmp_path):
+    # a products_export bootstrap row (or populate_discontinued's minimal row): 'synced', no id, held by Medusa by SKU
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _product(ledger, "B-1", state="synced", medusa_id=None)
+        _stock(ledger, "B-1", 4, synced=(4, 0, None, None))
+        populate_discontinued(ledger, [("B-1", "h")])                    # the supplier dropped it
+        assert [i["payload"] for i in sync.ready_inventory(ledger)] == [
+            {"sku": "B-1", "quantity": 0, "made_to_order": False}]
+        assert sync.ack(ledger, "inventory", "B-1", status_="updated", quantity=0) == 1
+        assert _lane(ledger) == []
+
+
+def test_a_hard_reset_tombstones_a_synced_product_without_an_id(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _product(ledger, "B-1", state="synced", medusa_id=None)
+        _product(ledger, "E-1", state="pending", medusa_id="")
+        sync.reset_sync_state(ledger, hard=True)
+        assert [r["external_id"] for r in ledger.execute("SELECT external_id FROM removed")] == ["B-1"]
+
+
+# --- an un-hide never outruns the product update ---------------------------------------------------------------
+
+def test_an_un_hide_waits_for_the_product_update_and_a_hide_does_not(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        # its new photo (photo_ready 1) is still to reach Blokport, and that apply failed: it waits
+        _product(ledger, "U-1", state="dirty", medusa_id="M-U")
+        ledger.execute("UPDATE product SET retry_after = '2999-01-01T00:00:00+00:00' WHERE sku = 'U-1'")
+        _stock(ledger, "U-1", 5, synced=(0, 0, "no_photo", None))       # was hidden, now back on sale
+        _product(ledger, "H-1", state="dirty", medusa_id="M-H")
+        _stock(ledger, "H-1", 0, reason="delisted", synced=(5, 0, None, None))   # a hide
+        _product(ledger, "C-1", state="dirty", medusa_id="M-C")
+        _stock(ledger, "C-1", 7, synced=(5, 0, None, None))              # a count move while on sale
+        _product(ledger, "N-1", state="syncing", medusa_id="M-N")
+        _stock(ledger, "N-1", 2)                                          # never synced: its first stock is a show
+        assert _lane(ledger) == ["C-1", "H-1"]
+        assert sync.status(ledger)["inventory"]["delta"] == 2
+        assert sync.ack(ledger, "inventory", "U-1", status_="updated", quantity=5) == 0   # nor acked ahead
+        ledger.execute("UPDATE product SET state = 'synced', retry_after = NULL")          # the update landed
+        assert _lane(ledger) == ["C-1", "H-1", "N-1", "U-1"]
+
+
+# --- a late or duplicate failure on a synced stock row does not count ----------------------------------------
+
+def test_failed_acks_on_a_stock_row_already_synced_do_not_count(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _product(ledger, "S-1")
+        _stock(ledger, "S-1", 4, synced=(4, 0, None, None))
+        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+            assert sync.ack(ledger, "inventory", "S-1", status_="failed", reason="late") == 0
+        row = _row(ledger, "S-1")
+        assert (row["sync_attempts"], row["sync_error"], row["retry_after"]) == (0, None, None)
+        assert sync.failures(ledger) == []
+
+
+# --- dead stock is visible and can be abandoned --------------------------------------------------------------
+
+def test_dead_stock_is_counted_in_status_and_can_be_abandoned(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _product(ledger, "S-1")
+        _stock(ledger, "S-1", 4)
+        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+            sync.ack(ledger, "inventory", "S-1", status_="failed", reason="SKU not found")
+        assert sync.status(ledger)["inventory"] == {"total": 1, "delta": 0, "dead": 1}
+        assert dispatch(ledger, "POST", "abandon", {}, {"type": "inventory", "external_id": "S-1"})[0] == 200
+        assert [(f["type"], f["state"], f["abandoned"]) for f in sync.failures(ledger)] == [("inventory", "abandoned", True)]
+        assert sync.requeue_dead_lettered(ledger) == 0                     # an abandoned one stays put
+        assert sync.status(ledger)["inventory"]["dead"] == 0               # like gap_held: abandoned is out
+        populate_discontinued(ledger, [("S-1", "h")])                     # a new stock: served again
+        assert _lane(ledger) == ["S-1"] and sync.failures(ledger) == []
+
+
+def test_abandon_refuses_a_live_stock_row(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _product(ledger, "S-1")
+        _stock(ledger, "S-1", 4)
+        assert dispatch(ledger, "POST", "abandon", {}, {"type": "inventory", "external_id": "S-1"})[0] == 409
 
 
 # --- defect 8: GET /status counts what the lane serves ---------------------------------------------------------
@@ -169,14 +260,15 @@ def test_the_status_delta_is_the_lane(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _product(ledger, "A-1")
         _stock(ledger, "A-1", 2)                                      # served
-        _product(ledger, "B-1", medusa_id=None)
+        _product(ledger, "B-1", state="pending", medusa_id=None)
         _stock(ledger, "B-1", 2)                                      # not in Medusa yet
         _product(ledger, "C-1")
         _stock(ledger, "C-1", 2)
         sync.ack(ledger, "inventory", "C-1", status_="failed", reason="x")   # waiting
         _product(ledger, "D-1")
         _stock(ledger, "D-1", 0, reason="replaced_by_lot", lot="L9")  # its lot has no piece in Medusa
-        assert sync.status(ledger)["inventory"] == {"total": 4, "delta": len(_lane(ledger))} == {"total": 4, "delta": 1}
+        assert sync.status(ledger)["inventory"] == {"total": 4, "delta": len(_lane(ledger)), "dead": 0} \
+            == {"total": 4, "delta": 1, "dead": 0}
 
 
 # --- the v13 migration --------------------------------------------------------------------------------------------

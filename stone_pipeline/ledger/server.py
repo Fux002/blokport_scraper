@@ -16,7 +16,7 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
       inventory echo, like a failed ack, waits and dead-letters by the product lane's rule.
     POST /sync/v1/requeue   body (optional): {type: variations|products|inventory}  -- un-quarantine
       dead-lettered entities after the Medusa-side cause is fixed (the recovery lever behind failures)
-    POST /sync/v1/abandon   body: {type: variations|products|removed, external_id}  -- the OPPOSITE of
+    POST /sync/v1/abandon   body: {type: variations|products|removed|inventory, external_id}  -- the OPPOSITE of
       requeue: drop ONE structurally-re-rejecting dead-letter to terminal (abandoned_at). Keyed by the
       same {type, external_id} a /failures row carries. 404 unknown id, 409 if not a dead-letter.
     POST /sync/v1/release-leases   no body  -- every 'syncing' variation and product back to 'dirty' at

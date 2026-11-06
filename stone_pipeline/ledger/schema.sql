@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS inventory (
     sync_attempts    INTEGER NOT NULL DEFAULT 0,        -- consecutive failed/refused acks (dead at the cap)
     sync_error       TEXT,                              -- last failure reason; null once synced
     retry_after      TEXT,                              -- after a failed ack: not served again before this time
+    abandoned_at     TEXT,                              -- set when the operator drops a dead stock row (until a new stock)
     CHECK (made_to_order IN (0, 1) AND (made_to_order = 1) = (qty IS NULL))
 );
 

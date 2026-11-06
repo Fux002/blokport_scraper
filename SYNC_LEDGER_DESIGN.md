@@ -555,12 +555,19 @@ re-import and no export download.
 
 - An `inventory_only` ingest updates `inventory.qty` in the ledger.
 - Inventory is served as `ready` only where the stock `(qty, made_to_order, reason,
-  replaced_by_lot_code)` differs from the last synced stock, for a product Medusa holds
-  (its id acked); on the ack the scraper records the stock as synced. Unchanged stock is
+  replaced_by_lot_code)` differs from the last synced stock, for a product Medusa holds;
+  on the ack the scraper records the stock as synced. Unchanged stock is
   never served, so a stock refresh moves only the deltas. A failed ack, or one the
   quantity echo refuses, waits and dead-letters by the product lane's rule (section 5,
-  Resumable); a dead stock row is listed in GET /failures and reset by a requeue or a
-  new stock.
+  Resumable); a dead stock row is counted in GET /status (`dead`), listed in GET
+  /failures, and reset by a requeue or a new stock (or abandoned). A late `failed` on a
+  row already synced counts nothing. Accepted: a stock that moved between serve and ack
+  makes the echo refuse it, so the new stock waits one backoff (5 min) before it serves.
+- "Medusa holds the product" is one rule (`sync._IN_MEDUSA`): its id acked, or `synced`
+  without one (a products_export bootstrap row, held by SKU). Every count move and every
+  hide go out for such a product; an UN-HIDE (on sale while the last synced stock was
+  not, or never synced) waits until the product itself is `synced`, so a hidden product
+  never returns before its own update (a new photo) has landed.
 - The >30% delist guard becomes a count query the sync service applies before it
   serves inventory, refusing to expose a mass delist from a partial scrape. It is
   PER SOURCE (fixes L3), matching the current per-source guard in `run.py`, so one
