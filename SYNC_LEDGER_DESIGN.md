@@ -215,8 +215,10 @@ Tables (columns abbreviated; every table has `created_at`, `updated_at`):
 - `payload_hash`, `medusa_id` (nullable), `state`, `last_synced`
 
 `inventory`
-- `sku` (PK, FK to product), `qty` (null exactly when `made_to_order`), `made_to_order`, `last_synced_qty`,
-  `last_synced_made_to_order` (null until first synced), `updated_at`
+- `sku` (PK, FK to product), `qty` (null exactly when `made_to_order`), `made_to_order`, `reason`,
+  `replaced_by_lot_code`, the last synced copy of each (`last_synced_qty`, `last_synced_made_to_order` (null until
+  first synced), `last_synced_reason`, `last_synced_lot_code`), the failure wait (`sync_attempts`, `sync_error`,
+  `retry_after`), `updated_at`
 
 `image`
 - `sha256` (PK), `kind` in {scraped_photo, variant_texture}, `source_url`,
@@ -254,7 +256,7 @@ combination `(category_pcat, type, variation_key, color, finish, quality)`; prod
 `(variation_key, color, finish, quality, title, description, handle, weight,
 length, width, height, origin_country_code, ordered(image_urls), company_id,
 sales_channel_id, category, bundle_size, ports)`. Inventory uses no hash: the
-compare of the stock `(qty, made_to_order)` with the last synced stock drives it
+compare of the stock `(qty, made_to_order, reason, replaced_by_lot_code)` with the last synced stock drives it
 (`db.STOCK_DELTA_SQL`). A field Medusa applies must be in the
 hash or a real change never re-syncs; a volatile field must be out of it or every
 run churns.
@@ -552,9 +554,22 @@ Inventory becomes a first-class entity with a fast lane that needs no product
 re-import and no export download.
 
 - An `inventory_only` ingest updates `inventory.qty` in the ledger.
-- Inventory is served as `ready` only where the stock `(qty, made_to_order)` differs
-  from the last synced stock; on the ack the scraper records the stock as synced.
-  Unchanged stock is never served, so a stock refresh moves only the deltas.
+- Inventory is served as `ready` only where the stock `(qty, made_to_order, reason,
+  replaced_by_lot_code)` differs from the last synced stock, for a product Medusa holds;
+  on the ack the scraper records the stock as synced. Unchanged stock is
+  never served, so a stock refresh moves only the deltas. A failed ack, or one the
+  quantity echo refuses, waits and dead-letters by the product lane's rule (section 5,
+  Resumable); a dead stock row is counted in GET /status (`dead`), listed in GET
+  /failures, and reset by a requeue or a new stock (or abandoned). A late `failed` on a
+  row already synced counts nothing. Accepted: a stock that moved between serve and ack
+  makes the echo refuse it, so the new stock waits one backoff (5 min) before it serves.
+- "Medusa holds the product" is one rule (`db.in_medusa_sql`): its id acked, or synced
+  once (`last_synced`: an ack, or a products_export row Medusa holds by SKU), whatever
+  its state now. Every count move and every hide go out for such a product; an UN-HIDE
+  (on sale while the last synced stock was not, or never synced) is SERVED only once the
+  product itself is `synced`, so a hidden product never returns before its own update
+  (a new photo) has landed (GET /status `waiting` counts those). An ack of a served stock
+  is recorded whatever the product did since.
 - The >30% delist guard becomes a count query the sync service applies before it
   serves inventory, refusing to expose a mass delist from a partial scrape. It is
   PER SOURCE (fixes L3), matching the current per-source guard in `run.py`, so one

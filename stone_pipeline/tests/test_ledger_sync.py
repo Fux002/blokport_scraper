@@ -58,7 +58,7 @@ def test_status_reports_state_histograms_and_inventory_delta(tmp_path):
     assert st["variation"] == held("variation", synced=1, pending=1)
     assert st["product"] == held("product", pending=1)
     assert st["combination"] == held("combination")   # all 0 until materialized
-    assert st["inventory"] == {"total": 1, "delta": 1}
+    assert st["inventory"] == {"total": 1, "delta": 0, "dead": 0, "waiting": 0}   # S-1 moved, but Medusa does not hold the product yet
 
 
 def test_sync_loop_serve_ack_converges(tmp_path):
@@ -459,6 +459,7 @@ def test_inventory_sync_serves_delta_for_synced_products_only(tmp_path):
         now = now_iso()
         _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
         _product(ledger, "P-1", "slab_v1", state="synced")    # in Medusa -> stock can sync
+        ledger.execute("UPDATE product SET medusa_id = 'M1' WHERE sku = 'P-1'")
         _product(ledger, "P-2", "slab_v1", state="pending")   # not yet -> stock held
         for sku in ("P-1", "P-2"):
             ledger.upsert("inventory", {"sku": sku, "qty": 7, "last_synced_qty": None,
@@ -765,8 +766,8 @@ def _synced_product(ledger, sku="S-1", vkey="slab_a_1", state="syncing", payload
     now = now_iso()
     _variation(ledger, vkey, "synced")                      # eligibility: the product's variation is synced
     ledger.upsert("product", {"sku": sku, "source": "s", "variation_key": vkey, "state": state,
-                              "payload_hash": payload_hash, "created_at": now, "updated_at": now},
-                  pk=("sku",))
+                              "medusa_id": "M-" + sku, "payload_hash": payload_hash,
+                              "created_at": now, "updated_at": now}, pk=("sku",))
 
 
 def test_product_ack_with_stale_hash_is_refused(tmp_path):

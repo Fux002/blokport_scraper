@@ -133,7 +133,7 @@ def test_a_made_to_order_shape_is_served_on_both_paths_with_no_quantity(cfg, tmp
         assert stored == {"POL-A": (None, 1), "POL-B": (5, 0)}
         assert _lane(ledger) == {"POL-A": {"sku": "POL-A", "quantity": None, "made_to_order": True},
                                  "POL-B": {"sku": "POL-B", "quantity": 5, "made_to_order": False}}
-        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 2}
+        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 2, "dead": 0, "waiting": 0}
 
 
 def test_an_ack_echoing_what_was_served_clears_the_delta(cfg, tmp_path):
@@ -153,6 +153,8 @@ def test_an_ack_for_a_state_that_moved_since_the_pull_is_refused_and_the_new_sta
         _synced(ledger, [_row("A", made_to_order=True)], cfg)
         populate_inventory(ledger, [_row("A", made_to_order=False, count="7")], cfg)   # moved before the ack
         assert sync.ack(ledger, "inventory", "POL-A", None, "synced", quantity=None, made_to_order=True) == 0
+        assert _lane(ledger) == {}                         # a refused ack waits like a failed one
+        ledger.execute("UPDATE inventory SET retry_after = '2000-01-01T00:00:00+00:00'")
         assert _lane(ledger) == {"POL-A": {"sku": "POL-A", "quantity": 7, "made_to_order": False}}
 
 
@@ -186,7 +188,7 @@ def test_a_soft_reset_re_serves_a_made_to_order_shape(cfg, tmp_path):
         _synced(ledger, [_row("A", made_to_order=True)], cfg)
         sync.ack(ledger, "inventory", "POL-A", None, "synced", quantity=None, made_to_order=True)
         sync.reset_sync_state(ledger)
-        ledger.execute("UPDATE product SET state = 'synced'")
+        ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'P-' || sku")   # Blokport acks it again
         assert "POL-A" in _lane(ledger)
 
 
@@ -207,8 +209,8 @@ def _v11_ledger(path) -> None:
     with Ledger.open(path, env="development") as ledger:
         now = now_iso()
         for sku in ("POL-1", "POL-2"):
-            ledger.execute("INSERT INTO product (sku, source, state, created_at, updated_at) "
-                           "VALUES (?, 'pol', 'synced', ?, ?)", (sku, now, now))
+            ledger.execute("INSERT INTO product (sku, source, state, medusa_id, created_at, updated_at) "
+                           "VALUES (?, 'pol', 'synced', 'M', ?, ?)", (sku, now, now))
     raw = sqlite3.connect(path)
     raw.executescript("""
         DROP TABLE inventory;
@@ -233,7 +235,7 @@ def test_a_v11_ledger_keeps_its_stock_and_sync_marks_and_serves_nothing_new(tmp_
         rows = {r["sku"]: dict(r) for r in ledger.execute("SELECT * FROM inventory")}
         assert {k: (v["qty"], v["last_synced_qty"], v["made_to_order"], v["last_synced_made_to_order"], v["reason"])
                 for k, v in rows.items()} == {"POL-1": (4, 4, 0, 0, None), "POL-2": (0, None, 0, None, "no_photo")}
-        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 1}     # only the never-synced one
+        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 1, "dead": 0, "waiting": 0}     # only the never-synced one
         assert {r["made_to_order"] for r in ledger.execute("SELECT made_to_order FROM product")} == {0}
 
 

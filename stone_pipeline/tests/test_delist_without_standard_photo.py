@@ -43,7 +43,7 @@ def rule_on(monkeypatch):
 def _stocked(ledger, rows, cfg):
     """The write-through's order: the products (each one's photo decision), applied by Blokport, then their stock."""
     populate_products(ledger, rows, cfg)
-    ledger.execute("UPDATE product SET state = 'synced'")
+    ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'M-' || sku")
     return populate_inventory(ledger, rows, cfg)
 
 

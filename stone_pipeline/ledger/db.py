@@ -27,28 +27,55 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 12  # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 13  # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
 #                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
 #                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
 #                      v10: product.model_3d_key -- the lead slab's 3D cut-out;
 #                      v11: product.photo_ready -- the no-photo rule's decision;
 #                      v12: made to order -- inventory.qty nullable + made_to_order + last_synced_made_to_order,
-#                           product.made_to_order
+#                           product.made_to_order;
+#                      v13: the inventory lane's sync bookkeeping -- inventory.last_synced_reason/last_synced_lot_code
+#                           (the stock includes its reason) + sync_attempts/sync_error/retry_after/abandoned_at
+#                           (the failure wait and dead-letter)
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
-
-# The inventory rows the lane serves: the stock (qty, made_to_order) differs from the last synced stock, or was
-# never synced (last_synced_made_to_order NULL). Over the inventory table aliased `i`; the one definition.
-STOCK_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
-                   "OR i.last_synced_qty IS NOT i.qty)")
-# Forget the last synced stock, so the row serves again (a reset, a changed reason).
-FORGET_SYNCED_STOCK_SQL = "last_synced_qty = NULL, last_synced_made_to_order = NULL"
-
 
 def on_sale_sql(alias: str) -> str:
     """The one rule for an inventory row (aliased `alias`) on sale: stock above 0, or made to order (no count).
     Its negation is stock 0, the reversible delist (qty is never negative, and NULL only when made to order)."""
     return f"({alias}.qty > 0 OR {alias}.made_to_order = 1)"
+
+
+def in_medusa_sql(alias: str) -> str:
+    """The one rule for a product (aliased `alias`) Medusa holds: Medusa acked its id (a non-empty medusa_id), or it
+    was synced once (last_synced: set by a successful ack, and by the rows the products export shows, the bootstrap
+    seed and populate_discontinued's minimal rows, which Medusa holds by SKU). Whatever its sync state now: a dirty,
+    leased or held product is still in Medusa. A reset clears both, so a reset product is new again."""
+    return f"(({alias}.medusa_id IS NOT NULL AND {alias}.medusa_id != '') OR {alias}.last_synced IS NOT NULL)"
+
+
+# The inventory rows whose count (qty, made_to_order) differs from the last synced count, or was never synced
+# (last_synced_made_to_order NULL): all the inventory CSV (4_inventory_update.csv: SKU + quantity) can carry.
+COUNT_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
+                   "OR i.last_synced_qty IS NOT i.qty)")
+# The inventory rows whose stock differs from the last synced stock. The stock is everything the sync lane serves:
+# (qty, made_to_order, reason, replaced_by_lot_code), so a reason or lot that changes at an unchanged count is a delta
+# too. Over the inventory table aliased `i`; the one definition.
+STOCK_DELTA_SQL = (f"({COUNT_DELTA_SQL} OR i.last_synced_reason IS NOT i.reason "
+                   "OR i.last_synced_lot_code IS NOT i.replaced_by_lot_code)")
+# An un-hide: the stock is on sale (on_sale_sql) while the last synced one was not (stock 0 with any reason, or never
+# synced). The same rule as on_sale_sql, over the last synced columns; NULL (never synced) reads as not on sale.
+UNHIDE_SQL = f"({on_sale_sql('i')} AND NOT COALESCE(i.last_synced_qty > 0 OR i.last_synced_made_to_order = 1, 0))"
+# Record the current stock as synced (a successful inventory ack).
+RECORD_SYNCED_STOCK_SQL = ("last_synced_qty = qty, last_synced_made_to_order = made_to_order, "
+                           "last_synced_reason = reason, last_synced_lot_code = replaced_by_lot_code")
+# Clear an inventory row's failure bookkeeping (the product lane's sync_attempts/sync_error/retry_after/abandoned_at):
+# a success, a requeue, a reset, or a new stock (the failures counted belong to the stock that failed, not to the one
+# now to serve, as new product content clears a product's).
+CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = NULL, abandoned_at = NULL"
+# Forget the last synced stock, so the row serves again from zero (a reset).
+FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
+                           "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
 
 
 class LedgerError(Exception):
@@ -193,7 +220,16 @@ class Ledger:
         if "replaced_by_lot_code" not in inv_cols:   # v8: the lot a bundle was replaced by (its redirect target)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN replaced_by_lot_code TEXT")
         if "made_to_order" not in inv_cols:   # v12: qty becomes nullable, which SQLite only does by a rebuild
-            self._rebuild_inventory_v12()
+            self._rebuild_inventory_v12()     # from schema.sql's table, so it already has every later column
+            inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
+        # v13: no backfill on purpose. A synced row's last synced reason/lot is not known, so it stays NULL: a row whose
+        # reason or lot is set serves once (Blokport applies it idempotently), which also delivers a reason that an
+        # earlier ledger never sent; a row with neither matches NULL and serves nothing new.
+        for col, ddl in (("last_synced_reason", "TEXT"), ("last_synced_lot_code", "TEXT"),
+                         ("sync_attempts", "INTEGER NOT NULL DEFAULT 0"), ("sync_error", "TEXT"),
+                         ("retry_after", "TEXT"), ("abandoned_at", "TEXT")):
+            if col not in inv_cols:
+                self.conn.execute(f"ALTER TABLE inventory ADD COLUMN {col} {ddl}")
         prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}
         if "collection_country_code" not in prod_cols:   # v6: supplier collection location (independent of origin)
             self.conn.execute("ALTER TABLE product ADD COLUMN collection_country_code TEXT")
@@ -209,6 +245,12 @@ class Ledger:
             self.conn.execute("ALTER TABLE product ADD COLUMN photo_ready INTEGER NOT NULL DEFAULT 1")
         if "made_to_order" not in prod_cols:   # v12: on sale with no count (read by Blokport at create)
             self.conn.execute("ALTER TABLE product ADD COLUMN made_to_order INTEGER NOT NULL DEFAULT 0")
+        if from_version < 13:
+            # v13 reads "Medusa holds it" from last_synced (in_medusa_sql); before, a products export row was only
+            # 'synced' (seed_products and populate_discontinued wrote no last_synced). Keyed on the version: a 'synced'
+            # row without last_synced is exactly such a row (an ack always sets it).
+            self.conn.execute("UPDATE product SET last_synced = updated_at "
+                              "WHERE state = 'synced' AND last_synced IS NULL")
         if from_version < 11:
             # Before v11 the decision was kept only as the stock reason, so derive it from that. Keyed on the version,
             # not on the ALTER: the ALTER commits on its own, so a crash before the version bump below leaves the

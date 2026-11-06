@@ -20,7 +20,7 @@ from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import csvio
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger.bootstrap import attribute_id
-from stone_pipeline.ledger.db import STOCK_DELTA_SQL, Ledger, on_sale_sql
+from stone_pipeline.ledger.db import COUNT_DELTA_SQL, Ledger, on_sale_sql
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.emit_catalog import _COLS as VARIANTS_FULL_COLS
 
@@ -127,13 +127,13 @@ def render_products(ledger: Ledger, cfg: SourceConfig, path: str | Path,
 
 def render_inventory(ledger: Ledger, cfg: SourceConfig, path: str | Path) -> int:
     """Render the inventory delta (4_inventory_update.csv): the products whose stock
-    moved since the last sync (db.STOCK_DELTA_SQL), joined to the
+    count moved since the last sync (db.COUNT_DELTA_SQL: the CSV carries no reason), joined to the
     product row for the handle. Reuses emit.write_inventory_csv so the format
     matches. A qty of 0 is the reversible delist, written like any other row."""
     served = ledger.execute(
         "SELECT p.sku AS sku, i.qty AS qty, i.made_to_order AS made_to_order, p.surrogate_key AS surrogate_key, "
         f"p.handle AS handle, {on_sale_sql('i')} AS on_sale FROM inventory i JOIN product p ON p.sku = i.sku "
-        f"WHERE {STOCK_DELTA_SQL} ORDER BY i.rowid"
+        f"WHERE {COUNT_DELTA_SQL} ORDER BY i.rowid"
     ).fetchall()
     # qty 0 is the reversible delist: emit writes 0 only via its discontinued path, so split on sale (db.on_sale_sql)
     # from not, and feed the on-sale rows through `changed`.
