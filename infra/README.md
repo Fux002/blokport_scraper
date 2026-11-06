@@ -48,11 +48,10 @@ terraform apply                        # only dev is created
 terraform output deploy_role_arn       # -> repo secret AWS_DEPLOY_ROLE_ARN
 ```
 
-## Run the dev job
-```bash
-aws ecs run-task --cluster blokport-dev --launch-type FARGATE \
-  --task-definition blokport-scraper-development \
-  --network-configuration "awsvpcConfiguration={subnets=[<dev-private-subnets>],securityGroups=[<dev-scraper-sg>],assignPublicIp=DISABLED}"
-```
-`terraform output` gives `dev_private_subnet_ids` and `dev_security_group_id` (and the
-`prod_*` equivalents once prod is enabled).
+## The ad-hoc task
+The task definition runs `deploy/run_pipeline.sh`, which needs a `RUN_MODE` container override (unset exits 2,
+`pipeline` is refused: the produce runs in the sync service, `POST /config/v1/run`). Its cluster is the platform's
+(`terraform output -raw dev_cluster_name`, `blokport-dev-cluster`), with `dev_private_subnet_ids` and
+`dev_security_group_id` for the network configuration (and the `prod_*` equivalents). Note that every mode
+`run_pipeline.sh` accepts needs torch and the baked models of the GPU images, which the `:core` image this task
+runs does not carry; those modes run as AWS Batch jobs (`modules/gpu_enhance`).

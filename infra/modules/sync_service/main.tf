@@ -298,8 +298,10 @@ resource "aws_ecs_task_definition" "this" {
         { name = "SCRAPER_STANDARDISE_CLEAN_BUDGET_USD", value = var.standardise_clean_budget_usd },
         { name = "SCRAPER_STANDARDISE_CLEAN", value = tostring(var.standardise_clean) },
         { name = "SCRAPER_STANDARDISE_JOBDEF", value = var.standardise_job_definition_name },
-        # the GPU pool's ceiling while a round runs (always set back to 8 after): the size of a round's burst
+        # the GPU pool's ceiling while a round runs (the size of a round's burst), and the idle ceiling it is always
+        # set back to after: the value Terraform creates the pool with, so the two never disagree
         { name = "SCRAPER_STANDARDISE_GPU_VCPUS", value = tostring(var.standardise_gpu_vcpus) },
+        { name = "SCRAPER_STANDARDISE_IDLE_GPU_VCPUS", value = tostring(var.standardise_idle_gpu_vcpus) },
         ],
         # No standardised photo -> served qty 0, reason no_photo (hidden, kept for review). Unset leaves the code's
         # env default (on in production), so an env that does not pass it keeps its task definition unchanged.

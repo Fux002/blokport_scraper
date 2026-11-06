@@ -34,7 +34,7 @@ Alway stick to these coding principles: ~/.claude/CLAUDE.md
 - Scraper config store: `python -m stone_pipeline.config.store seed|list`
 - Config admin API (UI): `SCRAPER_CONFIG_TOKEN=<t> python -m stone_pipeline.config.server`
 - Sync ledger server: `SCRAPER_SYNC_TOKEN=<t> python -m stone_pipeline.ledger.server` (routes `/sync/v1/*`)
-- Container entrypoint (the GPU jobs and the ad-hoc task): `deploy/run_pipeline.sh` (RUN_MODE: standardise|standardise-retouch|standardise-edit-test|generate-textures; `pipeline` is refused: the produce runs in the sync service)
+- Container entrypoint (the GPU jobs and the ad-hoc task): `deploy/run_pipeline.sh` (RUN_MODE: standardise|standardise-close|standardise-retouch|standardise-edit-test|standardise-diag|generate-textures; `pipeline` is refused: the produce runs in the sync service)
 
 ### Docker
 - `docker build --target core -t blokport-scraper:core .`: scrape + pipeline + CPU image re-host (the sync service + the ad-hoc task).

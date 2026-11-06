@@ -181,6 +181,10 @@ resource "aws_batch_compute_environment" "this" {
 
   lifecycle {
     create_before_destroy = true
+    # The ceiling is set here only when the pool is created: the photo process raises it for a round and sets it back to
+    # the idle value (the same variable, passed to it as SCRAPER_STANDARDISE_IDLE_GPU_VCPUS). An apply during a round
+    # must not cut the round's burst back to idle under its running jobs.
+    ignore_changes = [compute_resources[0].max_vcpus]
   }
 
   compute_resources {

@@ -184,6 +184,11 @@ variable "standardise_gpu_vcpus" {
   description = "SCRAPER_STANDARDISE_GPU_VCPUS: the GPU pool's ceiling while a photo round runs (4 vCPUs per job). Within the account's G-instance quota."
 }
 
+variable "standardise_idle_gpu_vcpus" {
+  type        = number
+  description = "SCRAPER_STANDARDISE_IDLE_GPU_VCPUS: the GPU pool's idle ceiling the photo process sets back after every round. The root's gpu_idle_vcpus, the same value the pool is created with."
+}
+
 variable "gpu_compute_environment_arn" {
   type        = string
   default     = ""

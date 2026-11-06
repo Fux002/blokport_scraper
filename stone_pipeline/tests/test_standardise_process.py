@@ -372,6 +372,7 @@ def _configured(monkeypatch):
     for name, value in (("SCRAPER_GPU_QUEUE", "q"), ("SCRAPER_STANDARDISE_JOBDEF", "jd"), ("FAL_KEY", "k")):
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(C, "BUDGET_USD", 50.0)
+    monkeypatch.setattr(C, "IDLE_GPU_VCPUS", 8)
     monkeypatch.setattr(proc, "RUN_TIMEOUT_SECONDS", C.WORK_SECONDS + C.FINISH_SECONDS + 1)
 
 
@@ -387,6 +388,17 @@ def test_the_gpu_target_and_the_hosted_key_must_be_configured(monkeypatch):
     for name in ("SCRAPER_GPU_QUEUE", "BLOKPORT_GPU_QUEUE", "SCRAPER_STANDARDISE_JOBDEF", "BLOKPORT_STANDARDISE_JOBDEF", "FAL_KEY"):
         monkeypatch.delenv(name, raising=False)
     assert proc.unconfigured() == ["SCRAPER_GPU_QUEUE", "SCRAPER_STANDARDISE_JOBDEF", "FAL_KEY"]
+
+
+def test_without_the_gpu_pool_s_idle_ceiling_the_process_refuses_to_start(monkeypatch):
+    # the ceiling every round sets the pool back to (Terraform's gpu_idle_vcpus): missing, the run stops at preflight,
+    # before any lock or S3 work, instead of failing when it first touches the pool
+    _configured(monkeypatch)
+    monkeypatch.setattr(C, "IDLE_GPU_VCPUS", None)
+    assert proc.unconfigured() == ["SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"]
+    assert proc.unconfigured(close_only=True) == ["SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"]
+    monkeypatch.setattr(proc.boto3, "client", lambda *a, **k: pytest.fail("preflight must stop before any AWS client"))
+    assert proc.main() == 2
 
 
 def test_the_work_window_and_the_finish_must_fit_the_runner_s_ceiling(monkeypatch):

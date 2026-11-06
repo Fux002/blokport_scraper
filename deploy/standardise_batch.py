@@ -41,14 +41,24 @@ def _ceiling(batch, ce, vcpus):
     batch.update_compute_environment(computeEnvironment=ce, computeResources={"maxvCpus": vcpus})
 
 
+def idle_vcpus():
+    """The pool's idle ceiling (IDLE_GPU_VCPUS, from the environment Terraform sets); fails loud when this host was given
+    none, so a run never leaves the pool at a guessed ceiling."""
+    if C.IDLE_GPU_VCPUS is None:
+        raise KeyError("SCRAPER_STANDARDISE_IDLE_GPU_VCPUS")
+    return C.IDLE_GPU_VCPUS
+
+
 @contextmanager
 def raised(batch, ce):
-    """The pool's ceiling at RUN_GPU_VCPUS for the block, back at IDLE_GPU_VCPUS after, whatever happened in it."""
+    """The pool's ceiling at RUN_GPU_VCPUS for the block, back at the idle ceiling after, whatever happened in it. The idle
+    ceiling is read first: a host without one fails before it raises the pool."""
+    idle = idle_vcpus()
     _ceiling(batch, ce, C.RUN_GPU_VCPUS)
     try:
         yield
     finally:
-        _ceiling(batch, ce, C.IDLE_GPU_VCPUS)
+        _ceiling(batch, ce, idle)
 
 
 def slices(todo):
@@ -256,8 +266,9 @@ def _active(batch, run_id):
 
 def set_idle(batch):
     """The GPU pool's ceiling back to idle."""
+    idle = idle_vcpus()
     queue, _ = target()
-    _ceiling(batch, pool(batch, queue), C.IDLE_GPU_VCPUS)
+    _ceiling(batch, pool(batch, queue), idle)
 
 
 def clear_leftovers(batch, run_id):

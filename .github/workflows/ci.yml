@@ -16,14 +16,29 @@ jobs:
       - name: Install deps
         run: pip install -r stone_pipeline/requirements.txt pyflakes
       # Static gates before the suite: an unused/undefined name (pyflakes catches the NameError class of
-      # boot crash) and the no-em-dash invariant (plan section 0) over every code file. image_pipeline/ and
-      # the design docs are outside the gate for now.
+      # boot crash) and the no-em-dash invariant (plan section 0).
       - name: Lint (pyflakes)
         run: python -m pyflakes stone_pipeline scrapers deploy
-      - name: No em dashes in code
+      # Every tracked text file (code, docs, config) is gated, except the files listed in .github/em-dash-allowlist.txt:
+      # the offenders that predate the gate, one path per line. The list only shrinks: a listed file that no longer has
+      # an em dash fails the gate until its line is removed, and a new file is never added (clean it instead). Wave B
+      # cleans the listed files and empties the list.
+      - name: No em dashes in tracked files
+        env:
+          LC_ALL: C.UTF-8   # one collation for sort/comm, and UTF-8 for the PCRE match
         run: |
-          if grep -rnP "\x{2014}" stone_pipeline scrapers deploy infra .github Dockerfile; then
-            echo "em dash found in code (plan section 0: none anywhere)"; exit 1
+          rc=0; git grep -I -l -P "\x{2014}" > /tmp/hits.txt || rc=$?
+          [ "$rc" -le 1 ] || { echo "git grep failed (exit $rc)"; exit 1; }   # 1 = no match, anything above is an error
+          sort /tmp/hits.txt > /tmp/offenders.txt
+          sort .github/em-dash-allowlist.txt > /tmp/allowed.txt
+          mapfile -t new < <(comm -23 /tmp/offenders.txt /tmp/allowed.txt)
+          mapfile -t stale < <(comm -13 /tmp/offenders.txt /tmp/allowed.txt)
+          if [ "${#new[@]}" -gt 0 ]; then
+            echo "em dash found (plan section 0: none anywhere):"; git grep -I -n -P "\x{2014}" -- "${new[@]}"; exit 1
+          fi
+          if [ "${#stale[@]}" -gt 0 ]; then
+            echo "no em dash left in these allow-listed files; remove them from .github/em-dash-allowlist.txt:"
+            printf '%s\n' "${stale[@]}"; exit 1
           fi
       - name: Run tests
         run: pytest -q

@@ -36,7 +36,7 @@ variable "instance_types" {
 }
 
 variable "max_vcpus" {
-  description = "Ceiling for the managed compute env. 16 = up to 4 g4dn.xlarge in parallel. min is always 0 ($0 idle)."
+  description = "The managed compute env's ceiling when it is created (afterwards the photo process owns it, see ignore_changes). min is always 0 ($0 idle)."
   type        = number
   default     = 16
 }

@@ -41,7 +41,8 @@ EventBridge (cron) ─▶ Fargate task: scrape ─▶ pipeline (Stage 7 stages i
 ## Pieces (all in this repo)
 - `Dockerfile` — `core` (scrape+pipeline+CPU image enhancement) and `imageproc`
   (adds the CPU torch enhance stack) and `gpu` (CUDA torch, the AWS Batch enhancer) targets.
-- `deploy/run_pipeline.sh` — container entrypoint (`scrape → run → catalog → upload`).
+- `deploy/run_pipeline.sh`: the image entrypoint for the GPU Batch jobs and the ad-hoc task; it dispatches on
+  `RUN_MODE` and refuses an unset mode or `pipeline` (exit 2). The produce runs in the sync service, not here.
 - `infra/` — Terraform: one stack, shared ECR + CI role, and `modules/scraper`
   instantiated twice (`scraper_dev`, `scraper_prod`); see `infra/README.md`.
 - `.github/workflows/` — `ci.yml` (pytest) + `deploy.yml` (OIDC → build → push to ECR).
@@ -54,30 +55,37 @@ Each task has its environment **baked in** by Terraform — `scraper-dev` runs
 separate task definitions in separate clusters, each scoped by IAM to its own
 bucket. Images land at `s3://<staging>/<env>/products/improved/<source>/<hash>.jpg`
 and the product CSV links to that full https URL. See `config/settings.py` +
-`DEV_PROD_PIPELINE.md`. To run one by hand:
-`aws ecs run-task --cluster <env_cluster> --task-definition blokport-scraper-<env>`.
+`DEV_PROD_PIPELINE.md`. A produce is started from the admin's Run (`POST /config/v1/run` on the sync
+service). The ad-hoc task definition (`blokport-scraper-<env>`) runs `deploy/run_pipeline.sh`, which needs a
+`RUN_MODE` (unset exits 2); none of its modes runs on the `:core` image that task uses (they need the GPU
+images' torch and models and run as AWS Batch jobs), so it is not a way to produce.
 
 ## Sequencing guarantee: images are ready before products load
-The image re-host (download + size-reduce) runs **synchronously inside the run, before the product CSV
-exists** — there is no async path, so a product can never be loaded referencing an
-unprocessed or not-yet-uploaded image:
+The image re-host runs **synchronously inside the produce, before the product CSV exists**, so a product
+can never be loaded referencing an unprocessed or not-yet-uploaded image (layout: `stone_pipeline/io/imagestore.py`):
 
 ```
-run all → Stage 7: download → size-reduce → UPLOAD to S3
-        → only THEN emit the product CSV, with image URLs pointing at the uploaded files
-catalog → bundle to_upload/
-[separate, later, you] → import the CSV into Medusa   ← you trigger this; the task does not
+produce (sync service, POST /config/v1/run)
+  -> Stage 7: download -> size-reduce -> UPLOAD to s3://<staging>/<env>/products/improved/<src>/<hash>.jpg
+              (the raw original to <env>/products/scraped/<src>/<hash>.jpg, the photo process's input)
+  -> only THEN emit the product CSV, with image URLs pointing at the uploaded files
+  -> catalog -> bundle to_upload/
+photos stage (after a produce when SCRAPER_STANDARDISE_AUTO is on, or the admin's Run for photos)
+  -> publishes the standardised photos to <env>/products/standard/<view>/<src>/<hash>.jpg; a product of a
+     source whose image pipeline is on links its standardised photo once published
+[separate, later, Blokport] -> import the CSV into Medusa
 ```
 
-The produce (the sync service's runner, `POST /config/v1/run`) **stages** the CSV + images and stops; importing into Medusa is a
-separate step you run afterward, so "processing completes before load" holds by construction.
+The produce **stages** the CSV + images and stops; importing into Medusa is a separate step, so "processing
+completes before load" holds by construction. A product that has no standardised photo yet is served qty 0
+with reason `no_photo` when `SCRAPER_REQUIRE_STANDARD_PHOTO` is on (the production default), until its photo
+is published.
 
-**INVARIANT — do not break:** this only holds when the real run has
-`SCRAPER_S3_DRY_RUN=false` **and** `SCRAPER_IMAGE_MODE=s3`. With `dry_run=true` or
-`mode=passthrough`, Stage 7 *derives* image URLs **without uploading**, so the CSV would
-link to objects that don't exist. Those are the safe DEV/no-network defaults — never let
-them leak into a real upload run. The Terraform task sets both correctly
-(`infra/modules/scraper/main.tf`); verify them if you run the task by hand.
+**INVARIANT, do not break:** this only holds when the real run has `SCRAPER_S3_DRY_RUN=false` **and**
+`SCRAPER_IMAGE_MODE=s3`. With `dry_run=true` or `mode=passthrough`, Stage 7 *derives* image URLs **without
+uploading**, so the CSV would link to objects that don't exist. Those are the safe DEV/no-network defaults;
+never let them leak into a real upload run. The sync service's task definition sets both
+(`infra/modules/sync_service/main.tf`, the config container, which runs the produce).
 
 ## First deploy
 ```bash
@@ -89,16 +97,13 @@ terraform output deploy_role_arn           # copy for step 2
 # 2. CI auth: GitHub repo Settings → Secrets and variables → Actions →
 #    add repo secret  AWS_DEPLOY_ROLE_ARN = <the output above>
 
-# 3. First image: push to `main` (or run the Deploy workflow). CI builds the
-#    `core` image and pushes blokport-scraper:core.
+# 3. First image: merge to `main`. When CI on main is green, the Deploy workflow builds
+#    main's head and pushes blokport-scraper:core + :<sha>, then rolls the dev sync service.
 
-# 4. Run the DEV task once manually and watch the logs
-aws ecs run-task --cluster blokport-dev --launch-type FARGATE \
-  --task-definition blokport-scraper-development \
-  --network-configuration "awsvpcConfiguration={subnets=[$(terraform output -json dev_private_subnet_ids | jq -r 'join(\",\")')],securityGroups=[$(terraform output -raw dev_security_group_id)],assignPublicIp=DISABLED}"
-
-# 5. When happy, enable the DEV cron:
-# unattended produces: an EventBridge schedule targeting POST /config/v1/run (not a cron task)
+# 4. Wait for the dev sync service to be stable on it, then start a produce from the admin's Run
+#    (POST /config/v1/run on the sync service). There is no produce schedule: a produce is started by hand.
+aws ecs wait services-stable --cluster "$(terraform output -raw dev_cluster_name)" \
+  --services blokport-scraper-svc-development
 ```
 
 With `prod_staging_bucket` empty (the default), **only the dev task is created** — the
@@ -110,7 +115,8 @@ to `main` rebuilds and pushes a NEW `:core` image, but the task def does not cha
 change" and never restart the running task, leaving the new code in ECR but **not live**.
 
 The Deploy workflow now closes this automatically: after the `:core` push, the **"Roll dev service"**
-step (`.github/workflows/deploy.yml`, `push` events only) runs `update-service --force-new-deployment`
+step (`.github/workflows/deploy.yml`) runs on the Deploy that CI's completion on `main` starts, and only when it
+built main's head (never on a manual dispatch). It runs `update-service --force-new-deployment`
 and `wait services-stable`, so a green Deploy means the task ACTUALLY rolled, not just that the image was
 pushed. This is safe: `config.db` (sources + review decisions) and the ledger restore from their S3
 snapshots on restart, so nothing is lost. The CI deploy role is granted `ecs:UpdateService` (scoped to
@@ -127,22 +133,36 @@ aws ecr describe-images --repository-name blokport-scraper \
   --image-ids imageTag=core --query 'imageDetails[0].imageDigest' --output text
 ```
 
-## Standing PROD up LATER (after dev is proven AND the prod Medusa platform exists)
-Prod is a **separate task in the prod cluster** (`blokport-scraper-production`), not a
-runtime override of dev. It needs the prod platform stack (`blokport-prod-vpc`,
-`blokport/prod/terraform.tfstate`) and the prod bucket:
-```bash
-cd infra
-# promote the SAME dev-proven image (a git sha), do NOT rebuild for prod:
-terraform apply \
-  -var prod_staging_bucket=blokport-prod-staging-<hex> \
-  -var prod_image_tag=<the dev-proven git sha>
-aws ecs run-task --cluster blokport-prod --launch-type FARGATE \
-  --task-definition blokport-scraper-production \
-  --network-configuration "awsvpcConfiguration={subnets=[$(terraform output -json prod_private_subnet_ids | jq -r 'join(\",\")')],securityGroups=[$(terraform output -raw prod_security_group_id)],assignPublicIp=DISABLED}"
-# enable the prod cron when proven:
-terraform apply -var prod_staging_bucket=...
-```
+## Promoting an image to prod (pinning)
+Prod is its own stack in the prod cluster, stood up 2026-09-02. It runs only immutable, dev-proven tags, set in
+`infra/brands/blokport.tfvars` (`variables.tf` refuses a mutable or empty tag while prod is enabled):
+
+- `prod_image_tag = "<sha>"`: the sync service image, the 40-hex git-sha tag the Deploy workflow pushed.
+- `prod_gpu_image_tag = "gpu-<sha>"`: the texture job's GPU image (a Deploy dispatch with `build_gpu`).
+- `prod_standardise_image_tag = "standardise-pin-<sha12>"`: the photo process's GPU image
+  (`deploy/build_standardise_image.sh` pushes it under that pin tag; see STANDARDISE_PROCESS.md).
+
+**Pinning = adding the image's pin tag in ECR, before the apply.** The ECR lifecycle (`infra/main.tf`) keeps
+pinned images by their pin tag, in rules that rank above every build and churn rule, so no build or churn
+rule can expire a pinned image; each kind keeps its newest pins (the current one and its rollbacks):
+
+| Pinned image | Pin tag to add | Kept |
+|---|---|---|
+| sync service (`<sha>`) | `prod-<sha12>` | newest 20 |
+| texture GPU (`gpu-<sha>`) | `prod-gpu-<sha12>` | newest 5 |
+| photo process GPU | `standardise-pin-<sha12>` (pushed under it) | newest 20 |
+
+`<sha12>` is the first 12 hex digits of the image's commit sha, the form every pin tag uses (the current prod
+image carries `prod-d11da5b62972`).
+
+The images are OCI indexes: add a tag by re-putting the image's EXACT manifest (boto3 `batch_get_image` with
+`acceptedMediaTypes` including `application/vnd.oci.image.index.v1+json`, then `put_image` with that
+`imageManifest`, its `imageManifestMediaType`, the new `imageTag` and the source `imageDigest`), and check that
+the new tag's digest equals the source tag's. Re-serialising the manifest (the CLI's `--output text` round
+trip) yields a different digest, a tag on an image nothing runs.
+
+Then apply the prod modules the change touches with the brand's tfvars, e.g.
+`terraform apply -var-file=brands/blokport.tfvars -target=module.sync_service_prod -target=module.gpu_enhance_prod`.
 
 ## Standardised photos
 Supplier logos and watermarks are taken off per photo by the standardised-photo process
