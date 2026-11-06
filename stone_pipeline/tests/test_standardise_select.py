@@ -1037,7 +1037,7 @@ def test_an_answer_that_never_parses_is_a_named_fail_after_its_asks(monkeypatch)
     s3 = _S3({f"{GPU}judged/{A}.json": _unparsed(C.JUDGE_UNPARSED_ASKS - 1),
               f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     asked = []
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or (
+    monkeypatch.setattr(sel.judge, "judge", lambda job: asked.append(1) or (
         {"verdict": "unparsed", "raw": "?", "version": C.JUDGE_VERSION}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (None, True)      # final: on the review list
@@ -1050,7 +1050,7 @@ def test_an_answer_that_never_parses_is_a_named_fail_after_its_asks(monkeypatch)
 def test_a_photo_is_asked_at_most_once_a_run(monkeypatch):
     s3 = _S3({f"{GPU}judged/{A}.json": _unparsed(0), f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     asked = []
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or (
+    monkeypatch.setattr(sel.judge, "judge", lambda job: asked.append(1) or (
         {"verdict": "unparsed", "raw": "?", "version": C.JUDGE_VERSION}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     for listing in (_listing(A, key="one"), _listing(A, key="two")):                      # two listings of one stone

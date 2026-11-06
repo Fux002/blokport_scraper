@@ -778,7 +778,7 @@ def test_a_mark_that_waits_beside_a_collected_click_is_never_called_the_click_s_
         store.objects[f"{CL_P}attempts/{A}.{name}.request.json"] = json.dumps({"model": name}).encode()
         s.rounds[1][1]["sentas"].requested.add(f"{A}.{name}")
     monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
-    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": False}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: ({"passes": False}, 0.02))
     plans, _ = s.plans()
     cap = sel_mod.Spend(3 * C.JUDGE_PRICE_USD, cap_error=sel_mod.CleanCapReached)          # A's checks, not E's edit
     problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
