@@ -253,6 +253,18 @@ def test_an_un_hide_waits_for_the_product_update_and_a_hide_does_not(tmp_path):
         assert sync.status(ledger)["inventory"]["waiting"] == 0
 
 
+def test_waiting_counts_only_un_hides_the_product_gate_holds(tmp_path):
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        for sku in ("W-1", "R-1", "D-1", "A-1"):
+            _product(ledger, sku, state="dirty", medusa_id="M-" + sku)
+            _stock(ledger, sku, 5, synced=(0, 0, "no_photo", None))      # all un-hides of a dirty product
+        ledger.execute("UPDATE inventory SET retry_after = '2999-01-01T00:00:00+00:00' WHERE sku = 'R-1'")
+        ledger.execute("UPDATE inventory SET sync_attempts = ? WHERE sku IN ('D-1', 'A-1')", (sync._MAX_SYNC_ATTEMPTS,))
+        ledger.execute("UPDATE inventory SET abandoned_at = '2026-01-01T00:00:00+00:00' WHERE sku = 'A-1'")
+        inv = sync.status(ledger)["inventory"]
+        assert (inv["waiting"], inv["dead"]) == (1, 1)                   # W-1 only; D-1 is dead, not also waiting
+
+
 def test_an_un_hide_acked_after_its_product_went_dirty_is_recorded(tmp_path):
     # the re-review's repro: served while the product was synced, the product went dirty before the ack, then the
     # stock went back to hidden. The ack must be recorded, or the hide would match the old last-synced stock and

@@ -111,7 +111,7 @@ def status(ledger: Ledger) -> dict[str, dict[str, int]]:
         out[table] = {state: held.get(state, 0) for state in states}
     total = ledger.execute("SELECT COUNT(*) AS n FROM inventory").fetchone()["n"]
     dead = ledger.execute(f"SELECT COUNT(*) AS n FROM inventory i WHERE {_STOCK_DEAD}").fetchone()["n"]
-    waiting = ledger.execute(f"SELECT COUNT(*) AS n {_UNHIDE_WAITING}").fetchone()["n"]
+    waiting = ledger.execute(f"SELECT COUNT(*) AS n {_UNHIDE_WAITING}", (now_iso(),)).fetchone()["n"]
     out["inventory"] = {"total": total, "delta": _count_inventory_lane(ledger), "dead": dead, "waiting": waiting}
     # E13: variation reconcile signal. `retiring` already surfaces in out["variation"] (a state count);
     # `orphaned` = synced, rendered varieties with 0 products (a source removal's shared orphan, or the old
@@ -332,10 +332,13 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
 # of what was served is recorded whatever the product did since (_ack_inventory).
 _STOCK_GATE = f"{in_medusa_sql('p')} AND (p.state = 'synced' OR NOT {UNHIDE_SQL})"
 
-# An un-hide held back only by the serve gate: a stock delta of a product Medusa holds that would bring it back on sale
-# while the product itself is not synced yet (GET /status `waiting`).
+# An un-hide held back only by the serve gate (GET /status `waiting`): a stock delta of a product Medusa holds that
+# would bring it back on sale while the product itself is not synced yet, and that nothing else holds (not dead, not
+# abandoned, not waiting out a failed ack). Parameter: the current time.
 _UNHIDE_WAITING = ("FROM inventory i JOIN product p ON p.sku = i.sku "
-                   f"WHERE {in_medusa_sql('p')} AND p.state != 'synced' AND {UNHIDE_SQL} AND {STOCK_DELTA_SQL}")
+                   f"WHERE {in_medusa_sql('p')} AND p.state != 'synced' AND {UNHIDE_SQL} AND {STOCK_DELTA_SQL} "
+                   f"AND i.sync_attempts < {_MAX_SYNC_ATTEMPTS} AND i.abandoned_at IS NULL "
+                   "AND (i.retry_after IS NULL OR i.retry_after <= ?)")
 
 # A dead stock row (alias i): the failed/refused acks reached the cap, and the operator has not abandoned it.
 _STOCK_DEAD = f"i.sync_attempts >= {_MAX_SYNC_ATTEMPTS} AND i.abandoned_at IS NULL"
