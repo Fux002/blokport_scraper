@@ -47,6 +47,14 @@ class Attributes:
             i for table in self.by_category.values() for _, i in table.values()]
 
 
+def attributes_status_required(path: Path) -> bool:
+    """Whether reading `path` requires the status/internal columns: only Medusa's live attributes.csv download
+    carries them. An internal temp dump of the ledger (ledger.render) is the old shape and is read tolerant,
+    so the decision is a pure function of the path and step C's flag flip touches only the real download. The
+    variants export has the mirror helper variants_status_required."""
+    return ATTRIBUTES_STATUS_REQUIRED and Path(path) == env().SETTINGS.paths.attributes_csv
+
+
 def load_attributes(path: Path | None = None) -> Attributes:
     """The name->id tables of every value that has an id (an id-less value cannot be emitted).
     read_attributes guards conflicting duplicates."""

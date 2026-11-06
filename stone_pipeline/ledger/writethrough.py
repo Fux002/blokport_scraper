@@ -68,6 +68,52 @@ def open_ledger(path: str | Path | None = None) -> Ledger:
     return ledger
 
 
+def mirror_restrictions(ledger: Ledger, *, export_path: str | Path | None = None,
+                        attributes_path: str | Path | None = None) -> tuple[int, int]:
+    """Mirror the Medusa export's VE2 freeze flags onto the ledger (design section 6): variation.archived from
+    the variants export's status, attribute.restricted from the attributes export's status/internal (archived OR
+    internal). A PURE FUNCTION of the files, recomputed every produce -- a value no longer archived flips back to
+    0 -- and it touches ONLY the rows whose flag actually changes, so an unchanged row keeps its updated_at and is
+    never re-served. Dormant when a file is absent (returns 0). Reads through the one reader with the download-path
+    status decision, so a file without the column reads tolerant until step C flips the flags. Returns
+    (variations changed, attributes changed). Idempotent: a second call with the same files changes nothing."""
+    from stone_pipeline.ledger.db import now_iso
+    from stone_pipeline.reference.loaders import attributes_status_required, variants_status_required
+    from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
+
+    now = now_iso()
+    n_var = 0
+    export = Path(export_path) if export_path is not None else SETTINGS.paths.export_file
+    if export.exists():
+        archived = {v.key for v in read_variants_export(export, require_status=variants_status_required(export))
+                    if v.archived}
+        current = {r["key"] for r in ledger.execute("SELECT key FROM variation WHERE archived = 1")}
+        for key in sorted(archived - current):   # raise only the rows flipping up (a key with no row no-ops)
+            n_var += ledger.execute(
+                "UPDATE variation SET archived = 1, updated_at = ? WHERE key = ? AND archived = 0",
+                (now, key)).rowcount
+        for key in sorted(current - archived):   # lower the rows no longer archived in the file
+            n_var += ledger.execute(
+                "UPDATE variation SET archived = 0, updated_at = ? WHERE key = ?", (now, key)).rowcount
+
+    n_attr = 0
+    attrs = Path(attributes_path) if attributes_path is not None else SETTINGS.paths.attributes_csv
+    if attrs.exists():
+        restricted = {(a.category, a.value) for a in
+                      read_attributes(attrs, require_status=attributes_status_required(attrs)) if not a.assignable}
+        current = {(r["category"], r["value"]) for r in
+                   ledger.execute("SELECT category, value FROM attribute WHERE restricted = 1")}
+        for category, value in sorted(restricted - current):
+            n_attr += ledger.execute(
+                "UPDATE attribute SET restricted = 1, updated_at = ? "
+                "WHERE category = ? AND value = ? AND restricted = 0", (now, category, value)).rowcount
+        for category, value in sorted(current - restricted):
+            n_attr += ledger.execute(
+                "UPDATE attribute SET restricted = 0, updated_at = ? WHERE category = ? AND value = ?",
+                (now, category, value)).rowcount
+    return n_var, n_attr
+
+
 def record_source(emit_rows: Sequence[CanonicalRow],
                   discontinued: Sequence[tuple[str, str]], cfg: SourceConfig, *, inventory_only: bool,
                   replaced: dict[str, str] | None = None, path: str | Path | None = None) -> bool:
@@ -131,8 +177,13 @@ def record_catalog(path: str | Path | None = None) -> bool:
         with open_ledger(path) as ledger:
             n = populate.populate_variations_full(ledger, full)
             typed = populate.fill_variation_types(ledger)
+            # VE2: mirror the export's freeze flags once per produce, after the variation rows are in place
+            # (so a fresh ledger is bootstrapped first). Reads the from_medusa files the produce just fetched.
+            archived_changed, restricted_changed = mirror_restrictions(ledger)
         log.info("ledger write-through recorded catalog variations",
-                 extra={"extra_fields": {"variants_full": n, "types_filled": typed}})
+                 extra={"extra_fields": {"variants_full": n, "types_filled": typed,
+                                         "archived_changed": archived_changed,
+                                         "restricted_changed": restricted_changed}})
         return True
     except Exception:
         log.exception("ledger catalog write-through FAILED: produced variations did NOT reach the ledger; "

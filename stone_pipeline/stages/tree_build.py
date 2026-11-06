@@ -26,10 +26,10 @@ from collections import defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, CATEGORIES, SETTINGS,
-                                            VARIANTS_EXPORT_STATUS_REQUIRED, default_form_name)
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS, default_form_name
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
+from stone_pipeline.reference.loaders import attributes_status_required, variants_status_required
 from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("tree")
@@ -46,7 +46,7 @@ def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
     'Semi-Precious Stone' resolves from an underscore/space slug); lookups must key the same way. The
     read_attributes guards conflicting duplicates."""
     attr: dict[str, dict[str, str]] = defaultdict(dict)
-    for a in read_attributes(Path(path), require_status=ATTRIBUTES_STATUS_REQUIRED):
+    for a in read_attributes(Path(path), require_status=attributes_status_required(Path(path))):
         if a.sourceid:
             attr[match_key(a.category)][match_key(a.value)] = a.sourceid
     return attr
@@ -257,7 +257,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
 
     export_rows = []
     malformed = 0
-    for r in read_variants_export(Path(export_csv), require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
+    for r in read_variants_export(Path(export_csv), require_status=variants_status_required(Path(export_csv))):
         # a row missing Id or Key is skipped, not a KeyError (the cold-start guard only checks the export
         # EXISTS; read_variants_export fails loud on a missing Key or Name column, an absent Id reads empty).
         vid, key, name = r.id, r.key, r.name

@@ -152,9 +152,14 @@ def _sub_limit(limit: int | None) -> str:
 # peek (count_ready) so the two can never diverge -- a variation is servable once produced + typed;
 # a product once its variation is LIVE (synced, typed, textured). `v` is the joined variation alias. Neither while
 # it waits out a failed apply (retry_after): each takes the current time as its one parameter.
-_ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND type IS NOT NULL AND type != '' "
+# VE2: an archived variation is FROZEN -- the variations lane never serves it (no create, no update), and the
+# products lane admits it only for an EXISTING product (one Medusa holds, in_medusa_sql): a new product on an
+# archived variety is never served. archived beats dirty. Both are a pure mirror of the export (writethrough).
+_ELIGIBLE_VARIATION = ("state IN ('pending', 'dirty') AND in_full = 1 AND archived = 0 "
+                       "AND type IS NOT NULL AND type != '' "
                        "AND (retry_after IS NULL OR retry_after <= ?)")
-_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') AND v.state = 'synced' "
+_ELIGIBLE_PRODUCT = ("p.state IN ('pending', 'dirty') "
+                     f"AND ((v.state = 'synced' AND v.archived = 0) OR (v.archived = 1 AND {in_medusa_sql('p')})) "
                      "AND v.type IS NOT NULL AND v.type != '' "
                      "AND v.image_url IS NOT NULL AND v.image_url != '' "
                      "AND (p.retry_after IS NULL OR p.retry_after <= ?)")
@@ -458,8 +463,12 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
                         extra={"extra_fields": {"type": type_, "external_id": external_id,
                                                 "attempts": attempts, "reason": reason}})
         return cur.rowcount
-    # success: a PRODUCT is only marked synced if its variation is synced (the eligibility guard).
-    guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced')" \
+    # success: a PRODUCT is only marked synced under the same rule the products lane serves by (VE2): its
+    # variation is synced-and-active, OR archived and this product is one Medusa already holds (in_medusa_sql).
+    # So an existing product on a frozen variety still acks its updates, while a new product on an archived
+    # variety (which the lane never served) can never be acked synced.
+    guard = (" AND (variation_key IN (SELECT key FROM variation WHERE state = 'synced' AND archived = 0) "
+             f"OR (variation_key IN (SELECT key FROM variation WHERE archived = 1) AND {in_medusa_sql('product')}))") \
         if type_ == "products" else ""
     # retire guard: a success ack must NOT resurrect a row that is being RETIRED. A stray/out-of-order ack
     # would otherwise flip a 'retiring' row back to 'synced' while its variation tombstone still serves

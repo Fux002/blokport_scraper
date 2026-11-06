@@ -27,7 +27,7 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 13  # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 14  # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
 #                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
 #                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
@@ -37,7 +37,9 @@ SCHEMA_VERSION = 13  # v6: product.collection_country_code/collection_city -- su
 #                           product.made_to_order;
 #                      v13: the inventory lane's sync bookkeeping -- inventory.last_synced_reason/last_synced_lot_code
 #                           (the stock includes its reason) + sync_attempts/sync_error/retry_after/abandoned_at
-#                           (the failure wait and dead-letter)
+#                           (the failure wait and dead-letter);
+#                      v14: variation.archived + attribute.restricted -- the VE2 freeze, a pure mirror of the
+#                           Medusa export's status/internal columns (recomputed every produce)
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def on_sale_sql(alias: str) -> str:
@@ -214,6 +216,14 @@ class Ledger:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN abandoned_at TEXT")
             if "retry_after" not in cols:   # v9: the wait after a failed apply
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN retry_after TEXT")
+        # v14: the VE2 freeze mirror columns (a pure function of the export; default 0 = active/assignable).
+        # No backfill: the mirror recomputes both from the files on the next produce.
+        variation_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(variation)")}
+        if "archived" not in variation_cols:
+            self.conn.execute("ALTER TABLE variation ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+        attribute_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(attribute)")}
+        if "restricted" not in attribute_cols:
+            self.conn.execute("ALTER TABLE attribute ADD COLUMN restricted INTEGER NOT NULL DEFAULT 0")
         inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
         if "reason" not in inv_cols:   # why qty is 0: 'delisted' (admin take-offline) vs null (out of stock)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN reason TEXT")
