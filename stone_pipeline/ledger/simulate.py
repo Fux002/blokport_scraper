@@ -36,8 +36,10 @@ def simulate_sync(ledger: Ledger, mint: Callable[[str, str], str] | None = None,
         moved = 0
         for type_ in _TYPES:
             for item in sync.ready(ledger, type_):
-                sync.ack(ledger, type_, item["external_id"],
-                         mint(type_, item["external_id"]), "created")
+                if type_ == "inventory":   # the consumer's stock ack: no id, the inventory lane's status
+                    sync.ack(ledger, type_, item["external_id"], status_="updated")
+                else:
+                    sync.ack(ledger, type_, item["external_id"], mint(type_, item["external_id"]), "created")
                 applied[type_] += 1
                 moved += 1
         if moved == 0:

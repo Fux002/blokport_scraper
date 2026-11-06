@@ -25,15 +25,13 @@ dormant C3 case). No em dashes (design principle 2).
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 
-from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core import logfmt
-from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, RECORD_SYNCED_STOCK_SQL,
                                       STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql, now_iso,
                                       on_sale_sql)
+from stone_pipeline.ledger.payloads import product_payload, variation_payload
 
 log = logfmt.get_logger("ledger.sync")
 
@@ -90,11 +88,6 @@ _ENTITY = {
     # so wiring it here would make ack('combinations','failed') raise). Combinations are CSV-rendered
     # from the export and Medusa resolves priceable tuples itself. Re-add only with a full serve lane.
 }
-# a variation always belongs to a category (strict): branch is NOT NULL and constrained, so every served
-# variation maps to one canonical category label. Derived from the pack-built category registry (was
-# hardcoded name->label).
-_CATEGORY = {c.name: c.label for c in CATEGORIES}
-
 
 
 # --- GET /sync/status ---------------------------------------------------------
@@ -225,16 +218,7 @@ def ready_variations(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "RETURNING key, branch, type, name, aliases, image_url, payload_hash",
         (now, now)).fetchall()
     return _isolate(ledger, "variation", "key", rows, lambda v: {
-        "external_id": v["key"],
-        "payload_hash": v["payload_hash"],
-        "payload": {
-            "category": _CATEGORY.get(v["branch"], ""),   # strict: a variation belongs to a category
-            "type": v["type"],
-            "name": v["name"],
-            "aliases": json.loads(v["aliases"] or "[]"),
-            "image_url": v["image_url"] or "",
-        },
-    })
+        "external_id": v["key"], "payload_hash": v["payload_hash"], "payload": variation_payload(v)})
 
 
 def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
@@ -250,7 +234,7 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
     fill_variation_types could not resolve) would make the product inherit an empty type
     and list broken. Gating on `v.type` holds those products until the variety is typed.
 
-    The payload carries ZERO Medusa ids (the review's red flag): everything is an
+    The payload (payloads.product_payload) carries ZERO Medusa ids (the review's red flag): everything is an
     external reference Medusa resolves on its side. `vendor` (the source) resolves to the
     company + sales channel. `port_ids` are the SUPPLIER's shipping ports (already Medusa
     port ids, from ports.csv) -- the true port of origin (where the goods ship FROM), sent
@@ -267,63 +251,7 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
         "  ORDER BY p.created_at, p.sku" + _sub_limit(limit) + ") RETURNING *",
         (now, now)).fetchall()
     return _isolate(ledger, "product", "sku", rows, lambda p: {
-        "external_id": p["sku"],
-        "payload_hash": p["payload_hash"],
-        "payload": {
-            # category + type are OWNED by the variation (identity = category/type/name); the product
-            # INHERITS them via variation_external_id -- resolve identity from the variation, not here.
-            # We ALSO send the NAMES, denormalized, purely for display/filtering, so Medusa never has
-            # to join product -> variation just to show the stone type. They always equal the
-            # variation's by construction (a product is a physical instance of its variety).
-            "variation_external_id": p["variation_key"],
-            "category": p["category"] or "", "type": p["type"] or "",
-            "color": p["color"], "finish": p["finish"], "quality": p["quality"],
-            "vendor": p["vendor"],   # agnostic company name; Medusa resolves it (kept for display + fallback)
-            # company_id: the per-source Medusa company id set in :4200 (empty until pasted). Medusa
-            # allocates by this id directly when present, else resolves by `vendor`. ENV-SPECIFIC:
-            # a dev company id differs from prod, so :4200's config is maintained per environment.
-            "company_id": p["company_id"] or "",
-            "title": p["title"], "description": p["description"], "handle": p["handle"],
-            "weight": p["weight"], "length": p["length"],
-            "width": p["width"], "height": p["height"],
-            "origin_country_code": p["origin_country_code"],   # the stone's quarry country (origin display)
-            # the SUPPLIER's shipping ports = the port of origin. Already Medusa port ids, so Medusa links
-            # them directly instead of deriving ports from the quarry country (which fanned out to every
-            # port in that country). Empty means "no port", never "re-derive".
-            "port_ids": json.loads(p["ports"] or "[]"),
-            # supplier COLLECTION location: where the product is physically collected before shipping (the
-            # supplier's warehouse). Independent of origin_country_code (provenance) and of ports (departure);
-            # null when the source configured none. Never overload origin with it.
-            "collection_country_code": p["collection_country_code"],
-            "collection_city": p["collection_city"],
-            "bundle_size": p["bundle_size"],   # under coordination: pallet model is retiring the multiplier
-            # LOTS: every piece of a lot carries the same lot_code and its place in the cut order; Blokport
-            # groups the catalog on lot_code. Both null outside a lot (the product's path is unchanged).
-            "lot_code": p["lot_code"],
-            "lot_position": p["lot_position"],
-            # Images -- the SAME set the working CSV import carried, so Medusa builds the same media:
-            #   thumbnail      = the CSV 'Product Thumbnail' (the product's MAIN display image)
-            #   oriented_images= the CSV 'Front/Right/Back/Left Image' (a block's oriented shots)
-            #   image_urls     = the CSV 'Product Image 1..N' (the gallery)
-            # All are S3 ingestion sources Medusa copies into its own storage. The variety's texture
-            # ({Key}.png) rides on the VARIATION payload separately.
-            "thumbnail": p["thumbnail_key"] or "",
-            "oriented_images": json.loads(p["oriented_image_keys"] or "[]"),
-            "image_urls": json.loads(p["product_image_keys"] or "[]"),
-            # The 3D slab (the "Slab 3D on Blokport" contract): the lead slab's cut-out and its outline, ingestion
-            # sources like the images; null when the product has none (a close-up, a block or tile).
-            "model_3d": ({"cutout": p["model_3d_key"], "meta": imagestore.cutout_meta_url(p["model_3d_key"])}
-                         if p["model_3d_key"] else None),
-            # The no-photo rule's decision (populate._photo_ready), the same one that sends the stock out with reason
-            # 'no_photo'. Blokport reads it at create only: a product that is not ready is created as a hidden draft, so
-            # a priced product never goes on sale before a stock delta could hide it; afterwards the stock lane owns
-            # visibility. Not in payload_hash, so a change never re-serves a product on its own.
-            "photo_ready": bool(p["photo_ready"]),
-            # Made to order (a free-size shape): on sale with no count. Read at create like photo_ready (the variant
-            # takes backorders); afterwards the stock lane carries every change. Not in payload_hash.
-            "made_to_order": bool(p["made_to_order"]),
-        },
-    })
+        "external_id": p["sku"], "payload_hash": p["payload_hash"], "payload": product_payload(p)})
 
 
 # The serve gate of an inventory row (aliases i, p): every count move and every hide goes out for a product Medusa
@@ -418,7 +346,7 @@ def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
 
 # --- POST /sync/ack -----------------------------------------------------------
 
-def _ack_inventory(ledger: Ledger, sku: str, status_: str, reason: str | None,
+def _ack_inventory(ledger: Ledger, sku: str, failed: bool, reason: str | None,
                    quantity: int | None, made_to_order: bool | None) -> int:
     """One inventory ack, for a product Medusa holds (db.in_medusa_sql). A success whose echo matches the current stock
     is always recorded as synced, whatever the product did since the serve (the un-hide gate is the serve's only: a
@@ -446,7 +374,7 @@ def _ack_inventory(ledger: Ledger, sku: str, status_: str, reason: str | None,
                          (*params, sku)).fetchone()
     if row is None:
         return 0
-    if status_ == "failed":
+    if failed:
         if not row["is_delta"]:
             return 0
         return _fail_inventory(ledger, sku, row["sync_attempts"], reason or "apply failed")
@@ -472,68 +400,63 @@ def _fail_inventory(ledger: Ledger, sku: str, attempts_before: int, error: str) 
     return cur.rowcount
 
 
+# The closed set of ack statuses per lane (MEDUSA_INTEGRATION_GUIDE.md section 7), as (success, failure). Blokport sends
+# created/updated/skipped/failed on variations and products, updated/skipped/failed on inventory and done/blocked/failed
+# on removed. An inventory 'skipped' is a stock Blokport did NOT apply (SKU not found, or its stock write refused it),
+# so it is a failure there. 'synced' is ack_batch's internal default for an ack that names no status (Blokport always
+# names one).
+_ACK_STATUSES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "variations": (frozenset({"created", "updated", "skipped", "synced"}), frozenset({"failed"})),
+    "products": (frozenset({"created", "updated", "skipped", "synced"}), frozenset({"failed"})),
+    "inventory": (frozenset({"updated", "synced"}), frozenset({"skipped", "failed"})),
+    "removed": (frozenset({"done"}), frozenset({"blocked", "failed"})),
+}
+
+
 def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = None,
         status_: str = "synced", reason: str | None = None,
         payload_hash: str | None = None, quantity: int | None = None,
         made_to_order: bool | None = None) -> int:
     """Medusa talks back for ONE entity. Returns the number of ledger rows changed (0 = the
     external_id was not found, or the ack was REFUSED as out-of-order -- see the eligibility guard).
-      synced -> record the minted/matched id, mark synced, clear the failure counter+reason.
-      failed -> record the reason and re-serve (dirty) once its retry_after has passed (_RETRY_BASE_SECONDS,
-                doubling per consecutive failure); after _MAX_SYNC_ATTEMPTS consecutive failures the entity
-                is DEAD-LETTERED to 'gap_held' (stops serving, surfaces in /status).
+    An ack the ledger cannot apply fails loud: a status outside the lane's set (_ACK_STATUSES), or on
+    variations/products a success without a medusa_id, is recorded as a FAILED attempt with that error
+    (it backs off, dead-letters at the cap and is listed in GET /failures). It never writes the id, so a
+    stored Medusa id is never cleared (a row without one is dropped locally on retire, with no tombstone).
+    Raises ValueError for an unknown lane (nothing to record it on).
+      success -> record the minted/matched id, mark synced, clear the failure counter+reason.
+      failure -> record the reason and re-serve (dirty) once its retry_after has passed (_RETRY_BASE_SECONDS,
+                 doubling per consecutive failure); after _MAX_SYNC_ATTEMPTS consecutive failures the entity
+                 is DEAD-LETTERED to 'gap_held' (stops serving, surfaces in /status).
+    Inventory: see _ack_inventory; removed: see _ack_removed.
 
     ELIGIBILITY GUARD (defense in depth): a product is only marked synced if its variation is
     already synced, and stock only if Medusa holds its product -- so a duplicate/out-of-order ack can
     never load a product ahead of its variation (which the serve gate already prevents, but the ack
-    path must not trust the caller). Inventory: see _ack_inventory."""
-    now = now_iso()
-    if type_ == "removed":
-        # tombstone ack: 'done' = Medusa deleted it -> retire the tombstone; 'blocked' = an open
-        # reservation blocks the hard-delete -> keep it, count the attempt, re-serve, and dead-letter
-        # to 'dead' after _MAX_SYNC_ATTEMPTS so a permanently-reserved id stops re-serving forever.
-        if status_ == "done":
-            row = ledger.execute("SELECT kind FROM removed WHERE external_id = ?", (external_id,)).fetchone()
-            if row and row["kind"] == "variation":
-                # E3 + self-heal: hard-delete the variety only once it is FK-safe (no product/combination
-                # re-acquired it). A raced produce with a stale retired-key exclusion could re-link a product
-                # onto the retiring Key; if so, KEEP the pending tombstone (return without deleting) so it
-                # re-serves and self-heals once the next (properly-excluding) produce moves those children
-                # off -- never a blind DELETE that would FK-fail and orphan the row with no tombstone.
-                child = ledger.execute(
-                    "SELECT 1 FROM product WHERE variation_key = ? "
-                    "UNION ALL SELECT 1 FROM combination WHERE variation_key = ? LIMIT 1",
-                    (external_id, external_id)).fetchone()
-                if child:
-                    log.warning("retiring variety re-acquired children; keeping its tombstone to re-serve",
-                                extra={"extra_fields": {"key": external_id}})
-                    return 0
-                ledger.execute("DELETE FROM variation WHERE key = ?", (external_id,))
-            return ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
-        row = ledger.execute("SELECT sync_attempts FROM removed WHERE external_id = ?",
-                             (external_id,)).fetchone()
-        if not row:
-            return 0
-        attempts = ((row["sync_attempts"] or 0)) + 1
-        state = "dead" if attempts >= _MAX_SYNC_ATTEMPTS else "pending"
-        cur = ledger.execute(
-            "UPDATE removed SET state = ?, sync_attempts = ?, sync_error = ?, retry_after = ?, updated_at = ? "
-            "WHERE external_id = ?", (state, attempts, (reason or "blocked")[:500], _retry_after(attempts), now, external_id))
-        if state == "dead" and cur.rowcount:
-            log.warning("tombstone dead-lettered after repeated blocks (open reservation?)",
-                        extra={"extra_fields": {"external_id": external_id, "attempts": attempts}})
-        return cur.rowcount
-    if type_ == "inventory":
-        return _ack_inventory(ledger, external_id, status_, reason, quantity, made_to_order)
-    if type_ not in _ENTITY:
+    path must not trust the caller)."""
+    if type_ not in _ACK_STATUSES:
         raise ValueError(f"unsupported sync type {type_!r}")
+    success, failure = _ACK_STATUSES[type_]
+    if status_ not in success | failure:
+        failed, reason = True, f"unknown ack status {status_!r}"
+    elif status_ in success and type_ in _ENTITY and not (isinstance(medusa_id, str) and medusa_id.strip()):
+        failed, reason = True, "success ack without medusa_id"
+    else:
+        failed = status_ in failure
+        if type_ == "inventory" and status_ == "skipped":   # it carries no reason: say what it means
+            reason = "not applied by the consumer (skipped)"
+    if type_ == "removed":
+        return _ack_removed(ledger, external_id, failed, reason)
+    if type_ == "inventory":
+        return _ack_inventory(ledger, external_id, failed, reason, quantity, made_to_order)
     table, pk = _ENTITY[type_]
-    if status_ == "failed":
+    now = now_iso()
+    if failed:
         row = ledger.execute(f"SELECT sync_attempts FROM {table} WHERE {pk} = ?",
                              (external_id,)).fetchone()
         attempts = ((row["sync_attempts"] if row else 0) or 0) + 1
         state = "gap_held" if attempts >= _MAX_SYNC_ATTEMPTS else "dirty"   # dead-letter at the cap
-        # same retire guard as the synced branch below: a stray/out-of-order FAILED ack must NOT knock a
+        # same retire guard as the success path below: a stray/out-of-order FAILED ack must NOT knock a
         # 'retiring' row back to dirty/gap_held, which would re-enter the serve lane while its tombstone
         # still serves /removed. A failed ack on a retiring row is a no-op (0 rows) by design.
         cur = ledger.execute(
@@ -545,10 +468,10 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
                         extra={"extra_fields": {"type": type_, "external_id": external_id,
                                                 "attempts": attempts, "reason": reason}})
         return cur.rowcount
-    # synced: a PRODUCT is only marked synced if its variation is synced (the eligibility guard).
+    # success: a PRODUCT is only marked synced if its variation is synced (the eligibility guard).
     guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced')" \
         if type_ == "products" else ""
-    # retire guard: a synced ack must NOT resurrect a row that is being RETIRED. A stray/out-of-order ack
+    # retire guard: a success ack must NOT resurrect a row that is being RETIRED. A stray/out-of-order ack
     # would otherwise flip a 'retiring' row back to 'synced' while its variation tombstone still serves
     # /removed, diverging the two systems. (ack from pending/syncing/dirty stays allowed by design -- serve
     # leases are an optimization, not a precondition; only 'retiring' is protected.)
@@ -572,11 +495,55 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     return cur.rowcount
 
 
+def _ack_removed(ledger: Ledger, external_id: str, failed: bool, reason: str | None) -> int:
+    """A tombstone ack. 'done' = Medusa deleted it -> retire the tombstone. 'blocked' (an open reservation blocks the
+    hard-delete) or 'failed' -> keep it, count the attempt and wait (_block_tombstone). Returns the rows changed: 0
+    for an unknown tombstone, or a 'done' the ledger refuses (below)."""
+    row = ledger.execute("SELECT kind, sync_attempts FROM removed WHERE external_id = ?", (external_id,)).fetchone()
+    if row is None:
+        return 0
+    if failed:
+        return _block_tombstone(ledger, external_id, row["sync_attempts"], reason or "blocked")
+    if row["kind"] == "variation":
+        # E3 + self-heal: hard-delete the variety only once it is FK-safe (no product/combination re-acquired it).
+        # A raced produce with a stale retired-key exclusion could re-link a product onto the retiring Key; if so,
+        # KEEP the tombstone and count the attempt like a block, so it re-serves after the wait (not on every
+        # pull) and self-heals once the next (properly-excluding) produce moves those children off -- never a blind
+        # DELETE that would FK-fail and orphan the row with no tombstone.
+        child = ledger.execute(
+            "SELECT 1 FROM product WHERE variation_key = ? "
+            "UNION ALL SELECT 1 FROM combination WHERE variation_key = ? LIMIT 1",
+            (external_id, external_id)).fetchone()
+        if child:
+            log.warning("retiring variety re-acquired children; keeping its tombstone to re-serve",
+                        extra={"extra_fields": {"key": external_id}})
+            _block_tombstone(ledger, external_id, row["sync_attempts"],
+                             "done refused: the variety has products or combinations in the ledger again")
+            return 0
+        ledger.execute("DELETE FROM variation WHERE key = ?", (external_id,))
+    return ledger.execute("DELETE FROM removed WHERE external_id = ?", (external_id,)).rowcount
+
+
+def _block_tombstone(ledger: Ledger, external_id: str, attempts_before: int, error: str) -> int:
+    """Count one undelivered delete: the tombstone waits _retry_after, and after _MAX_SYNC_ATTEMPTS it is 'dead'
+    so a permanently-reserved id stops re-serving (GET /failures lists it; a requeue serves it again)."""
+    attempts = attempts_before + 1
+    state = "dead" if attempts >= _MAX_SYNC_ATTEMPTS else "pending"
+    cur = ledger.execute(
+        "UPDATE removed SET state = ?, sync_attempts = ?, sync_error = ?, retry_after = ?, updated_at = ? "
+        "WHERE external_id = ?", (state, attempts, error[:500], _retry_after(attempts), now_iso(), external_id))
+    if state == "dead" and cur.rowcount:
+        log.warning("tombstone dead-lettered after repeated blocks (open reservation?)",
+                    extra={"extra_fields": {"external_id": external_id, "attempts": attempts}})
+    return cur.rowcount
+
+
 def ack_batch(ledger: Ledger, acks: list[dict]) -> dict[str, int]:
     """Apply a batch of acks (POST /sync/ack body). Each: {type, external_id, medusa_id, status,
     error?}. Per-ack ISOLATED: a malformed/unsupported ack is skipped and logged, the rest still
     apply -- one bad ack never drops the batch. Returns {applied, missed, skipped}: applied changed a
-    row; missed = external_id not found or ack refused (out-of-order); skipped = malformed."""
+    row (a failed attempt included: an unknown status or a success without its id is one); missed =
+    external_id not found or ack refused (out-of-order, stale echo); skipped = malformed (an unknown lane)."""
     applied = missed = skipped = 0
     for a in acks:
         try:
@@ -628,27 +595,28 @@ def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
     return out
 
 
-# The lanes a requeue resets (POST /sync/v1/requeue `type`); no type resets them all.
-REQUEUE_TYPES = ("variations", "products", "inventory")
+# What a requeue resets, per lane (POST /sync/v1/requeue `type`; no type resets them all): a 'gap_held' variation or
+# product back to 'dirty', a 'dead' tombstone back to 'pending', a dead stock row back to a plain delta. Each clears
+# the counter, the wait AND the stale error; an abandoned dead-letter stays put. The one parameter is the time.
+_REQUEUE_SQL = {
+    **{lane: f"UPDATE {table} SET state = 'dirty', sync_attempts = 0, sync_error = NULL, retry_after = NULL, "
+             "updated_at = ? WHERE state = 'gap_held' AND abandoned_at IS NULL"
+       for lane, (table, _pk) in _ENTITY.items()},
+    "removed": "UPDATE removed SET state = 'pending', sync_attempts = 0, sync_error = NULL, retry_after = NULL, "
+               "updated_at = ? WHERE state = 'dead' AND abandoned_at IS NULL",
+    "inventory": f"UPDATE inventory AS i SET {CLEAR_STOCK_FAILURES_SQL}, updated_at = ? WHERE {_STOCK_DEAD}",
+}
+REQUEUE_TYPES = tuple(_REQUEUE_SQL)
 
 
 def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
-    """Recovery: reset dead-lettered entities so they are re-served at once -- used after the underlying Medusa
-    issue is fixed (e.g. a transient outage that hit the cap). A 'gap_held' variation/product goes back to 'dirty';
-    a dead stock row (sync_attempts at the cap) back to a plain delta. Clears the counter, the wait AND the stale
-    error. Returns the number requeued. type_ None = every lane in REQUEUE_TYPES."""
+    """Recovery: reset dead-lettered entities (_REQUEUE_SQL) so they are re-served at once -- used after the
+    underlying Medusa issue is fixed (e.g. a transient outage that hit the cap). Returns the number requeued.
+    type_ None = every lane in REQUEUE_TYPES."""
     if type_ is not None and type_ not in REQUEUE_TYPES:
         raise ValueError(f"unsupported requeue type {type_!r}; expected one of {REQUEUE_TYPES}")
-    now, n = now_iso(), 0
-    for lane in ([type_] if type_ else REQUEUE_TYPES):
-        if lane == "inventory":
-            n += ledger.execute(f"UPDATE inventory AS i SET {CLEAR_STOCK_FAILURES_SQL}, updated_at = ? "
-                                f"WHERE {_STOCK_DEAD}", (now,)).rowcount   # abandoned stays
-            continue
-        n += ledger.execute(
-            f"UPDATE {_ENTITY[lane][0]} SET state = 'dirty', sync_attempts = 0, sync_error = NULL, retry_after = NULL, "
-            "updated_at = ? WHERE state = 'gap_held' AND abandoned_at IS NULL", (now,)).rowcount   # abandoned stays
-    return n
+    now = now_iso()
+    return sum(ledger.execute(_REQUEUE_SQL[lane], (now,)).rowcount for lane in ([type_] if type_ else REQUEUE_TYPES))
 
 
 def serve_in_flight(ledger: Ledger) -> bool:
@@ -722,6 +690,9 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
     matcher reference, and the emitted catalog all agree on exactly one Key per variety."""
     import collections
     from stone_pipeline.reference.loaders import survivor_of, variety_identity
+    # the write lock first, as purge does: an ack committing between the product SELECT below and the deletes could
+    # otherwise give a product a medusa_id after it was read as unsent, and it would be deleted without a tombstone
+    _lock_and_check_in_flight(ledger)
     protected = protected or set()
     groups: dict[tuple, list[str]] = collections.defaultdict(list)
     for v in ledger.execute("SELECT key, name FROM variation").fetchall():
@@ -738,13 +709,19 @@ def reconcile_variations_to_seed(ledger: Ledger, seed_keys: set[str], protected:
         dedup += [k for k in keys if k != survivor and k not in protected]
     dropped = dedup + stale
     if dropped:
-        if dedup:
-            record_tombstones(ledger, [(k, None) for k in dedup], reason="reseed_dedup", kind="variation")
-        if stale:
-            record_tombstones(ledger, [(k, None) for k in stale], reason="not_in_seed", kind="variation")
+        for keys, reason in ((dedup, "reseed_dedup"), (stale, "not_in_seed")):
+            if not keys:
+                continue
+            # the products of a dropped variety are deleted below: a product Medusa holds is tombstoned first (as a
+            # hard reset does), so Medusa deletes it too instead of keeping it as an orphan
+            q = ",".join("?" * len(keys))
+            held = ledger.execute(f"SELECT p.sku, p.source FROM product p WHERE p.variation_key IN ({q}) "
+                                  f"AND {in_medusa_sql('p')}", tuple(keys)).fetchall()
+            record_tombstones(ledger, [(r["sku"], r["source"]) for r in held], reason=reason, kind="product")
+            record_tombstones(ledger, [(k, None) for k in keys], reason=reason, kind="variation")
         q = ",".join("?" * len(dropped))
-        # FK order: inventory -> product -> combination -> variation. Post-reset there are no products,
-        # but reconcile is safe to run independently, so cascade defensively.
+        # FK order: inventory -> product -> combination -> variation. The reconcile runs before the reset, so a
+        # dropped variety can still have products here.
         ledger.execute(f"DELETE FROM inventory WHERE sku IN "
                        f"(SELECT sku FROM product WHERE variation_key IN ({q}))", tuple(dropped))
         ledger.execute(f"DELETE FROM product WHERE variation_key IN ({q})", tuple(dropped))

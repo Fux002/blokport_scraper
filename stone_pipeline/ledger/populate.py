@@ -18,21 +18,11 @@ from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import match_key
-from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, in_medusa_sql, now_iso, payload_hash
+from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, in_medusa_sql, now_iso
+from stone_pipeline.ledger.payloads import product_hash, variation_hash
 from stone_pipeline.stages.emit import _sku
 from stone_pipeline.stages.emit_catalog import _COLS as _VARIANTS_FULL_COLS
 from stone_pipeline.stages.product_state import inventory_str
-
-# Bump when the PRODUCT SYNC PAYLOAD SHAPE changes (a new field Medusa must receive) while the underlying
-# data would hash the same -- included in the product payload_hash so it flips every product 'dirty' exactly
-# once, re-syncing the whole catalog with the new payload. v2: adds port_ids to the sync payload so Medusa
-# links the supplier's shipping ports directly instead of deriving the port of origin from the quarry
-# origin_country_code (which fanned every product out to all ports in its quarry country).
-# v4: height is the thickness, width the short face (every shape flat). v5: lot_code + lot_position.
-# v6: model_3d, the lead slab's 3D cut-out. photo_ready is additive and outside the hash (read at create only), so it
-# needs no bump: an existing product does not re-serve for it.
-_PRODUCT_PAYLOAD_CONTRACT = "v6-model-3d"
-
 
 def _image_models(path: str | Path | None = None) -> dict[str, str]:
     """{Key: model} from catalog_source/image_model.csv, the provenance audit of which generator made each
@@ -79,6 +69,8 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
     # corrupt file -> no provenance, never a crash. NOT part of payload_hash: the generator is our own
     # bookkeeping, not content Medusa receives, so recording it must never re-serve a variant.
     models = _image_models()
+    # the type is not in the produced file: it is filled on the row (fill_variation_types), and the hash covers it
+    types = {r["key"]: r["type"] for r in ledger.execute("SELECT key, type FROM variation")}
     ledger.execute("UPDATE variation SET in_full = 0")
     n = 0
     with Path(path).open(encoding="utf-8-sig", newline="") as handle:
@@ -95,10 +87,11 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
             # not a hardcoded stone set, so a non-stone pack's categories are kept, not silently dropped to "".
             head = key.split("_", 1)[0]
             branch = head if category(head) else ""
-            # image_sha256 in the hash re-serves a variant whose texture bytes changed at the stable URL.
-            # Adding it to the formula also flips every imaged variant dirty ONCE (a one-time full variation
-            # re-sync, like the product payload contract bump), which heals variants Medusa ingested blank.
-            ph = payload_hash([branch, "", name, sorted(aliases), image_url, image_sha256, volume])
+            # the hash is the served payload plus the texture's fingerprint (payloads.variation_hash): a texture
+            # re-made at the stable URL re-serves; the volume is not served, so it never does
+            ph = variation_hash({"branch": branch, "type": types.get(key, ""), "name": name,
+                                 "aliases": json.dumps(aliases), "image_url": image_url,
+                                 "image_sha256": image_sha256})
             ledger.execute(
                 "INSERT INTO variation (key, branch, type, name, aliases, image_url, "
                 "image_sha256, image_model, volume, medusa_id, in_full, payload_hash, "
@@ -123,9 +116,12 @@ def populate_variations_full(ledger: Ledger, path: str | Path) -> int:
                 "updated_at = CASE WHEN variation.state = 'retiring' "
                 "OR variation.payload_hash != excluded.payload_hash THEN excluded.updated_at "
                 "ELSE variation.updated_at END, "
-                # new content is served at once, not after the wait a failed apply of the old content set
+                # new content is served at once, not after the wait a failed apply of the old content set, and is
+                # no longer the dead-letter the operator abandoned
                 "retry_after = CASE WHEN variation.payload_hash != excluded.payload_hash THEN NULL "
-                "ELSE variation.retry_after END",
+                "ELSE variation.retry_after END, "
+                "abandoned_at = CASE WHEN variation.payload_hash != excluded.payload_hash THEN NULL "
+                "ELSE variation.abandoned_at END",
                 (key, branch, "", name, json.dumps(aliases), image_url, image_sha256,
                  models.get(key), volume,
                  None, ph, "pending", now, None, now, now),
@@ -175,7 +171,8 @@ def fill_variation_types(ledger: Ledger) -> int:
         return 0
     now = now_iso()
     n = 0
-    for v in ledger.execute("SELECT key FROM variation WHERE type IS NULL OR type = ''"):
+    for v in ledger.execute("SELECT key, branch, name, aliases, image_url, image_sha256 FROM variation "
+                            "WHERE type IS NULL OR type = ''").fetchall():
         parts = v["key"].split("_")[1:-1]   # drop the branch prefix and the trailing uuid
         found = None
         for i in range(len(parts), 0, -1):
@@ -184,13 +181,12 @@ def fill_variation_types(ledger: Ledger) -> int:
                 found = types[cand]
                 break
         if found:
-            # a synced-but-untyped variation was HELD (ready_variations gates on a non-empty type),
-            # so filling the type must RE-SERVE it: flip synced -> dirty. pending/dirty stay as-is.
-            # (type is not in the variation payload_hash, so a re-populate alone would miss this.)
+            # the type is served, so it is in the hash; a synced-but-untyped variation was HELD (ready_variations
+            # gates on a non-empty type), so filling the type RE-SERVES it: synced -> dirty. pending/dirty stay as-is.
             ledger.execute(
-                "UPDATE variation SET type = ?, "
+                "UPDATE variation SET type = ?, payload_hash = ?, "
                 "state = CASE WHEN state = 'synced' THEN 'dirty' ELSE state END, "
-                "updated_at = ? WHERE key = ?", (found, now, v["key"]))
+                "updated_at = ? WHERE key = ?", (found, variation_hash({**dict(v), "type": found}), now, v["key"]))
             n += 1
     return n
 
@@ -268,38 +264,24 @@ def populate_products(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceC
             "lot_code": r.lot_code,
             "lot_position": r.lot_position,
             "photo_ready": 1 if photo_ready else 0,
-            "payload_hash": (ph := payload_hash([
-                _PRODUCT_PAYLOAD_CONTRACT,   # bump forces a one-time full re-sync on a payload-shape change
-                variation_key, r.color_name, r.finish_name, r.quality_name, r.type_name,
-                r.title, r.description, r.handle, r.weight, r.length, r.width, r.height,
-                r.origin_country_code, json.dumps(r.product_image_keys or []),
-                # oriented image keys carry a BLOCK's images (Front/Right/Back/Left); without them a
-                # re-shot block never flips dirty and its new images never re-serve.
-                json.dumps(r.oriented_image_keys or []),
-                r.company_id, r.sales_channel_id, category,
-                r.bundle_size, json.dumps(r.port_ids or []),
-                # supplier collection location: a config change must flip the product dirty so it re-serves.
-                r.collection_country_code, r.collection_city,
-                # a piece's lot membership: a re-cut lot or a moved position must re-serve the piece
-                r.lot_code, r.lot_position,
-                r.model_3d_key,   # a slab that gains, changes or loses its 3D re-serves
-                # the standardised files are re-made in place under the same names: their content re-serves them
-                r.standard_version,
-            ])),
             "created_at": now,
             "updated_at": now,
         }
+        # the hash is the served payload (payloads.product_hash), so a served field that changes re-serves the product
+        # and one that is not served (sales_channel_id: Blokport resolves the channel by vendor) never does
+        record["payload_hash"] = ph = product_hash(record, r.standard_version)
         # Convergent sync state (design db.py header): NEW -> pending, CHANGED -> dirty, UNCHANGED
         # -> untouched. CRITICAL: preserve a synced product's medusa_id + state on re-run. The old
         # code hardcoded state='pending', medusa_id=None, so every write-through run reset the whole
         # catalog to pending and wiped the acked Medusa ids -> Medusa re-ingested everything nightly.
         # updated_at is the syncing-lease clock (reap_stale_syncing): it moves only with the content, so
-        # an unchanged re-run never renews a lease Medusa did not ack. The row is still written (vendor
-        # and thumbnail_key are served but outside the hash), only the timestamp is carried over.
+        # an unchanged re-run never renews a lease Medusa did not ack. The row is still written (fields that are not
+        # served may move), only the timestamp is carried over.
         if prev is None:                                     # `prev` fetched above (variation_key fallback)
             record.update(medusa_id=None, state="pending", last_synced=None)
-        elif prev["payload_hash"] != ph:                     # new content is served at once, not after a failure's wait
-            record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"], state="dirty", retry_after=None)
+        elif prev["payload_hash"] != ph:   # new content is served at once, not after a failure's wait, nor abandoned
+            record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"], state="dirty", retry_after=None,
+                          abandoned_at=None)
         else:
             record.update(medusa_id=prev["medusa_id"], last_synced=prev["last_synced"],
                           state=prev["state"], updated_at=prev["updated_at"])
