@@ -252,8 +252,10 @@ rule (`select.click_problem`): a clean is refused only for its record or for a c
 cannot fix; one on a photo not judged yet is stored and reported blocked until it is. A judge's answer that did not
 parse is asked again, at most once a run, until it was asked `JUDGE_UNPARSED_ASKS` times (2); then it is a final fail,
 named "the judge's answer could not be read" on the review list (review 2026-11-06). A listing whose choice
-record cannot be read stays exactly as published (its photo, its conflict-photo assignment and its files untouched, in
-every kind of run) and every run names it in its problems. A listing not fully judged is simply not cleaned yet (the
+record cannot be read, its own or the owner's, stays exactly as published (its photo, its conflict-photo assignment and
+its files untouched, in every kind of run) and every run names it in its problems; one such file never stops the run
+or the others (each record is read on its own: `publish.read_records`), and while one cannot be read publish adds what
+is chosen but removes nothing, since whose files are whose cannot be told (the run says so). A listing not fully judged is simply not cleaned yet (the
 report counts it pending); an edit already paid for is not collected once its listing has a passing photo or the
 owner's choice, since it is no longer needed. Each paid call is
 listed in the cleaning cap's spend file with its reason (`auto` or `click`, with the click's time) and what the edit
@@ -331,7 +333,8 @@ Two monthly budgets (UTC calendar month) per environment, each with its own spen
   413, 422, 429) costs nothing (`usd` 0, `refused` its status), for the judge as for an edit; any other failure (a
   408 among them: a request timeout can follow upstream work) may have been billed and counts at its price. An edit is reserved together with its check, so the cap never sends a copy the run
   cannot then check; a reached cap stops only the cleaning, the judge and the GPU go on. Unset: no edit is paid, and the
-  run says so once. The edits also need the clean step on (`SCRAPER_STANDARDISE_CLEAN`).
+  run says so once. The clean switch (`SCRAPER_STANDARDISE_CLEAN`) governs only the automatic edits of marks; the
+  owner's clicks are cleaned whatever it says, within this cap.
 
 The process budget covers the judge and GPU time (each job's running time from Batch's start and stop
 times, read once the jobs have actually stopped, plus `GPU_JOB_ALLOWANCE_SECONDS` (12 min) per job that started, for
@@ -443,6 +446,8 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 - Work window ended: the round's jobs are stopped, unfinished listings are `pending`; the next press goes on.
 - GPU job failed or a photo crashed the GPU: listed as problems; retried next press (a photo that crashes the GPU
   twice is held, as before).
+- Batch refused or failed a round (an AWS error): its jobs are stopped and settled, the round is a problem, and the
+  run goes on to judge, report and publish what is finished.
 - Hosted call failed (timeout, 5xx, 429): that listing is tried again by the next run, from what is stored, never a
   second time in the same run (every hosted call is paid, so a run never spends past what it admitted). Auth or balance
   errors are loud.
