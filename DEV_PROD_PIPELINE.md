@@ -47,8 +47,8 @@ reproduce dev-staging, so an unset environment behaves exactly as before.
 
 Product photos re-host under `{bucket}/{env}/products/` (content-addressed by source
 + sha256; the staging path you gave is `blokport-dev-staging-3e58a6/dev/products/`),
-in two sibling folders so the upgraded set is cleanly separated:
-- `{env}/products/improved/<src_site>/<sha256>.jpg` — the enhanced image **Medusa uses**.
+in two sibling folders so the re-hosted set is cleanly separated:
+- `{env}/products/improved/<src_site>/<sha256>.jpg` — the re-hosted image (size-reduced, re-encoded) **Medusa uses**.
 - `{env}/products/scraped/<src_site>/<sha256>.jpg` — the raw download, same filename
   (only when `SCRAPER_KEEP_SCRAPED=true`; downloads are otherwise in-memory and the
   untouched original still lives at the supplier URL).
