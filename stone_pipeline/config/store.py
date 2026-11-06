@@ -429,8 +429,9 @@ def read_sources(path: str | Path | None = None) -> dict[str, SourceConfig]:
 def effective_lifecycle(lifecycle: str | None, enabled) -> str:
     """THE derivation of a source's state, read by the admin listing (_row_dict) and the run guard
     (inactive_sources) alike, so neither can call a source active while the other refuses it: the stored lifecycle
-    when set; else 'disabled' when the run flag is off (a legacy row: enabled 0, lifecycle NULL); else 'active'."""
-    if lifecycle:
+    when it is set and not 'active' (paused, delisted); else 'active' when the run flag is on, 'disabled' when off
+    (legacy rows: enabled 0 with lifecycle NULL, or 'active' from a settings save that flipped the flag alone)."""
+    if lifecycle and lifecycle != "active":
         return lifecycle
     return "active" if enabled else "disabled"
 
