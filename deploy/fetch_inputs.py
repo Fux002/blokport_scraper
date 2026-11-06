@@ -15,8 +15,13 @@ import sys
 from pathlib import Path
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, category_for_key
+from stone_pipeline.config.settings import (ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, THIN_COPY_MIN_FRACTION,
+                                            category_for_key)
+from stone_pipeline.core import logfmt
+
+log = logfmt.get_logger("deploy.fetch_inputs")
 
 # A thin/empty S3 copy (Medusa mid-reset, or an export not yet fully seeded) must never overwrite a fuller
 # local file, or the run silently starts from the wrong base:
@@ -26,9 +31,12 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, S3_REGION, SE
 #   - variants_export_base.csv is the committed full seed of truth (base == full).
 #   - ports.csv carries the env's Medusa port ids; a thin copy loses port-of-origin resolution for the
 #     whole run (every product ships no port), and in prod there is no dev fallback to catch it.
-# These keep the local copy unless the S3 copy is at least half as complete (_MIN_KEEP_FRACTION).
+# These keep the local copy unless the S3 copy is at least THIN_COPY_MIN_FRACTION as complete.
 _PROTECTED_BASE = {"attributes.csv", "variants_export.csv", "variants_export_base.csv", "ports.csv"}
-_MIN_KEEP_FRACTION = 0.5
+# A protected file with no local copy is measured against the committed file that lists the same rows: the live
+# export is gitignored, so after every roll it is absent while the committed base (the same scraper-owned variants,
+# Id-free) is in the image. Without this the guard never ran on a fresh task.
+_BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
 # The variant exports list every vendor's variants; the scraper keeps only its own (a Key whose prefix is one of its
 # categories). Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
 # dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
@@ -62,7 +70,16 @@ def _line_count(path: Path) -> int:
 def _would_clobber(incoming_lines: int, current_lines: int) -> bool:
     """True when a protected base file already on disk is materially larger than the S3 copy, so the
     download would replace a full seed with a thin one -- keep what we have."""
-    return current_lines > 0 and incoming_lines < current_lines * _MIN_KEEP_FRACTION
+    return current_lines > 0 and incoming_lines < current_lines * THIN_COPY_MIN_FRACTION
+
+
+def _baseline(dest: Path, name: str) -> tuple[int, str]:
+    """(line count, the file it was counted on) a protected download must not fall far below: the local copy, else
+    the committed file standing in for it (_BASELINE_WHEN_ABSENT), else nothing to protect (0)."""
+    for candidate in (name, _BASELINE_WHEN_ABSENT.get(name)):
+        if candidate and (dest / candidate).exists():
+            return _line_count(dest / candidate), candidate
+    return 0, name
 
 
 def fetch_attributes(client=None, target=None) -> bool:
@@ -70,10 +87,11 @@ def fetch_attributes(client=None, target=None) -> bool:
     thin-copy floor as the full fetch. The config server calls this on BOOT so the review-decision endpoint
     validates colours/types against Medusa's CURRENT set from container start. Without it a fresh container
     (every deploy reverts the on-disk file to the committed baseline, which lags Medusa's newer colours)
-    rejects a just-added colour at mint until the next full produce re-fetches it. Best-effort: returns False
-    and keeps the committed copy on ANY error (a fresh/offline host still validates against a real seed).
-    Returns True iff a fresher copy was written. Downloads to a temp then atomically replaces. `target`
-    overrides the destination for tests (defaults to the live attributes_csv path)."""
+    rejects a just-added colour at mint until the next full produce re-fetches it. An S3 failure (no object, no
+    credentials, no endpoint) is logged as an error and keeps the committed copy, returning False: a fresh or
+    offline host still validates against a real seed. Any other error raises. Returns True iff a fresher copy was
+    written. Downloads to a temp then atomically replaces. `target` overrides the destination for tests (defaults
+    to the live attributes_csv path)."""
     key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
     target = Path(target or SETTINGS.paths.attributes_csv)
     tmp = target.with_suffix(target.suffix + ".incoming")
@@ -86,7 +104,8 @@ def fetch_attributes(client=None, target=None) -> bool:
             return False
         tmp.replace(target)
         return True
-    except Exception:
+    except (BotoCoreError, ClientError) as exc:
+        log.error(f"could not fetch s3://{S3_BUCKET}/{key}; keeping the committed attributes.csv: {exc}")
         return False
     finally:
         if tmp.exists():
@@ -112,14 +131,15 @@ def main() -> int:
                 print(f"   ! skipped (key escapes {dest.name}/): {key}")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            if name in _PROTECTED_BASE and target.exists():
+            if name in _PROTECTED_BASE:
                 tmp = target.with_suffix(target.suffix + ".incoming")
                 client.download_file(S3_BUCKET, key, str(tmp))
                 # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
                 dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
-                incoming, current = _line_count(tmp), _line_count(target)
+                incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
                 if _would_clobber(incoming, current):
-                    print(f"   ! kept committed {name} (S3 copy looks thin: {incoming} vs {current} lines)")
+                    kept = f"kept the local {name}" if basis == name else f"left {name} absent"
+                    print(f"   ! {kept} (S3 copy looks thin: {incoming} vs {current} lines of {basis})")
                     tmp.unlink()
                     continue
                 tmp.replace(target)

@@ -14,8 +14,10 @@ _PAST = "2000-01-01T00:00:00+00:00"
 _FUTURE = "2999-01-01T00:00:00+00:00"
 
 
-def _run(run_id: str, finished_at: str, status: str = "succeeded", stage: str = "all") -> None:
-    store.record_run_log({"run_id": run_id, "finished_at": finished_at, "status": status, "stage": stage})
+def _run(run_id: str, finished_at: str, status: str = "succeeded", stage: str = "all",
+         started_at: str | None = None) -> None:
+    store.record_run_log({"run_id": run_id, "started_at": started_at or finished_at, "finished_at": finished_at,
+                          "status": status, "stage": stage})
 
 
 def _decide(name: str) -> None:
@@ -76,3 +78,44 @@ def test_the_newest_applied_produce_wins_over_an_older_one():
     got = store.decisions_pending_apply()
     assert got["last_produce_at"] == _FUTURE        # compares against the most recent applied run
     assert got["changed"] == 0
+
+
+def test_a_statement_made_while_the_applying_produce_ran_is_still_pending():
+    # a produce reads the decisions ONCE, at curate start: a statement made while it ran reached no product,
+    # though it predates the run's finish
+    _decide("Alpine Luxe")                          # decided "during" the run below
+    _run("zucchi_long", _FUTURE, started_at=_PAST)  # started before the statement, finished after it
+    assert store.decisions_pending_apply()["changed"] == 1
+
+
+def test_membership_the_produce_writes_is_never_an_operator_decision_pending():
+    # a minted variety's colour/finish/quality, recorded by the produce itself (record_minted_membership), is written
+    # during the run, after its start: it is the produce's own output, not a decision waiting for one
+    assert ds.record_minted_membership([("Alpine Luxe", "Granite", "color", "White")]) == 1
+    got = store.decisions_pending_apply()
+    assert got["changed"] == 0 and got["latest_decision_at"] is None
+    _run("zucchi_long", _FUTURE, started_at=_PAST)
+    assert ds.record_minted_membership([("Alpine Luxe", "Granite", "finish", "Polished")]) == 1
+    assert store.decisions_pending_apply()["changed"] == 0
+
+
+def test_an_operator_leaf_verdict_counts_and_takes_over_a_produce_written_row():
+    ds.record_minted_membership([("Alpine Luxe", "Granite", "color", "White")])
+    ds.set_backbone_leaf_decision("Alpine Luxe", "Granite", "color", "White", "reject")   # the operator revises it
+    ds.set_backbone_leaf_decision("Alpine Luxe", "Granite", "quality", "B", "approve")
+    assert store.decisions_pending_apply()["changed"] == 2
+
+
+def test_a_store_from_before_the_leaf_origin_gains_it_as_operator_rows(tmp_path):
+    from contextlib import closing
+    db = tmp_path / "legacy.db"
+    with closing(store.open_store(db)) as conn:
+        conn.execute("ALTER TABLE backbone_leaf_decision DROP COLUMN decided_by")
+        conn.execute("INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
+                     "value_display, action, decided_at) VALUES ('a', 'granite', 'color', 'white', 'White', "
+                     "'approve', '2001-01-01T00:00:00+00:00')")
+        conn.execute("PRAGMA user_version = 9")
+        conn.commit()
+    with closing(store.open_store(db)) as conn:
+        row = conn.execute("SELECT decided_by FROM backbone_leaf_decision").fetchone()
+    assert row["decided_by"] == "operator"

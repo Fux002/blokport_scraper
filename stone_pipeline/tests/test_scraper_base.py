@@ -554,3 +554,26 @@ def test_single_format_scraper_falls_back_to_its_category_constant(tmp_path):
 def test_varsha_has_no_category_fallback(tmp_path):
     from scrapers.varsha import VarshaScraper
     assert VarshaScraper.category is None                   # unknown thickness must not silently become slab
+
+
+# --- every failed attempt records its cause and backs off (a 3xx with no Location, a non-200 2xx) ------------
+@pytest.mark.parametrize("status, cause", [(302, "without a Location"), (204, "HTTP 204")])
+def test_a_retryable_answer_backs_off_and_names_its_cause(tmp_path, monkeypatch, status, cause):
+    s = _Fake(data_dir=tmp_path)
+    client = _SeqClient([status])
+    s._client = client
+    sleeps = _sleepless(monkeypatch)
+    with pytest.raises(RuntimeError, match=cause):
+        s.get("http://x/a", throttle=False)
+    assert client.i == s.max_retries
+    assert sleeps == [s.backoff_base ** a for a in range(s.max_retries)]      # the same backoff as an exception
+    assert cause in s._failures[-1]["error"]                                    # the audit names it, not None
+
+
+def test_too_many_redirects_backs_off_and_names_its_cause(tmp_path, monkeypatch):
+    s = _Fake(data_dir=tmp_path)
+    s._client = _SeqClient([301], headers={"location": "/loop"})
+    sleeps = _sleepless(monkeypatch)
+    with pytest.raises(RuntimeError, match="too many redirects"):
+        s.get("http://x/a", throttle=False)
+    assert sleeps == [s.backoff_base ** a for a in range(s.max_retries)]

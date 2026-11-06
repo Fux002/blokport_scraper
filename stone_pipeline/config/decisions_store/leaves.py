@@ -82,9 +82,10 @@ def set_backbone_leaf_decision(variety: str, stone_type: str, attribute: str, va
     with closing(store.open_store()) as conn:
         conn.execute(
             "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
-            "value_display, action, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "value_display, action, decided_at, decided_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'operator') "
             "ON CONFLICT(variety_norm, stone_type_norm, attribute, value_norm) DO UPDATE SET "
-            "value_display = excluded.value_display, action = excluded.action, decided_at = excluded.decided_at",
+            "value_display = excluded.value_display, action = excluded.action, decided_at = excluded.decided_at, "
+            "decided_by = 'operator'",
             (_norm(variety), _norm(stone_type), attribute, _norm(value), value.strip(), action, _now()))
         conn.commit()
 
@@ -107,9 +108,10 @@ def record_minted_membership(rows: list[tuple[str, str, str, str]]) -> int:
                 continue
             conn.execute(
                 "INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
-                "value_display, action, decided_at) VALUES (?, ?, ?, ?, ?, 'approve', ?) "
+                "value_display, action, decided_at, decided_by) VALUES (?, ?, ?, ?, ?, 'approve', ?, 'produce') "
                 "ON CONFLICT(variety_norm, stone_type_norm, attribute, value_norm) DO UPDATE SET "
-                "value_display = excluded.value_display, action = 'approve', decided_at = excluded.decided_at",
+                "value_display = excluded.value_display, action = 'approve', decided_at = excluded.decided_at, "
+                "decided_by = 'produce'",
                 (_norm(variety), _norm(stone_type), attribute, _norm(value), value, _now()))
             written += 1
         conn.commit()
@@ -152,7 +154,7 @@ def revise_leaf_decision(ref: str, action: str) -> bool:
         if action == "clear":
             cur = conn.execute(f"DELETE FROM backbone_leaf_decision {where}", tuple(parts))
         else:
-            cur = conn.execute(f"UPDATE backbone_leaf_decision SET action = ?, decided_at = ? {where}",
-                               (action, _now(), *parts))
+            cur = conn.execute(f"UPDATE backbone_leaf_decision SET action = ?, decided_at = ?, "
+                               f"decided_by = 'operator' {where}", (action, _now(), *parts))
         conn.commit()
     return cur.rowcount > 0

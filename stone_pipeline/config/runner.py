@@ -30,7 +30,8 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-from stone_pipeline.config.settings import RUN_STOP_GRACE_SECONDS, RUN_TIMEOUT_SECONDS
+from stone_pipeline.config.settings import (RUN_HISTORY_MAX, RUN_LOG_TAIL_LINES, RUN_STOP_GRACE_SECONDS,
+                                            RUN_TIMEOUT_SECONDS)
 from stone_pipeline.core import logfmt
 
 log = logfmt.get_logger("config.runner")
@@ -44,7 +45,6 @@ _child: subprocess.Popen | None = None
 _child_run: dict | None = None
 _watcher: threading.Thread | None = None
 _stopping = False                        # the server is stopping: no run starts any more
-_MAX_RUNS = 200                  # cap the in-memory history so a long-lived server never grows unbounded (M2)
 
 
 def run_in_progress() -> bool:
@@ -153,64 +153,48 @@ def _resolve_sources(requested) -> list[str]:
 
 # -- launchers (injectable for tests) -----------------------------------------
 
-_RUN_TIMEOUT = RUN_TIMEOUT_SECONDS     # kill a wedged produce so a hung scraper never wedges the
-                                       # control plane (409s all runs/ops)
-
-
-_TAIL_LINES = 40
-
 
 def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
-    global _child, _child_run
+    """Watch the run's subprocess to its end and finish its record. The record ALWAYS ends terminal (_finish, in the
+    finally): a watcher that raised and left the run `running` held the run slot, so every reset, delist and purge
+    answered 409 until a restart. A failure is recorded with its cause and raised on (the thread's traceback)."""
     with _lock:
         rec["status"] = "running"
     # STREAM the produce's stderr (its structured logs + any traceback) line by line onto THIS process's
     # stderr, so every line reaches the task's CloudWatch stream AS IT HAPPENS (a running produce is
     # visible, not a black box until exit), and keep the tail on the run record so the /run API shows WHY
-    # a produce failed. A hung produce is killed at the timeout so it never holds the run slot forever.
-    tail: deque[str] = deque(maxlen=_TAIL_LINES)
+    # a produce failed. A hung produce is stopped at the timeout so it never holds the run slot forever.
+    tail: deque[str] = deque(maxlen=RUN_LOG_TAIL_LINES)
     timed_out = threading.Event()
 
-    def _kill_on_timeout():
+    def _stop_on_timeout():
+        # the same graceful stop as a give-way: SIGTERM and its grace (a photos run stops its GPU jobs, sets the
+        # pool's ceiling back and releases its lock), then the kill, then what a killed photos run left is cleared
         timed_out.set()
-        proc.kill()
-    timer = threading.Timer(_RUN_TIMEOUT, _kill_on_timeout)
+        log.error("run exceeded the timeout; stopping it", extra={"extra_fields": {
+            "run_id": rec["run_id"], "timeout_s": RUN_TIMEOUT_SECONDS}})
+        _end_child(time.monotonic() + RUN_STOP_GRACE_SECONDS, reap=True)
+    timer = threading.Timer(RUN_TIMEOUT_SECONDS, _stop_on_timeout)
     timer.daemon = True
-    timer.start()
+    rc, counts, fault = None, None, None
     try:
-        for line in (proc.stdout if proc.stderr is None else proc.stderr):   # the photos run: one merged stream
-            sys.stderr.write(line)
-            sys.stderr.flush()
-            tail.append(line.rstrip("\n"))
-        rc = proc.wait()
+        timer.start()
+        try:
+            for line in (proc.stdout if proc.stderr is None else proc.stderr):   # the photos run: one merged stream
+                sys.stderr.write(line)
+                sys.stderr.flush()
+                tail.append(line.rstrip("\n"))
+            rc = proc.wait()
+        finally:
+            timer.cancel()
+        # ledger totals after a produce; a photos run's own summary (chosen, review, pending, spend)
+        counts = _photo_counts(rec) if rec.get("stage") == "photos" else _capture_counts()
+    except BaseException as exc:
+        fault = f"the run's watcher failed: {exc!r}"
+        _end_unwatched(proc)
+        raise
     finally:
-        timer.cancel()
-    if timed_out.is_set():
-        rc = -1
-        log.error("produce run exceeded timeout; killed", extra={"extra_fields": {
-            "run_id": rec["run_id"], "timeout_s": _RUN_TIMEOUT}})
-        tail.append(f"produce run exceeded timeout ({_RUN_TIMEOUT}s); killed")
-    tail_text = "\n".join(tail)
-    # ledger totals after a produce; a photos run's own summary (chosen, review, pending, spend)
-    counts = _photo_counts(rec) if rec.get("stage") == "photos" else _capture_counts()
-    with _lock:
-        if _child is proc:
-            _child, _child_run = None, None
-        rec["finished_at"] = _now()
-        rec["counts"] = counts
-        # it gave way: stopped by us for another run (not a failure, its work is kept); a run that ended on its own
-        # before the signal keeps its real status
-        if rec.get("preempted_by") and rec.get("signalled") and rc != 0:
-            rec["status"] = "stopped"
-            rec["error"] = f"stopped for the {rec['preempted_by']}; its work is kept for the next photos run"
-        else:
-            rec["status"] = "succeeded" if rc == 0 else "failed"
-            if rc != 0:
-                rec["error"] = f"pipeline exited {rc}" + (f":\n{tail_text}" if tail_text else "")
-    # the produce subprocess owns persisting the scrape trees and publishing the deliverables (its exit
-    # code carries a publish failure, with the cause in the streamed tail above)
-    _stamp_last_run(rec, rec["status"])
-    _persist_run(rec)                                   # durable `last` across a restart
+        _finish(rec, proc, rc, counts, "\n".join(tail), timed_out.is_set(), fault)
     # An inventory run is a stock refresh, NOT a validated produce, so it must not advance the admission
     # consistency streak nor overwrite the latest full-run diagnostic (matches produce._finalize_control_plane).
     # Neither is a photos run (its own republish finalizes the control plane inside produce).
@@ -219,6 +203,44 @@ def _watch_local(rec: dict, proc: subprocess.Popen) -> None:
         _evaluate_admission()                           # record consistency history + auto-demote on drift
     log.info("scraper run finished", extra={"extra_fields": {"run_id": rec["run_id"], "rc": rc}})
     _follow_up(rec)
+
+
+def _end_unwatched(proc: subprocess.Popen) -> None:
+    """The watcher failed while the subprocess may still run: kill it, since nobody reads its log any more (a full
+    pipe would block it) and its run is about to read terminal, which frees the slot for a reset or another run."""
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+
+
+def _finish(rec: dict, proc: subprocess.Popen, rc: int | None, counts: dict | None, tail_text: str,
+            timed_out: bool, fault: str | None) -> None:
+    """Record the run's terminal status and its cause, free the run slot, stamp the sources and persist the record."""
+    global _child, _child_run
+    with _lock:
+        if _child is proc:
+            _child, _child_run = None, None
+        rec["finished_at"] = _now()
+        rec["counts"] = counts
+        tail = f":\n{tail_text}" if tail_text else ""
+        if fault is not None:
+            rec["status"], rec["error"] = "failed", fault + tail
+        # it gave way: stopped by us for another run (not a failure, its work is kept); a run that ended on its own
+        # before the signal keeps its real status
+        elif rec.get("preempted_by") and rec.get("signalled") and rc != 0:
+            rec["status"] = "stopped"
+            rec["error"] = f"stopped for the {rec['preempted_by']}; its work is kept for the next photos run"
+        elif timed_out:
+            rec["status"] = "failed"
+            rec["error"] = f"run exceeded the timeout ({RUN_TIMEOUT_SECONDS}s); stopped" + tail
+        else:
+            rec["status"] = "succeeded" if rc == 0 else "failed"
+            if rc != 0:
+                rec["error"] = f"pipeline exited {rc}" + tail
+    # the produce subprocess owns persisting the scrape trees and publishing the deliverables (its exit
+    # code carries a publish failure, with the cause in the streamed tail above)
+    _stamp_last_run(rec, rec["status"])
+    _persist_run(rec)                                   # durable `last` across a restart
 
 
 def _follow_up(rec: dict) -> None:
@@ -255,12 +277,21 @@ def _summary_path(rec: dict) -> Path:
 
 def _photo_counts(rec: dict) -> dict | None:
     """A photos run's summary (chosen, review, pending, spend, ...), read once and removed; None when the process ended
-    without one (a crash: its tail says why)."""
+    without one (a crash: its tail says why). A summary that cannot be read as a JSON object (cut short, or not
+    UTF-8) is reported as {"problem": ...} on the record and kept on disk for a look, never raised through the
+    watcher."""
     path = _summary_path(rec)
     try:
-        counts = json.loads(path.read_text())
+        counts = json.loads(path.read_text(encoding="utf-8"))
+        problem = None if isinstance(counts, dict) else f"not a JSON object: {counts!r}"
     except FileNotFoundError:
         return None
+    except (OSError, ValueError) as exc:          # ValueError: JSONDecodeError and UnicodeDecodeError
+        problem = repr(exc)
+    if problem is not None:
+        problem = f"the photos run's summary {path} is unreadable: {problem}"
+        log.error(problem, extra={"extra_fields": {"run_id": rec["run_id"]}})
+        return {"problem": problem}
     path.unlink()
     return counts
 
@@ -438,9 +469,9 @@ def start_run(sources=None, stage="all", launch=None, close_only=False) -> tuple
                "stage": stage, "scope": scope, "close_only": close_only, "progress": {}}
         _runs[run_id] = rec
         _current_id = run_id                       # claim the run slot FIRST -> run_in_progress() is now True
-        # M2: keep only the newest _MAX_RUNS in memory (durable history is in the run_log). Evict the
+        # M2: keep only the newest RUN_HISTORY_MAX in memory (durable history is in the run_log). Evict the
         # oldest first (dicts preserve insertion order); never evict the in-flight run.
-        while len(_runs) > _MAX_RUNS:
+        while len(_runs) > RUN_HISTORY_MAX:
             oldest = next(iter(_runs))
             if oldest == _current_id:
                 break

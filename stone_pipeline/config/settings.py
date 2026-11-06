@@ -155,6 +155,14 @@ RUN_TIMEOUT_SECONDS = _env_int("SCRAPER_RUN_TIMEOUT_SECONDS", 7200)
 # record. It leaves 40 s of the config container's stopTimeout (120 s, the Fargate maximum) for the last config save.
 # The same deadline bounds a photos run giving way to another stage.
 RUN_STOP_GRACE_SECONDS = _env_int("SCRAPER_RUN_STOP_GRACE_SECONDS", 80)
+# The config runner keeps this many run records in memory for GET /run/<id> (the durable history is the run_log), so a
+# long-lived server never grows without bound; and this many last log lines of a run on its record (the failure cause).
+RUN_HISTORY_MAX = 200
+RUN_LOG_TAIL_LINES = 40
+# A thin copy of a protected base file (Medusa mid-reset, or a produce on a thin input) replaces the fuller one only
+# when it keeps at least this fraction of its rows: the S3 input fetch (deploy.fetch_inputs) and the base write-back
+# (reference.sync_variants_base) both refuse a collapse below it.
+THIN_COPY_MIN_FRACTION = 0.5
 
 # Brand<->bucket cross-check: the bucket must BELONG to this brand, so a bucket mis-set to ANOTHER brand's
 # store fails loud instead of crossing brands (and, since it runs before any snapshot restore, it also stops

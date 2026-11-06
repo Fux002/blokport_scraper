@@ -67,10 +67,11 @@ def _now() -> str:
 
 # Bump when _migrate gains a step: a database stamped at this version skips the schema work entirely, so a
 # new step never reaches an already-stamped database unless the version moves (same pattern as ledger/db.py).
-SCHEMA_VERSION = 10    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
+SCHEMA_VERSION = 11    # 4: the decision `statement` table + its one-time migration; 5: the legacy tables dropped;
 #                        6: source.lots (a per-vendor lot switch); 7: lot_sold_answer; 8: source.lots dropped;
 #                        9: source.image_pipeline (on for every source); the retired enhancer's columns dropped;
-#                        10: every source with enabled 0 is labelled (lifecycle 'paused' unless paused/delisted)
+#                        10: every source with enabled 0 is labelled (lifecycle 'paused' unless paused/delisted);
+#                        11: backbone_leaf_decision.decided_by (operator | produce)
 
 
 def _prepare(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -233,11 +234,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # stone_type. An approved row becomes a LOAD-TIME OVERLAY on the backbone (loaders.Backbone.
     # apply_leaf_overlay); the committed seed JSON is NEVER mutated, so dropping these rows restores the
     # pristine tree. reject == never propose it again. Durable in config.db, so approvals survive a restart.
+    # `decided_by`: 'operator' (a verdict from the review API) or 'produce' (a minted variety's own membership, which
+    # the produce records while it runs, leaves.record_minted_membership); only the operator's are decisions a produce
+    # has yet to apply (decisions_pending_apply). A row from before the column has no record of who wrote it and
+    # reads as the operator's: the produce re-stamps its own membership rows on its next run.
     conn.execute("CREATE TABLE IF NOT EXISTS backbone_leaf_decision ("
                  "variety_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL DEFAULT '', "
                  "attribute TEXT NOT NULL, value_norm TEXT NOT NULL, value_display TEXT NOT NULL DEFAULT '', "
                  "action TEXT NOT NULL CHECK (action IN ('approve','reject')), decided_at TEXT NOT NULL, "
+                 "decided_by TEXT NOT NULL DEFAULT 'operator' CHECK (decided_by IN ('operator','produce')), "
                  "PRIMARY KEY (variety_norm, stone_type_norm, attribute, value_norm))")
+    if "decided_by" not in {r["name"] for r in conn.execute("PRAGMA table_info(backbone_leaf_decision)")}:
+        conn.execute("ALTER TABLE backbone_leaf_decision ADD COLUMN decided_by TEXT NOT NULL DEFAULT 'operator' "
+                     "CHECK (decided_by IN ('operator','produce'))")
     # Operator "Not a duplicate" verdicts: variation Keys the reconcile dedup must NEVER drop, even when a
     # Key shares a (branch,type,name) identity with another. A false-positive dup detection (two genuinely
     # distinct varieties, e.g. multi-type homonyms) is exempted here so a future reconcile/pristine cannot
@@ -665,56 +674,51 @@ def last_run_log(path: str | Path | None = None) -> dict | None:
 _APPLIED_STAGES = ("catalog", "all", "republish")
 
 
-def _last_applied_produce_at(conn) -> str | None:
-    """finished_at of the newest SUCCESSFUL catalog/all/republish run in the bounded run_log (<=50 rows), the
-    moment the emitted catalog last reflected the decisions; None when none has completed."""
+def _last_applied_produce(conn) -> dict | None:
+    """The run record of the newest SUCCESSFUL catalog/all/republish run in the bounded run_log (<=50 rows), the
+    last run whose emitted catalog reflected the decisions; None when none has completed."""
     for r in conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL "
                           "ORDER BY finished_at DESC LIMIT 50"):
         rec = json.loads(r["record"])
         if rec.get("status") == "succeeded" and rec.get("stage") in _APPLIED_STAGES:
-            return rec.get("finished_at")
+            return rec
     return None
 
 
 def last_applied_produce_at(path: str | Path | None = None) -> str | None:
-    """When the last produce that APPLIED the operator's decisions finished (see _last_applied_produce_at): a
+    """When the last produce that APPLIED the operator's decisions finished (see _last_applied_produce): a
     decision made after it has not reached any product yet. A pure read: never creates config.db."""
     with closing(read_store(path)) as conn:
-        return _last_applied_produce_at(conn)
+        rec = _last_applied_produce(conn)
+    return rec["finished_at"] if rec else None
 
 
 def decisions_pending_apply(path: str | Path | None = None) -> dict:
-    """The 're-produce to apply' signal (no product scan): how many operator decisions were recorded AFTER
-    the last catalog-applying produce finished, so the emitted catalog does not yet reflect them. A produce
-    binds products from the decisions as they stood when it ran; a decision made since then is pending.
+    """The 're-produce to apply' signal (no product scan): how many operator decisions the emitted catalog may not
+    reflect yet, because the last catalog-applying produce did not read them.
 
-    Counts the `statement` table (bind / mint / reject) and `backbone_leaf_decision` (variety membership) --
-    the two decision stores a produce consumes -- comparing their `decided_at` to the finished_at of the
-    most recent SUCCESSFUL catalog/all/republish run (a scrape-only or inventory run applies no decisions).
-    Statements count by DISTINCT spelling_norm: one operator mint writes a vendor row AND a global (source='')
-    row for the same spelling, so counting rows would double it; a spelling is one decision. (Mint MEMBERSHIP
-    leaf rows are written DURING a produce, so their decided_at precedes that run's finished_at and they do
-    not inflate the post-produce count; only operator leaf approvals between produces do.) All timestamps are
-    UTC `datetime.isoformat()`, so the lexicographic compare is chronological. Reads the bounded run_log
-    (<=50 rows) plus two indexed aggregates. Returns {changed, latest_decision_at, last_produce_at}; changed
-    counts every decision when nothing has produced yet (last_produce_at is None)."""
+    A produce reads the decisions ONCE, at curate start, so the cut is that run's `started_at`, not its finish: a
+    statement made while it ran (after its read) reached no product, and counts. Counting from the start may also
+    count a statement made in the few moments between the start and the read, which is the safe side (it asks for
+    one produce more, never one fewer). Counts the `statement` table (bind / mint / reject) and the operator's
+    `backbone_leaf_decision` verdicts (variety membership), the two decision stores a produce consumes; a
+    scrape-only or inventory run applies no decisions. The membership rows the produce itself records for a minted
+    variety (decided_by 'produce') are its output, not decisions, so they never count, whatever their time.
+    Statements count by DISTINCT spelling_norm: one operator mint writes a vendor row AND a global (source='') row for
+    the same spelling, so counting rows would double it; a spelling is one decision. All timestamps are UTC
+    `datetime.isoformat()`, so the lexicographic compare is chronological. Returns {changed, latest_decision_at,
+    last_produce_at (that run's finish)}; changed counts every decision when nothing has produced yet."""
     with closing(open_store(path)) as conn:
-        last_produce_at = _last_applied_produce_at(conn)
-        latest_decision_at = conn.execute(
-            "SELECT MAX(d) AS latest FROM ("
-            "SELECT MAX(decided_at) AS d FROM statement "
-            "UNION ALL SELECT MAX(decided_at) FROM backbone_leaf_decision)").fetchone()["latest"]
-        if last_produce_at is None:
-            changed = conn.execute(
-                "SELECT (SELECT COUNT(DISTINCT spelling_norm) FROM statement) + "
-                "(SELECT COUNT(*) FROM backbone_leaf_decision) AS n").fetchone()["n"]
-        else:
-            changed = conn.execute(
-                "SELECT (SELECT COUNT(DISTINCT spelling_norm) FROM statement WHERE decided_at > ?) + "
-                "(SELECT COUNT(*) FROM backbone_leaf_decision WHERE decided_at > ?) AS n",
-                (last_produce_at, last_produce_at)).fetchone()["n"]
-    return {"changed": changed, "latest_decision_at": latest_decision_at,
-            "last_produce_at": last_produce_at}
+        applied = _last_applied_produce(conn)
+        since = applied["started_at"] if applied else ""      # '' precedes every timestamp: count them all
+        row = conn.execute(
+            "SELECT (SELECT COUNT(DISTINCT spelling_norm) FROM statement WHERE decided_at > ?) + "
+            "(SELECT COUNT(*) FROM backbone_leaf_decision WHERE decided_by = 'operator' AND decided_at > ?) AS n, "
+            "(SELECT MAX(d) FROM (SELECT MAX(decided_at) AS d FROM statement UNION ALL "
+            "SELECT MAX(decided_at) FROM backbone_leaf_decision WHERE decided_by = 'operator')) AS latest",
+            (since, since)).fetchone()
+    return {"changed": row["n"], "latest_decision_at": row["latest"],
+            "last_produce_at": applied["finished_at"] if applied else None}
 
 
 def record_source_diagnostic(source: str, run_id: str, summary: dict,
