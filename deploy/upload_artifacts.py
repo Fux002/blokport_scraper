@@ -157,6 +157,14 @@ def _upload_dir(client, bucket: str, local: Path, prefix: str) -> int:
     return n
 
 
+def publish_to_upload(client, run_id: str | None) -> dict:
+    """Publish the env's to_upload/ folder under the manifest (publish_deliverables on the env's bucket and
+    prefix). The one entry point for every caller that publishes deliverables: a produce, and a factory reset
+    that has just reseeded the base deliverable."""
+    return publish_deliverables(client, S3_BUCKET, SETTINGS.paths.to_upload_dir,
+                                f"{ENV_SEGMENT}/scraper/to_upload", run_id)
+
+
 def main(run_id: str | None = None) -> int:
     base = f"{ENV_SEGMENT}/scraper"
     client = boto3.client("s3", region_name=S3_REGION)
@@ -164,7 +172,7 @@ def main(run_id: str | None = None) -> int:
     if not SETTINGS.paths.to_upload_dir.is_dir():
         print("   nothing to publish (no to_upload dir)")
         return 0
-    result = publish_deliverables(client, S3_BUCKET, SETTINGS.paths.to_upload_dir, f"{base}/to_upload", run_id)
+    result = publish_to_upload(client, run_id)
     for name in result["uploaded"]:
         print(f"   uploaded  {name}")
     for name in result["unchanged"]:

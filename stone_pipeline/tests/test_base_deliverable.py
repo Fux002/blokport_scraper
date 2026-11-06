@@ -1,7 +1,8 @@
 """The scraper's variety base is a listed deliverable (Blokport D7: its "restore base" import verifies every file
 against the manifest). The catalog copies the base THIS produce settled (from_medusa/<env>/, after
 sync_variants_base) into to_upload/<env>/ byte for byte, so the manifest lists it like 1_variants_full.csv:
-sha256 of those bytes, CSV rows, uploaded only when changed. A produce that runs no catalog publishes nothing."""
+sha256 of those bytes, CSV rows, uploaded only when changed. A produce that runs no catalog publishes nothing. A
+factory reset publishes the seed as the base through the same publisher, so the key and the manifest move together."""
 
 from __future__ import annotations
 
@@ -185,3 +186,56 @@ def test_a_produce_without_a_catalog_publishes_nothing(stage, monkeypatch):
     monkeypatch.setattr(ua, "main", lambda run_id=None: published.append(run_id) or 0)
     assert produce.main(["--stage", stage]) == 0
     assert published == []
+
+
+def _reset_world(tmp_path, monkeypatch, s3: _S3) -> tuple[Path, Path, Path]:
+    """A factory reset's base half on tmp paths: the seed, the live base, to_upload/ and one fake S3 for every
+    boto3 client (the from_medusa publish and the deliverable publisher)."""
+    import boto3
+    seed, base, to_upload = tmp_path / "seed.csv", tmp_path / "from_medusa" / VARIANTS_BASE_FILE, tmp_path / "to_upload"
+    base.parent.mkdir()
+    to_upload.mkdir()
+    seed.write_bytes(_BASE)
+    base.write_bytes(b"Key,Name\nslab_marble_minted_7,Minted\n")                # the grown base before the reset
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
+    monkeypatch.setattr(svb, "DELIVERABLE", to_upload / VARIANTS_BASE_FILE)
+    monkeypatch.setattr(ua, "SETTINGS", types.SimpleNamespace(paths=types.SimpleNamespace(to_upload_dir=to_upload)))
+    return seed, base, to_upload
+
+
+def test_a_factory_reset_publishes_the_seed_as_the_base_deliverable_under_the_manifest(tmp_path, monkeypatch):
+    from stone_pipeline import lifecycle
+    from stone_pipeline.config.settings import ENV_SEGMENT
+    s3 = _S3()
+    seed, base, to_upload = _reset_world(tmp_path, monkeypatch, s3)
+    (to_upload / "1_variants_full.csv").write_text("Key\nslab_marble_a_1\n", encoding="utf-8")
+    prefix = f"{ENV_SEGMENT}/scraper/to_upload"
+
+    r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
+    assert r == {"reseeded": True, "s3_published": True, "import_published": True}
+    manifest = json.loads(s3.objects[f"{prefix}/{ua.MANIFEST_NAME}"])
+    entry = manifest["files"][VARIANTS_BASE_FILE]
+    assert entry["sha256"] == hashlib.sha256(_BASE).hexdigest() and entry["rows"] == 2
+    assert s3.objects[f"{prefix}/{VARIANTS_BASE_FILE}"] == _BASE              # the key holds the seed's bytes
+    assert s3.objects[f"{ENV_SEGMENT}/scraper/from_medusa/{VARIANTS_BASE_FILE}"] == _BASE
+    assert "1_variants_full.csv" in manifest["files"]                          # the rest of to_upload/ stays listed
+
+    # the next produce settles the same base (nothing minted): the base is not uploaded again
+    s3.uploads.clear()
+    svb.write_deliverable(base)
+    out = ua.publish_to_upload(s3, "r2")
+    assert VARIANTS_BASE_FILE in out["unchanged"] and f"{prefix}/{VARIANTS_BASE_FILE}" not in s3.uploads
+    assert out["manifest"]["files"][VARIANTS_BASE_FILE] == entry
+
+
+def test_a_failed_deliverable_publish_is_reported_not_hidden(tmp_path, monkeypatch):
+    from stone_pipeline import lifecycle
+    s3 = _S3()
+    seed, base, _ = _reset_world(tmp_path, monkeypatch, s3)
+
+    def _down(client, run_id):
+        raise ClientError({"Error": {"Code": "AccessDenied"}}, "PutObject")
+    monkeypatch.setattr(ua, "publish_to_upload", _down)
+    r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
+    assert r == {"reseeded": True, "s3_published": True, "import_published": False}
+    assert base.read_bytes() == _BASE                                           # the reseed itself still happened

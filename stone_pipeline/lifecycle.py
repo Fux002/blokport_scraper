@@ -107,7 +107,11 @@ def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
     live variants_export_base.csv self-mutates each produce (base := 1_variants_full) and is republished to
     S3 (the S0 single-source-of-truth); without also reseeding that file, a factory reset would leave the
     drifted base in place and the 'cold start' would silently start from it, not the seed. Best-effort +
-    loud: a failure never fails the reset (the ledger/config are already reset) but is surfaced."""
+    loud: a failure never fails the reset (the ledger/config are already reset) but is surfaced.
+
+    The seed is also published as the base DELIVERABLE (to_upload/, manifest-listed), so Blokport's "restore
+    base" restores the seed until the next produce publishes the base it settles. A caller that prunes other
+    deliverables prunes them BEFORE this, so the manifest written here never names a pruned file."""
     import shutil
     from pathlib import Path
     from stone_pipeline.config.settings import SETTINGS
@@ -120,14 +124,32 @@ def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
         shutil.copyfile(seed, base)                     # local base := pristine seed
         from stone_pipeline.reference.sync_variants_base import publish_base_to_s3
         published = publish_base_to_s3(base)            # S3 base := pristine seed, so the cold start reads it
-        # Not to_upload/: the base there is a manifest-listed deliverable, written only by a produce's publish so
-        # the manifest always holds its sha256. The next produce settles its base from this seed and publishes it.
+        import_published = _publish_base_deliverable(base)
         log.info("reset: base file reseeded from the pristine seed",
-                 extra={"extra_fields": {"s3_published": published}})
-        return {"reseeded": True, "s3_published": published}
+                 extra={"extra_fields": {"s3_published": published, "import_published": import_published}})
+        return {"reseeded": True, "s3_published": published, "import_published": import_published}
     except Exception as exc:
         log.exception("reset: base-file reseed FAILED; the base may still be the drifted copy")
         return {"reseeded": False, "error": str(exc)}
+
+
+def _publish_base_deliverable(base) -> bool:
+    """Copy the reseeded base into to_upload/ (sync_variants_base.write_deliverable, as the catalog does) and
+    publish through the produce's own publisher, so the fixed key and the manifest's sha256 change together and
+    the next produce compares against what S3 really holds. One writer of that key: the deliverable publisher.
+    Best-effort + loud like the rest of the reseed: False (logged) when the copy or the publish fails."""
+    try:
+        import boto3
+        from deploy import upload_artifacts
+        from stone_pipeline.config.settings import S3_REGION
+        from stone_pipeline.reference.sync_variants_base import write_deliverable
+        write_deliverable(base)
+        upload_artifacts.publish_to_upload(boto3.client("s3", region_name=S3_REGION), None)
+        return True
+    except Exception:
+        log.exception("reset: base deliverable NOT published: Blokport's restore reads the previous base "
+                      "until the next produce publishes one")
+        return False
 
 
 _snapshot_on_mutation = False   # set True ONLY by the config server (serve); off in tests, laptop, and the
@@ -458,6 +480,10 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 config["variety_origins"] = decisions_store.clear_variety_origins()
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()
+                # prune the pre-reset per-source product exports so to_upload/ holds only the seed (they refill
+                # on the next produce; the admin reads the ledger, not these files). BEFORE the reseed, which
+                # publishes the manifest: it must not name a file this prune deletes.
+                out["product_exports_pruned"] = _prune_stale_product_exports()
                 out["base_reseed"] = _reseed_base_from_pristine()   # S0: the base file itself starts pristine
                 # S0b: reconcile_variations_to_seed above fixes WHICH varieties exist (drops non-seed, dedups
                 # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
@@ -487,9 +513,6 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                     except Exception as exc:
                         log.exception("reset: scrape-artifact wipe FAILED; a stale scrape may remain")
                         out["artifacts_wiped"] = {"error": f"wipe failed, scrape cache kept: {exc}"}
-                # prune the pre-reset per-source product exports so to_upload/ holds only the seed (they refill
-                # on the next produce; the admin reads the ledger, not these files).
-                out["product_exports_pruned"] = _prune_stale_product_exports()
                 # prune the stale Medusa product export so the cold start does not seed GHOST 'synced' products
                 # from a pre-reset products_export.csv (Medusa is wiped on a factory reset -> that file is stale).
                 out["medusa_export_pruned"] = _prune_stale_medusa_export()
