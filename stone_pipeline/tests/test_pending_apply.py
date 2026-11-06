@@ -114,7 +114,8 @@ def test_a_store_from_before_the_leaf_origin_gains_it_as_operator_rows(tmp_path)
         conn.execute("INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
                      "value_display, action, decided_at) VALUES ('a', 'granite', 'color', 'white', 'White', "
                      "'approve', '2001-01-01T00:00:00+00:00')")
-        conn.execute("PRAGMA user_version = 9")
+        conn.execute("DELETE FROM migration WHERE name = 'leaf_decided_by_v1'")    # a store from before the column
+        conn.execute("PRAGMA user_version = 10")
         conn.commit()
     with closing(store.open_store(db)) as conn:
         row = conn.execute("SELECT decided_by FROM backbone_leaf_decision").fetchone()
@@ -145,8 +146,37 @@ def test_the_migration_stamps_membership_written_inside_an_applied_run_as_the_pr
             conn.execute("INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
                          "value_display, action, decided_at) VALUES ('a', 'granite', 'color', ?, ?, ?, ?)",
                          (value, value, action, at))
-        conn.execute("PRAGMA user_version = 9")
+        conn.execute("DELETE FROM migration WHERE name = 'leaf_decided_by_v1'")    # a store from before the column
+        conn.execute("PRAGMA user_version = 10")
         conn.commit()
     with closing(store.open_store(db)) as conn:
         got = {r["value_norm"]: r["decided_by"] for r in conn.execute("SELECT value_norm, decided_by FROM backbone_leaf_decision")}
-    assert got == {"in_run": "produce", "between": "operator", "rejected_in_run": "operator", "in_failed_run": "operator"}
+    # a failed applied run wrote its membership too (it records as it curates): whatever the outcome, it is the produce's
+    assert got == {"in_run": "produce", "between": "operator", "rejected_in_run": "operator", "in_failed_run": "produce"}
+
+
+def test_a_stamp_that_failed_runs_again_on_the_next_open(tmp_path, monkeypatch):
+    # the stamp is its own recorded step: the column added before a failed stamp does not make the next open skip it
+    from contextlib import closing
+    import pytest
+    db = tmp_path / "legacy.db"
+    store.record_run_log({"run_id": "r1", "status": "succeeded", "stage": "all",
+                          "started_at": "2001-01-01T10:00:00+00:00", "finished_at": "2001-01-01T11:00:00+00:00"}, path=db)
+    with closing(store.open_store(db)) as conn:
+        conn.execute("ALTER TABLE backbone_leaf_decision DROP COLUMN decided_by")
+        conn.execute("INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
+                     "value_display, action, decided_at) VALUES ('a', 'granite', 'color', 'w', 'W', 'approve', "
+                     "'2001-01-01T10:30:00+00:00')")
+        conn.execute("DELETE FROM migration WHERE name = 'leaf_decided_by_v1'")
+        conn.execute("PRAGMA user_version = 10")
+        conn.commit()
+    real = store._stamp_produce_membership
+
+    def _fails(conn):
+        raise RuntimeError("stamp interrupted")
+    monkeypatch.setattr(store, "_stamp_produce_membership", _fails)
+    with pytest.raises(RuntimeError, match="stamp interrupted"):
+        store.open_store(db)
+    monkeypatch.setattr(store, "_stamp_produce_membership", real)
+    with closing(store.open_store(db)) as conn:
+        assert conn.execute("SELECT decided_by FROM backbone_leaf_decision").fetchone()["decided_by"] == "produce"

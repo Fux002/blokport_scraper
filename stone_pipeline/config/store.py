@@ -236,8 +236,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # pristine tree. reject == never propose it again. Durable in config.db, so approvals survive a restart.
     # `decided_by`: 'operator' (a verdict from the review API) or 'produce' (a minted variety's own membership, which
     # the produce records while it runs, leaves.record_minted_membership); only the operator's are decisions a produce
-    # has yet to apply (decisions_pending_apply). A row from before the column has no record of who wrote it and
-    # reads as the operator's: the produce re-stamps its own membership rows on its next run.
+    # has yet to apply (decisions_pending_apply). For the rows from before the column, the migration stamps those
+    # written inside a produce run as the produce's; everything else stays the operator's (_stamp_produce_membership).
     conn.execute("CREATE TABLE IF NOT EXISTS backbone_leaf_decision ("
                  "variety_norm TEXT NOT NULL, stone_type_norm TEXT NOT NULL DEFAULT '', "
                  "attribute TEXT NOT NULL, value_norm TEXT NOT NULL, value_display TEXT NOT NULL DEFAULT '', "
@@ -247,7 +247,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "decided_by" not in {r["name"] for r in conn.execute("PRAGMA table_info(backbone_leaf_decision)")}:
         conn.execute("ALTER TABLE backbone_leaf_decision ADD COLUMN decided_by TEXT NOT NULL DEFAULT 'operator' "
                      "CHECK (decided_by IN ('operator','produce'))")
+    # the stamp is its own recorded step (not keyed on the column existing): a stamp that failed after the column was
+    # added runs again on the next open instead of being skipped
+    if not conn.execute("SELECT 1 FROM migration WHERE name = ?", (_LEAF_DECIDED_BY_MIGRATION,)).fetchone():
         _stamp_produce_membership(conn)
+        conn.execute("INSERT INTO migration (name, applied_at) VALUES (?, ?)", (_LEAF_DECIDED_BY_MIGRATION, _now()))
+        conn.commit()
     # Operator "Not a duplicate" verdicts: variation Keys the reconcile dedup must NEVER drop, even when a
     # Key shares a (branch,type,name) identity with another. A false-positive dup detection (two genuinely
     # distinct varieties, e.g. multi-type homonyms) is exempted here so a future reconcile/pristine cannot
@@ -271,14 +276,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+_LEAF_DECIDED_BY_MIGRATION = "leaf_decided_by_v1"
+
+
 def _stamp_produce_membership(conn: sqlite3.Connection) -> None:
-    """The decided_by migration: an 'approve' row written inside a successful catalog-applying run's [started_at,
-    finished_at] window is a minted variety's membership the produce recorded while it ran, so it is stamped
-    'produce'; every other row keeps 'operator'. Without this, every membership row of the last produce would count
-    as a pending operator decision right after the deploy. Reads the bounded run_log (<=50 runs)."""
+    """The decided_by migration: an 'approve' row written inside a FINISHED catalog-applying run's [started_at,
+    finished_at] window, whatever the run's outcome (the produce records membership as it curates, before it can
+    fail, stop or be interrupted), is a minted variety's membership the produce recorded, so it is stamped 'produce';
+    every other row keeps 'operator'. Without this, every membership row of the last produce would count as a
+    pending operator decision right after the deploy. Reads the bounded run_log (<=50 runs)."""
     windows = [(rec["started_at"], rec["finished_at"]) for rec in map(json.loads, (
         r["record"] for r in conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL")))
-        if rec.get("status") == "succeeded" and rec.get("stage") in _APPLIED_STAGES and rec.get("started_at")]
+        if rec.get("stage") in _APPLIED_STAGES and rec.get("started_at")]
     for started_at, finished_at in windows:
         conn.execute("UPDATE backbone_leaf_decision SET decided_by = 'produce' "
                      "WHERE action = 'approve' AND decided_at BETWEEN ? AND ?", (started_at, finished_at))

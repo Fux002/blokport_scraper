@@ -57,3 +57,12 @@ def test_a_run_is_launched_in_its_own_session(monkeypatch):
         assert seen["start_new_session"] is True
     finally:
         runner._child, runner._child_run, runner._watcher = None, None, None
+
+
+def test_a_group_that_holds_only_its_exited_leader_is_nothing_to_stop(monkeypatch):
+    # macOS answers PermissionError for a zombie-only group, Linux succeeds; a gone group is ProcessLookupError
+    for error in (PermissionError, ProcessLookupError):
+        def _killpg(pid, sig, error=error):
+            raise error()
+        monkeypatch.setattr(runner.os, "killpg", _killpg)
+        runner._signal(type("P", (), {"pid": 12345})(), signal.SIGTERM)       # no raise

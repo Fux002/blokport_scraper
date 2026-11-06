@@ -369,7 +369,9 @@ def _signal(child: subprocess.Popen, sig: int) -> None:
     A group already gone has nothing left to stop."""
     try:
         os.killpg(child.pid, sig)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        # the group is gone, or holds only its exited leader: Linux signals the zombie and succeeds, macOS answers
+        # PermissionError for a zombie-only group. Either way nothing is left running to stop.
         pass
 
 
