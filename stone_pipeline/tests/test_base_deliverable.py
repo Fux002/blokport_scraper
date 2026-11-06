@@ -153,6 +153,7 @@ def test_the_base_is_listed_in_the_manifest_files_with_its_sha256_and_rows(tmp_p
     assert VARIANTS_BASE_FILE not in out["manifest"].get("side_files", {})
     assert entry["sha256"] == hashlib.sha256(base.read_bytes()).hexdigest()
     assert entry["rows"] == 3 and entry["bytes"] == base.stat().st_size
+    assert entry["version_id"] == s3.versions[f"dev/scraper/to_upload/{VARIANTS_BASE_FILE}"]
     assert s3.objects[f"dev/scraper/to_upload/{VARIANTS_BASE_FILE}"] == base.read_bytes()
     assert json.loads(s3.objects["dev/scraper/to_upload/manifest.json"])["files"][VARIANTS_BASE_FILE] == entry
 
@@ -165,6 +166,7 @@ def test_an_unchanged_base_is_not_re_uploaded_and_a_changed_one_is(tmp_path):
     _produce(tmp_path, ["slab_marble_a_1", "slab_marble_b_2"])          # the same base again
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r2")
     assert VARIANTS_BASE_FILE in out["unchanged"] and key not in s3.uploads
+    assert out["manifest"]["files"][VARIANTS_BASE_FILE]["version_id"] == s3.versions[key]
     base = _produce(tmp_path, ["slab_marble_a_1", "slab_marble_b_2", "slab_onyx_c_3"])   # a mint grows it
     out = ua.publish_deliverables(s3, "b", tmp_path / "to_upload", "p", run_id="r3")
     assert VARIANTS_BASE_FILE in out["uploaded"] and s3.objects[key] == base.read_bytes()
@@ -214,15 +216,17 @@ def test_a_factory_reset_publishes_a_manifest_listing_only_the_seed_base(tmp_pat
     prefix = f"{ENV_SEGMENT}/scraper/to_upload"
     (to_upload / "1_variants_full.csv").write_text("Key\nslab_marble_minted_7\n", encoding="utf-8")
     (to_upload / "3_products_all.csv").write_text("Handle\nh1\n", encoding="utf-8")
+    (to_upload / "SYNC_STEPS.md").write_text("# steps\n", encoding="utf-8")         # a side file
     svb.write_deliverable(base)
     ua.publish_to_upload(s3, "before-reset")                                   # the pre-reset full set on S3
 
     r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
     assert r == {"reseeded": True, "s3_published": True, "import_published": True}
     manifest = json.loads(s3.objects[f"{prefix}/{ua.MANIFEST_NAME}"])
-    assert list(manifest["files"]) == [VARIANTS_BASE_FILE] and not manifest.get("side_files")
+    assert list(manifest["files"]) == [VARIANTS_BASE_FILE] and manifest["side_files"] == {}
     entry = manifest["files"][VARIANTS_BASE_FILE]
     assert entry["sha256"] == hashlib.sha256(_BASE).hexdigest() and entry["rows"] == 2
+    assert entry["version_id"] == s3.versions[f"{prefix}/{VARIANTS_BASE_FILE}"]    # the version holding the seed
     assert s3.objects[f"{prefix}/{VARIANTS_BASE_FILE}"] == _BASE              # the key holds the seed's bytes
     assert s3.objects[f"{ENV_SEGMENT}/scraper/from_medusa/{VARIANTS_BASE_FILE}"] == _BASE
     assert f"{prefix}/1_variants_full.csv" in s3.objects                       # stale, kept, no longer listed
@@ -234,6 +238,7 @@ def test_a_factory_reset_publishes_a_manifest_listing_only_the_seed_base(tmp_pat
     assert VARIANTS_BASE_FILE in out["unchanged"] and f"{prefix}/{VARIANTS_BASE_FILE}" not in s3.uploads
     assert out["manifest"]["files"][VARIANTS_BASE_FILE] == entry
     assert set(out["manifest"]["files"]) == {VARIANTS_BASE_FILE, "1_variants_full.csv", "3_products_all.csv"}
+    assert set(out["manifest"]["side_files"]) == {"SYNC_STEPS.md"}
 
 
 def test_publishing_only_a_name_the_folder_lacks_writes_nothing(tmp_path):
@@ -255,3 +260,23 @@ def test_a_failed_deliverable_publish_is_reported_not_hidden(tmp_path, monkeypat
     r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
     assert r == {"reseeded": True, "s3_published": True, "import_published": False}
     assert base.read_bytes() == _BASE                                           # the reseed itself still happened
+
+
+def test_the_produce_publish_entry_point_lists_the_base_beside_the_side_files(tmp_path, monkeypatch):
+    """upload_artifacts.main (the produce's publish) goes through publish_to_upload without `only`: the whole
+    folder, the base under `files` with its version, side files under `side_files`."""
+    import boto3
+    from stone_pipeline.config.settings import ENV_SEGMENT
+    s3 = _S3()
+    to_upload, review = tmp_path / "to_upload", tmp_path / "review"
+    to_upload.mkdir()
+    (to_upload / VARIANTS_BASE_FILE).write_bytes(_BASE)
+    (to_upload / "1_variants_full.csv").write_text("Key\nslab_marble_a_1\n", encoding="utf-8")
+    (to_upload / "SYNC_STEPS.md").write_text("# steps\n", encoding="utf-8")
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: s3)
+    monkeypatch.setattr(ua, "SETTINGS", types.SimpleNamespace(
+        paths=types.SimpleNamespace(to_upload_dir=to_upload, review_dir=review)))
+    assert ua.main("r1") == 0
+    m = json.loads(s3.objects[f"{ENV_SEGMENT}/scraper/to_upload/{ua.MANIFEST_NAME}"])
+    assert set(m["files"]) == {VARIANTS_BASE_FILE, "1_variants_full.csv"} and set(m["side_files"]) == {"SYNC_STEPS.md"}
+    assert m["files"][VARIANTS_BASE_FILE]["version_id"] == s3.versions[f"{ENV_SEGMENT}/scraper/to_upload/{VARIANTS_BASE_FILE}"]
