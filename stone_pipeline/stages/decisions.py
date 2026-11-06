@@ -16,14 +16,14 @@ colours/finishes/types work the same way: the operator pastes the Medusa id and 
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 from stone_pipeline.config import decisions_store
 from stone_pipeline.config.decisions_model import Decisions
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS
 from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.reference.medusa_files import AttributeValue, append_attributes, read_attributes
 
 # Field names the catalog stages build/read. Kept here so curate.py and emit stay unchanged; the store
 # persists these same fields as the pending-queue payload.
@@ -276,16 +276,11 @@ def adopt_attribute_ids(filled: dict[tuple[str, str], tuple[str, str]],
     path = Path(attributes_csv or SETTINGS.paths.attributes_csv)
     if not filled or not path.exists():
         return 0
-    existing = set()
-    with path.open(encoding="utf-8-sig", newline="") as h:
-        for r in csv.DictReader(h):
-            existing.add(((r.get("category") or "").strip().lower(), _norm(r.get("value", ""))))
-    new = [(k, raw_value, mid) for (k, vnorm), (raw_value, mid) in filled.items()
-           if (k, vnorm) not in existing]
-    if not new:
-        return 0
-    with path.open("a", newline="", encoding="utf-8") as h:
-        w = csv.writer(h)
-        for kind, raw_value, mid in new:
-            w.writerow([kind, raw_value, mid])
+    existing = {(a.category.lower(), _norm(a.value))
+                for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED)}
+    # The operator pasted the id of a value they just made in Medusa, so it is active and not internal.
+    new = [AttributeValue(k, raw_value, mid, "active", False)
+           for (k, vnorm), (raw_value, mid) in filled.items() if (k, vnorm) not in existing]
+    if new:
+        append_attributes(path, new)
     return len(new)

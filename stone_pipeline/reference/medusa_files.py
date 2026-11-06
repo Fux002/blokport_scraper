@@ -1,0 +1,131 @@
+"""The one reader of each Medusa download in from_medusa/<env>/ (VE2 design, section 1).
+
+Every consumer reads a file through here, so the columns, the blank-row rules and the guards live in one place.
+Columns are found by header name: their order is free and an unknown column is ignored, but a missing required
+column fails loud (a renamed header would otherwise read as an empty vocabulary).
+
+Imports only the stdlib and core.text: config.settings reads attributes.csv at import time (the category pcats),
+so this module must never import settings or the loaders (an import cycle).
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Iterator
+
+from stone_pipeline.core.text import match_key
+
+ATTRIBUTE_COLUMNS = ("category", "value", "sourceid")
+_STATUS_COLUMNS = ("status", "internal")
+_STATUS = ("active", "archived")
+_INTERNAL = {"true": True, "false": False}
+
+
+@dataclass(frozen=True)
+class AttributeValue:
+    """One attributes.csv row: a vocabulary value and its Medusa id (sourceid may be empty)."""
+
+    category: str
+    value: str
+    sourceid: str
+    status: str        # "active" | "archived"
+    internal: bool
+
+    @property
+    def assignable(self) -> bool:
+        """New data may map to this value: active and not internal."""
+        return self.status == "active" and not self.internal
+
+
+def read_attributes(src: Path | str, *, require_status: bool) -> list[AttributeValue]:
+    """attributes.csv -> its values, in file order. `src` is the file's Path, or a str holding the file's TEXT
+    (a str is never taken as a path). A row without category or value is skipped; an empty sourceid is kept
+    (each caller decides what an id-less value means). Without a status/internal column every value is active
+    and not internal, unless `require_status`, which makes the absent column an error. A conflicting duplicate
+    raises: two values of one category that match_key to the same name with different ids, across all statuses,
+    since the value->id map would otherwise silently keep the last one."""
+    label = str(src) if isinstance(src, Path) else "attributes.csv"
+    out: list[AttributeValue] = []
+    ids: dict[tuple[str, str], AttributeValue] = {}
+    required = ATTRIBUTE_COLUMNS + (_STATUS_COLUMNS if require_status else ())
+    for line, row, fields in _rows(src, label, required):
+        category = (row.get("category") or "").strip()
+        value = (row.get("value") or "").strip()
+        if not category or not value:
+            continue
+        item = AttributeValue(category, value, (row.get("sourceid") or "").strip(),
+                              _status(row, fields, label, line), _internal(row, fields, label, line))
+        _guard_duplicate(ids, item, label)
+        out.append(item)
+    return out
+
+
+def append_attributes(path: Path, values: Iterable[AttributeValue]) -> None:
+    """Append values to an existing attributes.csv in ITS header's column order, so a file with status and
+    internal columns (or any extra one, left empty) stays well-formed for read_attributes."""
+    with path.open(encoding="utf-8-sig", newline="") as h:
+        header = [name.strip() for name in next(csv.reader(h), [])]
+    missing = [c for c in ATTRIBUTE_COLUMNS if c not in header]
+    if missing:
+        raise ValueError(f"{path}: missing required column(s) {', '.join(missing)}")
+    with path.open("a", newline="", encoding="utf-8") as h:
+        writer = csv.writer(h)
+        for v in values:
+            cells = {"category": v.category, "value": v.value, "sourceid": v.sourceid,
+                     "status": v.status, "internal": "true" if v.internal else "false"}
+            writer.writerow([cells.get(name, "") for name in header])
+
+
+def _rows(src: Path | str, label: str, required: tuple[str, ...]) -> Iterator[tuple[int, dict, set[str]]]:
+    """(line number, row by stripped header name, the header's names) for each data row; raises when a required
+    column is missing. A Path is opened as utf-8-sig; text drops a leading BOM the same way."""
+    if isinstance(src, Path):
+        with src.open(encoding="utf-8-sig", newline="") as h:
+            yield from _parse(h, label, required)
+    else:
+        yield from _parse(io.StringIO(src.removeprefix("\ufeff"), newline=""), label, required)
+
+
+def _parse(handle, label: str, required: tuple[str, ...]) -> Iterator[tuple[int, dict, set[str]]]:
+    reader = csv.DictReader(handle)
+    reader.fieldnames = [name.strip() for name in reader.fieldnames or []]
+    fields = set(reader.fieldnames)
+    missing = [c for c in required if c not in fields]
+    if missing:
+        raise ValueError(f"{label}: missing required column(s) {', '.join(missing)}")
+    for row in reader:
+        yield reader.line_num, row, fields
+
+
+def _status(row: dict, fields: set[str], label: str, line: int) -> str:
+    if "status" not in fields:
+        return "active"
+    cell = (row.get("status") or "").strip().lower()
+    if cell not in _STATUS:
+        raise ValueError(f"{label} line {line}: status {row.get('status')!r} is not one of {', '.join(_STATUS)}")
+    return cell
+
+
+def _internal(row: dict, fields: set[str], label: str, line: int) -> bool:
+    if "internal" not in fields:
+        return False
+    cell = (row.get("internal") or "").strip().lower()
+    if cell not in _INTERNAL:
+        raise ValueError(f"{label} line {line}: internal {row.get('internal')!r} is not true or false")
+    return _INTERNAL[cell]
+
+
+def _guard_duplicate(ids: dict[tuple[str, str], AttributeValue], item: AttributeValue, label: str) -> None:
+    """An id-less row carries no id to conflict with, so only rows with a sourceid take part."""
+    if not item.sourceid:
+        return
+    key = (match_key(item.category), match_key(item.value))
+    seen = ids.setdefault(key, item)
+    if seen.sourceid != item.sourceid:
+        raise ValueError(
+            f"{label}: {item.category} values {seen.value!r} and {item.value!r} normalize to the same key "
+            f"{key[1]!r} but map to different ids ({seen.sourceid} vs {item.sourceid}); attribute names must be "
+            f"unique per category so the value->id mapping is unambiguous")

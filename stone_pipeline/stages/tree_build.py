@@ -26,9 +26,10 @@ from collections import defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, default_form_name
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, CATEGORIES, SETTINGS, default_form_name
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
+from stone_pipeline.reference.medusa_files import read_attributes
 
 log = logfmt.get_logger("tree")
 
@@ -39,28 +40,14 @@ COMBINATION_COLUMNS = ("product_category_id", "type_id", "variation_id",
 
 
 def _load_attributes(path: Path) -> dict[str, dict[str, str]]:
-    """attributes.csv (category,value,sourceid) -> {kind: {match_key(value): sourceId}}.
-    Keyed by match_key so a lookup matches regardless of separator/case/accent (a hyphenated
-    'Semi-Precious Stone' resolves from an underscore/space slug); lookups must key the same way."""
+    """attributes.csv (category,value,sourceid) -> {kind: {match_key(value): sourceId}}, for every value that
+    has an id. Keyed by match_key so a lookup matches regardless of separator/case/accent (a hyphenated
+    'Semi-Precious Stone' resolves from an underscore/space slug); lookups must key the same way. The
+    read_attributes guards conflicting duplicates."""
     attr: dict[str, dict[str, str]] = defaultdict(dict)
-    with Path(path).open(encoding="utf-8-sig", newline="") as h:
-        for r in csv.DictReader(h):
-            # tolerate a renamed/truncated header the same way reference.loaders reads this file: a blank
-            # category/value/sourceid is skipped, never a KeyError that aborts the whole tree build.
-            category = (r.get("category") or "").strip()
-            value = (r.get("value") or "").strip()
-            sourceid = (r.get("sourceid") or "").strip()
-            if not category or not value or not sourceid:
-                continue
-            k, v = match_key(category), match_key(value)
-            # Fail loud on a CONFLICTING duplicate (same normalized key, different id) -- else the last row
-            # silently wins and a combination could carry the wrong attribute id. Mirrors the same guard in
-            # reference.loaders.load_attributes; a no-op while names are unique per category.
-            if v in attr[k] and attr[k][v] != sourceid:
-                raise ValueError(
-                    f"attributes.csv: two {category} values normalize to {v!r} but map to different ids "
-                    f"({attr[k][v]} vs {sourceid}); attribute names must be unique per category")
-            attr[k][v] = sourceid
+    for a in read_attributes(Path(path), require_status=ATTRIBUTES_STATUS_REQUIRED):
+        if a.sourceid:
+            attr[match_key(a.category)][match_key(a.value)] = a.sourceid
     return attr
 
 
