@@ -26,6 +26,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
@@ -89,12 +90,21 @@ class Spend:
             if self._halt.is_set():
                 raise Halted(self._why)
             if self.before + self.spent + self.reserved + usd > self.budget:
-                self.capped = True
-                raise self.cap_error(f"spend would pass the month's {self.cap_error.WHAT} of ${self.budget:.2f} "
-                                     f"(spent ${self.before + self.spent:.2f})")
+                raise self._refusal()
             self.reserved += usd
             self._version += 1
         self._keep()
+
+    def refuse(self):
+        """The cap's error for work the budget left cannot cover, the budget marked as reached; nothing is reserved (a
+        GPU round with not one slice that fits: deploy.standardise_batch.run_round)."""
+        with self._lock:
+            return self._refusal()
+
+    def _refusal(self):
+        self.capped = True
+        return self.cap_error(f"spend would pass the month's {self.cap_error.WHAT} of ${self.budget:.2f} "
+                              f"(spent ${self.before + self.spent:.2f})")
 
     def settle(self, reserved, cost):
         with self._lock:
@@ -260,10 +270,13 @@ def paid(spend, price, call, what, use=None):
 
 
 def refused(exc):
-    """The status when a hosted call was refused before any work was done (HOSTED_REFUSED_CODES: a model refusing the
-    photo as much as an auth, balance or rate refusal), so nothing was billed; None for any other failure."""
+    """Why a hosted call cost nothing, or None: its status when the service refused it before any work
+    (HOSTED_REFUSED_CODES: a model refusing the photo as much as an auth, balance or rate refusal), or the error's name
+    when the request never reached the service (no connection made). Any other failure may have been billed."""
     if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in C.HOSTED_REFUSED_CODES:
         return exc.response.status_code
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return type(exc).__name__
     return None
 
 
@@ -420,9 +433,14 @@ def clean_photo(client, cl, src, sha, spend, listing, why, models=clean.MODELS):
 def _attempt(client, cl, sha, name, original, spend, use):
     """The clean check of model `name`'s copy of the photo, made once. A stored check is read back, a stored copy is
     checked, a stored request is collected; only a photo never sent is sent, its price counted as soon as the queue
-    accepts it (it is paid even if collecting it fails later). A request the queue no longer has is forgotten, so the
-    next run sends it again. A photo sent here has its edit and its clean check reserved together, so the cap never
-    leaves a paid copy unchecked in the run that paid for it; the check's share is released when no check is made.
+    accepts it (it is paid even if collecting it fails later). Nothing is ever paid twice: an edit is sent to a model
+    once per photo. A send refused before any work (refused) costs nothing: a refusal of the photo for good (given_up)
+    is a failed attempt, any other refusal is loud and sent again next run. A send that may have been billed and has no
+    usable answer (a timeout, a 5xx), and a stored request the queue no longer has (404, 410), are failed attempts
+    counted as paid: the next model gets its turn, the edit is never sent again. A request the queue still has but has
+    not finished is collected again next run. A photo sent here has its edit and its clean check reserved together, so
+    the cap never leaves a paid copy unchecked in the run that paid for it; the check's share is released when no check
+    is made.
     Every paid call is listed (spend.record, with `use`)."""
     att, ident = f"{cl.prefix}attempts/{sha}.{name}", f"{sha}.{name}"
     if ident in cl.attempts:
@@ -440,24 +458,27 @@ def _attempt(client, cl, sha, name, original, spend, use):
                 job = _get_json(client, f"{att}.request.json")
             else:
                 price = C.CLEAN_PRICE_USD[name]            # an edit is billed at its list price once the queue has it
+                prepared = clean.prepare(name, original)   # before anything is reserved: a failure here is free and loud
                 spend.reserve(price + C.JUDGE_PRICE_USD)
                 held = C.JUDGE_PRICE_USD
                 try:
-                    job, _ = settled(spend, price, lambda: (clean.submit(name, original), price),
+                    job, _ = settled(spend, price, lambda: (clean.submit(prepared), price),
                                      f"edit {name} {sha[:12]}", {**use, "model": name, "call": "edit"})
-                except httpx.HTTPStatusError as exc:
+                except Exception as exc:
+                    if refused(exc) is None:           # may have been billed: counted, never sent again
+                        return _failed(client, cl, att, ident, name,
+                                       f"the edit got no usable answer ({type(exc).__name__}): counted as paid")
                     if (code := given_up(exc)) is None:
-                        raise                          # loud (auth, balance, rate, 5xx): sent again next run
+                        raise                          # refused before any work (auth, balance, rate, no connection): loud
                     return _failed(client, cl, att, ident, name, f"the edit was refused ({code})")
                 _put_json(client, f"{att}.request.json", job)
                 cl.requested.add(ident)
             try:
                 copy = clean.collect(job)
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in (404, 410):     # the queue no longer has it: the next run sends it again
-                    client.delete_object(Bucket=S3_BUCKET, Key=f"{att}.request.json")
-                    cl.requested.discard(ident)
-                    raise
+                if exc.response.status_code in (404, 410):     # a paid request's result is gone: never sent again
+                    return _failed(client, cl, att, ident, name,
+                                   f"its result could not be found ({exc.response.status_code}): counted as paid")
                 if (code := given_up(exc)) is None:
                     raise                              # anything else (auth, balance, 5xx, 429): loud, collected again
                 return _failed(client, cl, att, ident, name, f"the edit failed ({code})")
@@ -479,9 +500,9 @@ def _attempt(client, cl, sha, name, original, spend, use):
 
 
 def given_up(exc):
-    """The status of an edit's HTTP error when the model refused this photo for good (CLEAN_FAILED_CODES), at submit or
-    at collect: the attempt is a failed one and the next model gets its turn; None for any other status."""
-    code = exc.response.status_code
+    """The status when the edit model refused this photo for good (CLEAN_FAILED_CODES), at submit or at collect: the
+    attempt is a failed one and the next model gets its turn; None for any other failure."""
+    code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
     return code if code in C.CLEAN_FAILED_CODES else None
 
 
@@ -501,36 +522,74 @@ def cleaned_copies(cl, listing, click):
     return [sha for sha in ([click["sha"]] if click is not None else listing["photos"]) if sha in cl.cleaned]
 
 
-def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=None):
-    """A listing with no good photo from the standardiser. First an edit already paid for is always collected and
-    checked (the payment is made, whatever the gate says now), no new one sent for it. Then its first
-    CLEAN_PHOTOS_PER_LISTING fixable photos that may be paid for (authorised: the photo the owner's valid click names
-    first, then a mark on the stone) and still have a model left to try are cleaned (one is enough). Nothing to do when
-    the owner chose its photo, or when it already has its cleaned copy (cleaned_copies: of the clicked photo when the
-    owner clicked one; its result is judged later). `click` is the listing's click record as read (an invalid one is
-    never used: click_problem)."""
+@dataclass(frozen=True)
+class CleanPlan:
+    """What the clean step does for one listing (clean_plan), read from the stores before anything is paid. `collect`:
+    ((sha, models), ...) its edits already paid and not checked, collected and checked first (the payment is made,
+    whatever the gate says now). `send`: ((sha, why, models), ...) its photos for new edits when no collected copy
+    passes, each sent to its `models` in turn until a copy passes (cheapest first). pay does exactly this and never
+    more, so clean_price is its worst case on the cleaning cap and the GPU round and judge of its one copy are priced
+    by deploy.standardise_batch.price."""
+    listing: dict
+    collect: tuple
+    send: tuple
+
+    @property
+    def click(self):
+        """Whether its first new edit is for the owner's click."""
+        return bool(self.send) and self.send[0][1]["reason"] == "click"
+
+
+def clean_price(plan):
+    """The most pay(plan) can take of the cleaning cap: a clean check per collected edit, and an edit at its list price
+    with its check for every model it may send."""
+    return (sum(len(models) for _, models in plan.collect) * C.JUDGE_PRICE_USD
+            + sum(C.CLEAN_PRICE_USD[m] + C.JUDGE_PRICE_USD for _, _, models in plan.send for m in models))
+
+
+def clean_plan(client, rounds, listing, exclude, owner=None, click=None):
+    """The CleanPlan of a listing with no good photo from the standardiser, from stored answers only (nothing is paid or
+    written), or None when there is nothing to clean: the owner chose its photo, it already has its cleaned copy
+    (cleaned_copies: of the clicked photo when the owner clicked one; its result is judged later), or it is not fully
+    judged or has a pass (choose). Its first CLEAN_PHOTOS_PER_LISTING fixable photos that may be paid for (authorised:
+    the photo the owner's valid click names first, then a mark on the stone) with a model left to try are its sends,
+    each to the models not tried yet (an edit already paid for is collected instead). `click` is the listing's click
+    record as read (an invalid one is never used: click_problem)."""
     (_, gpu), (_, cl) = rounds
     src = listing["source"]
+    rnd = cl[src]
     if owner is not None:
-        return
+        return None
     if click is not None and click_problem(client, gpu[src], listing, click, exclude) is not None:
         click = None
-    if cleaned_copies(cl[src], listing, click):
-        return
+    if cleaned_copies(rnd, listing, click):
+        return None
     picked, complete = choose(client, rounds[:1], listing, exclude)
     if picked is not None or not complete:             # not fully judged: nothing is cleaned yet (the report counts it pending)
-        return
-    for sha in listing["photos"]:
-        if sha not in exclude and (models := paid_unchecked(cl[src], sha)):
-            if clean_photo(client, cl[src], src, sha, spend, listing, {"reason": "paid"}, models):
-                return
+        return None
+    collect = tuple((sha, models) for sha in listing["photos"] if sha not in exclude and (models := paid_unchecked(rnd, sha)))
     sent = [(sha, {"reason": why, **cause, **({"click_at": click["at"]} if why == "click" else {})})
             for sha in listing["photos"]
             if (cause := fixable(client, gpu[src], sha, exclude)) is not None and (why := authorised(cause, sha, click))]
     sent.sort(key=lambda item: item[1]["reason"] != "click")       # the owner's clicked photo first (stable otherwise)
-    for sha, why in [item for item in sent if models_left(client, cl[src], item[0])][:C.CLEAN_PHOTOS_PER_LISTING]:
-        if clean_photo(client, cl[src], src, sha, spend, listing, why):
+    send = tuple((sha, why, models) for sha, why in sent
+                 if (models := [m for m in models_left(client, rnd, sha) if m not in paid_unchecked(rnd, sha)])
+                 )[:C.CLEAN_PHOTOS_PER_LISTING]
+    return CleanPlan(listing, collect, send) if collect or send else None
+
+
+def pay(client, rounds, plan, spend):
+    """The plan carried out on the cleaning cap (spend): its collected edits checked, then its photos sent to their
+    models in turn; the first copy that passes is the listing's cleaned copy, so it stops there (clean_photo)."""
+    src = plan.listing["source"]
+    cl = rounds[1][1][src]
+    for sha, models in plan.collect:
+        if clean_photo(client, cl, src, sha, spend, plan.listing, {"reason": "paid"}, models):
             return
+    for sha, why, models in plan.send:
+        if clean_photo(client, cl, src, sha, spend, plan.listing, why, models):
+            return
+
 
 def photo_notes(client, rounds, listing, exclude, conflicts, click=None, issue=None):
     """What happened to each of a listing's photos, for a person reading the tracked list, and the owner's click on it:
@@ -618,11 +677,18 @@ class Selection:
         narrowed.sources = sorted({l["source"] for l in listings})
         return narrowed
 
-    def usable_clicks(self):
-        """[(listing, click)] of this run's listings with a click the clean step can use (click_issue: no problem), in
-        sheet order, never one whose photo the owner chose (its choice stands)."""
-        return [(l, click) for l in self.listings if self.owner_pick(l) is None
-                for click, issue in [self.click_issue(l)] if click is not None and issue is None]
+    def plans(self):
+        """([CleanPlan] of this selection's listings with something to clean, in sheet order (clean_plan), [(listing key,
+        why its plan could not be read)]): read a few listings at a time; one listing's failed read never stops the
+        others (the next run plans it again)."""
+        def one(l):
+            try:
+                return clean_plan(self.client, self.rounds, l, self.blocked(l), self.owner_pick(l),
+                                  self.clicks.get(l["sku"])), None
+            except Exception as exc:                   # one listing never stops the others; the re-run retries it
+                return None, (l["key"], f"{type(exc).__name__}: {exc}")
+        found = pool_map(C.SELECT_WORKERS, one, self.listings)
+        return [plan for plan, _ in found if plan is not None], [failure for _, failure in found if failure is not None]
 
     def click_issue(self, listing):
         """(the listing's click or None, why it cannot be used or None): click_problem, as the clean step sees it."""
@@ -733,11 +799,12 @@ def judge_all(sel, spend, deadline):
     return _each(sel.listings, lambda l: choose(sel.client, sel.rounds, l, sel.blocked(l), spend, sel.owner_pick(l)), deadline)
 
 
-def clean_all(sel, spend, deadline):
-    """(failures, stopped): every listing with no pass gets a cleaned copy where one can be made, each started before the
-    deadline."""
-    return _each(sel.listings, lambda l: clean_listing(sel.client, sel.rounds, l, sel.blocked(l), spend, sel.owner_pick(l),
-                                                       sel.clicks.get(l["sku"])), deadline)
+def clean_all(sel, plans, spend, deadline):
+    """(failures, stopped): each admitted plan paid (pay), each started before the deadline; admission
+    (deploy.standardise_run.admit) has already held their worst case within both budgets, so which listings are paid
+    never depends on which thread reaches the cap first."""
+    by_key = {plan.listing["key"]: plan for plan in plans}
+    return _each([plan.listing for plan in plans], lambda l: pay(sel.client, sel.rounds, by_key[l["key"]], spend), deadline)
 
 
 def report(sel):

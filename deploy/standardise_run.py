@@ -5,10 +5,10 @@ runner's `photos` stage, started after each full produce on the owner's button. 
   1. pick: the sheet's listings without a valid choice record (missing, its photo no longer the listing's or excluded,
      not the owner's choice, or a photo listings of several stones show that the owner did not assign), never one the
      owner removed; and the slab listings whose chosen photo is no whole slab (a close-up: no 3D slab), their choice kept;
-     only of the sources whose image pipeline is on. Of those, the listings with the owner's click go first: each click
-     the month's budget can finish (its GPU round and judge covered, run.clicks_to_finish) is cleaned, run through the
-     GPU and judged (steps 4 to 6 for those listings alone) before step 2; a click it cannot finish is not paid and
-     waits, named in the run's problems. Steps 2 to 6 then pay no click
+     only of the sources whose image pipeline is on. Of those, the listings with the owner's click go first: each ready
+     click both budgets can finish (run.admit) is cleaned, run through the GPU and judged (steps 4 to 6 for those
+     listings alone) before step 2; a click they cannot finish is not paid and waits, named in the run's problems.
+     Step 4 then admits the clicks that became ready this run first, then the marks, by the same rule
   2. GPU: their first photos the standardiser has not run yet (deploy.standardise_batch), under STANDARDISE.RUN_TAG,
      and every chosen result outdated (a whole slab drawn under an older outline rule: live_choices), its listing not
      picked again; then settle: a recheck drawn differently is a candidate beside its result, judged as a new result
@@ -50,7 +50,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 import boto3
@@ -362,56 +362,75 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
 
 
 def hosted(step, sel, spend, deadline):
-    """A hosted step over every listing, run a second time for the listings that failed (a passing hiccup): (problems,
-    stopped)."""
+    """A hosted step over every listing, once: (problems, stopped). Every hosted step pays (a verdict, an edit, a check),
+    so a listing that failed is tried again by the next run, from what is stored, never a second time in this one: a run
+    never spends past what it admitted (review of #540)."""
     failures, stopped = step(sel, spend, deadline)
-    if failures and not stopped:
-        failures, stopped = step(sel, spend, deadline)
     return [f"{key}: {why}" for key, why in failures], stopped
 
 
-def finish_price(todo, listings, window):
-    """The most that finishing the owner's clicks can take of the process budget: the GPU round of their cleaned copies
-    (todo, {source: shas}) at its worst case, what gpu.run_round reserves (it only shrinks as the window does), and one
-    judge per listing (one photo per listing is cleaned)."""
-    return gpu.gpu_usd(gpu.worst_seconds(len(gpu.slices(todo)), window)) + listings * C.JUDGE_PRICE_USD
+WAIT_BUDGET = "month photo budget reached (GPU round and judge not covered); not paid"
+WAIT_CAP = "cleaning cap reached (edits and checks not covered); not paid"
+WAIT_WINDOW = "too little of the work window left for a GPU round; not paid"
 
 
-def clicks_to_finish(sel, left, window):
-    """({SKU: click} of the clicks this run finishes before any other work, [the listings whose click waits])
-    (scraper 1a 2026-11-06: the owner's word goes before the automatic work, and nothing is paid that cannot finish).
-    A click whose photo a run before cleaned (select.cleaned_copies: the clicked photo's own copy) costs no edit: it
-    always goes. Then each new click in sheet order, while the month's budget left (`left`) covers the GPU round and the
-    judge of every click taken with it (finish_price); with less than a GPU round's minimum of the window left, none.
-    The GPU round counted is exactly what the clicks' round runs: each taken listing's cleaned copies the GPU has not
-    run (made), and the clicked photo's copy to come. A click not taken is not paid: it waits for next month or a
-    higher budget."""
-    cl = sel.rounds[1][1]
-    todo, taken, waiting = {}, {}, []
-    clicks = sel.usable_clicks()
-    copies = {l["sku"]: select.cleaned_copies(cl[l["source"]], l, click) for l, click in clicks}
+def admit(sel, plans, left, cap_left, window):
+    """(the plans the clean step pays, {listing key: why its new edits wait}) (review 2026-11-06, A2.3/A2.4: one
+    admission, nothing paid that cannot finish, the same listings whatever the threads do). Read-only, in a fixed order.
+    First every edit already paid for (a plan's collect): it is owed, so it always goes, its check and its copy counted.
+    Then the new edits (a plan's send), the owner's clicks first, then the marks, each in sheet order: admitted while
+    both budgets left cover them with everything counted before them: the process budget (`left`) the GPU round and
+    judging of their copies (gpu.price, the same price a round is sized by), on top of what this selection's next GPU
+    round runs anyway (clean_todo); the cleaning cap (`cap_left`) their edits and checks at worst (select.clean_price).
+    With less than a GPU round's minimum of the window left no new edit is admitted. A plan whose send waits still
+    collects what it owes. The pay step then never reaches either cap, so admission alone decides who is paid."""
+    todo, waits, sending = sel.clean_todo(), {}, set()
+    gpu_left, clean_left = left, cap_left
 
-    def made(l):
-        """The listing's cleaned copies the GPU has not run: what the clicks' GPU round runs of it (clean_todo)."""
-        rnd = cl[l["source"]]
-        return [sha for sha in l["photos"] if sha in rnd.cleaned and select.needs_gpu(rnd, sha)]
-    def adding(todo, l, shas):
-        """todo with the listing's photos added once each (listings of one stone may show the same photo)."""
-        listed = todo.get(l["source"], [])
-        return {**todo, l["source"]: listed + [sha for sha in dict.fromkeys(shas) if sha not in listed]}
-    for l, click in clicks:
-        if copies[l["sku"]]:
-            taken[l["sku"]] = click
-            todo = adding(todo, l, made(l))
-    for l, click in clicks:
-        if copies[l["sku"]]:
-            continue
-        trial = adding(todo, l, made(l) + [click["sha"]])
-        if window >= C.GPU_MIN_WINDOW_SECONDS and finish_price(trial, len(taken) + 1, window) <= left:
-            todo, taken[l["sku"]] = trial, click
+    def adding(todo, plan):
+        """todo with the listing's one copy to come counted once (pay stops at the first copy that passes)."""
+        src = plan.listing["source"]
+        sha = (plan.collect or plan.send)[0][0]
+        listed = todo.get(src, [])
+        return todo if sha in listed else {**todo, src: listed + [sha]}
+    for plan in plans:
+        if plan.collect:
+            todo, clean_left = adding(todo, plan), clean_left - select.clean_price(replace(plan, send=()))
+    for plan in sorted((plan for plan in plans if plan.send), key=lambda plan: not plan.click):   # stable: sheet order
+        trial, price = adding(todo, plan), select.clean_price(replace(plan, collect=()))
+        if window < C.GPU_MIN_WINDOW_SECONDS:
+            waits[plan.listing["key"]] = WAIT_WINDOW
+        elif gpu.price(trial, window) > gpu_left:
+            waits[plan.listing["key"]] = WAIT_BUDGET
+        elif price > clean_left:
+            waits[plan.listing["key"]] = WAIT_CAP
         else:
-            waiting.append(l)
-    return taken, waiting
+            todo, clean_left = trial, clean_left - price
+            sending.add(plan.listing["key"])
+    goes = [plan if plan.listing["key"] in sending else replace(plan, send=())
+            for plan in plans if plan.collect or plan.listing["key"] in sending]
+    return goes, waits
+
+
+def clean_step(sel, plans, spend, clean, deadline, window):
+    """The clean step over `plans`: admitted (admit), then paid (select.clean_all on the cleaning cap). (problems,
+    stopped, the plans paid): what could not be paid or read, and a line per send that waits (a click by its listing,
+    the marks counted)."""
+    goes, waits = admit(sel, plans, spend.left(), clean.left(), window)
+    clicks = {plan.listing["key"] for plan in plans if plan.click}
+    problems = [f"{key}: the owner's click waits: {why}" for key, why in waits.items() if key in clicks]
+    if marks := [why for key, why in waits.items() if key not in clicks]:
+        problems += [f"the marks of {marks.count(why)} listings wait: {why}" for why in dict.fromkeys(marks)]
+    found, stopped = hosted(lambda s, cap, d: select.clean_all(s, goes, cap, d), sel, clean, deadline)
+    return problems + found, stopped, goes
+
+
+def owed_copy(sel, listing):
+    """Whether the listing's clicked photo has a cleaned copy the GPU has not run yet (made by an earlier run): the
+    clicks' step finishes it, as it was priced (admit counts clean_todo)."""
+    rnd = sel.rounds[1][1][listing["source"]]
+    sha = sel.clicks[listing["sku"]]["sha"]
+    return sha in rnd.cleaned and select.needs_gpu(rnd, sha)
 
 
 def through(steps, deadline, clock, problems):
@@ -429,32 +448,46 @@ def through(steps, deadline, clock, problems):
 
 
 def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monotonic):
-    """The GPU and hosted steps, then the report: (problems, report). First the owner's clicks the month's budget can
-    finish (clicks_to_finish): cleaned, through the GPU and judged before any other work, the selection read again
-    after; a click it cannot finish is not paid and is named as waiting. Then the run's listings, their clean step
-    paying no click. A step starts only inside the work window and while the budget lasts (the hosted clean-up edits and
-    their checks on the cleaning cap, `clean`: None when it is not set, and then no photo is sent to an edit; the clean
-    switch governs only the automatic edits, select.authorised); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so
-    the judge always has its share; after each of the run's GPU rounds the outline recheck's candidates are settled
-    (select.settle); the report always runs, so what is chosen is recorded and published, unless a promotion failed:
-    raised, and the next run of either kind finishes it at its start (select.finish, in process) before anything is
-    published."""
+    """The GPU and hosted steps, then the report: (problems, report). The clean step (clean_step: admitted, then paid)
+    comes twice. First the owner's clicks whose listing is ready (select.clean_plan: fully judged, no pass, a model left):
+    cleaned, through the GPU and judged before any other work, the selection read again after. Then the run's own
+    steps, its clean step over every listing, a click that only became ready this run (its outline settled in the
+    run's GPU round) first. Nothing is paid that the budgets left cannot finish (admit); what waits is named. A step
+    starts only inside the work window and while the budget lasts (the hosted clean-up edits and their checks on the
+    cleaning cap, `clean`: None when it is not set, and then no photo is sent to an edit; the clean switch governs only
+    the automatic edits, select.authorised); the GPU rounds end JUDGE_WINDOW_SECONDS before it, so the judge always has
+    its share; after each of the run's GPU rounds the outline recheck's candidates are settled (select.settle); the
+    report always runs, so what is chosen is recorded and published, unless a promotion failed: raised, and the next
+    run of either kind finishes it at its start (select.finish, in process) before anything is published."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
-    paying, waiting = clicks_to_finish(sel, spend.left(), gpu_deadline - clock()) if clean is not None else ({}, [])
-    if paying or waiting:
-        say(f"==> the owner's clicks first: {len(paying)} finished this run, "
-            f"{len(waiting)} waiting for the month's budget")
-    problems = [f"{l['key']}: the owner's click waits: month photo budget reached (its GPU round and judge are not "
-                "covered); not paid" for l in waiting]
-    clicked = sel.only([l for l in sel.listings if l["sku"] in paying], paying)
-    first = [lambda: hosted(select.clean_all, clicked, clean, deadline),
-             lambda: gpu_round(batch, clicked, clicked.tags[1], clicked.clean_todo(), run_id, gpu_deadline, spend),
-             lambda: hosted(select.judge_all, clicked, spend, deadline)] if paying else []
+    problems = []
+
+    def cleaning(work):
+        plans, failures = work.plans()
+        if work is not sel:                            # the clicks' step: only the owner's clicks
+            plans = [plan for plan in plans if plan.click]
+        found, stopped, goes = clean_step(work, plans, spend, clean, deadline, gpu_deadline - clock())
+        return [f"{key}: {why}" for key, why in failures] + found, stopped, goes
+    clicked = sel.only([l for l in sel.listings if l["sku"] in sel.clicks], sel.clicks)
+    finishing = []                                     # the clicks' step finishes only what it admitted and owes
+
+    def clicks_cleaned():
+        found, stopped, goes = cleaning(clicked)
+        paid = {plan.listing["key"] for plan in goes}
+        finishing.append(clicked.only([l for l in clicked.listings if l["key"] in paid or owed_copy(clicked, l)],
+                                      clicked.clicks))
+        return found, stopped
+    first = []
+    if clean is not None and clicked.listings:
+        say(f"==> the owner's clicks first: {len(clicked.listings)} listings with a click")
+        first = [clicks_cleaned,
+                 lambda: gpu_round(batch, finishing[0], finishing[0].tags[1], finishing[0].clean_todo(), run_id,
+                                   gpu_deadline, spend),
+                 lambda: hosted(select.judge_all, finishing[0], spend, deadline)]
     then = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
             lambda: hosted(select.settle, sel, spend, deadline),
             lambda: hosted(select.judge_all, sel, spend, deadline),
-            *([lambda: hosted(select.clean_all, sel.only(sel.listings, {}), clean, deadline)]
-              if clean is not None else []),
+            *([lambda: cleaning(sel)[:2]] if clean is not None else []),
             lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, gpu_deadline, spend),
             lambda: hosted(select.settle, sel, spend, deadline),
             lambda: hosted(select.judge_all, sel, spend, deadline)]
@@ -463,6 +496,7 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
         sel.refresh()                                  # the clicks' steps stored new results and verdicts
     if not ended:
         through(then, deadline, clock, problems)
+    problems = list(dict.fromkeys(problems))           # a click waiting at both clean steps is named once
     result = select.report(sel)
     by_tag = {tag: sum(c["tag"] == tag for c in result["chosen"]) for tag in sel.tags}
     say(f"==> {len(result['chosen'])} of {len(sel.listings)} listings with a good photo {by_tag}; "

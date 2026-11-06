@@ -669,7 +669,7 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
     assert sel.gpu_todo() == {}                                     # every candidate has its result: no GPU
     spend = select.Spend(5.0)
     select.judge_all(sel, spend, float("inf"))
-    select.clean_all(sel, spend, float("inf"))
+    select.clean_all(sel, sel.plans()[0], spend, float("inf"))
     assert asked == [b"mb"] and spend.spent == pytest.approx(0.02)
     result = select.report(sel)
     assert [c["sha"] for c in result["chosen"]] == [B]
@@ -690,7 +690,7 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
     spend = select.Spend(5.0)
     assert sel.gpu_todo() == {}
     assert select.judge_all(sel, spend, float("inf")) == ([], False)
-    assert select.clean_all(sel, spend, float("inf")) == ([], False)
+    assert select.clean_all(sel, sel.plans()[0], spend, float("inf")) == ([], False)
     s3.written.clear()
     assert [c["sha"] for c in select.report(sel)["chosen"]] == [A]
     assert spend.spent == 0 and s3.written == [f"{ROOT}tracked.csv"]   # the kept record is not written again

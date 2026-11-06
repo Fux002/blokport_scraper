@@ -24,6 +24,13 @@ def _idle_ceiling(monkeypatch):
     monkeypatch.setattr(C, "IDLE_GPU_VCPUS", 8)
 
 
+@pytest.fixture(autouse=True)
+def _prepared_by_name(monkeypatch):
+    """An edit's prepared request is its model's name here (clean.prepare builds the real one before anything is paid),
+    so a fake submit receives the model's name."""
+    monkeypatch.setattr(sel_mod.clean, "prepare", lambda name, encoded: name)
+
+
 class _Batch:
     """Records what a run asks of Batch; jobs end with the statuses given, in turn per poll."""
 
@@ -236,7 +243,7 @@ def _steps(monkeypatch, cap_at=None):
     done = []
 
     def step(name):
-        def run(sel, spend, deadline):
+        def run(sel, *given):                          # (spend, deadline), or (plans, spend, deadline) for clean_all
             done.append(name)
             return [], name == cap_at
         return run
@@ -268,7 +275,7 @@ def test_the_clean_up_edits_are_paid_from_the_cleaning_cap_and_the_judge_from_th
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: ([], False))
     monkeypatch.setattr(runner.select, "settle", lambda sel, spend, deadline: ([], False))
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: given.setdefault("judge", spend) and ([], False))
-    monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: given.setdefault("clean", spend) and ([], False))
+    monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: given.setdefault("clean", spend) and ([], False))
     monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     runner.run(_Batch(), _selection([_listing(A)]), process, cleaning, "R1", math.inf, say=lambda m: None)
     assert given["judge"] is process and given["clean"] is cleaning
@@ -279,7 +286,7 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
     given = []
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (given.append((tag, deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (given.append(("judge", deadline)), ([], False))[1])
-    monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: ([], False))
+    monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: ([], False))
     monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", 10_000, say=lambda m: None, clock=lambda: 0)
     gpu_end = 10_000 - C.JUDGE_WINDOW_SECONDS
@@ -313,12 +320,12 @@ def test_a_reached_cleaning_cap_ends_only_the_clean_step(monkeypatch):
     # review of #524: the cap's error ended the whole run, so the cleaned copies made before it were never standardised
     # or judged, and every later run of the month did the same
     done = _steps(monkeypatch)
-    monkeypatch.setattr(runner.select, "clean_all", lambda sel, spend, deadline: (
+    monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: (
         done.append("clean"), sel_mod._each([{"key": "k"}], lambda l: spend.reserve(1.0), deadline))[1])
     cap = sel_mod.Spend(0, cap_error=sel_mod.CleanCapReached)
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(100), cap, "R1", math.inf,
                              say=lambda m: None)
-    assert done == ["gpu v9", "settle", "judge", "clean", "clean", "gpu v9-clean", "settle", "judge", "report"]
+    assert done == ["gpu v9", "settle", "judge", "clean", "gpu v9-clean", "settle", "judge", "report"]
     assert cap.capped and problems and all("cleaning cap" in p for p in problems)
 
 
@@ -459,21 +466,22 @@ class _Store:
         self.objects.pop(Key, None)
 
 
-def _stored_round(prefix, finished=(), judged=(), cleaned=()):
+def _stored_round(prefix, finished=(), judged=(), cleaned=(), slabs=(), checked=()):
     import threading
     r = object.__new__(sel_mod.Round)
     r.prefix, r.finished, r.judged, r.cleaned = prefix, set(finished), set(judged), set(cleaned)
-    r.held, r.slabs, r.studio, r.noslab, r.logo_step, r.checked = set(), set(), set(), set(), set(), set()
+    r.held, r.slabs, r.studio, r.noslab, r.logo_step, r.checked = set(), set(slabs), set(), set(), set(), set(checked)
     r.redraw, r.redrawn = sel_mod.Candidates(prefix, []), set()
     r.attempts, r.edited, r.requested = set(), set(), set()
     r._locks, r._guard = {}, threading.Lock()
     return r
 
 
-def _clicked_selection(clicked=(("slab-1", "SEN-1", A),), backlog=(("slab-2", "SEN-2", B),), cleaned=()):
+def _clicked_selection(clicked=(("slab-1", "SEN-1", A),), backlog=(("slab-2", "SEN-2", B),), cleaned=(),
+                       outline_pending=()):
     """(selection, store) of listings whose one photo failed the judge for a reflection, the `clicked` ones with the
-    owner's click (`cleaned`: their copies a run before made, not yet through the GPU), and `backlog` listings whose
-    photo the GPU has not run."""
+    owner's click (`cleaned`: their copies a run before made, not yet through the GPU; `outline_pending`: whole slabs
+    drawn under the older outline rule, so not yet settled), and `backlog` listings whose photo the GPU has not run."""
     listings = [{"key": k, "sku": s, "source": "sentas", "format": "slab", "photos": [p]} for k, s, p in clicked + backlog]
     shas = [p for _, _, p in clicked]
     store = _Store({**{f"dev/products/scraped/sentas/{p}.jpg": b"o" for _, _, p in clicked + backlog},
@@ -484,21 +492,22 @@ def _clicked_selection(clicked=(("slab-1", "SEN-1", A),), backlog=(("slab-2", "S
     s.owner, s.conflicts, s.chosen, s.frozen, s.sources = {}, {}, [], set(), ["sentas"]
     s.clicks = {sku: {"sku": sku, "listing": k, "source": "sentas", "sha": p, "at": "2026-11-06T07:00:00Z"}
                 for k, sku, p in clicked}
-    s.rounds = [("v9", {"sentas": _stored_round(GPU_P, finished=shas, judged=shas)}),
+    whole = set(shas) - set(outline_pending)
+    s.rounds = [("v9", {"sentas": _stored_round(GPU_P, finished=shas, judged=shas, slabs=shas, checked=whole)}),
                 ("v9-clean", {"sentas": _stored_round(CL_P, cleaned=cleaned)})]
     s.refresh = lambda: None                           # the rounds above are the stores' state, kept up to date by the run
     return s, store
 
 
 def _clicked_run(monkeypatch, budget, clicked=(("slab-1", "SEN-1", A),), backlog=(("slab-2", "SEN-2", B),),
-                 cleaned=(), before=0.0):
-    """A run over _clicked_selection. The GPU round reserves its worst case like the real one; the backlog's round takes
-    all the budget left. (problems, report, store, what was paid for edits, the GPU rounds in order, the process
-    spend)."""
+                 cleaned=(), before=0.0, outline_pending=()):
+    """A run over _clicked_selection. The GPU round reserves its worst case like the real one, and settles the outline
+    of the whole slabs it runs again; a backlog round (listings to standardise) takes all the budget left. (problems,
+    report, store, what was paid for edits, the GPU rounds in order, the process spend)."""
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
-    s, store = _clicked_selection(clicked, backlog, cleaned)
+    s, store = _clicked_selection(clicked, backlog, cleaned, outline_pending)
     edits, rounds = [], []
-    monkeypatch.setattr(sel_mod.clean, "submit", lambda name, img: edits.append(name) or {"model": name})
+    monkeypatch.setattr(sel_mod.clean, "submit", lambda name: edits.append(name) or {"model": name})
     monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
     monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
     monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
@@ -507,7 +516,7 @@ def _clicked_run(monkeypatch, budget, clicked=(("slab-1", "SEN-1", A),), backlog
         rounds.append((tag, todo))
         if not any(todo.values()):
             return [], False
-        price = spend.left() if tag == "v9" else gpu.gpu_usd(gpu.worst_seconds(len(gpu.slices(todo)), math.inf))
+        price = spend.left() if tag == "v9" and backlog else gpu.gpu_usd(gpu.worst_seconds(len(gpu.slices(todo)), math.inf))
         try:
             spend.reserve(price)
         except sel_mod.SpendCapReached as exc:
@@ -516,7 +525,10 @@ def _clicked_run(monkeypatch, budget, clicked=(("slab-1", "SEN-1", A),), backlog
         rnd, prefix = dict(sel.rounds)[tag]["sentas"], GPU_P if tag == "v9" else CL_P
         for sha in todo.get("sentas", []):
             rnd.finished.add(sha)
+            rnd.checked.add(sha)                       # an older outline is drawn again under the current rule
             store.objects[f"{prefix}{sha}.main.jpg"] = b"m"
+        for worked_out in ("older_outline", "unchecked", "outdated"):
+            rnd.__dict__.pop(worked_out, None)
         return [], False
     monkeypatch.setattr(runner, "gpu_round", gpu_round)
     process = sel_mod.Spend(budget, others=lambda: before)
@@ -561,39 +573,194 @@ def test_of_two_clicks_the_budget_finishes_the_first_and_the_other_waits_unpaid(
     assert not any(p.startswith("slab-1: the owner's click waits") for p in problems)
 
 
+def _admit(s, left, cap_left=100.0, window=math.inf):
+    """(the listing keys admitted, {key: why the others wait}) of the selection's plans."""
+    plans, failures = s.plans()
+    assert failures == []
+    goes, waits = runner.admit(s, plans, left, cap_left, window)
+    return [plan.listing["key"] for plan in goes], waits
+
+
+def _second_photo_cleaned(s, store):
+    """slab-1 shows a second photo, E: judged a fail too, its cleaned copy made by an earlier run (an earlier mark)."""
+    s.listings[0]["photos"] = [A, E]
+    s.rounds[0][1]["sentas"].finished.add(E)
+    s.rounds[0][1]["sentas"].judged.add(E)
+    store.objects[f"{GPU_P}judged/{E}.json"] = FAIL
+    s.rounds[1][1]["sentas"].cleaned.add(E)
+
+
 def test_a_click_is_new_work_though_another_photo_of_its_listing_has_a_cleaned_copy():
     # review 2026-11-06 (A2.1): the other photo's copy made the click count as finished, and nothing paid it
-    s, _ = _clicked_selection()
-    s.listings[0]["photos"] = [A, E]
-    s.rounds[1][1]["sentas"].cleaned.add(E)
-    assert runner.clicks_to_finish(s, 0.0, math.inf) == ({}, [s.listings[0]])             # it needs an edit: the budget
-    taken, waiting = runner.clicks_to_finish(s, _finish_price(1, 1), math.inf)
-    assert list(taken) == ["SEN-1"] and waiting == []
+    s, store = _clicked_selection()
+    _second_photo_cleaned(s, store)
+    assert _admit(s, 0.0)[0] == []                                                         # it needs an edit: the budget
+    assert _admit(s, gpu.price({"sentas": [E, A]}, math.inf))[0] == ["slab-1"]
 
 
 def test_two_clicked_listings_showing_one_photo_price_its_gpu_work_once(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 1)
     s, _ = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-3", "SEN-3", A)), backlog=())
-    taken, waiting = runner.clicks_to_finish(s, _finish_price(1, 2), math.inf)
-    assert sorted(taken) == ["SEN-1", "SEN-3"] and waiting == []
+    assert _admit(s, gpu.price({"sentas": [A]}, math.inf)) == (["slab-1", "slab-3"], {})
 
 
 def test_a_click_s_price_counts_every_copy_its_gpu_round_runs(monkeypatch):
     # the clicks' GPU round runs the listing's older cleaned copy too (clean_todo): its slice is part of the price
     monkeypatch.setattr(C, "RUN_SLICE", 1)
-    s, _ = _clicked_selection()
-    s.listings[0]["photos"] = [A, E]
-    s.rounds[1][1]["sentas"].cleaned.add(E)                                               # made, not yet through the GPU
-    assert runner.clicks_to_finish(s, _finish_price(1, 1), math.inf) == ({}, [s.listings[0]])
-    taken, _ = runner.clicks_to_finish(s, _finish_price(2, 1), math.inf)
-    assert list(taken) == ["SEN-1"]
+    s, store = _clicked_selection()
+    _second_photo_cleaned(s, store)                                                       # E: not yet through the GPU
+    both = gpu.price({"sentas": [E, A]}, math.inf)
+    assert _admit(s, both - 0.01)[0] == [] and _admit(s, both)[0] == ["slab-1"]
 
 
 def test_no_new_click_is_paid_when_too_little_window_is_left_for_its_gpu_round():
     s, _ = _clicked_selection()
-    assert runner.clicks_to_finish(s, 100.0, C.GPU_MIN_WINDOW_SECONDS - 1) == ({}, [s.listings[0]])
-    taken, waiting = runner.clicks_to_finish(s, 100.0, C.GPU_MIN_WINDOW_SECONDS)
-    assert list(taken) == ["SEN-1"] and waiting == []
+    assert _admit(s, 100.0, window=C.GPU_MIN_WINDOW_SECONDS - 1)[0] == []
+    assert _admit(s, 100.0, window=C.GPU_MIN_WINDOW_SECONDS)[0] == ["slab-1"]
+
+
+# --- one price, one admission (review 2026-11-06, A2.3, A2.4) --------------------------------------------------------
+def _marked(s, store, *keys):
+    """The listings `keys` of _clicked_selection fail the judge for a mark on the stone (cleaned without a click)."""
+    mark = json.dumps({"verdict": "fail", "problems": [{"kind": "leftover_mark", "where": "x"}],
+                       "version": C.JUDGE_VERSION}).encode()
+    for l in s.listings:
+        if l["key"] in keys:
+            store.objects[f"{GPU_P}judged/{l['photos'][0]}.json"] = mark
+            s.clicks.pop(l["sku"], None)
+
+
+def _send_price(plan_models=("nano2", "kontext", "flux3")):
+    return sum(C.CLEAN_PRICE_USD[m] + C.JUDGE_PRICE_USD for m in plan_models)
+
+
+def test_the_clean_step_admits_the_clicks_first_then_the_marks_each_in_sheet_order(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_ENABLED", True)
+    s, store = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-2", "SEN-2", B), ("slab-3", "SEN-3", D)),
+                                  backlog=())
+    _marked(s, store, "slab-1", "slab-2")                                                   # slab-3 keeps its click
+    goes, waits = _admit(s, 100.0, cap_left=2 * _send_price())
+    assert goes == ["slab-1", "slab-3"] and waits == {"slab-2": runner.WAIT_CAP}       # the click went before slab-2
+
+
+def test_the_cleaning_cap_and_the_month_s_budget_each_hold_their_own_line(monkeypatch):
+    s, _ = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-3", "SEN-3", D)), backlog=())
+    one = gpu.price({"sentas": [A]}, math.inf)
+    assert "month photo budget reached" in _admit(s, one, cap_left=100.0)[1]["slab-3"]
+    assert "cleaning cap reached" in _admit(s, 100.0, cap_left=_send_price())[1]["slab-3"]
+
+
+def test_an_edit_already_paid_for_is_owed_first_and_lowers_what_the_sends_may_take(monkeypatch):
+    s, store = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-3", "SEN-3", D)), backlog=())
+    store.objects[f"{CL_P}attempts/{A}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
+    s.rounds[1][1]["sentas"].requested.add(f"{A}.nano2")                                  # slab-1: paid, not collected
+    s.clicks.pop("SEN-1")
+    owed = C.JUDGE_PRICE_USD                                                              # its check
+    goes, waits = _admit(s, 100.0, cap_left=owed + _send_price() - 0.01)
+    assert goes == ["slab-1"] and list(waits) == ["slab-3"]
+    assert _admit(s, 100.0, cap_left=owed + _send_price())[0] == ["slab-1", "slab-3"]
+
+
+def test_the_clean_step_never_spends_past_what_it_admitted_when_a_check_is_lost(monkeypatch):
+    s, store = _clicked_selection(backlog=())
+    for name in ("nano2", "kontext"):                                                    # flux3 is the model left
+        store.objects[f"{CL_P}attempts/{A}.{name}.json"] = json.dumps({"passes": False, "clean_version": C.CLEAN_VERSION}).encode()
+        s.rounds[1][1]["sentas"].attempts.add(f"{A}.{name}")
+    monkeypatch.setattr(sel_mod.clean, "submit", lambda name: {"model": name})
+    monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: (_ for _ in ()).throw(RuntimeError("the check was lost")))
+    plans, _ = s.plans()
+    cap = sel_mod.Spend(10, cap_error=sel_mod.CleanCapReached)
+    runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+    assert cap.spent <= sel_mod.clean_price(plans[0]) + 1e-9
+
+
+def test_the_clicks_step_judges_only_what_it_admitted_and_the_copies_it_owes(monkeypatch):
+    # review of #540: the clicks' step judged every listing with a click, buying verdicts its admission never priced
+    s, store = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-3", "SEN-3", D)), backlog=())
+    s.rounds[0][1]["sentas"].judged.discard(D)                                            # slab-3: not fully judged
+    del store.objects[f"{GPU_P}judged/{D}.json"]
+    judged, gpu_runs = [], []
+    real = runner.select.judge_all
+    monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (
+        judged.append([l["key"] for l in sel.listings]), real(sel, spend, deadline))[1])
+    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (
+        gpu_runs.append((tag, [l["key"] for l in sel.listings])), ([], False))[1])
+    monkeypatch.setattr(sel_mod.clean, "submit", lambda name: {"model": name})
+    monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    runner.run(_Batch(), s, sel_mod.Spend(100), sel_mod.Spend(10, cap_error=sel_mod.CleanCapReached), "R1", math.inf,
+               say=lambda m: None)
+    assert judged[0] == ["slab-1"] and gpu_runs[0] == ("v9-clean", ["slab-1"])
+
+
+def test_a_listing_whose_new_edit_waits_still_collects_the_edit_it_paid_for(monkeypatch):
+    s, store = _clicked_selection(backlog=())
+    s.listings[0]["photos"] = [A, E]
+    s.rounds[0][1]["sentas"].finished.add(E)
+    s.rounds[0][1]["sentas"].judged.add(E)
+    store.objects[f"{GPU_P}judged/{E}.json"] = FAIL
+    store.objects[f"{CL_P}attempts/{E}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
+    s.rounds[1][1]["sentas"].requested.add(f"{E}.nano2")                                  # E: paid, not collected
+    plans, _ = s.plans()
+    goes, waits = runner.admit(s, plans, 100.0, C.JUDGE_PRICE_USD, math.inf)              # the cap covers E's check only
+    assert waits == {"slab-1": runner.WAIT_CAP}
+    assert [(p.listing["key"], [sha for sha, _ in p.collect], p.send) for p in goes] == [("slab-1", [E], ())]
+
+
+def test_a_new_edit_with_too_little_window_left_waits_for_that_reason():
+    s, _ = _clicked_selection()
+    assert _admit(s, 100.0, window=C.GPU_MIN_WINDOW_SECONDS - 1)[1] == {"slab-1": runner.WAIT_WINDOW}
+
+
+def test_the_cap_edge_pays_the_same_listings_whatever_the_threads_do(monkeypatch):
+    # review 2026-11-06 (A2.4): the pay step ran listings in parallel up to the cap, so which got the last dollars
+    # depended on thread timing
+    import random
+    import time
+    monkeypatch.setattr(C, "CLEAN_ENABLED", True)
+    monkeypatch.setattr(C, "SELECT_WORKERS", 4)
+    keys = [f"slab-{i}" for i in range(8)]
+    shas = [f"{i}" * 64 for i in range(8)]
+    paid = []
+    for attempt in range(3):
+        s, store = _clicked_selection(clicked=tuple((k, f"SEN-{i}", sha) for i, (k, sha) in enumerate(zip(keys, shas))),
+                                      backlog=())
+        _marked(s, store, *keys)
+        monkeypatch.setattr(sel_mod.clean, "submit", lambda name: time.sleep(random.random() / 50) or {"model": name})
+        monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
+        monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
+        cap = sel_mod.Spend(3 * _send_price(), cap_error=sel_mod.CleanCapReached)
+        plans, _ = s.plans()
+        problems, _, _ = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+        paid.append(sorted(k for k in store.objects if "/cleaned/" in k))
+        assert cap.spent <= cap.budget and not cap.capped
+        assert problems == [f"the marks of 5 listings wait: {runner.WAIT_CAP}"]
+    assert paid[0] == paid[1] == paid[2] == sorted(f"{CL_P}cleaned/{sha}.jpg" for sha in shas[:3])
+
+
+def test_a_click_blocked_by_its_outline_at_the_start_is_paid_in_the_run_s_own_clean_step(monkeypatch):
+    # dev run 20261106082352439 (MAR-P/24/04): the clicked whole slab awaited its outline recheck when the run began, so
+    # the clicks' step could not clean it; the run's GPU round settled the outline, and its own clean step pays it
+    problems, report, store, edits, rounds, process = _clicked_run(monkeypatch, 100.0, backlog=(), outline_pending=(A,))
+    assert edits == ["nano2"] and [(r["key"], r["tag"]) for r in report["chosen"]] == [("slab-1", "v9-clean")]
+    assert [tag for tag, todo in rounds if any(todo.values())] == ["v9", "v9-clean"]        # settled, then its copy
+    assert not any("slab-1" in p for p in problems)
+
+
+def test_a_month_with_money_to_judge_but_none_for_a_round_judges_what_is_finished(monkeypatch):
+    # review 2026-11-06: a round that cannot start ends nothing; the judge, the report and publish still run
+    _gpu_env(monkeypatch)
+    s, store = _clicked_selection()
+    s.clicks = {}
+    s.rounds[0][1]["sentas"].judged.discard(A)
+    del store.objects[f"{GPU_P}judged/{A}.json"]
+    monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    batch = _Batch()
+    problems, report = runner.run(batch, s, sel_mod.Spend(0.5), None, "R1", math.inf, say=lambda m: None)
+    assert batch.submitted == [] and [r["key"] for r in report["chosen"]] == ["slab-1"]
+    assert any("GPU round v9 not started" in p for p in problems)
 
 
 # --- the GPU's share of the month's budget ----------------------------------------------------------------------------
@@ -649,9 +816,35 @@ def test_a_round_is_sized_to_the_budget_left(monkeypatch):
     monkeypatch.setattr(C, "RUN_SLICE", 1)
     monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
     batch, kept = _Batch(), []
-    spend = sel_mod.Spend(5.0, save=lambda total, uses: kept.append(total))                                   # 2 slices of 2.40 fit, not 3
+    spend = sel_mod.Spend(5.1, save=lambda total, uses: kept.append(total))      # 2 slices of 2.40 and 2 verdicts fit, not 3
     gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B, D]}, "R1", 7200, spend, clock=lambda: 0)
     assert len(batch.submitted) == 4 and kept[0] == pytest.approx(4.8) and not spend.capped
+
+
+def test_a_round_leaves_the_judging_of_its_results_covered(monkeypatch):
+    # review 2026-11-06 (A2.3): a round sized to the GPU alone spent the month on results it could not then judge
+    _gpu_env(monkeypatch)
+    monkeypatch.setattr(C, "RUN_SLICE", 1)
+    monkeypatch.setattr(gpu, "wait", lambda batch, ids, until, clock: [])
+    batch, kept = _Batch(), []
+    spend = sel_mod.Spend(4.9, save=lambda total, uses: kept.append(total))   # 2 slices' GPU (4.80) fit, not their verdicts
+    gpu.run_round(batch, _S3(), "v9", {"sentas": [A, B, D]}, "R1", 7200, spend, clock=lambda: 0)
+    assert len(batch.submitted) == 2 and kept[0] == pytest.approx(2.4)             # 1 slice; its verdict reserved later
+
+
+def test_a_round_whose_one_slice_cannot_also_be_judged_submits_nothing(monkeypatch):
+    _gpu_env(monkeypatch)
+    batch, spend = _Batch(), sel_mod.Spend(2.45)                                     # the GPU (2.40), not its verdict too
+    with pytest.raises(sel_mod.SpendCapReached):
+        gpu.run_round(batch, _S3(), "v9", {"sentas": [A]}, "R1", 7200, spend, clock=lambda: 0)
+    assert batch.submitted == [] and spend.capped and spend.reserved == 0
+
+
+def test_one_price_for_gpu_work_and_a_close_up_round_has_no_verdict_in_it(monkeypatch):
+    _gpu_env(monkeypatch)
+    todo = {"sentas": [A, B]}
+    assert gpu.price(todo, 7200) == pytest.approx(gpu.gpu_usd(gpu.worst_seconds(1, 7200)) + 2 * C.JUDGE_PRICE_USD)
+    assert gpu.price(todo, 7200, gpu.CLOSE_ROUND) == pytest.approx(gpu.gpu_usd(gpu.worst_seconds(1, 7200, gpu.CLOSE_ROUND)))
 
 
 def test_a_round_the_budget_cannot_cover_even_one_slice_of_submits_nothing(monkeypatch):
@@ -725,13 +918,15 @@ def test_jobs_an_earlier_run_left_are_stopped_and_the_ceiling_set_back(monkeypat
     assert asked[0]["filters"] == [{"name": "JOB_NAME", "values": [f"{C.JOB_PREFIX}*"]}] and asked[1]["nextToken"] == "t"
 
 
-def test_a_failed_hosted_step_is_run_once_more():
+def test_a_paid_hosted_step_runs_once_and_its_failures_wait_for_the_next_run():
+    # review of #540: a second pass paid again for what failed after it was sent (a check that was lost), past what the
+    # run had admitted; every hosted step pays, so each runs once and the next run retries from what is stored
     calls = []
 
     def flaky(sel, spend, deadline):
         calls.append(1)
-        return ([("slab-1", "timeout")] if len(calls) == 1 else []), False
-    assert runner.hosted(flaky, None, None, math.inf) == ([], False) and len(calls) == 2
+        return [("slab-1", "timeout")], False
+    assert runner.hosted(flaky, None, None, math.inf) == (["slab-1: timeout"], False) and len(calls) == 1
 
 
 # --- one run at a time ------------------------------------------------------------------------------------------------

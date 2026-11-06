@@ -13,7 +13,7 @@ Every record is keyed by the listing's SKU, which a variety re-bind never moves 
           no_photo). Its owner choice and its choice record go. Nothing is deleted from the catalog: Blokport deletes the product.
   clean   the owner's click, <clean tag root>clicks/<SKU>.json = {sku, listing, source, sha, at}, stored and read only
           by publish.write_click and read_clicks: the next photos run sends that photo to the hosted clean step first,
-          before its other work, while the month's budget can finish it (else it waits: run.clicks_to_finish), whose
+          before its other work, while the month's budget can finish it (else it waits: run.admit), whose
           gate (select.authorised) allows a click whatever kind of fix it needs and whatever the clean switch says; the
           cleaned copy is judged, chosen on a pass, and on a fail the listing stays on the review list (its stored
           attempts are read back, never paid again). Only for the listing decided on: a cleaned copy is the photo's, so
@@ -62,7 +62,7 @@ from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import index
 
 # The page's document shape per action (its contract, not a setting): exactly these fields. A clean names no tag: the
-# clean step always edits the scraped photo whose standardised result failed (select.clean_listing).
+# clean step always edits the scraped photo whose standardised result failed (select.clean_plan).
 FIELDS = {"use": {"id", "action", "source", "sha", "tag", "at"}, "remove": {"id", "action", "source", "at"},
           "clean": {"id", "action", "source", "sha", "at"}}
 TAGS = (C.RUN_TAG, C.CLEAN_TAG)                        # the process's tags, the only results a choice can name

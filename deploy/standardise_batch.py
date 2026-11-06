@@ -106,14 +106,15 @@ def submit_close(batch, s3, queue, jobdef, tag, todo, run_id, ids):
 @dataclass(frozen=True)
 class Work:
     """What each slice of a round runs: `jobs` jobs, one after another (one GPU at a time), within `seconds` together,
-    submitted by `submit`."""
+    submitted by `submit`; `judged`: whether the judge then looks at each photo's result (a close-up round's are not)."""
     jobs: int
     seconds: int
     submit: Callable
+    judged: bool
 
 
-STANDARDISE_ROUND = Work(2, C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, submit)
-CLOSE_ROUND = Work(1, C.STANDARDISE_TIMEOUT, submit_close)
+STANDARDISE_ROUND = Work(2, C.RETOUCH_TIMEOUT + C.STANDARDISE_TIMEOUT, submit, True)
+CLOSE_ROUND = Work(1, C.STANDARDISE_TIMEOUT, submit_close, False)
 
 
 def wait(batch, ids, until, sleep=time.sleep, clock=time.monotonic):
@@ -165,12 +166,22 @@ def worst_seconds(n_slices, window, work=STANDARDISE_ROUND):
     return running + work.jobs * n_slices * C.GPU_JOB_ALLOWANCE_SECONDS
 
 
-def fitting(n_slices, window, left, work=STANDARDISE_ROUND):
-    """The most of the round's slices whose worst case the budget left covers (the cost only grows with the slices)."""
-    low, high = 0, n_slices
+def price(todo, window, work=STANDARDISE_ROUND):
+    """The most a round of `todo` ({source: shas}) takes of the process budget, its results judged: the GPU's worst case
+    (worst_seconds) and, when the judge looks at its results (work.judged), one verdict per photo. The one price of GPU
+    work: a round is sized by it (fitting) and the clean step admits by it (deploy.standardise_run.admit), so no round
+    starts work whose results the budget cannot then judge."""
+    photos = sum(len(shas) for shas in todo.values())
+    return gpu_usd(worst_seconds(len(slices(todo)), window, work)) + (photos * C.JUDGE_PRICE_USD if work.judged else 0.0)
+
+
+def fitting(plan, window, left, work=STANDARDISE_ROUND):
+    """The most of the round's slices (`plan`, slices()) whose price the budget left covers (it only grows with the
+    slices)."""
+    low, high = 0, len(plan)
     while low < high:
         mid = (low + high + 1) // 2
-        if gpu_usd(worst_seconds(mid, window, work)) <= left:
+        if price(_first(plan[:mid]), window, work) <= left:
             low = mid
         else:
             high = mid - 1
@@ -218,9 +229,10 @@ def run_round(batch, s3, tag, todo, run_id, deadline, spend, work=STANDARDISE_RO
               now=time.time, sleep=time.sleep):
     """Every listed photo through the round's work under `tag` (STANDARDISE_ROUND: retouch and standardise; CLOSE_ROUND:
     the close-up made again): [(job name, why)] of failed jobs. No jobs, no ceiling change, when nothing is listed. Skipped when less than GPU_MIN_WINDOW_SECONDS of the work window (on `clock`)
-    is left. The round is sized to the month's budget left: as many whole slices as their worst case fits, the rest
-    waits (SpendCapReached when not one fits: nothing is submitted); that worst case is reserved first and settled to
-    what the jobs ran, however the round ends. It waits until the deadline at most: then its jobs are stopped
+    is left. The round is sized to the month's budget left: as many whole slices as their price fits (price: the GPU's
+    worst case and the judging of their results), the rest waits (SpendCapReached when not one fits: nothing is
+    submitted); the GPU's worst case is reserved first (each verdict reserves its own share when it is bought) and
+    settled to what the jobs ran, however the round ends. It waits until the deadline at most: then its jobs are stopped
     (TimeoutError), every photo they finished stays, the next run goes on."""
     if not any(todo.values()):
         return []
@@ -230,9 +242,12 @@ def run_round(batch, s3, tag, todo, run_id, deadline, spend, work=STANDARDISE_RO
         raise Skipped(f"only {window:.0f}s of the work window left (a round needs {C.GPU_MIN_WINDOW_SECONDS}s)")
     queue, jobdef = target()
     plan = slices(todo)
-    todo = _first(plan[:max(1, fitting(len(plan), window, spend.left(), work))])
+    fit = fitting(plan, window, spend.left(), work)
+    if not fit:                                        # not one slice and its judging fits: nothing is submitted
+        raise spend.refuse()
+    todo = _first(plan[:fit])
     reserved = gpu_usd(worst_seconds(len(slices(todo)), window, work))
-    spend.reserve(reserved)                            # not even one slice fits: SpendCapReached, nothing submitted
+    spend.reserve(reserved)
     ids = []
     try:
         with raised(batch, pool(batch, queue)):
