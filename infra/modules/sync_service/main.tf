@@ -364,6 +364,10 @@ resource "aws_ecs_service" "this" {
   # short outage per roll.
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
+  # AZ rebalancing (on for these services until now) needs headroom above 100% to start a task in another zone before
+  # stopping one, and ECS rejects maximumPercent <= 100 while it is on. A single task with one SQLite writer has nothing
+  # to balance, so it is off: the limits above are what this service needs.
+  availability_zone_rebalancing = "DISABLED"
 
   # A task that dies at boot (an import error in serve(), a required restore that fails) must not take the
   # service down for good: ECS marks the deployment failed and rolls back to the last stable task definition
