@@ -55,7 +55,7 @@ def in_medusa_sql(alias: str) -> str:
 
 
 # The inventory rows whose count (qty, made_to_order) differs from the last synced count, or was never synced
-# (last_synced_made_to_order NULL): all the inventory CSV (4_inventory_update.csv: SKU + quantity) can carry.
+# (last_synced_made_to_order NULL): the count half of STOCK_DELTA_SQL.
 COUNT_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
                    "OR i.last_synced_qty IS NOT i.qty)")
 # The inventory rows whose stock differs from the last synced stock. The stock is everything the sync lane serves:

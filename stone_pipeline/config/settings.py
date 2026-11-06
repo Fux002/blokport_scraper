@@ -796,6 +796,31 @@ class LotConfig:
 
 
 @dataclass(frozen=True)
+class SyncConfig:
+    """The sync ledger's serve/ack tunables (ledger/sync.py, ledger/server.py: SYNC_LEDGER_DESIGN.md section 8)."""
+
+    # After this many CONSECUTIVE failed applies (or refused acks) an entity is dead-lettered: it stops being served
+    # (no infinite poison-pill retry) and surfaces in GET /sync/v1/failures for a human. Every lane uses it.
+    max_attempts: int = 5
+    # A failed apply is not re-served on the very next pull: a passing hiccup (an S3 blip while Medusa copies a photo)
+    # would fail every immediate retry too and reach the cap within seconds. It waits retry_base_seconds, multiplied
+    # by retry_factor with each consecutive failure (5, 10, 20, 40 min), so the cap means over an hour of failures.
+    retry_base_seconds: int = 300
+    retry_factor: int = 2
+    # A served-but-not-yet-acked entity is leased in state 'syncing'; an un-acked lease is reclaimed to 'dirty' after
+    # this many seconds (comfortably longer than a pull -> apply -> ack cycle) and re-served.
+    syncing_lease_seconds: int = 900
+    # An authed request body cap, so a hostile Content-Length cannot force an unbounded read. The largest real body
+    # is an ack page (2000 items, well under 1 MiB).
+    max_body_bytes: int = 8 << 20
+    # Page bounds for the pull routes: an unbounded pull on a full delta builds it all in memory and writes it in one
+    # buffer (http.server has no backpressure); a 24k-item bootstrap delta is ~4.6 MB.
+    default_page: int = 500
+    max_page: int = 2000
+    default_failures_page: int = 200
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: str = BLOKPORT_ENV  # "development" | "production" (BLOKPORT_ENV)
     # A hash of the live id set (section 3.2). Computed from reference data at
@@ -814,6 +839,7 @@ class Settings:
     curation: CurationConfig = field(default_factory=CurationConfig)
     lots: LotConfig = field(default_factory=LotConfig)
     variety_colour: VarietyColourConfig = field(default_factory=VarietyColourConfig)
+    sync: SyncConfig = field(default_factory=SyncConfig)
 
     # The source proven first (section 14). develi is absent from the supplied
     # data, so polonine is the clean named-variety proving source.
@@ -1431,3 +1457,10 @@ Your whole answer is one JSON object and nothing else:
     TILE_SIDE_SHADOW = ((40, 18, 0.30), (6, 4, 0.30))   # blur, drop (px), strength: soft + contact shadow
     TILE_CLOSE_MAX_UPSCALE = 2.0       # the close view never enlarges the real pixels more than this ...
     TILE_CLOSE_MIN_TILES = 1.6         # ... and shows at least this many tile lengths (a joint for scale)
+
+
+# The files in to_upload/ that are not deliverables: published beside them (deploy.upload_artifacts) but not listed in
+# the deliverables manifest, which no consumer reads them through. The operator checklist (core.layout), the photo
+# process's list of each listing's photos (read by its fixed key, STANDARDISE.PHOTOS_KEY), and the texture
+# fingerprints the produce writes beside 1_variants_full.csv (stages.emit_catalog, read back by the ledger populate).
+UPLOAD_SIDE_FILES = frozenset({"SYNC_STEPS.md", STANDARDISE.PHOTOS_FILE, "variant_image_shas.json"})

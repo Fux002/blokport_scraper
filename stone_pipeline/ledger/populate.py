@@ -1,10 +1,8 @@
 """Populate the ledger from canonical rows (the write-through, design section 3).
 
-Phase 1 keeps this OUT of the live pipeline; it is exercised by the equivalence
-test, which proves that populating the ledger from canonical rows and rendering it
-back reproduces emit's output. The product row stores the design's name-based
-fields (ids resolved at render) plus the presentation fields the legacy import CSV
-needs. No em dashes (design principle 2).
+The live pipeline's write-through (ledger.writethrough) calls it on every produce, so the ledger Medusa pulls holds
+the run's products, stock and variations. The product row stores the design's name-based fields (ids resolved at
+render) plus the presentation fields the legacy import CSV needs. No em dashes (design principle 2).
 """
 
 from __future__ import annotations

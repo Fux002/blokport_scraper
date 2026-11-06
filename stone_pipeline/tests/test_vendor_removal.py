@@ -5,9 +5,9 @@ vendor."""
 
 from __future__ import annotations
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.sync import (
-    _MAX_SYNC_ATTEMPTS,
     ack,
     delist_source,
     failures,
@@ -217,7 +217,7 @@ def test_tombstone_done_retires_blocked_retries_and_dead_letters(tmp_path):
 
         # 'blocked' (open reservation) keeps it and re-serves once its wait has passed, until it dead-letters after
         # the cap
-        for _ in range(_MAX_SYNC_ATTEMPTS - 1):
+        for _ in range(SETTINGS.sync.max_attempts - 1):
             ack(ledger, "removed", "AAA-2", status_="blocked", reason="reserved")
             assert ready(ledger, "removed") == []                                        # waiting
             ledger.execute("UPDATE removed SET retry_after = '2000-01-01T00:00:00+00:00' WHERE external_id = 'AAA-2'")

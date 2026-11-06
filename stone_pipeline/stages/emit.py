@@ -231,7 +231,7 @@ def write_discontinued_csv(discontinued: list[tuple[str, str]], path: Path,
                            replaced: dict[str, str] | None = None) -> Path:
     """The delete-loop report: products in Medusa that the supplier no longer carries. The
     inventory update already set them to stock 0 (out of stock); this lists them so they can be
-    reviewed and optionally hard-deleted/archived in Medusa. The pipeline never auto-deletes.
+    reviewed; a purge deletes them through the sync ledger's removed lane (ledger.sync.purge_discontinued).
     A bundle `replaced` by its lot (sku -> lot_code) is deactivated and redirected, never deleted."""
     replaced = replaced or {}
 

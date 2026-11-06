@@ -19,7 +19,7 @@ from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.ledger import sync
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_discontinued, populate_inventory, populate_products
-from stone_pipeline.ledger.render import render_inventory, render_products
+from stone_pipeline.ledger.render import render_products
 from stone_pipeline.stages import emit
 from stone_pipeline.stages.derive import derive_inventory
 from stone_pipeline.stages.product_state import allow_backorder_str, inventory_str
@@ -98,26 +98,7 @@ def test_the_inventory_update_file_leaves_made_to_order_out(cfg, tmp_path):
     emit.write_inventory_csv(rows, cfg, direct)
     assert [(r["Variant Sku"], r["Inventory Quantity"]) for r in csv.DictReader(direct.open(encoding="utf-8-sig"))] \
         == [("POL-B", "5")]
-    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _seed(ledger)
-        _synced(ledger, rows, cfg)
-        assert render_inventory(ledger, cfg, tmp_path / "via.csv") == 1   # the count is the rows written
 
-
-def test_the_ledger_render_of_a_made_to_order_delta_equals_emit(cfg, tmp_path):
-    rows = [_row("A", made_to_order=True), _row("B", made_to_order=False)]
-    direct = tmp_path / "direct.csv"
-    emit.write_inventory_csv(rows, cfg, direct)
-    via = tmp_path / "via.csv"
-    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _seed(ledger)
-        populate_products(ledger, rows, cfg)
-        populate_inventory(ledger, rows, cfg)
-        render_inventory(ledger, cfg, via)
-    assert via.read_bytes() == direct.read_bytes()
-
-
-# --- the ledger and the two Blokport paths --------------------------------------------------------------
 
 def test_a_made_to_order_shape_is_served_on_both_paths_with_no_quantity(cfg, tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:

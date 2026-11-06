@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.ledger.db import STATES, Ledger, now_iso
 from stone_pipeline.ledger.sync import ack, ready, status
 
@@ -476,16 +477,15 @@ def test_failed_ack_dead_letters_after_cap_then_requeues(tmp_path):
     # error handling when Medusa keeps rejecting an entity: it must NOT re-serve forever. After the
     # attempt cap it dead-letters (gap_held) -> stops serving, stores the reason, surfaces in status
     # + failures(); an explicit requeue (or a success) recovers it.
-    from stone_pipeline.ledger.sync import (ack, ready, requeue_dead_lettered, failures, status,
-                                            _MAX_SYNC_ATTEMPTS)
+    from stone_pipeline.ledger.sync import ack, ready, requeue_dead_lettered, failures, status
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
         _product(ledger, "P-1", "slab_v1", state="pending")
         assert [i["external_id"] for i in ready(ledger, "products")] == ["P-1"]
-        for _ in range(_MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             ack(ledger, "products", "P-1", status_="failed", reason="Medusa 400: bad company")
         row = ledger.get("product", "sku", "P-1")
-        assert row["state"] == "gap_held" and row["sync_attempts"] == _MAX_SYNC_ATTEMPTS
+        assert row["state"] == "gap_held" and row["sync_attempts"] == SETTINGS.sync.max_attempts
         assert "bad company" in row["sync_error"]
         assert ready(ledger, "products") == []                       # no infinite poison-pill loop
         assert status(ledger)["product"].get("gap_held") == 1        # visible in status
@@ -676,11 +676,11 @@ def test_requeue_endpoint_recovers_dead_lettered(tmp_path):
     # POST /sync/v1/requeue is the HTTP lever over requeue_dead_lettered: un-quarantine gap_held -> dirty
     # so the entity re-serves after the Medusa-side cause is fixed. Mirrors GET /sync/v1/failures (observe).
     from stone_pipeline.ledger import server
-    from stone_pipeline.ledger.sync import ack, _MAX_SYNC_ATTEMPTS
+    from stone_pipeline.ledger.sync import ack
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="synced", medusa_id="V1")
         _product(ledger, "P-1", "slab_v1", state="pending")
-        for _ in range(_MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             ack(ledger, "products", "P-1", status_="failed", reason="Medusa 400: bad company")
         assert ledger.get("product", "sku", "P-1")["state"] == "gap_held"
         code, body = server.dispatch(ledger, "POST", "requeue", {}, {})

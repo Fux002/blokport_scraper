@@ -43,20 +43,12 @@ import signal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger import snapshot, sync, writethrough
 from stone_pipeline.ledger.db import Ledger
 
 log = logfmt.get_logger("ledger.server")
-
-# Cap an authed request body so a bad/hostile Content-Length can't force an unbounded read into memory.
-# The largest real body is an ack page (2000 items, well under 1 MiB); 8 MiB is far above it.
-_MAX_BODY_BYTES = 8 << 20
-# Page bounds for the pull routes. An unbounded pull on a full delta builds the whole set in memory and
-# writes it in one buffer (http.server has no backpressure): a 24k-item bootstrap delta is ~4.6 MB.
-_DEFAULT_PAGE, _MAX_PAGE = 500, 2000
-_DEFAULT_FAILURES_PAGE = 200
-
 
 def _page_limit(query: dict[str, list[str]], default: int) -> int | None:
     """?limit= as an int: absent -> `default`; above the cap -> the cap (the page stays bounded, and the
@@ -67,7 +59,7 @@ def _page_limit(query: dict[str, list[str]], default: int) -> int | None:
         return default
     if not raw.isdigit() or int(raw) == 0:
         return None
-    return min(int(raw), _MAX_PAGE)
+    return min(int(raw), SETTINGS.sync.max_page)
 
 
 def dispatch(ledger: Ledger, method: str, resource: str,
@@ -79,11 +71,11 @@ def dispatch(ledger: Ledger, method: str, resource: str,
         return 200, sync.status(ledger)
     if method == "GET" and resource == "failures":
         # drill-down behind the status gap_held count: what Medusa rejected and why.
-        if (limit := _page_limit(query, _DEFAULT_FAILURES_PAGE)) is None:
+        if (limit := _page_limit(query, SETTINGS.sync.default_failures_page)) is None:
             return 400, {"error": "limit must be a positive integer"}
         return 200, {"failures": sync.failures(ledger, limit)}
     if method == "GET" and resource in ("variations", "products", "inventory", "removed"):
-        if (limit := _page_limit(query, _DEFAULT_PAGE)) is None:
+        if (limit := _page_limit(query, SETTINGS.sync.default_page)) is None:
             return 400, {"error": "limit must be a positive integer"}
         return 200, {"type": resource, "items": sync.ready(ledger, resource, limit)}
     if method == "POST" and resource == "ack":
@@ -171,8 +163,8 @@ class SyncHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 return self._respond(400, {"error": "invalid Content-Length"})
-            if length < 0 or length > _MAX_BODY_BYTES:
-                return self._respond(400, {"error": f"body too large (max {_MAX_BODY_BYTES} bytes)"})
+            if length < 0 or length > SETTINGS.sync.max_body_bytes:
+                return self._respond(400, {"error": f"body too large (max {SETTINGS.sync.max_body_bytes} bytes)"})
             try:
                 body = json.loads(self.rfile.read(length) or b"null")
             except json.JSONDecodeError:
