@@ -259,8 +259,11 @@ def main(argv: list[str] | None = None) -> int:
             if rc != 0:
                 rc = _reconcile_gate(rc)
     # VE2: log products held on a frozen variety on EVERY stage that recorded products (scrape writes new
-    # products too), so it is not confined to the catalog-only branch above.
-    _log_frozen_waiting()
+    # products too), so it is not confined to the catalog-only branch above. ONLY on a clean build: it must
+    # never run its own ledger query in place of a failing build's exit code (a gate rc, an abort), so a
+    # build failure returns untouched.
+    if rc == 0:
+        _log_frozen_waiting()
     return _persist_and_publish(stage, rc)
 
 

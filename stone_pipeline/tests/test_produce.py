@@ -18,7 +18,9 @@ def _stub(monkeypatch):
     # VE2: the archived mirror runs right after fetch, before any source is recorded -- record it so the
     # fetch -> mirror -> scrape -> build order is PROTECTED (deleting or moving the call fails these tests).
     monkeypatch.setattr(produce, "_mirror_archived", lambda: calls.append(("mirror", None)))
-    monkeypatch.setattr(produce, "_log_frozen_waiting", lambda: None)
+    # record the frozen-waiting log as a step too, so the order tests PROTECT its call site (after build):
+    # deleting it from main fails them instead of silently passing.
+    monkeypatch.setattr(produce, "_log_frozen_waiting", lambda: calls.append(("frozen_log", None)))
     monkeypatch.setattr(produce, "_live_scrape", lambda s: calls.append(("scrape", s)) or 0)
     monkeypatch.setattr(produce.build, "main", lambda argv: calls.append(("build", argv)) or 0)
     # persist + publish belong to produce now (wave 4g); off for these step-order tests
@@ -34,13 +36,14 @@ def test_full_produce_fetches_then_scrapes_then_builds(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--sources", "zucchi"]) == 0
     assert calls == [("fetch", None), ("mirror", None), ("scrape", ["zucchi"]),
-                     ("build", ["--sources", "zucchi"])]
+                     ("build", ["--sources", "zucchi"]), ("frozen_log", None)]
 
 
 def test_default_scope_scrapes_all(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main([]) == 0
-    assert calls == [("fetch", None), ("mirror", None), ("scrape", None), ("build", [])]
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", None), ("build", []),
+                     ("frozen_log", None)]
 
 
 def test_finalize_skips_inventory_but_runs_for_a_validated_produce(monkeypatch):
@@ -59,21 +62,23 @@ def test_finalize_skips_inventory_but_runs_for_a_validated_produce(monkeypatch):
 def test_catalog_only_never_scrapes(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--stage", "catalog"]) == 0
-    # fetch, mirror, then straight to build (no scrape): the mirror still runs before build
-    assert calls == [("fetch", None), ("mirror", None), ("build", ["--stage", "catalog"])]
+    # fetch, mirror, then straight to build (no scrape); the frozen-waiting log runs after build
+    assert calls == [("fetch", None), ("mirror", None), ("build", ["--stage", "catalog"]),
+                     ("frozen_log", None)]
 
 
 def test_republish_stage_never_scrapes_but_still_mirrors(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--stage", "republish"]) == 0
-    assert calls == [("fetch", None), ("mirror", None), ("build", ["--stage", "republish"])]
+    assert calls == [("fetch", None), ("mirror", None), ("build", ["--stage", "republish"]),
+                     ("frozen_log", None)]
 
 
 def test_inventory_stage_still_scrapes_first(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--stage", "inventory"]) == 0
     assert calls == [("fetch", None), ("mirror", None), ("scrape", None),
-                     ("build", ["--stage", "inventory"])]
+                     ("build", ["--stage", "inventory"]), ("frozen_log", None)]
 
 
 def test_verify_delegates_straight_to_build(monkeypatch):
@@ -90,6 +95,31 @@ def test_failed_scrape_aborts_before_build(monkeypatch):
     monkeypatch.setattr(produce.build, "main", lambda argv: calls.append("build") or 0)
     assert produce.main(["--sources", "zucchi"]) == 3
     assert calls == ["fetch", "mirror", "scrape"]    # build never runs on a failed scrape; mirror precedes it
+
+
+def test_mirror_archived_propagates_a_ledger_failure(monkeypatch):
+    # the fetch-time mirror must FAIL LOUD: if the ledger cannot be opened, the produce raises rather than
+    # continuing to scrape (which would record new products on a freshly archived variety). Restoring a
+    # try/except around it would make this test fail.
+    from stone_pipeline.ledger import writethrough
+
+    def _boom(*a, **k):
+        raise RuntimeError("ledger busy past busy_timeout")
+    monkeypatch.setattr(writethrough, "enabled", lambda: True)
+    monkeypatch.setattr(writethrough, "open_ledger", _boom)
+    with pytest.raises(RuntimeError):
+        produce._mirror_archived()
+
+
+def test_frozen_log_skipped_when_the_build_fails(monkeypatch):
+    # the frozen-waiting log must NOT run on a failed build: it would open the ledger and could replace the
+    # build's own exit code (a consistency-gate rc, an abort) with a traceback. A failed build returns its rc.
+    calls = _stub(monkeypatch)
+    monkeypatch.setattr(produce.build, "main", lambda argv: calls.append(("build", argv)) or 7)
+    assert produce.main(["--sources", "zucchi"]) == 7
+    assert ("frozen_log", None) not in calls
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", ["zucchi"]),
+                     ("build", ["--sources", "zucchi"])]
 
 
 def test_fetch_inputs_failure_is_best_effort(monkeypatch):
