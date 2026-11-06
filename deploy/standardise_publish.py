@@ -464,7 +464,7 @@ def assignment_changes(assigned, published, current):
     return writes, sorted(set(current) - set(wanted))
 
 
-def publish(client, root, sheet, photos, say=print, *, assigned, held=frozenset()):
+def publish(client, root, sheet, photos, say=print, *, assigned, held):
     """Make the published folder match the choice records under `root` (the clean tag's root) and the tile listings of
     `sheet` (the product sheet's text, with its photo list `photos`): {"listings", "copied", "made_3d", "removed", "tiles" (counts), "tiles_hidden"
     ({listing: why it has no images}), "tiles_problems" ({listing: the error its tile step met}), "changed"}; changed =

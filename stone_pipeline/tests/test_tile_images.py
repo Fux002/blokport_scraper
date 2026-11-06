@@ -432,7 +432,7 @@ def _bucket(slab_rgba):
 
 
 def _publish(s3):
-    return pub.publish(s3, ROOT, *_sheet(*SHEET_ROWS), say=lambda m: None, assigned={})
+    return pub.publish(s3, ROOT, *_sheet(*SHEET_ROWS), say=lambda m: None, assigned={}, held=frozenset())
 
 
 def test_a_tile_listing_is_shown_from_its_variety_s_slab_stone_not_its_own_photo(categories, monkeypatch):
@@ -514,7 +514,7 @@ def test_a_tile_too_big_for_the_first_slab_is_cut_from_the_next(categories):
     s3 = _two_slab_bucket(cut_in_four, _stone_rgba(960, 672, seed=3))
     rows = (SHEET_ROWS[0], SHEET_ROWS[1], ("rb-tile", "tile", 1.5, 1.1, 0.02, "v_rb_tile", MARBLE, POLISHED, "marenostone", B),
             ("rb-slab2", "slab", 2.0, 1.4, 0.02, "v_rb_slab", MARBLE, POLISHED, "marenostone", E))
-    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={})
+    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={}, held=frozenset())
     record = json.loads(s3.objects[imagestore.tile_record_key("marenostone", imagestore.listing_sha("rb-tile"))]["Body"])
     assert out["tiles"]["shown"] == 1 and record["stone"]["sha"] == E
 
@@ -563,7 +563,7 @@ def test_an_unexpected_error_in_a_tile_step_fails_the_run_before_anything_is_rem
 def test_a_failed_tile_whose_stone_is_no_longer_its_to_cut_loses_its_files(categories, monkeypatch):
     s3 = _two_slab_bucket(_stone_rgba(960, 640), _stone_rgba(960, 672, seed=3))
     rows = SHEET_ROWS + (("rb-slab2", "slab", 2.0, 1.4, 0.02, "v_rb_slab", MARBLE, POLISHED, "marenostone", E),)
-    pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={})
+    pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={}, held=frozenset())
     record = imagestore.tile_record_key("marenostone", imagestore.listing_sha("rb-tile"))
     assert json.loads(s3.objects[record]["Body"])["stone"]["sha"] == A
     mesh = cv2.resize(_fixture("crosshatch_805cf5ac.webp"), (960, 640), interpolation=cv2.INTER_NEAREST)
@@ -572,7 +572,7 @@ def test_a_failed_tile_whose_stone_is_no_longer_its_to_cut_loses_its_files(categ
     def broken(*args):
         raise OSError("disk full")
     monkeypatch.setattr(tile_plan, "render", broken)
-    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={})
+    out = pub.publish(s3, ROOT, *_sheet(*rows), say=lambda m: None, assigned={}, held=frozenset())
     assert out["tiles"]["failed_listings"] == ["rb-tile"]
     assert not any(imagestore.listing_sha("rb-tile") in k for k in s3.objects)     # hidden until it renders again
 
@@ -637,7 +637,7 @@ def test_only_one_slab_s_stone_is_decoded_at_a_time(categories, monkeypatch):
         live.append(weakref.ref(stone))
         return stone
     monkeypatch.setattr(pub, "_stone", counted)
-    out = pub.publish(s3, ROOT, *_sheet(*TWO_SLABS), say=lambda m: None, assigned={})
+    out = pub.publish(s3, ROOT, *_sheet(*TWO_SLABS), say=lambda m: None, assigned={}, held=frozenset())
     assert out["tiles"]["rendered"] == 1
     assert len(most) == 3 and max(most) == 0                                       # two checks, then the pick again
 
