@@ -178,3 +178,47 @@ def test_the_thin_copy_floor_is_one_setting():
     assert fetch_inputs.THIN_COPY_MIN_FRACTION == settings.THIN_COPY_MIN_FRACTION
     assert sync_variants_base.THIN_COPY_MIN_FRACTION == settings.THIN_COPY_MIN_FRACTION
     assert not hasattr(fetch_inputs, "_MIN_KEEP_FRACTION") and not hasattr(sync_variants_base, "_MIN_KEEP_FRACTION")
+
+
+# settings parses attributes.csv at import, so a malformed S3 copy written over the good local file would stop every
+# later produce at `import settings`, before its own fetch could heal it. The fetch validates before it replaces.
+_MALFORMED_ATTRIBUTES = {
+    "empty status cell": "category,value,sourceid,status,internal\n" + "".join(
+        f"color,c{i},id{i},active,false\n" for i in range(30)) + "color,cx,idx,,false\n",
+    "conflicting duplicate": "category,value,sourceid\n" + "".join(
+        f"color,c{i},id{i}\n" for i in range(30)) + "color,C0,other\n",
+}
+
+
+def test_fetch_attributes_keeps_the_local_file_when_s3_is_malformed(tmp_path, caplog):
+    for problem, body in _MALFORMED_ATTRIBUTES.items():
+        target = _committed(tmp_path, 26)
+        before = target.read_text()
+        caplog.clear()
+        assert fetch_inputs.fetch_attributes(client=_FakeS3(body), target=target) is False, problem
+        assert target.read_text() == before, problem
+        assert not target.with_suffix(".csv.incoming").exists()
+        errors = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert errors and "attributes.csv" in errors[0].getMessage(), problem
+
+
+def test_the_produce_fetch_stops_loud_on_a_malformed_attributes_file(tmp_path, monkeypatch):
+    for problem, body in _MALFORMED_ATTRIBUTES.items():
+        local = _committed(tmp_path, 26)
+        before = local.read_text()
+        with pytest.raises(ValueError, match="attributes.csv"):
+            _main_with(tmp_path, monkeypatch, "attributes.csv", body)
+        assert local.read_text() == before, problem                 # the good local file stays
+        assert not local.with_suffix(".csv.incoming").exists()
+
+
+def test_the_produce_fetch_never_writes_a_malformed_attributes_file_where_none_was(tmp_path, monkeypatch):
+    with pytest.raises(ValueError):
+        _main_with(tmp_path, monkeypatch, "attributes.csv", _MALFORMED_ATTRIBUTES["empty status cell"])
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_produce_fetch_takes_a_well_formed_attributes_file(tmp_path, monkeypatch):
+    body = "category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n"
+    _main_with(tmp_path, monkeypatch, "attributes.csv", body)
+    assert (tmp_path / "attributes.csv").read_text(encoding="utf-8") == body

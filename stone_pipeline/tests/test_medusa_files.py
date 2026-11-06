@@ -130,11 +130,26 @@ def test_append_to_the_old_shape_writes_three_columns(tmp_path):
     assert p.read_bytes() == b"category,value,sourceid\ncolor,Black,col_1\ncolor,Grey,col_2\r\n"
 
 
-# A module parses attributes.csv when it reads a CSV and takes the file's columns from its rows: the sourceid, or
-# the category and value pair. Only medusa_files.py may (ledger/render.py writes the shape, never reads it).
-_CSV_READER = re.compile(r"csv\.(Dict)?[rR]eader")
+# A module parses attributes.csv when it reads a CSV (the csv module, polars or pandas) and takes the file's columns
+# from its rows: the sourceid, or the category and value pair (by .get, subscript or pl.col). Only medusa_files.py
+# may (ledger/render.py writes the shape, never reads it).
+_CSV_READER = re.compile(r"csv\.(Dict)?[rR]eader|\b(pl|polars|pd|pandas)\.(read|scan)_csv")
 _ATTRIBUTE_COLUMNS = (re.compile(r"""["']sourceid["']"""),
-                      re.compile(r"""get\(["']category["'][\s\S]*get\(["']value["']"""))
+                      re.compile(r"""(get\(|\[|col\()["']category["'][\s\S]*(get\(|\[|col\()["']value["']"""))
+
+
+def _parses_attributes(text: str) -> bool:
+    return bool(_CSV_READER.search(text)) and any(p.search(text) for p in _ATTRIBUTE_COLUMNS)
+
+
+@pytest.mark.parametrize("snippet", [
+    'for r in csv.DictReader(h): ids[r.get("category"), r.get("value")] = r.get("sourceid")',
+    'for r in csv.DictReader(h): out[r["category"]] = r["value"]',
+    'df = pl.read_csv(path); df.filter(pl.col("category") == "finish").select(pl.col("value"))',
+    'df = pd.read_csv(path); ids = df["sourceid"]',
+])
+def test_the_guard_recognises_an_attributes_parser(snippet):
+    assert _parses_attributes(snippet)
 
 
 def test_only_medusa_files_parses_the_attributes_file():
@@ -144,8 +159,7 @@ def test_only_medusa_files_parses_the_attributes_file():
             rel = path.relative_to(WORKSPACE).as_posix()
             if "/tests/" in rel or rel == "stone_pipeline/reference/medusa_files.py":
                 continue
-            text = path.read_text(encoding="utf-8")
-            if _CSV_READER.search(text) and any(p.search(text) for p in _ATTRIBUTE_COLUMNS):
+            if _parses_attributes(path.read_text(encoding="utf-8")):
                 offenders.append(rel)
     assert offenders == [], f"parse attributes.csv through reference.medusa_files.read_attributes: {offenders}"
 

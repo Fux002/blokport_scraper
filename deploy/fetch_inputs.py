@@ -18,9 +18,10 @@ import boto3
 from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
-from stone_pipeline.config.settings import (ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, THIN_COPY_MIN_FRACTION,
-                                            category_for_key)
+from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS,
+                                            THIN_COPY_MIN_FRACTION, category_for_key)
 from stone_pipeline.core import logfmt
+from stone_pipeline.reference.medusa_files import read_attributes
 
 log = logfmt.get_logger("deploy.fetch_inputs")
 
@@ -42,6 +43,19 @@ _BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
 # categories). Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
 # dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
 _VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
+# Downloads checked by their one reader BEFORE they replace the local copy. settings parses attributes.csv at
+# import, so a malformed copy written over the good one would stop every later produce at `import settings`, before
+# its own fetch could heal it; kept out, the next fetch heals the file once S3 is fixed.
+_READERS = {
+    "attributes.csv": lambda path: read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED),
+}
+
+
+def check_readable(name: str, path: Path) -> None:
+    """Raise ValueError (naming the file and the problem) when the download `path` of `name` is malformed."""
+    reader = _READERS.get(name)
+    if reader is not None:
+        reader(path)
 
 
 def own_variants(path: Path) -> int:
@@ -119,6 +133,11 @@ def fetch_attributes(client=None, target=None) -> bool:
         # protected base: never let a thin S3 copy (Medusa mid-reset) replace the fuller committed seed
         if target.exists() and _would_clobber(_line_count(tmp), _line_count(target)):
             return False
+        try:
+            check_readable("attributes.csv", tmp)
+        except ValueError as exc:
+            log.error(f"kept the local attributes.csv: the S3 copy is malformed ({exc})")
+            return False
         tmp.replace(target)
         return True
     except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
@@ -148,20 +167,22 @@ def main() -> int:
                 print(f"   ! skipped (key escapes {dest.name}/): {key}")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            if name in _PROTECTED_BASE:
-                tmp = target.with_suffix(target.suffix + ".incoming")
+            # one flow for every file: download beside the target, then the thin-copy guard, then the reader check, and
+            # only then replace, so a refused or malformed copy never touches the local file
+            tmp = target.with_suffix(target.suffix + ".incoming")
+            try:
                 client.download_file(S3_BUCKET, key, str(tmp))
                 # filtered BEFORE the thin-copy guard: other vendors' rows must not make a thin stone export look full
                 dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
-                incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
-                if _would_clobber(incoming, current):
-                    tmp.unlink()
-                    _refuse_thin(name, incoming, current, basis)
-                    continue
+                if name in _PROTECTED_BASE:
+                    incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
+                    if _would_clobber(incoming, current):
+                        _refuse_thin(name, incoming, current, basis)
+                        continue
+                check_readable(name, tmp)       # malformed: raise, the produce stops loud with the local file kept
                 tmp.replace(target)
-            else:
-                client.download_file(S3_BUCKET, key, str(target))
-                dropped = own_variants(target) if name in _VARIANT_EXPORTS else 0
+            finally:
+                tmp.unlink(missing_ok=True)
             if dropped:
                 print(f"   {name}: dropped {dropped} variants of other vendors (not a scraper category)")
             print(f"   {name}")
