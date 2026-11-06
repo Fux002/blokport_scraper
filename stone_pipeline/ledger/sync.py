@@ -118,7 +118,10 @@ def gate_state(ledger: Ledger) -> tuple[int, int]:
     product with no variation is structurally impossible -- it can never exist to be a fatal fault.)"""
     def n(sql: str) -> int:
         return ledger.execute(sql).fetchone()["n"]
-    new_pending = "in_full = 1 AND medusa_id IS NULL AND state IN ('pending', 'dirty')"
+    # VE2: an archived variety is frozen (never re-served), so it can never clear. After a reset nulls its
+    # medusa_id it would otherwise sit in this held count forever and mask the reset's converged (held == 0)
+    # check, so exclude it: a frozen variety is not an awaiting-pull variety.
+    new_pending = "in_full = 1 AND medusa_id IS NULL AND state IN ('pending', 'dirty') AND archived = 0"
     return (
         n(f"SELECT COUNT(*) n FROM variation WHERE {new_pending}"),
         n(f"SELECT COUNT(*) n FROM variation WHERE {new_pending} AND (type IS NULL OR type = '')"),
@@ -140,6 +143,15 @@ def typing_health(ledger: Ledger) -> tuple[int, int, int]:
         n("SELECT COUNT(*) n FROM variation WHERE in_full = 1"),
         n("SELECT COUNT(*) n FROM variation WHERE in_full = 1 AND type IS NOT NULL AND type != ''"),
     )
+
+
+def frozen_waiting_products(ledger: Ledger) -> int:
+    """New products (NOT Medusa-held) bound to an ARCHIVED variety. The VE2 freeze means the products lane
+    never serves them, so they wait silently as pending. The produce logs this count so the hold is visible;
+    the VISIBLE upstream hold (curate refusing a new bind to an archived variety) is PR5's, not PR3's."""
+    return ledger.execute(
+        "SELECT COUNT(*) AS n FROM product p JOIN variation v ON v.key = p.variation_key "
+        f"WHERE v.archived = 1 AND p.state IN ('pending', 'dirty') AND NOT {in_medusa_sql('p')}").fetchone()["n"]
 
 
 # --- GET /sync/<type>?status=ready --------------------------------------------
@@ -463,12 +475,12 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
                         extra={"extra_fields": {"type": type_, "external_id": external_id,
                                                 "attempts": attempts, "reason": reason}})
         return cur.rowcount
-    # success: a PRODUCT is only marked synced under the same rule the products lane serves by (VE2): its
-    # variation is synced-and-active, OR archived and this product is one Medusa already holds (in_medusa_sql).
-    # So an existing product on a frozen variety still acks its updates, while a new product on an archived
-    # variety (which the lane never served) can never be acked synced.
-    guard = (" AND (variation_key IN (SELECT key FROM variation WHERE state = 'synced' AND archived = 0) "
-             f"OR (variation_key IN (SELECT key FROM variation WHERE archived = 1) AND {in_medusa_sql('product')}))") \
+    # success: a PRODUCT is only marked synced if its variation is synced OR archived. An ack RECORDS what
+    # Medusa did, so it must not re-apply the serve-time freeze rule: if the variety was archived between serve
+    # and ack, refusing the ack would lose the id Medusa assigned and let withdraw_unsent orphan the product.
+    # The VE2 frozen rule (no NEW product on an archived variety) lives once, in the serve predicate
+    # (_ELIGIBLE_PRODUCT); a new product is never served, so it never reaches a success ack to begin with.
+    guard = " AND variation_key IN (SELECT key FROM variation WHERE state = 'synced' OR archived = 1)" \
         if type_ == "products" else ""
     # retire guard: a success ack must NOT resurrect a row that is being RETIRED. A stray/out-of-order ack
     # would otherwise flip a 'retiring' row back to 'synced' while its variation tombstone still serves

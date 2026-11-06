@@ -1,10 +1,11 @@
 """VE2 PR3: the archived-variation freeze (design section 6).
 
-variation.archived and attribute.restricted are a PURE FUNCTION of the Medusa export files, mirrored in the
-write-through every produce. The variations lane serves archived = 0 only; the products lane (and the product
-ack guard) accept a synced-active OR archived variation but only for an EXISTING product (one Medusa holds); a
-new product on an archived variety is never served. Inventory is unchanged. Restricted attributes are mirrored
-here but NOT enforced on scraped products (that is PR4, validate value_frozen).
+variation.archived is a PURE FUNCTION of the Medusa variants export, mirrored at FETCH time (before any source
+is recorded) and again at catalog (for the rows it creates). The variations lane serves archived = 0 only; the
+products lane serves an archived variety's product only when Medusa already holds it, so a NEW product on a
+frozen variety is never served. An ack RECORDS what Medusa did, so it accepts a synced OR archived variation
+(it never re-applies the serve-time freeze). gate_state excludes archived, so a reset still converges.
+Inventory is unchanged. attribute.restricted is NOT kept in the ledger here (PR4 owns restricted values).
 """
 
 from __future__ import annotations
@@ -40,25 +41,6 @@ def _product(ledger, sku, variation_key, *, state="pending", medusa_id=None, las
         "medusa_id": medusa_id, "last_synced": last_synced, "created_at": now, "updated_at": now}, pk=("sku",))
 
 
-def _attr(ledger, category, value, *, restricted=0, medusa_id="A"):
-    now = now_iso()
-    ledger.upsert("attribute", {
-        "category": category, "value": value, "medusa_id": medusa_id, "state": "synced",
-        "restricted": restricted, "created_at": now, "updated_at": now}, pk=("category", "value"))
-
-
-def _attrs_csv(tmp_path, rows, *, with_status=True):
-    """rows: (category, value, sourceid, status, internal). Writes attributes.csv and returns its Path."""
-    p = tmp_path / "attributes.csv"
-    header = "category,value,sourceid" + (",status,internal" if with_status else "")
-    lines = [header]
-    for category, value, sourceid, status, internal in rows:
-        cells = [category, value, sourceid] + ([status, internal] if with_status else [])
-        lines.append(",".join(cells))
-    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return p
-
-
 def _export_csv(tmp_path, rows, *, with_status=True):
     """rows: (Id, Key, Name, status). Writes variants_export.csv and returns its Path."""
     p = tmp_path / "variants_export.csv"
@@ -73,26 +55,24 @@ def _export_csv(tmp_path, rows, *, with_status=True):
 
 # --- A. schema + migration (v14) ---------------------------------------------
 
-def test_fresh_ledger_has_archived_and_restricted_defaulting_to_zero(tmp_path):
+def test_fresh_ledger_has_archived_defaulting_to_zero(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         vcols = {r["name"]: r for r in ledger.execute("PRAGMA table_info(variation)")}
-        acols = {r["name"]: r for r in ledger.execute("PRAGMA table_info(attribute)")}
-        assert "archived" in vcols and "restricted" in acols
+        assert "archived" in vcols
         assert vcols["archived"]["dflt_value"] == "0" and vcols["archived"]["notnull"] == 1
-        assert acols["restricted"]["dflt_value"] == "0" and acols["restricted"]["notnull"] == 1
+        # restricted is deliberately NOT a ledger column (PR4 decides restricted values from the files)
+        assert "restricted" not in {r["name"] for r in ledger.execute("PRAGMA table_info(attribute)")}
         assert ledger.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
-def test_a_v13_ledger_gains_the_columns_and_keeps_its_data(tmp_path):
+def test_a_v13_ledger_gains_archived_and_keeps_its_data(tmp_path):
     if sqlite3.sqlite_version_info < (3, 35, 0):
         pytest.skip("ALTER TABLE DROP COLUMN needs SQLite >= 3.35 to simulate the v13 shape")
     p = tmp_path / "mig.ledger"
     with Ledger.open(p, env="development") as lg:
         _variation(lg, "slab_v1", archived=0)
-        _attr(lg, "color", "Beige")
     raw = sqlite3.connect(p)                                       # simulate a v13 ledger
     raw.execute("ALTER TABLE variation DROP COLUMN archived")
-    raw.execute("ALTER TABLE attribute DROP COLUMN restricted")
     raw.execute("PRAGMA user_version = 13")
     raw.execute("UPDATE ledger_meta SET schema_version = 13")
     raw.commit()
@@ -100,49 +80,24 @@ def test_a_v13_ledger_gains_the_columns_and_keeps_its_data(tmp_path):
     with Ledger.open(p, env="development") as lg:
         assert lg.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert lg.get("variation", "key", "slab_v1")["archived"] == 0
-        assert lg.execute("SELECT restricted FROM attribute WHERE category='color' AND value='Beige'"
-                          ).fetchone()["restricted"] == 0
-        # idempotent: a second open is a no-op (no duplicate-column error)
-    with Ledger.open(p, env="development") as lg:
+    with Ledger.open(p, env="development") as lg:   # idempotent: a second open is a no-op
         assert lg.get("variation", "key", "slab_v1")["archived"] == 0
 
 
-# --- B. the mirror (pure function of the files) ------------------------------
+# --- B. the mirror (pure function of the export) -----------------------------
 
 def test_mirror_sets_and_clears_variation_archived(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", archived=0)
         _variation(ledger, "slab_v2", archived=0)
         exp = _export_csv(tmp_path, [("i1", "slab_v1", "A", "archived"), ("i2", "slab_v2", "B", "active")])
-        writethrough.mirror_restrictions(ledger, export_path=exp, attributes_path=None)
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 1
         assert ledger.get("variation", "key", "slab_v1")["archived"] == 1
         assert ledger.get("variation", "key", "slab_v2")["archived"] == 0
         # flips back to 0 when the export no longer archives it (pure function, not sticky)
         exp2 = _export_csv(tmp_path, [("i1", "slab_v1", "A", "active"), ("i2", "slab_v2", "B", "active")])
-        writethrough.mirror_restrictions(ledger, export_path=exp2, attributes_path=None)
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp2) == 1
         assert ledger.get("variation", "key", "slab_v1")["archived"] == 0
-
-
-def test_mirror_sets_restricted_for_archived_or_internal_attributes(tmp_path):
-    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _attr(ledger, "color", "Beige")
-        _attr(ledger, "finish", "Polished")
-        _attr(ledger, "color", "SecretBlue")
-        attrs = _attrs_csv(tmp_path, [
-            ("color", "Beige", "a1", "active", "false"),
-            ("finish", "Polished", "a2", "archived", "false"),
-            ("color", "SecretBlue", "a3", "active", "true")])
-        writethrough.mirror_restrictions(ledger, export_path=None, attributes_path=attrs)
-        restricted = {(r["category"], r["value"]) for r in ledger.execute(
-            "SELECT category, value FROM attribute WHERE restricted = 1")}
-        assert restricted == {("finish", "Polished"), ("color", "SecretBlue")}
-        # flips back when all active and not internal
-        attrs2 = _attrs_csv(tmp_path, [
-            ("color", "Beige", "a1", "active", "false"),
-            ("finish", "Polished", "a2", "active", "false"),
-            ("color", "SecretBlue", "a3", "active", "false")])
-        writethrough.mirror_restrictions(ledger, export_path=None, attributes_path=attrs2)
-        assert ledger.execute("SELECT COUNT(*) n FROM attribute WHERE restricted = 1").fetchone()["n"] == 0
 
 
 def test_mirror_touches_only_changed_rows(tmp_path):
@@ -150,16 +105,15 @@ def test_mirror_touches_only_changed_rows(tmp_path):
         _variation(ledger, "slab_v1", archived=1)
         before = ledger.get("variation", "key", "slab_v1")["updated_at"]
         exp = _export_csv(tmp_path, [("i1", "slab_v1", "A", "archived")])   # unchanged: stays archived
-        writethrough.mirror_restrictions(ledger, export_path=exp, attributes_path=None)
+        assert writethrough.mirror_archived_variations(ledger, export_path=exp) == 0
         after = ledger.get("variation", "key", "slab_v1")
         assert after["archived"] == 1 and after["updated_at"] == before   # no spurious write
 
 
-def test_mirror_is_a_noop_when_files_are_absent(tmp_path):
+def test_mirror_is_a_noop_when_the_export_is_absent(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", archived=0)
-        assert writethrough.mirror_restrictions(
-            ledger, export_path=tmp_path / "absent.csv", attributes_path=tmp_path / "none.csv") == (0, 0)
+        assert writethrough.mirror_archived_variations(ledger, export_path=tmp_path / "absent.csv") == 0
         assert ledger.get("variation", "key", "slab_v1")["archived"] == 0
 
 
@@ -168,12 +122,37 @@ def test_mirror_freezes_a_variety_archived_by_any_export_path(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="dirty", archived=0)
         exp = _export_csv(tmp_path, [("i1", "slab_v1", "A", "archived")])
-        writethrough.mirror_restrictions(ledger, export_path=exp, attributes_path=None)
+        writethrough.mirror_archived_variations(ledger, export_path=exp)
         assert ledger.get("variation", "key", "slab_v1")["archived"] == 1
         assert sync.count_ready(ledger, "variations") == 0
 
 
-# --- C. variations lane freeze ------------------------------------------------
+def test_produce_mirror_hook_runs_the_mirror_at_fetch(monkeypatch, tmp_path):
+    # the fetch-time hook (produce._mirror_archived) must open the ledger and run the mirror, so the freeze is
+    # applied BEFORE any record_source write (the HIGH finding). A failing-first guard for that call site.
+    import contextlib
+
+    import stone_pipeline.produce as produce
+    seen = []
+
+    @contextlib.contextmanager
+    def _fake_open(path=None):
+        with Ledger.open(tmp_path / "dev.ledger", env="development") as lg:
+            yield lg
+
+    monkeypatch.setattr(writethrough, "enabled", lambda: True)
+    monkeypatch.setattr(writethrough, "open_ledger", _fake_open)
+    monkeypatch.setattr(writethrough, "mirror_archived_variations", lambda ledger, **kw: seen.append(ledger) or 0)
+    produce._mirror_archived()
+    assert len(seen) == 1
+    # and it is a no-op when write-through is off (no ledger opened, no mirror)
+    seen.clear()
+    monkeypatch.setattr(writethrough, "enabled", lambda: False)
+    produce._mirror_archived()
+    assert seen == []
+
+
+# --- C. variations lane freeze + the produce gate ----------------------------
 
 def test_variations_lane_serves_archived_zero_only(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
@@ -190,7 +169,17 @@ def test_archived_beats_dirty_in_the_variations_lane(tmp_path):
         assert sync.count_ready(ledger, "variations") == 0
 
 
-# --- D. products lane + ack guard --------------------------------------------
+def test_gate_state_ignores_archived_held(tmp_path):
+    # after a reset an archived variety is pending with no medusa_id and never re-serves; counting it held
+    # would mask the reset's converged (held == 0) check, so gate_state must exclude it.
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_arch", state="pending", medusa_id=None, archived=1)
+        _variation(ledger, "slab_new", state="pending", medusa_id=None, archived=0)
+        held, _untyped = sync.gate_state(ledger)
+        assert held == 1   # only the active new variety, never the frozen one
+
+
+# --- D. products lane + ack guard + the frozen-waiting count ------------------
 
 def test_existing_product_on_archived_variation_still_serves(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
@@ -214,21 +203,31 @@ def test_new_product_on_active_variation_serves(tmp_path):
         assert [r["external_id"] for r in sync.ready_products(ledger)] == ["P-new"]
 
 
-def test_product_ack_guard_matches_the_lane(tmp_path):
+def test_product_ack_records_what_medusa_did_even_after_archival(tmp_path):
+    # the variety is archived BETWEEN serve and ack; the ack must still record the id Medusa assigned, or the
+    # ledger loses it and withdraw_unsent can orphan the product in Medusa (the LOW ack-guard finding).
+    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
+        _variation(ledger, "slab_v1", state="synced", medusa_id="V", archived=0)
+        _product(ledger, "P-1", "slab_v1", state="pending")
+        assert [r["external_id"] for r in sync.ready_products(ledger)] == ["P-1"]   # leased to 'syncing'
+        ledger.execute("UPDATE variation SET archived = 1 WHERE key = 'slab_v1'")
+        assert sync.ack(ledger, "products", "P-1", medusa_id="MP") == 1
+        row = ledger.get("product", "sku", "P-1")
+        assert row["state"] == "synced" and row["medusa_id"] == "MP"
+
+
+def test_frozen_waiting_products_counts_new_on_archived(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="synced", medusa_id="V", archived=1)
-        _product(ledger, "P-old", "slab_v1", state="syncing", medusa_id="MP")   # existing
-        _product(ledger, "P-new", "slab_v1", state="syncing")                   # new
-        assert sync.ack(ledger, "products", "P-old", medusa_id="MP") == 1
-        assert ledger.get("product", "sku", "P-old")["state"] == "synced"
-        assert sync.ack(ledger, "products", "P-new", medusa_id="MX") == 0        # refused by the guard
-        assert ledger.get("product", "sku", "P-new")["state"] == "syncing"
+        _product(ledger, "P-new", "slab_v1", state="pending")                  # waiting
+        _product(ledger, "P-old", "slab_v1", state="pending", medusa_id="MP")  # existing, not waiting
+        assert sync.frozen_waiting_products(ledger) == 1
 
 
 # --- E. inventory unchanged ---------------------------------------------------
 
 def test_inventory_lane_ignores_archived(tmp_path):
-    assert "archived" not in sync._INVENTORY_LANE and "restricted" not in sync._INVENTORY_LANE
+    assert "archived" not in sync._INVENTORY_LANE
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _variation(ledger, "slab_v1", state="synced", medusa_id="V", archived=1)
         _product(ledger, "P-1", "slab_v1", state="synced", medusa_id="MP")
@@ -241,12 +240,10 @@ def test_inventory_lane_ignores_archived(tmp_path):
 
 def test_status_required_is_decided_by_the_download_path(monkeypatch, tmp_path):
     other = tmp_path / "render_dump.csv"
-    # flags OFF: never required, whatever the path
     monkeypatch.setattr("stone_pipeline.reference.loaders.variants.VARIANTS_EXPORT_STATUS_REQUIRED", False)
     monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.ATTRIBUTES_STATUS_REQUIRED", False)
     assert loaders.variants_status_required(SETTINGS.paths.export_file) is False
     assert loaders.attributes_status_required(SETTINGS.paths.attributes_csv) is False
-    # flags ON: required ONLY for the real download file, never for an internal temp dump
     monkeypatch.setattr("stone_pipeline.reference.loaders.variants.VARIANTS_EXPORT_STATUS_REQUIRED", True)
     monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.ATTRIBUTES_STATUS_REQUIRED", True)
     assert loaders.variants_status_required(SETTINGS.paths.export_file) is True
@@ -262,8 +259,9 @@ def test_render_combinations_reads_its_temp_dumps_even_when_status_required(monk
     monkeypatch.setattr("stone_pipeline.reference.loaders.variants.VARIANTS_EXPORT_STATUS_REQUIRED", True)
     monkeypatch.setattr("stone_pipeline.reference.loaders.attributes.ATTRIBUTES_STATUS_REQUIRED", True)
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _attr(ledger, "category", "Slabs")
-        _attr(ledger, "type", "Marble")
+        ledger.upsert("attribute", {"category": "category", "value": "Slabs", "medusa_id": "A",
+                                    "state": "synced", "created_at": now_iso(), "updated_at": now_iso()},
+                      pk=("category", "value"))
         _variation(ledger, "slab_v1", state="synced", medusa_id="V", archived=0)
         out = tmp_path / "2_valid_combinations.csv"
         written = render_combinations(ledger, out, backbone_paths=[], products_csv=None)

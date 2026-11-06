@@ -97,6 +97,31 @@ def _live_scrape(sources: list[str] | None) -> int:
 _COLD_START_MARKERS = ("NOT in the current export", "NO valid-combination row", "cannot verify")
 
 
+def _mirror_archived() -> None:
+    """VE2: mirror the export's archived flag onto the ledger RIGHT AFTER the fetch, before any record_source
+    write, so a variety Blokport archived in the fresh export is frozen for the whole produce (every stage,
+    `scrape` included), not only from the later catalog step. No-op when write-through is off. Non-fatal: the
+    catalog write-through re-mirrors, and a failure here must not abort a produce on a transient ledger issue."""
+    from stone_pipeline.ledger import writethrough
+    if not writethrough.enabled():
+        return
+    try:
+        with writethrough.open_ledger() as ledger:
+            n = writethrough.mirror_archived_variations(ledger)
+        log.info("VE2 archived mirror after fetch", extra={"extra_fields": {"archived_changed": n}})
+    except Exception:
+        log.exception("VE2 archived mirror after fetch FAILED; produce continues (catalog re-mirrors)")
+
+
+def _frozen_waiting() -> int:
+    """New products waiting on a frozen (archived) variety -- counted from the ledger for a visible log line."""
+    from stone_pipeline.ledger import sync, writethrough
+    from stone_pipeline.ledger.db import Ledger
+    with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME,
+                     backend_id_fingerprint=writethrough.backend_fingerprint()) as lg:
+        return sync.frozen_waiting_products(lg)
+
+
 def _ledger_gate_state() -> tuple[int, int]:
     """(held, untyped) from the ledger -- the pull-model source of truth (NOT the stale CSV export),
     which is why pass-2 needs no refreshed Medusa export. The schema queries live in the ledger layer
@@ -193,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         return build.main(argv)   # let build report the unknown stage consistently
 
     _fetch_inputs()
+    _mirror_archived()   # VE2: freeze archived varieties from the FRESH export before any source is recorded
     # Stages that REUSE the last scrape instead of re-fetching suppliers: `catalog` (consolidate only) and
     # `republish` (re-run the pipeline + catalog from cache, e.g. to release products a backbone-leaf
     # approval just made valid). Every other stage pulls fresh supplier data first.
@@ -217,6 +243,12 @@ def main(argv: list[str] | None = None) -> int:
             # checkpoint, not an error -- reconcile against the ledger so pass-1 exits 0.
             if rc != 0:
                 rc = _reconcile_gate(rc)
+            # VE2: surface new products held on a frozen (archived) variety. They wait silently as pending (the
+            # sync lane never serves them); the VISIBLE upstream hold (curate refusing the new bind) is PR5's.
+            if (waiting := _frozen_waiting()):
+                log.warning("VE2: new products are held on a frozen (archived) variety and will not sync until "
+                            "the variety is active again or the product is moved off it",
+                            extra={"extra_fields": {"frozen_waiting": waiting}})
     return _persist_and_publish(stage, rc)
 
 
