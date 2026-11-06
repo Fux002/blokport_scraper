@@ -1,15 +1,18 @@
-"""The one reader of from_medusa/<env>/attributes.csv (VE2 design, section 1): parse by header name, a missing
-required column or a bad status/internal cell fails loud, the blank-row rules and the conflicting-duplicate guard
-live here once, and no other module parses the file."""
+"""The one reader of each Medusa download, from_medusa/<env>/attributes.csv and variants_export.csv (VE2 design,
+section 1): parse by header name, a missing required column or a bad status/internal cell fails loud, the
+blank-row rules (and for attributes the conflicting-duplicate guard) live here once, and no other module parses
+the files."""
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
 import pytest
 
-from stone_pipeline.reference.medusa_files import AttributeValue, append_attributes, read_attributes
+from stone_pipeline.reference.medusa_files import (AttributeValue, ExportVariation, append_attributes,
+                                                   read_attributes, read_variants_export)
 
 PACKAGE = Path(__file__).resolve().parents[1]
 WORKSPACE = PACKAGE.parent
@@ -183,3 +186,226 @@ def test_finish_ids_reads_the_text_form():
     from stone_pipeline.standardise.tile_plan import finish_ids
     text = "﻿category,value,sourceid\nfinish,Polished,fin_1\nfinish,Honed,fin_2\ncolor,Black,col_1\n"
     assert finish_ids(text) == {"fin_1", "fin_2"}
+
+
+# --- variants_export.csv ---------------------------------------------------------------------------------------
+
+_EXPORT = "Id,Key,Name,Image,Aliases,Volume per kg (m³/kg)\n"
+
+
+def _export(tmp_path, text: str, encoding: str = "utf-8") -> Path:
+    p = tmp_path / "variants_export.csv"
+    p.write_text(text, encoding=encoding)
+    return p
+
+
+def test_export_old_shape_reads_every_row_active(tmp_path):
+    p = _export(tmp_path, _EXPORT + "v1,slab_marble_a_1,A,https://x/a.png,A1|A2,0.0004\n")
+    assert read_variants_export(p, require_status=False) == [
+        ExportVariation("slab_marble_a_1", "A", "v1", "https://x/a.png", ("A1", "A2"), "0.0004", "active")]
+
+
+def test_export_new_shape_carries_status(tmp_path):
+    p = _export(tmp_path, "Id,Key,Name,Image,Aliases,status\nv1,slab_a_1,A,,,active\nv2,slab_b_1,B,,,Archived\n")
+    got = read_variants_export(p, require_status=True)
+    assert [(v.key, v.status, v.archived) for v in got] == [("slab_a_1", "active", False), ("slab_b_1", "archived", True)]
+
+
+def test_export_reordered_and_extra_columns_parse_by_header_name(tmp_path):
+    p = _export(tmp_path, " status ,Extra,Aliases, Name ,Key,Id\nactive,x, a | |b ,A,slab_a_1,v1\n")
+    assert read_variants_export(p, require_status=True) == [
+        ExportVariation("slab_a_1", "A", "v1", "", ("a", "b"), "", "active")]
+
+
+def test_export_optional_columns_read_empty_when_absent(tmp_path):
+    # the Id-free base shape, and an export without Image/Aliases: every reader tolerated both before
+    base = _export(tmp_path, "Key,Name\nslab_a_1,A\n")
+    assert read_variants_export(base, require_status=False) == [
+        ExportVariation("slab_a_1", "A", "", "", (), "", "active")]
+
+
+@pytest.mark.parametrize("header", ["Id,Key,Image,Aliases", "Id,Name,Image,Aliases", ""])
+def test_export_missing_required_column_raises_naming_file_and_column(tmp_path, header):
+    p = _export(tmp_path, header + "\n" if header else "")
+    with pytest.raises(ValueError, match=r"variants_export\.csv: missing required column"):
+        read_variants_export(p, require_status=False)
+
+
+@pytest.mark.parametrize("status", ["", "deleted"])
+def test_export_empty_or_invalid_status_cell_raises_naming_the_row(tmp_path, status):
+    p = _export(tmp_path, f"Id,Key,Name,status\nv1,slab_a_1,A,active\nv2,slab_b_1,B,{status}\n")
+    with pytest.raises(ValueError, match="line 3: status"):
+        read_variants_export(p, require_status=False)
+
+
+def test_export_require_status_without_the_column_raises(tmp_path):
+    p = _export(tmp_path, _EXPORT)
+    with pytest.raises(ValueError, match="missing required column.*status"):
+        read_variants_export(p, require_status=True)
+
+
+def test_export_blank_rows_skipped_and_half_rows_kept(tmp_path):
+    p = _export(tmp_path, _EXPORT + ",,,,,\n\n,slab_a_1,A,,,\nv2,,B,,,\n")
+    assert [(v.id, v.key, v.name) for v in read_variants_export(p, require_status=False)] == [
+        ("", "slab_a_1", "A"), ("v2", "", "B")]
+
+
+def test_export_bom_and_text_form(tmp_path):
+    body = _EXPORT + "v1,slab_a_1,A,,,\r\n"
+    from_file = read_variants_export(_export(tmp_path, body, encoding="utf-8-sig"), require_status=False)
+    assert from_file == read_variants_export("\ufeff" + body, require_status=False)
+    assert [v.key for v in from_file] == ["slab_a_1"]
+
+
+def test_export_text_form_errors_name_the_file_it_came_from(tmp_path):
+    with pytest.raises(ValueError, match=r"^variants_export\.csv: missing"):
+        read_variants_export("Key\nslab_a_1\n", require_status=False)
+    with pytest.raises(ValueError, match=r"^variants_export_base\.csv: missing"):
+        read_variants_export("Key\nslab_a_1\n", require_status=False, name="variants_export_base.csv")
+
+
+def test_the_loader_names_the_base_file_in_an_error(tmp_path):
+    from stone_pipeline.reference.loaders import load_existing_variants
+    base = tmp_path / "variants_export_base.csv"
+    base.write_text("Key\nslab_a_1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=re.escape(str(base))):
+        load_existing_variants(base, ["slab"])
+
+
+def test_own_variants_keeps_the_status_column_whole(tmp_path):
+    from deploy.fetch_inputs import own_variants
+    p = _export(tmp_path, "Id,Key,Name,status\nv1,slab_a_1,A,archived\nv9,np-cattle-1,Cow,active\n")
+    assert own_variants(p) == 1
+    assert p.read_text(encoding="utf-8") == "Id,Key,Name,status\nv1,slab_a_1,A,archived\n"
+    assert read_variants_export(p, require_status=True)[0].archived
+
+
+def test_variety_names_reads_the_text_form():
+    from stone_pipeline.standardise.tile_plan import variety_names
+    assert variety_names("Id,Key,Name\nv1,slab_a_1,A\n,slab_b_1,B\nv3,slab_c_1,\n") == {"v1": "A"}
+
+
+# Medusa's variants export reaches the code through these names. Inside a function, the export is a marker
+# expression, a call that returns it (existing_varieties_file(), Path(<export>), _text(client, <export key>), or a
+# package function whose return names a marker, like image_intake._variant_files) or a local bound to any of those. A
+# function reads the export outside the one reader when it opens it (.open / .read_text / .read_bytes) or passes it to
+# any callee that neither reads through read_variants_export (directly or via other package functions, worked out
+# from the source) nor is listed as not reading it. pl.read_csv(<export>) or a helper taking the path is therefore
+# flagged until it reads through the reader.
+_EXPORT_MARKERS = ("export_file", "variants_export_csv", "existing_varieties_file", "VARIANTS_KEY")
+_OPENERS = {"open", "read_text", "read_bytes"}
+# given the export, these return it again: as a path, or as its text fetched from S3
+_CARRIERS = {"Path", "_text"}
+# take the path or S3 key without parsing it: a carrier, its text form, an error or a message, a record of which file
+# was read (ImportFile.path), the status-column rule (compares the path)
+_NOT_A_READ = _CARRIERS | {"str", "FileNotFoundError", "say", "ImportFile", "variants_status_required"}
+
+
+def _callee(call: ast.Call) -> str:
+    f = call.func
+    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+
+
+def _functions(tree: ast.AST) -> list:
+    return [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _reads_through(modules: dict) -> set:
+    """(module, function) pairs that read through read_variants_export, closed over calls: a bare name resolves in
+    its own module when defined there (else it is an import: any package function of that name), an attribute call
+    (mod.fn) to any package function of that name."""
+    calls = {(rel, fn.name): {(isinstance(c.func, ast.Name), _callee(c)) for c in ast.walk(fn)
+                               if isinstance(c, ast.Call)}
+             for rel, tree in modules.items() for fn in _functions(tree)}
+    through = {k for k, cs in calls.items() if any(name == "read_variants_export" for _, name in cs)}
+    while True:
+        more = {k for k, cs in calls.items() if k not in through
+                and any(_resolves_through(k[0], bare, name, calls, through) for bare, name in cs)}
+        if not more:
+            return through
+        through |= more
+
+
+def _resolves_through(rel: str, bare: bool, name: str, defined, through: set) -> bool:
+    if name == "read_variants_export":
+        return True
+    if bare and (rel, name) in defined:
+        return (rel, name) in through
+    return any(n == name for _, n in through)
+
+
+def _returns_export(modules: dict) -> set:
+    """Names of package functions that return an export marker expression."""
+    return {fn.name for tree in modules.values() for fn in _functions(tree)
+            if any(isinstance(r, ast.Return) and r.value is not None
+                   and any(m in ast.unparse(r.value) for m in _EXPORT_MARKERS) for r in ast.walk(fn))}
+
+
+def _export_offences(rel: str, func: ast.AST, through: set, defined, sources: set) -> list:
+    bound: set[str] = set()
+
+    def marked(node) -> bool:
+        if isinstance(node, ast.Name):
+            return node.id in bound
+        if isinstance(node, ast.Call):
+            return (any(m in ast.unparse(node.func) for m in _EXPORT_MARKERS) or _callee(node) in sources
+                    or (_callee(node) in _CARRIERS and any(marked(a) for a in node.args)))
+        return any(m in ast.unparse(node) for m in _EXPORT_MARKERS)
+    for node in ast.walk(func):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and node.value is not None and marked(node.value):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            bound |= {n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}
+        elif isinstance(node, ast.For) and marked(node.iter):
+            bound |= {n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)}
+    out = []
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _callee(node)
+        reads = _resolves_through(rel, isinstance(node.func, ast.Name), name, defined, through)
+        if isinstance(node.func, ast.Attribute) and name in _OPENERS and marked(node.func.value):
+            out.append(f"{rel}:{func.name} opens it")
+        elif not reads and name not in _NOT_A_READ and any(
+                marked(a) for a in [*node.args, *(k.value for k in node.keywords)]):
+            out.append(f"{rel}:{func.name} passes it to {name}")
+    return out
+
+
+def _package_modules() -> dict:
+    modules = {}
+    for root in ("stone_pipeline", "scrapers", "deploy", "image_pipeline"):
+        for path in sorted((WORKSPACE / root).rglob("*.py")):
+            rel = path.relative_to(WORKSPACE).as_posix()
+            if "/tests/" not in rel and rel != "stone_pipeline/reference/medusa_files.py":
+                modules[rel] = ast.parse(path.read_text(encoding="utf-8"))
+    return modules
+
+
+@pytest.mark.parametrize("snippet", [
+    "def f():\n    with SETTINGS.paths.export_file.open() as h:\n        return list(csv.DictReader(h))\n",
+    "def f():\n    exp = SETTINGS.paths.export_file\n    return pl.read_csv(exp)\n",
+    "def f():\n    return _ids(SETTINGS.paths.variants_export_csv, 'Id')\n",
+    "def f(path=None):\n    path = Path(path or SETTINGS.paths.variants_export_csv)\n    return path.read_text()\n",
+    "def f():\n    return _helper(existing_varieties_file())\n",
+    "def f(client):\n    return parse(_text(client, f'{ENV}/{C.VARIANTS_KEY}'))\n",
+    "def f():\n    for p in _variant_files():\n        return p.read_bytes()\n",
+])
+def test_the_guard_recognises_an_export_read_outside_the_reader(snippet):
+    assert _export_offences("x.py", _functions(ast.parse(snippet))[0], set(), set(), {"_variant_files"})
+
+
+def test_the_guard_accepts_a_helper_that_reads_through_the_reader():
+    tree = ast.parse("def _helper(p):\n    return read_variants_export(p, require_status=False)\n"
+                     "def f():\n    return _helper(SETTINGS.paths.export_file)\n")
+    through = _reads_through({"x.py": tree})
+    assert _export_offences("x.py", _functions(tree)[1], through, {("x.py", "_helper"), ("x.py", "f")}, set()) == []
+
+
+def test_only_medusa_files_parses_the_variants_export():
+    modules = _package_modules()
+    through = _reads_through(modules)
+    defined = {(rel, fn.name) for rel, tree in modules.items() for fn in _functions(tree)}
+    sources = _returns_export(modules)
+    offenders = [o for rel, tree in modules.items() for fn in _functions(tree)
+                 for o in _export_offences(rel, fn, through, defined, sources)]
+    assert offenders == [], f"read the variants export through reference.medusa_files.read_variants_export: {offenders}"

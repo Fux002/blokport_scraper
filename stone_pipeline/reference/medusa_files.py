@@ -22,6 +22,11 @@ ATTRIBUTE_COLUMNS = ("category", "value", "sourceid")
 _STATUS_COLUMNS = ("status", "internal")
 _STATUS = ("active", "archived")
 _INTERNAL = {"true": True, "false": False}
+# Key and Name are the variation's identity, so they are required. Id, Image, Aliases and the volume are read
+# as empty when their column is absent, exactly as every reader before this one tolerated: the scraper's base
+# files (variants_export_base*.csv) carry no Id, and an export without Image or Aliases is still read.
+EXPORT_COLUMNS = ("Key", "Name")
+VOLUME_COLUMN = "Volume per kg (m³/kg)"
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,44 @@ def read_attributes(src: Path | str, *, require_status: bool) -> list[AttributeV
                               _status(row, fields, label, line), _internal(row, fields, label, line))
         _guard_duplicate(ids, item, label)
         out.append(item)
+    return out
+
+
+@dataclass(frozen=True)
+class ExportVariation:
+    """One variants export row: Medusa's export, or a scraper-owned file of the same shape (the Id-free base)."""
+
+    key: str
+    name: str
+    id: str                   # empty in the Id-free base and for a variation Medusa has not minted yet
+    image: str
+    aliases: tuple[str, ...]
+    volume: str
+    status: str               # "active" | "archived"
+
+    @property
+    def archived(self) -> bool:
+        return self.status == "archived"
+
+
+def read_variants_export(src: Path | str, *, require_status: bool,
+                         name: str = "variants_export.csv") -> list[ExportVariation]:
+    """A variants export -> its rows, in file order. `src` is the file's Path, or a str holding the file's TEXT
+    (a str is never taken as a path; `name` is the file an error names then, since the text form also reads a base). Cells are stripped and Aliases is split on '|' into its non-empty names.
+    Only a blank row (every cell empty) is skipped: what a row without Key, Name or Id means differs per caller
+    (the base has no Id; tree_build counts a half row as malformed), so each caller keeps its own rule. Without
+    a status column every row is active, unless `require_status`, which makes the absent column an error."""
+    label = str(src) if isinstance(src, Path) else name
+    required = EXPORT_COLUMNS + (("status",) if require_status else ())
+    out: list[ExportVariation] = []
+    for line, row, fields in _rows(src, label, required):
+        cell = {name: (row.get(name) or "").strip() for name in fields}
+        if not any(cell.values()):
+            continue
+        out.append(ExportVariation(
+            cell["Key"], cell["Name"], cell.get("Id", ""), cell.get("Image", ""),
+            tuple(a.strip() for a in cell.get("Aliases", "").split("|") if a.strip()),
+            cell.get(VOLUME_COLUMN, ""), _status(row, fields, label, line)))
     return out
 
 

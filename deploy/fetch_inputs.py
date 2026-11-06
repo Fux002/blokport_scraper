@@ -19,9 +19,9 @@ from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS,
-                                            THIN_COPY_MIN_FRACTION, category_for_key)
+                                            THIN_COPY_MIN_FRACTION, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key)
 from stone_pipeline.core import logfmt
-from stone_pipeline.reference.medusa_files import read_attributes
+from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("deploy.fetch_inputs")
 
@@ -43,11 +43,13 @@ _BASELINE_WHEN_ABSENT = {"variants_export.csv": "variants_export_base.csv"}
 # categories). Another vendor's variant is not the scraper's to match, mint or sync, and the ledger refuses it:
 # dev 2026-11-01, Blokport's non-stone test products (np-cattle-..., np-diesel-...) aborted the produce.
 _VARIANT_EXPORTS = {"variants_export.csv", "variants_export_base.csv"}
-# Downloads checked by their one reader BEFORE they replace the local copy. settings parses attributes.csv at
-# import, so a malformed copy written over the good one would stop every later produce at `import settings`, before
-# its own fetch could heal it; kept out, the next fetch heals the file once S3 is fixed.
+# Medusa's downloads, checked by their one reader BEFORE they replace the local copy. settings parses attributes.csv
+# at import, so a malformed copy written over the good one would stop every later produce at `import settings`, before
+# its own fetch could heal it (every stage reads the variants export the same way); kept out, the next fetch heals the
+# file once S3 is fixed.
 _READERS = {
     "attributes.csv": lambda path: read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED),
+    "variants_export.csv": lambda path: read_variants_export(path, require_status=VARIANTS_EXPORT_STATUS_REQUIRED),
 }
 
 

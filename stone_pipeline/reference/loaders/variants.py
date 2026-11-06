@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import io
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from stone_pipeline.config.settings import VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.reference.loaders.common import env, log
 from stone_pipeline.reference.loaders.identity import survivor_of, variety_identity
+from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
 
 
 @dataclass
@@ -52,10 +53,18 @@ class ExistingVariants:
     content_hash: str
 
 
-def _read_variant_records(path: Path) -> tuple[list[dict], str]:
+def variants_status_required(path: Path) -> bool:
+    """Whether reading `path` requires the status column: only Medusa's live export carries it. The existing-variety
+    file can also be the scraper's Id-free base, which never has the column, so the base is always read with
+    require_status False."""
+    return VARIANTS_EXPORT_STATUS_REQUIRED and Path(path) == env().SETTINGS.paths.export_file
+
+
+def _read_variant_records(path: Path) -> tuple[list[ExportVariation], str]:
     """One read of the file: the parsed rows and the same digest content_hash() would give."""
     data = path.read_bytes()
-    records = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline="")))
+    records = read_variants_export(data.decode("utf-8-sig"), require_status=variants_status_required(path),
+                                   name=str(path))
     return records, hashlib.sha256(data).hexdigest()[:16]
 
 
@@ -90,7 +99,7 @@ def load_variants(path: Path, branch: str, key_prefix: str | None = None) -> Var
     return table
 
 
-def _fill_tables(records: list[dict], table_for) -> None:
+def _fill_tables(records: list[ExportVariation], table_for) -> None:
     """Index each eligible record into the table `table_for(key)` picks (None = not this table)."""
     # CRITICAL: a RETIRED variety must not be a resolution target here either. The matcher stamps a
     # product's variation_key from THIS reference (built off the lagging Medusa export, which still lists a
@@ -115,22 +124,19 @@ def _fill_tables(records: list[dict], table_for) -> None:
         return not (looks_code_shaped(name) == "bare_code" or key in delete_keys)
     _by_identity: dict = {}
     for rec in records:
-        k = (rec.get("Key") or "").strip()
-        nm = (rec.get("Name") or "").strip()
-        if k and _eligible(k, nm):
-            _by_identity.setdefault(variety_identity(k, nm), []).append(k)
+        if rec.key and _eligible(rec.key, rec.name):
+            _by_identity.setdefault(variety_identity(rec.key, rec.name), []).append(rec.key)
     dup_losers = {k for keys in _by_identity.values() if len(keys) > 1
                   for k in keys if k != survivor_of(keys, _seed)}
     delete_keys = delete_keys | dup_losers
     for record in records:
-        name = (record.get("Name") or "").strip()
-        key = (record.get("Key") or "").strip()
+        name, key = record.name, record.key
         # The Id-free base is the matcher's fallback source when the live export is absent (post factory
         # reset -- see load_all). It has no Id column, so use the Key as the variation_id: Keys are unique,
         # so every base variety indexes distinctly instead of colliding on an empty id, and the matcher
         # recognizes it rather than minting a duplicate. Products link by Key (match_variation._key_for);
         # the real Medusa id fills in on the next pull. The live export (with an Id) is unaffected.
-        vid = (record.get("Id") or "").strip() or key
+        vid = record.id or key
         if not vid or not name:
             continue
         # Never match products to a JUNK existing variant -- a bare-code one ('Mgt','Gs', a supplier
@@ -142,9 +148,6 @@ def _fill_tables(records: list[dict], table_for) -> None:
         table = table_for(key)
         if table is None:
             continue
-        aliases_raw = (record.get("Aliases") or "").strip()
-        aliases = [a.strip() for a in aliases_raw.split("|") if a.strip()] if aliases_raw else []
         table.by_id[vid] = Variant(
-            variation_id=vid, key=key, name=name,
-            image=(record.get("Image") or "").strip(), aliases=aliases,
+            variation_id=vid, key=key, name=name, image=record.image, aliases=list(record.aliases),
         )

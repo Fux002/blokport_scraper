@@ -3,12 +3,12 @@ category by (normalized Name, normalized stone TYPE). Curate decides alias-vs-ne
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from stone_pipeline.matching import projections as proj
-from stone_pipeline.reference.loaders import existing_varieties_file, type_slug_from_key
+from stone_pipeline.reference.loaders import existing_varieties_file, type_slug_from_key, variants_status_required
+from stone_pipeline.reference.medusa_files import read_variants_export
 from stone_pipeline.stages.curate.keys import BRANCHES
 
 
@@ -34,23 +34,20 @@ def load_all_existing() -> dict[str, ImportFile]:
     output. A missing file raises: an empty existing index would mint every known variety again."""
     path = existing_varieties_file()
     imports = {b: ImportFile(branch=b, path=path) for b in BRANCHES}
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        for r in csv.DictReader(handle):
-            name = (r.get("Name") or "").strip()
-            key = (r.get("Key") or "").strip()
-            imp = imports.get(key.split("_", 1)[0].casefold())     # one combined file; the branch is the Key prefix
-            if name and imp is not None:
-                v = {
-                    "Key": key,
-                    "Name": name,
-                    "Image": (r.get("Image") or "").strip(),
-                    "Aliases": (r.get("Aliases") or "").strip(),
-                    "Volume": (r.get("Volume per kg (m³/kg)") or "").strip(),
-                    "type": proj.norm(type_slug_from_key(key)),   # the variety's stone type, from its Key
-                }
-                imp.varieties.append(v)
-                imp.by_name_type[(proj.norm(name), v["type"])] = v
-                imp.by_name[proj.norm(name)] = v   # name-only lookup (a review suggestion has no type)
+    for r in read_variants_export(path, require_status=variants_status_required(path)):
+        imp = imports.get(r.key.split("_", 1)[0].casefold())     # one combined file; the branch is the Key prefix
+        if r.name and imp is not None:
+            v = {
+                "Key": r.key,
+                "Name": r.name,
+                "Image": r.image,
+                "Aliases": "|".join(r.aliases),
+                "Volume": r.volume,
+                "type": proj.norm(type_slug_from_key(r.key)),   # the variety's stone type, from its Key
+            }
+            imp.varieties.append(v)
+            imp.by_name_type[(proj.norm(r.name), v["type"])] = v
+            imp.by_name[proj.norm(r.name)] = v   # name-only lookup (a review suggestion has no type)
     return imports
 
 

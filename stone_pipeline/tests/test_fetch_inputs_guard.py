@@ -168,7 +168,7 @@ def test_with_no_local_export_a_header_only_one_stays_absent(tmp_path, monkeypat
 
 def test_with_no_local_export_a_full_one_is_taken(tmp_path, monkeypatch):
     _committed_base(tmp_path)
-    full = "Id,Key\n" + "".join(f"v{i},slab_x_{i:04d}\n" for i in range(10))
+    full = "Id,Key,Name\n" + "".join(f"v{i},slab_x_{i:04d},X\n" for i in range(10))     # an export carries Name
     _main_with(tmp_path, monkeypatch, "variants_export.csv", full)
     assert (tmp_path / "variants_export.csv").read_text(encoding="utf-8").count("slab_x_") == 10
 
@@ -222,3 +222,23 @@ def test_the_produce_fetch_takes_a_well_formed_attributes_file(tmp_path, monkeyp
     body = "category,value,sourceid,status,internal\ncolor,Black,col_1,archived,false\n"
     _main_with(tmp_path, monkeypatch, "attributes.csv", body)
     assert (tmp_path / "attributes.csv").read_text(encoding="utf-8") == body
+
+
+def test_the_produce_fetch_stops_loud_on_a_malformed_variants_export(tmp_path, monkeypatch):
+    malformed = {
+        "empty status cell": "Id,Key,Name,status\nv1,slab_x_0001,X,active\nv2,slab_x_0002,Y,\n",
+        "no Name column": "Id,Key\nv1,slab_x_0001\nv2,slab_x_0002\n",
+    }
+    for problem, body in malformed.items():
+        local = tmp_path / "variants_export.csv"
+        local.write_text("Id,Key,Name\nv1,slab_x_0001,X\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="variants_export.csv"):
+            _main_with(tmp_path, monkeypatch, "variants_export.csv", body)
+        assert local.read_text(encoding="utf-8") == "Id,Key,Name\nv1,slab_x_0001,X\n", problem
+        assert not local.with_suffix(".csv.incoming").exists()
+
+
+def test_the_produce_fetch_takes_a_variants_export_with_status(tmp_path, monkeypatch):
+    body = "Id,Key,Name,status\nv1,slab_x_0001,X,archived\n"
+    _main_with(tmp_path, monkeypatch, "variants_export.csv", body)
+    assert (tmp_path / "variants_export.csv").read_text(encoding="utf-8") == body

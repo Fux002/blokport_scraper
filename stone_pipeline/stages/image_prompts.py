@@ -19,8 +19,9 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS, category_for_key
+from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key
 from stone_pipeline.core import logfmt
+from stone_pipeline.reference.medusa_files import read_variants_export
 
 log = logfmt.get_logger("image_prompts")
 
@@ -88,11 +89,8 @@ def product_backed_keys() -> set[str]:
     prods = SETTINGS.paths.to_upload_dir / "3_products_all.csv"
     if not (exp.exists() and prods.exists()):
         return keys
-    id_to_key: dict[str, str] = {}
-    with exp.open(encoding="utf-8-sig", newline="") as h:
-        for r in csv.DictReader(h):
-            if (r.get("Id") or "").strip() and (r.get("Key") or "").strip():
-                id_to_key[r["Id"].strip()] = r["Key"].strip()
+    id_to_key = {r.id: r.key for r in read_variants_export(exp, require_status=VARIANTS_EXPORT_STATUS_REQUIRED)
+                 if r.id and r.key}
     with prods.open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
             k = id_to_key.get((r.get("STN Variation Id") or "").strip())

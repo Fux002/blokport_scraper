@@ -14,7 +14,6 @@ stamped in place and re-running yields an identical file:
 
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
@@ -30,6 +29,8 @@ from stone_pipeline.core.text import (
     split_bracket_alias,
     title_case,
 )
+from stone_pipeline.reference.loaders import variants_status_required
+from stone_pipeline.reference.medusa_files import read_variants_export
 
 log = logfmt.get_logger("emit_catalog")
 
@@ -136,11 +137,13 @@ def _image_link(key: str, has_export_image: bool, backed: bool,
 
 
 def _rows(path: Path) -> list[dict]:
-    if not Path(path).exists():
+    """The _COLS rows with a Key of a variants file: the base, Medusa's live export or this produce's update
+    delta, which share the shape."""
+    path = Path(path)
+    if not path.exists():
         return []
-    with Path(path).open(encoding="utf-8-sig") as h:
-        return [{c: (r.get(c) or "") for c in _COLS}
-                for r in csv.DictReader(h) if (r.get("Key") or "").strip()]
+    return [dict(zip(_COLS, (v.key, v.name, v.image, "|".join(v.aliases), v.volume)))
+            for v in read_variants_export(path, require_status=variants_status_required(path)) if v.key]
 
 
 def _posts_of(data) -> list[dict]:

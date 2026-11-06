@@ -21,13 +21,14 @@ import shutil
 import sys
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS, STANDARDISE
+from stone_pipeline.config.settings import SETTINGS, STANDARDISE, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.adapters.tokens import explicit_type_word
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.layout import write_sync_md
 from stone_pipeline.core.text import looks_code_shaped
 from stone_pipeline.io import staging
 from stone_pipeline.reference import loaders
+from stone_pipeline.reference.medusa_files import ExportVariation, read_variants_export
 from stone_pipeline.stages import build_tile_backbone, curate, emit, emit_catalog, tree_build
 
 log = logfmt.get_logger("catalog")
@@ -573,24 +574,19 @@ def write_variants_to_delete() -> int:
     if not exp.exists():
         return 0
     rows = []
-    export_keys: set[str] = set()
-    by_key: dict[str, dict] = {}
-    with exp.open(encoding="utf-8-sig", newline="") as h:
-        for r in csv.DictReader(h):
-            name = (r.get("Name") or "").strip()
-            key = (r.get("Key") or "").strip()
-            if key:
-                export_keys.add(key)
-                by_key[key] = r
-            reason = ""
-            if name and looks_code_shaped(name) == "bare_code":
-                reason = "bare_code: supplier code/brand abbreviation, not a variety"
-            elif name and loaders.is_mistyped_variant(key, name):
-                kt = key.split("_")[1] if key.count("_") >= 2 else "?"
-                reason = f"mistyped: name says '{explicit_type_word(name)}' but keyed as type '{kt}'"
-            if reason:
-                rows.append({"Key": key, "Name": name, "Id": (r.get("Id") or "").strip(),
-                             "Image": (r.get("Image") or "").strip(), "reason": reason})
+    by_key: dict[str, ExportVariation] = {}
+    for r in read_variants_export(exp, require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
+        name, key = r.name, r.key
+        if key:
+            by_key[key] = r
+        reason = ""
+        if name and looks_code_shaped(name) == "bare_code":
+            reason = "bare_code: supplier code/brand abbreviation, not a variety"
+        elif name and loaders.is_mistyped_variant(key, name):
+            kt = key.split("_")[1] if key.count("_") >= 2 else "?"
+            reason = f"mistyped: name says '{explicit_type_word(name)}' but keyed as type '{kt}'"
+        if reason:
+            rows.append({"Key": key, "Name": name, "Id": r.id, "Image": r.image, "reason": reason})
     out = SETTINGS.paths.review_dir / "variants_to_delete.csv"
     # Preserve a previously-flagged variant that auto-detection can't re-derive (e.g. a single-token
     # name like 'Sodalita' that isn't an explicit type word) AS LONG AS it is still in the export.
@@ -599,11 +595,11 @@ def write_variants_to_delete() -> int:
     if out.exists():
         for prev in csv.DictReader(out.open(encoding="utf-8-sig")):
             pk = (prev.get("Key") or "").strip()
-            if pk and pk in export_keys and pk not in auto_keys:
-                src = by_key.get(pk, {})
-                rows.append({"Key": pk, "Name": (src.get("Name") or prev.get("Name") or "").strip(),
-                             "Id": (src.get("Id") or prev.get("Id") or "").strip(),
-                             "Image": (src.get("Image") or prev.get("Image") or "").strip(),
+            if pk and pk in by_key and pk not in auto_keys:
+                src = by_key[pk]
+                rows.append({"Key": pk, "Name": src.name or (prev.get("Name") or "").strip(),
+                             "Id": src.id or (prev.get("Id") or "").strip(),
+                             "Image": src.image or (prev.get("Image") or "").strip(),
                              "reason": prev.get("reason") or "flagged for deletion"})
     out.parent.mkdir(parents=True, exist_ok=True)
     # operator-opened delete list carrying scraped Names -> sanitize against formula injection + atomic.
@@ -679,6 +675,11 @@ def verify_consistency() -> tuple[list[str], list[str]]:
         except FileNotFoundError:
             return set()
 
+    def _export_ids(path: Path) -> set[str]:
+        if not path.exists():
+            return set()
+        return {v.id for v in read_variants_export(path, require_status=VARIANTS_EXPORT_STATUS_REQUIRED) if v.id}
+
     # Full-combination tuples, in ONE canonical field order (type, variation, finish, colour, quality),
     # so the product feed's STN ids and the valid-combinations columns compare directly. Category is
     # pinned by variation_id (Key prefix), so it is redundant in the tuple. Only complete tuples (every
@@ -708,7 +709,7 @@ def verify_consistency() -> tuple[list[str], list[str]]:
     from stone_pipeline.stages.product_state import load_known_products
     known = load_known_products()
     errors, warnings = _consistency_errors(
-        export_ids=_ids(p.variants_export_csv, "Id"),
+        export_ids=_export_ids(p.variants_export_csv),
         combo_ids=_ids(p.to_upload_dir / "2_valid_combinations.csv", "variation_id"),
         prod_ids=_ids(p.to_upload_dir / "3_products_all.csv", "STN Variation Id"),
         inv_skus={s.upper() for s in _ids(p.to_upload_dir / "4_inventory_update.csv", "Variant Sku")},

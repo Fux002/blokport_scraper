@@ -88,6 +88,9 @@ _OUTPUTS = REPO_ROOT / "outputs" / ENV_NAME                # the env's per-sourc
 # Blokport change 1 (VE2) adds status/internal columns to attributes.csv. While False an absent column reads as
 # active and not internal; step C flips this once Blokport change 1 is live on prod, so a missing column fails loud.
 ATTRIBUTES_STATUS_REQUIRED = False
+# The same change adds a status column (active|archived) to Medusa's variants_export.csv, flipped with it in
+# step C. Only that export is held to it: the scraper's own base files never carry the column.
+VARIANTS_EXPORT_STATUS_REQUIRED = False
 
 
 def _env_bool(name: str, default: bool) -> bool:

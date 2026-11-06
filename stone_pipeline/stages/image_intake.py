@@ -26,9 +26,10 @@ import shutil
 from collections import defaultdict
 from pathlib import Path
 
-from stone_pipeline.config.settings import CATEGORIES, SETTINGS, category_for_key
+from stone_pipeline.config.settings import CATEGORIES, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED, category_for_key
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.text import ascii_fold
+from stone_pipeline.reference.medusa_files import read_variants_export
 
 log = logfmt.get_logger("image_intake")
 
@@ -70,21 +71,18 @@ def build_lookups():
     by_basename: dict[str, str] = {}
     variants: dict[str, dict] = {}
     for f in _variant_files():
-        with f.open(encoding="utf-8-sig", newline="") as h:
-            for r in csv.DictReader(h):
-                key = (r.get("Key") or "").strip()
-                if not key:
-                    continue
-                cat = category_for_key(key)        # None for a malformed/legacy Key prefix
-                if cat is None:
-                    continue                        # skip that row, don't crash the whole intake
-                img = (r.get("Image") or "").strip()
-                rec = variants.setdefault(key, {"Name": (r.get("Name") or "").strip(),
-                                                "branch": cat.name, "has_image": False})
-                by_stem[key_stem(key)].add(key)
-                if img:
-                    by_basename[Path(img).name.lower()] = key
-                    rec["has_image"] = True
+        for r in read_variants_export(f, require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
+            key = r.key
+            if not key:
+                continue
+            cat = category_for_key(key)        # None for a malformed/legacy Key prefix
+            if cat is None:
+                continue                        # skip that row, don't crash the whole intake
+            rec = variants.setdefault(key, {"Name": r.name, "branch": cat.name, "has_image": False})
+            by_stem[key_stem(key)].add(key)
+            if r.image:
+                by_basename[Path(r.image).name.lower()] = key
+                rec["has_image"] = True
     return by_stem, by_basename, variants
 
 

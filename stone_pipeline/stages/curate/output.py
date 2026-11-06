@@ -7,10 +7,11 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS
+from stone_pipeline.config.settings import SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.reference.medusa_files import read_variants_export
 from stone_pipeline.stages.curate.context import CurationResult
 from stone_pipeline.stages.curate.keys import BRANCHES
 
@@ -56,11 +57,9 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     exp_idx: dict[str, tuple[set, str]] = {}
     ef = SETTINGS.paths.export_file
     if ef.exists():
-        with ef.open(encoding="utf-8-sig") as h:
-            for r in csv.DictReader(h):
-                if (r.get("Key") or "").strip():
-                    exp_idx[r["Key"]] = ({proj.norm(a) for a in (r.get("Aliases") or "").split("|") if a.strip()},
-                                         (r.get("Image") or "").strip())
+        for r in read_variants_export(ef, require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
+            if r.key:
+                exp_idx[r.key] = ({proj.norm(a) for a in r.aliases}, r.image)
 
     def _is_real_delta(row: dict) -> bool:
         e = exp_idx.get(row["Key"])
