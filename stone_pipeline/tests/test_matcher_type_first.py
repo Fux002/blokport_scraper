@@ -127,3 +127,49 @@ def test_a_lone_fuzzy_winner_still_binds():
     idx.add("c", "Bianco Carrara", [], block_type="Marble")
     m = _engine(idx).match("Bianco Carrara X", block_type="Marble")
     assert m.cid == "c" and m.method == "fuzzy"
+
+
+def _calacatta(origins: tuple[set, set, set]) -> CandidateIndex:
+    idx = CandidateIndex()
+    idx.add("d1", "Calacatta Gold", [], block_type="Marble", origins=origins[0])
+    idx.add("d2", "Calacatta Gold", [], block_type="Marble", origins=origins[1])
+    idx.add("g", "Calacatta Golf", [], block_type="Marble", origins=origins[2])
+    return idx
+
+
+def test_a_tie_origin_narrows_away_from_the_duplicate_is_not_ambiguous():
+    # three tied (two same-name 'Calacatta Gold' + 'Calacatta Golf'); Italian origin keeps one Gold and the
+    # Golf: what is left is a tie between DISTINCT stones, so it is a review but not flagged ambiguous (the
+    # ambiguity is read from the origin-narrowed set, as the exact tier does)
+    m = _engine(_calacatta(({"IT"}, {"IN"}, {"IT"}))).match("Calacatta Golx", block_type="Marble", block_origin="IT")
+    assert m.cid is None and m.method == "review" and not m.ambiguous
+
+
+def test_a_tie_origin_narrows_to_the_duplicate_is_ambiguous():
+    m = _engine(_calacatta(({"IT"}, {"IT"}, {"TR"}))).match("Calacatta Golx", block_type="Marble", block_origin="IT")
+    assert m.cid is None and m.method == "review" and m.ambiguous
+
+
+# The short-name guard applies to the stone that origin picks, whatever the file order: 'Glacier' (one word) never
+# wins a three-word query, while the two-word 'Arctic Snow' may. Both carry the same alias, so they tie.
+_POLAR = {"a": ("Arctic Snow", ["Polar Iceberg White"], {"IT"}), "b": ("Glacier", ["Polar Iceberg White"], {"TR"})}
+
+
+def _polar(order) -> CandidateIndex:
+    idx = CandidateIndex()
+    for cid in order:
+        name, aliases, origins = _POLAR[cid]
+        idx.add(cid, name, aliases, block_type="Marble", origins=origins)
+    return idx
+
+
+@pytest.mark.parametrize("order", [("a", "b"), ("b", "a")])
+def test_origin_never_binds_a_tied_stone_the_short_name_guard_rejects(order):
+    m = _engine(_polar(order)).match("Polar Iceberg Whitx", block_type="Marble", block_origin="TR")
+    assert m.cid is None and m.method == "review"
+
+
+@pytest.mark.parametrize("order", [("a", "b"), ("b", "a")])
+def test_origin_binds_a_tied_stone_that_passes_the_guard_in_any_file_order(order):
+    m = _engine(_polar(order)).match("Polar Iceberg Whitx", block_type="Marble", block_origin="IT")
+    assert m.cid == "a" and m.method == "fuzzy_origin"

@@ -401,30 +401,32 @@ class VariationEngine:
         scored.sort(key=rank, reverse=True)
 
         if scored:
-            top_cid, top_name, top_score = scored[0]
-            # length/token guard: a short generic candidate must not win
-            if top_score >= self.auto_accept and self._passes_guard(query, top_name):
+            top_score = scored[0][2]
+            if top_score >= self.auto_accept:
                 # HOLD-not-guess: a top fuzzy rank (score, then a canonical-name hit over an alias hit) TIED
                 # between several varieties is a guess between different stones, so it goes to review;
                 # auto-accepting would pick one by export-row order (the pick swaps when the file order
                 # swaps) and the write-back would learn it. Origin breaks the tie exactly like an exact-tier
-                # tie (one rule, one rung). A tie between candidates that share a canonical name (a genuine
-                # same-name duplicate, e.g. two 'Calacatta Gold') is flagged AMBIGUOUS so the match-stage
-                # retries do not fire on it (the same detector and flag as the exact tier). A tie between
-                # DISTINCT stones ('Arabescatto' equidistant from two 'Arabescato ...' varieties through their
-                # shared family alias) is not: a stronger raw spelling may still name one of them, as for an
-                # exact-tier collision. A lone winner ('Bianco Carara') still binds.
-                tied = [t[0] for t in scored if rank(t) == rank(scored[0])]
+                # tie (one rule, one rung). A tie origin leaves between candidates that share a canonical
+                # name (a genuine same-name duplicate, e.g. two 'Calacatta Gold') is flagged AMBIGUOUS so the
+                # match-stage retries do not fire on it (the same detector and flag as the exact tier, read
+                # from the origin-narrowed set). A tie between DISTINCT stones ('Arabescatto' equidistant from
+                # two 'Arabescato ...' varieties through their shared family alias) is not: a stronger raw
+                # spelling may still name one of them, as for an exact-tier collision. A lone winner ('Bianco
+                # Carara') still binds.
+                tied = [t for t in scored if rank(t) == rank(scored[0])]
+                winner, method = tied[0], "fuzzy"
                 if len(tied) > 1:
-                    by_origin = self._narrow_by_origin(set(tied), block_origin)
+                    by_origin = self._narrow_by_origin({t[0] for t in tied}, block_origin)
                     if len(by_origin) > 1:
                         return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3],
-                                              ambiguous=bool(self._duplicate_canonical_group(tied)))
-                    top_cid = next(iter(by_origin))
-                    top_name = next(n for c, n, _s in scored if c == top_cid)
-                    return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy_origin", top_score,
+                                              ambiguous=bool(self._duplicate_canonical_group(by_origin)))
+                    winner, method = next(t for t in tied if t[0] in by_origin), "fuzzy_origin"
+                # length/token guard on the stone that would bind (the lone winner or origin's pick, never
+                # whichever tied stone the file listed first): a short generic candidate must not win
+                if self._passes_guard(query, winner[1]):
+                    return VariationMatch(winner[0], winner[1], Confidence.medium, method, top_score,
                                           scored[:3])
-                return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy", top_score, scored[:3])
             if top_score >= self.review_floor:
                 return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3])
 
