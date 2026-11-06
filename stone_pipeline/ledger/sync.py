@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.core import logfmt
 from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, RECORD_SYNCED_STOCK_SQL,
                                       STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql, now_iso,
@@ -39,37 +40,26 @@ log = logfmt.get_logger("ledger.sync")
 class ServeInFlight(Exception):
     """A reset was attempted while a pull holds a lease ('syncing' rows). The caller maps it to 409."""
 
-# After this many CONSECUTIVE failed Medusa applies, an entity is dead-lettered (state 'gap_held'):
-# it stops being served (no infinite poison-pill retry) and surfaces in /status for a human. A later
-# populate with changed data, or an explicit requeue, un-quarantines it.
-_MAX_SYNC_ATTEMPTS = 5
-
-# A failed apply is not re-served on the very next pull: a passing hiccup (an S3 blip while Medusa copies a photo)
-# would fail every immediate retry too and reach the dead-letter cap within seconds. It waits _RETRY_BASE_SECONDS,
-# doubled with each consecutive failure (5, 10, 20, 40 min), so the cap means over an hour of real failures.
-_RETRY_BASE_SECONDS = 300
-_RETRY_FACTOR = 2
-
 
 def _retry_after(attempts: int) -> str:
-    """When an entity that just failed for the attempts-th time in a row may be served again."""
-    wait = _RETRY_BASE_SECONDS * _RETRY_FACTOR ** (attempts - 1)
+    """When an entity that just failed for the attempts-th time in a row may be served again (SETTINGS.sync)."""
+    wait = SETTINGS.sync.retry_base_seconds * SETTINGS.sync.retry_factor ** (attempts - 1)
     return (datetime.now(timezone.utc) + timedelta(seconds=wait)).isoformat()
 
 
-# A served-but-not-yet-acked entity is leased in state 'syncing' (the in-flight guard) so two
-# overlapping pulls can NEVER double-serve the same rows. If Medusa pulls but never acks (crash /
-# lost response), the lease is reclaimed to 'dirty' after this many seconds and re-served.
-_SYNCING_LEASE_SECONDS = 900   # 15 min -- comfortably longer than a pull->apply->ack cycle
-
-
+# A served-but-not-yet-acked entity is leased in state 'syncing' (the in-flight guard) so two overlapping pulls can
+# NEVER double-serve the same rows. If Medusa pulls but never acks (crash / lost response), the lease is reclaimed to
+# 'dirty' after SETTINGS.sync.syncing_lease_seconds and re-served.
 def reap_stale_syncing(ledger: Ledger, table: str | None = None,
-                       older_than_s: int = _SYNCING_LEASE_SECONDS) -> int:
+                       older_than_s: int | None = None) -> int:
     """Return dead leases ('syncing' older than `older_than_s`) to 'dirty' so they re-serve.
     Called lazily at the head of every serve, so a crashed puller's in-flight rows recover on the
     next pull without a background job. POST /sync/v1/release-leases calls it with 0: the consumer's
     run, the ledger's one puller under its catalog lock, declares every lease dead before its first
-    pull (PHASE-0 Q8). Returns the number reclaimed."""
+    pull (PHASE-0 Q8). `older_than_s` None = the lease (SETTINGS.sync.syncing_lease_seconds). Returns the number
+    reclaimed."""
+    if older_than_s is None:
+        older_than_s = SETTINGS.sync.syncing_lease_seconds
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=older_than_s)).isoformat()
     now, n = now_iso(), 0
     for t in ([table] if table else ["variation", "product"]):
@@ -265,11 +255,11 @@ _STOCK_GATE = f"{in_medusa_sql('p')} AND (p.state = 'synced' OR NOT {UNHIDE_SQL}
 # abandoned, not waiting out a failed ack). Parameter: the current time.
 _UNHIDE_WAITING = ("FROM inventory i JOIN product p ON p.sku = i.sku "
                    f"WHERE {in_medusa_sql('p')} AND p.state != 'synced' AND {UNHIDE_SQL} AND {STOCK_DELTA_SQL} "
-                   f"AND i.sync_attempts < {_MAX_SYNC_ATTEMPTS} AND i.abandoned_at IS NULL "
+                   f"AND i.sync_attempts < {SETTINGS.sync.max_attempts} AND i.abandoned_at IS NULL "
                    "AND (i.retry_after IS NULL OR i.retry_after <= ?)")
 
 # A dead stock row (alias i): the failed/refused acks reached the cap, and the operator has not abandoned it.
-_STOCK_DEAD = f"i.sync_attempts >= {_MAX_SYNC_ATTEMPTS} AND i.abandoned_at IS NULL"
+_STOCK_DEAD = f"i.sync_attempts >= {SETTINGS.sync.max_attempts} AND i.abandoned_at IS NULL"
 
 # ONE definition of the inventory lane, used by the serve, the non-leasing peek and GET /status's `delta`, so the
 # three never disagree: a stock delta through the stock gate, not waiting out a failed ack (retry_after), not dead or
@@ -288,7 +278,7 @@ _INVENTORY_LANE = (
 
 def _count_inventory_lane(ledger: Ledger) -> int:
     return ledger.execute("SELECT COUNT(*) AS n " + _INVENTORY_LANE,
-                          (now_iso(), _MAX_SYNC_ATTEMPTS)).fetchone()["n"]
+                          (now_iso(), SETTINGS.sync.max_attempts)).fetchone()["n"]
 
 
 def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
@@ -297,7 +287,7 @@ def ready_inventory(ledger: Ledger, limit: int | None = None) -> list[dict]:
     rows = ledger.execute(
         "SELECT i.sku AS sku, i.qty AS qty, i.made_to_order AS made_to_order, i.reason AS reason, "
         "i.replaced_by_lot_code AS lot_code " + _INVENTORY_LANE +
-        "ORDER BY i.sku" + _sub_limit(limit), (now_iso(), _MAX_SYNC_ATTEMPTS))
+        "ORDER BY i.sku" + _sub_limit(limit), (now_iso(), SETTINGS.sync.max_attempts))
     out = []
     for r in rows:
         # quantity is null exactly when made_to_order (on sale with no count)
@@ -352,11 +342,11 @@ def _ack_inventory(ledger: Ledger, sku: str, failed: bool, reason: str | None,
     is always recorded as synced, whatever the product did since the serve (the un-hide gate is the serve's only: a
     dropped ack would leave Medusa on sale with no delta left to correct it), and clears the failure bookkeeping.
     A failure, or a success the echo guard refuses, counts an attempt and waits like a failed product (_retry_after,
-    dead at _MAX_SYNC_ATTEMPTS): without it the row stays a delta at the head of the sku-ordered page and re-serves
-    on every pull. Only a row that is a delta now counts a failure: a late or duplicate 'failed' for a stock already
-    synced is no failure of anything still to send. Returns 1 when the stock was recorded as
-    synced or the failure recorded, 0 for an unknown sku, a product not in Medusa, a refused echo, or a failure on a
-    row with nothing to send.
+    dead at SETTINGS.sync.max_attempts): without it the row stays a delta at the head of the sku-ordered page and
+    re-serves on every pull. Only a row that is a delta now counts a failure: a late or duplicate 'failed' for a stock
+    already synced is no failure of anything still to send. Returns 1 when the stock was recorded as synced or the
+    failure recorded, 0 for an unknown sku, a product not in Medusa, a refused echo, or a failure on a row with
+    nothing to send.
 
     F4 lost-update guard: the stock is recorded only if the SERVED stock is still the current one. Each stock field
     the ack echoes must equal the live one: a produce that moved stock between serve and ack makes it differ, so the
@@ -389,12 +379,12 @@ def _ack_inventory(ledger: Ledger, sku: str, failed: bool, reason: str | None,
 
 
 def _fail_inventory(ledger: Ledger, sku: str, attempts_before: int, error: str) -> int:
-    """Count one failed attempt on an inventory row: it waits _retry_after, and at _MAX_SYNC_ATTEMPTS it is dead (the
-    lane stops serving it; GET /failures lists it until a requeue, or a new stock, clears it)."""
+    """Count one failed attempt on an inventory row: it waits _retry_after, and at SETTINGS.sync.max_attempts it is
+    dead (the lane stops serving it; GET /failures lists it until a requeue, or a new stock, clears it)."""
     attempts = attempts_before + 1
     cur = ledger.execute("UPDATE inventory SET sync_attempts = ?, sync_error = ?, retry_after = ?, updated_at = ? "
                          "WHERE sku = ?", (attempts, error[:500], _retry_after(attempts), now_iso(), sku))
-    if attempts >= _MAX_SYNC_ATTEMPTS:
+    if attempts >= SETTINGS.sync.max_attempts:
         log.warning("stock dead-lettered after repeated failed acks",
                     extra={"extra_fields": {"sku": sku, "attempts": attempts, "error": error}})
     return cur.rowcount
@@ -425,8 +415,8 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
     stored Medusa id is never cleared (a row without one is dropped locally on retire, with no tombstone).
     Raises ValueError for an unknown lane (nothing to record it on).
       success -> record the minted/matched id, mark synced, clear the failure counter+reason.
-      failure -> record the reason and re-serve (dirty) once its retry_after has passed (_RETRY_BASE_SECONDS,
-                 doubling per consecutive failure); after _MAX_SYNC_ATTEMPTS consecutive failures the entity
+      failure -> record the reason and re-serve (dirty) once its retry_after has passed (_retry_after, growing
+                 per consecutive failure); after SETTINGS.sync.max_attempts consecutive failures the entity
                  is DEAD-LETTERED to 'gap_held' (stops serving, surfaces in /status).
     Inventory: see _ack_inventory; removed: see _ack_removed.
 
@@ -455,7 +445,7 @@ def ack(ledger: Ledger, type_: str, external_id: str, medusa_id: str | None = No
         row = ledger.execute(f"SELECT sync_attempts FROM {table} WHERE {pk} = ?",
                              (external_id,)).fetchone()
         attempts = ((row["sync_attempts"] if row else 0) or 0) + 1
-        state = "gap_held" if attempts >= _MAX_SYNC_ATTEMPTS else "dirty"   # dead-letter at the cap
+        state = "gap_held" if attempts >= SETTINGS.sync.max_attempts else "dirty"   # dead-letter at the cap
         # same retire guard as the success path below: a stray/out-of-order FAILED ack must NOT knock a
         # 'retiring' row back to dirty/gap_held, which would re-enter the serve lane while its tombstone
         # still serves /removed. A failed ack on a retiring row is a no-op (0 rows) by design.
@@ -525,10 +515,10 @@ def _ack_removed(ledger: Ledger, external_id: str, failed: bool, reason: str | N
 
 
 def _block_tombstone(ledger: Ledger, external_id: str, attempts_before: int, error: str) -> int:
-    """Count one undelivered delete: the tombstone waits _retry_after, and after _MAX_SYNC_ATTEMPTS it is 'dead'
-    so a permanently-reserved id stops re-serving (GET /failures lists it; a requeue serves it again)."""
+    """Count one undelivered delete: the tombstone waits _retry_after, and after SETTINGS.sync.max_attempts it is
+    'dead' so a permanently-reserved id stops re-serving (GET /failures lists it; a requeue serves it again)."""
     attempts = attempts_before + 1
-    state = "dead" if attempts >= _MAX_SYNC_ATTEMPTS else "pending"
+    state = "dead" if attempts >= SETTINGS.sync.max_attempts else "pending"
     cur = ledger.execute(
         "UPDATE removed SET state = ?, sync_attempts = ?, sync_error = ?, retry_after = ?, updated_at = ? "
         "WHERE external_id = ?", (state, attempts, error[:500], _retry_after(attempts), now_iso(), external_id))
@@ -589,7 +579,7 @@ def failures(ledger: Ledger, limit: int = 200) -> list[dict]:
     for r in ledger.execute(                             # stock Medusa kept failing or refusing
         "SELECT sku, sync_attempts, sync_error, updated_at, abandoned_at FROM inventory "
         "WHERE sync_attempts >= ? OR abandoned_at IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
-            (_MAX_SYNC_ATTEMPTS, limit)):
+            (SETTINGS.sync.max_attempts, limit)):
         out.append(_row("inventory", r["sku"], "dead", r["sync_attempts"], r["sync_error"], r["updated_at"],
                         r["abandoned_at"]))
     return out
@@ -1004,7 +994,7 @@ _ABANDONABLE = {
     "variations": ("variation", "key", "state = 'gap_held'", "gap_held"),
     "products": ("product", "sku", "state = 'gap_held'", "gap_held"),
     "removed": ("removed", "external_id", "state = 'dead'", "dead"),
-    "inventory": ("inventory", "sku", f"sync_attempts >= {_MAX_SYNC_ATTEMPTS}", "dead"),
+    "inventory": ("inventory", "sku", f"sync_attempts >= {SETTINGS.sync.max_attempts}", "dead"),
 }
 
 

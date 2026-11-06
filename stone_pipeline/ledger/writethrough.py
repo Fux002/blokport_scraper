@@ -1,9 +1,10 @@
-"""Phase 2 write-through: a real run also populates the ledger (flag-gated, shadow).
+"""Write-through: a real run also populates the ledger, the live sync source Medusa pulls (flag-gated).
 
 OFF by default. Enable with SCRAPER_LEDGER_WRITETHROUGH=1 (legacy BLOKPORT_ still read). When on, run_source
 records its emitted products and the inventory delta into the per-env ledger AFTER
-the CSVs are written, so the ledger is a shadow mirror and the live CSV flow is
-unchanged. A ledger error is caught and logged, never failing the run.
+the CSVs are written. A ledger error is logged and reported as a failed write-through (record_source /
+record_catalog return False), and the caller fails the run on it: a change that did not reach the ledger
+never reaches Medusa.
 
 A run records its emitted products, the changed-stock inventory delta, and the
 discontinued delist; a stock-only run records the stock and the delist but never a

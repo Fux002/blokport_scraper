@@ -468,29 +468,38 @@ LAST, `manifest.json` next to them:
   "run_id": "20260911143633034",
   "produced_at": "2026-09-11T14:42:59Z",
   "files": {
-    "2_valid_combinations.csv":               {"sha256": "…", "rows": 2501238, "bytes": 420208056},
-    "2_valid_combinations_products_only.csv": {"sha256": "…", "rows": 46244,   "bytes": 7769064},
-    "1_variants_full.csv":                    {"sha256": "…", "rows": 36582,   "bytes": 9763859},
-    "3_products_all.csv":                     {"sha256": "…", "rows": 2728,    "bytes": 3626025}
+    "2_valid_combinations.csv":               {"sha256": "…", "rows": 2501238, "bytes": 420208056, "version_id": "…"},
+    "2_valid_combinations_products_only.csv": {"sha256": "…", "rows": 46244,   "bytes": 7769064,   "version_id": "…"},
+    "1_variants_full.csv":                    {"sha256": "…", "rows": 36582,   "bytes": 9763859,   "version_id": "…"},
+    "3_products_all.csv":                     {"sha256": "…", "rows": 2728,    "bytes": 3626025,   "version_id": "…"}
   }
 }
 ```
 
 - `sha256` is over the exact bytes of the S3 object (hash the stream you import and compare);
-  `rows` is data rows, header excluded, CSV-parsed. Every published file is listed.
-- A file is uploaded only when its hash differs from the manifest already on S3, so unchanged
-  content keeps its object and timestamp. The manifest is rewritten on every publish with a new
-  `run_id` / `produced_at`, so "nothing changed" is the same hashes under a newer manifest: a
-  no-op for a hash-keyed guard, never a block.
+  `rows` is CSV records, header excluded, CSV-parsed: a truly empty line is not a record, a record
+  whose fields are all empty (`,,,`) is. Every deliverable is listed.
+- `version_id` is the S3 VersionId of the object holding exactly those bytes (S3 verified them
+  against `sha256` on upload). The files keep their fixed names, so reading `<name>` works as
+  before; a GET with `versionId=<version_id>` reads the manifest's bytes even while a later
+  produce overwrites the fixed name. Reading by version needs `s3:GetObjectVersion` on your role
+  (plus `kms:Decrypt` on the bucket's key when the bucket is KMS-encrypted), beside `s3:GetObject`.
+- A file is uploaded only when its hash differs from the manifest already on S3, or its fixed name
+  no longer holds the version that manifest names; unchanged content keeps its object, version and
+  timestamp. The manifest is rewritten on every publish with a new `run_id` / `produced_at`, so
+  "nothing changed" is the same hashes under a newer manifest: a no-op for a hash-keyed guard,
+  never a block.
 - Ordering: files first, manifest last, one PUT. A manifest never names content that is not
-  there. A produce landing mid-import shows as a stream-hash mismatch on your side: fail loud,
-  retry. Key your "combinations changed?" guard on `files["2_valid_combinations.csv"].sha256`
-  against the hash you last loaded, never on timestamps.
+  there. Reading a fixed name, a produce landing mid-import shows as a stream-hash mismatch on
+  your side: fail loud, retry (or read by `version_id`, which never mismatches).
+- Key your "combinations changed?" guard on `files["2_valid_combinations.csv"].sha256` against the
+  hash you last loaded, never on timestamps.
 - The former `2_valid_combinations_update.csv` (the delta since the scraper's last BUILD, not since
-  your last load) is no longer written. The manifest lists every file in `to_upload/`, so a task
+  your last load) is no longer written. The manifest lists every deliverable in `to_upload/`, so a task
   that still holds an old copy keeps listing it until it restarts (the folder is rebuilt then).
-- `standardise_photo_list.json` (each product's own photos, for the scraper's photo process) is
-  listed like every file there; it is not an import file, ignore it.
+- Files in `to_upload/` that are not deliverables (`SYNC_STEPS.md`, `standardise_photo_list.json`
+  for the scraper's photo process, `variant_image_shas.json`) are published beside them and recorded
+  under the manifest's `side_files`, never under `files`: ignore them.
 
 ---
 

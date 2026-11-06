@@ -7,6 +7,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.ledger import sync
 from stone_pipeline.ledger.db import Ledger, now_iso
@@ -67,7 +68,7 @@ def test_the_wait_doubles_with_each_consecutive_failure_and_the_cap_still_dead_l
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _live_product(ledger)
         waits = []
-        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             before = datetime.now(timezone.utc)
             ack(ledger, "products", "P-1", status_="failed", reason="photo copy timed out")
             waits.append((datetime.fromisoformat(ledger.get("product", "sku", "P-1")["retry_after"]) - before).total_seconds())
@@ -87,7 +88,7 @@ def test_a_success_ends_the_wait(tmp_path):
 def test_a_requeue_serves_a_dead_letter_at_once(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _live_product(ledger)
-        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             ack(ledger, "products", "P-1", status_="failed", reason="Medusa 400")
         assert requeue_dead_lettered(ledger) == 1
         assert ledger.get("product", "sku", "P-1")["retry_after"] is None

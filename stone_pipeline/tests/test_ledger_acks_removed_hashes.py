@@ -10,6 +10,7 @@ import sqlite3
 
 import pytest
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.ledger import payloads, sync
 from stone_pipeline.ledger.db import Ledger, now_iso
@@ -76,7 +77,7 @@ def test_a_status_outside_its_lane_is_a_failed_attempt_never_an_apply(tmp_path, 
         sync.record_tombstones(ledger, [("T-1", "s")])
         xid = {"products": "S-1", "variations": "slab_marble_x_1", "inventory": "S-1", "removed": "T-1"}[type_]
         table, pk = _TABLE[type_]
-        for attempt in range(1, sync._MAX_SYNC_ATTEMPTS + 1):
+        for attempt in range(1, SETTINGS.sync.max_attempts + 1):
             _batch(ledger, {"type": type_, "external_id": xid, "medusa_id": "M-9", "status": status})
             row = ledger.get(table, pk, xid)
             assert row["sync_attempts"] == attempt and row["sync_error"] == f"unknown ack status {status!r}"
@@ -93,7 +94,7 @@ def test_a_success_without_an_id_is_a_failed_attempt_and_keeps_the_stored_id(tmp
         ack = {"type": "variations", "external_id": "slab_marble_x_1", "status": "updated"}
         if medusa_id is not None:
             ack["medusa_id"] = medusa_id
-        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             _batch(ledger, ack)
         row = ledger.get("variation", "key", "slab_marble_x_1")
         assert (row["medusa_id"], row["state"], row["sync_error"]) == ("V-1", "gap_held", "success ack without medusa_id")
@@ -107,7 +108,7 @@ def test_an_inventory_skipped_is_a_stock_the_consumer_did_not_apply(tmp_path):
         _variation(ledger, "slab_marble_x_1")
         _product(ledger, "S-1", state="synced", medusa_id="P-1")
         _stock(ledger, "S-1", 3)
-        for attempt in range(1, sync._MAX_SYNC_ATTEMPTS + 1):
+        for attempt in range(1, SETTINGS.sync.max_attempts + 1):
             _batch(ledger, {"type": "inventory", "external_id": "S-1", "status": "skipped", "quantity": 3})
             row = ledger.get("inventory", "sku", "S-1")
             assert row["last_synced_qty"] is None                              # not synced
@@ -255,7 +256,7 @@ def test_the_reconcile_never_deletes_a_product_without_its_tombstone(tmp_path, f
 def test_a_dead_tombstone_is_requeued(tmp_path):
     with Ledger.open(tmp_path / "l.db", env="development") as ledger:
         sync.record_tombstones(ledger, [("T-1", "s"), ("T-2", "s")])
-        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             for xid in ("T-1", "T-2"):
                 sync.ack(ledger, "removed", xid, status_="blocked", reason="open reservation")
         assert {r["state"] for r in ledger.execute("SELECT state FROM removed")} == {"dead"}
@@ -274,7 +275,7 @@ def test_a_done_on_a_variety_that_regained_children_waits_like_a_block(tmp_path)
         _variation(ledger, "slab_marble_x_1", state="retiring")
         sync.record_tombstones(ledger, [("slab_marble_x_1", None)], reason="variation_removed", kind="variation")
         _product(ledger, "S-1", "slab_marble_x_1")                          # a raced produce re-linked a product
-        for attempt in range(1, sync._MAX_SYNC_ATTEMPTS + 1):
+        for attempt in range(1, SETTINGS.sync.max_attempts + 1):
             assert sync.ack(ledger, "removed", "slab_marble_x_1", status_="done") == 0
             row = ledger.get("removed", "external_id", "slab_marble_x_1")
             assert row["sync_attempts"] == attempt and row["retry_after"] > now_iso()

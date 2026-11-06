@@ -616,10 +616,8 @@ def run_source(
     # consolidated by `python -m stone_pipeline.catalog` (reads every run's
     # canonical.parquet), not written per source. This folder is products only.
 
-    # Phase 2 (flag-gated, shadow): also record this source's emitted products +
-    # inventory into the ledger, AFTER the CSVs are written. Fully inert unless
-    # write-through is enabled, and it never fails the run (the ledger is
-    # a shadow mirror while the CSVs stay authoritative, per SYNC_LEDGER_DESIGN.md).
+    # Record this source's emitted products + inventory into the ledger (the live sync source Medusa pulls), AFTER
+    # the CSVs are written. Inert unless write-through is enabled; a failed write-through fails the run (below).
     from stone_pipeline.ledger import writethrough
     ledger_failed = False
     if writethrough.enabled():

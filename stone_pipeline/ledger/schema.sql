@@ -222,7 +222,7 @@ CREATE INDEX IF NOT EXISTS idx_product_source ON product (source);
 -- inventory: stock per SKU. No state/payload_hash: the stock (qty, made_to_order, reason, replaced_by_lot_code)
 -- vs the last synced stock drives what is served (design section 7, db.STOCK_DELTA_SQL). qty 0 is the reversible
 -- delist for a discontinued product; made_to_order 1 is on sale with no count (qty NULL). A failed or refused ack
--- waits and dead-letters by the product lane's rule (sync_attempts, retry_after; dead at sync._MAX_SYNC_ATTEMPTS).
+-- waits and dead-letters by the product lane's rule (sync_attempts, retry_after; dead at SETTINGS.sync.max_attempts).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS inventory (
     sku              TEXT PRIMARY KEY REFERENCES product (sku),
@@ -293,7 +293,7 @@ CREATE INDEX IF NOT EXISTS idx_gap_state ON gap (state);
 -- ack. `kind` says what `external_id` addresses: a product SKU or a variation Key.
 -- Medusa acks 'done' (the delete happened -> the tombstone row is removed) or 'blocked'
 -- (an open reservation blocks the hard-delete -> keep it, re-serve, and dead-letter to
--- 'dead' after _MAX_SYNC_ATTEMPTS blocks). Served while state='pending', with PRODUCT
+-- 'dead' after SETTINGS.sync.max_attempts blocks). Served while state='pending', with PRODUCT
 -- tombstones ordered before VARIATION tombstones so Medusa deletes children before the
 -- parent (a variant with products cannot be deleted). No FK (the row is gone); a
 -- re-created SKU or re-minted Key clears its tombstone in populate so a live entity and
@@ -304,7 +304,9 @@ CREATE TABLE IF NOT EXISTS removed (
     kind          TEXT NOT NULL DEFAULT 'product'
                   CHECK (kind IN ('product','variation')),  -- what external_id addresses
     source        TEXT,                                 -- source_code, for scope/audit (product tombstones)
-    reason        TEXT,                                 -- 'vendor_removed' | 'discontinued' | 'variation_removed' | 'rekey'
+    -- why: 'discontinued' | 'vendor_removed' | 'reset_dropped' (products); 'variation_removed' | 'variation_unminted'
+    -- | 'reseed_dedup' | 'not_in_seed' | 'stale_not_in_seed' (variations, and a reconciled variety's products)
+    reason        TEXT,
     state         TEXT NOT NULL DEFAULT 'pending'
                   CHECK (state IN ('pending','dead')),  -- pending serves; 'done' deletes the row; dead = blocked cap
     sync_attempts INTEGER NOT NULL DEFAULT 0,           -- consecutive 'blocked' acks (dead-letter counter)

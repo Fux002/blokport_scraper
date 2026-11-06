@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import io
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.ledger import server, sync
 from stone_pipeline.ledger.db import Ledger
-from stone_pipeline.ledger.server import SyncHandler, _MAX_BODY_BYTES
+from stone_pipeline.ledger.server import SyncHandler
 
 
 def _handler(auth_header: str, token: str = "sekret", headers: dict | None = None,
@@ -40,7 +41,7 @@ def test_correct_token_authorizes_and_wrong_does_not():
 # ---- Content-Length bound ---------------------------------------------------------------------------
 
 def test_max_body_bytes_is_a_sane_cap():
-    assert _MAX_BODY_BYTES == 8 << 20                  # an ack page of 2000 items is well under 1 MiB
+    assert SETTINGS.sync.max_body_bytes == 8 << 20                  # an ack page of 2000 items is well under 1 MiB
 
 
 def test_malformed_content_length_is_a_400_not_a_dropped_connection():
@@ -50,7 +51,7 @@ def test_malformed_content_length_is_a_400_not_a_dropped_connection():
 
 
 def test_oversized_content_length_is_refused_before_the_read():
-    h, out = _handler("Bearer sekret", headers={"Content-Length": str(_MAX_BODY_BYTES + 1)})
+    h, out = _handler("Bearer sekret", headers={"Content-Length": str(SETTINGS.sync.max_body_bytes + 1)})
     h._handle("POST")
     assert out[0][0] == 400 and "too large" in out[0][1]["error"]
 

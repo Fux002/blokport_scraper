@@ -436,8 +436,8 @@ def run() -> Path:
     """Build the valid combinations and write the upload set to to_upload/:
       2_valid_combinations.csv          FULL set  -- Blokport replaces its set with it when the manifest's
                                                     sha256 changed (no delta: an import never adds into a set)
-      2_valid_combinations_products_only.csv      TESTING one-off (drops off in production): combos
-                                                    for just the variations the product sheet uses.
+      2_valid_combinations_products_only.csv      combos for just the variations the product sheet uses
+                                                    (written in every env; Blokport can load it instead)
     """
     export = SETTINGS.paths.export_file
     if not export.exists():
@@ -477,7 +477,7 @@ def run() -> Path:
     path = to_upload / "2_valid_combinations.csv"
     write_combinations(combinations, path)
 
-    # TESTING one-off (drops off in production): combinations for ONLY the product sheet's variations.
+    # combinations for ONLY the product sheet's variations (written in every env, beside the full set)
     vidx = COMBINATION_COLUMNS.index("variation_id")
     prod_vids = _product_variation_ids(products)
     products_only = {c for c in combinations if c[vidx] in prod_vids} if prod_vids else set()

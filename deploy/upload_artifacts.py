@@ -8,12 +8,23 @@ The produced CSVs are mirrored to the env's staging bucket under the canonical s
 
 THE CONTRACT (Blokport's import reads it):
   * `manifest.json` lists every deliverable with the SHA-256 of the exact bytes of the S3 object, its data row
-    count (header excluded) and its size. Blokport keys its "combinations changed?" guard on the full set's
-    sha256, hashes the stream it imports and fails loud on a mismatch.
-  * A deliverable is uploaded ONLY when its hash differs from the manifest currently on S3, so unchanged
-    content keeps its object and timestamp; the manifest is written LAST, on every publish, with a fresh
-    run_id / produced_at even when every hash is unchanged (a "nothing changed" produce is a clean no-op on
-    the guard, never a block). A manifest therefore never names content that is not already there.
+    count (CSV records, header and empty lines excluded), its size, and the S3 VersionId of the object holding
+    those bytes. Blokport keys its "combinations changed?" guard on the full set's sha256, hashes the stream it
+    imports and fails loud on a mismatch.
+  * The deliverables keep their fixed names, so a reader of `<prefix>/<name>` is unchanged. A fixed name is
+    overwritten in place while a publish runs, so its bytes can be newer than the manifest on S3 (the reader's
+    hash then mismatches: retry). The VersionId closes that window for a reader that wants it: a GET with
+    `versionId` reads exactly the bytes the manifest hashes, whatever a publish is doing. S3 verifies each upload
+    against the manifest's sha256 (ChecksumSHA256), so the named version holds those bytes. The bucket must be
+    versioned; an upload without a VersionId fails loud.
+  * A file is uploaded ONLY when its hash differs from the manifest currently on S3, or the fixed name no longer
+    holds the version that manifest names (a publish that died mid-way, a prune's delete marker), so unchanged
+    content keeps its object, version and timestamp; the manifest is written LAST, on every
+    publish, with a fresh run_id / produced_at even when every hash is unchanged (a "nothing changed" produce is a
+    clean no-op on the guard, never a block). A manifest therefore never names content that is not already there.
+  * Files in to_upload/ that are not deliverables (settings.UPLOAD_SIDE_FILES: the operator checklist, the photo
+    process's list, the texture fingerprints) are published by the same rule beside them, recorded under the
+    manifest's `side_files`, never under `files`: no importer reads them through it.
   * The manifest on S3 is the ONLY record of what is published; no local state.
 
 Local source is the per-env folder (to_upload/<env>/) resolved by BLOKPORT_ENV; the S3 prefix uses ENV_SEGMENT
@@ -22,6 +33,7 @@ Local source is the per-env folder (to_upload/<env>/) resolved by BLOKPORT_ENV; 
 
 from __future__ import annotations
 
+import base64
 import csv
 import hashlib
 import json
@@ -32,7 +44,7 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 
-from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS
+from stone_pipeline.config.settings import ENV_NAME, ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, UPLOAD_SIDE_FILES
 
 MANIFEST_CONTRACT = "v1"
 MANIFEST_NAME = "manifest.json"
@@ -42,8 +54,9 @@ _CHUNK = 1 << 20
 
 def file_entry(path: Path) -> dict:
     """{sha256, rows, bytes} of one deliverable: sha256 over the exact bytes (what an importer hashing the S3
-    stream sees), rows = CSV data records header excluded (csv-parsed, so a quoted newline is not a row); a
-    non-CSV file carries no rows."""
+    stream sees), rows = CSV records header excluded (csv-parsed, so a quoted newline is not a row; a truly empty
+    line, which csv.reader yields as [], is not a record, while one of empty fields like ',,,' is); a non-CSV file
+    carries no rows."""
     digest = hashlib.sha256()
     with path.open("rb") as h:
         for chunk in iter(lambda: h.read(_CHUNK), b""):
@@ -51,7 +64,7 @@ def file_entry(path: Path) -> dict:
     entry = {"sha256": digest.hexdigest(), "bytes": path.stat().st_size}
     if path.suffix.lower() == ".csv":
         with path.open(newline="", encoding="utf-8-sig") as h:
-            entry["rows"] = max(sum(1 for _ in csv.reader(h)) - 1, 0)
+            entry["rows"] = max(sum(1 for record in csv.reader(h) if record) - 1, 0)
     return entry
 
 
@@ -67,29 +80,68 @@ def published_manifest(client, bucket: str, key: str) -> dict:
     return json.loads(body)
 
 
+def _put_version(client, bucket: str, key: str, path: Path, sha256: str) -> str:
+    """Upload one deliverable and return the VersionId of the object written. S3 checks the bytes it stores against
+    `sha256` (the manifest's), so the version the manifest names is exactly the hashed content."""
+    with path.open("rb") as body:
+        response = client.put_object(Bucket=bucket, Key=key, Body=body,
+                                     ChecksumSHA256=base64.b64encode(bytes.fromhex(sha256)).decode("ascii"))
+    version = response.get("VersionId")
+    if not version or version == "null":
+        raise RuntimeError(f"s3://{bucket}/{key} was written without a version id: the manifest names each "
+                           "deliverable's version, so the bucket must have versioning enabled")
+    return version
+
+
+def _current_version(client, bucket: str, key: str) -> str | None:
+    """The VersionId the fixed name holds now, or None when it holds nothing (absent, or a delete marker on top)."""
+    try:
+        return client.head_object(Bucket=bucket, Key=key).get("VersionId")
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+            return None
+        raise
+
+
+def _publish_file(client, bucket: str, key: str, path: Path, entry: dict, prior: dict) -> bool:
+    """Set entry["version_id"] to the version holding `path`'s bytes, uploading only when needed. Unchanged means the
+    prior manifest's sha256 AND the fixed name still holding the version it named: a publish that died after an
+    upload, a prune's delete marker or any stray write leaves another version there, and the file is uploaded again.
+    Returns True when it uploaded."""
+    if prior.get("sha256") == entry["sha256"] and prior.get("version_id") \
+            and _current_version(client, bucket, key) == prior["version_id"]:
+        entry["version_id"] = prior["version_id"]
+        return False
+    entry["version_id"] = _put_version(client, bucket, key, path, entry["sha256"])
+    return True
+
+
 def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: str | None) -> dict:
-    """Upload the changed deliverables under `local`, then write the manifest. Returns
-    {"uploaded": [...], "unchanged": [...], "manifest": <the manifest written>}."""
+    """Upload the changed deliverables and side files under `local`, then write the manifest. Returns
+    {"uploaded": [...], "unchanged": [...], "side": [<side files uploaded>], "manifest": <the manifest written>}."""
     manifest_key = f"{prefix}/{MANIFEST_NAME}"
-    previous = published_manifest(client, bucket, manifest_key).get("files", {})
-    files: dict[str, dict] = {}
+    published = published_manifest(client, bucket, manifest_key)
+    sections: dict[str, dict[str, dict]] = {"files": {}, "side_files": {}}
     uploaded: list[str] = []
     unchanged: list[str] = []
+    side: list[str] = []
     for path in sorted(p for p in local.rglob("*") if p.is_file() and p.name not in _SKIP_NAMES):
         name = path.relative_to(local).as_posix()
+        section = "side_files" if name in UPLOAD_SIDE_FILES else "files"
         entry = file_entry(path)
-        files[name] = entry
-        if previous.get(name, {}).get("sha256") == entry["sha256"]:
-            unchanged.append(name)
-            continue
-        client.upload_file(str(path), bucket, f"{prefix}/{name}")
-        uploaded.append(name)
+        changed = _publish_file(client, bucket, f"{prefix}/{name}", path, entry,
+                                published.get(section, {}).get(name, {}))
+        sections[section][name] = entry
+        if section == "side_files":
+            side += [name] if changed else []
+        else:
+            (uploaded if changed else unchanged).append(name)
     manifest = {"contract": MANIFEST_CONTRACT, "env": ENV_NAME, "run_id": run_id,
                 "produced_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
-                "files": files}
+                **sections}
     client.put_object(Bucket=bucket, Key=manifest_key, ContentType="application/json",
                       Body=json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"))
-    return {"uploaded": uploaded, "unchanged": unchanged, "manifest": manifest}
+    return {"uploaded": uploaded, "unchanged": unchanged, "side": side, "manifest": manifest}
 
 
 def _upload_dir(client, bucket: str, local: Path, prefix: str) -> int:
@@ -117,6 +169,8 @@ def main(run_id: str | None = None) -> int:
         print(f"   uploaded  {name}")
     for name in result["unchanged"]:
         print(f"   unchanged {name}")
+    for name in result["side"]:
+        print(f"   side file {name} (changed)")
     print(f"   manifest  {MANIFEST_NAME} ({len(result['manifest']['files'])} file(s), run {run_id or '-'})")
     n = _upload_dir(client, S3_BUCKET, SETTINGS.paths.review_dir, f"{base}/review")
     print(f"==> uploaded {len(result['uploaded'])} changed deliverable(s), {len(result['unchanged'])} unchanged, "

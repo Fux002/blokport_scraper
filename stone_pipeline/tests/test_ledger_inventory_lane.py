@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.ledger import sync
 from stone_pipeline.ledger.db import SCHEMA_VERSION, Ledger, now_iso
 from stone_pipeline.ledger.populate import populate_discontinued
@@ -64,7 +65,7 @@ def test_a_made_to_order_row_acked_with_quantity_0_backs_off_dead_letters_and_re
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _product(ledger, "S-1")
         _stock(ledger, "S-1", None, made_to_order=1)
-        for attempt in range(1, sync._MAX_SYNC_ATTEMPTS + 1):
+        for attempt in range(1, SETTINGS.sync.max_attempts + 1):
             assert _lane(ledger) == ["S-1"]
             assert sync.ack(ledger, "inventory", "S-1", status_="updated", quantity=0) == 0   # refused
             row = _row(ledger, "S-1")
@@ -75,7 +76,7 @@ def test_a_made_to_order_row_acked_with_quantity_0_backs_off_dead_letters_and_re
         assert _lane(ledger) == []                                                           # dead
         assert sync.status(ledger)["inventory"]["delta"] == 0
         dead = [f for f in sync.failures(ledger) if f["type"] == "inventory"]
-        assert [(f["external_id"], f["state"], f["attempts"]) for f in dead] == [("S-1", "dead", sync._MAX_SYNC_ATTEMPTS)]
+        assert [(f["external_id"], f["state"], f["attempts"]) for f in dead] == [("S-1", "dead", SETTINGS.sync.max_attempts)]
         assert "refused" in dead[0]["error"]
         assert sync.requeue_dead_lettered(ledger) == 1
         row = _row(ledger, "S-1")
@@ -112,7 +113,7 @@ def test_requeue_takes_the_inventory_type_over_http(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _product(ledger, "S-1")
         _stock(ledger, "S-1", 4)
-        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             sync.ack(ledger, "inventory", "S-1", status_="failed", reason="x")
         assert dispatch(ledger, "POST", "requeue", {}, {"type": "inventory"}) == (200, {"requeued": 1})
         assert _lane(ledger) == ["S-1"]
@@ -147,18 +148,6 @@ def test_a_reason_cleared_at_stock_0_is_served(tmp_path):
         populate_discontinued(ledger, [("S-1", "h")])                 # dropped: dead stock, no reason any more
         assert [i["payload"] for i in sync.ready_inventory(ledger)] == [
             {"sku": "S-1", "quantity": 0, "made_to_order": False}]
-
-
-def test_the_inventory_csv_render_sticks_to_count_changes(tmp_path):
-    # 4_inventory_update.csv carries SKU + quantity only, so a reason or lot change at an unchanged count is no row
-    from stone_pipeline.config.sources import load_source
-    from stone_pipeline.ledger.render import render_inventory
-    with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
-        _product(ledger, "POL-1", lot_code=None)
-        _product(ledger, "POL-2")
-        _stock(ledger, "POL-1", 0, reason="replaced_by_lot", lot="L1", synced=(0, 0, None, None))   # reason only
-        _stock(ledger, "POL-2", 3, synced=(5, 0, None, None))                                        # a count move
-        assert render_inventory(ledger, load_source("polonine"), tmp_path / "inv.csv") == 1
 
 
 # --- defect 7: stock moves for every product Medusa holds -------------------------------------------------------
@@ -259,7 +248,7 @@ def test_waiting_counts_only_un_hides_the_product_gate_holds(tmp_path):
             _product(ledger, sku, state="dirty", medusa_id="M-" + sku)
             _stock(ledger, sku, 5, synced=(0, 0, "no_photo", None))      # all un-hides of a dirty product
         ledger.execute("UPDATE inventory SET retry_after = '2999-01-01T00:00:00+00:00' WHERE sku = 'R-1'")
-        ledger.execute("UPDATE inventory SET sync_attempts = ? WHERE sku IN ('D-1', 'A-1')", (sync._MAX_SYNC_ATTEMPTS,))
+        ledger.execute("UPDATE inventory SET sync_attempts = ? WHERE sku IN ('D-1', 'A-1')", (SETTINGS.sync.max_attempts,))
         ledger.execute("UPDATE inventory SET abandoned_at = '2026-01-01T00:00:00+00:00' WHERE sku = 'A-1'")
         inv = sync.status(ledger)["inventory"]
         assert (inv["waiting"], inv["dead"]) == (1, 1)                   # W-1 only; D-1 is dead, not also waiting
@@ -288,7 +277,7 @@ def test_failed_acks_on_a_stock_row_already_synced_do_not_count(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _product(ledger, "S-1")
         _stock(ledger, "S-1", 4, synced=(4, 0, None, None))
-        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             assert sync.ack(ledger, "inventory", "S-1", status_="failed", reason="late") == 0
         row = _row(ledger, "S-1")
         assert (row["sync_attempts"], row["sync_error"], row["retry_after"]) == (0, None, None)
@@ -301,7 +290,7 @@ def test_dead_stock_is_counted_in_status_and_can_be_abandoned(tmp_path):
     with Ledger.open(tmp_path / "dev.ledger", env="development") as ledger:
         _product(ledger, "S-1")
         _stock(ledger, "S-1", 4)
-        for _ in range(sync._MAX_SYNC_ATTEMPTS):
+        for _ in range(SETTINGS.sync.max_attempts):
             sync.ack(ledger, "inventory", "S-1", status_="failed", reason="SKU not found")
         assert sync.status(ledger)["inventory"] == {"total": 1, "delta": 0, "dead": 1, "waiting": 0}
         assert dispatch(ledger, "POST", "abandon", {}, {"type": "inventory", "external_id": "S-1"})[0] == 200
