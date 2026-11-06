@@ -164,6 +164,12 @@ trip) yields a different digest, a tag on an image nothing runs.
 Then apply the prod modules the change touches with the brand's tfvars, e.g.
 `terraform apply -var-file=brands/blokport.tfvars -target=module.sync_service_prod -target=module.gpu_enhance_prod`.
 
+The plan checks the pins (`infra/main.tf`, `data.aws_ecr_image.prod_service` / `prod_gpu`): each prod image is looked
+up by its configured tag and must carry `prod-<sha12>` / `prod-gpu-<sha12>` on that same image, or the plan fails
+with "is not pinned: add the tag ... to that same image". The prod modules take their tags through these lookups,
+so a targeted plan of a prod module runs the check too. The standardise image needs no check: its tfvars name its
+pin tag itself.
+
 ## Standardised photos
 Supplier logos and watermarks are taken off per photo by the standardised-photo process
 (STANDARDISE_PROCESS.md: the judge finds them, the hosted clean step removes them). A source opts

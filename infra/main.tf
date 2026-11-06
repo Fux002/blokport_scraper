@@ -40,8 +40,9 @@ locals {
   dev_enabled  = var.dev_enabled
   # Shared image repo, resolved from whichever side owns it: the creating brand's resource, or the data
   # source that references it. Every consumer uses these, so create_ecr flips ownership with no other edit.
-  ecr_repo_url = var.create_ecr ? aws_ecr_repository.this[0].repository_url : data.aws_ecr_repository.scraper[0].repository_url
-  ecr_repo_arn = var.create_ecr ? aws_ecr_repository.this[0].arn : data.aws_ecr_repository.scraper[0].arn
+  ecr_repo_url  = var.create_ecr ? aws_ecr_repository.this[0].repository_url : data.aws_ecr_repository.scraper[0].repository_url
+  ecr_repo_arn  = var.create_ecr ? aws_ecr_repository.this[0].arn : data.aws_ecr_repository.scraper[0].arn
+  ecr_repo_name = var.create_ecr ? aws_ecr_repository.this[0].name : data.aws_ecr_repository.scraper[0].name
 }
 
 # blokport's dev modules pre-date the dev_enabled gate: migrate their state to the count index so adding
@@ -131,6 +132,47 @@ resource "aws_ecr_lifecycle_policy" "this" {
       action = { type = "expire" } },
     ]
   })
+}
+
+# --- Prod runs only pinned images (checked at plan time) -----------------------
+# A prod image is protected from the ECR lifecycle only by its pin tag (<prefix><sha12>, the first 12 hex digits of its
+# commit sha; DEPLOY.md, "Promoting an image to prod"). A promotion that sets the tag in the tfvars but forgets the pin
+# would run an image the build rules can expire. Each prod image is looked up by its configured tag and must carry its
+# pin tag on that same image (same digest), or the plan fails. The prod modules take their tag from these lookups, so
+# a targeted plan of a prod module runs the check too. Prod only: dev and a brand with prod off read nothing.
+locals {
+  prod_pin_tag     = "prod-${substr(var.prod_image_tag, 0, 12)}"
+  prod_gpu_pin_tag = "prod-gpu-${substr(trimprefix(var.prod_gpu_image_tag, "gpu-"), 0, 12)}"
+}
+
+data "aws_ecr_image" "prod_service" {
+  count           = local.prod_enabled ? 1 : 0
+  repository_name = local.ecr_repo_name
+  image_tag       = var.prod_image_tag
+  lifecycle {
+    postcondition {
+      condition     = contains(self.image_tags, local.prod_pin_tag)
+      error_message = "The prod image ${var.prod_image_tag} (${self.image_digest}) is not pinned: add the tag ${local.prod_pin_tag} to that same image in ECR before promoting it (DEPLOY.md, \"Promoting an image to prod\"). Its tags: ${join(", ", self.image_tags)}."
+    }
+  }
+}
+
+data "aws_ecr_image" "prod_gpu" {
+  count           = local.prod_enabled ? 1 : 0
+  repository_name = local.ecr_repo_name
+  image_tag       = var.prod_gpu_image_tag
+  lifecycle {
+    postcondition {
+      condition     = contains(self.image_tags, local.prod_gpu_pin_tag)
+      error_message = "The prod GPU image ${var.prod_gpu_image_tag} (${self.image_digest}) is not pinned: add the tag ${local.prod_gpu_pin_tag} to that same image in ECR before promoting it (DEPLOY.md, \"Promoting an image to prod\"). Its tags: ${join(", ", self.image_tags)}."
+    }
+  }
+}
+
+locals {
+  # the prod modules' tags, through the checked lookups (only reached when prod is enabled)
+  prod_image_tag_pinned     = local.prod_enabled ? data.aws_ecr_image.prod_service[0].image_tag : ""
+  prod_gpu_image_tag_pinned = local.prod_enabled ? data.aws_ecr_image.prod_gpu[0].image_tag : ""
 }
 
 # --- SHARED GitHub OIDC deploy role (CI builds + pushes the one image) --------
@@ -241,7 +283,7 @@ module "scraper_prod" {
   state_bucket   = var.platform_state_bucket # the platform state this brand reads its cluster name from
 
   region              = var.region
-  image_tag           = var.prod_image_tag
+  image_tag           = local.prod_image_tag_pinned
   keep_scraped        = var.keep_scraped
   ssm_secret_arns     = local.prod_ssm_secrets
   secrets_kms_key_arn = local.prod_secrets_kms_key_arn
@@ -299,7 +341,7 @@ module "gpu_enhance_prod" {
   home_env       = var.prod_home_env
   staging_bucket = var.prod_staging_bucket
   image_repo_url = local.ecr_repo_url
-  image_tag      = var.prod_gpu_image_tag
+  image_tag      = local.prod_gpu_image_tag_pinned
   region         = var.region
   max_vcpus      = var.gpu_idle_vcpus # initial ceiling, as dev
   alert_email    = var.alert_email
@@ -449,7 +491,7 @@ module "sync_service_prod" {
 
   target_env          = "production"
   image_repo_url      = local.ecr_repo_url
-  image_tag           = var.prod_image_tag
+  image_tag           = local.prod_image_tag_pinned
   region              = var.region
   staging_bucket      = var.prod_staging_bucket
   memory              = 6144 # 3.0 GB peak observed over two weeks (the combination tree build); 6 GB keeps 2x headroom
