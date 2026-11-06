@@ -471,7 +471,8 @@ LAST, `manifest.json` next to them:
     "2_valid_combinations.csv":               {"sha256": "…", "rows": 2501238, "bytes": 420208056, "version_id": "…"},
     "2_valid_combinations_products_only.csv": {"sha256": "…", "rows": 46244,   "bytes": 7769064,   "version_id": "…"},
     "1_variants_full.csv":                    {"sha256": "…", "rows": 36582,   "bytes": 9763859,   "version_id": "…"},
-    "3_products_all.csv":                     {"sha256": "…", "rows": 2728,    "bytes": 3626025,   "version_id": "…"}
+    "3_products_all.csv":                     {"sha256": "…", "rows": 2728,    "bytes": 3626025,   "version_id": "…"},
+    "variants_export_base.csv":               {"sha256": "…", "rows": 36582,   "bytes": 9475521,   "version_id": "…"}
   }
 }
 ```
@@ -497,6 +498,13 @@ LAST, `manifest.json` next to them:
 - The former `2_valid_combinations_update.csv` (the delta since the scraper's last BUILD, not since
   your last load) is no longer written. The manifest lists every deliverable in `to_upload/`, so a task
   that still holds an old copy keeps listing it until it restarts (the folder is rebuilt then).
+- `variants_export_base.csv` is the scraper's full base of its own varieties, Id-free, with the
+  columns the file has: `Key`, `Name`, `Image`, `Aliases`, `Volume per kg (m³/kg)`. It is the exact
+  base the produce settled (normally the same varieties as `1_variants_full.csv`), so your
+  "restore base" import verifies it against `sha256` like any deliverable.
+- After a factory reset the manifest lists ONLY `variants_export_base.csv` (with its `version_id`;
+  `side_files` empty), holding the pristine seed: every other file is stale for a wiped Medusa. Those files stay on S3 unlisted, so a
+  verifying import refuses them until the next produce publishes a full set again.
 - Files in `to_upload/` that are not deliverables (`SYNC_STEPS.md`, `standardise_photo_list.json`
   for the scraper's photo process, `variant_image_shas.json`) are published beside them and recorded
   under the manifest's `side_files`, never under `files`: ignore them.

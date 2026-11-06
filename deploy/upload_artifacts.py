@@ -116,9 +116,15 @@ def _publish_file(client, bucket: str, key: str, path: Path, entry: dict, prior:
     return True
 
 
-def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: str | None) -> dict:
-    """Upload the changed deliverables and side files under `local`, then write the manifest. Returns
+def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: str | None,
+                         only: set[str] | None = None) -> dict:
+    """Upload the changed deliverables and side files under `local`, then write the manifest. `only` restricts the
+    publish, and so the manifest, to exactly those names whatever else `local` holds (a factory reset: the seed base
+    is the one valid deliverable for a wiped Medusa, so no other deliverable and no side file is listed); a name in
+    `only` that `local` lacks raises before anything is written. Returns
     {"uploaded": [...], "unchanged": [...], "side": [<side files uploaded>], "manifest": <the manifest written>}."""
+    if only is not None and (missing := sorted(n for n in only if not (local / n).is_file())):
+        raise FileNotFoundError(f"cannot publish {missing}: not in {local}")
     manifest_key = f"{prefix}/{MANIFEST_NAME}"
     published = published_manifest(client, bucket, manifest_key)
     sections: dict[str, dict[str, dict]] = {"files": {}, "side_files": {}}
@@ -127,6 +133,8 @@ def publish_deliverables(client, bucket: str, local: Path, prefix: str, run_id: 
     side: list[str] = []
     for path in sorted(p for p in local.rglob("*") if p.is_file() and p.name not in _SKIP_NAMES):
         name = path.relative_to(local).as_posix()
+        if only is not None and name not in only:
+            continue
         section = "side_files" if name in UPLOAD_SIDE_FILES else "files"
         entry = file_entry(path)
         changed = _publish_file(client, bucket, f"{prefix}/{name}", path, entry,
@@ -157,6 +165,14 @@ def _upload_dir(client, bucket: str, local: Path, prefix: str) -> int:
     return n
 
 
+def publish_to_upload(client, run_id: str | None, only: set[str] | None = None) -> dict:
+    """Publish the env's to_upload/ folder under the manifest (publish_deliverables on the env's bucket and
+    prefix). The one entry point for every caller that publishes deliverables: a produce (the whole folder), and
+    a factory reset (only the reseeded base)."""
+    return publish_deliverables(client, S3_BUCKET, SETTINGS.paths.to_upload_dir,
+                                f"{ENV_SEGMENT}/scraper/to_upload", run_id, only)
+
+
 def main(run_id: str | None = None) -> int:
     base = f"{ENV_SEGMENT}/scraper"
     client = boto3.client("s3", region_name=S3_REGION)
@@ -164,7 +180,7 @@ def main(run_id: str | None = None) -> int:
     if not SETTINGS.paths.to_upload_dir.is_dir():
         print("   nothing to publish (no to_upload dir)")
         return 0
-    result = publish_deliverables(client, S3_BUCKET, SETTINGS.paths.to_upload_dir, f"{base}/to_upload", run_id)
+    result = publish_to_upload(client, run_id)
     for name in result["uploaded"]:
         print(f"   uploaded  {name}")
     for name in result["unchanged"]:

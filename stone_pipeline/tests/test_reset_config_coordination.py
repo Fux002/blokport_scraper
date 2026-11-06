@@ -218,39 +218,28 @@ def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch)
     assert wiped == []                                # neither touched the scrape cache
 
 
-def test_publish_base_to_import_targets_the_to_upload_namespace(monkeypatch):
-    # bulk-restore phase 1: the base must land at the IMPORT key Medusa's /restore reads, NOT from_medusa/.
-    import boto3
-    from pathlib import Path
-    from stone_pipeline.reference import sync_variants_base
-
-    seen: dict = {}
-
-    class _S3:
-        def upload_file(self, path, bucket, key):
-            seen.update(path=path, bucket=bucket, key=key)
-
-    monkeypatch.setattr(boto3, "client", lambda *a, **k: _S3())
-    assert sync_variants_base.publish_base_to_import(Path("/tmp/variants_export_base.csv")) is True
-    assert seen["key"].endswith("scraper/to_upload/variants_export_base.csv"), seen["key"]
-
-
-def test_pristine_reseed_publishes_the_seed_to_the_import_namespace(tmp_path, monkeypatch):
-    # the pristine reseed publishes the SEED to BOTH from_medusa/ (matcher) and to_upload/ (Medusa restore).
+def test_only_the_factory_reset_publishes_the_base_deliverable_after_a_successful_reseed(tmp_path, monkeypatch):
     from stone_pipeline import lifecycle
-    from stone_pipeline.reference import sync_variants_base
+    from stone_pipeline.ledger import snapshot
+    from deploy import cleanup_images
 
-    import_calls: list = []
-    monkeypatch.setattr(sync_variants_base, "publish_base_to_s3", lambda p: True)
-    monkeypatch.setattr(sync_variants_base, "publish_base_to_import",
-                        lambda p: (import_calls.append(str(p)), True)[1])
-    seed = tmp_path / "seed.csv"
-    seed.write_text("Key,Name\nslab_marble_x_1,X\n", encoding="utf-8")
-    base = tmp_path / "base.csv"
+    _seed_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
+    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})
+    monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: {"local": [], "s3": []})
+    calls: list[str] = []
+    monkeypatch.setattr(lifecycle, "_publish_base_deliverable", lambda: calls.append("publish") or True)
+    monkeypatch.setattr(lifecycle, "_reseed_base_from_pristine", lambda: {"reseeded": True, "s3_published": True})
+    out, code = lifecycle.reset(sources=None, pristine=True)
+    assert code == 200 and calls == ["publish"] and out["base_reseed"]["import_published"] is True
 
-    r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
-    assert r["reseeded"] and r.get("import_published") is True
-    assert import_calls == [str(base)], "reset must publish the reseeded base to the import namespace"
+    calls.clear()                                     # no seed reseeded -> nothing to publish
+    monkeypatch.setattr(lifecycle, "_reseed_base_from_pristine", lambda: {"reseeded": False, "reason": "no seed"})
+    out, code = lifecycle.reset(sources=None, pristine=True)
+    assert code == 200 and calls == [] and "import_published" not in out["base_reseed"]
+
+    lifecycle.reset(sources=None, hard=True)          # a hard reset never reseeds or publishes
+    assert calls == []
 
 
 def test_pristine_reset_is_global_only(tmp_path, monkeypatch):

@@ -107,7 +107,10 @@ def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
     live variants_export_base.csv self-mutates each produce (base := 1_variants_full) and is republished to
     S3 (the S0 single-source-of-truth); without also reseeding that file, a factory reset would leave the
     drifted base in place and the 'cold start' would silently start from it, not the seed. Best-effort +
-    loud: a failure never fails the reset (the ledger/config are already reset) but is surfaced."""
+    loud: a failure never fails the reset (the ledger/config are already reset) but is surfaced.
+
+    Reseeds only: it publishes no deliverable. The factory reset follows it with _publish_base_deliverable; the
+    curation rebuild does not (Medusa is not wiped, its catalog run publishes the full set)."""
     import shutil
     from pathlib import Path
     from stone_pipeline.config.settings import SETTINGS
@@ -118,18 +121,36 @@ def _reseed_base_from_pristine(seed_path=None, base_path=None) -> dict:
         return {"reseeded": False, "reason": "no pristine seed"}
     try:
         shutil.copyfile(seed, base)                     # local base := pristine seed
-        from stone_pipeline.reference.sync_variants_base import publish_base_to_import, publish_base_to_s3
+        from stone_pipeline.reference.sync_variants_base import publish_base_to_s3
         published = publish_base_to_s3(base)            # S3 base := pristine seed, so the cold start reads it
-        # ALSO publish the seed to the import namespace (to_upload/) so Medusa's bulk-restore reads the SEED.
-        # Only the pristine reset writes there, so to_upload/ is pinned to the seed (never the grown base) --
-        # a 'Restore Medusa to base' always restores to seed. Best-effort, same as the from_medusa/ publish.
-        import_published = publish_base_to_import(base)
         log.info("reset: base file reseeded from the pristine seed",
-                 extra={"extra_fields": {"s3_published": published, "import_published": import_published}})
-        return {"reseeded": True, "s3_published": published, "import_published": import_published}
+                 extra={"extra_fields": {"s3_published": published}})
+        return {"reseeded": True, "s3_published": published}
     except Exception as exc:
         log.exception("reset: base-file reseed FAILED; the base may still be the drifted copy")
         return {"reseeded": False, "error": str(exc)}
+
+
+def _publish_base_deliverable(base=None) -> bool:
+    """Factory reset only. Copy the reseeded base into to_upload/ (sync_variants_base.write_deliverable, as the catalog does) and
+    publish it through the produce's own publisher with `only` the base, so the fixed key and the manifest's
+    sha256 change together and the next produce compares against what S3 really holds. The manifest lists the
+    seed base and nothing else, whatever the task's to_upload/ or S3 still hold: every other deliverable is stale
+    for a wiped Medusa, stays on S3 unlisted (an importer verifying against the manifest refuses it) until the
+    next produce publishes a full set. Best-effort + loud like the rest of the reseed: False (logged) when the
+    copy or the publish fails."""
+    try:
+        import boto3
+        from deploy import upload_artifacts
+        from stone_pipeline.config.settings import S3_REGION, SETTINGS, VARIANTS_BASE_FILE
+        from stone_pipeline.reference.sync_variants_base import write_deliverable
+        write_deliverable(base or SETTINGS.paths.variants_export_base_csv)
+        upload_artifacts.publish_to_upload(boto3.client("s3", region_name=S3_REGION), None, only={VARIANTS_BASE_FILE})
+        return True
+    except Exception:
+        log.exception("reset: base deliverable NOT published: Blokport's restore reads the previous base "
+                      "until the next produce publishes one")
+        return False
 
 
 _snapshot_on_mutation = False   # set True ONLY by the config server (serve); off in tests, laptop, and the
@@ -461,6 +482,9 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
                 config["leaf_decisions"] = decisions_store.clear_leaf_decisions()
                 config["retired_keys"] = store.clear_retired()
                 out["base_reseed"] = _reseed_base_from_pristine()   # S0: the base file itself starts pristine
+                if out["base_reseed"]["reseeded"]:
+                    # Medusa is wiped: the seed is the one valid deliverable, published under a seed-only manifest
+                    out["base_reseed"]["import_published"] = _publish_base_deliverable()
                 # S0b: reconcile_variations_to_seed above fixes WHICH varieties exist (drops non-seed, dedups
                 # keys) but NOT their CONTENT. A produce can decorate an EXISTING seed variety with extra alias
                 # spellings (a mis-bind written into the grown base); reseeding the base FILE alone leaves those
@@ -799,7 +823,8 @@ def rebuild_curation() -> tuple[dict, int]:
     def _guard(lg, sync):
         sync._lock_and_check_in_flight(lg)              # ServeInFlight -> 409 via _ledger_op
         # the base swap happens INSIDE the slot: a produce or reset starting between the guard and the swap
-        # would read a half-written base or race the S3 publish
+        # would read a half-written base or race the S3 publish. No deliverable publish here: Medusa is not wiped,
+        # so the published set stays valid until the catalog run below publishes the full set, base included.
         return {"reseed": _reseed_base_from_pristine()}
     guard, code = _ledger_op("rebuild_curation", _guard)
     if code != 200:

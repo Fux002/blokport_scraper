@@ -149,6 +149,7 @@ def run(outputs_root: Path | None = None) -> Path:
     # ONE list: the committed seed of truth is exactly the freshly-gated full upload (base == full).
     from stone_pipeline.reference import sync_variants_base
     sync_variants_base.sync()
+    sync_variants_base.write_deliverable()        # -> to_upload/variants_export_base.csv: the base just settled
     pruned = prune_superseded_runs(outputs_root)  # leave only the latest run folder per source
     # Build the valid combinations HERE, in the same step as the variants/products, so they are
     # always derived from the SAME export. They can never go stale by someone forgetting to run
