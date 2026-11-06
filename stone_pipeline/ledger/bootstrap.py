@@ -16,10 +16,11 @@ import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import SETTINGS, category
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS, category
 from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.payloads import variation_hash
+from stone_pipeline.reference.medusa_files import read_attributes
 
 
 def _branch_of(key: str) -> str:
@@ -36,22 +37,16 @@ def seed_attributes(ledger: Ledger, path: str | Path | None = None) -> int:
     path = Path(path or SETTINGS.paths.attributes_csv)
     now = now_iso()
     n = 0
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        for r in csv.DictReader(handle):
-            category = (r.get("category") or "").strip()
-            value = (r.get("value") or "").strip()
-            sourceid = (r.get("sourceid") or "").strip()
-            if not category or not value:
-                continue
-            ledger.upsert("attribute", {
-                "category": category,
-                "value": value,
-                "medusa_id": sourceid or None,
-                "state": "synced",
-                "created_at": now,
-                "updated_at": now,
-            }, pk=("category", "value"))
-            n += 1
+    for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED):
+        ledger.upsert("attribute", {
+            "category": a.category,
+            "value": a.value,
+            "medusa_id": a.sourceid or None,
+            "state": "synced",
+            "created_at": now,
+            "updated_at": now,
+        }, pk=("category", "value"))
+        n += 1
     return n
 
 
@@ -71,17 +66,13 @@ def restore_attribute_ids(ledger: Ledger, path: str | Path | None = None) -> int
         return 0
     now = now_iso()
     n = 0
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        for r in csv.DictReader(handle):
-            kind = (r.get("category") or "").strip()
-            value = (r.get("value") or "").strip()
-            sourceid = (r.get("sourceid") or "").strip()
-            if not kind or not value or not sourceid:
-                continue
-            n += ledger.execute(
-                "UPDATE attribute SET medusa_id = ?, state = 'synced', updated_at = ? "
-                "WHERE category = ? AND value = ?",
-                (sourceid, now, kind, value)).rowcount
+    for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED):
+        if not a.sourceid:
+            continue
+        n += ledger.execute(
+            "UPDATE attribute SET medusa_id = ?, state = 'synced', updated_at = ? "
+            "WHERE category = ? AND value = ?",
+            (a.sourceid, now, a.category, a.value)).rowcount
     return n
 
 

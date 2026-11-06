@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from stone_pipeline.config.domain import active_pack
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED
 from stone_pipeline.reference.loaders.common import env, norm
+from stone_pipeline.reference.medusa_files import read_attributes
 
 # Vocabulary categories carried in attributes.csv (section 6), declared by the active product-domain pack
 # (the stone pack reproduces the historical set). Used only to load the per-attribute synonyms, so order
@@ -47,30 +48,15 @@ class Attributes:
 
 
 def load_attributes(path: Path | None = None) -> Attributes:
-    path = Path(path or env().SETTINGS.paths.attributes_csv)
+    """The name->id tables of every value that has an id (an id-less value cannot be emitted).
+    read_attributes guards conflicting duplicates."""
     attrs = Attributes()
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        for record in csv.DictReader(handle):
-            category = (record.get("category") or "").strip()
-            value = (record.get("value") or "").strip()
-            sourceid = (record.get("sourceid") or "").strip()
-            if not category or not value or not sourceid:
-                continue
-            if category == "category":
-                attrs.category_pcat[value] = sourceid
-            else:
-                table = attrs.by_category.setdefault(category, {})
-                nk = norm(value)
-                # Fail loud on a CONFLICTING duplicate: two names in a category that collapse to the same
-                # normalized key but carry DIFFERENT Medusa ids. The value->id map silently last-wins
-                # otherwise, so one id would shadow the other (and norm folds accents/separators, so two
-                # distinct raw names can collide). Names are unique per category today, so this never fires;
-                # it surfaces a future Medusa dup instead of shipping the wrong id. A same-id repeat is
-                # harmless (idempotent) and allowed.
-                if nk in table and table[nk][1] != sourceid:
-                    raise ValueError(
-                        f"attributes.csv: {category} values {table[nk][0]!r} and {value!r} normalize to the "
-                        f"same key {nk!r} but map to different ids ({table[nk][1]} vs {sourceid}); attribute "
-                        f"names must be unique per category so the value->id mapping is unambiguous")
-                table[nk] = (value, sourceid)
+    for a in read_attributes(Path(path or env().SETTINGS.paths.attributes_csv),
+                             require_status=ATTRIBUTES_STATUS_REQUIRED):
+        if not a.sourceid:
+            continue
+        if a.category == "category":
+            attrs.category_pcat[a.value] = a.sourceid
+        else:
+            attrs.by_category.setdefault(a.category, {})[norm(a.value)] = (a.value, a.sourceid)
     return attrs

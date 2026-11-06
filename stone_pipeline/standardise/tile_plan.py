@@ -20,8 +20,9 @@ import json
 from dataclasses import dataclass
 from typing import Optional
 
-from stone_pipeline.config.settings import STANDARDISE as C
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, STANDARDISE as C
 from stone_pipeline.io import imagestore
+from stone_pipeline.reference.medusa_files import read_attributes
 from stone_pipeline.standardise import index, tile_stone, tile_views
 
 
@@ -60,7 +61,9 @@ def variety_names(variants_csv: str) -> dict:
 
 
 def finish_ids(attributes_csv: str) -> set:
-    return {r["sourceid"] for r in csv.DictReader(io.StringIO(attributes_csv)) if r.get("category") == "finish"}
+    """The finish ids of the attributes.csv text."""
+    return {a.sourceid for a in read_attributes(attributes_csv, require_status=ATTRIBUTES_STATUS_REQUIRED)
+            if a.category == "finish"}
 
 
 def products(sheet_text: str, photos: dict, names: dict) -> list:

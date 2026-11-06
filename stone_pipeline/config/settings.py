@@ -21,6 +21,7 @@ from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack  # dependency-free (yaml only); no import cycle
 from stone_pipeline.core import env  # neutral SCRAPER_ env prefix (BLOKPORT_ fallback); no import cycle
+from stone_pipeline.reference.medusa_files import read_attributes  # stdlib + core.text only; no import cycle
 
 # Repository root: this file is stone_pipeline/config/settings.py, so two parents up.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +84,10 @@ _FROM_MEDUSA = WORKSPACE_ROOT / "from_medusa" / ENV_NAME   # the env's Medusa do
 _TO_UPLOAD = WORKSPACE_ROOT / "to_upload" / ENV_NAME       # the env's upload files
 _REVIEW = WORKSPACE_ROOT / "review" / ENV_NAME             # the env's look-before-upload
 _OUTPUTS = REPO_ROOT / "outputs" / ENV_NAME                # the env's per-source staging
+
+# Blokport change 1 (VE2) adds status/internal columns to attributes.csv. While False an absent column reads as
+# active and not internal; step C flips this once Blokport change 1 is live on prod, so a missing column fails loud.
+ATTRIBUTES_STATUS_REQUIRED = False
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -641,14 +646,10 @@ class Category:
 # below are only a bootstrap fallback for an env whose attributes.csv isn't downloaded yet.
 def _env_category_pcats() -> dict[str, str]:
     path = _FROM_MEDUSA / "attributes.csv"
-    out: dict[str, str] = {}
-    if path.exists():
-        import csv as _csv
-        with path.open(encoding="utf-8-sig", newline="") as h:
-            for r in _csv.DictReader(h):
-                if (r.get("category") or "").strip() == "category" and (r.get("sourceid") or "").strip():
-                    out[(r.get("value") or "").strip()] = r["sourceid"].strip()
-    return out
+    if not path.exists():
+        return {}
+    return {a.value: a.sourceid for a in read_attributes(path, require_status=ATTRIBUTES_STATUS_REQUIRED)
+            if a.category == "category" and a.sourceid}
 
 
 _ENV_PCATS = _env_category_pcats()  # {'Slabs': pcat, 'Blocks': pcat, 'Tiles': pcat} for THIS env
