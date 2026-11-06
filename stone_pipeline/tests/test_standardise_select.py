@@ -742,6 +742,28 @@ def test_the_judge_answer_s_missing_cost_is_none_never_free(monkeypatch):
     assert judge.ask(judge.prepare("s", "p", [b"x"])) == ("{}", None)
 
 
+def test_a_judge_call_that_may_have_been_billed_counts_at_its_price(monkeypatch):
+    import httpx
+    s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    broken = httpx.HTTPStatusError("502", request=httpx.Request("POST", "https://q"), response=httpx.Response(502))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: (_ for _ in ()).throw(broken))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    spend = sel.Spend(10)
+    with pytest.raises(httpx.HTTPStatusError):
+        sel.choose(s3, rounds, _listing(A), set(), spend)
+    assert spend.spent == pytest.approx(C.JUDGE_PRICE_USD)
+
+
+def test_a_check_that_cannot_be_prepared_after_its_edit_was_sent_frees_only_the_check_s_share(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    monkeypatch.setattr(sel.judge, "checking", lambda o, c: (_ for _ in ()).throw(ValueError("undecodable")))
+    spend = sel.Spend(10)
+    with pytest.raises(ValueError):
+        _clean(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == ["nano2"] and spend.spent == pytest.approx(C.CLEAN_PRICE_USD["nano2"])
+    assert spend.reserved == pytest.approx(0, abs=1e-9)
+
+
 def test_a_judge_request_that_cannot_be_prepared_costs_nothing_and_is_loud(monkeypatch):
     # review of #540: the judge encoded its images inside the paid call, so an undecodable photo was charged every run
     s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
@@ -758,7 +780,7 @@ def test_the_real_judge_preparation_fails_before_anything_is_sent(monkeypatch):
     import httpx
     monkeypatch.setenv("FAL_KEY", "key")
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("sent"))
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="undecodable"):
         _REAL_JUDGING(b"not an image", b"neither", "slab")
 
 
@@ -903,7 +925,7 @@ def test_the_real_preparation_fails_before_anything_is_sent(monkeypatch):
     import httpx
     monkeypatch.setenv("FAL_KEY", "key")
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("sent"))
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="undecodable"):
         _REAL_PREPARE("nano2", b"not an image")
     with pytest.raises(KeyError):
         _REAL_PREPARE("no-such-model", b"o")

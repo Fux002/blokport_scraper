@@ -242,11 +242,12 @@ def test_applying_the_same_clean_again_writes_nothing_also_after_the_run_chose_a
     assert s3.written == [] and s3.objects == before
 
 
-@pytest.mark.parametrize("store", ["owner", "removed"])
+@pytest.mark.parametrize("store", ["owner", "removed", "chosen"])
 def test_a_decision_on_a_listing_whose_stored_choice_or_removal_cannot_be_read_is_refused(store):
-    # read through the photo process's isolated reader (publish.records_by_sku), never a bare read that crashes here
+    # read through the photo process's isolated readers (publish.read_records), never a bare read that crashes here
     s3 = _bucket()
-    key = pub.owner_key(ROOT, "SEN-ONE") if store == "owner" else imagestore.owner_removed_key("SEN-ONE")
+    key = {"owner": pub.owner_key(ROOT, "SEN-ONE"), "removed": imagestore.owner_removed_key("SEN-ONE"),
+           "chosen": f"{pub.chosen_prefix(ROOT)}one.json"}[store]
     s3.objects[key] = b"{broken"
     before, s3.written = dict(s3.objects), []
     with pytest.raises(dec.InvalidDecisions, match=f"cannot be read .*look at {key} first"):
@@ -257,6 +258,15 @@ def test_a_decision_on_a_listing_whose_stored_choice_or_removal_cannot_be_read_i
 def test_a_use_never_reaches_a_sibling_whose_stored_choice_cannot_be_read():
     s3 = _bucket()
     s3.objects[pub.owner_key(ROOT, "SEN-BLOCK-2")] = b"[1, 2]"
+    p = dec.plan(s3, [_use("block-1", F)], LISTINGS, exclude=set())
+    assert list(p.owner) == [pub.owner_key(ROOT, "SEN-BLOCK-1")]
+    assert "block-2: same stone as block-1, not reached: its own decision stands" in p.notes
+
+
+def test_a_use_never_reaches_a_sibling_whose_choice_record_cannot_be_read():
+    # review of #548: a sibling's corrupt choice record crashed the whole apply (a bare JSON read)
+    s3 = _bucket()
+    s3.objects[f"{pub.chosen_prefix(ROOT)}block-2.json"] = b"{broken"
     p = dec.plan(s3, [_use("block-1", F)], LISTINGS, exclude=set())
     assert list(p.owner) == [pub.owner_key(ROOT, "SEN-BLOCK-1")]
     assert "block-2: same stone as block-1, not reached: its own decision stands" in p.notes

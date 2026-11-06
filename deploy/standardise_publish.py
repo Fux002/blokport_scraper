@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
@@ -36,6 +37,12 @@ from stone_pipeline.standardise import cutout, tile_plan, tile_stone
 EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "stone_pipeline" / "config" / "standardise_exclude.txt"
 _SHA = re.compile(r"^([0-9a-f]{64})\b")
 _MADE_FROM = "made-from"                     # the outline's S3 metadata: what its 3D slab was made from (made_from)
+
+
+def aws_config():
+    """The one client configuration of the photo process: a throttled AWS call is retried (botocore standard mode,
+    AWS_MAX_ATTEMPTS times), never fatal."""
+    return Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS})
 
 
 def chosen_prefix(root):
@@ -457,7 +464,7 @@ def assignment_changes(assigned, published, current):
     return writes, sorted(set(current) - set(wanted))
 
 
-def publish(client, root, sheet, photos, say=print, *, assigned):
+def publish(client, root, sheet, photos, say=print, *, assigned, held=frozenset()):
     """Make the published folder match the choice records under `root` (the clean tag's root) and the tile listings of
     `sheet` (the product sheet's text, with its photo list `photos`): {"listings", "copied", "made_3d", "removed", "tiles" (counts), "tiles_hidden"
     ({listing: why it has no images}), "tiles_problems" ({listing: the error its tile step met}), "changed"}; changed =
@@ -465,10 +472,10 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
     folder would be emptied). assigned = {(source, sha): SKUs} of every photo listings of several stones show (the
     produce's conflict set): one is published only when the owner assigned it to someone, with a file naming who, so the
     produce links it for those products only (a record that names it otherwise is a choice made before it was a
-    conflict: not published). A choice record that cannot be read ("unreadable": {listing key: why}) leaves its
-    listing's files as they are: which published files are its cannot be told, so nothing is removed while one is
-    unreadable (what is chosen is still published)."""
-    by_key, unreadable = read_choices(client, root)
+    conflict: not published). held = {(source, sha)} of the photos of the listings the run leaves exactly as published
+    (deploy.standardise_run: a choice record, its own or the owner's, that cannot be read): their views, 3D slabs and
+    assignment files stay whatever the readable records say; every other listing is published and removed as usual."""
+    by_key, _ = read_choices(client, root)            # one that cannot be read is held by the run (held)
     chosen = [by_key[key] for key in sorted(by_key)]
     if not chosen:
         raise NoChoiceRecords(f"no choice records under {chosen_prefix(root)}: nothing published or removed")
@@ -501,9 +508,11 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
     slab_3d = {k for s in todo for k in cutout_keys(s)}
     cutouts = {k: t for k, t in _objects(client, imagestore.cutout_prefix()).items() if k in slab_3d}
     tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
-    gone = [] if unreadable else stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"])
+    kept = [imagestore.standard_key(*photo, view) for photo in held for view in imagestore.STANDARD_VIEWS]
+    kept += [k for photo in held for k in cutout_keys(photo)]
+    gone = stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"] + kept)
     pool_map(C.STORE_WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
-    unassigned = [] if unreadable else unassigned      # the same: an unreadable record may still need its assignment
+    unassigned = [k for k in unassigned if k not in {imagestore.assigned_key(*photo) for photo in held}]
     for key in unassigned:                             # only once the views it covered are gone
         client.delete_object(Bucket=S3_BUCKET, Key=key)
     say(f"==> published {len(chosen)} listings' photos: {len(fresh)} of {len(plan)} views copied (the rest unchanged), "
@@ -513,5 +522,5 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
               | {"hidden": len(tiles["hidden"]), "failed": len(tiles["failed"]),
                  "failed_listings": tiles["failed"][:C.TILE_FAILED_LISTED]})
     return {"listings": len(chosen), "copied": len(fresh), "made_3d": made_3d, "removed": len(gone), "tiles": counts,
-            "tiles_hidden": tiles["hidden"], "tiles_problems": tiles["problems"], "unreadable": unreadable,
+            "tiles_hidden": tiles["hidden"], "tiles_problems": tiles["problems"],
             "changed": bool(fresh or remake or gone or tiles["rendered"] or writes or unassigned)}

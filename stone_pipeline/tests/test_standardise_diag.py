@@ -93,12 +93,13 @@ def test_a_run_writes_only_the_diag_files_of_the_listed_photos_and_fails_loud_on
     monkeypatch.setattr(source, "start", lambda client, out, key, sha: (key, False, ""))
     monkeypatch.setattr(source, "_get", lambda client, key: b"jpeg")
     monkeypatch.setattr(photo, "decode", lambda data: rgb)
-    loaded = []
+    from unittest import mock
     # review 2026-11-06: a fake with the wrong signature hid that the job called load(survey_only=True), a TypeError;
-    # this one takes exactly what the real load takes
-    monkeypatch.setattr(models, "load", lambda need="all": loaded.append(need) or models.Models(None, None, None, None, None, None))
+    # an autospec takes exactly what the real load takes
+    load = mock.create_autospec(models.load, return_value=models.Models(None, None, None, None, None, None))
+    monkeypatch.setattr(models, "load", load)
     assert diag.main() == 1                                                  # the missing photo fails the job
-    assert loaded == ["survey"]
+    load.assert_called_once_with("survey")
     assert sorted(s3.objects) == [f"{diag.diag_prefix()}{a}{ext}" for ext in (".json", ".mask.png", ".overlay.jpg")]
     record = json.loads(s3.objects[f"{diag.diag_prefix()}{a}.json"])
     assert record["sha"] == a and record["size"] == [3.0, 1.8] and record["photo"].endswith(f"{a}.jpg")

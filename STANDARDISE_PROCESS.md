@@ -254,8 +254,9 @@ parse is asked again, at most once a run, until it was asked `JUDGE_UNPARSED_ASK
 named "the judge's answer could not be read" on the review list (review 2026-11-06). A listing whose choice
 record cannot be read, its own or the owner's, stays exactly as published (its photo, its conflict-photo assignment and
 its files untouched, in every kind of run) and every run names it in its problems; one such file never stops the run
-or the others (each record is read on its own: `publish.read_records`), and while one cannot be read publish adds what
-is chosen but removes nothing, since whose files are whose cannot be told (the run says so). A listing not fully judged is simply not cleaned yet (the
+or the others (each record is read on its own: `publish.read_records`), and publish keeps exactly that listing's
+published files (its photos' views, 3D slabs and assignment files) while every other listing is published and removed
+as usual. A listing not fully judged is simply not cleaned yet (the
 report counts it pending); an edit already paid for is not collected once its listing has a passing photo or the
 owner's choice, since it is no longer needed. Each paid call is
 listed in the cleaning cap's spend file with its reason (`auto` or `click`, with the click's time) and what the edit

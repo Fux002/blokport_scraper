@@ -369,7 +369,7 @@ def test_a_listing_whose_choice_record_cannot_be_read_is_left_as_it_is_and_named
         worked.extend(l["key"] for l in sel.listings)
         return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
-    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {"changed": False})
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned, held: {"changed": False})
     import time
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
     stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
@@ -396,35 +396,28 @@ def test_a_listing_whose_own_choice_record_cannot_be_read_is_left_as_published_a
         worked.extend(l["key"] for l in sel.listings)
         return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
-    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {"changed": False})
+    given = {}
+    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned, held: (
+        given.setdefault("held", held), {"changed": False})[1])
     import time
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
     stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
-    assert worked == []
+    assert worked == [] and given["held"] == {("sentas", D)}                             # its photos left as published
     assert any(p.startswith("mine: its choice record cannot be read") for p in stored["problem_list"])
 
 
-def test_publish_removes_nothing_while_a_choice_record_cannot_be_read_and_says_so():
+def test_publish_keeps_exactly_the_held_listing_as_published_and_removes_the_rest(monkeypatch):
+    # review of #548: one unreadable record stopped every removal everywhere (an owner-removed listing stayed live)
     s3 = _published_bucket()
-    s3._store(f"{ROOT}chosen/two.json", b"{broken")
-    s3._store(imagestore.standard_key("sentas", B, "main"), b"maybe two's")             # whose it is cannot be told
-    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
-    assert out["removed"] == 0 and imagestore.standard_key("sentas", B, "main") in s3.objects
-    assert list(out["unreadable"]) == ["two"]
-
-
-def test_the_run_says_publish_removed_nothing_because_a_choice_record_cannot_be_read(monkeypatch):
-    s3 = _S3({imagestore.conflicts_key("sentas"): b"{}"})
-    monkeypatch.setattr(proc, "sheet_and_photos", lambda client: (NO_TILES, {}))
-    monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [])
-    monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
-    monkeypatch.setattr(proc, "run", lambda *a, **k: ([], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}))
-    monkeypatch.setattr(proc.publish, "publish", lambda s3, root, sheet, photos, say, assigned: {
-        "changed": False, "unreadable": {"two": "not JSON (x)"}})
-    import time
-    proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
-    stored = json.loads(s3.objects[f"{ROOT}summary.json"]["Body"])
-    assert "publish removed nothing: the choice records of two cannot be read" in stored["problem_list"]
+    s3._store(f"{ROOT}chosen/two.json", b"{broken")                                   # two: left exactly as published
+    held = [imagestore.standard_key("sentas", B, view) for view in imagestore.STANDARD_VIEWS]
+    held += [imagestore.cutout_key("sentas", B, ext) for ext in ("webp", "json")] + [imagestore.assigned_key("sentas", B)]
+    for key in held:
+        s3._store(key, b"two's")
+    s3._store(imagestore.standard_key("sentas", E, "main"), b"no longer chosen")
+    out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={}, held={("sentas", B)})
+    assert all(key in s3.objects for key in held)
+    assert imagestore.standard_key("sentas", E, "main") not in s3.objects and out["removed"] == 1
 
 
 def test_a_close_only_run_reads_the_choice_records_it_can():
@@ -683,7 +676,7 @@ def test_the_run_reads_the_owner_s_choices_by_sku_and_the_conflicts_the_produce_
         return [], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}
     monkeypatch.setattr(proc, "run", run)
     monkeypatch.setattr(proc.publish, "publish",
-                        lambda s3, root, sheet, photos, say, assigned: handed.update(assigned) or {"changed": False})
+                        lambda s3, root, sheet, photos, say, assigned, held: handed.update(assigned) or {"changed": False})
     import time
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None)
     assert seen["owner"] == {"SEN-MINE": _owned(D)} and seen["conflicts"] == {("sentas", D): ("mine", "partner")}
@@ -1167,7 +1160,7 @@ def test_a_close_only_run_publishes_only_the_conflict_photos_the_owner_assigned(
     monkeypatch.setattr(proc.select, "Selection", lambda *a, **k: pytest.fail("a close-only run picks no listings"))
     handed = {}
     monkeypatch.setattr(proc.publish, "publish",
-                        lambda s3, root, sheet, photos, say, assigned: handed.update(assigned) or {"changed": False})
+                        lambda s3, root, sheet, photos, say, assigned, held: handed.update(assigned) or {"changed": False})
     proc.process(s3, None, select.Spend(5.0), None, "R1", time.monotonic() + 3600, say=lambda m: None, close_only=True)
     assert handed == {("sentas", D): ["SEN-MINE"]}
 

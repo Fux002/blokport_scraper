@@ -50,12 +50,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
-from botocore.config import Config
 
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import (NoConflictSet, chosen_prefix, click_record, clicks_prefix, excluded, owner_key,
-                                       owner_prefix, read_clicks, read_conflicts, records_by_sku, write_click)
+from deploy.standardise_publish import (NoConflictSet, aws_config, chosen_prefix, click_record, clicks_prefix, excluded,
+                                       owner_key, owner_prefix, read_choices, read_clicks, read_conflicts,
+                                       records_by_sku, write_click)
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -142,21 +142,18 @@ def _keys(s3, prefix):
             for o in page.get("Contents", [])}
 
 
-def _json(s3, key):
-    return json.loads(s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read())
-
-
 class _Stores:
     """The decisions already stored, read once through the photo process's own readers (standardise_run.owner_records,
-    publish.records_by_sku, publish.read_clicks), so a file that cannot be read fails only its listing: each SKU's
-    owner choice, removal and click; `unreadable` = {SKU: [(what, key, why)]} of the files that cannot be read, whose
+    publish.records_by_sku, publish.read_choices, publish.read_clicks), so a file that cannot be read fails only its
+    listing: each SKU's owner choice, removal and click, and its listing's choice record; `unreadable` = {SKU: [(what, key, why)]} of the files that cannot be read, whose
     listing is never decided over (its decision is unknown); and the click files' keys by SKU, so a later decision
     removes the file there."""
 
-    def __init__(self, s3):
+    def __init__(self, s3, listings):
         self.s3 = s3
         self.owner_keys, self.removal_keys = _keys(s3, owner_prefix(ROOT)), _keys(s3, imagestore.owner_removed_prefix())
         self.record_keys = _keys(s3, chosen_prefix(ROOT))
+        self.records, record_bad = read_choices(s3, ROOT)                 # by listing key
         self.click_keys = {imagestore.sku_of(k, clicks_prefix(ROOT)): k for k in _keys(s3, clicks_prefix(ROOT))}
         self.stored = self.owner_keys | self.removal_keys | self.record_keys
         (self.owners, owner_bad), clicks = proc.owner_records(s3, ROOT), read_clicks(s3, ROOT)
@@ -169,16 +166,15 @@ class _Stores:
                                 lambda sku: self.click_keys[sku])):
             for sku, why in bad.items():
                 self.unreadable.setdefault(sku, []).append((what, key(sku), why))
-        self._read = {}
+        for key, why in record_bad.items():          # a choice record names its listing; the stores go by SKU
+            if key in listings:
+                self.unreadable.setdefault(listings[key]["sku"], []).append(
+                    ("choice record", f"{chosen_prefix(ROOT)}{key}.json", why))
 
     def chosen(self, listing):
-        """A listing's choice record (the run's own, by listing key), None without one."""
-        key = f"{chosen_prefix(ROOT)}{listing['key']}.json"
-        if key not in self.record_keys:
-            return None
-        if key not in self._read:
-            self._read[key] = _json(self.s3, key)
-        return self._read[key]
+        """A listing's choice record (the run's own, by listing key), None without one (or when it cannot be read: the
+        listing is then unreadable, see unreadable_of)."""
+        return self.records.get(listing["key"])
 
     def owner(self, sku):
         return self.owners.get(sku)
@@ -340,7 +336,7 @@ def plan(s3, docs, sheet, exclude):
     """The changes the decisions make (Plan), every decision checked first: InvalidDecisions names each bad one. Reads
     only; the same decisions against the same stores give the same plan, whatever their order in the file."""
     listings = {l["key"]: l for l in sheet}
-    stores = _Stores(s3)
+    stores = _Stores(s3, listings)
     try:                                              # the produce's conflict set, the sheet's sibling groups
         shared = index.groups(sheet, read_conflicts(s3, {l["source"] for l in sheet}))
     except NoConflictSet as exc:
@@ -431,7 +427,7 @@ def main() -> int:
     except (OSError, InvalidDecisions) as exc:
         print(f"ERROR: {exc}; nothing applied")
         return 2
-    s3 = boto3.client("s3", region_name=S3_REGION, config=Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS}))
+    s3 = boto3.client("s3", region_name=S3_REGION, config=aws_config())
     exclude = excluded()
     print(f"==> {len(docs)} owner decisions from {path}")
     try:

@@ -54,7 +54,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 import boto3
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from deploy import standardise_batch as gpu
@@ -635,12 +634,11 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
         closing.cancel()
     problems += conflicted + unreadable_problems(frozen, decisions)
     try:
-        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned)
+        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned,
+                                    held={(l["source"], sha) for l in frozen for sha in l["photos"]})
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}
-    if held := published.pop("unreadable", {}):
-        problems.append(f"publish removed nothing: the choice records of {', '.join(sorted(held))} cannot be read")
     hidden = published.pop("tiles_hidden", {})
     problems += [f"tile {key}: {why}" for key, why in sorted(published.pop("tiles_problems", {}).items())]
     for p in problems:
@@ -680,7 +678,7 @@ def reap(run_id):
     never ran): stop that run's GPU jobs and, only while the run lock is still that run's (its body names the run), set
     the pool's ceiling back and remove the lock. Nothing of another process is touched: a rolling deploy's other task or
     a process started by hand keeps its jobs, its lock and its ceiling."""
-    retries = Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS})
+    retries = publish.aws_config()
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     stopped = gpu.stop_run(batch, run_id)
@@ -754,7 +752,7 @@ def main() -> int:
         print(f"ERROR: not configured: {', '.join(missing)}; aborting")
         return 2
     deadline = time.monotonic() + C.WORK_SECONDS
-    retries = Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS})     # a throttled call is retried, never fatal
+    retries = publish.aws_config()
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     # The runner's run id names the lock and the GPU jobs, so the runner can clear exactly what this run left if it
