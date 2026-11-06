@@ -50,7 +50,8 @@ from stone_pipeline.reference.loaders.reference_data import (ReferenceData,
 from stone_pipeline.reference.loaders.synonyms import load_synonyms
 from stone_pipeline.reference.loaders.units import UnitEntry, Units, load_units
 from stone_pipeline.reference.loaders.variants import (ExistingVariants, Variant, VariantTable,
-                                                       _delete_keys, load_existing_variants, load_variants)
+                                                       _delete_keys, load_existing_variants, load_variants,
+                                                       variants_status_required)
 
 __all__ = [
     "IS_PRODUCTION", "SETTINGS", "content_hash", "log",
@@ -65,5 +66,6 @@ __all__ = [
     "load_synonyms",
     "UnitEntry", "Units", "load_units",
     "ExistingVariants", "Variant", "VariantTable", "load_existing_variants", "load_variants",
+    "variants_status_required",
     "_assert_pack_defaults_resolve", "_delete_keys", "_norm",
 ]

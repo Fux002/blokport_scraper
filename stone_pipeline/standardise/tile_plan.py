@@ -13,16 +13,14 @@ on which a tile of its size fits, so the sizes of a variety show the same slab w
 """
 from __future__ import annotations
 
-import csv
 import hashlib
-import io
 import json
 from dataclasses import dataclass
 from typing import Optional
 
-from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, STANDARDISE as C
+from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, STANDARDISE as C, VARIANTS_EXPORT_STATUS_REQUIRED
 from stone_pipeline.io import imagestore
-from stone_pipeline.reference.medusa_files import read_attributes
+from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 from stone_pipeline.standardise import index, tile_stone, tile_views
 
 
@@ -56,8 +54,9 @@ def _size(row):
 
 
 def variety_names(variants_csv: str) -> dict:
-    """{Medusa variation id: variety name} of the variations export."""
-    return {r["Id"]: r["Name"] for r in csv.DictReader(io.StringIO(variants_csv)) if r.get("Id") and r.get("Name")}
+    """{Medusa variation id: variety name} of the variations export text."""
+    return {v.id: v.name for v in read_variants_export(variants_csv, require_status=VARIANTS_EXPORT_STATUS_REQUIRED)
+            if v.id and v.name}
 
 
 def finish_ids(attributes_csv: str) -> set:

@@ -12,15 +12,15 @@ live here after the seed. No em dashes (design principle 2).
 
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
-from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, SETTINGS, category
+from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, SETTINGS, VARIANTS_EXPORT_STATUS_REQUIRED,
+                                            category)
 from stone_pipeline.core.numbers import parse_number
 from stone_pipeline.ledger.db import Ledger, now_iso
 from stone_pipeline.ledger.payloads import variation_hash
-from stone_pipeline.reference.medusa_files import read_attributes
+from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 
 def _branch_of(key: str) -> str:
@@ -89,41 +89,35 @@ def seed_variations(ledger: Ledger, path: str | Path | None = None) -> int:
         return 0
     now = now_iso()
     n = 0
-    with path.open(encoding="utf-8-sig", newline="") as handle:
-        for r in csv.DictReader(handle):
-            key = (r.get("Key") or "").strip()
-            if not key:
-                continue
-            medusa_id = (r.get("Id") or "").strip()
-            name = r.get("Name") or ""
-            aliases = [a for a in (r.get("Aliases") or "").split("|") if a]
-            image_url = r.get("Image") or ""
-            volume = r.get("Volume per kg (m³/kg)") or ""
-            branch = _branch_of(key)
-            ledger.upsert("variation", {
-                "key": key,
-                "branch": branch,
-                "type": "",
-                "name": name,
-                "aliases": json.dumps(aliases),
-                "image_url": image_url,
-                "image_sha256": None,
-                "image_model": None,
-                "volume": volume,
-                "medusa_id": medusa_id or None,
-                # the one hash of populate_variations_full (payloads.variation_hash). image_sha256 is None here
-                # (the export carries no fingerprint); the first produce fills the real fingerprint from S3, which
-                # re-serves any variant Medusa holds without its now-existing texture.
-                "payload_hash": variation_hash({"branch": branch, "type": "", "name": name,
-                                                "aliases": json.dumps(aliases), "image_url": image_url,
-                                                "image_sha256": None}),
-                "state": "synced",
-                "first_seen": now,
-                "last_synced": now,
-                "created_at": now,
-                "updated_at": now,
-            }, pk=("key",))
-            n += 1
+    for v in read_variants_export(path, require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
+        if not v.key:
+            continue
+        aliases = list(v.aliases)
+        branch = _branch_of(v.key)
+        ledger.upsert("variation", {
+            "key": v.key,
+            "branch": branch,
+            "type": "",
+            "name": v.name,
+            "aliases": json.dumps(aliases),
+            "image_url": v.image,
+            "image_sha256": None,
+            "image_model": None,
+            "volume": v.volume,
+            "medusa_id": v.id or None,
+            # the one hash of populate_variations_full (payloads.variation_hash). image_sha256 is None here
+            # (the export carries no fingerprint); the first produce fills the real fingerprint from S3, which
+            # re-serves any variant Medusa holds without its now-existing texture.
+            "payload_hash": variation_hash({"branch": branch, "type": "", "name": v.name,
+                                            "aliases": json.dumps(aliases), "image_url": v.image,
+                                            "image_sha256": None}),
+            "state": "synced",
+            "first_seen": now,
+            "last_synced": now,
+            "created_at": now,
+            "updated_at": now,
+        }, pk=("key",))
+        n += 1
     return n
 
 

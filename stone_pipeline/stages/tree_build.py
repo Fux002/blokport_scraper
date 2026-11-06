@@ -26,10 +26,11 @@ from collections import defaultdict
 from pathlib import Path
 
 from stone_pipeline.config.domain import active_pack
-from stone_pipeline.config.settings import ATTRIBUTES_STATUS_REQUIRED, CATEGORIES, SETTINGS, default_form_name
+from stone_pipeline.config.settings import (ATTRIBUTES_STATUS_REQUIRED, CATEGORIES, SETTINGS,
+                                            VARIANTS_EXPORT_STATUS_REQUIRED, default_form_name)
 from stone_pipeline.core import csvio, logfmt
 from stone_pipeline.core.text import looks_like_artifact, match_key
-from stone_pipeline.reference.medusa_files import read_attributes
+from stone_pipeline.reference.medusa_files import read_attributes, read_variants_export
 
 log = logfmt.get_logger("tree")
 
@@ -256,22 +257,19 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
 
     export_rows = []
     malformed = 0
-    with Path(export_csv).open(encoding="utf-8-sig", newline="") as h:
-        for r in csv.DictReader(h):
-            # tolerate a truncated/renamed export header: a row missing Id or Key is skipped, not a KeyError
-            # (the cold-start guard only checks the export EXISTS, not its shape).
-            vid = (r.get("Id") or "").strip()
-            key = (r.get("Key") or "").strip()
-            name = (r.get("Name") or "").strip()
-            # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
-            # combination references a variation that will not exist after the Medusa cleanup.
-            if vid and key and vid not in exclude_ids and key not in retired_keys and not looks_like_artifact(name):
-                export_rows.append((key, vid, name))
-            elif (vid or key or name) and not (vid and key):
-                # a row that carries data but is MISSING Id or Key is not a blank line -- it is a real
-                # variation being silently dropped from combinations. Surface it (fail-loud, without
-                # aborting the run on a thin/header-only cold-start export, which is legitimately empty).
-                malformed += 1
+    for r in read_variants_export(Path(export_csv), require_status=VARIANTS_EXPORT_STATUS_REQUIRED):
+        # a row missing Id or Key is skipped, not a KeyError (the cold-start guard only checks the export
+        # EXISTS; read_variants_export fails loud on a missing Key or Name column, an absent Id reads empty).
+        vid, key, name = r.id, r.key, r.name
+        # exclude code-like names (e.g. a stale 'Z Astoria' still in the export) so no
+        # combination references a variation that will not exist after the Medusa cleanup.
+        if vid and key and vid not in exclude_ids and key not in retired_keys and not looks_like_artifact(name):
+            export_rows.append((key, vid, name))
+        elif (vid or key or name) and not (vid and key):
+            # a row that carries data but is MISSING Id or Key is not a blank line -- it is a real
+            # variation being silently dropped from combinations. Surface it (fail-loud, without
+            # aborting the run on a thin/header-only cold-start export, which is legitimately empty).
+            malformed += 1
     if malformed:
         log.warning("export rows missing Id/Key were skipped from combinations",
                     extra={"extra_fields": {"count": malformed, "export": str(export_csv)}})
