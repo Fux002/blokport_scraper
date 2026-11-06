@@ -135,10 +135,18 @@ re-running catalog with `SCRAPER_VARIANT_IMAGE_BASE=<prod-bucket>/.../variations
   keep it in review or fix it). This is the onboarding funnel for a new source: certify → health → ingest → clean → process.
 
 ## 7. Current state (sources)
+
+> Historical snapshot, kept for context. The onboarded sources are the `REGISTRY` in
+> `scrapers/run.py` (the one source of truth); current source and sync state live in the
+> root docs (HOW_THE_SCRAPER_WORKS.md, DEV_PROD_PIPELINE.md, SYNC_LEDGER_DESIGN.md).
+
 varsha ✅ · polonine ✅ · marenostone ✅ · zucchi ❌ (scrape gate: scraper chat).
 Product CSV: 798/870 linked, 0 broken; 72 imageless = supplier never photographed them.
 
 ## 8. Open / handoffs
+
+> Historical snapshot, kept for context; these handoffs are resolved or have moved on.
+
 1. **Publish current CSVs to S3** `to_upload/` (S3 copies stale) — scraper chat.
 2. **Medusa re-import** products from `improved/`-linked CSV → user applies the **Blokport watermark** in Medusa
    media (`d1xcekdxyhabdd.cloudfront.net`, a SEPARATE system from our `improved/`).

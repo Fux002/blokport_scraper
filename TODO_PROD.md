@@ -3,7 +3,7 @@
 Everything that must be done to run the pipeline in **production**. Dev is proven and deployed;
 prod is **provisioned and live** since 2026-09-02 (the stack is gated on `prod_staging_bucket`, now set). Promotion
 dev->prod is a config/env change, never a code edit (see `DEV_PROD_PIPELINE.md` for the data flow, and
-`PROD_CUTOVER_RUNBOOK.md` for the ordered two-team cutover sequence + the resolved cross-team answers).
+`docs/superseded/PROD_CUTOVER_RUNBOOK.md` for the ordered two-team cutover sequence + the resolved cross-team answers).
 
 The code fails loud on the values that have NO fallback, so a missed item errors rather than shipping
 silently. Work top to bottom.

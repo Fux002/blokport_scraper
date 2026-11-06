@@ -45,7 +45,7 @@ changes at its own pace and confirms each one.
         v
  +--------------------------------------------------------------+
  | 4. ENRICH    Add the rest: country of origin, size/weight,    |
- |              and images (downloaded, cleaned, upscaled, hosted).|
+ |              and images (downloaded, cleaned, resized, hosted). |
  +--------------------------------------------------------------+
         |  [check] a product with no proper image is HELD back, not shipped
         v
@@ -179,8 +179,9 @@ Robustness here is not a claim, it is built in and checked automatically:
 - **The source of truth is protected.** The ledger is safeguarded against interference
   (it refuses risky changes while the shop is mid-read) and is backed up automatically,
   so a restart never loses what the shop has already confirmed.
-- **Images are ready before products.** Photo cleaning and hosting finish inside the run,
-  before the product is offered, so a product can never appear referencing a missing image.
+- **Images gate the product.** Hosting (download, resize, re-host) happens inside the run; the
+  standardised-photo cleaning is a separate stage (see STANDARDISE_PROCESS.md). A product is offered
+  only once its photo is ready (the `photo_ready` rule), so it can never appear referencing a missing image.
 
 ---
 

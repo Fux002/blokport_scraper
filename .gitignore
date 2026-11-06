@@ -18,9 +18,8 @@ __pycache__/
 /ledger/
 *.ledger
 # the scraper config store (live, UI-edited); sources.yaml is the committed seed.
-/config.db
-/config.db-wal
-/config.db-shm
+# glob covers config.db + its -wal/-shm and any env-suffixed copy.
+/config*.db*
 # runtime state/diagnostics that live INSIDE the code package (keep the .py code)
 stone_pipeline/state/*.csv
 stone_pipeline/state/*.json
@@ -29,7 +28,6 @@ stone_pipeline/outputs/
 image_pipeline/images/
 image_pipeline/to_upload/
 image_pipeline/prompts_to_generate.json
-*.parquet
 *.bak
 failures.jsonl
 
