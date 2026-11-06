@@ -113,6 +113,12 @@ class ReviewFlag(BaseModel):
     detail: Optional[str] = None      # free-text reviewer note; callers pass detail= (was silently dropped)
 
 
+# The origin_needs_confirmation flag's method for a multi-country stone none of whose countries is the
+# supplier's home (derive raises it, the review card words it): its best_guess is the supplier's HOME, not a
+# country the vendor declared, so the card must not offer it as the origin.
+ORIGIN_HOLD_MULTI_HOME = "multi_home_absent"
+
+
 class RejectReason(BaseModel):
     """A single hard failure that prevents a row from emitting (section 9, Stage 9)."""
 

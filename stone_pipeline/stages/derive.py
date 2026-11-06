@@ -22,7 +22,7 @@ from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core import logfmt
 from stone_pipeline.core.manifest import StageMetric
 from stone_pipeline.core.numbers import normalize_unit, parse_number
-from stone_pipeline.core.schema import CanonicalRow, FlagCode, ReviewFlag
+from stone_pipeline.core.schema import ORIGIN_HOLD_MULTI_HOME, CanonicalRow, FlagCode, ReviewFlag
 from stone_pipeline.stages._rowguard import isolate_rows
 from stone_pipeline.gates.report import DEGRADED, OK
 from stone_pipeline.core.text import slugify, title_case
@@ -652,7 +652,7 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
         home = _to_iso(source_cfg.origin_default, ref) or ""
         iso = _select_origin(rule.countries, home)
         if iso is None:
-            _hold_for_origin_confirmation(row, rule.countries, home or None, "multi_home_absent")
+            _hold_for_origin_confirmation(row, rule.countries, home or None, ORIGIN_HOLD_MULTI_HOME)
             return
         row.origin_country_code = iso
         row.origin_city = rule.city

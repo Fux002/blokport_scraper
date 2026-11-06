@@ -104,6 +104,31 @@ def test_multi_home_absent_is_held_for_confirmation(base_ref):
         ("turco", "Patagonia", "BR,IN", "TR")
 
 
+def test_the_multi_home_card_names_the_supplier_home_and_prefills_no_origin(base_ref):
+    # the supplier's HOME is not a declared own country and is by definition not a documented origin, so the
+    # card says where the supplier is based and leaves the origin for the operator to choose
+    from stone_pipeline.config import server
+    ref = _ref(base_ref, _map(("Patagonia", "Quartzite", "BR,IN,TR")))
+    row = _row(src_site="turco", variation_name="Patagonia")
+    derive.derive_origin(row, ref, _cfg("IT"))
+    decisions.write_origin_confirm_file([row])
+    card = server._origin_as_card(ds.list_pending("origin")[0])
+    assert "supplier based in IT; stone documented in BR, IN, TR" in card["reason"]
+    assert "declares" not in card["reason"]
+    assert card["origin"] == ""
+
+
+def test_the_vendor_mismatch_card_keeps_the_declared_country_prefill(base_ref):
+    from stone_pipeline.config import server
+    ref = _ref(base_ref, _map(("Patagonia", "Quartzite", "BR,IN")))
+    row = _row(src_site="turco", variation_name="Patagonia")
+    derive.derive_origin(row, ref, dataclasses.replace(_cfg("IT"), primary_origin="TR"))
+    decisions.write_origin_confirm_file([row])
+    card = server._origin_as_card(ds.list_pending("origin")[0])
+    assert "the vendor declares TR" in card["reason"]
+    assert card["origin"] == "TR"
+
+
 # --- rung 2: per-supplier override wins over the map -------------------------
 def test_supplier_override_wins(base_ref):
     ov = OriginOverrides(rules={(_norm("varsha"), _norm("Patagonia"), _norm("Quartzite")): "IN"})

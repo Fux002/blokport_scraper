@@ -137,6 +137,8 @@ def write_origin_confirm_file(rows) -> int:
                         "scraped": (getattr(row, "variety_match_key", "") or getattr(row, "raw_name", "") or ""),
                         "map_country": (flag.raw_value if flag else ""),
                         "vendor_origin": (flag.best_guess if flag else ""),
+                        # WHY it is held (derive's hold method): the card words the two holds differently
+                        "hold": (flag.method if flag else ""),
                         "src_url": (getattr(row, "src_url", "") or ""),
                         "image": next((u for u in imgs if u), "")},
             "sources": [source],
