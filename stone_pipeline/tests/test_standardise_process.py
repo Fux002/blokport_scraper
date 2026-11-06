@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import signal
 import subprocess
 import sys
 
@@ -1401,6 +1402,9 @@ class _Child:
 
 def _child_of(monkeypatch, child, stage="photos"):
     run = {"run_id": "r", "stage": stage}
+    # the fake has no process group: the one signalling seam maps the group signal onto it
+    monkeypatch.setattr(runner, "_signal", lambda c, sig: c.terminate() if sig == signal.SIGTERM else c.kill(),
+                        raising=False)
     monkeypatch.setattr(runner, "_child", child)
     monkeypatch.setattr(runner, "_child_run", run)
     monkeypatch.setattr(runner, "_watcher", None)
@@ -1464,7 +1468,7 @@ def test_one_deadline_bounds_the_child_s_grace_and_the_watcher_s_join(monkeypatc
     monkeypatch.setattr(runner, "RUN_STOP_GRACE_SECONDS", 80)
     joined = []
     monkeypatch.setattr(runner, "_watcher", type("W", (), {"join": lambda self, timeout: joined.append(timeout)})())
-    times = iter([0, 0, 30])                                                # the child took 30 s to end
+    times = iter([0, 0, 0, 30])                    # the stop's turn, the child's grace, then it took 30 s to end
     runner.stop_current(clock=lambda: next(times))
     assert child.waited == 80 and joined == [50]
 
@@ -1561,6 +1565,7 @@ def test_the_owner_s_publish_stops_a_photos_run_cleanly_and_runs_at_once(monkeyp
     monkeypatch.setattr(runner, "_watcher", None)
     child = _Running()
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: child)
+    monkeypatch.setattr(runner, "_signal", lambda c, sig: c.terminate() if sig == signal.SIGTERM else c.kill())
     photos, code = runner.start_run(None, "photos")
     assert code == 202
     for _ in range(100):                                                            # the photos run is under way

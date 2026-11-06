@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import boto3
+from boto3.exceptions import Boto3Error
 from botocore.exceptions import BotoCoreError, ClientError
 
 from stone_pipeline.config.settings import (ENV_SEGMENT, S3_BUCKET, S3_REGION, SETTINGS, THIN_COPY_MIN_FRACTION,
@@ -73,6 +74,21 @@ def _would_clobber(incoming_lines: int, current_lines: int) -> bool:
     return current_lines > 0 and incoming_lines < current_lines * THIN_COPY_MIN_FRACTION
 
 
+def _refuse_thin(name: str, incoming_lines: int, current_lines: int, basis: str) -> None:
+    """A thin S3 copy of `name` was refused. With a local copy, that copy is kept. With none, a copy WITHOUT rows is the
+    real cold start (Medusa holds nothing yet): `name` stays absent and the run goes on. A copy WITH rows stops the
+    fetch (SystemExit, so the produce stops in every environment): left absent it would look like a cold start, and
+    tree_build would publish an EMPTY valid-combinations set that the reconcile gate passes as one."""
+    rows, base_rows = max(incoming_lines - 1, 0), max(current_lines - 1, 0)     # less the header line
+    if basis == name:
+        print(f"   ! kept the local {name} (S3 copy looks thin: {rows} rows vs {base_rows})")
+    elif rows == 0:
+        print(f"   {name}: no rows on S3 (a cold start); left absent")
+    else:
+        raise SystemExit(f"refusing {name} from S3: {rows} row(s) against {base_rows} rows in the committed {basis}; "
+                         "Medusa's export looks partial (mid-reset?). Re-export it, then run again.")
+
+
 def _baseline(dest: Path, name: str) -> tuple[int, str]:
     """(line count, the file it was counted on) a protected download must not fall far below: the local copy, else
     the committed file standing in for it (_BASELINE_WHEN_ABSENT), else nothing to protect (0)."""
@@ -88,8 +104,9 @@ def fetch_attributes(client=None, target=None) -> bool:
     validates colours/types against Medusa's CURRENT set from container start. Without it a fresh container
     (every deploy reverts the on-disk file to the committed baseline, which lags Medusa's newer colours)
     rejects a just-added colour at mint until the next full produce re-fetches it. An S3 failure (no object, no
-    credentials, no endpoint) is logged as an error and keeps the committed copy, returning False: a fresh or
-    offline host still validates against a real seed. Any other error raises. Returns True iff a fresher copy was
+    credentials, no endpoint, a transfer whose retries ran out) is logged as an error and keeps the committed copy,
+    returning False: a fresh or offline host still validates against a real seed, and one network blip at boot is no
+    restart loop. Any other error raises. Returns True iff a fresher copy was
     written. Downloads to a temp then atomically replaces. `target` overrides the destination for tests (defaults
     to the live attributes_csv path)."""
     key = f"{ENV_SEGMENT}/scraper/from_medusa/attributes.csv"
@@ -104,7 +121,7 @@ def fetch_attributes(client=None, target=None) -> bool:
             return False
         tmp.replace(target)
         return True
-    except (BotoCoreError, ClientError) as exc:
+    except (BotoCoreError, ClientError, Boto3Error) as exc:   # Boto3Error: S3Transfer's RetriesExceededError
         log.error(f"could not fetch s3://{S3_BUCKET}/{key}; keeping the committed attributes.csv: {exc}")
         return False
     finally:
@@ -138,9 +155,8 @@ def main() -> int:
                 dropped = own_variants(tmp) if name in _VARIANT_EXPORTS else 0
                 incoming, (current, basis) = _line_count(tmp), _baseline(dest, name)
                 if _would_clobber(incoming, current):
-                    kept = f"kept the local {name}" if basis == name else f"left {name} absent"
-                    print(f"   ! {kept} (S3 copy looks thin: {incoming} vs {current} lines of {basis})")
                     tmp.unlink()
+                    _refuse_thin(name, incoming, current, basis)
                     continue
                 tmp.replace(target)
             else:

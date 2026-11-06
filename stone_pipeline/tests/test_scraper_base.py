@@ -566,7 +566,8 @@ def test_a_retryable_answer_backs_off_and_names_its_cause(tmp_path, monkeypatch,
     with pytest.raises(RuntimeError, match=cause):
         s.get("http://x/a", throttle=False)
     assert client.i == s.max_retries
-    assert sleeps == [s.backoff_base ** a for a in range(s.max_retries)]      # the same backoff as an exception
+    # the same backoff as an exception, and none after the last attempt (nothing follows it)
+    assert sleeps == [s.backoff_base ** a for a in range(s.max_retries - 1)]
     assert cause in s._failures[-1]["error"]                                    # the audit names it, not None
 
 
@@ -576,4 +577,4 @@ def test_too_many_redirects_backs_off_and_names_its_cause(tmp_path, monkeypatch)
     sleeps = _sleepless(monkeypatch)
     with pytest.raises(RuntimeError, match="too many redirects"):
         s.get("http://x/a", throttle=False)
-    assert sleeps == [s.backoff_base ** a for a in range(s.max_retries)]
+    assert sleeps == [s.backoff_base ** a for a in range(s.max_retries - 1)]

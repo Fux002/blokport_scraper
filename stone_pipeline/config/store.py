@@ -247,6 +247,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "decided_by" not in {r["name"] for r in conn.execute("PRAGMA table_info(backbone_leaf_decision)")}:
         conn.execute("ALTER TABLE backbone_leaf_decision ADD COLUMN decided_by TEXT NOT NULL DEFAULT 'operator' "
                      "CHECK (decided_by IN ('operator','produce'))")
+        _stamp_produce_membership(conn)
     # Operator "Not a duplicate" verdicts: variation Keys the reconcile dedup must NEVER drop, even when a
     # Key shares a (branch,type,name) identity with another. A false-positive dup detection (two genuinely
     # distinct varieties, e.g. multi-type homonyms) is exempted here so a future reconcile/pristine cannot
@@ -268,6 +269,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "health TEXT NOT NULL, worst TEXT NOT NULL, drift TEXT NOT NULL DEFAULT '[]', "
                  "certified INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (source, run_id))")
     conn.commit()
+
+
+def _stamp_produce_membership(conn: sqlite3.Connection) -> None:
+    """The decided_by migration: an 'approve' row written inside a successful catalog-applying run's [started_at,
+    finished_at] window is a minted variety's membership the produce recorded while it ran, so it is stamped
+    'produce'; every other row keeps 'operator'. Without this, every membership row of the last produce would count
+    as a pending operator decision right after the deploy. Reads the bounded run_log (<=50 runs)."""
+    windows = [(rec["started_at"], rec["finished_at"]) for rec in map(json.loads, (
+        r["record"] for r in conn.execute("SELECT record FROM run_log WHERE finished_at IS NOT NULL")))
+        if rec.get("status") == "succeeded" and rec.get("stage") in _APPLIED_STAGES and rec.get("started_at")]
+    for started_at, finished_at in windows:
+        conn.execute("UPDATE backbone_leaf_decision SET decided_by = 'produce' "
+                     "WHERE action = 'approve' AND decided_at BETWEEN ? AND ?", (started_at, finished_at))
 
 
 STATEMENTS_MIGRATION = "statements_v1"

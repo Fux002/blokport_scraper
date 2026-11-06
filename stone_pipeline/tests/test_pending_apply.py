@@ -119,3 +119,34 @@ def test_a_store_from_before_the_leaf_origin_gains_it_as_operator_rows(tmp_path)
     with closing(store.open_store(db)) as conn:
         row = conn.execute("SELECT decided_by FROM backbone_leaf_decision").fetchone()
     assert row["decided_by"] == "operator"
+
+
+def test_the_produce_never_takes_over_an_operator_verdict_on_the_same_leaf():
+    ds.set_backbone_leaf_decision("Alpine Luxe", "Granite", "color", "White", "reject")    # the operator's
+    assert ds.record_minted_membership([("Alpine Luxe", "Granite", "color", "White")]) == 0
+    assert [(d["action"]) for d in ds.list_decided_leaves()] == ["reject"]
+    assert store.decisions_pending_apply()["changed"] == 1                               # still the operator's
+
+
+def test_the_migration_stamps_membership_written_inside_an_applied_run_as_the_produce_s(tmp_path):
+    from contextlib import closing
+    db = tmp_path / "legacy.db"
+    run = {"run_id": "r1", "status": "succeeded", "stage": "all",
+           "started_at": "2001-01-01T10:00:00+00:00", "finished_at": "2001-01-01T11:00:00+00:00"}
+    store.record_run_log(run, path=db)
+    store.record_run_log({**run, "run_id": "r2", "status": "failed", "started_at": "2001-01-02T10:00:00+00:00",
+                          "finished_at": "2001-01-02T11:00:00+00:00"}, path=db)
+    rows = {"in_run": ("approve", "2001-01-01T10:30:00+00:00"), "between": ("approve", "2001-01-01T12:00:00+00:00"),
+            "rejected_in_run": ("reject", "2001-01-01T10:40:00+00:00"),
+            "in_failed_run": ("approve", "2001-01-02T10:30:00+00:00")}
+    with closing(store.open_store(db)) as conn:
+        conn.execute("ALTER TABLE backbone_leaf_decision DROP COLUMN decided_by")
+        for value, (action, at) in rows.items():
+            conn.execute("INSERT INTO backbone_leaf_decision (variety_norm, stone_type_norm, attribute, value_norm, "
+                         "value_display, action, decided_at) VALUES ('a', 'granite', 'color', ?, ?, ?, ?)",
+                         (value, value, action, at))
+        conn.execute("PRAGMA user_version = 9")
+        conn.commit()
+    with closing(store.open_store(db)) as conn:
+        got = {r["value_norm"]: r["decided_by"] for r in conn.execute("SELECT value_norm, decided_by FROM backbone_leaf_decision")}
+    assert got == {"in_run": "produce", "between": "operator", "rejected_in_run": "operator", "in_failed_run": "operator"}

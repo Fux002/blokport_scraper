@@ -276,7 +276,8 @@ class ScraperBase:
                 raise  # permanent -- never retry a blocked target
             except Exception as exc:  # transient: back off and retry
                 cause = exc
-            time.sleep(wait)
+            if attempt + 1 < self.max_retries:                    # nothing follows the last attempt
+                time.sleep(wait)
         self.record_failure("http", method=method, url=url, error=str(cause))
         raise RuntimeError(f"{method} failed after {self.max_retries} tries: {url}: {cause}") from cause
 

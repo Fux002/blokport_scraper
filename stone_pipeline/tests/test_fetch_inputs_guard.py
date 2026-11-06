@@ -4,6 +4,7 @@ thin/empty Medusa export (mid-reset), or nothing resolves. Guards _would_clobber
 from __future__ import annotations
 
 import pytest
+from boto3.exceptions import RetriesExceededError
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
 
 from deploy import fetch_inputs
@@ -70,7 +71,8 @@ def test_fetch_attributes_keeps_committed_when_s3_is_thin(tmp_path):
     assert not target.with_suffix(".csv.incoming").exists()
 
 
-@pytest.mark.parametrize("error", [_NO_SUCH_KEY, NoCredentialsError(), EndpointConnectionError(endpoint_url="x")])
+@pytest.mark.parametrize("error", [_NO_SUCH_KEY, NoCredentialsError(), EndpointConnectionError(endpoint_url="x"),
+                                   RetriesExceededError(last_exception=ConnectionError("body read"))])
 def test_fetch_attributes_keeps_the_committed_vocab_on_an_s3_error_and_says_so(tmp_path, monkeypatch, error):
     errors: list[str] = []
     monkeypatch.setattr(fetch_inputs.log, "error", lambda msg, *a, **k: errors.append(msg))
@@ -141,18 +143,31 @@ def _main_with(tmp_path, monkeypatch, name: str, incoming: str):
     fetch_inputs.main()
 
 
-def test_with_no_local_export_a_thin_one_is_measured_against_the_committed_base(tmp_path, monkeypatch):
-    # after a roll the live export is absent (gitignored); the committed base is in the image and lists the same
-    # variants, so a thin S3 export (Medusa mid-reset) is refused instead of becoming the matcher's reference
+def _committed_base(tmp_path, rows=10):
     (tmp_path / "variants_export_base.csv").write_text(
-        "Key,Name\n" + "".join(f"slab_x_{i:04d},X\n" for i in range(10)), encoding="utf-8")
-    _main_with(tmp_path, monkeypatch, "variants_export.csv", "Id,Key\nv1,slab_x_0001\n")
-    assert not (tmp_path / "variants_export.csv").exists()          # absent: the matcher falls back to the base
+        "Key,Name\n" + "".join(f"slab_x_{i:04d},X\n" for i in range(rows)), encoding="utf-8")
+
+
+def test_with_no_local_export_a_thin_one_with_rows_stops_the_fetch(tmp_path, monkeypatch):
+    # after a roll the live export is absent (gitignored); the committed base lists the same variants. A thin S3 export
+    # (Medusa mid-reset) must not become the reference, nor be dropped so the run looks like a cold start (tree_build
+    # would publish an EMPTY valid-combinations set): the fetch fails, naming the file and both row counts
+    _committed_base(tmp_path)
+    with pytest.raises(SystemExit, match=r"variants_export\.csv.*1 row.*10 rows"):
+        _main_with(tmp_path, monkeypatch, "variants_export.csv", "Id,Key\nv1,slab_x_0001\n")
+    assert not (tmp_path / "variants_export.csv").exists()
+    assert not (tmp_path / "variants_export.csv.incoming").exists()
+
+
+def test_with_no_local_export_a_header_only_one_stays_absent(tmp_path, monkeypatch):
+    # an export with no rows is the real cold start (Medusa has nothing yet): absent, the run goes on
+    _committed_base(tmp_path)
+    _main_with(tmp_path, monkeypatch, "variants_export.csv", "Id,Key\n")
+    assert not (tmp_path / "variants_export.csv").exists()
 
 
 def test_with_no_local_export_a_full_one_is_taken(tmp_path, monkeypatch):
-    (tmp_path / "variants_export_base.csv").write_text(
-        "Key,Name\n" + "".join(f"slab_x_{i:04d},X\n" for i in range(10)), encoding="utf-8")
+    _committed_base(tmp_path)
     full = "Id,Key\n" + "".join(f"v{i},slab_x_{i:04d}\n" for i in range(10))
     _main_with(tmp_path, monkeypatch, "variants_export.csv", full)
     assert (tmp_path / "variants_export.csv").read_text(encoding="utf-8").count("slab_x_") == 10

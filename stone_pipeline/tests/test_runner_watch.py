@@ -4,8 +4,10 @@ failure cause, and the record always ends terminal: whatever goes wrong in the w
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import threading
+import time
 
 import pytest
 
@@ -71,7 +73,10 @@ class _HungProc(_FakeProc):
 
 
 @pytest.fixture(autouse=True)
-def _runner_state():
+def _runner_state(monkeypatch):
+    # the fakes have no process group: the one signalling seam maps the group signal onto them
+    monkeypatch.setattr(runner, "_signal", lambda child, sig: child.terminate() if sig == signal.SIGTERM else child.kill(),
+                        raising=False)
     yield
     runner._child, runner._child_run, runner._watcher = None, None, None
 
@@ -151,20 +156,33 @@ def test_a_watcher_failure_after_the_run_still_records_a_terminal_status(monkeyp
     assert runner._child is None and not runner.run_in_progress()
 
 
-def test_a_watcher_failure_mid_stream_ends_the_unwatched_child(monkeypatch):
-    _quiet(monkeypatch)
+class _Undecodable(_HungProc):
+    """A run whose log stops decoding mid-stream while it still runs."""
 
-    class _Undecodable(_FakeProc):
-        @property
-        def stderr(self):
-            yield "first\n"
-            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
-    proc = _Undecodable([])
-    rec = {"run_id": "r5", "stage": "all"}
+    @property
+    def stderr(self):
+        yield "first\n"
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
+@pytest.mark.parametrize("stage, honours_term, signals, reaped", [
+    ("all", True, ["TERM"], []),                            # stopped the graceful way, nothing of a photos run to clear
+    ("photos", False, ["TERM", "KILL"], ["r5"]),            # a killed photos run's GPU jobs, lock and ceiling cleared
+])
+def test_a_watcher_failure_mid_stream_ends_the_unwatched_child(monkeypatch, stage, honours_term, signals, reaped):
+    _quiet(monkeypatch)
+    monkeypatch.setattr(runner, "RUN_STOP_GRACE_SECONDS", 0.3)
+    monkeypatch.setattr(runner, "_photo_counts", lambda rec: None)
+    cleared = []
+    monkeypatch.setattr(runner, "_reap_photos", lambda run_id, deadline, clock=None: cleared.append(run_id))
+    proc = _Undecodable(honours_term=honours_term)
+    rec = {"run_id": "r5", "stage": stage}
+    runner._child, runner._child_run = proc, rec
     with pytest.raises(UnicodeDecodeError):
         runner._watch_local(rec, proc)
-    assert "KILL" in proc.signals                           # never left running with nobody reading its log
+    assert proc.signals == signals and cleared == reaped    # never left running with nobody reading its log
     assert rec["status"] == "failed" and "UnicodeDecodeError" in rec["error"]
+    assert runner._child is None
 
 
 def test_a_truncated_photos_summary_is_a_problem_on_the_record_not_a_crash(monkeypatch, tmp_path):
@@ -200,3 +218,61 @@ def test_the_kept_tail_and_the_run_history_are_settings(monkeypatch):
     rec = {"run_id": "r8", "stage": "all"}
     runner._watch_local(rec, _FakeProc([f"line {i}\n" for i in range(10)], rc=1))
     assert rec["error"].splitlines()[1:] == ["line 7", "line 8", "line 9"]
+
+
+class _SlowStream(_FakeProc):
+    """A run whose log is still being read when the timer fires; `exited` says whether the process itself is done."""
+
+    def __init__(self, exited):
+        super().__init__([])
+        self.exited = exited
+
+        def _slow():
+            yield "working\n"
+            time.sleep(0.5)
+        self._lines = _slow()
+
+    def poll(self):
+        return 0 if self.exited else super().poll()
+
+
+def test_a_run_that_exited_as_the_timer_fired_keeps_its_rc_0(monkeypatch):
+    _quiet(monkeypatch)
+    monkeypatch.setattr(runner, "RUN_TIMEOUT_SECONDS", 0.1)
+    proc = _SlowStream(exited=True)
+    rec = {"run_id": "r9", "stage": "all"}
+    _watch_registered(rec, proc)
+    assert proc.signals == [] and rec["status"] == "succeeded"
+
+
+def test_the_timer_acts_only_on_its_own_run(monkeypatch):
+    _quiet(monkeypatch)
+    monkeypatch.setattr(runner, "RUN_TIMEOUT_SECONDS", 0.1)
+    proc, other = _SlowStream(exited=False), _FakeProc([])
+    rec = {"run_id": "r10", "stage": "all"}
+    watcher = threading.Thread(target=runner._watch_local, args=(rec, proc), daemon=True)
+    runner._child, runner._child_run, runner._watcher = other, {"run_id": "other"}, None    # another run holds the slot
+    watcher.start()
+    watcher.join(timeout=10)
+    assert proc.signals == [] and other.signals == [] and rec["status"] == "succeeded"
+
+
+def test_two_stops_at_once_signal_the_child_once():
+    # a timeout and a give-way (or the server's stop) arriving together: one stop path at a time
+    proc = _HungProc(honours_term=True)
+    gate = threading.Event()
+    terminate = proc.terminate
+
+    def _slow_terminate():                                   # the first stop is still under way when the second comes
+        terminate()
+        gate.wait(timeout=1)
+    proc.terminate = _slow_terminate
+    runner._child, runner._child_run, runner._watcher = proc, {"run_id": "r11", "stage": "all"}, None
+    stops = [threading.Thread(target=runner._end_child, args=(time.monotonic() + 3,)) for _ in range(2)]
+    for t in stops:
+        t.start()
+    time.sleep(0.2)
+    gate.set()
+    for t in stops:
+        t.join(timeout=5)
+    assert proc.signals == ["TERM"]
