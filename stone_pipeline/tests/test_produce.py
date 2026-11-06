@@ -15,6 +15,10 @@ def _stub(monkeypatch):
     """Record the produce steps in order; stub build.main so nothing touches disk/network."""
     calls = []
     monkeypatch.setattr(produce, "_fetch_inputs", lambda: calls.append(("fetch", None)))
+    # VE2: the archived mirror runs right after fetch, before any source is recorded -- record it so the
+    # fetch -> mirror -> scrape -> build order is PROTECTED (deleting or moving the call fails these tests).
+    monkeypatch.setattr(produce, "_mirror_archived", lambda: calls.append(("mirror", None)))
+    monkeypatch.setattr(produce, "_log_frozen_waiting", lambda: None)
     monkeypatch.setattr(produce, "_live_scrape", lambda s: calls.append(("scrape", s)) or 0)
     monkeypatch.setattr(produce.build, "main", lambda argv: calls.append(("build", argv)) or 0)
     # persist + publish belong to produce now (wave 4g); off for these step-order tests
@@ -29,13 +33,14 @@ def _stub(monkeypatch):
 def test_full_produce_fetches_then_scrapes_then_builds(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--sources", "zucchi"]) == 0
-    assert calls == [("fetch", None), ("scrape", ["zucchi"]), ("build", ["--sources", "zucchi"])]
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", ["zucchi"]),
+                     ("build", ["--sources", "zucchi"])]
 
 
 def test_default_scope_scrapes_all(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main([]) == 0
-    assert calls == [("fetch", None), ("scrape", None), ("build", [])]
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", None), ("build", [])]
 
 
 def test_finalize_skips_inventory_but_runs_for_a_validated_produce(monkeypatch):
@@ -54,13 +59,21 @@ def test_finalize_skips_inventory_but_runs_for_a_validated_produce(monkeypatch):
 def test_catalog_only_never_scrapes(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--stage", "catalog"]) == 0
-    assert calls == [("fetch", None), ("build", ["--stage", "catalog"])]   # fetch, then straight to build
+    # fetch, mirror, then straight to build (no scrape): the mirror still runs before build
+    assert calls == [("fetch", None), ("mirror", None), ("build", ["--stage", "catalog"])]
+
+
+def test_republish_stage_never_scrapes_but_still_mirrors(monkeypatch):
+    calls = _stub(monkeypatch)
+    assert produce.main(["--stage", "republish"]) == 0
+    assert calls == [("fetch", None), ("mirror", None), ("build", ["--stage", "republish"])]
 
 
 def test_inventory_stage_still_scrapes_first(monkeypatch):
     calls = _stub(monkeypatch)
     assert produce.main(["--stage", "inventory"]) == 0
-    assert calls == [("fetch", None), ("scrape", None), ("build", ["--stage", "inventory"])]
+    assert calls == [("fetch", None), ("mirror", None), ("scrape", None),
+                     ("build", ["--stage", "inventory"])]
 
 
 def test_verify_delegates_straight_to_build(monkeypatch):
@@ -72,10 +85,11 @@ def test_verify_delegates_straight_to_build(monkeypatch):
 def test_failed_scrape_aborts_before_build(monkeypatch):
     calls = []
     monkeypatch.setattr(produce, "_fetch_inputs", lambda: calls.append("fetch"))
+    monkeypatch.setattr(produce, "_mirror_archived", lambda: calls.append("mirror"))
     monkeypatch.setattr(produce, "_live_scrape", lambda s: calls.append("scrape") or 3)
     monkeypatch.setattr(produce.build, "main", lambda argv: calls.append("build") or 0)
     assert produce.main(["--sources", "zucchi"]) == 3
-    assert calls == ["fetch", "scrape"]              # build never runs on a failed scrape
+    assert calls == ["fetch", "mirror", "scrape"]    # build never runs on a failed scrape; mirror precedes it
 
 
 def test_fetch_inputs_failure_is_best_effort(monkeypatch):
@@ -86,6 +100,31 @@ def test_fetch_inputs_failure_is_best_effort(monkeypatch):
     monkeypatch.setattr("deploy.fetch_inputs.main", boom, raising=False)
     # call the real _fetch_inputs (not the stub) to prove it swallows the error
     p._fetch_inputs()   # must not raise
+
+
+def test_frozen_waiting_is_logged_when_products_wait(monkeypatch):
+    # VE2 finding 4: the frozen-waiting line must be logged on every produce stage (write-through on), and
+    # skipped when nothing waits. Spy on the logger so this does not depend on log propagation.
+    from stone_pipeline.ledger import writethrough
+    monkeypatch.setattr(writethrough, "enabled", lambda: True)
+    monkeypatch.setattr(produce, "_frozen_waiting", lambda: 2)
+    seen: list = []
+    monkeypatch.setattr(produce.log, "warning", lambda msg, **k: seen.append((msg, k)))
+    produce._log_frozen_waiting()
+    assert len(seen) == 1 and seen[0][1]["extra"]["extra_fields"]["frozen_waiting"] == 2
+    seen.clear()
+    monkeypatch.setattr(produce, "_frozen_waiting", lambda: 0)   # nothing waiting -> no line
+    produce._log_frozen_waiting()
+    assert seen == []
+
+
+def test_frozen_waiting_is_silent_when_writethrough_is_off(monkeypatch):
+    from stone_pipeline.ledger import writethrough
+    monkeypatch.setattr(writethrough, "enabled", lambda: False)
+    called: list = []
+    monkeypatch.setattr(produce, "_frozen_waiting", lambda: called.append(1) or 5)
+    produce._log_frozen_waiting()
+    assert called == []   # write-through off: never opens the ledger to count
 
 
 # -- pull-model gate reconciliation (Medusa's scoped non-fatal-for-new-varieties) -----------------

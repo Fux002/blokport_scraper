@@ -152,6 +152,36 @@ def test_produce_mirror_hook_runs_the_mirror_at_fetch(monkeypatch, tmp_path):
     assert seen == []
 
 
+def test_record_catalog_mirrors_the_rows_it_creates(tmp_path, monkeypatch):
+    # finding 3: the SECOND mirror call, in record_catalog AFTER populate, must freeze a variety whose ledger
+    # row first appears THERE (populate_variations_full created it). Deleting that call leaves it served.
+    import types
+
+    from stone_pipeline.ledger import populate
+    ledger_file = tmp_path / "dev.ledger"
+    monkeypatch.setenv("SCRAPER_LEDGER_WRITETHROUGH", "1")
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(ledger_file))
+    # pre-create the ledger (non-empty) so open_ledger does NOT bootstrap from the real exports
+    with Ledger.open(ledger_file, env="development") as lg:
+        _variation(lg, "slab_seed", archived=0)
+    full = tmp_path / "1_variants_full.csv"
+    full.write_text("Key\nslab_K\n", encoding="utf-8")   # record_catalog gates on this file existing
+    export = _export_csv(tmp_path, [("i", "slab_K", "K", "archived")])
+    monkeypatch.setattr(writethrough, "SETTINGS", types.SimpleNamespace(
+        paths=types.SimpleNamespace(to_upload_dir=tmp_path, export_file=export)))
+
+    def _pop(ledger, path):   # what populate_variations_full does at catalog: create the produced variety
+        _variation(ledger, "slab_K", state="pending", medusa_id=None, archived=0)
+        return 1
+    monkeypatch.setattr(populate, "populate_variations_full", _pop)
+    monkeypatch.setattr(populate, "fill_variation_types", lambda ledger: 0)
+
+    assert writethrough.record_catalog() is True
+    with Ledger.open(ledger_file, env="development") as lg:
+        assert lg.get("variation", "key", "slab_K")["archived"] == 1   # the second mirror froze the new row
+        assert sync.count_ready(lg, "variations") == 0                 # frozen: not served
+
+
 # --- C. variations lane freeze + the produce gate ----------------------------
 
 def test_variations_lane_serves_archived_zero_only(tmp_path):
