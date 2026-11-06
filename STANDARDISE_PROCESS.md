@@ -229,7 +229,7 @@ too, since the edit removes both) and the photos the retouch or the retired logo
 `CLEAN_AUTO_HELD`). Any other fixable photo (a reflection or a bad fill alone) is cleaned only when the owner clicks it,
 and a click is cleaned whatever the switch says, within the cap: `<CLEAN_TAG>/clicks/<SKU>.json` = {sku, listing,
 source, sha, at} (written by `publish.write_click`, read by `publish.read_clicks`) names the photo, and the next photos
-run cleans it. One rule per listing (`clean_listing`): an edit already paid for is always collected and checked first
+run cleans it. One rule per listing (`clean_plan`, then `pay`): an edit already paid for is always collected and checked first
 (the payment is made, whatever the gate says now, and no new edit is sent for it); then the clicked photo goes first,
 then the marks, skipping any photo with no edit model left to try, one photo cleaned. The clicked photo is the unit
 (`select.cleaned_copies`): a listing with a click is done only once that photo has its cleaned copy, whatever copies
@@ -245,17 +245,26 @@ owner's choice, since it is no longer needed. Each paid call is
 listed in the cleaning cap's spend file with its reason (`auto` or `click`, with the click's time) and what the edit
 fixes (`kinds` or `held`).
 
-### The owner's click first
+### The owner's click first, and one admission
 
 A click is the owner's word, so a run finishes it before any automatic work (scraper 1a, 2026-11-06): the listings
-with a usable click are cleaned, their cleaned copies run through the GPU and judged, and only then does the run's own
-GPU round start (`run.clicks_to_finish`, `run.run`). Before that, nothing is paid for a click that cannot finish: the
-month's budget left (the process budget, not the cleaning cap) must cover the clicks' GPU round at its worst case (what
-the round reserves) and one judge per listing, taken in sheet order; a click whose cleaned copy an earlier run made
-costs no edit and always goes. A click the budget cannot cover is not sent to an edit and waits for next month or a
-higher budget; the run's problems name it ("the owner's click waits: month photo budget reached"). The run's own clean
-step pays no click, so a click is only ever paid this way. Before this rule the month's budget could run out in the
-run's GPU round, and the clean step then paid for a click whose copy got no GPU round and no judge until next month.
+with a ready click (fully judged, no pass, a model left to try) are cleaned, their cleaned copies run through the GPU
+and judged, and only then does the run's own GPU round start (`run.run`). The run's own clean step, after its GPU
+round and judge, admits the clicks that became ready during the run first (a photo whose outline was settled in that
+round), then the marks.
+
+Both clean steps go through one admission (`run.admit`), read-only and in a fixed order: plans whose edits are paid
+already (collected and checked), then the clicks, then the marks, each in sheet order. Each listing's plan
+(`select.clean_plan`) names exactly what the pay step may do: the edits to collect, and the photo to send to each model
+not tried yet, cheapest first, until a copy passes. A plan is admitted while both budgets left cover it together with
+every plan admitted before it: the process budget its copy's GPU round and judging (`gpu.price`, the one price a GPU
+round is also sized by, on top of the copies the next round runs anyway), the cleaning cap its edits and checks at
+worst (`select.clean_price`). An edit already paid for always goes (it is owed), even when the
+listing's new edit waits. A new edit that does not fit is not paid and waits; the run's problems name each click
+("the owner's click waits: month photo budget reached", "cleaning cap reached", or "too little of the work window
+left") and count the marks. The pay step
+(`select.pay`, a few listings at a time) never reaches either cap, so which listings are paid never depends on which
+thread finishes first.
 
 ## Trigger
 

@@ -55,6 +55,13 @@ def _listing(*photos, key="slab-1", fmt="slab", kept=None):
             **({"kept": kept} if kept else {})}
 
 
+def _clean(client, rounds, listing, exclude, spend, owner=None, click=None):
+    """The clean step for one listing: its plan (read-only), then paid."""
+    plan = sel.clean_plan(client, rounds, listing, exclude, owner, click)
+    if plan is not None:
+        sel.pay(client, rounds, plan, spend)
+
+
 def _verdict(v, *kinds):
     return json.dumps({"verdict": v, "problems": [{"kind": k, "where": "x"} for k in kinds], "version": C.JUDGE_VERSION}).encode()
 
@@ -160,7 +167,7 @@ def _clean_setup(monkeypatch, passes_at):
 
 def test_a_listing_with_no_good_photo_has_its_first_fixable_photo_cleaned_model_by_model(monkeypatch):
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == ["nano2", "kontext"]                                       # A is stacked: not worth an edit
     assert s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
     assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["passes"] is False
@@ -175,7 +182,7 @@ def test_a_paid_edit_whose_check_was_not_made_is_reused(monkeypatch):
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     s3.objects[f"{CL}attempts/{B}.nano2.jpg"] = b"copy-nano2"
     rounds[1][1]["sentas"].edited.add(f"{B}.nano2")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == [] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
 
 
@@ -184,14 +191,14 @@ def test_an_edit_is_reserved_with_its_check_so_the_cap_never_sends_one_it_cannot
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     spend = sel.Spend(C.CLEAN_PRICE_USD["nano2"] + C.JUDGE_PRICE_USD - 0.01)       # covers the edit, not its check too
     with pytest.raises(sel.SpendCapReached):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+        _clean(s3, rounds, _listing(A, B), set(), spend)
     assert edits == [] and spend.spent == 0 and spend.reserved == 0 and spend.capped
 
 
 def test_every_paid_clean_up_call_is_listed_for_the_listing_that_asked_for_it(monkeypatch):
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     listed = [(u["model"], u["call"], u["usd"]) for u in spend.uses]
     assert listed == [("nano2", "edit", C.CLEAN_PRICE_USD["nano2"]), ("nano2", "check", 0.02),
                       ("kontext", "edit", C.CLEAN_PRICE_USD["kontext"]), ("kontext", "check", 0.02)]
@@ -200,13 +207,24 @@ def test_every_paid_clean_up_call_is_listed_for_the_listing_that_asked_for_it(mo
     assert spend.reserved == pytest.approx(0, abs=1e-9)                       # every reservation settled or released
 
 
-def test_a_failed_edit_is_listed_at_its_price_and_its_check_s_share_goes_back_to_the_cap(monkeypatch):
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
-    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(TimeoutError("no answer")))
+def test_an_edit_with_no_usable_answer_counts_at_its_price_and_is_never_sent_again(monkeypatch):
+    # review of #530: an edit that may have been billed was sent again next run (paid twice); it is a failed attempt
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    sent = []
+
+    def submit(name, img):
+        sent.append(name)
+        if name == "nano2":
+            raise TimeoutError("no answer")
+        return {"model": name}
+    monkeypatch.setattr(sel.clean, "submit", submit)
     spend = sel.Spend(10)
-    with pytest.raises(TimeoutError):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
-    assert [(u["call"], u["usd"], u.get("failed")) for u in spend.uses] == [("edit", C.CLEAN_PRICE_USD["nano2"], True)]
+    _clean(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)                                  # a later run: nothing re-sent
+    assert sent == ["nano2", "kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
+    assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["passes"] is False
+    assert [(u["model"], u["call"], u["usd"], u.get("failed")) for u in spend.uses][0] == (
+        "nano2", "edit", C.CLEAN_PRICE_USD["nano2"], True)
     assert spend.reserved == pytest.approx(0, abs=1e-9)
 
 
@@ -216,7 +234,7 @@ def test_an_edit_collected_in_a_later_run_has_its_check_reserved_then(monkeypatc
     s3.objects[f"{CL}attempts/{B}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
     rounds[1][1]["sentas"].requested.add(f"{B}.nano2")
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     assert edits == [] and [(u["call"], u["usd"]) for u in spend.uses] == [("check", 0.02)] and spend.reserved == 0
 
 
@@ -224,9 +242,8 @@ def test_a_listing_not_fully_judged_is_never_cleaned_and_is_no_problem_of_the_cl
     # waiting is a normal state: the report counts the listing pending once, the clean step adds no line for it
     monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned before judging"))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
-    sel.clean_listing(_S3(), rounds, _listing(A), set(), sel.Spend(10))
     s = _selection(_S3(), [_listing(A)], rounds)
-    assert sel.clean_all(s, sel.Spend(10), float("inf")) == ([], False)
+    assert s.plans() == ([], []) and sel.clean_all(s, [], sel.Spend(10), float("inf")) == ([], False)
 
 
 def test_a_photo_held_by_the_retouch_or_the_retired_logo_step_is_worth_cleaning_one_held_for_its_outline_is_not():
@@ -261,9 +278,9 @@ def test_a_reflection_waits_for_the_owner_s_click_then_is_cleaned_and_listed_as_
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     assert edits == [] and spend.uses == []                                            # no click: nothing paid
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=_click(B))
+    _clean(s3, rounds, _listing(A, B), set(), spend, click=_click(B))
     assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
     assert {(u["reason"], u["click_at"], tuple(u["kinds"])) for u in spend.uses} == {
         ("click", "2026-11-05T18:00:00Z", ("light_reflection",))}
@@ -272,17 +289,17 @@ def test_a_reflection_waits_for_the_owner_s_click_then_is_cleaned_and_listed_as_
 def test_an_automatic_clean_is_listed_with_what_it_fixes(monkeypatch):
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     assert {(u["reason"], tuple(u["kinds"])) for u in spend.uses} == {("auto", ("leftover_mark",))}
     assert all("click_at" not in u for u in spend.uses)
 
 
-def test_the_clean_step_hands_each_listing_its_own_click(monkeypatch):
+def test_each_listing_is_planned_with_its_own_click(monkeypatch):
     seen = []
-    monkeypatch.setattr(sel, "clean_listing", lambda client, rounds, l, exclude, spend, owner, click: seen.append((l["sku"], click)))
+    monkeypatch.setattr(sel, "clean_plan", lambda client, rounds, l, exclude, owner, click: seen.append((l["sku"], click)))
     s = _selection(_S3(), [_listing(A, key="one"), {**_listing(B, key="two"), "sku": "SEN-2"}], [])
     s.clicks = {"SEN-2": {"sha": B, "at": "t"}}
-    sel.clean_all(s, sel.Spend(10), float("inf"))
+    s.plans()
     assert sorted(seen) == [("SEN-1", None), ("SEN-2", {"sha": B, "at": "t"})]
 
 
@@ -302,7 +319,7 @@ def test_the_clicked_photo_is_cleaned_before_an_earlier_mark(monkeypatch):
     s3.objects[f"{GPU}judged/{A}.json"] = _verdict("fail", "leftover_mark")
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=_click(B))
+    _clean(s3, rounds, _listing(A, B), set(), spend, click=_click(B))
     assert {u["sha"] for u in spend.uses} == {B} and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
 
 
@@ -312,17 +329,17 @@ def test_a_photo_with_no_model_left_never_takes_the_slot(monkeypatch):
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "leftover_mark")
     _all_models_failed(s3, rounds, A)
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     assert edits == ["nano2"] and {u["sha"] for u in spend.uses} == {B}
 
 
 def test_with_the_clean_switch_off_a_mark_waits_and_a_click_is_cleaned(monkeypatch):
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")                  # B: a mark
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == []
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=_click(B))       # a clicked mark: a click always works
+    _clean(s3, rounds, _listing(A, B), set(), spend, click=_click(B))       # a clicked mark: a click always works
     assert edits == ["nano2"] and {u["reason"] for u in spend.uses} == {"click"}
     assert sel.authorised({"kinds": ["leftover_mark"]}, B, _click(B)) == "click"
     assert sel.authorised({"held": "logo: still visible"}, B, None) is None             # switch off: no automatic edit
@@ -331,7 +348,7 @@ def test_with_the_clean_switch_off_a_mark_waits_and_a_click_is_cleaned(monkeypat
 def test_with_the_clean_switch_on_a_mark_is_cleaned_without_a_click(monkeypatch):
     monkeypatch.setattr(C, "CLEAN_ENABLED", True)
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == ["nano2"]
 
 
@@ -347,7 +364,7 @@ def test_a_click_that_cannot_be_used_is_never_paid_for_and_the_listing_says_why(
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")       # needs a click
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend, click=click)
+    _clean(s3, rounds, _listing(A, B), set(), spend, click=click)
     assert edits == [] and spend.uses == []
     issue = sel.click_problem(s3, rounds[0][1]["sentas"], _listing(A, B), click, set())
     assert why in issue
@@ -371,7 +388,7 @@ def test_an_edit_paid_before_the_gate_is_always_collected_and_checked_and_nothin
     s3.objects[f"{CL}attempts/{B}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
     rounds[1][1]["sentas"].requested.add(f"{B}.nano2")
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     assert edits == [] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
     assert [(u["reason"], u["call"]) for u in spend.uses] == [("paid", "check")]
 
@@ -381,7 +398,7 @@ def test_a_paid_edit_that_fails_its_check_sends_no_new_one_without_a_reason(monk
     s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "light_reflection")
     s3.objects[f"{CL}attempts/{B}.nano2.request.json"] = json.dumps({"model": "nano2"}).encode()
     rounds[1][1]["sentas"].requested.add(f"{B}.nano2")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == []
 
 
@@ -479,22 +496,53 @@ def test_a_sent_edit_is_paid_even_when_collecting_it_fails_and_a_rerun_collects_
     monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(TimeoutError("queue slow")))
     spend = sel.Spend(10)
     with pytest.raises(TimeoutError):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+        _clean(s3, rounds, _listing(A, B), set(), spend)
     assert edits == ["nano2"] and spend.spent == pytest.approx(C.CLEAN_PRICE_USD["nano2"])   # counted when sent
     assert f"{CL}attempts/{B}.nano2.request.json" in s3.objects
     monkeypatch.setattr(sel.clean, "collect", lambda job: b"copy-nano2")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"   # collected, not sent again
 
 
-def test_a_request_the_queue_no_longer_has_is_forgotten_so_the_next_run_sends_it_again(monkeypatch):
+def test_a_paid_request_the_queue_no_longer_has_is_a_failed_attempt_never_sent_again(monkeypatch):
+    # review of #530: a 404/410 at collect deleted the request, so the next run paid for the same edit again
+    import httpx
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
+    gone = httpx.HTTPStatusError("gone", request=httpx.Request("GET", "https://q"), response=httpx.Response(404))
+
+    def collect(job):
+        if job["model"] == "nano2":
+            raise gone
+        return f"copy-{job['model']}".encode()
+    monkeypatch.setattr(sel.clean, "collect", collect)
+    spend = sel.Spend(10)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == ["nano2", "kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
+    assert "no longer has the request (404)" in json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["problems"]
+    assert f"{CL}attempts/{B}.nano2.request.json" in s3.objects                       # kept: what was paid for
+
+
+def test_a_request_not_finished_yet_is_collected_again_next_run_never_sent_again(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(TimeoutError("not done")))
+    with pytest.raises(TimeoutError):
+        _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    monkeypatch.setattr(sel.clean, "collect", lambda job: b"copy-nano2")
+    rounds[1][1]["sentas"].requested.add(f"{B}.nano2")                                 # the stores as read next run
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"
+
+
+def test_a_send_that_never_reached_the_service_costs_nothing_and_is_tried_again(monkeypatch):
     import httpx
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
-    gone = httpx.HTTPStatusError("gone", request=httpx.Request("GET", "https://q"), response=httpx.Response(404))
-    monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(gone))
-    with pytest.raises(httpx.HTTPStatusError):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
-    assert edits == ["nano2"] and f"{CL}attempts/{B}.nano2.request.json" not in s3.objects
+    down = httpx.ConnectError("no route", request=httpx.Request("POST", "https://q"))
+    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(down))
+    spend = sel.Spend(10)
+    with pytest.raises(httpx.ConnectError):
+        _clean(s3, rounds, _listing(A, B), set(), spend)
+    assert spend.spent == 0 and f"{CL}attempts/{B}.nano2.json" not in s3.objects
 
 
 def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_listings():
@@ -545,7 +593,7 @@ def test_an_edit_the_model_failed_for_good_is_a_failed_attempt_and_the_next_mode
             raise error
         return f"copy-{job['model']}".encode()
     monkeypatch.setattr(sel.clean, "collect", collect)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == ["nano2", "kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
     assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["passes"] is False
 
@@ -671,15 +719,6 @@ def test_the_judge_answer_s_missing_cost_is_none_never_free(monkeypatch):
     assert judge.ask("s", "p", [b"x"]) == ("{}", None)
 
 
-def test_an_edit_whose_submit_failed_counts_at_its_price_it_may_have_been_accepted(monkeypatch):
-    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
-    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(TimeoutError("no answer")))
-    spend = sel.Spend(10)
-    with pytest.raises(TimeoutError):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
-    assert spend.spent == pytest.approx(C.CLEAN_PRICE_USD["nano2"]) and spend.reserved == 0
-
-
 def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch):
     import threading
     import time
@@ -710,7 +749,7 @@ def test_an_auth_or_balance_error_from_the_queue_is_loud_never_a_failed_edit(mon
     locked = httpx.HTTPStatusError("403", request=httpx.Request("GET", "https://q"), response=httpx.Response(403))
     monkeypatch.setattr(sel.clean, "collect", lambda job: (_ for _ in ()).throw(locked))
     with pytest.raises(httpx.HTTPStatusError):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+        _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert f"{CL}attempts/{B}.nano2.json" not in s3.objects and edits == ["nano2"]   # retried next run, not given up
 
 
@@ -735,7 +774,7 @@ def test_an_edit_refused_at_submit_costs_nothing_and_the_next_model_gets_its_tur
     s3, _, rounds = _clean_setup(monkeypatch, passes_at="kontext")
     submitted = _refused_at_submit(monkeypatch, 422)
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     assert submitted == ["nano2", "kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
     assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["passes"] is False         # never sent again
     assert spend.spent == pytest.approx(C.CLEAN_PRICE_USD["kontext"] + 0.02) and spend.reserved == pytest.approx(0, abs=1e-9)
@@ -747,8 +786,8 @@ def test_the_step_s_second_pass_never_pays_again_for_a_refused_model(monkeypatch
     s3, _, rounds = _clean_setup(monkeypatch, passes_at="none")                         # no copy passes its check
     submitted = _refused_at_submit(monkeypatch, 422)
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
+    _clean(s3, rounds, _listing(A, B), set(), spend)
     assert submitted == ["nano2", "kontext", "flux3"]                                    # each model asked once
 
 
@@ -758,7 +797,7 @@ def test_an_auth_or_rate_error_at_submit_is_loud_costs_nothing_and_is_tried_agai
     submitted = _refused_at_submit(monkeypatch, 429)
     spend = sel.Spend(10)
     with pytest.raises(httpx.HTTPStatusError):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
+        _clean(s3, rounds, _listing(A, B), set(), spend)
     assert submitted == ["nano2"] and f"{CL}attempts/{B}.nano2.json" not in s3.objects
     assert spend.spent == 0 and spend.reserved == pytest.approx(0, abs=1e-9)
 
@@ -801,7 +840,7 @@ def test_only_the_statuses_known_to_come_before_any_work_are_free():
 def test_a_listing_the_owner_chose_reads_nothing_of_its_click(monkeypatch):
     monkeypatch.setattr(sel, "click_problem", lambda *a: pytest.fail("the click was read"))
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), owner=("v9", A), click=_click(B))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10), owner=("v9", A), click=_click(B))
     assert edits == []
 
 
@@ -811,19 +850,17 @@ def test_a_call_that_may_have_been_billed_still_counts_at_its_price(monkeypatch)
     broken = httpx.HTTPStatusError("502", request=httpx.Request("POST", "https://q"), response=httpx.Response(502))
     monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(broken))
     spend = sel.Spend(10)
-    with pytest.raises(httpx.HTTPStatusError):
-        sel.clean_listing(s3, rounds, _listing(A, B), set(), spend)
-    assert spend.spent == pytest.approx(C.CLEAN_PRICE_USD["nano2"])
+    _clean(s3, rounds, _listing(A, B), set(), spend)
+    assert spend.spent == pytest.approx(sum(C.CLEAN_PRICE_USD.values()))               # each model once, never again
 
 
-# --- the clicked photo is the unit (review 2026-11-06, A2.1) ---------------------------------------------------------
 def test_a_clicked_photo_is_cleaned_though_another_photo_of_the_listing_has_a_cleaned_copy(monkeypatch):
     # a copy of another photo (an earlier mark) made the listing count as cleaned: the click was never paid
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     s3.objects[f"{GPU}judged/{A}.json"] = _verdict("fail", "light_reflection")
     rounds[1][1]["sentas"].cleaned.add(B)
     s3.objects[f"{CL}cleaned/{B}.jpg"] = b"older-copy"
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), click=_click(A))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10), click=_click(A))
     assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{A}.jpg"] == b"copy-nano2"
 
 
@@ -831,7 +868,7 @@ def test_a_clicked_photo_with_its_own_cleaned_copy_is_never_paid_again(monkeypat
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     s3.objects[f"{GPU}judged/{A}.json"] = _verdict("fail", "light_reflection")
     rounds[1][1]["sentas"].cleaned.add(A)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), click=_click(A))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10), click=_click(A))
     assert edits == []
 
 
@@ -839,7 +876,7 @@ def test_without_a_click_any_cleaned_copy_of_the_listing_is_its_one_photo(monkey
     monkeypatch.setattr(C, "CLEAN_ENABLED", True)
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")                    # B: a mark
     rounds[1][1]["sentas"].cleaned.add(A)
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == []
 
 
@@ -868,7 +905,7 @@ def test_a_listing_with_an_outdated_fail_is_never_cleaned_before_it_is_judged_ag
     monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned on an outdated verdict"))
     old_fail = json.dumps({"verdict": "fail", "problems": [{"kind": "light_reflection"}], "version": 1}).encode()
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
-    sel.clean_listing(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set(), sel.Spend(10))
+    _clean(_S3({f"{GPU}judged/{A}.json": old_fail}), rounds, _listing(A), set(), sel.Spend(10))
 
 
 def test_an_attempt_that_failed_under_an_older_instruction_is_made_again_and_a_pass_stands(monkeypatch):
@@ -877,7 +914,7 @@ def test_an_attempt_that_failed_under_an_older_instruction_is_made_again_and_a_p
     s3.objects[f"{CL}attempts/{B}.nano2.jpg"] = b"old-copy"
     rounds[1][1]["sentas"].attempts.add(f"{B}.nano2")
     rounds[1][1]["sentas"].edited.add(f"{B}.nano2")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10))
     assert edits == ["nano2"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-nano2"   # sent again, new copy used
     assert json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["clean_version"] == C.CLEAN_VERSION
 
@@ -950,7 +987,7 @@ def test_a_listing_with_a_close_up_pass_is_never_sent_to_a_hosted_edit(monkeypat
     s3 = _S3({f"{GPU}judged/{B}.json": _verdict("fail", "light_reflection")})          # fixable, but A already passed
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B), slabs=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
     spend = sel.Spend(10)
-    sel.clean_listing(s3, rounds, _listing(A, B, kept=("v9", A)), set(), spend)
+    _clean(s3, rounds, _listing(A, B, kept=("v9", A)), set(), spend)
     assert spend.spent == 0
 
 
@@ -1325,4 +1362,4 @@ def test_the_review_list_says_which_photo_is_held_for_a_conflict_and_with_whom()
 def test_a_listing_the_owner_decided_is_never_cleaned(monkeypatch):
     monkeypatch.setattr(sel.clean, "submit", lambda *a: pytest.fail("cleaned a listing the owner decided"))
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
-    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), owner=("v9", A))
+    _clean(s3, rounds, _listing(A, B), set(), sel.Spend(10), owner=("v9", A))
