@@ -28,7 +28,7 @@ prod_sales_channel_id = "sc_01M1GGAHFVHZ8XEY20KVZP2QV5" # Default Sales Channel,
 prod_home_env         = "prod"
 
 # Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu; variables.tf refuses them). Each pinned
-# image also carries its pin tag (prod-<sha> / prod-gpu-<sha>), which the ECR lifecycle keeps (DEPLOY.md).
+# image also carries its pin tag (prod-<sha12> / prod-gpu-<sha12>), which the ECR lifecycle keeps (DEPLOY.md).
 prod_image_tag     = "d11da5b62972619db3f689f09d0936d3e54a93fd"     # + parallel scrape (#513), sentas Drive cards (#516), GPU image recipe (#508), #517-#521, corners (#514), status zeros (#522)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 

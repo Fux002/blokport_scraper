@@ -646,8 +646,8 @@ def reap(run_id):
 
 
 def unconfigured(close_only=False):
-    """What is missing or wrong in the settings: the GPU target, the hosted key (not for a close-only run: it makes no
-    hosted call), the month's budget, and a work window that leaves the GPU rounds their minimum after the judge's share
+    """What is missing or wrong in the settings: the GPU target and the pool's idle ceiling, the hosted key (not for a
+    close-only run: it makes no hosted call), the month's budget, and a work window that leaves the GPU rounds their minimum after the judge's share
     (not for a close-only run: it judges nothing) and that, plus its finish, must end before the runner's ceiling."""
     missing = []
     for name in ("GPU_QUEUE", "STANDARDISE_JOBDEF"):          # what gpu.target() reads, each named when missing
@@ -655,6 +655,8 @@ def unconfigured(close_only=False):
             env.require(name)
         except KeyError as exc:
             missing.append(exc.args[0])
+    if C.IDLE_GPU_VCPUS is None:                               # what every round sets the pool back to (gpu.idle_vcpus)
+        missing.append("SCRAPER_STANDARDISE_IDLE_GPU_VCPUS")
     try:
         if not close_only:
             judge.fal_key()

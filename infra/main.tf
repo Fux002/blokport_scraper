@@ -91,19 +91,19 @@ resource "aws_ecr_lifecycle_policy" "this" {
   # would expire the pinned prod GPU image after a few GPU builds. Hence the pin rules come FIRST, one per kind of
   # pinned image so a kind pinned often (the service) never pushes out one pinned rarely (the GPU images).
   # Pinning an image = adding its pin tag (DEPLOY.md, "Promoting an image to prod"):
-  #   prod-gpu-<sha>          the prod texture GPU image (prod_gpu_image_tag = gpu-<sha>)
-  #   prod-<sha>              the prod service image (prod_image_tag = <sha>)
+  #   prod-gpu-<sha12>        the prod texture GPU image (prod_gpu_image_tag = gpu-<sha>)
+  #   prod-<sha12>            the prod service image (prod_image_tag = <sha>)
   #   standardise-pin-<sha12> the photo process's GPU image (the tfvars reference this tag itself)
   # After the pins: the build prefixes (gpu / imageproc / core and the standardise builds, never a hex git sha), then
   # the per-commit <sha> churn. A single "keep last N, tagStatus=any" rule once expired the :gpu image and, on
   # 2026-11-02, the prod GPU image mid-day and the previous prod image (CannotPullImageManifestError).
   policy = jsonencode({
     rules = [
-      # listed before prod- because prod-gpu-<sha> also starts with prod-: the GPU pins keep their own count
-      { rulePriority = 1, description = "keep the pinned prod GPU images (prod-gpu-<sha>)",
+      # listed before prod- because prod-gpu-<sha12> also starts with prod-: the GPU pins keep their own count
+      { rulePriority = 1, description = "keep the pinned prod GPU images (prod-gpu-<sha12>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["prod-gpu-"], countType = "imageCountMoreThan", countNumber = 5 },
       action = { type = "expire" } },
-      { rulePriority = 2, description = "keep the pinned prod images (prod-<sha>)",
+      { rulePriority = 2, description = "keep the pinned prod images (prod-<sha12>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["prod-"], countType = "imageCountMoreThan", countNumber = 20 },
       action = { type = "expire" } },
       { rulePriority = 3, description = "keep the pinned standardise GPU images (standardise-pin-<sha>)",

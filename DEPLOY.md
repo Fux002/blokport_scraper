@@ -148,9 +148,12 @@ rule can expire a pinned image; each kind keeps its newest pins (the current one
 
 | Pinned image | Pin tag to add | Kept |
 |---|---|---|
-| sync service (`<sha>`) | `prod-<sha>` | newest 20 |
-| texture GPU (`gpu-<sha>`) | `prod-gpu-<sha>` | newest 5 |
+| sync service (`<sha>`) | `prod-<sha12>` | newest 20 |
+| texture GPU (`gpu-<sha>`) | `prod-gpu-<sha12>` | newest 5 |
 | photo process GPU | `standardise-pin-<sha12>` (pushed under it) | newest 20 |
+
+`<sha12>` is the first 12 hex digits of the image's commit sha, the form every pin tag uses (the current prod
+image carries `prod-d11da5b62972`).
 
 The images are OCI indexes: add a tag by re-putting the image's EXACT manifest (boto3 `batch_get_image` with
 `acceptedMediaTypes` including `application/vnd.oci.image.index.v1+json`, then `put_image` with that

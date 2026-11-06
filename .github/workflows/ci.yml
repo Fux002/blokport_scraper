@@ -24,19 +24,21 @@ jobs:
       # an em dash fails the gate until its line is removed, and a new file is never added (clean it instead). Wave B
       # cleans the listed files and empties the list.
       - name: No em dashes in tracked files
+        env:
+          LC_ALL: C.UTF-8   # one collation for sort/comm, and UTF-8 for the PCRE match
         run: |
           rc=0; git grep -I -l -P "\x{2014}" > /tmp/hits.txt || rc=$?
           [ "$rc" -le 1 ] || { echo "git grep failed (exit $rc)"; exit 1; }   # 1 = no match, anything above is an error
           sort /tmp/hits.txt > /tmp/offenders.txt
           sort .github/em-dash-allowlist.txt > /tmp/allowed.txt
-          new=$(comm -23 /tmp/offenders.txt /tmp/allowed.txt)
-          stale=$(comm -13 /tmp/offenders.txt /tmp/allowed.txt)
-          if [ -n "$new" ]; then
-            echo "em dash found (plan section 0: none anywhere):"; git grep -I -n -P "\x{2014}" -- $new; exit 1
+          mapfile -t new < <(comm -23 /tmp/offenders.txt /tmp/allowed.txt)
+          mapfile -t stale < <(comm -13 /tmp/offenders.txt /tmp/allowed.txt)
+          if [ "${#new[@]}" -gt 0 ]; then
+            echo "em dash found (plan section 0: none anywhere):"; git grep -I -n -P "\x{2014}" -- "${new[@]}"; exit 1
           fi
-          if [ -n "$stale" ]; then
+          if [ "${#stale[@]}" -gt 0 ]; then
             echo "no em dash left in these allow-listed files; remove them from .github/em-dash-allowlist.txt:"
-            echo "$stale"; exit 1
+            printf '%s\n' "${stale[@]}"; exit 1
           fi
       - name: Run tests
         run: pytest -q
