@@ -854,6 +854,7 @@ def test_a_call_that_may_have_been_billed_still_counts_at_its_price(monkeypatch)
     assert spend.spent == pytest.approx(sum(C.CLEAN_PRICE_USD.values()))               # each model once, never again
 
 
+# --- the clicked photo is the unit (review 2026-11-06, A2.1) ---------------------------------------------------------
 def test_a_clicked_photo_is_cleaned_though_another_photo_of_the_listing_has_a_cleaned_copy(monkeypatch):
     # a copy of another photo (an earlier mark) made the listing count as cleaned: the click was never paid
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
