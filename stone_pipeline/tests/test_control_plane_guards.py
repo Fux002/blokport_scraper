@@ -163,6 +163,30 @@ def test_a_multi_listing_statement_stores_every_listing(monkeypatch):
     assert {(r["source"], r["spelling_norm"]) for r in decisions_store._statement_rows()} == {("", _norm("Bonsai Green"))}
 
 
+def test_an_undo_over_several_listings_with_an_empty_key_spelling_clears_none(monkeypatch):
+    # a spelling that folds to no key is a 400 naming it, checked before anything is cleared: the listings before it
+    # keep their statements (it used to be a 500 after they were already cleared)
+    monkeypatch.setattr(varieties, "exists_as", lambda n, t: False)
+    monkeypatch.setattr(varieties, "alias_target", lambda n, t: None)
+    decisions_store.decide("varsha", "Bonsai Green", "Bonsai Green", "Granite")
+    decisions_store.decide("polonine", "Other Stone", "Other Stone", "Granite")
+    before = decisions_store._statement_rows()
+    code, body = server.dispatch("DELETE", ["review", "decide"], {
+        "listings": [{"source": "varsha", "scraped": "Bonsai Green"}, {"source": "polonine", "scraped": "Other Stone"},
+                     {"source": "polonine", "scraped": "東京"}]})
+    assert code == 400 and "東京" in body["error"]
+    assert decisions_store._statement_rows() == before
+
+
+def test_an_undo_over_several_listings_clears_them_all():
+    for source, spelling in (("varsha", "Bonsai Green"), ("polonine", "Other Stone")):
+        decisions_store.reject(source, spelling)
+    code, body = server.dispatch("DELETE", ["review", "decide"], {
+        "listings": [{"source": "varsha", "scraped": "Bonsai Green"}, {"source": "polonine", "scraped": "Other Stone"}]})
+    assert code == 200 and body["cleared"] == [{"statements": 1}, {"statements": 1}]
+    assert decisions_store._statement_rows() == []
+
+
 # -- 8: bodies are type-checked at the boundary ------------------------------------------------------------------
 
 _DECIDE = {"source": "varsha", "scraped": "Bonsai", "name": "Bonsai", "type": "Granite"}

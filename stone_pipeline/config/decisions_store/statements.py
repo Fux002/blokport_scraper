@@ -114,8 +114,22 @@ def _clear(conn, source: str, spelling: str) -> int:
 
 def clear(source: str, spelling: str) -> int:
     """Undo ONE vendor's statement on a spelling ('' = the global one). Returns rows dropped (0 or 1)."""
+    return clear_all([(source, spelling)])[0]
+
+
+def check_clearable(listings) -> None:
+    """Refuse (InvalidDecision, naming them) the (source, spelling) listings whose spelling folds to no key."""
+    if empty := [spelling for _, spelling in listings if not _norm(spelling)]:
+        raise InvalidDecision(f"clearing a statement requires a scraped spelling with a usable name; "
+                              f"{empty} folds to no key (a non-Latin script only)")
+
+
+def clear_all(listings) -> list[int]:
+    """Undo each (source, spelling) listing's statement, all or nothing: every spelling is checked first
+    (check_clearable), then all are cleared in ONE transaction. Returns rows dropped per listing."""
+    check_clearable(listings)
     with closing(store.open_store()) as conn, conn:
-        return _clear(conn, source, spelling)
+        return [_clear(conn, source, spelling) for source, spelling in listings]
 
 
 def statement_decided_at(source: str, spelling: str) -> str | None:

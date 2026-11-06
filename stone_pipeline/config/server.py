@@ -456,6 +456,10 @@ def _delete_review_decide(params, body, query):
     listings = _decide_listings(body)
     if not listings:
         return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
+    try:
+        decisions_store.check_clearable(listings)          # every listing first: a refused one clears none
+    except decisions_store.InvalidDecision as e:
+        return 400, {"error": str(e)}
     applied_at = store.last_applied_produce_at()
     blocked = []
     for s, sp in listings:
@@ -476,7 +480,7 @@ def _delete_review_decide(params, body, query):
                               "listing with the correct variety instead.",
                      "blocked": blocked}
     return 200, {"listings": [{"source": s, "scraped": sp} for s, sp in listings],
-                 "cleared": [{"statements": decisions_store.clear(s, sp)} for s, sp in listings]}
+                 "cleared": [{"statements": n} for n in decisions_store.clear_all(listings)]}   # one transaction
 
 
 def _put_review_decide(params, body, query):
