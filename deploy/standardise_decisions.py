@@ -25,8 +25,9 @@ reaches the click). A decision older than the one already stored for its listing
 again never undoes a later decision.
 Every decision is checked first (the listing is on the product sheet, the action is known, exactly the page's fields,
 `at` an ISO UTC timestamp, the source is the listing's, the photo one of the listing's and not excluded, the tag's result
-exists, for a clean the photo is no conflict photo and the run could use the click (select.click_problem: its result
-failed the judge only for what an edit fixes), not older than what is stored, no stored decision of the listing that
+exists, for a clean the photo is no conflict photo and the run could ever use the click (select.click_problem: its record
+is the listing's, and no current verdict or hold says a cleaned copy cannot fix the photo; one not judged yet is
+accepted, the run reports it blocked until it is), not older than what is stored, no stored decision of the listing that
 cannot be read); one bad decision refuses the whole file and nothing is written. The stores are read through the photo
 process's own readers, so a file that cannot be read is named with its key and never crashes the applier: a listing
 with one is never decided over (its decision is unknown), never reached by a sibling's use, and a conflict photo is
@@ -247,9 +248,9 @@ def _click(listing, doc):
 
 
 def _unusable(doc, listing, shared, rnd, exclude, s3):
-    """Why the photos run would never use this clean, [] when it would: a conflict photo is never chosen by itself
-    (Selection.blocked), and otherwise the run's own test of a click (select.click_problem: a photo whose result failed
-    the judge only for what an edit fixes, or a hold an edit fixes)."""
+    """Why the photos run would never use this clean, [] when it might: a conflict photo is never chosen by itself
+    (Selection.blocked), and otherwise the run's own rule (select.click_problem: the click's record, or a current
+    verdict or hold a cleaned copy cannot fix; a photo not judged yet is accepted)."""
     group = shared.get((doc["source"], doc["sha"]))
     if group is not None and group.kind == "conflict":
         return [f"photo {doc['sha'][:12]} is a conflict photo, never chosen by itself: assign it with a use"]

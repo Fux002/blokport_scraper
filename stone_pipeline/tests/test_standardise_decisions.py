@@ -374,7 +374,6 @@ def test_a_dry_run_names_every_listing_a_use_reaches_and_every_conflict_partner(
     (_clean("one", D), "not one of the listing's photos"),
     (_clean("one", "not-a-sha"), "sha"),
     (_clean("one", B, source="zucchi"), "source"),
-    (_clean("three", "c" * 64), "a cleaned copy cannot fix"),
     (_clean("leathered", E), "conflict photo"),
 ])
 def test_a_bad_decision_refuses_the_whole_file_and_nothing_is_written(bad, why):
@@ -394,6 +393,15 @@ def test_an_excluded_photo_is_refused():
         dec.plan(_bucket(), [_use("one", A)], LISTINGS, exclude={A})
     with pytest.raises(dec.InvalidDecisions, match="on the exclude list"):
         dec.plan(_bucket(), [_clean("one", A)], LISTINGS, exclude={A})
+
+
+def test_a_clean_of_a_photo_not_judged_yet_is_accepted_and_the_run_reports_it_pending():
+    # review of #546: the applier refused it as "cannot fix" while the run called the same photo pending; one rule now
+    s3 = _bucket()
+    s3.objects[f"{RUN}judged/{B}.json"] = json.dumps({"verdict": "unparsed", "raw": "?", "version": C.JUDGE_VERSION,
+                                                       "asks": 1}).encode()
+    p = dec.plan(s3, [_clean("three", "c" * 64), _clean("one", B)], LISTINGS, exclude=set())
+    assert not p.empty()
 
 
 def test_a_clean_of_a_photo_the_judge_passed_is_refused():
