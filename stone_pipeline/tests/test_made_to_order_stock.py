@@ -153,6 +153,8 @@ def test_an_ack_for_a_state_that_moved_since_the_pull_is_refused_and_the_new_sta
         _synced(ledger, [_row("A", made_to_order=True)], cfg)
         populate_inventory(ledger, [_row("A", made_to_order=False, count="7")], cfg)   # moved before the ack
         assert sync.ack(ledger, "inventory", "POL-A", None, "synced", quantity=None, made_to_order=True) == 0
+        assert _lane(ledger) == {}                         # a refused ack waits like a failed one
+        ledger.execute("UPDATE inventory SET retry_after = '2000-01-01T00:00:00+00:00'")
         assert _lane(ledger) == {"POL-A": {"sku": "POL-A", "quantity": 7, "made_to_order": False}}
 
 
@@ -186,7 +188,7 @@ def test_a_soft_reset_re_serves_a_made_to_order_shape(cfg, tmp_path):
         _synced(ledger, [_row("A", made_to_order=True)], cfg)
         sync.ack(ledger, "inventory", "POL-A", None, "synced", quantity=None, made_to_order=True)
         sync.reset_sync_state(ledger)
-        ledger.execute("UPDATE product SET state = 'synced'")
+        ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'P-' || sku")   # Blokport acks it again
         assert "POL-A" in _lane(ledger)
 
 
@@ -207,8 +209,8 @@ def _v11_ledger(path) -> None:
     with Ledger.open(path, env="development") as ledger:
         now = now_iso()
         for sku in ("POL-1", "POL-2"):
-            ledger.execute("INSERT INTO product (sku, source, state, created_at, updated_at) "
-                           "VALUES (?, 'pol', 'synced', ?, ?)", (sku, now, now))
+            ledger.execute("INSERT INTO product (sku, source, state, medusa_id, created_at, updated_at) "
+                           "VALUES (?, 'pol', 'synced', 'M', ?, ?)", (sku, now, now))
     raw = sqlite3.connect(path)
     raw.executescript("""
         DROP TABLE inventory;

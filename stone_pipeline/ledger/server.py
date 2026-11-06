@@ -12,9 +12,10 @@ sync engine, so Medusa's pull job can talk to the ledger and ack ids back:
       ledger only marks 'synced' if it is still current -- otherwise a produce that changed the row between
       the pull and the ack is silently lost. For variations/products add `payload_hash` (the value served
       on the pull item); for inventory add `quantity` and `made_to_order` (the served payload's). Backward compatible:
-      if omitted, the prior behavior is kept, so the guard engages the moment the consumer starts echoing.
-    POST /sync/v1/requeue   body (optional): {type: variations|products}  -- un-quarantine gap_held
-      entities back to dirty after the Medusa-side cause is fixed (the recovery lever behind failures)
+      if omitted, the prior behavior is kept, so the guard engages the moment the consumer starts echoing. A refused
+      inventory echo, like a failed ack, waits and dead-letters by the product lane's rule.
+    POST /sync/v1/requeue   body (optional): {type: variations|products|inventory}  -- un-quarantine
+      dead-lettered entities after the Medusa-side cause is fixed (the recovery lever behind failures)
     POST /sync/v1/abandon   body: {type: variations|products|removed, external_id}  -- the OPPOSITE of
       requeue: drop ONE structurally-re-rejecting dead-letter to terminal (abandoned_at). Keyed by the
       same {type, external_id} a /failures row carries. 404 unknown id, 409 if not a dead-letter.
@@ -91,12 +92,12 @@ def dispatch(ledger: Ledger, method: str, resource: str,
         result = sync.ack_batch(ledger, body)
         return 200, {"acked": result["applied"], "missed": result["missed"], "skipped": result["skipped"]}
     if method == "POST" and resource == "requeue":
-        # recovery lever: un-quarantine dead-lettered ('gap_held') entities back to 'dirty' so they
-        # re-serve, after the underlying Medusa issue is fixed. Body (optional): {"type":
-        # "variations"|"products"}; omitted -> both. Observed via GET /sync/v1/failures + /status.
+        # recovery lever: un-quarantine dead-lettered entities so they re-serve, after the underlying Medusa
+        # issue is fixed. Body (optional): {"type": one of sync.REQUEUE_TYPES}; omitted -> every lane.
+        # Observed via GET /sync/v1/failures + /status.
         type_ = body.get("type") if isinstance(body, dict) else None
-        if type_ is not None and type_ not in ("variations", "products"):
-            return 400, {"error": "type must be 'variations' or 'products' (or omitted for both)"}
+        if type_ is not None and type_ not in sync.REQUEUE_TYPES:
+            return 400, {"error": f"type must be one of {', '.join(sync.REQUEUE_TYPES)} (or omitted for all)"}
         return 200, {"requeued": sync.requeue_dead_lettered(ledger, type_=type_)}
     if method == "POST" and resource == "release-leases":
         return 200, {"released": sync.reap_stale_syncing(ledger, older_than_s=0)}

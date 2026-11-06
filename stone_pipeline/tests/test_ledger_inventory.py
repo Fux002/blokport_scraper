@@ -79,8 +79,8 @@ def test_initial_load_seeds_inventory_without_a_baseline(tmp_path):
         _seed_variations(ledger)
         populate_products(ledger, rows, cfg)
         populate_inventory(ledger, rows, cfg)          # the FULL set, not a precomputed delta
-        for r in rows:                                  # stock serves only for synced products
-            ledger.set_state("product", "sku", emit._sku(r, cfg), "synced")
+        for r in rows:                                  # stock serves only for products Medusa holds
+            ledger.execute("UPDATE product SET state = 'synced', medusa_id = 'M' WHERE sku = ?", (emit._sku(r, cfg),))
         served = {i["external_id"]: i["payload"]["quantity"] for i in ready(ledger, "inventory")}
     assert served[emit._sku(rows[0], cfg)] == 5
     assert served[emit._sku(rows[1], cfg)] == 10

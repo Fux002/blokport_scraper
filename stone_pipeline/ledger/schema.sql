@@ -221,9 +221,10 @@ CREATE INDEX IF NOT EXISTS idx_product_variation ON product (variation_key);
 CREATE INDEX IF NOT EXISTS idx_product_source ON product (source);
 
 -- ---------------------------------------------------------------------------
--- inventory: stock per SKU. No state/payload_hash: the stock (qty, made_to_order) vs the last synced
--- stock drives what is served (design section 7, db.STOCK_DELTA_SQL). qty 0 is the reversible delist for
--- a discontinued product; made_to_order 1 is on sale with no count (qty NULL).
+-- inventory: stock per SKU. No state/payload_hash: the stock (qty, made_to_order, reason, replaced_by_lot_code)
+-- vs the last synced stock drives what is served (design section 7, db.STOCK_DELTA_SQL). qty 0 is the reversible
+-- delist for a discontinued product; made_to_order 1 is on sale with no count (qty NULL). A failed or refused ack
+-- waits and dead-letters by the product lane's rule (sync_attempts, retry_after; dead at sync._MAX_SYNC_ATTEMPTS).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS inventory (
     sku              TEXT PRIMARY KEY REFERENCES product (sku),
@@ -236,6 +237,11 @@ CREATE TABLE IF NOT EXISTS inventory (
                                                         -- pieces) vs null (ordinary out-of-stock, stays listed)
     replaced_by_lot_code TEXT,                          -- reason 'replaced_by_lot': the lot that replaced it
     updated_at       TEXT NOT NULL,
+    last_synced_reason   TEXT,                          -- the reason Medusa last acked (null until first sync)
+    last_synced_lot_code TEXT,                          -- the lot code Medusa last acked
+    sync_attempts    INTEGER NOT NULL DEFAULT 0,        -- consecutive failed/refused acks (dead at the cap)
+    sync_error       TEXT,                              -- last failure reason; null once synced
+    retry_after      TEXT,                              -- after a failed ack: not served again before this time
     CHECK (made_to_order IN (0, 1) AND (made_to_order = 1) = (qty IS NULL))
 );
 

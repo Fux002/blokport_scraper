@@ -27,22 +27,33 @@ from typing import Any, Iterable, Iterator, Sequence
 
 from stone_pipeline.core import ids as _ids
 
-SCHEMA_VERSION = 12  # v6: product.collection_country_code/collection_city -- supplier collection location;
+SCHEMA_VERSION = 13  # v6: product.collection_country_code/collection_city -- supplier collection location;
 #                      v7: product.lot_code/lot_position -- the pieces of a lot;
 #                      v8: inventory.replaced_by_lot_code -- a bundle replaced by its lot;
 #                      v9: variation/product/removed.retry_after -- the wait after a failed apply;
 #                      v10: product.model_3d_key -- the lead slab's 3D cut-out;
 #                      v11: product.photo_ready -- the no-photo rule's decision;
 #                      v12: made to order -- inventory.qty nullable + made_to_order + last_synced_made_to_order,
-#                           product.made_to_order
+#                           product.made_to_order;
+#                      v13: the inventory lane's sync bookkeeping -- inventory.last_synced_reason/last_synced_lot_code
+#                           (the stock includes its reason) + sync_attempts/sync_error/retry_after (the failure wait)
 _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
-# The inventory rows the lane serves: the stock (qty, made_to_order) differs from the last synced stock, or was
-# never synced (last_synced_made_to_order NULL). Over the inventory table aliased `i`; the one definition.
+# The inventory rows whose stock differs from the last synced stock, or was never synced (last_synced_made_to_order
+# NULL). The stock is everything the lane serves: (qty, made_to_order, reason, replaced_by_lot_code), so a reason or
+# lot that changes at an unchanged count is a delta too. Over the inventory table aliased `i`; the one definition.
 STOCK_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
-                   "OR i.last_synced_qty IS NOT i.qty)")
-# Forget the last synced stock, so the row serves again (a reset, a changed reason).
-FORGET_SYNCED_STOCK_SQL = "last_synced_qty = NULL, last_synced_made_to_order = NULL"
+                   "OR i.last_synced_qty IS NOT i.qty OR i.last_synced_reason IS NOT i.reason "
+                   "OR i.last_synced_lot_code IS NOT i.replaced_by_lot_code)")
+# Record the current stock as synced (a successful inventory ack).
+RECORD_SYNCED_STOCK_SQL = ("last_synced_qty = qty, last_synced_made_to_order = made_to_order, "
+                           "last_synced_reason = reason, last_synced_lot_code = replaced_by_lot_code")
+# Clear an inventory row's failure bookkeeping (the product lane's sync_attempts/sync_error/retry_after): a success,
+# a requeue, or a new stock (the failures counted belong to the stock that failed, not to the one now to serve).
+CLEAR_STOCK_FAILURES_SQL = "sync_attempts = 0, sync_error = NULL, retry_after = NULL"
+# Forget the last synced stock, so the row serves again from zero (a reset).
+FORGET_SYNCED_STOCK_SQL = ("last_synced_qty = NULL, last_synced_made_to_order = NULL, last_synced_reason = NULL, "
+                           "last_synced_lot_code = NULL, " + CLEAR_STOCK_FAILURES_SQL)
 
 
 def on_sale_sql(alias: str) -> str:
@@ -193,7 +204,16 @@ class Ledger:
         if "replaced_by_lot_code" not in inv_cols:   # v8: the lot a bundle was replaced by (its redirect target)
             self.conn.execute("ALTER TABLE inventory ADD COLUMN replaced_by_lot_code TEXT")
         if "made_to_order" not in inv_cols:   # v12: qty becomes nullable, which SQLite only does by a rebuild
-            self._rebuild_inventory_v12()
+            self._rebuild_inventory_v12()     # from schema.sql's table, so it already has every later column
+            inv_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(inventory)")}
+        # v13: no backfill on purpose. A synced row's last synced reason/lot is not known, so it stays NULL: a row whose
+        # reason or lot is set serves once (Blokport applies it idempotently), which also delivers a reason that an
+        # earlier ledger never sent; a row with neither matches NULL and serves nothing new.
+        for col, ddl in (("last_synced_reason", "TEXT"), ("last_synced_lot_code", "TEXT"),
+                         ("sync_attempts", "INTEGER NOT NULL DEFAULT 0"), ("sync_error", "TEXT"),
+                         ("retry_after", "TEXT")):
+            if col not in inv_cols:
+                self.conn.execute(f"ALTER TABLE inventory ADD COLUMN {col} {ddl}")
         prod_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(product)")}
         if "collection_country_code" not in prod_cols:   # v6: supplier collection location (independent of origin)
             self.conn.execute("ALTER TABLE product ADD COLUMN collection_country_code TEXT")
