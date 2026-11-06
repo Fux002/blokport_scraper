@@ -17,6 +17,7 @@ reported and never stops the others.
 
 from __future__ import annotations
 
+import copy
 import csv
 import functools
 import io
@@ -570,6 +571,21 @@ class Selection:
 
     def refresh(self):
         self.rounds = read_rounds(self.client, self.tags, self.sources)
+
+    def only(self, listings, clicks):
+        """This selection narrowed to `listings`, its clean step paying only `clicks` ({SKU: click}), over the same
+        stores (the same rounds, so what one step stores the other reads); none of the live choices (they are the whole
+        run's)."""
+        narrowed = copy.copy(self)
+        narrowed.listings, narrowed.clicks, narrowed.chosen = listings, clicks, []
+        narrowed.sources = sorted({l["source"] for l in listings})
+        return narrowed
+
+    def usable_clicks(self):
+        """[(listing, click)] of this run's listings with a click the clean step can use (click_issue: no problem), in
+        sheet order, never one whose photo the owner chose (its choice stands)."""
+        return [(l, click) for l in self.listings if self.owner_pick(l) is None
+                for click, issue in [self.click_issue(l)] if click is not None and issue is None]
 
     def click_issue(self, listing):
         """(the listing's click or None, why it cannot be used or None): click_problem, as the clean step sees it."""

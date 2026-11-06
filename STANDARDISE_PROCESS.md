@@ -23,7 +23,10 @@ owner presses Run                            POST /config/v1/run {"stage": "all"
                       choice, or a conflict photo the owner did not assign), and every slab listing whose chosen
                       photo is no whole slab (a close-up), its choice kept; never one the owner removed, never a
                       tile listing (rendered at step 10, see Tile listings); only of the
-                      sources whose image pipeline is on
+                      sources whose image pipeline is on. The owner's clicks go first: each click the
+                      month's budget can finish (its GPU round and judge covered) is cleaned, run through
+                      the GPU and judged (steps 6 to 8 for those listings alone) before step 4; a click it
+                      cannot finish is not paid and waits (see "The owner's click first")
        4. GPU         the listings' first JUDGE_MAX photos the standardiser has not run, or whose result is
                       outdated (RUN_TAG); none of a listing the owner chose a photo for
        5. judge       the owner's choice for the listing, else its results in its own order until one passes (a
@@ -237,6 +240,18 @@ report counts it pending); an edit already paid for is not collected once its li
 owner's choice, since it is no longer needed. Each paid call is
 listed in the cleaning cap's spend file with its reason (`auto` or `click`, with the click's time) and what the edit
 fixes (`kinds` or `held`).
+
+### The owner's click first
+
+A click is the owner's word, so a run finishes it before any automatic work (scraper 1a, 2026-11-06): the listings
+with a usable click are cleaned, their cleaned copies run through the GPU and judged, and only then does the run's own
+GPU round start (`run.clicks_to_finish`, `run.run`). Before that, nothing is paid for a click that cannot finish: the
+month's budget left (the process budget, not the cleaning cap) must cover the clicks' GPU round at its worst case (what
+the round reserves) and one judge per listing, taken in sheet order; a click whose cleaned copy an earlier run made
+costs no edit and always goes. A click the budget cannot cover is not sent to an edit and waits for next month or a
+higher budget; the run's problems name it ("the owner's click waits: month photo budget reached"). The run's own clean
+step pays no click, so a click is only ever paid this way. Before this rule the month's budget could run out in the
+run's GPU round, and the clean step then paid for a click whose copy got no GPU round and no judge until next month.
 
 ## Trigger
 
@@ -564,7 +579,8 @@ the listing's SKU: a variety decided later re-binds the product and moves its ha
 - **clean**: the owner's click `<CLEAN_TAG>/clicks/<SKU>.json` (`{sku, listing, source, sha, at}`), stored through
   `publish.write_click`, the one writer of a click; a later clean overwrites it. Fields `{id, action: "clean", source,
   sha, at}`: no tag, as the clean step always edits the scraped photo whose standardised result (`RUN_TAG`) failed. The
-  next photos run carries it out through the clean step (step 6) like any click: when none of the listing's results
+  next photos run carries it out first, before its own GPU round, like any click ("The owner's click first"; while the
+  month's budget can finish it, else it waits unpaid): when none of the listing's results
   passes the judge, that photo goes to the hosted edit models cheapest first within the cleaning cap, whatever kind of
   fix it needs and whatever the clean switch says; the cleaned copy goes through the GPU (`CLEAN_TAG`) and the judge,
   and a pass is the listing's choice. A fail leaves the listing on the review list; the copies and checks are stored, so

@@ -12,7 +12,8 @@ Every record is keyed by the listing's SKU, which a variety re-bind never moves 
           the image stage links nothing standardised to it, even a sibling's published photo, so it stays hidden (reason
           no_photo). Its owner choice and its choice record go. Nothing is deleted from the catalog: Blokport deletes the product.
   clean   the owner's click, <clean tag root>clicks/<SKU>.json = {sku, listing, source, sha, at}, stored and read only
-          by publish.write_click and read_clicks: the next photos run sends that photo to the hosted clean step, whose
+          by publish.write_click and read_clicks: the next photos run sends that photo to the hosted clean step first,
+          before its other work, while the month's budget can finish it (else it waits: run.clicks_to_finish), whose
           gate (select.authorised) allows a click whatever kind of fix it needs and whatever the clean switch says; the
           cleaned copy is judged, chosen on a pass, and on a fail the listing stays on the review list (its stored
           attempts are read back, never paid again). Only for the listing decided on: a cleaned copy is the photo's, so
