@@ -140,6 +140,9 @@ class TreeGap(BaseModel):
     gap_kind: GapKind
     nearest_existing: Optional[str] = None
     nearest_score: Optional[float] = None
+    # the nearest candidate's variety Key: its type slug is that variety's type (the Key is the type
+    # authority), so curate never has to guess the type of a name several types share
+    nearest_key: Optional[str] = None
     example_src_url: Optional[str] = None
 
 

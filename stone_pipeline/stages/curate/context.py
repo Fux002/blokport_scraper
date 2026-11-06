@@ -49,7 +49,7 @@ class Curation:
     retired_keys: set
     decisions: Decisions            # every operator decision, ONE object; each phase asks it one question
     resolver: object
-    near_meta: dict
+    near_meta: dict                 # (norm name, norm type) -> (colours, aliases) of each backbone variety
     alias_floor: float
     valid_type_norms: set
     last_resort_quality: str

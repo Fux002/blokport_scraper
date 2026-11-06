@@ -405,6 +405,7 @@ class VariationStage:
                 gap_kind=GapKind.missing_variation,
                 nearest_existing=nearest[1] if nearest else None,
                 nearest_score=round(nearest[2], 1) if nearest else None,
+                nearest_key=self._key_for(nearest[0]) if nearest else None,
                 example_src_url=row.src_url,
             )
         )

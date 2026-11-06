@@ -36,7 +36,9 @@ a suggestion       the confident ones            a leaf-decision            it o
    `catalog_source/backbone_additions/backbone_value_updates.csv` (human-readable audit) and into the
    review queue (`review_pending`, kind `backbone_leaf`). Each suggestion carries the variety, its
    `stone_type` (so a granite approval never grows a same-named quartzite), the attribute, the value, and
-   a `verdict` (`likely_real` for exact/projection matches, else `verify_match`).
+   a `verdict`: `verify_match` when the variety was bound by a learned guess (`writeback.is_learned`: a
+   phonetic or fuzzy tier, also through the `clean_variety_` / `operator_type_` wrappers), else
+   `likely_real` (every bind the seed or an operator decides: exact, projection, override, descriptor).
 
 2. **Review.** The `:4200` admin serves the queue:
    - `GET  /config/v1/review/backbone` -- the pending suggestions (with `current_action` if decided between runs).

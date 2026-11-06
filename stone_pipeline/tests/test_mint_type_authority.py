@@ -76,7 +76,7 @@ def test_non_exact_match_aliases_onto_the_matched_type_never_the_same_name_other
     row = CanonicalRow(src_site="polonine", surrogate_key="a1",
                        variety_match_key="Arabesk",           # the scraped spelling to alias
                        variation_id="v1", variation_key=GRANITE_KEY,
-                       variation_name="Arabescato", variation_method="model")   # non-exact -> alias path
+                       variation_name="Arabescato", variation_method="fuzzy")   # a learned guess -> alias path
     result = curate.build_curation([row], ref)
 
     slab_aliases = result.alias_additions["slab"]
@@ -169,14 +169,21 @@ def test_typeless_match_on_multi_type_name_holds_never_picks_an_arbitrary_stone(
     monkeypatch.setattr(curate, "_alias_model", lambda: (None, {}))
     ref = loaders.load_all()
 
-    row = CanonicalRow(src_site="polonine", surrogate_key="a2",
-                       variety_match_key="Arabesk",
-                       variation_id="v1", variation_key=None,          # keyless -> name-only resolution
-                       variation_name="Arabescato", variation_method="model")
-    result = curate.build_curation([row], ref)
+    def keyless(raw_type: str) -> CanonicalRow:
+        return CanonicalRow(src_site="polonine", surrogate_key="a2", variety_match_key="Arabesk",
+                            raw_type=raw_type,
+                            variation_id="v1", variation_key=None,     # keyless -> name-only resolution
+                            variation_name="Arabescato", variation_method="fuzzy")
 
-    touched = [a for a in result.alias_additions["slab"] if a["Key"] in (MARBLE_KEY, GRANITE_KEY)]
-    assert not touched, f"multi-type name must not resolve to an arbitrary stone, got {touched}"
+    def aliased(result) -> set[str]:
+        return {a["Key"] for a in result.alias_additions["slab"]
+                if a["Key"] in (MARBLE_KEY, GRANITE_KEY) and "Arabesk" in (a.get("_added") or "")}
+
+    # the row DOES reach the name-only routing: with its own type it is aliased onto that type's variety
+    assert aliased(curate.build_curation([keyless("Granite")], ref)) == {GRANITE_KEY}
+    # type-less, the multi-type name is HELD: no alias on either stone
+    assert aliased(curate.build_curation([keyless("")], ref)) == set(), \
+        "multi-type name must not resolve to an arbitrary stone"
 
 
 def _minted_any(res) -> bool:

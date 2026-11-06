@@ -46,7 +46,8 @@ _METHOD_WRAPPERS = ("clean_variety_", "operator_type_")
 
 
 def is_learned(method: str) -> bool:
-    """True when `method` is a guess worth keeping as an alias: its engine tier is phonetic or fuzzy."""
+    """True when `method` is a guess worth keeping as an alias: its engine tier is phonetic or fuzzy. The ONE
+    rule: curate's alias proposals and leaf-suggestion verdicts read it too, so they never disagree."""
     method = (method or "").strip()
     for wrapper in _METHOD_WRAPPERS:
         if method.startswith(wrapper):
