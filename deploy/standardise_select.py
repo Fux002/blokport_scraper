@@ -258,7 +258,8 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
         if stored is None and spend is None:
             return None
         original, result = _original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg")   # read before paying
-        found, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.judge(original, result, fmt), f"judge {src} {sha[:12]}")
+        request = judge.judging(original, result, fmt)   # prepared before anything is paid: a failure here is free
+        found, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.judge(request), f"judge {src} {sha[:12]}")
         rnd.asked.add(sha)
         if found["verdict"] == "unparsed":             # counted, so an answer that never parses ends as a named fail
             found = {**found, "asks": (stored or {}).get("asks", 0) + 1 if (stored or {}).get("verdict") == "unparsed" else 1}
@@ -557,7 +558,8 @@ def _attempt(client, cl, sha, name, original, spend, use):
                 return _failed(client, cl, att, ident, name, str(exc))
             _put(client, f"{att}.jpg", copy, "image/jpeg")
             cl.edited.add(ident)
-        call, what = (lambda: judge.check_clean(original, copy)), f"clean check {name} {sha[:12]}"
+        asked = judge.checking(original, copy)         # prepared before anything is paid: a failure here is free
+        call, what = (lambda: judge.check_clean(asked)), f"clean check {name} {sha[:12]}"
         listed = {**use, "model": name, "call": "check"}
         reserved, held = held, 0.0
         check, cost = (settled(spend, reserved, call, what, listed) if reserved

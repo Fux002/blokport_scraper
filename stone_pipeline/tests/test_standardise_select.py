@@ -14,7 +14,16 @@ from stone_pipeline.standardise import clean, judge
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
 
+
+@pytest.fixture(autouse=True)
+def _judged_by_inputs(monkeypatch):
+    """A judge or check request is its inputs here (judge.judging and judge.checking prepare the real one before anything
+    is paid), so a fake judge receives (original, result, fmt) and a fake check (original, copy)."""
+    monkeypatch.setattr(sel.judge, "judging", lambda original, result, fmt: (original, result, fmt))
+    monkeypatch.setattr(sel.judge, "checking", lambda original, copy: (original, copy))
+
 _REAL_PREPARE = clean.prepare
+_REAL_JUDGING = judge.judging
 
 
 @pytest.fixture(autouse=True)
@@ -126,7 +135,7 @@ def test_each_edit_model_gets_the_photo_in_the_field_it_takes():
 def test_the_first_photo_the_judge_passes_is_chosen_and_judging_stops_there(monkeypatch):
     s3 = _S3({f"dev/products/scraped/sentas/{s}.jpg": b"o" for s in (A, B, D)} | {f"{GPU}{s}.main.jpg": b"m" for s in (A, B, D)})
     asked = []
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or ({"verdict": "pass" if len(asked) == 2 else "fail",
+    monkeypatch.setattr(sel.judge, "judge", lambda job: asked.append(1) or ({"verdict": "pass" if len(asked) == 2 else "fail",
                                                                                  "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B, D))}), ("v9-clean", {"sentas": _round(CL)})]
     picked, complete = sel.choose(s3, rounds, _listing(A, B, D), set(), sel.Spend(10))
@@ -145,7 +154,7 @@ def test_at_most_the_set_number_of_photos_is_judged_per_listing(monkeypatch):
     photos = [c * 64 for c in "123456"]
     s3 = _S3({f"dev/products/scraped/sentas/{s}.jpg": b"o" for s in photos} | {f"{GPU}{s}.main.jpg": b"m" for s in photos})
     asked = []
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or ({"verdict": "fail", "problems": [], "version": C.JUDGE_VERSION}, 0.0))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: asked.append(1) or ({"verdict": "fail", "problems": [], "version": C.JUDGE_VERSION}, 0.0))
     rounds = [("v9", {"sentas": _round(GPU, finished=photos)}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(s3, rounds, _listing(*photos), set(), sel.Spend(10)) == (None, True)
     assert len(asked) == C.JUDGE_MAX_PER_LISTING
@@ -170,7 +179,7 @@ def _clean_setup(monkeypatch, passes_at):
     edits = []
     monkeypatch.setattr(sel.clean, "submit", lambda name: edits.append(name) or {"model": name})
     monkeypatch.setattr(sel.clean, "collect", lambda job: f"copy-{job['model']}".encode())
-    monkeypatch.setattr(sel.judge, "check_clean", lambda o, c: ({"passes": c == f"copy-{passes_at}".encode()}, 0.02))
+    monkeypatch.setattr(sel.judge, "check_clean", lambda job: ({"passes": job[1] == f"copy-{passes_at}".encode()}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
     return s3, edits, rounds
 
@@ -496,7 +505,7 @@ def test_a_photo_two_listings_share_is_judged_once_even_in_parallel(monkeypatch)
     import time
     s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     calls = []
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: (calls.append(1), time.sleep(0.05))[0] or ({"verdict": "pass", "problems": []}, 0.02))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: (calls.append(1), time.sleep(0.05))[0] or ({"verdict": "pass", "problems": []}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     spend = sel.Spend(10)
     threads = [threading.Thread(target=sel.choose, args=(s3, rounds, _listing(A, key=k), set(), spend)) for k in ("one", "two")]
@@ -708,7 +717,7 @@ def _judged_setup(monkeypatch, answer):
 
 
 def test_a_judge_call_that_fails_after_it_was_sent_counts_at_its_reserved_price(monkeypatch):
-    s3, rounds = _judged_setup(monkeypatch, lambda o, r, f: (_ for _ in ()).throw(TimeoutError("read timed out")))
+    s3, rounds = _judged_setup(monkeypatch, lambda job: (_ for _ in ()).throw(TimeoutError("read timed out")))
     spend = sel.Spend(10)
     with pytest.raises(TimeoutError):
         sel.choose(s3, rounds, _listing(A), set(), spend)
@@ -716,7 +725,7 @@ def test_a_judge_call_that_fails_after_it_was_sent_counts_at_its_reserved_price(
 
 
 def test_an_answer_without_its_cost_counts_at_the_reserved_price_and_says_so(monkeypatch, capsys):
-    s3, rounds = _judged_setup(monkeypatch, lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, None))
+    s3, rounds = _judged_setup(monkeypatch, lambda job: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, None))
     spend = sel.Spend(10)
     sel.choose(s3, rounds, _listing(A), set(), spend)
     assert spend.spent == pytest.approx(C.JUDGE_PRICE_USD)
@@ -730,7 +739,27 @@ def test_the_judge_answer_s_missing_cost_is_none_never_free(monkeypatch):
     monkeypatch.setattr(judge, "data_uri", lambda *a: "data:")
     answer = httpx.Response(200, json={"output": "{}", "usage": {}}, request=httpx.Request("POST", C.JUDGE_URL))
     monkeypatch.setattr(httpx, "post", lambda *a, **k: answer)
-    assert judge.ask("s", "p", [b"x"]) == ("{}", None)
+    assert judge.ask(judge.prepare("s", "p", [b"x"])) == ("{}", None)
+
+
+def test_a_judge_request_that_cannot_be_prepared_costs_nothing_and_is_loud(monkeypatch):
+    # review of #540: the judge encoded its images inside the paid call, so an undecodable photo was charged every run
+    s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    monkeypatch.setattr(sel.judge, "judging", lambda o, r, f: (_ for _ in ()).throw(ValueError("undecodable")))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: pytest.fail("asked"))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    spend = sel.Spend(10)
+    with pytest.raises(ValueError):
+        sel.choose(s3, rounds, _listing(A), set(), spend)
+    assert spend.spent == 0 and spend.reserved == 0
+
+
+def test_the_real_judge_preparation_fails_before_anything_is_sent(monkeypatch):
+    import httpx
+    monkeypatch.setenv("FAL_KEY", "key")
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("sent"))
+    with pytest.raises(Exception):
+        _REAL_JUDGING(b"not an image", b"neither", "slab")
 
 
 def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch):
@@ -820,7 +849,7 @@ def test_a_judge_call_refused_with_a_4xx_costs_nothing(monkeypatch):
     import httpx
     s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     refusal = httpx.HTTPStatusError("429", request=httpx.Request("POST", "https://q"), response=httpx.Response(429))
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: (_ for _ in ()).throw(refusal))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: (_ for _ in ()).throw(refusal))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     spend = sel.Spend(10)
     with pytest.raises(httpx.HTTPStatusError):
@@ -834,7 +863,7 @@ def test_a_judge_timeout_after_upstream_work_counts_at_its_price(monkeypatch):
     import httpx
     s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     late = httpx.HTTPStatusError("408", request=httpx.Request("POST", "https://q"), response=httpx.Response(408))
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: (_ for _ in ()).throw(late))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: (_ for _ in ()).throw(late))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     spend = sel.Spend(10)
     with pytest.raises(httpx.HTTPStatusError):
@@ -977,7 +1006,7 @@ def test_an_unparsed_verdict_is_not_final_and_is_asked_again(monkeypatch):
     s3 = _S3({f"{GPU}judged/{A}.json": _unparsed(1), f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(s3, rounds, _listing(A), set()) == (None, False)                   # pending, not a final fail
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (("v9", A), True)
 
 
@@ -1051,7 +1080,7 @@ def test_a_fail_under_an_older_stricter_bar_is_judged_again_and_a_pass_stays_a_p
     s3 = _S3({f"{GPU}judged/{A}.json": old_fail, f"{GPU}judged/{B}.json": old_pass,
               f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     asked = []
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: asked.append(1) or ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(s3, rounds, _listing(B), set(), sel.Spend(10)) == (("v9", B), True) and asked == []   # pass stands
     assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (("v9", A), True) and asked == [1]  # judged again
@@ -1088,8 +1117,8 @@ def _judged_in_turn(monkeypatch, answers):
     """The judge stood in: answers[sha] = "pass" | "fail"; returns the shas it was asked about, in order."""
     asked = []
     monkeypatch.setattr(sel, "_original", lambda client, src, sha: sha.encode())
-    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(o.decode()) or (
-        {"verdict": answers[o.decode()], "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    monkeypatch.setattr(sel.judge, "judge", lambda job: asked.append(job[0].decode()) or (
+        {"verdict": answers[job[0].decode()], "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     return asked
 
 

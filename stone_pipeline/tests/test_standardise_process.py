@@ -24,6 +24,14 @@ from stone_pipeline.io import imagestore
 from stone_pipeline.ledger import writethrough
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
+
+
+@pytest.fixture(autouse=True)
+def _judged_by_inputs(monkeypatch):
+    """A judge or check request is its inputs here (judge.judging and judge.checking prepare the real one before anything
+    is paid), so a fake judge receives (original, result, fmt) and a fake check (original, copy)."""
+    monkeypatch.setattr(select.judge, "judging", lambda original, result, fmt: (original, result, fmt))
+    monkeypatch.setattr(select.judge, "checking", lambda original, copy: (original, copy))
 RUN = f"{ENV_SEGMENT}/standardise-test/{C.RUN_TAG}/sentas/"
 ROOT = f"{ENV_SEGMENT}/standardise-test/{C.CLEAN_TAG}/"
 NO_TILES = "Product Handle,Product Category 1\n"            # a product sheet without tile listings
@@ -656,7 +664,7 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
               f"{RUN}{B}.main.jpg": b"mb", f"{RUN}{B}.slab.png": b"p", f"{RUN}{C.OUTLINE_CHECKED}{B}.json": b"{}",
               f"{RUN}held/{D}.json": b'{"reason": "x"}', f"{scraped}{B}.jpg": b"ob"})
     asked = []
-    monkeypatch.setattr(select.judge, "judge", lambda o, r, f: asked.append(r) or (
+    monkeypatch.setattr(select.judge, "judge", lambda job: asked.append(job[1]) or (
         {"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     monkeypatch.setattr(select.clean, "submit", lambda *a: pytest.fail("a listing with a good photo was cleaned"))
 
@@ -763,7 +771,8 @@ def _photos_run(monkeypatch, s3, owner, redraw=None, verdict=None):
                 src.rework(client, out, sha, redraw, src.again(client, out, sha))
         return []
 
-    def judged(original, result, fmt):
+    def judged(job):
+        original, result, fmt = job
         assert verdict is not None, "a judge call"
         asked.append(result)
         return {"verdict": verdict, "problems": [], "version": C.JUDGE_VERSION}, 0.02
@@ -829,7 +838,7 @@ def test_a_pending_redraw_of_a_listing_left_as_published_waits_then_settles_once
     out = src.round_prefix(C.RUN_TAG, "sentas")
     src.rework(s3, out, A, _redrawn(), src.again(s3, out, A))                        # left complete by an earlier run
     asked = []
-    monkeypatch.setattr(select.judge, "judge", lambda o, r, f: asked.append(r) or (
+    monkeypatch.setattr(select.judge, "judge", lambda job: asked.append(job[1]) or (
         {"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     before = _state(s3)
 
@@ -923,7 +932,8 @@ def _process(monkeypatch, s3, mode, redraw=None, verdict=None):
                 src.rework(client, out, sha, redraw, src.again(client, out, sha))
         return []
 
-    def judged(original, result, fmt):
+    def judged(job):
+        original, result, fmt = job
         assert verdict is not None, "a paid call"
         return {"verdict": verdict, "problems": [], "version": C.JUDGE_VERSION}, 0.02
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])

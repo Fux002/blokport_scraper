@@ -61,24 +61,37 @@ def parse_clean(text):
     return {"clean": clean, "faithful": faithful, "problems": str(value.get("problems") or ""), "passes": clean and faithful}
 
 
-def ask(system, prompt, images):
-    """(the model's answer, what the call cost in USD) for these encoded images; the cost is None when the answer does not
-    carry it (the caller counts the call at its reserved price, never as free)."""
+def prepare(system, prompt, images):
+    """Everything asking the model needs, made before anything is paid: the request (the images encoded) and the
+    headers (the key). An image that cannot be encoded or a missing key fails here: loud, and free."""
     body = {"model": C.JUDGE_MODEL, "system_prompt": system, "prompt": prompt, "max_tokens": C.JUDGE_MAX_TOKENS,
             "image_urls": [data_uri(i, C.JUDGE_LONG_SIDE, C.JUDGE_JPEG_QUALITY) for i in images]}
     if C.JUDGE_REASONING:
         body["reasoning"] = True
-    r = httpx.post(C.JUDGE_URL, json=body, headers={"Authorization": f"Key {fal_key()}"}, timeout=C.JUDGE_TIMEOUT)
+    return {"body": body, "headers": {"Authorization": f"Key {fal_key()}"}}
+
+
+def ask(prepared):
+    """(the model's answer, what the call cost in USD) of a prepared request (prepare): the paid part, the call and the
+    reading of its answer; the cost is None when the answer does not carry it (the caller counts the call at its
+    reserved price, never as free)."""
+    r = httpx.post(C.JUDGE_URL, json=prepared["body"], headers=prepared["headers"], timeout=C.JUDGE_TIMEOUT)
     r.raise_for_status()
     res = r.json()
     cost = (res.get("usage") or {}).get("cost")
     return res["output"], None if cost is None else float(cost)
 
 
-def judge(original, result, fmt):
-    """(verdict dict, cost): is our catalog image `result` of the photo `original` fit to publish? fmt = slab | block | tile."""
-    text, cost = ask(C.JUDGE_PROMPT, f"Product format: {fmt.upper()}. Image 1: original. Image 2: catalog image. Judge image 2.",
-                     [original, result])
+def judging(original, result, fmt):
+    """The prepared request (prepare) asking whether our catalog image `result` of the photo `original` is fit to
+    publish; fmt = slab | block | tile."""
+    return prepare(C.JUDGE_PROMPT, f"Product format: {fmt.upper()}. Image 1: original. Image 2: catalog image. Judge image 2.",
+                   [original, result])
+
+
+def judge(prepared):
+    """(verdict dict, cost) of a prepared judging request (judging)."""
+    text, cost = ask(prepared)
     return {**parse_verdict(text), "model": C.JUDGE_MODEL, "version": C.JUDGE_VERSION}, cost
 
 
@@ -91,9 +104,15 @@ def current(verdict):
     return passed(verdict) or verdict.get("version", 1) >= C.JUDGE_VERSION
 
 
-def check_clean(original, cleaned):
-    """(check dict, cost): did the hosted edit take the reflections and marks off and leave the stone as it was?"""
-    text, cost = ask(C.CLEAN_CHECK_PROMPT, "Image 1: original. Image 2: edited copy.", [original, cleaned])
+def checking(original, cleaned):
+    """The prepared request (prepare) asking whether the hosted edit took the reflections and marks off and left the
+    stone as it was."""
+    return prepare(C.CLEAN_CHECK_PROMPT, "Image 1: original. Image 2: edited copy.", [original, cleaned])
+
+
+def check_clean(prepared):
+    """(check dict, cost) of a prepared check request (checking)."""
+    text, cost = ask(prepared)
     return {**parse_clean(text), "model": C.JUDGE_MODEL}, cost
 
 
