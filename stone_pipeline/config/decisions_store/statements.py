@@ -32,25 +32,30 @@ def _statement_rows() -> list[dict]:
                                               "ORDER BY source, spelling_norm").fetchall()]
 
 
-def _upsert_statement(source: str, spelling: str, verdict: str, *, name: str | None = None,
-                      stone_type: str | None = None, color: str | None = None, origin_iso: str | None = None,
-                      widen: bool = False, asked_by: str = "") -> None:
+def _write_statement(conn, source: str, spelling: str, verdict: str, *, name: str | None = None,
+                     stone_type: str | None = None, color: str | None = None, origin_iso: str | None = None,
+                     widen: bool = False, asked_by: str = "") -> None:
+    """Write one statement on `conn`, inside the caller's transaction (the caller commits)."""
     src, sp = (source or "").strip(), (spelling or "").strip()
     if not _norm(sp):
         raise InvalidDecision("a statement needs a scraped spelling with a usable name "
                               "(a spelling in a non-Latin script only folds to no key)")
-    with closing(store.open_store()) as conn:
-        conn.execute(
-            "INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, color, origin_iso, "
-            "widen, asked_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(source, spelling_norm) DO UPDATE SET spelling = excluded.spelling, "
-            "verdict = excluded.verdict, name = excluded.name, stone_type = excluded.stone_type, "
-            "color = excluded.color, origin_iso = excluded.origin_iso, widen = excluded.widen, "
-            "asked_by = excluded.asked_by, decided_at = excluded.decided_at",
-            (src, _norm(sp), sp, verdict, (name or "").strip() or None, (stone_type or "").strip() or None,
-             (color or "").strip() or None, (origin_iso or "").strip().upper() or None, 1 if widen else 0,
-             (asked_by or src or "").strip(), _now()))
-        conn.commit()
+    conn.execute(
+        "INSERT INTO statement (source, spelling_norm, spelling, verdict, name, stone_type, color, origin_iso, "
+        "widen, asked_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(source, spelling_norm) DO UPDATE SET spelling = excluded.spelling, "
+        "verdict = excluded.verdict, name = excluded.name, stone_type = excluded.stone_type, "
+        "color = excluded.color, origin_iso = excluded.origin_iso, widen = excluded.widen, "
+        "asked_by = excluded.asked_by, decided_at = excluded.decided_at",
+        (src, _norm(sp), sp, verdict, (name or "").strip() or None, (stone_type or "").strip() or None,
+         (color or "").strip() or None, (origin_iso or "").strip().upper() or None, 1 if widen else 0,
+         (asked_by or src or "").strip(), _now()))
+
+
+def _upsert_statement(source: str, spelling: str, verdict: str, **fields) -> None:
+    """Write one statement in its own transaction."""
+    with closing(store.open_store()) as conn, conn:
+        _write_statement(conn, source, spelling, verdict, **fields)
 
 
 def _lookups(exists_as, alias_target, clean=None) -> tuple:
@@ -99,16 +104,18 @@ def reject(source: str, spelling: str) -> None:
     _upsert_statement(source, spelling, "reject", asked_by=source)
 
 
-def clear(source: str, spelling: str) -> int:
-    """Undo ONE vendor's statement on a spelling ('' = the global one). Returns rows dropped (0 or 1)."""
+def _clear(conn, source: str, spelling: str) -> int:
     sp = _norm(spelling)
     if not sp:
         raise InvalidDecision("clearing a statement requires the scraped spelling")
-    with closing(store.open_store()) as conn:
-        n = conn.execute("DELETE FROM statement WHERE source = ? AND spelling_norm = ?",
-                         ((source or "").strip(), sp)).rowcount
-        conn.commit()
-    return n
+    return conn.execute("DELETE FROM statement WHERE source = ? AND spelling_norm = ?",
+                        ((source or "").strip(), sp)).rowcount
+
+
+def clear(source: str, spelling: str) -> int:
+    """Undo ONE vendor's statement on a spelling ('' = the global one). Returns rows dropped (0 or 1)."""
+    with closing(store.open_store()) as conn, conn:
+        return _clear(conn, source, spelling)
 
 
 def statement_decided_at(source: str, spelling: str) -> str | None:
@@ -187,12 +194,13 @@ def _spelling_means(spelling: str, stone_type: str, exists_as, alias_target, cle
     return None
 
 
-def _global_meaning(spelling: str, stone_type: str, exists_as, alias_target, clean) -> tuple[str, str] | None:
+def _global_meaning(conn, spelling: str, stone_type: str, exists_as, alias_target,
+                    clean) -> tuple[str, str] | None:
     """(name, type) the spelling means for every vendor today: the global statement on it, else the existing
-    variety it resolves to (see _spelling_means), else None (the spelling is undefined: the next mint defines it)."""
-    with closing(store.read_store()) as conn:
-        prior = conn.execute("SELECT spelling, name, stone_type FROM statement WHERE source = '' "
-                             "AND spelling_norm = ? AND verdict = 'is'", (_norm(spelling),)).fetchone()
+    variety it resolves to (see _spelling_means), else None (the spelling is undefined: the next mint defines it).
+    Read on the deciding transaction's `conn`, so an earlier listing of the same statement is seen."""
+    prior = conn.execute("SELECT spelling, name, stone_type FROM statement WHERE source = '' "
+                         "AND spelling_norm = ? AND verdict = 'is'", (_norm(spelling),)).fetchone()
     if prior:
         return (prior["name"] or prior["spelling"], prior["stone_type"] or "")
     existing = _spelling_means(spelling, stone_type, exists_as, alias_target, clean)
@@ -201,6 +209,25 @@ def _global_meaning(spelling: str, stone_type: str, exists_as, alias_target, cle
 
 def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "", origin: str = "",
            widen: bool = False, exists_as=None, alias_target=None, clean=None) -> dict:
+    """One listing's statement (see decide_all, which this is for a single listing)."""
+    return decide_all([(source, scraped)], name, stone_type, color, origin, widen,
+                      exists_as=exists_as, alias_target=alias_target, clean=clean)[0]
+
+
+def decide_all(listings, name: str, stone_type: str, color: str = "", origin: str = "", widen: bool = False,
+               exists_as=None, alias_target=None, clean=None) -> list[dict]:
+    """The operator's statement for every (source, scraped) listing it covers (a card several vendors share), in
+    ONE transaction: a listing the store refuses (InvalidDecision) leaves none of them stored. The listings are
+    decided in order on that transaction, so a later one sees what an earlier one defined (the first vendor's
+    mint is the spelling's global meaning the next restates). Returns one outcome per listing (see _decide)."""
+    exists_as, alias_target, clean = _lookups(exists_as, alias_target, clean)
+    with closing(store.open_store()) as conn, conn:
+        return [_decide(conn, source, scraped, name, stone_type, color, origin, widen, exists_as, alias_target, clean)
+                for source, scraped in listings]
+
+
+def _decide(conn, source: str, scraped: str, name: str, stone_type: str, color: str, origin: str, widen: bool,
+            exists_as, alias_target, clean) -> dict:
     """ONE operator statement about a vendor's product -- "this is `name`, a `stone_type`, `color`, from
     `origin`" -- stored as ONE row. The operator never picks mint / alias / origin: what the statement DOES is
     derived when the decisions are loaded (config.decisions_model): an existing (name, type), or a known alias
@@ -216,7 +243,8 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
 
     `exists_as(name, stone_type) -> bool`, `alias_target(name, stone_type) -> canonical name | None` and
     `clean(spelling, stone_type) -> str` are the variety lookups (see _lookups), injected so the rule is
-    testable without the ledger on disk. The caller validates the vocabulary (type, ISO) first."""
+    testable without the ledger on disk. The caller validates the vocabulary (type, ISO) first. Writes on `conn`;
+    the caller commits."""
     src = (source or "").strip()
     spelling = (scraped or "").strip()
     name = (name or "").strip()
@@ -226,7 +254,6 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
     if not src or not _norm(spelling) or not _norm(name) or not stone_type:
         raise InvalidDecision("a decision requires source, scraped spelling, name and stone_type, "
                               "and the spelling and name must have a usable name (not a non-Latin script only)")
-    exists_as, alias_target, clean = _lookups(exists_as, alias_target, clean)
     # a name the operator states may already be an existing variety's ALIAS (same type); it then resolves to
     # that variety's canonical name, so the statement binds instead of minting a duplicate of a known alias
     resolved_alias = False
@@ -238,30 +265,28 @@ def decide(source: str, scraped: str, name: str, stone_type: str, color: str = "
                      "color": color or None, "origin": origin or None}
     # a statement REPLACES the vendor's previous one for this spelling, and supersedes a global REJECT on the
     # same listing (the reject is keyed by the card ref, the cleaned name): last operator action wins
-    clear(src, spelling)
+    _clear(conn, src, spelling)
     for s in dict.fromkeys((spelling, clean(spelling, stone_type))):
-        with closing(store.open_store()) as conn:
-            conn.execute("DELETE FROM statement WHERE source = '' AND verdict = 'reject' AND spelling_norm = ?",
-                         (_norm(s),))
-            conn.commit()
+        conn.execute("DELETE FROM statement WHERE source = '' AND verdict = 'reject' AND spelling_norm = ?",
+                     (_norm(s),))
     if exists_as(name, stone_type) or resolved_alias:
-        _upsert_statement(src, spelling, "is", name=name, stone_type=stone_type, color=color,
-                          origin_iso=origin, widen=widen, asked_by=src)
+        _write_statement(conn, src, spelling, "is", name=name, stone_type=stone_type, color=color,
+                         origin_iso=origin, widen=widen, asked_by=src)
         outcome["result"] = "bound"
         if resolved_alias:
             outcome["resolved_alias"] = True
         return outcome
     renamed = _norm(name) != _norm(spelling)
-    meaning = _global_meaning(spelling, stone_type, exists_as, alias_target, clean)
+    meaning = _global_meaning(conn, spelling, stone_type, exists_as, alias_target, clean)
     if meaning and _norm(meaning[0]) == _norm(name) and _norm(meaning[1]) == _norm(stone_type):
         outcome["result"], outcome["level"] = "minted", "global"      # restates the global meaning: nothing new
         if origin:                                                    # ...but the vendor's origin is recorded
-            _upsert_statement(src, spelling, "is", name=name, stone_type=stone_type, color=color,
-                              origin_iso=origin, widen=widen, asked_by=src)
+            _write_statement(conn, src, spelling, "is", name=name, stone_type=stone_type, color=color,
+                             origin_iso=origin, widen=widen, asked_by=src)
         return outcome
     level = src if meaning else ""
-    _upsert_statement(level, spelling, "is", name=name if renamed or level else None, stone_type=stone_type,
-                      color=color, origin_iso=origin, widen=widen, asked_by=src)
+    _write_statement(conn, level, spelling, "is", name=name if renamed or level else None, stone_type=stone_type,
+                     color=color, origin_iso=origin, widen=widen, asked_by=src)
     outcome["result"], outcome["level"] = "minted", ("vendor" if level else "global")
     if widen and origin:
         outcome["widen"] = True

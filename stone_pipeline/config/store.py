@@ -459,7 +459,8 @@ def get_row(source: str, path: str | Path | None = None) -> dict | None:
 
 def upsert_row(data: dict, path: str | Path | None = None) -> None:
     """Upsert from an admin-UI payload dict (the inverse of _row_dict). The retired enhancer's fields an admin built before
-    their removal still sends are ignored, as every unknown field is, and named in a warning so the leftover is seen."""
+    their removal still sends are ignored, as every unknown field is, and named in a warning so the leftover is seen.
+    `enabled` and `lifecycle` are not settings: set_state owns them (the lifecycle verbs), so they are not read here."""
     if retired := sorted(_RETIRED_FIELDS & set(data)):
         log.warning(f"source {data.get('source')!r}: ignored the retired field(s) {', '.join(retired)}")
     cfg = SourceConfig(
@@ -477,7 +478,21 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
     )
     # re-adding a source clears any prior removal tombstone (in ONE transaction with the upsert, so a crash
     # between the two can't leave the source added yet still tombstoned).
-    upsert_source(cfg, enabled=bool(data.get("enabled", True)), clear_removed=True, path=path)
+    upsert_source(cfg, clear_removed=True, path=path)
+
+
+def inactive_sources(names, path: str | Path | None = None) -> dict[str, str]:
+    """{name: state} for each of `names` the store holds out of the run: paused or delisted by the lifecycle verbs,
+    or disabled. Names the store does not hold, or an absent store, are not inactive (a pure read: it never creates
+    config.db)."""
+    names = list(names)
+    if not names:
+        return {}
+    marks = ",".join("?" * len(names))
+    with closing(read_store(path)) as conn:
+        rows = conn.execute(f"SELECT source, enabled, lifecycle FROM source WHERE source IN ({marks})", names)
+        return {r["source"]: (r["lifecycle"] if r["lifecycle"] not in (None, "active") else "disabled")
+                for r in rows if not r["enabled"] or r["lifecycle"] not in (None, "active")}
 
 
 def enabled_names(path: str | Path | None = None) -> set[str] | None:
@@ -492,12 +507,13 @@ def enabled_names(path: str | Path | None = None) -> set[str] | None:
 
 # -- writes (used by the seed + the admin API) ---------------------------------
 
-def upsert_source(cfg: SourceConfig, *, enabled: bool = True,
-                  clear_removed: bool = False, path: str | Path | None = None) -> None:
-    p = _params(cfg, enabled)
+def upsert_source(cfg: SourceConfig, *, clear_removed: bool = False, path: str | Path | None = None) -> None:
+    """Write a source's settings. A new source starts enabled (active); an existing one keeps its run state, which
+    only set_state changes: a settings save that also wrote `enabled` re-enabled a delisted vendor."""
+    p = _params(cfg, enabled=True)
     cols = ", ".join(p)
     placeholders = ", ".join(f":{c}" for c in p)
-    updates = ", ".join(f"{c} = :{c}" for c in p if c != "source")
+    updates = ", ".join(f"{c} = :{c}" for c in p if c not in ("source", "enabled"))
     with closing(open_store(path)) as conn:
         conn.execute(
             f"INSERT INTO source ({cols}) VALUES ({placeholders}) "

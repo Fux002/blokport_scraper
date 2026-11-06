@@ -20,7 +20,7 @@ from stone_pipeline.tests import _decision_views as views
 @pytest.mark.parametrize("field", ["default_bundle_size", "min_expected_rows"])
 def test_a_malformed_integer_on_the_source_put_is_a_400_naming_the_field(field):
     body = {"source_code": "POL", "ports": ["port_1"], field: "abc"}
-    result = server._validate_source_put("polonine", body)
+    result = server._validate_source_put("polonine", body, None)
     assert result is not None
     status, err = result
     assert status == 400 and field in err["error"]

@@ -1,16 +1,13 @@
-"""HTTP surface for the scraper config store, for the admin UI (e.g. on :4200).
+"""HTTP surface of the scraper control plane under /config/v1, for the admin UI (Blokport's :4200 admin).
 
-A thin, dependency-free reference server over the config store, so the UI can list
-scrapers, toggle which run, and edit per-scraper settings live:
+A thin, dependency-free server over the config store, the run trigger and the lifecycle verbs: sources and their
+settings, runs, diagnostics, the source and variety lifecycle, the review queues, origins and the vocabularies for
+the admin pickers. `_ROUTES` below is the one list of what it serves (an unknown path answers with that list).
 
-    GET  /config/v1/sources                list every scraper (enabled + settings)
-    GET  /config/v1/sources/<name>         one scraper
-    PUT  /config/v1/sources/<name>         create or update one (body = the settings)
-
-Auth is a bearer token (BLOKPORT_CONFIG_TOKEN); the server refuses to start without
-it. Routing is split from transport (`dispatch` is pure) so it is testable without
-sockets. SQLite WAL handles the UI (single writer) plus the pipeline (readers). No
-em dashes (design principle 2).
+Auth is a bearer token (SCRAPER_CONFIG_TOKEN); the server refuses to start without it. Routing is split from
+transport (`dispatch` is pure) so it is testable without sockets. Every body is type-checked at this boundary: a
+wrongly typed field is a 400 naming it, never a coercion or a 500. SQLite WAL handles the UI (single writer) plus
+the pipeline (readers). No em dashes (design principle 2).
 """
 
 from __future__ import annotations
@@ -142,12 +139,52 @@ def _attach_image_progress(rows: list[dict]) -> None:
 # (status, json body). Adding a route = one handler + one table row, never a new branch in a dispatcher.
 
 
+class _BadRequest(ValueError):
+    """A body field of the wrong type or shape: dispatch answers 400 with the message, which names the field."""
+
+
 def _dict(body) -> dict:
-    return body if isinstance(body, dict) else {}
+    """The JSON object body of a route whose body is optional (absent = {}). Any other JSON value is refused: a list
+    or a string read as {} would run the route's widest default (every source) on a malformed request."""
+    if body is None:
+        return {}
+    if not isinstance(body, dict):
+        raise _BadRequest("body must be a JSON object")
+    return body
 
 
-def _sources_of(body):
-    return body.get("sources") if isinstance(body, dict) else None
+def _str(body: dict, field: str) -> str:
+    """An optional string field, stripped ('' when absent or null)."""
+    value = body.get(field)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise _BadRequest(f"{field} must be a string, got {value!r}")
+    return value.strip()
+
+
+def _flag(body: dict, field: str) -> bool:
+    """An optional true/false field (false when absent or null). Never bool(): "false" would read as true."""
+    value = body.get(field)
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise _BadRequest(f"{field} must be true or false, got {value!r}")
+    return value
+
+
+def _str_list(value, field: str) -> list[str]:
+    """A non-empty list of non-empty strings, stripped."""
+    if not (isinstance(value, list) and value and all(isinstance(v, str) and v.strip() for v in value)):
+        raise _BadRequest(f"{field} must be a non-empty list of non-empty strings, got {value!r}")
+    return [v.strip() for v in value]
+
+
+def _sources_of(body) -> list[str] | None:
+    """The `sources` scope: None when omitted or null (the route's global scope), else the named sources. An empty
+    list is refused: it is neither scope, and reading it as 'every source' turned a UI bug into a global action."""
+    sources = _dict(body).get("sources")
+    return None if sources is None else _str_list(sources, "sources")
 
 
 # -- run: the produce trigger ------------------------------------------------------------------------------
@@ -156,8 +193,9 @@ def _post_run(params, body, query):
     # sources omitted -> every enabled source; stage omitted -> "all" (scrape -> catalog -> gate); close_only
     # (stage photos only, an operator's action) makes the chosen photos' close-ups again.
     from stone_pipeline.config import runner
-    rec, code = runner.start_run(_sources_of(body), _dict(body).get("stage") or "all",
-                                 close_only=_dict(body).get("close_only", False))   # (record, status)
+    b = _dict(body)
+    rec, code = runner.start_run(_sources_of(b), _str(b, "stage") or "all",
+                                 close_only=b.get("close_only", False))   # (record, status)
     return code, rec
 
 
@@ -210,8 +248,8 @@ def _post_reset(params, body, query):
     # so the clean start is coherent across both stores; a scoped reset leaves config.db alone.
     from stone_pipeline import lifecycle
     b = _dict(body)
-    result, code = lifecycle.reset(_sources_of(body), bool(b.get("hard")), pristine=bool(b.get("pristine")),
-                                   keep_images=bool(b.get("keep_images")), keep_scrape=bool(b.get("keep_scrape")))
+    result, code = lifecycle.reset(_sources_of(b), _flag(b, "hard"), pristine=_flag(b, "pristine"),
+                                   keep_images=_flag(b, "keep_images"), keep_scrape=_flag(b, "keep_scrape"))
     return code, result
 
 
@@ -283,8 +321,8 @@ def _post_variations_unmint(params, body, query):
     #                                   Keys itself -- no paste needed; refuses 503 if no base is available)
     from stone_pipeline import lifecycle
     b = _dict(body)
-    force = bool(b.get("force"))
-    if b.get("all_minted"):
+    force = _flag(b, "force")
+    if _flag(b, "all_minted"):
         result, code = lifecycle.unmint_all_minted(force=force)
     else:
         result, code = lifecycle.unmint_variations(b.get("keys"), force=force)
@@ -303,7 +341,7 @@ def _post_variation_verb(params, body, query):
     from stone_pipeline import lifecycle
     key, verb = params["key"], params["verb"]
     if verb in ("retire", "unmint"):
-        force = bool(_dict(body).get("force"))
+        force = _flag(_dict(body), "force")
         op = lifecycle.retire_variation if verb == "retire" else lifecycle.unmint_variation
         result, code = op(key, force=force)
     elif verb == "un_retire":
@@ -373,8 +411,9 @@ def _put_review_attribute(params, body, query):
     if not isinstance(body, dict):
         return 400, {"error": "body must be a JSON object {kind, medusa_id}"}
     value = unquote(params["value"])   # same decode-before-key rule as the variety PUT
+    kind, medusa_id = _str(body, "kind"), _str(body, "medusa_id")
     try:
-        decisions_store.set_attribute_id(body.get("kind", ""), value, body.get("medusa_id", ""))
+        decisions_store.set_attribute_id(kind, value, medusa_id)
     except decisions_store.InvalidDecision as e:
         return 400, {"error": str(e)}
     return 200, {"value": value, "kind": body.get("kind"), "medusa_id": body.get("medusa_id")}
@@ -383,12 +422,23 @@ def _put_review_attribute(params, body, query):
 def _decide_listings(body) -> list[tuple[str, str]]:
     # the listings a statement applies to: the card's `listings` ([{source, scraped}], a card shared by
     # several vendors), or one `source` with `scraped` as a spelling or a list of spellings
-    source = (body.get("source") or "").strip()
-    raw_scraped = body.get("scraped") or ""
-    listings = [(str(l.get("source") or "").strip(), str(l.get("scraped") or "").strip())
-                for l in (body.get("listings") or []) if isinstance(l, dict)]
-    listings += [(source, s.strip()) for s in (raw_scraped if isinstance(raw_scraped, list) else [raw_scraped])
-                 if isinstance(s, str) and s.strip() and source]
+    source = _str(body, "source")
+    raw_listings = body.get("listings")
+    if raw_listings is None:
+        raw_listings = []
+    if not (isinstance(raw_listings, list) and all(
+            isinstance(l, dict) and isinstance(l.get("source"), str) and isinstance(l.get("scraped"), str)
+            for l in raw_listings)):
+        raise _BadRequest(f"listings must be a list of {{source, scraped}} string objects, got {raw_listings!r}")
+    listings = [(l["source"].strip(), l["scraped"].strip()) for l in raw_listings]
+    raw_scraped = body.get("scraped")
+    if isinstance(raw_scraped, list):
+        if not all(isinstance(s, str) for s in raw_scraped):
+            raise _BadRequest(f"scraped must be a spelling or a list of spellings, got {raw_scraped!r}")
+        spellings = [s.strip() for s in raw_scraped]
+    else:
+        spellings = [_str(body, "scraped")]
+    listings += [(source, s) for s in spellings if s and source]
     return list(dict.fromkeys(l for l in listings if l[0] and l[1]))
 
 
@@ -441,8 +491,9 @@ def _put_review_decide(params, body, query):
     listings = _decide_listings(body)
     if not listings:
         return 400, {"error": "listings [{source, scraped}] or source + scraped are required"}
-    name = (body.get("name") or "").strip()
-    raw_type = (body.get("type") or "").strip()
+    name = _str(body, "name")
+    raw_type = _str(body, "type")
+    widen = _flag(body, "widen")
     if not name or not raw_type:
         return 400, {"error": "name and type are required"}
     vocab = _type_vocab()
@@ -452,12 +503,12 @@ def _put_review_decide(params, body, query):
     # a colour, when given, must be a real Medusa colour attribute (a minted variety is seeded with it; a
     # value Medusa lacks would null-id every product), stored in its canonical casing
     color = ""
-    if (raw_color := (body.get("color") or "").strip()):
+    if (raw_color := _str(body, "color")):
         colors = _color_vocab()
         if proj.norm(raw_color) not in colors:
             return 400, {"error": f"color {raw_color!r} is not a known Medusa colour attribute"}
         color = colors[proj.norm(raw_color)]
-    raw_origin = (body.get("origin") or "").strip()
+    raw_origin = _str(body, "origin")
     origin = _country_iso(raw_origin) if raw_origin else ""
     if raw_origin and not origin:
         return 400, {"error": f"origin {raw_origin!r} is not a real ISO-3166 country"}
@@ -468,8 +519,8 @@ def _put_review_decide(params, body, query):
         return 409, {"error": f"'{name}' ({stone_type}) is a retired variety; un-retire it first",
                      "retired": True}
     try:
-        outcomes = [decisions_store.decide(s, sp, name, stone_type, color, origin, bool(body.get("widen")))
-                    for s, sp in listings]
+        # one transaction: a listing the store refuses leaves none of the others stored
+        outcomes = decisions_store.decide_all(listings, name, stone_type, color, origin, widen)
     except decisions_store.InvalidDecision as e:
         return 400, {"error": str(e)}
     return 200, {**outcomes[0], "listings": [{"source": s, "scraped": sp, "result": o["result"]}
@@ -504,7 +555,7 @@ def _get_review_backbone_decided(params, body, query):
 def _post_review_backbone_approve_all(params, body, query):
     # the primary UX: approve every pending leaf suggestion (or only one verdict, e.g. likely_real).
     from stone_pipeline.config import decisions_store
-    return 200, {"approved": decisions_store.approve_leaf_pending(_dict(body).get("verdict"))}
+    return 200, {"approved": decisions_store.approve_leaf_pending(_str(_dict(body), "verdict") or None)}
 
 
 def _put_review_backbone_leaf(params, body, query):
@@ -513,7 +564,7 @@ def _put_review_backbone_leaf(params, body, query):
     from stone_pipeline.config import decisions_store
     if not isinstance(body, dict):
         return 400, {"error": "body must be a JSON object {action}"}
-    ref, action = unquote(params["ref"]), body.get("action", "")
+    ref, action = unquote(params["ref"]), _str(body, "action")
     try:
         # a still-pending suggestion decides through the queue; a leaf a prior run already decided (e.g. a
         # spurious approval to undo) has dropped off that queue, so revise it in place by ref. 'clear' only
@@ -580,19 +631,18 @@ def _put_origin(params, body, query):
     from stone_pipeline.config import decisions_store
     if not isinstance(body, dict):
         return 400, {"error": "body must be {variety, stone_type, countries:[...]}"}
-    variety = (body.get("variety") or "").strip()
-    stone_type = (body.get("stone_type") or "").strip()
-    raw = body.get("countries") or []
-    if not (variety and stone_type and raw):
+    variety = _str(body, "variety")
+    stone_type = _str(body, "stone_type")
+    city, county = _str(body, "city"), _str(body, "county")
+    if not (variety and stone_type):
         return 400, {"error": "variety, stone_type and a non-empty countries list are required"}
     isos = []
-    for c in raw:
-        if not (iso := _country_iso((c or "").strip())):
+    for c in _str_list(body.get("countries"), "countries"):
+        if not (iso := _country_iso(c)):
             return 400, {"error": f"country {c!r} is not a real ISO-3166 country"}
         isos.append(iso)
     try:
-        decisions_store.set_variety_origin(variety, stone_type, ",".join(isos),
-                                           (body.get("city") or "").strip(), (body.get("county") or "").strip())
+        decisions_store.set_variety_origin(variety, stone_type, ",".join(isos), city, county)
     except decisions_store.InvalidDecision as e:
         return 400, {"error": str(e)}
     return 200, {"variety": variety, "stone_type": stone_type, "countries": isos}
@@ -655,11 +705,14 @@ def _put_source(params, body, query):
     if not isinstance(body, dict):
         return 400, {"error": "body must be a JSON object of source settings"}
     name = params["name"]
+    stored = store.get_row(name)
+    if conflict := _source_state_conflict(name, stored, body):
+        return conflict
     # The body updates the fields it names over the stored row, so a field the admin form does not render
     # keeps its value on save instead of resetting to its default. A new source has no stored row and is
     # validated as sent. The path name is authoritative.
-    body = {**(store.get_row(name) or {}), **body, "source": name}
-    err = _validate_source_put(name, body)
+    body = {**(stored or {}), **body, "source": name}
+    err = _validate_source_put(name, body, stored)
     if err:
         return err
     try:
@@ -722,9 +775,9 @@ _ROUTES: tuple[tuple[str, tuple[str, ...], object], ...] = (
     ("DELETE", ("sources", "{name}"), _delete_source),
 )
 
-_NOT_FOUND = ("not found; expected /config/v1/sources[/<name>], /run, /reset, /purge, /delist, /pause, "
-              "/resume, /clean, /review/<kind>, /varieties, /adapters, /colors, /types or "
-              "/variations/<key>/{retire,un_retire}")
+# derived from the table, so the answer to an unknown path can never drift from what is served
+_NOT_FOUND = "not found; the routes are: " + ", ".join(
+    f"{method} /config/v1/{'/'.join(pattern)}" for method, pattern, _ in _ROUTES)
 
 
 def _match(pattern: tuple[str, ...], segments: list[str]) -> dict | None:
@@ -749,7 +802,10 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
         if params is None:
             continue
         if route_method == method:
-            return handler(params, body, query)
+            try:
+                return handler(params, body, query)
+            except _BadRequest as exc:
+                return 400, {"error": str(exc)}
         allowed.append(route_method)
     if allowed:
         return 405, {"error": f"{method} is not allowed on /config/v1/{'/'.join(segments)}; "
@@ -758,39 +814,98 @@ def dispatch(method: str, segments: list[str], body, query: str = "") -> tuple[i
 
 
 _SOURCE_INT_FIELDS = ("default_bundle_size", "min_expected_rows")
+_SOURCE_STR_FIELDS = ("source_code", "vendor", "company_id", "origin_default", "primary_origin",
+                      "collection_country", "collection_city")
+_SOURCE_BOOL_FIELDS = ("image_pipeline", "emit_on_review")
+# The run state POST /pause, /resume and /delist own, as a source that has none yet starts: active.
+_SOURCE_STATE_FIELDS = ("enabled", "lifecycle")
+_NEW_SOURCE_STATE = {"enabled": True, "lifecycle": "active"}
 
 
-def _validate_source_put(name: str, body: dict) -> tuple[int, dict] | None:
+def _source_state_conflict(name: str, stored: dict | None, body: dict) -> tuple[int, dict] | None:
+    """`enabled` and `lifecycle` are set only by POST /pause, /resume and /delist, which keep the two in step (a
+    delisted source is disabled so no scrape restocks it). The admin form sends `enabled` back at the value it
+    read, so a state field equal to the source's current state is that round trip and is accepted; any other
+    value is a stale form or a flip past the verbs (it re-enabled a delisted vendor), refused with 409. A null
+    field reads as absent, like every optional field."""
+    current = {f: stored[f] for f in _SOURCE_STATE_FIELDS} if stored else _NEW_SOURCE_STATE
+    if body.get("enabled") is not None and not isinstance(body["enabled"], bool):
+        raise _BadRequest(f"enabled must be true or false, got {body['enabled']!r}")
+    changed = [f for f in _SOURCE_STATE_FIELDS if body.get(f) is not None and body[f] != current[f]]
+    if not changed:
+        return None
+    return 409, {"error": f"{', '.join(changed)} is not set by this PUT: source {name!r} is {current['lifecycle']} "
+                          f"(enabled {str(current['enabled']).lower()}). Change its state with POST "
+                          "/config/v1/pause, /config/v1/resume or /config/v1/delist, and send its current value "
+                          "here or omit the field."}
+
+
+def _ledger_products(source_code: str) -> int:
+    """How many products the sync ledger holds under `source_code` (their SKU prefix and product.source). A host
+    with no ledger file has produced nothing under any code; a ledger that cannot be read raises (a guard never
+    passes on an unread ledger)."""
+    from stone_pipeline.ledger import writethrough
+    from stone_pipeline.ledger.db import Ledger
+    path = writethrough.ledger_path()
+    if not path.exists():
+        return 0
+    with Ledger.open(path, env=writethrough.ENV_NAME) as lg:
+        return lg.execute("SELECT COUNT(*) AS n FROM product WHERE source = ?", (source_code,)).fetchone()["n"]
+
+
+def _validate_source_put(name: str, body: dict, stored: dict | None) -> tuple[int, dict] | None:
     """Guard the admin 'add/edit source' PUT so it can only create a RUNNABLE, non-colliding source.
     A source with no coded adapter can neither run nor be scoped (ISS-3), so it must never become a
     live-looking config row; a duplicate source_code collides SKU provenance for clear/remove (ISS-1).
-    Returns an (status, error) tuple to short-circuit, or None when the source is valid."""
+    Returns an (status, error) tuple to short-circuit, or None when the source is valid; a field of the wrong
+    type raises _BadRequest (400 naming it)."""
     from stone_pipeline import adapters
+    from stone_pipeline.certify import _VALID_MODES
     if name not in adapters.REGISTRY:
         return 400, {"error": f"no coded adapter for source {name!r}; a runnable source needs a coded "
                      f"adapter (fetcher + adapter map). Known adapters: {sorted(adapters.REGISTRY)}"}
-    code = (body.get("source_code") or "").strip()
+    for field in _SOURCE_STR_FIELDS:
+        body[field] = _str(body, field)     # null reads as '' (the column default); the store never sees a None
+    for field in _SOURCE_BOOL_FIELDS:
+        if field in body and not isinstance(body[field], bool):
+            raise _BadRequest(f"{field} must be true or false, got {body[field]!r}")
+    # the trust ladder's rungs; the store would keep any string, and certify reads anything else as unconfigured
+    if body.get("mode", "review") not in _VALID_MODES:
+        raise _BadRequest(f"mode must be one of {', '.join(_VALID_MODES)}, got {body.get('mode')!r}")
+    code = _str(body, "source_code")
     if code:
         for row in store.list_rows():
             if row["source"] != name and (row["source_code"] or "").strip().casefold() == code.casefold():
                 return 400, {"error": f"source_code {code!r} already used by source {row['source']!r}; "
                              "codes must be unique (they scope SKUs for removal)"}
+    # the code is the SKU prefix and the ledger's product.source: changing it under existing products re-creates
+    # every one of them under new SKUs and orphans the old ones in Medusa. Compared as the store will keep it
+    # (SourceConfig lowercases it and backfills an empty one), so a restated code is not a change.
+    from stone_pipeline.config.sources import SourceConfig
+    kept = SourceConfig(source=name, source_code=code).source_code
+    if stored and stored["source_code"] != kept and (held := _ledger_products(stored["source_code"])):
+        return 409, {"error": f"source_code {stored['source_code']!r} is the SKU prefix of {held} product(s) of "
+                              f"{name!r} in the ledger; changing it would re-create them all under new SKUs and "
+                              "orphan the old ones. Keep the code, or remove the source (delist, then DELETE) "
+                              "and add it again under the new one."}
     # Ports are a HARD requirement, set by the admin here (never derived from the seed): Medusa builds a
     # product's shipping ports from the supplier's ports, so a source that ships without them makes Medusa
     # fall back to deriving a whole-country port list. A source must therefore carry at least one port.
     ports = body.get("ports")
-    if not (isinstance(ports, list) and any(str(p).strip() for p in ports)):
+    if isinstance(ports, list) and not all(isinstance(p, str) for p in ports):
+        raise _BadRequest(f"ports must be a list of port names / LOCODEs (strings), got {ports!r}")
+    if not (isinstance(ports, list) and any(p.strip() for p in ports)):
         return 400, {"error": f"source {name!r} requires at least one shipping port: set 'ports' to a "
                      "non-empty list of the supplier's port names / LOCODEs (Medusa derives a product's "
                      "ports from these)."}
     # the integer fields are validated HERE, so a malformed value is the client's 400 (it used to reach
     # int() in the store and answer 500)
     for field in _SOURCE_INT_FIELDS:
-        raw = body.get(field)
-        if raw is None:
+        if field not in body:
             continue
+        raw = body[field]
         try:
-            int(str(raw).strip())
+            int(str(raw).strip())           # null too: str(None) is no integer
         except ValueError:
             return 400, {"error": f"{field} must be an integer, got {raw!r}"}
     return None
@@ -946,6 +1061,8 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     # default 127.0.0.1 (safe on a laptop); ECS sets BLOKPORT_BIND_HOST=0.0.0.0 so peer tasks
     # (Medusa, over the VPC) can reach it. The bearer token still gates every request.
     host = host or env.getenv("BLOKPORT_BIND_HOST", "127.0.0.1")
+    # the token first: a server that cannot serve must not restore, seed or reconcile anything before it exits
+    token = _expected_token()
     from stone_pipeline.ledger import snapshot, writethrough
     config_db = store.config_db_path()
     boot(config_db, writethrough.ledger_path())
@@ -956,7 +1073,7 @@ def serve(host: str | None = None, port: int = 8724) -> None:
     from stone_pipeline import lifecycle
     lifecycle.enable_config_snapshots()   # now a pause/delist also snapshots immediately (server context only)
     httpd = ThreadingHTTPServer((host, port), ConfigHandler)
-    httpd.expected_token = _expected_token()   # type: ignore[attr-defined]
+    httpd.expected_token = token   # type: ignore[attr-defined]
     log.info("config server listening", extra={"extra_fields": {
         "host": host, "port": port, "db": str(config_db)}})
     httpd.serve_forever()

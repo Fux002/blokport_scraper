@@ -388,7 +388,7 @@ def _give_way_then_launch(rec: dict, launch) -> None:
 def start_run(sources=None, stage="all", launch=None, close_only=False) -> tuple[dict, int]:
     """Kick off a produce. `sources` None -> every enabled source, else an explicit subset; `stage`
     is scrape / catalog / all (how far to run). Returns (record, http_status): 202 started, 409 if a
-    run is already in flight, 400 on a bad stage. `scope` (the explicit subset, internal) is what
+    run is already in flight or a named source is paused, delisted or disabled, 400 on a bad stage. `scope` (the explicit subset, internal) is what
     actually scopes the subprocess; `sources` is the resolved list shown to the caller. `close_only`
     (photos only, an operator's action): the photos run makes the chosen photos' close-ups again
     instead of picking and judging (STANDARDISE_PROCESS.md)."""
@@ -407,6 +407,12 @@ def start_run(sources=None, stage="all", launch=None, close_only=False) -> tuple
         unknown = [s for s in sources if s not in set(known)]
         if unknown:                            # reject ANY unknown, never silently drop it
             return {"error": f"unknown source(s): {unknown}"}, 400
+        # `all` runs only the enabled sources (run_all); a named source is held to the same state, else a stale
+        # button scrapes a delisted vendor live and restocks it
+        from stone_pipeline.config import store
+        if inactive := store.inactive_sources(known):
+            states = ", ".join(f"{name} ({state})" for name, state in sorted(inactive.items()))
+            return {"error": f"source(s) not active: {states}; resume them first (POST /config/v1/resume)"}, 409
         # catalog is a SHARED, all-source consolidation: a source scope is meaningless there (build
         # ignores --sources for catalog), so drop it -- else the 'last run' label would credit one source.
         scope = None if stage == "catalog" else known
