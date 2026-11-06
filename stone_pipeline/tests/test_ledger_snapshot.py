@@ -325,3 +325,108 @@ def test_an_unchanged_db_is_not_uploaded_again(tmp_path, monkeypatch):
     _seed(src, "slab_marble_test_2")                               # a real write
     assert snapshot.save(src, env="development") is True
     assert uploads["n"] == 2
+
+
+
+def test_a_restored_db_is_not_uploaded_back_over_a_newer_save(tmp_path, monkeypatch):
+    # A roll: the new task restores the snapshot while the old task is still stopping, then the old task's final save
+    # lands. The new task's first periodic save must not send the restored (older) bytes back over it: the restore
+    # records what it fetched as what is on S3, so an unchanged restored db is never uploaded.
+    fake = _FakeS3()
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    snapshot._LAST_UPLOADED.clear()
+    old = tmp_path / "old" / "development.db"
+    old.parent.mkdir()
+    _seed(old, "slab_marble_test_1")
+    assert snapshot.save(old, env="development") is True
+    snapshot._LAST_UPLOADED.clear()                                # the new task is a fresh process
+    restored = tmp_path / "new" / "development.db"
+    assert snapshot.restore(restored, env="development") is True
+    key = (snapshot.S3_BUCKET, snapshot.snapshot_key("development"))
+    _seed(old, "slab_marble_test_2")                               # the old task's last write, then its final save
+    final = tmp_path / "final.db"
+    snapshot._consistent_copy(old, final)
+    fake.store[key] = final.read_bytes()
+    uploads: list[str] = []
+    fake.upload_file = lambda filename, bucket, k: uploads.append(k)
+    assert snapshot.save(restored, env="development") is True      # the new task's periodic save, nothing changed
+    assert uploads == [] and fake.store[key] == final.read_bytes()
+
+
+def test_concurrent_saves_leave_s3_and_the_record_on_the_newest_copy(tmp_path, monkeypatch):
+    # ThreadingHTTPServer: two decision writes snapshot at once. Without one save at a time per key, the older copy's
+    # upload could land last, and its digest recorded last would make every later save (the final one included) skip
+    # while S3 holds the stale bytes.
+    import hashlib
+    import threading
+    fake = _FakeS3()
+    first_in_upload, release_first = threading.Event(), threading.Event()
+    real = fake.upload_file
+    calls = {"n": 0}
+
+    def upload(filename, bucket, key):
+        calls["n"] += 1
+        if calls["n"] == 1:                                        # the older copy's upload is slow
+            first_in_upload.set()
+            release_first.wait(5)
+        real(filename, bucket, key)
+
+    fake.upload_file = upload
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    snapshot._LAST_UPLOADED.clear()
+    db = tmp_path / "development.db"
+    _seed(db, "slab_marble_test_1")
+    older = threading.Thread(target=snapshot.save, args=(db,), kwargs={"env": "development"})
+    older.start()
+    assert first_in_upload.wait(5)
+    _seed(db, "slab_marble_test_2")                                # a newer write, saved while the older upload runs
+    newer = threading.Thread(target=snapshot.save, args=(db,), kwargs={"env": "development"})
+    newer.start()
+    newer.join(0.5)                                                # with one save at a time it waits for the older
+    release_first.set()
+    older.join(5)
+    newer.join(5)
+    newest = tmp_path / "newest.db"
+    snapshot._consistent_copy(db, newest)
+    key = snapshot.snapshot_key("development")
+    assert fake.store[(snapshot.S3_BUCKET, key)] == newest.read_bytes()
+    assert snapshot._LAST_UPLOADED[key] == hashlib.sha256(newest.read_bytes()).hexdigest()
+
+
+def test_a_failed_save_names_the_key_it_was_for(tmp_path, monkeypatch, caplog):
+    class _Down(_FakeS3):
+        def upload_file(self, filename, bucket, key):
+            raise OSError("S3 unreachable")
+    monkeypatch.setattr(snapshot, "_s3", lambda: _Down())
+    snapshot._LAST_UPLOADED.clear()
+    db = tmp_path / "config.db"
+    _seed(db, "slab_marble_test_1")
+    with caplog.at_level("ERROR"):
+        assert snapshot.save_config(db, env="development") is False
+    assert any(snapshot.config_key("development") in r.getMessage() for r in caplog.records)
+
+
+def test_the_final_save_is_forced_so_a_cross_process_flip_cannot_survive_a_roll(tmp_path, monkeypatch):
+    # Both servers save the ledger, each with its own lock and upload record. The flip: the config server copies an
+    # OLDER ledger and its upload lands last, while the sync server has uploaded the newer one and recorded it. S3 now
+    # holds the older copy, and the sync server's record matches the db, so its plain saves skip. The sync server's
+    # final save on stop is forced, so the old task's newest ledger is the last thing written before a roll restores.
+    import hashlib
+    fake = _FakeS3()
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    snapshot._LAST_UPLOADED.clear()
+    db = tmp_path / "development.db"
+    _seed(db, "slab_marble_test_1")
+    older = tmp_path / "older.db"
+    snapshot._consistent_copy(db, older)                           # the config server's copy, before the newer write
+    _seed(db, "slab_marble_test_2")
+    assert snapshot.save(db, env="development") is True            # the sync server: uploads and records the newer
+    key = snapshot.snapshot_key("development")
+    fake.store[(snapshot.S3_BUCKET, key)] = older.read_bytes()     # the config server's older upload lands last
+    newest = tmp_path / "newest.db"
+    snapshot._consistent_copy(db, newest)
+    assert snapshot.save(db, env="development") is True            # a plain save skips: its record matches the db
+    assert fake.store[(snapshot.S3_BUCKET, key)] == older.read_bytes()
+    assert snapshot.save(db, env="development", force=True) is True
+    assert fake.store[(snapshot.S3_BUCKET, key)] == newest.read_bytes()
+    assert snapshot._LAST_UPLOADED[key] == hashlib.sha256(newest.read_bytes()).hexdigest()

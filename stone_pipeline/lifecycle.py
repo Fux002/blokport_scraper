@@ -143,10 +143,11 @@ def enable_config_snapshots() -> None:
     _snapshot_on_mutation = True
 
 
-def _snapshot_config() -> None:
-    """Best-effort: snapshot config.db to S3 right after a lifecycle mutation, so a pause/delist/remove is
-    durable even if the task crashes before the periodic snapshot. Only inside the config server (guarded),
-    and best-effort there (a snapshot failure never fails the op)."""
+def snapshot_config() -> None:
+    """Best-effort: snapshot config.db to S3 right after a lifecycle mutation or an operator decision (the config
+    server's write routes, server._durable), so a pause/delist/remove or a decision is durable even if the task
+    crashes, or is replaced by a roll, before the periodic snapshot. Only inside the config server (guarded), and
+    best-effort there (a snapshot failure never fails the op)."""
     if not _snapshot_on_mutation:
         return
     try:
@@ -159,8 +160,9 @@ def _snapshot_config() -> None:
 
 def _snapshot_ledger() -> None:
     """Best-effort: snapshot the ledger to S3 right after a mutation -- the ledger-side mirror of
-    _snapshot_config. Same config-server-only guard, same best-effort. A global reset uses it so the ledger
-    reset is durable immediately, not only at the next periodic snapshot."""
+    snapshot_config. Same config-server-only guard, same best-effort. _ledger_op calls it after every lifecycle
+    verb's ledger change (reset, delist, purge, retire, unmint, ...), so it is durable at once, not only at the
+    next periodic snapshot."""
     if not _snapshot_on_mutation:
         return
     try:
@@ -213,13 +215,16 @@ def _resolve(sources, *, require_non_empty: bool = True):
 def _ledger_op(name: str, work):
     """Run `work(ledger, sync)` under the exclusive slot + the ledger lease guard, mapping the standard
     failures to http codes. `work` returns the success dict (paired with 200). _Busy -> 409, an in-flight
-    pull (ServeInFlight) -> 409, anything else -> 500."""
+    pull (ServeInFlight) -> 409, anything else -> 500. Every lifecycle verb that changes the ledger runs here, so
+    this is the one place its change is snapshotted: once the ledger is committed and closed, before the answer."""
     from stone_pipeline.ledger import sync, writethrough
     from stone_pipeline.ledger.db import Ledger
     try:
         with _exclusive(name):
             with Ledger.open(writethrough.ledger_path(), env=writethrough.ENV_NAME, backend_id_fingerprint=writethrough.backend_fingerprint()) as ledger:
-                return work(ledger, sync), 200
+                result = work(ledger, sync)
+        _snapshot_ledger()
+        return result, 200
     except _NotFound as exc:
         return {"error": str(exc)}, 404
     except _Busy as exc:
@@ -243,7 +248,7 @@ def pause(sources) -> tuple[dict, int]:
     for name in names:
         store.set_state(name, lifecycle="paused", enabled=False)
     log.info("source(s) paused (frozen, still live)", extra={"extra_fields": {"sources": names}})
-    _snapshot_config()
+    snapshot_config()
     return {"paused": names}, 200
 
 
@@ -259,7 +264,7 @@ def resume(sources) -> tuple[dict, int]:
     for name in names:
         store.set_state(name, lifecycle="active", enabled=True)
     log.info("source(s) resumed", extra={"extra_fields": {"sources": names, "restock_required": restock}})
-    _snapshot_config()
+    snapshot_config()
     return {"resumed": names, "restock_required": restock}, 200
 
 
@@ -279,7 +284,7 @@ def delist(sources) -> tuple[dict, int]:
         store.set_state(name, lifecycle="delisted", enabled=False)
     log.warning("source(s) taken offline (delist)", extra={"extra_fields": {
         "sources": names, "delisted": result.get("delisted")}})
-    _snapshot_config()
+    snapshot_config()
     return {**result, "disabled": names}, 200
 
 
@@ -513,14 +518,13 @@ def reset(sources=None, hard=False, pristine=False, keep_images=False, keep_scra
     # A GLOBAL reset mutates BOTH stores (ledger reset/reseed AND the config.db overlay clear). Durability
     # otherwise rides two independent per-process periodic snapshots, so a hard crash in that window could
     # persist one store's reset but not the other (e.g. a fresh ledger + a stale operator overlay -> the next
-    # produce re-mints from the surviving decisions). Snapshot both immediately, back-to-back, mirroring
-    # pause/delist -- this shrinks the cross-store tear window from up to one snapshot interval to a single S3
-    # round-trip. Same `codes is None` gate as the config.db clear above (a scoped reset leaves config.db
-    # alone, so there is no cross-store tear to close). Best-effort + config-server-guarded: a no-op in tests
-    # / laptop / the produce subprocess, and a snapshot failure never fails the (already-committed) reset.
+    # produce re-mints from the surviving decisions). _ledger_op has snapshotted the ledger; snapshot config.db
+    # right after it, mirroring pause/delist -- this shrinks the cross-store tear window from up to one snapshot
+    # interval to a single S3 round-trip. Same `codes is None` gate as the config.db clear above (a scoped reset
+    # leaves config.db alone). Best-effort + config-server-guarded: a no-op in tests / laptop / the produce
+    # subprocess, and a snapshot failure never fails the (already-committed) reset.
     if code == 200 and codes is None:
-        _snapshot_ledger()
-        _snapshot_config()
+        snapshot_config()
     return result, code
 
 
@@ -557,7 +561,7 @@ def remove_source(name: str) -> tuple[dict, int]:
     config_removed = result.pop("config_removed")
     log.warning("source REMOVED (purge + delete config)", extra={"extra_fields": {
         "source": name, "purged": result["product"], "config_removed": config_removed}})
-    _snapshot_config()
+    snapshot_config()
     return {"removed_source": name, "config_removed": config_removed,
             "purged": result["product"], "external_ids": result["external_ids"]}, 200
 

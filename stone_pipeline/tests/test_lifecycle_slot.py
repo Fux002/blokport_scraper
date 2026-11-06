@@ -34,7 +34,7 @@ def _slot_recorder(calls):
 def test_retire_memory_is_written_inside_the_slot(monkeypatch, verb, memory):
     calls: list[str] = []
     monkeypatch.setattr(lifecycle, "_ledger_op", _slot_recorder(calls))
-    monkeypatch.setattr(lifecycle, "_snapshot_config", lambda: None, raising=False)
+    monkeypatch.setattr(lifecycle, "snapshot_config", lambda: None, raising=False)
     monkeypatch.setattr(decisions, "add_retired", lambda key: calls.append("add_retired"))
     monkeypatch.setattr(decisions, "remove_retired", lambda key: calls.append("remove_retired"))
     for name in ("_variation_exists", "_require_variation"):

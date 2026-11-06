@@ -64,7 +64,7 @@ def test_ledger_server_shutdown_stops_the_periodic_snapshot_before_the_final_sav
     from stone_pipeline.ledger import server as ledger_server, snapshot
     order: list = []
     stop = threading.Event()
-    monkeypatch.setattr(snapshot, "save", lambda *a, **k: order.append(("save", stop.is_set())))
+    monkeypatch.setattr(snapshot, "save", lambda *a, **k: order.append(("save", stop.is_set(), k.get("force"))))
     with pytest.raises(SystemExit):
         ledger_server.shutdown(tmp_path / "ledger.db", stop)
-    assert order == [("save", True)]
+    assert order == [("save", True, True)]          # stopped first, then ONE forced save (see the snapshot tests)

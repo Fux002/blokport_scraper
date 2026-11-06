@@ -220,12 +220,14 @@ def bootstrap_ledger_if_missing(path) -> None:
 def shutdown(path, periodic) -> None:
     """SIGTERM path (ECS sends SIGTERM before stopping the task): stop the periodic snapshot thread and
     wait for an in-flight save, THEN save the ledger once, then exit 0. Same order as the config server,
-    so the final save never races interpreter teardown."""
+    so the final save never races interpreter teardown. The final save is forced: the config server also uploads
+    the ledger (after a lifecycle verb), and an older copy of its can land after this server's newer one while this
+    server's record still matches the db, so an unforced save would skip and a roll would restore the older copy."""
     if hasattr(periodic, "stop"):
         periodic.stop()
     else:
         periodic.set()
-    snapshot.save(path)
+    snapshot.save(path, force=True)
     raise SystemExit(0)
 
 
