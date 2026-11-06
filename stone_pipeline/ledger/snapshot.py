@@ -38,8 +38,22 @@ _LEDGER_AWAIT_POLL_SECONDS = 0.5
 # whether or not anything changed; the buckets are versioned, so an identical upload still creates a new
 # version (prod held 305 GB and dev 1.2 TB of old snapshot versions against 9 GB of live data). A copy whose
 # bytes equal the last one sent is already on S3 and is not sent again. Process-local on purpose: a fresh
-# task uploads once and then only on change.
+# task uploads once and then only on change. A restore records the digest of what it fetched, so a fresh task never
+# uploads its restored bytes back over a newer save (a roll's old task can still be saving while the new one restores).
 _LAST_UPLOADED: dict[str, str] = {}
+# One save at a time per key: decision writes snapshot from concurrent request threads, and two overlapping saves could
+# upload out of order, leaving S3 on the older copy with its digest recorded, so every later save would skip.
+_SAVE_LOCKS: dict[str, threading.Lock] = {}
+_SAVE_LOCKS_GUARD = threading.Lock()
+
+
+def _save_lock(key: str) -> threading.Lock:
+    with _SAVE_LOCKS_GUARD:
+        return _SAVE_LOCKS.setdefault(key, threading.Lock())
+
+
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _s3():
@@ -90,24 +104,26 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -
     if not ledger_path.exists():
         return False
     tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-        _consistent_copy(ledger_path, tmp_path)
-        digest = hashlib.sha256(tmp_path.read_bytes()).hexdigest()
-        if _LAST_UPLOADED.get(key) == digest:
-            return True                       # unchanged since the last upload: it is on S3 already
-        _s3().upload_file(str(tmp_path), S3_BUCKET, key)
-        _LAST_UPLOADED[key] = digest
-        log.info("db snapshot uploaded", extra={"extra_fields": {
-            "key": key, "bytes": tmp_path.stat().st_size}})
-        return True
-    except Exception:
-        log.exception("ledger snapshot failed (non-fatal)")
-        return False
-    finally:
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)
+    # copy, digest, upload and record under the key's lock, so the copy uploaded last is the newest one
+    with _save_lock(key):
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            _consistent_copy(ledger_path, tmp_path)
+            digest = _digest(tmp_path)
+            if _LAST_UPLOADED.get(key) == digest:
+                return True                       # unchanged since the last upload: it is on S3 already
+            _s3().upload_file(str(tmp_path), S3_BUCKET, key)
+            _LAST_UPLOADED[key] = digest
+            log.info("db snapshot uploaded", extra={"extra_fields": {
+                "key": key, "bytes": tmp_path.stat().st_size}})
+            return True
+        except Exception:
+            log.exception(f"db snapshot of {key} failed (non-fatal)")
+            return False
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
 
 
 def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None,
@@ -149,7 +165,10 @@ def restore(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None
     os.close(fd)
     try:
         _s3().download_file(S3_BUCKET, key, tmp)
+        restored = _digest(Path(tmp))
         os.replace(tmp, ledger_path)       # atomic rename: the file only ever appears complete
+        with _save_lock(key):              # these bytes are on S3 already: never upload them back over a newer save
+            _LAST_UPLOADED[key] = restored
         log.info("restored from snapshot", extra={"extra_fields": {"key": key}})
         return True
     except Exception as exc:

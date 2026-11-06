@@ -41,7 +41,7 @@ def test_a_refused_write_snapshots_nothing(snapshots):
     assert snapshots == []
 
 
-# The write routes whose handler is a lifecycle verb that snapshots config.db itself.
+# The write routes whose handler is a lifecycle verb that snapshots config.db itself: proven below, not just listed.
 _SNAPSHOTS_ITSELF = {
     ("POST", ("reset",)), ("POST", ("delist",)), ("POST", ("pause",)), ("POST", ("resume",)),
     ("DELETE", ("sources", "{name}")),
@@ -51,9 +51,75 @@ _SNAPSHOTS_ITSELF = {
 _NO_OPERATOR_DECISION = {
     ("POST", ("run",)), ("POST", ("curation", "rebuild")), ("POST", ("purge",)), ("POST", ("clean",)),
 }
+# Every write route that changes the ledger, with a body that reaches its ledger op.
+_LEDGER_WRITES = {
+    ("POST", ("reset",)): {}, ("POST", ("delist",)): {"sources": ["polonine"]}, ("POST", ("purge",)): {},
+    ("DELETE", ("sources", "{name}")): None, ("POST", ("variations", "unmint")): {"keys": ["slab_granite_x_1"]},
+    ("POST", ("variations", "{key}", "{verb}")): None,
+}
 
 
 def test_every_config_write_route_snapshots_config_db():
     writes = {(m, p) for m, p, _ in server._ROUTES if m != "GET"}
     durable = {(m, p) for m, p, h in server._ROUTES if getattr(h, "snapshots_config", False)}
     assert writes - _SNAPSHOTS_ITSELF - _NO_OPERATOR_DECISION == durable
+
+
+@pytest.fixture
+def one_source(tmp_path):
+    from stone_pipeline.config import store
+    yaml_path = tmp_path / "sources.yaml"
+    yaml_path.write_text("polonine:\n  source_code: pol\n  vendor: P\n", encoding="utf-8")
+    store.seed_from_yaml(yaml_path=yaml_path)
+
+
+def _canned_ledger_op(name, work):
+    """The ledger half answered without a ledger: what each verb reads from a successful op."""
+    return {"delisted": 0, "product": 0, "external_ids": [], "config_removed": True,
+            "unminted": [], "varieties": [], "skipped": []}, 200
+
+
+@pytest.mark.parametrize("route,segments,body", [
+    (("POST", ("pause",)), ["pause"], {"sources": ["polonine"]}),
+    (("POST", ("resume",)), ["resume"], {"sources": ["polonine"]}),
+    (("POST", ("delist",)), ["delist"], {"sources": ["polonine"]}),
+    (("POST", ("reset",)), ["reset"], {}),
+    (("DELETE", ("sources", "{name}")), ["sources", "polonine"], None),
+])
+def test_the_lifecycle_verbs_listed_as_snapshotting_themselves_do(monkeypatch, snapshots, one_source,
+                                                                 route, segments, body):
+    assert route in _SNAPSHOTS_ITSELF
+    monkeypatch.setattr(lifecycle, "_ledger_op", _canned_ledger_op)
+    code, payload = server.dispatch(route[0], segments, body)
+    assert code == 200, payload
+    assert snapshots == ["config"]
+
+
+def test_every_self_snapshotting_route_is_proven_above():
+    proven = {r for r, _, _ in test_the_lifecycle_verbs_listed_as_snapshotting_themselves_do.pytestmark[0].args[1]}
+    assert proven == _SNAPSHOTS_ITSELF
+
+
+@pytest.mark.parametrize("route", sorted(_LEDGER_WRITES, key=str))
+def test_every_ledger_write_route_goes_through_the_one_ledger_op(monkeypatch, one_source, route):
+    method, pattern = route
+    segments = ["polonine" if t == "{name}" else "slab_granite_x_1" if t == "{key}" else "retire" if t == "{verb}"
+                else t for t in pattern]
+    reached: list[str] = []
+    monkeypatch.setattr(lifecycle, "_ledger_op", lambda name, work: reached.append(name) or _canned_ledger_op(name, work))
+    monkeypatch.setattr(lifecycle, "snapshot_config", lambda: None)
+    server.dispatch(method, segments, _LEDGER_WRITES[route])
+    assert reached, f"{method} /{'/'.join(segments)} changed the ledger outside lifecycle._ledger_op"
+
+
+def test_the_ledger_op_snapshots_the_ledger_after_a_change_and_not_after_a_refusal(tmp_path, monkeypatch):
+    monkeypatch.setenv("BLOKPORT_LEDGER_PATH", str(tmp_path / "development.db"))
+    saved: list[str] = []
+    monkeypatch.setattr(lifecycle, "_snapshot_ledger", lambda: saved.append("ledger"))
+    result, code = lifecycle._ledger_op("retire_variation", lambda lg, sync: {"retired": "k"})
+    assert (result, code) == ({"retired": "k"}, 200) and saved == ["ledger"]
+
+    def refuse(lg, sync):
+        raise lifecycle._Busy("still live")
+    assert lifecycle._ledger_op("retire_variation", refuse)[1] == 409
+    assert saved == ["ledger"]                                      # a refused op changed nothing

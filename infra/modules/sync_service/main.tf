@@ -351,12 +351,13 @@ resource "aws_ecs_service" "this" {
   # is never on by accident; the task role below gains the ssmmessages channel actions only when set.
   enable_execute_command = var.enable_execute_command
 
-  # ONE writer at a time: a roll stops the old task BEFORE it starts the new one. config.db and the ledger are SQLite
-  # files on the task's local disk, carried across tasks only by S3 snapshots. With the default 100/200 limits the new
-  # task started first, restored the snapshots (up to one snapshot interval old) before the old task's final save on
-  # SIGTERM, and its own first save then overwrote that final save: the decisions and acks of the gap were lost, and
-  # Cloud Map served both tasks' IPs meanwhile. Stopping first means the new task restores the old task's final save.
-  # The price is a short outage per roll: the old task's stop (up to its stopTimeout) plus the new task's boot.
+  # ONE task at a time: a roll stops the old task before it starts the new one, so Medusa is never served by two tasks
+  # whose config.db and ledger (SQLite on each task's local disk, carried across tasks only by S3 snapshots) diverge.
+  # With the default 100/200 limits the two ran side by side and Cloud Map served both IPs. These limits do NOT order
+  # the saves: ECS counts only RUNNING/PENDING tasks, so the new task can boot while the old one is still in its
+  # SIGTERM grace. Durability comes from the snapshots themselves: every decision and lifecycle change is uploaded the
+  # moment it is made, and a restore records what it fetched, so the new task never uploads restored bytes back over the
+  # old task's final save (stone_pipeline/ledger/snapshot.py). The price is a short outage per roll.
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
 
