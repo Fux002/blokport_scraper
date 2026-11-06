@@ -183,7 +183,7 @@ def mark_mask(rgb: np.ndarray, on: np.ndarray | None = None) -> np.ndarray:
         p = Path(tmp) / "s.png"
         Image.fromarray(rgb).save(p)
         tsv = subprocess.run(["tesseract", str(p), "stdout", "--psm", "11", "tsv"], capture_output=True,
-                             text=True, timeout=180).stdout
+                             text=True, timeout=C.OCR_TIMEOUT).stdout
     words, anchors = [], []
     for line in tsv.splitlines()[1:]:
         f = line.split("\t")

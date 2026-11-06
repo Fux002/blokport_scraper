@@ -54,7 +54,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 import boto3
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from deploy import standardise_batch as gpu
@@ -72,7 +71,6 @@ from stone_pipeline.standardise import index, judge
 ROOT = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/"
 LOCK = f"{ROOT}run.lock"
 _TAKEN = ("PreconditionFailed", "ConditionalRequestConflict")
-_MISSING = ("404", "NoSuchKey", "NotFound")
 
 
 class RunActive(RuntimeError):
@@ -90,14 +88,14 @@ def _lost(s3, etag, exc):
     ETag; any other failure is a passing one."""
     if not isinstance(exc, ClientError):
         return False
-    if _code(exc) == "PreconditionFailed" or _code(exc) in _MISSING:
+    if _code(exc) == "PreconditionFailed" or _code(exc) in publish.MISSING:
         return True
     if _code(exc) != "ConditionalRequestConflict":
         return False
     try:
         return s3.head_object(Bucket=S3_BUCKET, Key=LOCK)["ETag"] != etag
     except ClientError as missing:
-        return _code(missing) in _MISSING
+        return _code(missing) in publish.MISSING
     except BotoCoreError:
         return False
 
@@ -148,7 +146,7 @@ def _acquire(s3, owner, now):
         try:
             held = s3.head_object(Bucket=S3_BUCKET, Key=LOCK)
         except ClientError as exc:
-            if _code(exc) in _MISSING:
+            if _code(exc) in publish.MISSING:
                 continue
             raise
         since = held["LastModified"]
@@ -177,7 +175,7 @@ def _release(s3, etag):
             s3.delete_object(Bucket=S3_BUCKET, Key=LOCK, IfMatch=etag)
             return
         except ClientError as exc:
-            if _code(exc) not in _TAKEN + _MISSING:
+            if _code(exc) not in _TAKEN + publish.MISSING:
                 raise
             if _lost(s3, etag, exc):
                 print("==> the run lock is no longer this run's: left as it is", flush=True)
@@ -217,11 +215,9 @@ def month_spend(s3, run_id, budget, directory, cap_error=select.SpendCapReached)
 
 # --- what a run works on ----------------------------------------------------------------------------------------------
 def choices(s3, root):
-    """{listing key: its choice record} under the clean tag's root."""
-    keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=S3_BUCKET, Prefix=publish.chosen_prefix(root))
-            for o in page.get("Contents", [])]
-    records = publish.pool_map(publish.WORKERS, lambda k: json.loads(s3.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
-    return {r["key"]: r for r in records}
+    """({listing key: its choice record}, {listing key: why it cannot be read}) under the clean tag's root
+    (publish.read_choices)."""
+    return publish.read_choices(s3, root)
 
 
 def whole_slabs(s3, records):
@@ -342,8 +338,9 @@ def stop_on_signal(*spends):
 
 def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
     """The GPU round for `todo`, then the stores re-read: (problems, stopped). Problems: failed jobs, a round stopped at
-    the work window or stuck, a round skipped (too little window left, or the budget left covers not one slice: the
-    hosted steps still judge what is finished, within their own reservations), listed photos left without a result.
+    the work window or stuck, a round Batch refused or failed (review 2026-11-06, A2.7: never the run's end), a round
+    skipped (too little window left, or the budget left covers not one slice: the hosted steps still judge what is
+    finished, within their own reservations), listed photos left without a result.
     stopped: paid work has ended (the window, a stop, a lost lock), so no step after it starts."""
     try:
         problems = [f"GPU job {name} failed: {why}"
@@ -354,6 +351,8 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
         return [f"GPU round {tag} not started: {exc}"], False
     except TimeoutError as exc:                        # its jobs were stopped; what they finished stays
         problems = [f"GPU round {tag} stopped: {exc}"]
+    except (BotoCoreError, ClientError) as exc:        # Batch refused or failed: its jobs were stopped and settled
+        problems = [f"GPU round {tag} failed: {exc}"]
     sel.refresh()
     rnd = dict(sel.rounds)[tag]
     problems += [f"{src} {sha[:12]}: no result after the GPU round" for src, shas in todo.items() for sha in shas
@@ -534,11 +533,15 @@ class Decisions:
 def read_decisions(s3, root, listings):
     """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
     re-classified; none stored yet: publish.NoConflictSet, nothing done."""
-    exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
-    (owner, unreadable), clicks = owner_records(s3, root), publish.read_clicks(s3, root)
+    exclude = publish.excluded()
+    (owner, broken), clicks = owner_records(s3, root), publish.read_clicks(s3, root)
     conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
-    chosen = choices(s3, root)
+    chosen, broken_choices = choices(s3, root)
+    # a listing whose own choice record or the owner's choice record cannot be read stays exactly as published
+    unreadable = ({sku: f"the owner's choice record cannot be read ({why})" for sku, why in broken.items()}
+                  | {l["sku"]: f"its choice record cannot be read ({broken_choices[l['key']]})" for l in listings
+                     if l["key"] in broken_choices})
     picks = {l["key"]: pick for l in listings
              if (pick := select.owner_choice(owner.get(l["sku"]), l, exclude, conflicts, rounds)) is not None}
     picks |= {l["key"]: (r["tag"], r["sha"]) for l in listings
@@ -549,8 +552,7 @@ def read_decisions(s3, root, listings):
 def unreadable_problems(frozen, decisions):
     """The run's problem line for each listing whose choice record cannot be read (`frozen`; every kind of run names
     them)."""
-    return [f"{l['key']}: the owner's choice record cannot be read ({decisions.unreadable[l['sku']]}): left exactly as "
-            "published" for l in frozen]
+    return [f"{l['key']}: {decisions.unreadable[l['sku']]}: left exactly as published" for l in frozen]
 
 
 def photos_round(s3, batch, spend, clean, run_id, deadline, root, say, listings, decisions, frozen):
@@ -632,7 +634,8 @@ def process(s3, batch, spend, clean, run_id, deadline, say=print, close_only=Fal
         closing.cancel()
     problems += conflicted + unreadable_problems(frozen, decisions)
     try:
-        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned)
+        published = publish.publish(s3, root, sheet, photos, say, assigned=assigned,
+                                    held={(l["source"], sha) for l in frozen for sha in l["photos"]})
     except publish.NoChoiceRecords as exc:             # nothing chosen yet in this environment: nothing to publish
         problems.append(str(exc))
         published = {"changed": False}
@@ -675,14 +678,14 @@ def reap(run_id):
     never ran): stop that run's GPU jobs and, only while the run lock is still that run's (its body names the run), set
     the pool's ceiling back and remove the lock. Nothing of another process is touched: a rolling deploy's other task or
     a process started by hand keeps its jobs, its lock and its ceiling."""
-    retries = Config(retries={"mode": "standard", "max_attempts": 10})
+    retries = publish.aws_config()
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     stopped = gpu.stop_run(batch, run_id)
     try:
         held = s3.get_object(Bucket=S3_BUCKET, Key=LOCK)
     except ClientError as exc:
-        if _code(exc) not in _MISSING:
+        if _code(exc) not in publish.MISSING:
             raise
         held = None
     ours = held is not None and json.loads(held["Body"].read()).get("run_id") == run_id
@@ -749,7 +752,7 @@ def main() -> int:
         print(f"ERROR: not configured: {', '.join(missing)}; aborting")
         return 2
     deadline = time.monotonic() + C.WORK_SECONDS
-    retries = Config(retries={"mode": "standard", "max_attempts": 10})     # a throttled call is retried, never fatal
+    retries = publish.aws_config()
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     # The runner's run id names the lock and the GPU jobs, so the runner can clear exactly what this run left if it

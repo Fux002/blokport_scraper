@@ -24,7 +24,7 @@ from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import index, kinds, models, outline, photo
 
 
-def _encode(rgb, quality=92):
+def _encode(rgb, quality=C.JPEG_QUALITY):
     ok, buf = cv2.imencode(".jpg", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not ok:
         raise ValueError("could not encode")

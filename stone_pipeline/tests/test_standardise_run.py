@@ -19,6 +19,14 @@ A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
 
 
 @pytest.fixture(autouse=True)
+def _judged_by_inputs(monkeypatch):
+    """A judge or check request is its inputs here (judge.judging and judge.checking prepare the real one before anything
+    is paid), so a fake judge receives (original, result, fmt) and a fake check (original, copy)."""
+    monkeypatch.setattr(sel_mod.judge, "judging", lambda original, result, fmt: (original, result, fmt))
+    monkeypatch.setattr(sel_mod.judge, "checking", lambda original, copy: (original, copy))
+
+
+@pytest.fixture(autouse=True)
 def _idle_ceiling(monkeypatch):
     """The idle ceiling the service's environment carries (Terraform's gpu_idle_vcpus); unset off AWS."""
     monkeypatch.setattr(C, "IDLE_GPU_VCPUS", 8)
@@ -510,8 +518,8 @@ def _clicked_run(monkeypatch, budget, clicked=(("slab-1", "SEN-1", A),), backlog
     edits, rounds = [], []
     monkeypatch.setattr(sel_mod.clean, "submit", lambda name: edits.append(name) or {"model": name})
     monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
-    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
-    monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: ({"passes": True}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "judge", lambda job: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
 
     def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
         rounds.append((tag, todo))
@@ -669,7 +677,7 @@ def test_the_clean_step_never_spends_past_what_it_admitted_when_a_check_is_lost(
         s.rounds[1][1]["sentas"].attempts.add(f"{A}.{name}")
     monkeypatch.setattr(sel_mod.clean, "submit", lambda name: {"model": name})
     monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
-    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: (_ for _ in ()).throw(RuntimeError("the check was lost")))
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: (_ for _ in ()).throw(RuntimeError("the check was lost")))
     plans, _ = s.plans()
     cap = sel_mod.Spend(10, cap_error=sel_mod.CleanCapReached)
     runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
@@ -689,8 +697,8 @@ def test_the_clicks_step_judges_only_what_it_admitted_and_the_copies_it_owes(mon
         gpu_runs.append((tag, [l["key"] for l in sel.listings])), ([], False))[1])
     monkeypatch.setattr(sel_mod.clean, "submit", lambda name: {"model": name})
     monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
-    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
-    monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: ({"passes": True}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "judge", lambda job: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     runner.run(_Batch(), s, sel_mod.Spend(100), sel_mod.Spend(10, cap_error=sel_mod.CleanCapReached), "R1", math.inf,
                say=lambda m: None)
     assert judged[0] == ["slab-1"] and gpu_runs[0] == ("v9-clean", ["slab-1"])
@@ -731,7 +739,7 @@ def test_the_cap_edge_pays_the_same_listings_whatever_the_threads_do(monkeypatch
         _marked(s, store, *keys)
         monkeypatch.setattr(sel_mod.clean, "submit", lambda name: time.sleep(random.random() / 50) or {"model": name})
         monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
-        monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
+        monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: ({"passes": True}, 0.02))
         cap = sel_mod.Spend(3 * _send_price(), cap_error=sel_mod.CleanCapReached)
         plans, _ = s.plans()
         problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
@@ -770,7 +778,7 @@ def test_a_mark_that_waits_beside_a_collected_click_is_never_called_the_click_s_
         store.objects[f"{CL_P}attempts/{A}.{name}.request.json"] = json.dumps({"model": name}).encode()
         s.rounds[1][1]["sentas"].requested.add(f"{A}.{name}")
     monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
-    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": False}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda job: ({"passes": False}, 0.02))
     plans, _ = s.plans()
     cap = sel_mod.Spend(3 * C.JUDGE_PRICE_USD, cap_error=sel_mod.CleanCapReached)          # A's checks, not E's edit
     problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
@@ -792,7 +800,7 @@ def test_a_month_with_money_to_judge_but_none_for_a_round_judges_what_is_finishe
     s.clicks = {}
     s.rounds[0][1]["sentas"].judged.discard(A)
     del store.objects[f"{GPU_P}judged/{A}.json"]
-    monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "judge", lambda job: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     batch = _Batch()
     problems, report = runner.run(batch, s, sel_mod.Spend(0.5), None, "R1", math.inf, say=lambda m: None)
     assert batch.submitted == [] and [r["key"] for r in report["chosen"]] == ["slab-1"]
@@ -1159,6 +1167,16 @@ def test_an_open_book_made_before_its_halves_had_a_slab_goes_to_the_gpu_again_on
                    clean_round=_round(finished={old}, cleaned={old}, studio={old}))
     assert s.gpu_todo() == {"sentas": [old]}                       # a side view and no slab, never completed before
     assert s.clean_todo() == {"sentas": [old]}
+
+
+def test_a_batch_error_in_a_round_is_a_problem_and_the_run_goes_on(monkeypatch):
+    # review 2026-11-06 (A2.7): a Batch ClientError ended the run before its report, so nothing finished was published
+    from botocore.exceptions import ClientError
+    refused = ClientError({"Error": {"Code": "ClientException", "Message": "queue disabled"}}, "SubmitJob")
+    monkeypatch.setattr(runner.gpu, "run_round", lambda *a: (_ for _ in ()).throw(refused))
+    s = _selection([_listing(A)])
+    problems, stopped = runner.gpu_round(_Batch(), s, "v9", {"sentas": [A]}, "R1", math.inf, sel_mod.Spend(10))
+    assert not stopped and problems[0].startswith("GPU round v9 failed: ") and "queue disabled" in problems[0]
 
 
 def test_an_open_book_still_without_its_slab_after_the_round_is_a_problem(monkeypatch):

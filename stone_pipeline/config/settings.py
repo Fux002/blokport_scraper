@@ -880,6 +880,7 @@ class STANDARDISE:
     OCR_MIN_CONF = 30              # word confidence to join a mark (the card/logo box decides what is erased)
     OCR_ANCHOR_CONF = 80           # a mark is real text only with a word read this surely (labels/logos: 85-97;
     OCR_ANCHOR_LEN = 3             # ... of at least this many characters; stone texture reads as 2-letter noise <70)
+    OCR_TIMEOUT = 180              # s: tesseract reading one photo
     OCR_SHORT_CONF = 88            # a 2-character word anchors from this confidence (a "DC+" grade label reads at ~90)
     CARD_FILL = 0.7                # a bright component this rectangular around a word is a printed card
     CARD_MAX_SHARE = 0.08          # and no larger than this share of the photo
@@ -1037,6 +1038,9 @@ class STANDARDISE:
     # their real stop times are counted; inside the 100 s stop grace on a SIGTERM.
     STOP_WAIT_SECONDS, STOP_POLL_SECONDS = 60, 5
     CUTOUT_WORKERS = 4                 # 3D cut-outs made at once by publish (full-size slabs in memory, on the 6 GB service)
+    STORE_WORKERS = 32                 # S3 reads, copies and deletes made at once (records, published files, job stops)
+    JPEG_QUALITY = 92                  # every JPEG the process writes, and the photo it sends to an edit model
+    AWS_MAX_ATTEMPTS = 10              # a throttled AWS call is retried this many times (botocore standard mode), never fatal
     DIAG_DIR = "diag"                  # the outline diagnostic (deploy.standardise_diag) writes under <env>/<TEST_PREFIX>/<this>/ only
     DIAG_JOINTS = 6                    # it lists this many of the strongest joints in each half of a profile ...
     DIAG_JOINT_MIN = 2.0               # ... scoring at least this (the trim's own bar is SEAM_MIN_END)
@@ -1158,6 +1162,7 @@ Your whole answer is one JSON object and nothing else:
     CLEAN_SINGLE_IMAGE = ("kontext",)  # these take one image_url; the others a list, image_urls
     CLEAN_SEND_LONG = 2048             # the photo is sent at this long side
     CLEAN_TIMEOUT, CLEAN_POLL = 600, 3 # s: give up on a queued edit after this long, asking every this many s
+    CLEAN_COLLECT_TIMEOUT = 60         # s: one status, result or image request of a queued edit
     # Problems a cleaned copy can fix; a photo held or failed for anything else (an outline the standardiser could not
     # find, stacked slabs) is not worth an edit.
     CLEAN_FIXES_KINDS = ("light_reflection", "scene_reflection", "bad_fill", "leftover_mark")

@@ -51,7 +51,7 @@ def main() -> int:
                    num_inference_steps=C.EDIT_STEPS, guidance_scale=C.EDIT_GUIDANCE,
                    generator=torch.Generator("cpu").manual_seed(C.BLEND_SEED)).images[0]
         buf = io.BytesIO()
-        out.save(buf, "JPEG", quality=92)
+        out.save(buf, "JPEG", quality=C.JPEG_QUALITY)
         client.put_object(Bucket=S3_BUCKET, Key=f"{prefix}/edit-test/klein/{name}.jpg", Body=buf.getvalue(), ContentType="image/jpeg")
         print(f"   {name} {w}x{h} {time.time() - started:.1f}s peak GPU {torch.cuda.max_memory_allocated() / 1e9:.1f} GB", flush=True)
     print("==> edit test done", flush=True)
