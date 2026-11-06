@@ -245,9 +245,13 @@ the listing passes), or `blocked` with why: its record (unreadable, no time, ano
 file's), the owner chose a photo, the listing is not fully judged yet (a photo awaits its GPU result, its outline
 recheck or its verdict), the photo is one a cleaned copy cannot fix, or no edit model is left to try. A blocked click is
 never paid and is a problem line of the run (`<listing>: owner's click on <photo>: blocked: <why>`); a ready click the
-budgets cannot cover waits, named by the run's admission and as `waiting: <why>` on its `tracked.csv` line. A
-judge's answer that did not parse is never final: the photo is asked again next run, and until then its listing is
-pending (review 2026-11-06). A listing whose choice
+budgets cannot cover waits, named by the run's admission and as `waiting: <why>` on its `tracked.csv` line (with no
+cleaning cap set, `waiting: no cleaning cap set`). A plan whose clicked photo leads what it collects (the owed check of
+a paid edit) is the click's too and is admitted before the marks. The owner's decisions applier and the run share the
+rule (`select.click_problem`): a clean is refused only for its record or for a current verdict or hold a cleaned copy
+cannot fix; one on a photo not judged yet is stored and reported blocked until it is. A judge's answer that did not
+parse is asked again, at most once a run, until it was asked `JUDGE_UNPARSED_ASKS` times (2); then it is a final fail,
+named "the judge's answer could not be read" on the review list (review 2026-11-06). A listing whose choice
 record cannot be read stays exactly as published (its photo, its conflict-photo assignment and its files untouched, in
 every kind of run) and every run names it in its problems. A listing not fully judged is simply not cleaned yet (the
 report counts it pending); an edit already paid for is not collected once its listing has a passing photo or the

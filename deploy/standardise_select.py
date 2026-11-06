@@ -161,6 +161,7 @@ class Candidates(_Locks):
         self.complete = {k[:64] for k in inner if k.endswith(".done.json") and "/" not in k and _SHA.match(k)}
         self.judged = _shas(inner, "judged/")
         self._locks, self._guard = {}, threading.Lock()
+        self.asked = set()                             # the photos the judge was asked about this run
 
 
 def read_candidates(client, out):
@@ -193,6 +194,7 @@ class Round(_Locks):
         self.edited = _attempts(keys, ".jpg")
         self.attempts = _attempts([k for k in keys if not k.endswith(".request.json")], ".json")
         self._locks, self._guard = {}, threading.Lock()
+        self.asked = set()                             # the photos the judge was asked about this run
 
     @functools.cached_property
     def older_outline(self):
@@ -250,14 +252,16 @@ def verdict(client, rnd, src, sha, fmt, spend=None):
     None when there is none and none may be bought."""
     key = f"{rnd.prefix}judged/{sha}.json"
     with rnd.lock(sha):
-        if sha in rnd.judged:
-            stored = _get_json(client, key)
-            if judge.current(stored) or spend is None:     # a fail under an older, stricter bar is judged again
-                return stored
-        elif spend is None:
+        stored = _get_json(client, key) if sha in rnd.judged else None
+        if stored is not None and (judge.current(stored) or spend is None or sha in rnd.asked):
+            return stored                              # an outdated or unparsed one is asked again, once a run
+        if stored is None and spend is None:
             return None
         original, result = _original(client, src, sha), _get(client, f"{rnd.prefix}{sha}.main.jpg")   # read before paying
         found, cost = paid(spend, C.JUDGE_PRICE_USD, lambda: judge.judge(original, result, fmt), f"judge {src} {sha[:12]}")
+        rnd.asked.add(sha)
+        if found["verdict"] == "unparsed":             # counted, so an answer that never parses ends as a named fail
+            found = {**found, "asks": (stored or {}).get("asks", 0) + 1 if (stored or {}).get("verdict") == "unparsed" else 1}
         _put_json(client, key, {**found, "cost": cost})
         rnd.judged.add(sha)
         return found
@@ -376,10 +380,24 @@ def authorised(cause, sha, click):
 
 
 def click_problem(client, rnd, listing, click, exclude):
-    """Why the owner's click for this listing cannot be used, or None when it can: its file could not be read, it has no
-    time, it names another SKU or listing than its own, or a photo that is not the listing's or that a cleaned copy
-    cannot fix. A click with a problem is never paid for; the listing's notes say why (photo_notes)."""
-    return record_problem(listing, click) or (CANNOT_FIX if fixable(client, rnd, click["sha"], exclude) is None else None)
+    """Why the owner's click for this listing can never be used, or None: its record (record_problem), or a photo whose
+    current verdict or hold a cleaned copy cannot fix (unfixable). The one rule the decisions applier refuses a clean
+    by; a photo not judged yet (its GPU result, its outline recheck or its verdict to come) is no problem: the click is
+    stored and the run reports it blocked until its listing is fully judged (click_state)."""
+    return record_problem(listing, click) or (CANNOT_FIX if unfixable(client, rnd, click["sha"], exclude) else None)
+
+
+def unfixable(client, rnd, sha, exclude):
+    """Whether a cleaned copy of this photo can never pass, by what is known now: an excluded photo, a held one whose
+    hold an edit does not fix, or one whose current verdict fails for what an edit does not fix (or passes). A photo
+    with no result, no verdict yet or an outdated one is not known to be unfixable."""
+    if sha in exclude:
+        return True
+    if sha in rnd.finished:
+        if sha not in rnd.judged:
+            return False
+        return judge.current(_get_json(client, f"{rnd.prefix}judged/{sha}.json")) and fixable(client, rnd, sha, exclude) is None
+    return sha in rnd.held and fixable(client, rnd, sha, exclude) is None
 
 
 CANNOT_FIX = "it names a photo a cleaned copy cannot fix"
@@ -586,10 +604,18 @@ class CleanPlan:
     listing: dict
     collect: tuple
     send: tuple
+    clicked: str | None = None                          # the photo of the owner's ready click, when there is one
 
     @property
     def click(self):
-        """Whether its first new edit is for the owner's click."""
+        """Whether the plan does the owner's click: its clicked photo leads what it collects or sends (the owed check of
+        a clicked photo's paid edit is the click's work too). Admission takes such a plan before the marks."""
+        first = (self.collect or self.send or ((None,),))[0][0]
+        return self.clicked is not None and first == self.clicked
+
+    @property
+    def sends_click(self):
+        """Whether its new edit is the owner's click (so a wait of its send is the click's wait)."""
         return bool(self.send) and self.send[0][1]["reason"] == "click"
 
 
@@ -620,7 +646,9 @@ def clean_plan(client, rounds, listing, exclude, owner=None, click=None):
     click = click if clicked == ("ready", None) else None
     if state != "open" or cleaned_copies(rnd, listing, click):
         return None                                    # not fully judged, or a pass: the report counts it
-    collect = tuple((sha, models) for sha in listing["photos"] if sha not in exclude and (models := paid_unchecked(rnd, sha)))
+    collect = tuple(sorted(((sha, models) for sha in listing["photos"]
+                            if sha not in exclude and (models := paid_unchecked(rnd, sha))),
+                           key=lambda item: click is None or item[0] != click["sha"]))   # the clicked photo first
     sent = [(sha, {"reason": why, **cause, **({"click_at": click["at"]} if why == "click" else {})})
             for sha in listing["photos"]
             if (cause := fixable(client, gpu[src], sha, exclude)) is not None and (why := authorised(cause, sha, click))]
@@ -628,7 +656,7 @@ def clean_plan(client, rounds, listing, exclude, owner=None, click=None):
     send = tuple((sha, why, models) for sha, why in sent
                  if (models := [m for m in models_left(client, rnd, sha) if m not in paid_unchecked(rnd, sha)])
                  )[:C.CLEAN_PHOTOS_PER_LISTING]
-    return CleanPlan(listing, collect, send) if collect or send else None
+    return CleanPlan(listing, collect, send, click["sha"] if click else None) if collect or send else None
 
 
 def pay(client, rounds, plan, spend):
@@ -663,7 +691,8 @@ def photo_notes(client, rounds, listing, exclude, conflicts, click=None, state=N
             if sha in r.judged:
                 v = _get_json(client, f"{r.prefix}judged/{sha}.json")
                 kinds = ", ".join(sorted({p.get("kind", "?") for p in v.get("problems", [])}))
-                parts.append(f"{tag}: judge {v['verdict']}" + (f" ({kinds})" if kinds else ""))
+                parts.append(f"{tag}: the judge's answer could not be read" if v["verdict"] == "unparsed"
+                             else f"{tag}: judge {v['verdict']}" + (f" ({kinds})" if kinds else ""))
             elif sha in r.finished:
                 parts.append(f"{tag}: finished, not judged")
             elif sha in r.held:
@@ -717,9 +746,20 @@ class Selection:
         self.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in self.chosen})
         self.exclude = read_exclude(EXCLUDE_PATH.read_text())
         self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
+        self._asked = {}
+        self._share_asked()
 
     def refresh(self):
         self.rounds = read_rounds(self.client, self.tags, self.sources)
+        self._share_asked()
+
+    def _share_asked(self):
+        """Every round and candidate folder read again keeps what the judge was asked about earlier in this run (so a
+        photo is asked at most once a run), one set per folder, shared by the selections narrowed from this one."""
+        for _, by_source in self.rounds:
+            for rnd in by_source.values():
+                rnd.asked = self._asked.setdefault(rnd.prefix, rnd.asked)
+                rnd.redraw.asked = self._asked.setdefault(rnd.redraw.prefix, rnd.redraw.asked)
 
     def only(self, listings, clicks):
         """This selection narrowed to `listings`, its clean step paying only `clicks` ({SKU: click}), over the same

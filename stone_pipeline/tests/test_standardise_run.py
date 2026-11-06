@@ -474,6 +474,7 @@ def _stored_round(prefix, finished=(), judged=(), cleaned=(), slabs=(), checked=
     r.redraw, r.redrawn = sel_mod.Candidates(prefix, []), set()
     r.attempts, r.edited, r.requested = set(), set(), set()
     r._locks, r._guard = {}, threading.Lock()
+    r.asked = r.redraw.asked = set()
     return r
 
 
@@ -736,7 +737,7 @@ def test_the_cap_edge_pays_the_same_listings_whatever_the_threads_do(monkeypatch
         problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
         paid.append(sorted(k for k in store.objects if "/cleaned/" in k))
         assert cap.spent <= cap.budget and not cap.capped
-        assert problems == [f"the marks of 5 listings wait: {runner.WAIT_CAP}"] and len(waits) == 5
+        assert problems == [f"the marks of 5 listings wait: {runner.WAIT_CAP}"] and waits == {}   # no click waits
     assert paid[0] == paid[1] == paid[2] == sorted(f"{CL_P}cleaned/{sha}.jpg" for sha in shas[:3])
 
 
@@ -755,6 +756,33 @@ def test_a_click_still_awaiting_its_outline_at_the_end_of_a_run_is_named_blocked
                                                                    before=10.0)
     assert edits == [] and report["chosen"] == []
     assert any(p.startswith(f"slab-1: owner's click on {A[:12]}: blocked: the listing is not fully judged") for p in problems)
+
+
+def test_a_mark_that_waits_beside_a_collected_click_is_never_called_the_click_s_wait(monkeypatch):
+    monkeypatch.setattr(C, "CLEAN_ENABLED", True)
+    s, store = _clicked_selection(backlog=())
+    s.listings[0]["photos"] = [A, E]
+    s.rounds[0][1]["sentas"].finished.add(E)
+    s.rounds[0][1]["sentas"].judged.add(E)
+    store.objects[f"{GPU_P}judged/{E}.json"] = json.dumps({"verdict": "fail", "problems": [{"kind": "leftover_mark"}],
+                                                           "version": C.JUDGE_VERSION}).encode()
+    for name in sel_mod.clean.MODELS:                                                    # A: paid, never checked
+        store.objects[f"{CL_P}attempts/{A}.{name}.request.json"] = json.dumps({"model": name}).encode()
+        s.rounds[1][1]["sentas"].requested.add(f"{A}.{name}")
+    monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": False}, 0.02))
+    plans, _ = s.plans()
+    cap = sel_mod.Spend(3 * C.JUDGE_PRICE_USD, cap_error=sel_mod.CleanCapReached)          # A's checks, not E's edit
+    problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+    assert waits == {} and not any("owner's click waits" in p for p in problems)
+    assert any(p.startswith("the marks of 1 listings wait") for p in problems)
+
+
+def test_without_a_cleaning_cap_a_ready_click_says_it_waits_for_one(monkeypatch):
+    s, store = _clicked_selection(backlog=())
+    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: ([], False))
+    problems, report = runner.run(_Batch(), s, sel_mod.Spend(100), None, "R1", math.inf, say=lambda m: None)
+    assert f"owner's click on {A[:12]}: waiting: no cleaning cap set" in report["tracked"][0]["what_happened"]
 
 
 def test_a_month_with_money_to_judge_but_none_for_a_round_judges_what_is_finished(monkeypatch):

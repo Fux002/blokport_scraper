@@ -56,6 +56,7 @@ def _round(prefix, finished=(), held=(), judged=(), cleaned=(), attempts=(), edi
     r.redrawn, r.redraw = set(redrawn), sel.Candidates(prefix, [])
     r.cleaned, r.attempts, r.edited, r.requested = set(cleaned), set(attempts), set(edited), set(requested)
     r._locks, r._guard = {}, threading.Lock()
+    r.asked = r.redraw.asked = set()
     return r
 
 
@@ -937,6 +938,19 @@ def test_a_click_s_state_is_one_answer_and_the_plan_sends_only_a_ready_one(monke
     assert _state(s3, rounds, _listing(A, B), None) is None
 
 
+def test_a_click_whose_edits_are_paid_but_not_checked_still_leads_its_plan(monkeypatch):
+    # review of #546: the clicked photo's paid edits were only collected, so the plan lost its click priority
+    monkeypatch.setattr(C, "CLEAN_ENABLED", True)
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    s3.objects[f"{GPU}judged/{B}.json"] = _verdict("fail", "leftover_mark")
+    cl = rounds[1][1]["sentas"]
+    for name in sel.clean.MODELS:                                                        # A: paid, never checked
+        s3.objects[f"{CL}attempts/{A}.{name}.request.json"] = json.dumps({"model": name}).encode()
+        cl.requested.add(f"{A}.{name}")
+    plan = sel.clean_plan(s3, rounds, _listing(A, B), set(), None, _click(A))
+    assert plan.click and plan.collect[0][0] == A and not plan.sends_click           # B, a mark, is its send
+
+
 def test_the_review_list_says_a_click_waits_and_why(monkeypatch):
     s3, _, rounds = _reflection_on_a(monkeypatch)
     s = _selection(s3, [_listing(A, B)], rounds)
@@ -955,13 +969,52 @@ def test_a_blocked_click_is_a_problem_of_the_run(monkeypatch):
 
 
 # --- an unparsed verdict is asked again (review 2026-11-06, A2.6) -----------------------------------------------------
-def test_an_unparsed_verdict_is_never_final_and_is_asked_again(monkeypatch):
-    unparsed = json.dumps({"verdict": "unparsed", "raw": "I think", "version": C.JUDGE_VERSION}).encode()
-    s3 = _S3({f"{GPU}judged/{A}.json": unparsed, f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+def _unparsed(asks):
+    return json.dumps({"verdict": "unparsed", "raw": "I think", "version": C.JUDGE_VERSION, "asks": asks}).encode()
+
+
+def test_an_unparsed_verdict_is_not_final_and_is_asked_again(monkeypatch):
+    s3 = _S3({f"{GPU}judged/{A}.json": _unparsed(1), f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
     assert sel.choose(s3, rounds, _listing(A), set()) == (None, False)                   # pending, not a final fail
     monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
     assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (("v9", A), True)
+
+
+def test_an_answer_that_never_parses_is_a_named_fail_after_its_asks(monkeypatch):
+    # review of #546: a permanently garbled answer was paid again every run and its listing stayed pending for ever
+    s3 = _S3({f"{GPU}judged/{A}.json": _unparsed(C.JUDGE_UNPARSED_ASKS - 1),
+              f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    asked = []
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or (
+        {"verdict": "unparsed", "raw": "?", "version": C.JUDGE_VERSION}, 0.02))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (None, True)      # final: on the review list
+    assert asked == [1] and json.loads(s3.objects[f"{GPU}judged/{A}.json"])["asks"] == C.JUDGE_UNPARSED_ASKS
+    rounds[0][1]["sentas"].asked.clear()                                                  # a later run
+    assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (None, True) and asked == [1]
+    assert "the judge's answer could not be read" in sel.photo_notes(s3, rounds, _listing(A), set(), {})
+
+
+def test_a_photo_is_asked_at_most_once_a_run(monkeypatch):
+    s3 = _S3({f"{GPU}judged/{A}.json": _unparsed(0), f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    asked = []
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: asked.append(1) or (
+        {"verdict": "unparsed", "raw": "?", "version": C.JUDGE_VERSION}, 0.02))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    for listing in (_listing(A, key="one"), _listing(A, key="two")):                      # two listings of one stone
+        sel.choose(s3, rounds, listing, set(), sel.Spend(10))
+    assert asked == [1]
+
+
+def test_a_selection_keeps_what_it_asked_across_reading_its_rounds_again(monkeypatch):
+    first = [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})]
+    again = [("v9", {"sentas": _round(GPU)}), ("v9-clean", {"sentas": _round(CL)})]
+    monkeypatch.setattr(sel, "read_rounds", lambda client, tags, sources: again)
+    s = sel.Selection(_S3(), [_listing(A)], "v9", "v9-clean", {}, {}, first, [], {}, set())
+    s.rounds[0][1]["sentas"].asked.add(A)
+    s.refresh()
+    assert A in s.rounds[0][1]["sentas"].asked and A in s.only([], {}).rounds[0][1]["sentas"].asked
 
 
 # --- the clicked photo is the unit (review 2026-11-06, A2.1) ---------------------------------------------------------

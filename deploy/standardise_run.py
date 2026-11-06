@@ -372,6 +372,7 @@ def hosted(step, sel, spend, deadline):
 WAIT_BUDGET = "month photo budget reached (GPU round and judge not covered); not paid"
 WAIT_CAP = "cleaning cap reached (edits and checks not covered); not paid"
 WAIT_WINDOW = "too little of the work window left for a GPU round; not paid"
+NO_CAP = "no cleaning cap set"
 
 
 def admit(sel, plans, left, cap_left, window):
@@ -414,15 +415,16 @@ def admit(sel, plans, left, cap_left, window):
 
 def clean_step(sel, plans, spend, clean, deadline, window):
     """The clean step over `plans`: admitted (admit), then paid (select.clean_all on the cleaning cap). (problems,
-    stopped, the plans paid, waits): what could not be paid or read, and a line per send that waits (a click by its
-    listing, the marks counted); waits as admit gives them, for the review list."""
+    stopped, the plans paid, the clicks that wait): what could not be paid or read, and a line per send that waits (a
+    click by its listing, the marks counted); {listing key: why} of the clicks whose own new edit waits, for the review
+    list."""
     goes, waits = admit(sel, plans, spend.left(), clean.left(), window)
-    clicks = {plan.listing["key"] for plan in plans if plan.click}
+    clicks = {plan.listing["key"] for plan in plans if plan.sends_click}   # a wait of the click's own new edit
     problems = [f"{key}: the owner's click waits: {why}" for key, why in waits.items() if key in clicks]
     if marks := [why for key, why in waits.items() if key not in clicks]:
         problems += [f"the marks of {marks.count(why)} listings wait: {why}" for why in dict.fromkeys(marks)]
     found, stopped = hosted(lambda s, cap, d: select.clean_all(s, goes, cap, d), sel, clean, deadline)
-    return problems + found, stopped, goes, waits
+    return problems + found, stopped, goes, {key: why for key, why in waits.items() if key in clicks}
 
 
 def owed_copy(sel, listing):
@@ -460,7 +462,9 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     report always runs, so what is chosen is recorded and published, unless a promotion failed: raised, and the next
     run of either kind finishes it at its start (select.finish, in process) before anything is published."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
-    problems, waiting = [], {}
+    problems = []
+    # no cleaning cap: no click can be paid, so every ready one says what it waits for
+    waiting = {} if clean is not None else {l["key"]: NO_CAP for l in sel.listings if l["sku"] in sel.clicks}
 
     def cleaning(work):
         plans, failures = work.plans()

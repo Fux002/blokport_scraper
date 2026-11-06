@@ -1053,6 +1053,9 @@ class STANDARDISE:
     # results looked fine: black-queen 7029-27, bianco-river 7099, amasya 980): the slab's proportions are corrected to its
     # real dimensions on purpose (never wrong_shape), and only what a buyer would see at catalog size fails.
     JUDGE_VERSION = 3
+    # An answer of the judge that does not parse is asked again, once a run, until it has been asked this many times;
+    # then it is a final fail ("the judge's answer could not be read") and its listing goes to the review list.
+    JUDGE_UNPARSED_ASKS = 2
     JUDGE_REASONING = True             # the endpoint refuses this model without it
     JUDGE_MAX_TOKENS = 6000            # reasoning included
     JUDGE_LONG_SIDE, JUDGE_JPEG_QUALITY = 1024, 88   # each image is sent at this long side

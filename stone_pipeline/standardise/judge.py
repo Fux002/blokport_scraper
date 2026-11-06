@@ -84,9 +84,10 @@ def judge(original, result, fmt):
 
 def current(verdict):
     """Whether a stored verdict still stands: a pass always does, a fail only when made under the current bar; an
-    answer that did not parse never does (review 2026-11-06, A2.6: it is asked again, never read as a final fail)."""
-    if verdict.get("verdict") == "unparsed":
-        return False
+    answer that did not parse does only once it was asked JUDGE_UNPARSED_ASKS times (review 2026-11-06: asked again,
+    once a run, then a final fail its listing's review line names)."""
+    if verdict.get("verdict") == "unparsed":                 # asked again until it was asked JUDGE_UNPARSED_ASKS times
+        return verdict.get("asks", 1) >= C.JUDGE_UNPARSED_ASKS
     return passed(verdict) or verdict.get("version", 1) >= C.JUDGE_VERSION
 
 
