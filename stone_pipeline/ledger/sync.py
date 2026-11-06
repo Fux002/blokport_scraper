@@ -40,6 +40,7 @@ log = logfmt.get_logger("ledger.sync")
 class ServeInFlight(Exception):
     """A reset was attempted while a pull holds a lease ('syncing' rows). The caller maps it to 409."""
 
+
 def _retry_after(attempts: int) -> str:
     """When an entity that just failed for the attempts-th time in a row may be served again (SETTINGS.sync)."""
     wait = SETTINGS.sync.retry_base_seconds * SETTINGS.sync.retry_factor ** (attempts - 1)

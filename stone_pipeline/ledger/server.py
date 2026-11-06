@@ -50,6 +50,7 @@ from stone_pipeline.ledger.db import Ledger
 
 log = logfmt.get_logger("ledger.server")
 
+
 def _page_limit(query: dict[str, list[str]], default: int) -> int | None:
     """?limit= as an int: absent -> `default`; above the cap -> the cap (the page stays bounded, and the
     response carries what was served); not a positive integer -> None (the caller answers 400). Never a

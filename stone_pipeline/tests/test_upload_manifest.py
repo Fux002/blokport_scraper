@@ -21,6 +21,7 @@ class _S3:
     def __init__(self, versioned=True):
         self.versions: dict[str, dict[str, bytes]] = {}   # key -> {version_id: bytes}
         self.objects: dict[str, bytes] = {}                # key -> the current bytes
+        self.current: dict[str, str] = {}                  # key -> the current version id
         self.calls: list[tuple[str, str]] = []
         self.versioned = versioned
 
@@ -29,9 +30,15 @@ class _S3:
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
         return {"Body": _Body(self.versions[Key][VersionId] if VersionId else self.objects[Key])}
 
-    def upload_file(self, filename, bucket, key):
-        self._store(key, open(filename, "rb").read())
-        self.calls.append(("side", key))
+    def head_object(self, Bucket, Key):
+        if Key not in self.objects:                     # absent, or its current version is a delete marker
+            raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
+        return {"VersionId": self.current[Key]}
+
+    def delete_object(self, Bucket, Key):
+        """An unversioned delete on a versioned bucket: a delete marker, the old versions stay."""
+        self.objects.pop(Key, None)
+        self.current.pop(Key, None)
 
     def put_object(self, Bucket, Key, Body, ContentType=None, ChecksumSHA256=None):
         data = Body if isinstance(Body, bytes) else Body.read()
@@ -46,6 +53,7 @@ class _S3:
         history = self.versions.setdefault(key, {})
         version = f"v{len(history) + 1}"
         history[version] = data
+        self.current[key] = version
         return version
 
 
@@ -140,7 +148,7 @@ def test_an_unversioned_bucket_fails_loud_before_the_manifest(tmp_path):
     assert "p/manifest.json" not in s3.objects
 
 
-def test_side_files_are_uploaded_but_not_in_the_manifest(tmp_path):
+def test_side_files_are_published_outside_the_deliverables(tmp_path):
     assert UPLOAD_SIDE_FILES == {"SYNC_STEPS.md", "standardise_photo_list.json", "variant_image_shas.json"}
     s3 = _S3()
     _write(tmp_path, "3_products_all.csv", "h\n1\n")
@@ -148,8 +156,30 @@ def test_side_files_are_uploaded_but_not_in_the_manifest(tmp_path):
         _write(tmp_path, name, "{}")
     out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
     assert sorted(out["side"]) == sorted(UPLOAD_SIDE_FILES)
-    assert set(json.loads(s3.objects["p/manifest.json"])["files"]) == {"3_products_all.csv"}
+    manifest = json.loads(s3.objects["p/manifest.json"])
+    assert set(manifest["files"]) == {"3_products_all.csv"}
+    assert set(manifest["side_files"]) == set(UPLOAD_SIDE_FILES)
     assert all(f"p/{name}" in s3.objects for name in UPLOAD_SIDE_FILES)                 # the photo process reads it
+    s3.calls.clear()
+    _write(tmp_path, "SYNC_STEPS.md", "changed")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2")                    # only the changed one
+    assert out["side"] == ["SYNC_STEPS.md"] and s3.calls == [("put", "p/SYNC_STEPS.md"), ("put", "p/manifest.json")]
+
+
+@pytest.mark.parametrize("disturb", ["overwrite", "delete_marker"])
+def test_unchanged_bytes_are_re_uploaded_when_the_fixed_name_no_longer_holds_that_version(tmp_path, disturb):
+    s3 = _S3()
+    _write(tmp_path, "3_products_all.csv", "h\n1\n")
+    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")
+    if disturb == "overwrite":                            # a publish that died after its upload, before its manifest
+        s3.put_object("b", "p/3_products_all.csv", b"h\n1\n9\n")
+    else:                                                 # a prune of the fixed name (a delete marker)
+        s3.delete_object("b", "p/3_products_all.csv")
+    out = ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2")
+    assert out["uploaded"] == ["3_products_all.csv"]
+    entry = json.loads(s3.objects["p/manifest.json"])["files"]["3_products_all.csv"]
+    assert s3.current["p/3_products_all.csv"] == entry["version_id"]
+    assert hashlib.sha256(s3.objects["p/3_products_all.csv"]).hexdigest() == entry["sha256"]
 
 
 def test_a_manifest_read_error_other_than_missing_raises(tmp_path):
@@ -159,3 +189,16 @@ def test_a_manifest_read_error_other_than_missing_raises(tmp_path):
     _write(tmp_path, "a.csv", "h\n1\n")
     with pytest.raises(ClientError):
         ua.publish_deliverables(_Broken(), "b", tmp_path, "p", run_id=None)
+
+
+def test_a_head_error_other_than_missing_raises_before_the_manifest(tmp_path):
+    class _NoHead(_S3):
+        def head_object(self, Bucket, Key):
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject")
+    s3 = _NoHead()
+    _write(tmp_path, "3_products_all.csv", "h\n1\n")
+    ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r1")                 # first publish: no head needed
+    before = s3.objects["p/manifest.json"]
+    with pytest.raises(ClientError):
+        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id="r2")             # unchanged: the head is required
+    assert s3.objects["p/manifest.json"] == before                               # no manifest written

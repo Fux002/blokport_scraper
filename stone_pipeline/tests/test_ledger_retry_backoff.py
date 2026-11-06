@@ -5,9 +5,9 @@ dead-letter cap within seconds. A success, a requeue, a reset or new content end
 from __future__ import annotations
 
 import sqlite3
-from stone_pipeline.config.settings import SETTINGS
 from datetime import datetime, timedelta, timezone
 
+from stone_pipeline.config.settings import SETTINGS
 from stone_pipeline.config.sources import load_source
 from stone_pipeline.ledger import sync
 from stone_pipeline.ledger.db import Ledger, now_iso

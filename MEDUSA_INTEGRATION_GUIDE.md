@@ -482,21 +482,24 @@ LAST, `manifest.json` next to them:
 - `version_id` is the S3 VersionId of the object holding exactly those bytes (S3 verified them
   against `sha256` on upload). The files keep their fixed names, so reading `<name>` works as
   before; a GET with `versionId=<version_id>` reads the manifest's bytes even while a later
-  produce overwrites the fixed name.
-- A file is uploaded only when its hash differs from the manifest already on S3, so unchanged
-  content keeps its object and timestamp. The manifest is rewritten on every publish with a new
-  `run_id` / `produced_at`, so "nothing changed" is the same hashes under a newer manifest: a
-  no-op for a hash-keyed guard, never a block.
+  produce overwrites the fixed name. Reading by version needs `s3:GetObjectVersion` on your role
+  (plus `kms:Decrypt` on the bucket's key when the bucket is KMS-encrypted), beside `s3:GetObject`.
+- A file is uploaded only when its hash differs from the manifest already on S3, or its fixed name
+  no longer holds the version that manifest names; unchanged content keeps its object, version and
+  timestamp. The manifest is rewritten on every publish with a new `run_id` / `produced_at`, so
+  "nothing changed" is the same hashes under a newer manifest: a no-op for a hash-keyed guard,
+  never a block.
 - Ordering: files first, manifest last, one PUT. A manifest never names content that is not
   there. Reading a fixed name, a produce landing mid-import shows as a stream-hash mismatch on
-  your side: fail loud, retry (or read by `version_id`, which never mismatches). Key your "combinations changed?" guard on `files["2_valid_combinations.csv"].sha256`
-  against the hash you last loaded, never on timestamps.
+  your side: fail loud, retry (or read by `version_id`, which never mismatches).
+- Key your "combinations changed?" guard on `files["2_valid_combinations.csv"].sha256` against the
+  hash you last loaded, never on timestamps.
 - The former `2_valid_combinations_update.csv` (the delta since the scraper's last BUILD, not since
   your last load) is no longer written. The manifest lists every deliverable in `to_upload/`, so a task
   that still holds an old copy keeps listing it until it restarts (the folder is rebuilt then).
 - Files in `to_upload/` that are not deliverables (`SYNC_STEPS.md`, `standardise_photo_list.json`
-  for the scraper's photo process, `variant_image_shas.json`) are published beside them but are not
-  in the manifest.
+  for the scraper's photo process, `variant_image_shas.json`) are published beside them and recorded
+  under the manifest's `side_files`, never under `files`: ignore them.
 
 ---
 
