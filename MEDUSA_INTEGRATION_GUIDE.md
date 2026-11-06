@@ -501,9 +501,10 @@ LAST, `manifest.json` next to them:
 - `variants_export_base.csv` is the scraper's full base of its own varieties, Id-free, with the
   columns the file has: `Key`, `Name`, `Image`, `Aliases`, `Volume per kg (m³/kg)`. It is the exact
   base the produce settled (normally the same varieties as `1_variants_full.csv`), so your
-  "restore base" import verifies it against `sha256` like any deliverable. A factory reset publishes
-  the pristine seed here through the same publisher (file and manifest together), so a restore
-  between a reset and the next produce loads the seed.
+  "restore base" import verifies it against `sha256` like any deliverable.
+- After a factory reset the manifest lists ONLY `variants_export_base.csv` (with its `version_id`;
+  `side_files` empty), holding the pristine seed: every other file is stale for a wiped Medusa. Those files stay on S3 unlisted, so a
+  verifying import refuses them until the next produce publishes a full set again.
 - Files in `to_upload/` that are not deliverables (`SYNC_STEPS.md`, `standardise_photo_list.json`
   for the scraper's photo process, `variant_image_shas.json`) are published beside them and recorded
   under the manifest's `side_files`, never under `files`: ignore them.

@@ -2,7 +2,7 @@
 against the manifest). The catalog copies the base THIS produce settled (from_medusa/<env>/, after
 sync_variants_base) into to_upload/<env>/ byte for byte, so the manifest lists it like 1_variants_full.csv:
 sha256 of those bytes, CSV rows, uploaded only when changed. A produce that runs no catalog publishes nothing. A
-factory reset publishes the seed as the base through the same publisher, so the key and the manifest move together."""
+factory reset publishes the seed base through the same publisher under a manifest listing only it."""
 
 from __future__ import annotations
 
@@ -203,29 +203,45 @@ def _reset_world(tmp_path, monkeypatch, s3: _S3) -> tuple[Path, Path, Path]:
     return seed, base, to_upload
 
 
-def test_a_factory_reset_publishes_the_seed_as_the_base_deliverable_under_the_manifest(tmp_path, monkeypatch):
+def test_a_factory_reset_publishes_a_manifest_listing_only_the_seed_base(tmp_path, monkeypatch):
+    """Leftover produce files on the task and a full manifest on S3: after the reset the manifest lists the seed
+    base and nothing else (the old files stay on S3, unlisted). The next produce publishes a full set again and,
+    its base unchanged from the seed, does not re-upload the base."""
     from stone_pipeline import lifecycle
     from stone_pipeline.config.settings import ENV_SEGMENT
     s3 = _S3()
     seed, base, to_upload = _reset_world(tmp_path, monkeypatch, s3)
-    (to_upload / "1_variants_full.csv").write_text("Key\nslab_marble_a_1\n", encoding="utf-8")
     prefix = f"{ENV_SEGMENT}/scraper/to_upload"
+    (to_upload / "1_variants_full.csv").write_text("Key\nslab_marble_minted_7\n", encoding="utf-8")
+    (to_upload / "3_products_all.csv").write_text("Handle\nh1\n", encoding="utf-8")
+    svb.write_deliverable(base)
+    ua.publish_to_upload(s3, "before-reset")                                   # the pre-reset full set on S3
 
     r = lifecycle._reseed_base_from_pristine(seed_path=seed, base_path=base)
     assert r == {"reseeded": True, "s3_published": True, "import_published": True}
     manifest = json.loads(s3.objects[f"{prefix}/{ua.MANIFEST_NAME}"])
+    assert list(manifest["files"]) == [VARIANTS_BASE_FILE] and not manifest.get("side_files")
     entry = manifest["files"][VARIANTS_BASE_FILE]
     assert entry["sha256"] == hashlib.sha256(_BASE).hexdigest() and entry["rows"] == 2
     assert s3.objects[f"{prefix}/{VARIANTS_BASE_FILE}"] == _BASE              # the key holds the seed's bytes
     assert s3.objects[f"{ENV_SEGMENT}/scraper/from_medusa/{VARIANTS_BASE_FILE}"] == _BASE
-    assert "1_variants_full.csv" in manifest["files"]                          # the rest of to_upload/ stays listed
+    assert f"{prefix}/1_variants_full.csv" in s3.objects                       # stale, kept, no longer listed
 
-    # the next produce settles the same base (nothing minted): the base is not uploaded again
+    # the next produce settles the same base (nothing minted yet) and publishes its full folder
     s3.uploads.clear()
     svb.write_deliverable(base)
     out = ua.publish_to_upload(s3, "r2")
     assert VARIANTS_BASE_FILE in out["unchanged"] and f"{prefix}/{VARIANTS_BASE_FILE}" not in s3.uploads
     assert out["manifest"]["files"][VARIANTS_BASE_FILE] == entry
+    assert set(out["manifest"]["files"]) == {VARIANTS_BASE_FILE, "1_variants_full.csv", "3_products_all.csv"}
+
+
+def test_publishing_only_a_name_the_folder_lacks_writes_nothing(tmp_path):
+    s3 = _S3()
+    (tmp_path / "1_variants_full.csv").write_text("Key\n", encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match=VARIANTS_BASE_FILE):
+        ua.publish_deliverables(s3, "b", tmp_path, "p", run_id=None, only={VARIANTS_BASE_FILE})
+    assert s3.objects == {}
 
 
 def test_a_failed_deliverable_publish_is_reported_not_hidden(tmp_path, monkeypatch):

@@ -218,26 +218,6 @@ def test_hard_and_soft_reset_do_NOT_wipe_the_scrape_cache(tmp_path, monkeypatch)
     assert wiped == []                                # neither touched the scrape cache
 
 
-def test_pristine_reset_prunes_the_product_exports_before_the_reseed_publishes_the_manifest(tmp_path, monkeypatch):
-    # The reseed publishes the base deliverable and so rewrites manifest.json from to_upload/: the product exports
-    # the reset deletes must be gone by then, or the manifest names files S3 no longer holds.
-    from stone_pipeline import lifecycle
-    from stone_pipeline.ledger import snapshot
-    from deploy import cleanup_images
-
-    _seed_config(tmp_path, monkeypatch)
-    monkeypatch.setattr(lifecycle, "_ledger_op", _fake_ledger_op)
-    monkeypatch.setattr(cleanup_images, "wipe_all_product_images", lambda **k: {})
-    monkeypatch.setattr(snapshot, "wipe_artifacts", lambda **k: {"local": [], "s3": []})
-    order: list[str] = []
-    monkeypatch.setattr(lifecycle, "_prune_stale_product_exports", lambda: order.append("prune") or {})
-    monkeypatch.setattr(lifecycle, "_reseed_base_from_pristine", lambda: order.append("reseed") or {})
-    monkeypatch.setattr(lifecycle, "_prune_stale_medusa_export", lambda: {})
-
-    out, code = lifecycle.reset(sources=None, pristine=True)
-    assert code == 200 and order == ["prune", "reseed"]
-
-
 def test_pristine_reset_is_global_only(tmp_path, monkeypatch):
     from stone_pipeline import lifecycle
     _seed_config(tmp_path, monkeypatch)
