@@ -426,6 +426,15 @@ def read_sources(path: str | Path | None = None) -> dict[str, SourceConfig]:
         return {r["source"]: _row_to_cfg(r) for r in conn.execute("SELECT * FROM source")}
 
 
+def effective_lifecycle(lifecycle: str | None, enabled) -> str:
+    """THE derivation of a source's state, read by the admin listing (_row_dict) and the run guard
+    (inactive_sources) alike, so neither can call a source active while the other refuses it: the stored lifecycle
+    when set; else 'disabled' when the run flag is off (a legacy row: enabled 0, lifecycle NULL); else 'active'."""
+    if lifecycle:
+        return lifecycle
+    return "active" if enabled else "disabled"
+
+
 def _row_dict(r: sqlite3.Row) -> dict:
     """JSON-friendly row for the admin API (includes enabled)."""
     return {
@@ -441,8 +450,8 @@ def _row_dict(r: sqlite3.Row) -> dict:
         # last run (for the admin list's "last run" label); null until this source has ever been produced.
         "last_run_at": r["last_run_at"], "last_run_status": r["last_run_status"],
         "last_run_stage": r["last_run_stage"],
-        # lifecycle label Medusa reads: active | paused | delisted. NULL (legacy rows, never paused) == active.
-        "lifecycle": r["lifecycle"] or "active",
+        # lifecycle label Medusa reads: active | paused | delisted | disabled (see effective_lifecycle)
+        "lifecycle": effective_lifecycle(r["lifecycle"], r["enabled"]),
     }
 
 
@@ -482,17 +491,16 @@ def upsert_row(data: dict, path: str | Path | None = None) -> None:
 
 
 def inactive_sources(names, path: str | Path | None = None) -> dict[str, str]:
-    """{name: state} for each of `names` the store holds out of the run: paused or delisted by the lifecycle verbs,
-    or disabled. Names the store does not hold, or an absent store, are not inactive (a pure read: it never creates
-    config.db)."""
+    """{name: state} for each of `names` whose effective_lifecycle is not 'active' (paused, delisted, disabled).
+    Names the store does not hold, or an absent store, are not inactive (a pure read: it never creates config.db)."""
     names = list(names)
     if not names:
         return {}
     marks = ",".join("?" * len(names))
     with closing(read_store(path)) as conn:
         rows = conn.execute(f"SELECT source, enabled, lifecycle FROM source WHERE source IN ({marks})", names)
-        return {r["source"]: (r["lifecycle"] if r["lifecycle"] not in (None, "active") else "disabled")
-                for r in rows if not r["enabled"] or r["lifecycle"] not in (None, "active")}
+        states = {r["source"]: effective_lifecycle(r["lifecycle"], r["enabled"]) for r in rows}
+    return {name: state for name, state in states.items() if state != "active"}
 
 
 def enabled_names(path: str | Path | None = None) -> set[str] | None:

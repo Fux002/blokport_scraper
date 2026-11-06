@@ -54,6 +54,17 @@ def test_the_run_route_refuses_a_delisted_source():
     assert code == 409 and "polonine" in body["error"] and "delisted" in body["error"]
 
 
+def test_a_disabled_row_without_a_lifecycle_reads_disabled_and_is_refused_by_the_same_name():
+    # a legacy row: enabled 0, lifecycle NULL. The listing and the run guard read ONE derivation of the state, so the
+    # list cannot call "active" what /run refuses
+    store.set_state("varsha", enabled=False)
+    assert store.get_row("varsha")["lifecycle"] == "disabled"
+    code, body = server.dispatch("GET", ["sources"], None)
+    assert {r["source"]: r["lifecycle"] for r in body["sources"]} == {"polonine": "active", "varsha": "disabled"}
+    code, body = server.dispatch("POST", ["run"], {"sources": ["varsha"], "stage": "scrape"})
+    assert code == 409 and "varsha (disabled)" in body["error"]
+
+
 # -- 2: `enabled` is owned by pause / resume / delist ---------------------------------------------------------
 
 def _source_body(**over):
