@@ -85,13 +85,14 @@ class ExportVariation:
         return self.status == "archived"
 
 
-def read_variants_export(src: Path | str, *, require_status: bool) -> list[ExportVariation]:
+def read_variants_export(src: Path | str, *, require_status: bool,
+                         name: str = "variants_export.csv") -> list[ExportVariation]:
     """A variants export -> its rows, in file order. `src` is the file's Path, or a str holding the file's TEXT
-    (a str is never taken as a path). Cells are stripped and Aliases is split on '|' into its non-empty names.
+    (a str is never taken as a path; `name` is the file an error names then, since the text form also reads a base). Cells are stripped and Aliases is split on '|' into its non-empty names.
     Only a blank row (every cell empty) is skipped: what a row without Key, Name or Id means differs per caller
     (the base has no Id; tree_build counts a half row as malformed), so each caller keeps its own rule. Without
     a status column every row is active, unless `require_status`, which makes the absent column an error."""
-    label = str(src) if isinstance(src, Path) else "variants_export.csv"
+    label = str(src) if isinstance(src, Path) else name
     required = EXPORT_COLUMNS + (("status",) if require_status else ())
     out: list[ExportVariation] = []
     for line, row, fields in _rows(src, label, required):

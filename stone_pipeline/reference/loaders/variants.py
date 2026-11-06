@@ -63,7 +63,8 @@ def variants_status_required(path: Path) -> bool:
 def _read_variant_records(path: Path) -> tuple[list[ExportVariation], str]:
     """One read of the file: the parsed rows and the same digest content_hash() would give."""
     data = path.read_bytes()
-    records = read_variants_export(data.decode("utf-8-sig"), require_status=variants_status_required(path))
+    records = read_variants_export(data.decode("utf-8-sig"), require_status=variants_status_required(path),
+                                   name=str(path))
     return records, hashlib.sha256(data).hexdigest()[:16]
 
 
