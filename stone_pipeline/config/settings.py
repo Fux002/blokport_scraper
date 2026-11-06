@@ -1096,6 +1096,10 @@ Your whole answer is one JSON object and nothing else:
     CLEAN_AUTO_KINDS = ("leftover_mark",)
     CLEAN_AUTO_HELD = ("retouch:", "logo:")
     CLEAN_FAILED_CODES = (400, 422)    # the model refused the photo for good (at submit or collect): the next model's turn
+    # The statuses a hosted call (an edit or the judge) is known to be answered with BEFORE any work is done, so nothing
+    # is billed: a malformed or unprocessable request, auth, balance, forbidden, unknown endpoint, too large, rate limit.
+    # Any other failure (408 among them: OpenRouter's request timeout can follow upstream work) counts at its price.
+    HOSTED_REFUSED_CODES = (400, 401, 402, 403, 404, 413, 422, 429)
     CLEAN_CHECK_PROMPT = """Image 1 is a supplier's photo of a natural-stone slab. Image 2 is an edited copy meant to remove lifting
 straps with their clamps, reflections (lamps, light tubes, windows, the room mirrored on the polished stone) and
 foreign marks (labels, stickers, sample cards, tape, protective film, writing, logos) from the stone, and nothing else. Judge image 2

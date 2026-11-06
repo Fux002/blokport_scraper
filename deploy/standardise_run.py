@@ -395,14 +395,18 @@ def clicks_to_finish(sel, left, window):
         """The listing's cleaned copies the GPU has not run: what the clicks' GPU round runs of it (clean_todo)."""
         rnd = cl[l["source"]]
         return [sha for sha in l["photos"] if sha in rnd.cleaned and select.needs_gpu(rnd, sha)]
+    def adding(todo, l, shas):
+        """todo with the listing's photos added once each (listings of one stone may show the same photo)."""
+        listed = todo.get(l["source"], [])
+        return {**todo, l["source"]: listed + [sha for sha in dict.fromkeys(shas) if sha not in listed]}
     for l, click in clicks:
         if copies[l["sku"]]:
             taken[l["sku"]] = click
-            todo.setdefault(l["source"], []).extend(made(l))
+            todo = adding(todo, l, made(l))
     for l, click in clicks:
         if copies[l["sku"]]:
             continue
-        trial = {**todo, l["source"]: todo.get(l["source"], []) + made(l) + [click["sha"]]}
+        trial = adding(todo, l, made(l) + [click["sha"]])
         if window >= C.GPU_MIN_WINDOW_SECONDS and finish_price(trial, len(taken) + 1, window) <= left:
             todo, taken[l["sku"]] = trial, click
         else:
@@ -614,7 +618,7 @@ def clean_summary(clean):
         return {"clean_run_spent_usd": None, "clean_month_spent_usd": None, "clean_budget_usd": None,
                 "clean_budget_reached": None, "clean_uses": None}
     return {"clean_run_spent_usd": round(clean.spent, 4), "clean_month_spent_usd": round(clean.before + clean.spent, 4),
-            "clean_budget_usd": clean.budget, "clean_budget_reached": clean.capped, "clean_uses": len(clean.uses)}
+            "clean_budget_usd": clean.budget, "clean_budget_reached": clean.capped, "clean_uses": clean.paid_calls()}
 
 
 def relink():
@@ -727,7 +731,7 @@ def main() -> int:
           + ("; the month's budget is reached: the rest waits for next month or a higher budget" if spend.capped else ""),
           flush=True)
     if clean is not None:
-        print(f"==> cleaning: spent ${clean.spent:.2f} this run in {len(clean.uses)} paid calls, "
+        print(f"==> cleaning: spent ${clean.spent:.2f} this run in {clean.paid_calls()} paid calls, "
               f"${clean.before + clean.spent:.2f} of ${clean.budget:.2f} this month"
               + ("; the cleaning cap is reached: further edits wait for next month or a higher cap" if clean.capped else ""),
               flush=True)

@@ -302,9 +302,9 @@ Two monthly budgets (UTC calendar month) per environment, each with its own spen
 - `SCRAPER_STANDARDISE_CLEAN_BUDGET_USD`, the cleaning cap (owner 2026-11-05): the hosted clean-up edits (at list price)
   and their clean checks. Each run keeps it in `<env>/standardise-test/clean-spend/<YYYY-MM>/<run id>.json`, which also
   lists every paid call (`uses`: when, source, photo, SKU, listing, model, edit or check, what it cost, a failed call
-  included at the price it counted). A call the service answered with a 4xx did no work and costs nothing (`usd` 0,
-  `refused` its status), for the judge as for an edit; any other failure may have been billed and counts at its
-  price. An edit is reserved together with its check, so the cap never sends a copy the run
+  included at the price it counted). A call refused before any work (`HOSTED_REFUSED_CODES`: 400, 401, 402, 403, 404,
+  413, 422, 429) costs nothing (`usd` 0, `refused` its status), for the judge as for an edit; any other failure (a
+  408 among them: a request timeout can follow upstream work) may have been billed and counts at its price. An edit is reserved together with its check, so the cap never sends a copy the run
   cannot then check; a reached cap stops only the cleaning, the judge and the GPU go on. Unset: no edit is paid, and the
   run says so once. The edits also need the clean step on (`SCRAPER_STANDARDISE_CLEAN`).
 

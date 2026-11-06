@@ -107,6 +107,11 @@ class Spend:
                 self.before = before
         self._keep()
 
+    def paid_calls(self):
+        """How many of the listed calls were paid for (a refused one is listed at $0 and is none)."""
+        with self._lock:
+            return sum(1 for use in self.uses if not use.get("refused"))
+
     def record(self, use):
         """List one paid call (its fields as given, stamped with when it was paid), kept with the run's total."""
         with self._lock:
@@ -255,18 +260,18 @@ def paid(spend, price, call, what, use=None):
 
 
 def refused(exc):
-    """The status of a hosted call's 4xx answer, or None: the service refused the request before doing any work, so
-    nothing was billed (an auth, balance or rate refusal as much as a model refusing the photo)."""
-    if isinstance(exc, httpx.HTTPStatusError) and 400 <= exc.response.status_code < 500:
+    """The status when a hosted call was refused before any work was done (HOSTED_REFUSED_CODES: a model refusing the
+    photo as much as an auth, balance or rate refusal), so nothing was billed; None for any other failure."""
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in C.HOSTED_REFUSED_CODES:
         return exc.response.status_code
     return None
 
 
 def settled(spend, price, call, what, use=None):
-    """(answer, cost) of one hosted call whose price is already reserved, settled to what it cost. A call the service
-    refused (refused: a 4xx) did no work and costs nothing. Any other failure may have been billed (sent, then lost), and
-    an answer without its cost has one: both count at the reserved price, never as free. With `use`, the call is listed
-    in the spend (record) at what it counted, a failed one included."""
+    """(answer, cost) of one hosted call whose price is already reserved, settled to what it cost. A call refused before
+    any work (refused: HOSTED_REFUSED_CODES) costs nothing. Any other failure may have been billed (sent, then lost),
+    and an answer without its cost has one: both count at the reserved price, never as free. With `use`, the call is
+    listed in the spend (record) at what it counted, a failed or refused one included."""
     try:
         answer, cost = call()
     except BaseException as exc:
@@ -506,9 +511,11 @@ def clean_listing(client, rounds, listing, exclude, spend, owner=None, click=Non
     never used: click_problem)."""
     (_, gpu), (_, cl) = rounds
     src = listing["source"]
+    if owner is not None:
+        return
     if click is not None and click_problem(client, gpu[src], listing, click, exclude) is not None:
         click = None
-    if owner is not None or cleaned_copies(cl[src], listing, click):
+    if cleaned_copies(cl[src], listing, click):
         return
     picked, complete = choose(client, rounds[:1], listing, exclude)
     if picked is not None or not complete:             # not fully judged: nothing is cleaned yet (the report counts it pending)

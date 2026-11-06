@@ -775,6 +775,36 @@ def test_a_judge_call_refused_with_a_4xx_costs_nothing(monkeypatch):
     assert spend.spent == 0 and spend.reserved == pytest.approx(0, abs=1e-9)
 
 
+def test_a_judge_timeout_after_upstream_work_counts_at_its_price(monkeypatch):
+    # review of #530: only statuses known to come before any work are free; a 408 (OpenRouter's request timeout) may
+    # follow upstream work, so it counts as billed
+    import httpx
+    s3 = _S3({f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    late = httpx.HTTPStatusError("408", request=httpx.Request("POST", "https://q"), response=httpx.Response(408))
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: (_ for _ in ()).throw(late))
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    spend = sel.Spend(10)
+    with pytest.raises(httpx.HTTPStatusError):
+        sel.choose(s3, rounds, _listing(A), set(), spend)
+    assert spend.spent == pytest.approx(C.JUDGE_PRICE_USD)
+
+
+def test_only_the_statuses_known_to_come_before_any_work_are_free():
+    import httpx
+    def error(code):
+        return httpx.HTTPStatusError(str(code), request=httpx.Request("POST", "https://q"), response=httpx.Response(code))
+    assert [code for code in (400, 401, 402, 403, 404, 408, 409, 413, 422, 425, 429, 499, 500)
+            if sel.refused(error(code))] == list(C.HOSTED_REFUSED_CODES)
+    assert sel.refused(TimeoutError("no answer")) is None
+
+
+def test_a_listing_the_owner_chose_reads_nothing_of_its_click(monkeypatch):
+    monkeypatch.setattr(sel, "click_problem", lambda *a: pytest.fail("the click was read"))
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    sel.clean_listing(s3, rounds, _listing(A, B), set(), sel.Spend(10), owner=("v9", A), click=_click(B))
+    assert edits == []
+
+
 def test_a_call_that_may_have_been_billed_still_counts_at_its_price(monkeypatch):
     import httpx
     s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")

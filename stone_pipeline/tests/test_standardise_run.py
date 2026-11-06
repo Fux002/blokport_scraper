@@ -565,6 +565,13 @@ def test_a_click_is_new_work_though_another_photo_of_its_listing_has_a_cleaned_c
     assert list(taken) == ["SEN-1"] and waiting == []
 
 
+def test_two_clicked_listings_showing_one_photo_price_its_gpu_work_once(monkeypatch):
+    monkeypatch.setattr(C, "RUN_SLICE", 1)
+    s, _ = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-3", "SEN-3", A)), backlog=())
+    taken, waiting = runner.clicks_to_finish(s, _finish_price(1, 2), math.inf)
+    assert sorted(taken) == ["SEN-1", "SEN-3"] and waiting == []
+
+
 def test_a_click_s_price_counts_every_copy_its_gpu_round_runs(monkeypatch):
     # the clicks' GPU round runs the listing's older cleaned copy too (clean_todo): its slice is part of the price
     monkeypatch.setattr(C, "RUN_SLICE", 1)
