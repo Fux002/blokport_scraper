@@ -140,6 +140,8 @@ resource "aws_ecr_lifecycle_policy" "this" {
 # would run an image the build rules can expire. Each prod image is looked up by its configured tag and must carry its
 # pin tag on that same image (same digest), or the plan fails. The prod modules take their tag from these lookups, so
 # a targeted plan of a prod module runs the check too. Prod only: dev and a brand with prod off read nothing.
+# The other failure, "reading ECR Images: couldn't find resource" with data.aws_ecr_image.prod_service / prod_gpu,
+# means the configured prod tag itself is not in ECR: expired, or mistyped in the tfvars.
 locals {
   prod_pin_tag     = "prod-${substr(var.prod_image_tag, 0, 12)}"
   prod_gpu_pin_tag = "prod-gpu-${substr(trimprefix(var.prod_gpu_image_tag, "gpu-"), 0, 12)}"

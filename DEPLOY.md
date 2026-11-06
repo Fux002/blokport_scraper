@@ -166,7 +166,9 @@ Then apply the prod modules the change touches with the brand's tfvars, e.g.
 
 The plan checks the pins (`infra/main.tf`, `data.aws_ecr_image.prod_service` / `prod_gpu`): each prod image is looked
 up by its configured tag and must carry `prod-<sha12>` / `prod-gpu-<sha12>` on that same image, or the plan fails
-with "is not pinned: add the tag ... to that same image". The prod modules take their tags through these lookups,
+with "is not pinned: add the tag ... to that same image". A plan that fails with "reading ECR Images: couldn't find
+resource" on `data.aws_ecr_image.prod_service` / `prod_gpu` means the configured prod tag itself is not in ECR
+(expired, or mistyped in the tfvars). The prod modules take their tags through these lookups,
 so a targeted plan of a prod module runs the check too. The standardise image needs no check: its tfvars name its
 pin tag itself.
 
