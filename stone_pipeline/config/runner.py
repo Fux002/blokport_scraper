@@ -388,7 +388,7 @@ def _give_way_then_launch(rec: dict, launch) -> None:
 def start_run(sources=None, stage="all", launch=None, close_only=False) -> tuple[dict, int]:
     """Kick off a produce. `sources` None -> every enabled source, else an explicit subset; `stage`
     is scrape / catalog / all (how far to run). Returns (record, http_status): 202 started, 409 if a
-    run is already in flight or a named source is paused, delisted or disabled, 400 on a bad stage. `scope` (the explicit subset, internal) is what
+    run is already in flight or a named source is paused or delisted, 400 on a bad stage. `scope` (the explicit subset, internal) is what
     actually scopes the subprocess; `sources` is the resolved list shown to the caller. `close_only`
     (photos only, an operator's action): the photos run makes the chosen photos' close-ups again
     instead of picking and judging (STANDARDISE_PROCESS.md)."""

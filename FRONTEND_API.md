@@ -26,6 +26,8 @@ base URL behind your proxy. Every request is bearer-gated; a bad/absent token re
 | `PUT` | `/config/v1/sources/<name>` | create OR update (full object; missing fields fall to defaults). **Also the promote-to-auto action: PUT with `"mode":"auto"`.** | body `<source>` -> saved `<source>`; `400` on a bad/duplicate/adapterless source |
 | `DELETE` | `/config/v1/sources/<name>` | remove permanently (purge qty-0 products + drop config) | `409` if the source still has LIVE products (delist first) |
 
+A `<source>`'s `lifecycle` is exactly one of `active` | `paused` | `delisted`.
+
 #### Image pipeline switch (`image_pipeline`, 2026-11-02)
 `<source>` carries **`image_pipeline`** (bool, default `true`): suggested label **"Image pipeline"**, a toggle on the
 source edit page and a column/badge in the list.

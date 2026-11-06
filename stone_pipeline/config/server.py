@@ -291,7 +291,7 @@ def _post_delist(params, body, query):
 
 def _post_pause(params, body, query):
     # freeze a source WITHOUT touching its stock: {"sources": ["zucchi", ...]}. Pause stops scraping
-    # (lifecycle=paused, disabled) but leaves products live & buyable at their last values.
+    # (lifecycle=paused, enabled 0) but leaves products live & buyable at their last values.
     from stone_pipeline import lifecycle
     result, code = lifecycle.pause(_sources_of(body))
     return code, result
@@ -828,7 +828,7 @@ _NEW_SOURCE_STATE = {"enabled": True, "lifecycle": "active"}
 
 def _source_state_conflict(name: str, stored: dict | None, body: dict) -> tuple[int, dict] | None:
     """`enabled` and `lifecycle` are set only by POST /pause, /resume and /delist, which keep the two in step (a
-    delisted source is disabled so no scrape restocks it). The admin form sends `enabled` back at the value it
+    delisted source has enabled 0 so no scrape restocks it). The admin form sends `enabled` back at the value it
     read, so a state field equal to the source's current state is that round trip and is accepted; any other
     value is a stale form or a flip past the verbs (it re-enabled a delisted vendor), refused with 409. A null
     field reads as absent, like every optional field."""

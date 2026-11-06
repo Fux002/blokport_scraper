@@ -54,17 +54,53 @@ def test_the_run_route_refuses_a_delisted_source():
     assert code == 409 and "polonine" in body["error"] and "delisted" in body["error"]
 
 
-@pytest.mark.parametrize("lifecycle", [None, "active"])
-def test_a_disabled_row_without_a_lifecycle_reads_disabled_and_is_refused_by_the_same_name(lifecycle):
-    # legacy rows: enabled 0 with lifecycle NULL, or 'active' (a settings PUT used to flip enabled alone). The listing
-    # and the run guard read ONE derivation of the state, so the list cannot call "active" what /run refuses, and
-    # the guard refuses what `all` (enabled only) would never run
-    store.set_state("varsha", lifecycle=lifecycle, enabled=False)
-    assert store.get_row("varsha")["lifecycle"] == "disabled"
+def test_lifecycle_is_one_derivation_of_exactly_active_paused_delisted():
+    derive = store.effective_lifecycle
+    assert [derive(stored, 1) for stored in (None, "active", "paused", "delisted")] == ["active", "active", "paused", "delisted"]
+    assert [derive(stored, 0) for stored in (None, "active", "paused", "delisted")] == ["paused", "paused", "paused", "delisted"]
+
+
+def _raw_state(conn, source):
+    r = conn.execute("SELECT enabled, lifecycle FROM source WHERE source = ?", (source,)).fetchone()
+    return (r["enabled"], r["lifecycle"])
+
+
+def test_the_migration_labels_every_disabled_row_paused_once(tmp_path):
+    from contextlib import closing
+    db = tmp_path / "legacy.db"
+    rows = {"null_off": (0, None), "active_off": (0, "active"), "null_on": (1, None), "active_on": (1, "active"),
+            "delisted": (0, "delisted"), "paused": (0, "paused")}
+    with closing(store.open_store(db)) as conn:
+        for name, (enabled, label) in rows.items():
+            conn.execute("INSERT INTO source (source, enabled, lifecycle, updated_at) VALUES (?, ?, ?, 'x')",
+                         (name, enabled, label))
+        conn.execute("PRAGMA user_version = 9")
+        conn.commit()
+    expected = {**rows, "null_off": (0, "paused"), "active_off": (0, "paused")}
+    with closing(store.open_store(db)) as conn:
+        assert {name: _raw_state(conn, name) for name in rows} == expected
+    with closing(store.open_store(db)) as conn:            # the step run again changes nothing
+        conn.execute("PRAGMA user_version = 9")
+        conn.commit()
+    with closing(store.open_store(db)) as conn:
+        assert {name: _raw_state(conn, name) for name in rows} == expected
+
+
+def test_disabling_without_a_label_stores_paused_and_never_relabels_a_delisted_source():
+    from contextlib import closing
+    store.set_state("varsha", enabled=False)
+    store.set_state("polonine", lifecycle="delisted", enabled=False)
+    store.set_state("polonine", enabled=False)
+    with closing(store.open_store()) as conn:
+        assert _raw_state(conn, "varsha") == (0, "paused") and _raw_state(conn, "polonine") == (0, "delisted")
+
+
+def test_a_disabled_source_lists_paused_and_run_refuses_it_by_the_same_name():
+    store.set_state("varsha", enabled=False)
     code, body = server.dispatch("GET", ["sources"], None)
-    assert {r["source"]: r["lifecycle"] for r in body["sources"]} == {"polonine": "active", "varsha": "disabled"}
+    assert {r["source"]: r["lifecycle"] for r in body["sources"]} == {"polonine": "active", "varsha": "paused"}
     code, body = server.dispatch("POST", ["run"], {"sources": ["varsha"], "stage": "scrape"})
-    assert code == 409 and "varsha (disabled)" in body["error"]
+    assert code == 409 and "varsha (paused)" in body["error"]
 
 
 # -- 2: `enabled` is owned by pause / resume / delist ---------------------------------------------------------
