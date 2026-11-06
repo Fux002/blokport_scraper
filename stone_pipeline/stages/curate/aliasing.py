@@ -5,7 +5,6 @@ emission of the alias additions in the import-file shape (phase 3)."""
 from __future__ import annotations
 
 from stone_pipeline.config.settings import category
-from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import title_case
 from stone_pipeline.matching import projections as proj
 from stone_pipeline.reference.loaders import type_slug_from_key
@@ -13,17 +12,7 @@ from stone_pipeline.stages.curate.context import Curation, CurationResult, spell
 from stone_pipeline.stages.curate.existing import alias_list
 from stone_pipeline.stages.curate.keys import active_branches, image_filename, image_url
 from stone_pipeline.stages.curate.review import attr_surface, review_evidence
-
-
-def non_exact_confirmed(row: CanonicalRow) -> bool:
-    m = row.variation_method or ""
-    # descriptor_* matches recovered the variety from an empty variety_match_key, so the
-    # only spelling available is the full raw_name (with its format word) -- not a clean
-    # alias. Treat them like exact (no alias proposal) so we do not emit "X Marble Slab".
-    return bool(row.variation_id) and not (
-        m in ("exact", "override") or m.startswith("exact")
-        or m.startswith("projection") or m.startswith("descriptor")
-    )
+from stone_pipeline.state.writeback import is_learned
 
 
 def by_name_owner(c: Curation, nm: str, prefer_type: str = "") -> tuple[str, str] | None:
@@ -45,7 +34,11 @@ def collect_matched_aliases(c: Curation) -> None:
         spelling = spelling_of(row)
         if not spelling:
             continue
-        if non_exact_confirmed(row):
+        # ONE rule for "this bind was a guess worth keeping as an alias", shared with the write-back
+        # (is_learned: a phonetic or fuzzy tier, through the clean_variety_/operator_type_ wrappers). Every
+        # other bind (exact, projection, override, descriptor) is re-derived from the seed each run, so
+        # proposing it as an alias would only make a pick outlive a later seed correction.
+        if row.variation_id and is_learned(row.variation_method):
             # attach to the variety the row MATCHED, by its (name, Key-type) -- the Key is the authority;
             # fall back to the by-name owner when the match carries no key (defensive / test rows).
             nnm = proj.norm(row.variation_name or "")

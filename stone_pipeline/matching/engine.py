@@ -232,43 +232,43 @@ class VariationEngine:
         # a single id resolves directly; several ids for the same surface (the
         # reference has duplicate names) are disambiguated by type/colour blocking,
         # so a real name like "White Travertine" still resolves cleanly
-        # IDENTITY beats ALIAS membership: when the surface hits several varieties but the query is the
-        # CANONICAL NAME of some of them, keep only those. 'Arabescato' the query is the variety named
-        # 'Arabescato', not 'White Ornamental' (which merely carries 'Arabescato' as an alias) nor the
-        # longer 'Arabescato Arni'. Only narrows the set; if none (query is an alias of all) or several
-        # (same name across types) match by name, the block + ambiguity logic below still applies.
-        if len(ids) > 1 and query:
-            named = {cid for cid in ids
-                     if (c := self._candidate(cid)) and proj.norm(c.canonical) == proj.norm(query)}
-            if named:
-                ids = named
-                method = f"{method}_name"
-        # Narrow by TYPE, which alone identifies the variety: identity is (type, name) and no two varieties
-        # share it. Colour is a product ATTRIBUTE, never part of identity -- use it only to break a tie the
-        # type left, NEVER to reject a type-identified variety. A scraped colour the catalog does not yet
-        # list for that variety is a new-combination gap to APPROVE downstream (leaf-gap), not an identity
-        # failure -- so 'Matterhorn Dolomite White' resolves to Matterhorn Dolomite (Grey/Blue) with White
-        # surfaced as a new colour, instead of gapping ambiguous because White belongs to the Marble twin.
+        # Narrow by TYPE FIRST, which alone identifies the variety: identity is (type, name) and no two
+        # varieties share it, so keep ONLY candidates of the scraped type -- for one candidate or many, the
+        # same rule. by_type is EMPTY when the scraped type matches no same-name
+        # variety: a NEW type, which must not bind to a wrong-type variety on name alone (else an operator's
+        # mint of the name as a different type is silently swallowed onto it). Empty -> no resolve here -> the
+        # row surfaces as missing_variation and curate mints the chosen type. Type must come before the
+        # own-name rule below: a WRONG-type variety owning the queried name would otherwise discard the
+        # right-type varieties carrying it as an alias, leave nothing for the type, and drop the row to the
+        # fuzzy tier's arbitrary pick ('Anatolia Black' Marble -> Nero Marquina, the name being a granite's).
+        blocked = False
         if block_type:
-            # (type, name) is the identity, so keep ONLY candidates of the scraped type -- for one candidate
-            # or many, the same rule. by_type is EMPTY when the scraped type matches no same-name variety: a
-            # NEW type, which must not bind to a wrong-type variety on name alone (else an operator's mint of
-            # the name as a different type is silently swallowed onto it). Empty -> no resolve here -> the row
-            # surfaces as missing_variation and curate mints the chosen type. Genuine same-type duplicates
-            # still keep 2+ ids and route to the ambiguous-duplicate review below.
             by_type = {cid for cid in ids if self._block_ok(cid, block_type, "")}
-            if by_type != ids:
-                method = f"{method}_blocked"
+            blocked = by_type != ids
             ids = by_type
-            if len(ids) > 1 and block_color:               # a genuine same-type tie -> colour breaks it
-                by_color = {cid for cid in ids if self._block_ok(cid, "", block_color)}
-                if len(by_color) == 1:
-                    ids = by_color
-        elif len(ids) > 1 and block_color:                 # type-less scrape: colour is the only signal
+        # IDENTITY beats ALIAS membership, inside the type: when the surface hits several varieties but the
+        # query is the CANONICAL NAME of some of them, keep only those. 'Arabescato' the query is the variety
+        # named 'Arabescato', not 'White Ornamental' (which merely carries 'Arabescato' as an alias) nor the
+        # longer 'Arabescato Arni'. Only narrows the set; if none (query is an alias of all) or several
+        # (a genuine same-type duplicate) match by name, the colour/origin + ambiguity logic below applies.
+        named = False
+        if len(ids) > 1 and query:
+            own = {cid for cid in ids
+                   if (c := self._candidate(cid)) and proj.norm(c.canonical) == proj.norm(query)}
+            if own:
+                ids, named = own, True
+        method = f"{method}{'_name' if named else ''}{'_blocked' if blocked else ''}"
+        # Colour is a product ATTRIBUTE, never part of identity -- use it only to break a tie the type left,
+        # NEVER to reject a type-identified variety. A scraped colour the catalog does not yet list for that
+        # variety is a new-combination gap to APPROVE downstream (leaf-gap), not an identity failure -- so
+        # 'Matterhorn Dolomite White' resolves to Matterhorn Dolomite (Grey/Blue) with White surfaced as a new
+        # colour, instead of gapping ambiguous because White belongs to the Marble twin.
+        if len(ids) > 1 and block_color:
             by_color = {cid for cid in ids if self._block_ok(cid, "", block_color)}
             if len(by_color) == 1:
                 ids = by_color
-                method = f"{method}_blocked"
+                if not block_type:                         # type-less scrape: colour was the only signal
+                    method = f"{method}_blocked"
         # ORIGIN, the last narrowing rung: a tie that type and colour left is broken by which candidates
         # DOCUMENT the product's origin evidence (a trade name means different stones to different sellers;
         # the seller's country tells them apart). Narrows only -- see _narrow_by_origin.
@@ -396,31 +396,34 @@ class VariationEngine:
         # aliases at the SAME score: 'Arabescatto' (typo) resolves to 'Arabescato' the variety, not to
         # 'White Ornamental' which merely carries 'Arabescato' as an alias. _fuzzy_score(query, canonical)
         # == best exactly when the canonical name is (one of) the best-scoring surface(s).
-        scored.sort(key=lambda t: (t[2], _fuzzy_score(query, t[1]) >= t[2]), reverse=True)
+        def rank(t: tuple[str, str, float]) -> tuple[float, bool]:
+            return t[2], _fuzzy_score(query, t[1]) >= t[2]
+        scored.sort(key=rank, reverse=True)
 
         if scored:
             top_cid, top_name, top_score = scored[0]
             # length/token guard: a short generic candidate must not win
             if top_score >= self.auto_accept and self._passes_guard(query, top_name):
-                # HOLD-not-guess: mirror the exact tier -- if the top fuzzy score is TIED between candidates
-                # that share a canonical name (the same variety name under >1 stone type, e.g. 'Calacatta
-                # Gold' marble vs dolomite_marble), auto-accepting picks one by arbitrary export-row order.
-                # Route that duplicate to review, flagged AMBIGUOUS so the match-stage retries do not fire
-                # on it (same-type ambiguity, the same rule as the exact tier -- one detector, one flag). A
-                # shared family ALIAS across distinct varieties ('Arabescato' -> many 'Arabescato ...') has
-                # different canonicals, so it still resolves; a lone typo ('Bianco Carara') is unaffected.
-                tied = [cid for cid, _n, s in scored if s == top_score]
+                # HOLD-not-guess: a top fuzzy rank (score, then a canonical-name hit over an alias hit) TIED
+                # between several varieties is a guess between different stones, so it goes to review;
+                # auto-accepting would pick one by export-row order (the pick swaps when the file order
+                # swaps) and the write-back would learn it. Origin breaks the tie exactly like an exact-tier
+                # tie (one rule, one rung). A tie between candidates that share a canonical name (a genuine
+                # same-name duplicate, e.g. two 'Calacatta Gold') is flagged AMBIGUOUS so the match-stage
+                # retries do not fire on it (the same detector and flag as the exact tier). A tie between
+                # DISTINCT stones ('Arabescatto' equidistant from two 'Arabescato ...' varieties through their
+                # shared family alias) is not: a stronger raw spelling may still name one of them, as for an
+                # exact-tier collision. A lone winner ('Bianco Carara') still binds.
+                tied = [t[0] for t in scored if rank(t) == rank(scored[0])]
                 if len(tied) > 1:
-                    # a fuzzy tie is broken by origin exactly like an exact-tier tie (one rule, one rung)
                     by_origin = self._narrow_by_origin(set(tied), block_origin)
-                    if len(by_origin) == 1:
-                        top_cid = next(iter(by_origin))
-                        top_name = next(n for c, n, _s in scored if c == top_cid)
-                        return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy_origin", top_score,
-                                              scored[:3])
-                if self._duplicate_canonical_group(tied):
-                    return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3],
-                                          ambiguous=True)
+                    if len(by_origin) > 1:
+                        return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3],
+                                              ambiguous=bool(self._duplicate_canonical_group(tied)))
+                    top_cid = next(iter(by_origin))
+                    top_name = next(n for c, n, _s in scored if c == top_cid)
+                    return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy_origin", top_score,
+                                          scored[:3])
                 return VariationMatch(top_cid, top_name, Confidence.medium, "fuzzy", top_score, scored[:3])
             if top_score >= self.review_floor:
                 return VariationMatch(None, None, Confidence.low, "review", top_score, scored[:3])

@@ -12,6 +12,7 @@ import re
 from stone_pipeline.core.schema import GapKind
 from stone_pipeline.core.text import looks_code_shaped, looks_like_artifact
 from stone_pipeline.matching import projections as proj
+from stone_pipeline.reference.loaders import type_slug_from_key
 from stone_pipeline.stages.curate.aliasing import alias_and_backfill, collision_owners
 from stone_pipeline.stages.curate.context import (Curation, is_generic, is_token_subset, level,
                                                   variety_identity)
@@ -156,6 +157,11 @@ def _resolve_existing(c: Curation, row, gap, name: str, stone_type: str, clean: 
     return True
 
 
+def _canonical_types(c: Curation, nn: str) -> set[str]:
+    """The types of the existing varieties NAMED nn (not those merely carrying it as an alias)."""
+    return {t for n, t in c.existing_surface.get(nn, set()) if n == nn}
+
+
 def _resolve_nearest(c: Curation, row, gap, name: str, stone_type: str, clean: str) -> bool:
     """RESOLVE against the fuzzy nearest existing variety: the tier-7 model uses name + type + colour to tell
     a real alias ('Marjan' -> 'Marjan Silver') from a distinct sibling ('Cristallo Divine' vs 'Cristallo
@@ -165,14 +171,21 @@ def _resolve_nearest(c: Curation, row, gap, name: str, stone_type: str, clean: s
     if not nearest or is_generic(c, clean):
         return False
     if c.resolver is not None:
-        nt, nc, nal = c.near_meta.get(proj.norm(nearest), ("", [], []))
+        # The nearest is ONE variety, (name, type): its type is the matcher candidate's Key type (the type
+        # authority), never looked up by name, since several types share a name ('Aqua Blue' granite, marble).
+        nn = proj.norm(nearest)
+        nt = proj.norm(type_slug_from_key(gap.nearest_key)) if gap.nearest_key else ""
+        nc, nal = c.near_meta.get((nn, nt), ([], []))
         d = c.resolver.decide_against(clean, stone_type, [gap.suggested_color or ""], [nearest, *nal], nt, nc)
-        if d.verdict == "alias":
-            # confident -> confirm; attach to the nearest variety of its OWN type, so a spelling lands on
-            # the right stone, not an arbitrary same-name one.
-            c.alias_new.setdefault((proj.norm(nearest), proj.norm(nt)), set()).add(name)
+        # A confident alias is confirmed onto that variety only when its (name, type) is certain: the
+        # candidate's Key named the type, and the row's own type agrees with it (decide_against gated a
+        # cross-type alias to review) or, for a TYPE-LESS row, the name is held by that one type only.
+        # Otherwise the confirmation would pick the row's type from whichever same-name variety the fuzzy
+        # tier happened to rank first, so it is held for the operator to state the variety instead.
+        if d.verdict == "alias" and nt and (stone_type or len(_canonical_types(c, nn)) == 1):
+            c.alias_new.setdefault((nn, nt), set()).add(name)
             return True
-        if d.verdict == "review":
+        if d.verdict in ("alias", "review"):
             hold_similar(c, clean, stone_type, nearest, row, gap, d.prob)
             return True
         return False                                # verdict "mint" -> a new variety

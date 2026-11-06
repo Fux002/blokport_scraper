@@ -114,14 +114,15 @@ class AliasResolver:
 
 def from_backbones():
     """Build the nearest-variety lookup from every category's backbone and return
-    (resolver, name_norm -> (stone_type, colors, aliases)) -- the lookup the mint decision uses for the
-    nearest variety's type + aliases. The resolver is deterministic (no labelled-data requirement), so it is
-    ALWAYS available (never (None, {}))."""
+    (resolver, (name_norm, type_norm) -> (colors, aliases)) -- the lookup the mint decision uses for the
+    nearest variety's colours + aliases. Keyed by (name, type), the variety identity: one name is held by
+    several types ('Aqua Blue' granite, marble, ...), and a name-only key kept whichever loaded last. The
+    resolver is deterministic (no labelled-data requirement), so it is ALWAYS available (never (None, {}))."""
     from stone_pipeline.config.settings import CATEGORIES
     from stone_pipeline.matching import projections as proj
     from stone_pipeline.reference.loaders import load_backbone
 
-    meta: dict[str, tuple] = {}
+    meta: dict[tuple[str, str], tuple] = {}
     seen: set = set()
     for c in CATEGORIES:
         path = c.backbone_path
@@ -130,7 +131,7 @@ def from_backbones():
         seen.add(path)
         for vlist in load_backbone(path).by_norm_name.values():
             for v in vlist:
-                meta[proj.norm(v.variant)] = (v.stone_type, v.colors, v.aliases)
+                meta[(proj.norm(v.variant), proj.norm(v.stone_type))] = (v.colors, v.aliases)
     log.info("alias resolver ready (deterministic name-identity)",
              extra={"extra_fields": {"varieties": len(meta),
                                      "alias_floor": SETTINGS.curation.alias_char_floor, "review_floor": SETTINGS.curation.alias_char_review_floor}})

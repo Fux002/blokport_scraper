@@ -14,6 +14,7 @@ from stone_pipeline.stages.curate.context import Curation, CurationResult, spell
 from stone_pipeline.stages.curate.keys import BRANCHES, active_branches, core, gen_key, image_filename, image_url
 from stone_pipeline.stages.curate.review import (attr_surface, hold_retired, named_with_types, review_card,
                                                  review_evidence)
+from stone_pipeline.state.writeback import is_learned
 
 log = logfmt.get_logger("curate")
 
@@ -180,7 +181,9 @@ def leaf_updates(rows: list[CanonicalRow], result: CurationResult) -> None:
                                      ("quality", g.suggested_quality)):
                 if not value:
                     continue
-                key = (proj.norm(row.variation_name or ""), attribute, proj.norm(value))
+                # (variety, type) is the identity: a same-name variety of another type is its own card
+                key = (proj.norm(row.variation_name or ""), proj.norm(row.type_name or ""), attribute,
+                       proj.norm(value))
                 if key in seen_leaf:
                     continue
                 seen_leaf.add(key)
@@ -192,8 +195,8 @@ def leaf_updates(rows: list[CanonicalRow], result: CurationResult) -> None:
                     "currently_allowed": g.nearest_existing or "",
                     "match_method": row.variation_method or "",
                     "match_confidence": row.variation_confidence or "",
-                    "verdict": "likely_real" if (row.variation_method or "").startswith(("exact", "projection"))
-                    else "verify_match",
+                    # the same rule as the alias write-back: a guessed bind (is_learned) is verified first
+                    "verdict": "verify_match" if is_learned(row.variation_method) else "likely_real",
                     "example_url": g.example_src_url or "",
                 })
 
