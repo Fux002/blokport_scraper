@@ -41,7 +41,9 @@ COPY . /app
 RUN for f in /app/from_medusa/*/variants_export_base.csv; do [ -e "$f" ] && cp "$f" "${f%.csv}.seed.csv"; done
 RUN chmod +x /app/deploy/run_pipeline.sh
 
-# Default run: scrape -> pipeline -> catalog -> push artifacts to S3 (staging).
+# The entrypoint dispatches on RUN_MODE (deploy/run_pipeline.sh: the GPU jobs and the ad-hoc task; an unset mode exits 2).
+# The sync service runs this image with its own entryPoint per container (the sync and config servers), and the produce
+# runs inside the config container (POST /config/v1/run), never through this entrypoint.
 ENTRYPOINT ["/app/deploy/run_pipeline.sh"]
 
 
@@ -168,7 +170,8 @@ RUN mkdir -p /app/models \
        https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth \
     && echo "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1  /app/models/RealESRGAN_x4plus.pth" | sha256sum -c - \
     && curl -fsSL -o /app/models/big-lama.pt \
-       https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt
+       https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt \
+    && echo "7ba7aa7ac37a4d41fdbbeba3a2af7ead18058552997e3a3cd1a3b2210c9e6b4c  /app/models/big-lama.pt" | sha256sum -c -
 RUN python -c "from huggingface_hub import snapshot_download as d; \
     d('facebook/sam-vit-huge', revision='87aecf0df4ce6b30cd7de76e87673c49644bdf67', allow_patterns=['*.json','*.txt','model.safetensors']); \
     d('IDEA-Research/grounding-dino-base', revision='12bdfa3120f3e7ec7b434d90674b3396eccf88eb', ignore_patterns=['*.bin']); \

@@ -85,40 +85,45 @@ resource "aws_ecr_repository" "this" {
 resource "aws_ecr_lifecycle_policy" "this" {
   count      = var.create_ecr ? 1 : 0
   repository = aws_ecr_repository.this[0].name
-  # ECR evaluates rules by priority and an image matched by a higher rule is NOT re-evaluated by a
-  # lower one -- so the prefix rules below PROTECT the semantic tags (core / gpu / imageproc, which can
-  # never collide with a hex git-sha) from the broad churn rule. Without this, a single "keep last N,
-  # tagStatus=any" rule expired the large, infrequently-rebuilt :gpu image once enough per-commit
-  # :<sha> images piled up, silently breaking the GPU Batch (CannotPullImageManifestError).
+  # ECR evaluates rules by priority, an image is selected by a rule when ANY of its tags matches the rule's prefix, and an
+  # image selected by a higher rule is never expired by a lower one. So the order IS the protection: an image prod runs
+  # carries its build tag too (gpu-<sha>, <sha>), and a build rule ranked above the pin rule (keep the 3 newest gpu*)
+  # would expire the pinned prod GPU image after a few GPU builds. Hence the pin rules come FIRST, one per kind of
+  # pinned image so a kind pinned often (the service) never pushes out one pinned rarely (the GPU images).
+  # Pinning an image = adding its pin tag (DEPLOY.md, "Promoting an image to prod"):
+  #   prod-gpu-<sha>          the prod texture GPU image (prod_gpu_image_tag = gpu-<sha>)
+  #   prod-<sha>              the prod service image (prod_image_tag = <sha>)
+  #   standardise-pin-<sha12> the photo process's GPU image (the tfvars reference this tag itself)
+  # After the pins: the build prefixes (gpu / imageproc / core and the standardise builds, never a hex git sha), then
+  # the per-commit <sha> churn. A single "keep last N, tagStatus=any" rule once expired the :gpu image and, on
+  # 2026-11-02, the prod GPU image mid-day and the previous prod image (CannotPullImageManifestError).
   policy = jsonencode({
     rules = [
-      { rulePriority = 1, description = "keep gpu images (:gpu + gpu-<sha>)",
-        selection    = { tagStatus = "tagged", tagPrefixList = ["gpu"], countType = "imageCountMoreThan", countNumber = 3 },
+      # listed before prod- because prod-gpu-<sha> also starts with prod-: the GPU pins keep their own count
+      { rulePriority = 1, description = "keep the pinned prod GPU images (prod-gpu-<sha>)",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["prod-gpu-"], countType = "imageCountMoreThan", countNumber = 5 },
       action = { type = "expire" } },
-      { rulePriority = 2, description = "keep imageproc images",
-        selection    = { tagStatus = "tagged", tagPrefixList = ["imageproc"], countType = "imageCountMoreThan", countNumber = 2 },
+      { rulePriority = 2, description = "keep the pinned prod images (prod-<sha>)",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["prod-"], countType = "imageCountMoreThan", countNumber = 20 },
       action = { type = "expire" } },
-      { rulePriority = 3, description = "keep :core",
-        selection    = { tagStatus = "tagged", tagPrefixList = ["core"], countType = "imageCountMoreThan", countNumber = 2 },
-      action = { type = "expire" } },
-      # The pinned prod images (tagged prod-<sha> when pinned: the current one and the ones to roll back to) and the
-      # standardise GPU image (standardise-edit-<sha>-x, rebuilt rarely) must never fall to the churn rule below: on
-      # 2026-11-02 it expired the GPU image mid-day (CannotPullImageManifestError) and the previous prod image.
-      { rulePriority = 4, description = "keep the pinned prod images (prod-<sha>)",
-        selection    = { tagStatus = "tagged", tagPrefixList = ["prod-"], countType = "imageCountMoreThan", countNumber = 5 },
-      action = { type = "expire" } },
-      # The GPU base every standardise image is built on (deploy/standardise.Dockerfile pins it by digest): its own
-      # prefix, so no number of releases can push it out of the pins' 20.
-      { rulePriority = 5, description = "keep the standardise GPU bases (standardise-base-<sha>)",
-        selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-base-"], countType = "imageCountMoreThan", countNumber = 3 },
-      action = { type = "expire" } },
-      # A standardise GPU image pinned in the brand tfvars (*_standardise_image_tag) is tagged standardise-pin-<sha>:
-      # matched before the build churn below (3 newest standardise-), so it can never expire an image a job
-      # definition runs. Pins are few (one per release); this keeps the last 20.
-      { rulePriority = 6, description = "keep the pinned standardise GPU images (standardise-pin-<sha>)",
+      { rulePriority = 3, description = "keep the pinned standardise GPU images (standardise-pin-<sha>)",
         selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-pin-"], countType = "imageCountMoreThan", countNumber = 20 },
       action = { type = "expire" } },
-      { rulePriority = 7, description = "keep the standardise GPU images",
+      # The GPU base every standardise image is built on (deploy/standardise.Dockerfile pins it by digest): its own
+      # prefix, so no number of standardise builds can push it out.
+      { rulePriority = 4, description = "keep the standardise GPU bases (standardise-base-<sha>)",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-base-"], countType = "imageCountMoreThan", countNumber = 3 },
+      action = { type = "expire" } },
+      { rulePriority = 5, description = "keep gpu images (:gpu + gpu-<sha>)",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["gpu"], countType = "imageCountMoreThan", countNumber = 3 },
+      action = { type = "expire" } },
+      { rulePriority = 6, description = "keep imageproc images",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["imageproc"], countType = "imageCountMoreThan", countNumber = 2 },
+      action = { type = "expire" } },
+      { rulePriority = 7, description = "keep :core",
+        selection    = { tagStatus = "tagged", tagPrefixList = ["core"], countType = "imageCountMoreThan", countNumber = 2 },
+      action = { type = "expire" } },
+      { rulePriority = 8, description = "keep the standardise GPU images",
         selection    = { tagStatus = "tagged", tagPrefixList = ["standardise-"], countType = "imageCountMoreThan", countNumber = 3 },
       action = { type = "expire" } },
       { rulePriority = 10, description = "expire the per-commit <sha> churn beyond the last ${var.keep_last_images}",
@@ -262,11 +267,8 @@ module "gpu_enhance_dev" {
   image_repo_url = local.ecr_repo_url
   image_tag      = var.gpu_image_tag
   region         = var.region
-  # 8 vCPU = 2 g4dn.xlarge. The steady state is a produce dispatching 30-50 two-minute jobs; with one
-  # instance per job (up to 32 in parallel) each job paid a ~4 min boot and a 5 GB image pull through NAT,
-  # so instance-hours ran 2-3x the job-hours. Two warm instances queue those jobs at the same total
-  # GPU-hours. Raise temporarily for a full-catalog backfill (~53 GPU-hours), where wall-clock matters.
-  max_vcpus = 8
+  # The pool's initial ceiling; afterwards the photo process owns it (raised for a round, set back to this same value).
+  max_vcpus = var.gpu_idle_vcpus
   # FAL_KEY for the FLUX texture generation. Wired by convention to the known dev SSM param, exactly like
   # the scraper/produce secrets, so a plain apply can never strip it.
   ssm_secret_arns       = { FAL_KEY = data.aws_ssm_parameter.fal_key_dev.arn }
@@ -299,10 +301,8 @@ module "gpu_enhance_prod" {
   image_repo_url = local.ecr_repo_url
   image_tag      = var.prod_gpu_image_tag
   region         = var.region
-  # 8 vCPU = 2 g4dn.xlarge, same reasoning as dev: the per-produce jobs are two minutes each and a boot per
-  # job (plus a 5 GB image pull through NAT) dominated the GPU bill. Raise temporarily for a backfill.
-  max_vcpus   = 8
-  alert_email = var.alert_email
+  max_vcpus      = var.gpu_idle_vcpus # initial ceiling, as dev
+  alert_email    = var.alert_email
   # FAL_KEY (+ proxy) for FLUX texture gen, by convention like dev. Empty until the
   # prod SSM params are configured (local.prod_ssm_secrets), so a plain apply never strips or invents it.
   ssm_secret_arns       = local.prod_ssm_secrets
@@ -314,7 +314,7 @@ module "gpu_enhance_prod" {
 # In-VPC sync/config SERVICE (dev) -- the long-running sync + config HTTP servers
 # run in the blokport-dev cluster so Medusa reaches them over Cloud Map (private
 # DNS), NOT a Cloudflare tunnel. One task (both servers + local produce), ledger on
-# EFS. Consumes the Medusa platform's remote-state outputs (published live to state).
+# the task's local volume, snapshotted to S3. Consumes the Medusa platform's remote-state outputs.
 # =============================================================================
 data "terraform_remote_state" "platform_dev" {
   backend = "s3"
@@ -346,7 +346,7 @@ module "sync_service_dev" {
 
   target_env     = "development"
   image_repo_url = local.ecr_repo_url
-  # DEV tracks :core (= what's on main); the branch is merged. :core = bbf35a2 (WAL + local-disk ledger).
+  # DEV tracks :core (main's head, rolled by the Deploy workflow after each green CI on main).
   image_tag              = var.image_tag
   image_upgrade_batch    = var.dev_image_upgrade_batch
   run_timeout_seconds    = var.run_timeout_seconds
@@ -389,6 +389,7 @@ module "sync_service_dev" {
   standardise_clean_budget_usd    = var.dev_standardise_clean_budget_usd
   standardise_clean               = var.dev_standardise_clean
   standardise_gpu_vcpus           = var.dev_standardise_gpu_vcpus
+  standardise_idle_gpu_vcpus      = var.gpu_idle_vcpus
   standardise_job_definition_name = module.gpu_enhance_dev[0].standardise_job_definition
   standardise_job_definition_arn  = local.dev_standardise_jobdef_iam_arn
   gpu_compute_environment_arn     = module.gpu_enhance_dev[0].compute_environment_arn
@@ -480,6 +481,7 @@ module "sync_service_prod" {
   standardise_clean_budget_usd    = var.prod_standardise_clean_budget_usd
   standardise_clean               = var.prod_standardise_clean
   standardise_gpu_vcpus           = var.prod_standardise_gpu_vcpus
+  standardise_idle_gpu_vcpus      = var.gpu_idle_vcpus
   standardise_job_definition_name = module.gpu_enhance_prod[0].standardise_job_definition
   standardise_job_definition_arn  = local.prod_standardise_jobdef_iam_arn
   gpu_compute_environment_arn     = module.gpu_enhance_prod[0].compute_environment_arn

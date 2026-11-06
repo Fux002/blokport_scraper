@@ -91,7 +91,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return env.env_bool(name, default)
 
 
-def _env_int(name: str, default: int) -> int:
+def _env_int(name: str, default: int | None) -> int | None:
     """Read an integer env var: the default ONLY when unset. A set-but-malformed override fails loud at
     config import, naming the variable: an operator who typed SCRAPER_STANDARDISE_RUN_SLICE=abc meant a
     value, and silently running on the default is the no_image incident class (a run proceeding on a value
@@ -1130,7 +1130,9 @@ Your whole answer is one JSON object and nothing else:
     # backlog spreads over the pool's GPUs instead of queueing on a few.
     RUN_SLICE = _env_int("SCRAPER_STANDARDISE_RUN_SLICE", 30)
     RUN_GPU_VCPUS = _env_int("SCRAPER_STANDARDISE_GPU_VCPUS", 128)
-    IDLE_GPU_VCPUS = 8
+    # The idle ceiling is Terraform's gpu_idle_vcpus, the value it also creates the pool with: no default here, so the two
+    # can never disagree. None off AWS; setting the pool's ceiling without it fails loud (deploy.standardise_batch).
+    IDLE_GPU_VCPUS = _env_int("SCRAPER_STANDARDISE_IDLE_GPU_VCPUS", None)
     RUN_POLL_SECONDS = 60              # how often a run asks Batch whether its jobs are done ...
     RUN_MAX_WAIT_SECONDS = 12 * 3600   # ... and how long at most per wave of jobs (the slices that run at once) before it
     #                                    stops them and fails (jobs stuck, no GPU quota); above a healthy slice's longest

@@ -8,19 +8,28 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
-# Produced / downloaded data — regenerated at runtime, not part of the image.
+# Produced / downloaded data: regenerated at runtime, not part of the image.
 outputs/
 state/
 data/
 to_upload/
 review/
-from_medusa/variants_export.csv
+**/from_medusa/**/variants_export.csv
 images/
 image_pipeline/images/
 image_pipeline/to_upload/
 *.parquet
 *.bak
 failures.jsonl
+
+# Durable state and secrets: the task restores config.db and the ledger from their S3 snapshots, and a restore is
+# skipped when a local file exists (local wins), so a laptop's config.db baked into the image would replace the
+# environment's real one on every task. Never bake a SQLite db (or its -wal/-shm journal), the ledger data folder or
+# a .env. A pattern without **/ matches at the context root only, so ledger/ never excludes stone_pipeline/ledger/.
+**/*.db
+**/*.db-*
+ledger/
+**/.env
 
 # Docs (not needed at runtime)
 *.md

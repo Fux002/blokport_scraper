@@ -18,6 +18,12 @@ from stone_pipeline.config.settings import STANDARDISE as C
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
 
 
+@pytest.fixture(autouse=True)
+def _idle_ceiling(monkeypatch):
+    """The idle ceiling the service's environment carries (Terraform's gpu_idle_vcpus); unset off AWS."""
+    monkeypatch.setattr(C, "IDLE_GPU_VCPUS", 8)
+
+
 class _Batch:
     """Records what a run asks of Batch; jobs end with the statuses given, in turn per poll."""
 
@@ -853,7 +859,37 @@ def test_a_run_s_size_is_set_per_run_and_a_malformed_value_fails_loud(monkeypatc
     monkeypatch.setenv("SCRAPER_STANDARDISE_RUN_SLICE", "forty")
     with pytest.raises(ValueError, match="SCRAPER_STANDARDISE_RUN_SLICE"):
         settings._env_int("SCRAPER_STANDARDISE_RUN_SLICE", 150)
-    assert C.IDLE_GPU_VCPUS == 8                                                    # always back to idle after a run
+
+
+def _idle_ceiling_read_by_settings(value):
+    """IDLE_GPU_VCPUS as a fresh interpreter's settings read it, with SCRAPER_STANDARDISE_IDLE_GPU_VCPUS set to value (None:
+    unset). A subprocess, because settings reads the environment once, at import."""
+    import os
+    import subprocess
+    import sys
+    env = {k: v for k, v in os.environ.items() if not k.endswith("STANDARDISE_IDLE_GPU_VCPUS")}
+    if value is not None:
+        env["SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"] = value
+    out = subprocess.run([sys.executable, "-c", "from stone_pipeline.config.settings import STANDARDISE as C; "
+                          "print(C.IDLE_GPU_VCPUS)"], env=env, capture_output=True, text=True, check=True)
+    return out.stdout.strip()
+
+
+def test_the_idle_ceiling_is_the_one_terraform_gives_the_pool_and_has_no_default_of_its_own():
+    assert _idle_ceiling_read_by_settings("12") == "12"
+    assert _idle_ceiling_read_by_settings(None) == "None"
+
+
+def test_a_host_without_an_idle_ceiling_fails_before_it_touches_the_pool(monkeypatch):
+    monkeypatch.setenv("SCRAPER_GPU_QUEUE", "q")
+    monkeypatch.setattr(C, "IDLE_GPU_VCPUS", None)
+    batch = _Batch()
+    with pytest.raises(KeyError, match="SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"):
+        with gpu.raised(batch, "gpu-pool"):
+            pass
+    with pytest.raises(KeyError, match="SCRAPER_STANDARDISE_IDLE_GPU_VCPUS"):
+        gpu.set_idle(batch)
+    assert batch.ceilings == []                                                     # never raised, never guessed
 
 
 # --- open books made before their halves had a slab -----------------------------------------------------------------

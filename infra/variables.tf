@@ -34,10 +34,17 @@ variable "image_tag" {
   description = "ECR tag the DEV task runs (core | imageproc | a git sha)."
 }
 
+# The prod tags have no default: a mutable tag (core / gpu) would move prod with every dev build, so a brand that enables
+# prod (prod_staging_bucket set) must name the immutable build tag of a dev-proven image, and also pin it (its prod- /
+# prod-gpu- tag, kept by the ECR lifecycle in main.tf). Unset is fine while prod is off: the prod modules are not created.
 variable "prod_image_tag" {
   type        = string
-  default     = "core"
-  description = "ECR tag the PROD task runs. Promote the dev-proven tag here; do NOT build prod separately (avoids catalog/logic drift)."
+  default     = ""
+  description = "ECR tag the PROD service runs: the dev-proven image's immutable git-sha tag (<sha>, 40 hex, as the Deploy workflow pushes it). Promote it here; do NOT build prod separately (avoids catalog/logic drift)."
+  validation {
+    condition     = var.prod_staging_bucket == "" || can(regex("^[0-9a-f]{40}$", var.prod_image_tag))
+    error_message = "prod is enabled (prod_staging_bucket is set), so prod_image_tag must be the immutable git-sha tag (40 hex) of a dev-proven image, never a mutable tag such as core."
+  }
 }
 
 variable "gpu_image_tag" {
@@ -48,8 +55,12 @@ variable "gpu_image_tag" {
 
 variable "prod_gpu_image_tag" {
   type        = string
-  default     = "gpu"
-  description = "ECR tag the PROD GPU Batch texture job runs. Promote the dev-proven :gpu-<sha> here."
+  default     = ""
+  description = "ECR tag the PROD GPU Batch texture job runs: the dev-proven image's immutable gpu-<sha> tag (40 hex)."
+  validation {
+    condition     = var.prod_staging_bucket == "" || can(regex("^gpu-[0-9a-f]{40}$", var.prod_gpu_image_tag))
+    error_message = "prod is enabled (prod_staging_bucket is set), so prod_gpu_image_tag must be the immutable gpu-<sha> tag (40 hex) of a dev-proven GPU image, never the mutable gpu tag."
+  }
 }
 
 # --- Sizing ------------------------------------------------------------------
@@ -240,6 +251,12 @@ variable "prod_standardise_clean_budget_usd" {
   type        = string
   default     = ""
   description = "SCRAPER_STANDARDISE_CLEAN_BUDGET_USD in prod: the month's cap of the clean-up edits and their checks (USD), the owner's number. Empty = no edit is paid."
+}
+
+variable "gpu_idle_vcpus" {
+  type        = number
+  default     = 8
+  description = "The GPU pool's idle ceiling (maxvCpus), both envs: 8 vCPU = 2 g4dn.xlarge. Terraform gives the pool this value when it creates it, and the photo process (SCRAPER_STANDARDISE_IDLE_GPU_VCPUS, from this same variable) sets the pool back to it after every round. The steady state is a produce dispatching 30-50 two-minute texture jobs; with one instance per job each paid a ~4 min boot and a 5 GB image pull through NAT, so instance-hours ran 2-3x the job-hours. Two warm instances queue those jobs at the same total GPU-hours."
 }
 
 variable "dev_standardise_gpu_vcpus" {

@@ -27,21 +27,20 @@ prod_staging_bucket   = "blokport-prod-staging"
 prod_sales_channel_id = "sc_01M1GGAHFVHZ8XEY20KVZP2QV5" # Default Sales Channel, prod bootstrap
 prod_home_env         = "prod"
 
-# Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu).
-# core = current dev :core (this session's fixes, live-verified); gpu = latest built GPU image.
+# Immutable, dev-proven image tags promoted to prod (NEVER the mutable core/gpu; variables.tf refuses them). Each pinned
+# image also carries its pin tag (prod-<sha> / prod-gpu-<sha>), which the ECR lifecycle keeps (DEPLOY.md).
 prod_image_tag     = "d11da5b62972619db3f689f09d0936d3e54a93fd"     # + parallel scrape (#513), sentas Drive cards (#516), GPU image recipe (#508), #517-#521, corners (#514), status zeros (#522)
 prod_gpu_image_tag = "gpu-f0af3849c268042e7422006cb6de5ac593fcb1aa" # the texture job's image (built at #448)
 
 # The image pipeline is switched per source LIVE via the :4200 admin UI (source.image_pipeline), NOT these
-# infra flags. prod gpu image (gpu-782f18c7) == dev's :gpu digest sha256:20767ddd -> carries ben2 + reads
-# SCRAPER_ env, so auto_texture + prod bucket are safe.
-# Texture quality drip: per produce, re-make up to N legacy textures on the current best model, ONLY for
-# variants a product actually links to, once each (durable S3 marker). 257 product-backed textures are on
-# the old model today, so 300 clears the backlog in one produce and then idles at ~0 (each Key once).
+# infra flags.
 # Operator shell into the dev sync task (ECS Exec), so the ledger can be reset/inspected without the UI.
 # Dev only, on purpose: prod has no equivalent and its reset stays a UI/API action behind the run lock.
 dev_enable_execute_command = true
 
+# Texture quality drip: per produce, re-make up to N legacy textures on the current best model, ONLY for
+# variants a product actually links to, once each (durable S3 marker). N is a per-produce cap: a backlog
+# smaller than it drains in one produce, after which the drip idles at ~0 (each Key once).
 dev_image_upgrade_batch = 1000
 
 prod_image_upgrade_batch = 1000

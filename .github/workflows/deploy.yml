@@ -112,8 +112,8 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
 
-      # The import smoke: every entrypoint module the container can run (the two servers, produce, the
-      # RUN_MODE scripts) must IMPORT inside the built image before it is pushed. A boot-time NameError
+      # The import smoke: every entrypoint module the :core container runs (the two servers, produce, the photo
+      # process the runner starts, the overnight photos press) must IMPORT inside the built image before it is pushed. A boot-time NameError
       # (a missing import in serve()) used to reach dev as a crash-looping task; now it fails the build.
       - name: Build image and smoke-import its entrypoints
         if: steps.gate.outputs.ready == 'true'
@@ -123,7 +123,7 @@ jobs:
         run: |
           REPO="$REGISTRY/blokport-scraper"
           docker build --target core -t "$REPO:core" -t "$REPO:$SHA" .
-          docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts"
+          docker run --rm --entrypoint python "$REPO:core" -c "import stone_pipeline.config.server, stone_pipeline.ledger.server, stone_pipeline.produce, stone_pipeline.catalog, stone_pipeline.prepare_variant_images, scrapers.run, deploy.fetch_inputs, deploy.upload_artifacts, deploy.standardise_run, deploy.start_photos_run"
           echo "Entrypoint imports OK in $REPO:core"
 
       # :<sha> is immutable and always pushed; :core (dev's image) only from main's head (Resolve).
