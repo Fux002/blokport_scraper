@@ -13,6 +13,15 @@ from stone_pipeline.config.settings import STANDARDISE as C
 from stone_pipeline.standardise import clean, judge
 
 A, B, D, E = "a" * 64, "b" * 64, "d" * 64, "e" * 64
+
+_REAL_PREPARE = clean.prepare
+
+
+@pytest.fixture(autouse=True)
+def _prepared_by_name(monkeypatch):
+    """An edit's prepared request is its model's name here (clean.prepare builds the real one before anything is paid),
+    so a fake submit receives the model's name."""
+    monkeypatch.setattr(sel.clean, "prepare", lambda name, encoded: name)
 GPU, CL = "dev/standardise-test/v9/sentas/", "dev/standardise-test/v9-clean/sentas/"
 
 
@@ -158,7 +167,7 @@ def _clean_setup(monkeypatch, passes_at):
     s3 = _S3({f"dev/products/scraped/sentas/{s}.jpg": b"o" for s in (A, B)}
              | {f"{GPU}judged/{A}.json": _verdict("fail", "not_one_slab"), f"{GPU}judged/{B}.json": _verdict("fail", "leftover_mark")})
     edits = []
-    monkeypatch.setattr(sel.clean, "submit", lambda name, img: edits.append(name) or {"model": name})
+    monkeypatch.setattr(sel.clean, "submit", lambda name: edits.append(name) or {"model": name})
     monkeypatch.setattr(sel.clean, "collect", lambda job: f"copy-{job['model']}".encode())
     monkeypatch.setattr(sel.judge, "check_clean", lambda o, c: ({"passes": c == f"copy-{passes_at}".encode()}, 0.02))
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
@@ -212,7 +221,7 @@ def test_an_edit_with_no_usable_answer_counts_at_its_price_and_is_never_sent_aga
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="kontext")
     sent = []
 
-    def submit(name, img):
+    def submit(name):
         sent.append(name)
         if name == "nano2":
             raise TimeoutError("no answer")
@@ -519,7 +528,7 @@ def test_a_paid_request_the_queue_no_longer_has_is_a_failed_attempt_never_sent_a
     _clean(s3, rounds, _listing(A, B), set(), spend)
     _clean(s3, rounds, _listing(A, B), set(), spend)
     assert edits == ["nano2", "kontext"] and s3.objects[f"{CL}cleaned/{B}.jpg"] == b"copy-kontext"
-    assert "no longer has the request (404)" in json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["problems"]
+    assert "its result could not be found (404)" in json.loads(s3.objects[f"{CL}attempts/{B}.nano2.json"])["problems"]
     assert f"{CL}attempts/{B}.nano2.request.json" in s3.objects                       # kept: what was paid for
 
 
@@ -538,7 +547,7 @@ def test_a_send_that_never_reached_the_service_costs_nothing_and_is_tried_again(
     import httpx
     s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     down = httpx.ConnectError("no route", request=httpx.Request("POST", "https://q"))
-    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(down))
+    monkeypatch.setattr(sel.clean, "submit", lambda name: (_ for _ in ()).throw(down))
     spend = sel.Spend(10)
     with pytest.raises(httpx.ConnectError):
         _clean(s3, rounds, _listing(A, B), set(), spend)
@@ -761,7 +770,7 @@ def _refused_at_submit(monkeypatch, code, model="nano2"):
     refusal = httpx.HTTPStatusError(str(code), request=httpx.Request("POST", "https://q"), response=httpx.Response(code))
     submitted = []
 
-    def submit(name, img):
+    def submit(name):
         submitted.append(name)
         if name == model:
             raise refusal
@@ -844,11 +853,33 @@ def test_a_listing_the_owner_chose_reads_nothing_of_its_click(monkeypatch):
     assert edits == []
 
 
+def test_a_photo_that_cannot_be_prepared_for_an_edit_costs_nothing_and_is_loud(monkeypatch):
+    # review of #540: an undecodable photo, a missing key or an unknown model failed inside the billed scope, so all
+    # three models were burnt as paid and the photo could never be cleaned, even by a click
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    monkeypatch.setattr(sel.clean, "prepare", lambda name, encoded: (_ for _ in ()).throw(ValueError("undecodable")))
+    spend = sel.Spend(10)
+    with pytest.raises(ValueError):
+        _clean(s3, rounds, _listing(A, B), set(), spend)
+    assert edits == [] and spend.spent == 0 and spend.reserved == 0 and spend.uses == []
+    assert not any("/attempts/" in k for k in s3.objects)
+
+
+def test_the_real_preparation_fails_before_anything_is_sent(monkeypatch):
+    import httpx
+    monkeypatch.setenv("FAL_KEY", "key")
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("sent"))
+    with pytest.raises(Exception):
+        _REAL_PREPARE("nano2", b"not an image")
+    with pytest.raises(KeyError):
+        _REAL_PREPARE("no-such-model", b"o")
+
+
 def test_a_call_that_may_have_been_billed_still_counts_at_its_price(monkeypatch):
     import httpx
     s3, _, rounds = _clean_setup(monkeypatch, passes_at="nano2")
     broken = httpx.HTTPStatusError("502", request=httpx.Request("POST", "https://q"), response=httpx.Response(502))
-    monkeypatch.setattr(sel.clean, "submit", lambda name, img: (_ for _ in ()).throw(broken))
+    monkeypatch.setattr(sel.clean, "submit", lambda name: (_ for _ in ()).throw(broken))
     spend = sel.Spend(10)
     _clean(s3, rounds, _listing(A, B), set(), spend)
     assert spend.spent == pytest.approx(sum(C.CLEAN_PRICE_USD.values()))               # each model once, never again

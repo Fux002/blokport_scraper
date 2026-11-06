@@ -24,6 +24,13 @@ def _idle_ceiling(monkeypatch):
     monkeypatch.setattr(C, "IDLE_GPU_VCPUS", 8)
 
 
+@pytest.fixture(autouse=True)
+def _prepared_by_name(monkeypatch):
+    """An edit's prepared request is its model's name here (clean.prepare builds the real one before anything is paid),
+    so a fake submit receives the model's name."""
+    monkeypatch.setattr(sel_mod.clean, "prepare", lambda name, encoded: name)
+
+
 class _Batch:
     """Records what a run asks of Batch; jobs end with the statuses given, in turn per poll."""
 
@@ -318,7 +325,7 @@ def test_a_reached_cleaning_cap_ends_only_the_clean_step(monkeypatch):
     cap = sel_mod.Spend(0, cap_error=sel_mod.CleanCapReached)
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(100), cap, "R1", math.inf,
                              say=lambda m: None)
-    assert done == ["gpu v9", "settle", "judge", "clean", "clean", "gpu v9-clean", "settle", "judge", "report"]
+    assert done == ["gpu v9", "settle", "judge", "clean", "gpu v9-clean", "settle", "judge", "report"]
     assert cap.capped and problems and all("cleaning cap" in p for p in problems)
 
 
@@ -500,7 +507,7 @@ def _clicked_run(monkeypatch, budget, clicked=(("slab-1", "SEN-1", A),), backlog
     monkeypatch.setattr(C, "CLEAN_ENABLED", False)
     s, store = _clicked_selection(clicked, backlog, cleaned, outline_pending)
     edits, rounds = [], []
-    monkeypatch.setattr(sel_mod.clean, "submit", lambda name, img: edits.append(name) or {"model": name})
+    monkeypatch.setattr(sel_mod.clean, "submit", lambda name: edits.append(name) or {"model": name})
     monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
     monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
     monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
@@ -654,6 +661,40 @@ def test_an_edit_already_paid_for_is_owed_first_and_lowers_what_the_sends_may_ta
     assert _admit(s, 100.0, cap_left=owed + _send_price())[0] == ["slab-1", "slab-3"]
 
 
+def test_the_clean_step_never_spends_past_what_it_admitted_when_a_check_is_lost(monkeypatch):
+    s, store = _clicked_selection(backlog=())
+    for name in ("nano2", "kontext"):                                                    # flux3 is the model left
+        store.objects[f"{CL_P}attempts/{A}.{name}.json"] = json.dumps({"passes": False, "clean_version": C.CLEAN_VERSION}).encode()
+        s.rounds[1][1]["sentas"].attempts.add(f"{A}.{name}")
+    monkeypatch.setattr(sel_mod.clean, "submit", lambda name: {"model": name})
+    monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: (_ for _ in ()).throw(RuntimeError("the check was lost")))
+    plans, _ = s.plans()
+    cap = sel_mod.Spend(10, cap_error=sel_mod.CleanCapReached)
+    runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+    assert cap.spent <= sel_mod.clean_price(plans[0]) + 1e-9
+
+
+def test_the_clicks_step_judges_only_what_it_admitted_and_the_copies_it_owes(monkeypatch):
+    # review of #540: the clicks' step judged every listing with a click, buying verdicts its admission never priced
+    s, store = _clicked_selection(clicked=(("slab-1", "SEN-1", A), ("slab-3", "SEN-3", D)), backlog=())
+    s.rounds[0][1]["sentas"].judged.discard(D)                                            # slab-3: not fully judged
+    del store.objects[f"{GPU_P}judged/{D}.json"]
+    judged, gpu_runs = [], []
+    real = runner.select.judge_all
+    monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (
+        judged.append([l["key"] for l in sel.listings]), real(sel, spend, deadline))[1])
+    monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (
+        gpu_runs.append((tag, [l["key"] for l in sel.listings])), ([], False))[1])
+    monkeypatch.setattr(sel_mod.clean, "submit", lambda name: {"model": name})
+    monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
+    monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
+    monkeypatch.setattr(sel_mod.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    runner.run(_Batch(), s, sel_mod.Spend(100), sel_mod.Spend(10, cap_error=sel_mod.CleanCapReached), "R1", math.inf,
+               say=lambda m: None)
+    assert judged[0] == ["slab-1"] and gpu_runs[0] == ("v9-clean", ["slab-1"])
+
+
 def test_a_listing_whose_new_edit_waits_still_collects_the_edit_it_paid_for(monkeypatch):
     s, store = _clicked_selection(backlog=())
     s.listings[0]["photos"] = [A, E]
@@ -687,12 +728,12 @@ def test_the_cap_edge_pays_the_same_listings_whatever_the_threads_do(monkeypatch
         s, store = _clicked_selection(clicked=tuple((k, f"SEN-{i}", sha) for i, (k, sha) in enumerate(zip(keys, shas))),
                                       backlog=())
         _marked(s, store, *keys)
-        monkeypatch.setattr(sel_mod.clean, "submit", lambda name, img: time.sleep(random.random() / 50) or {"model": name})
+        monkeypatch.setattr(sel_mod.clean, "submit", lambda name: time.sleep(random.random() / 50) or {"model": name})
         monkeypatch.setattr(sel_mod.clean, "collect", lambda job: b"copy")
         monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
         cap = sel_mod.Spend(3 * _send_price(), cap_error=sel_mod.CleanCapReached)
         plans, _ = s.plans()
-        problems, _ = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+        problems, _, _ = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
         paid.append(sorted(k for k in store.objects if "/cleaned/" in k))
         assert cap.spent <= cap.budget and not cap.capped
         assert problems == [f"the marks of 5 listings wait: {runner.WAIT_CAP}"]
@@ -877,13 +918,15 @@ def test_jobs_an_earlier_run_left_are_stopped_and_the_ceiling_set_back(monkeypat
     assert asked[0]["filters"] == [{"name": "JOB_NAME", "values": [f"{C.JOB_PREFIX}*"]}] and asked[1]["nextToken"] == "t"
 
 
-def test_a_failed_hosted_step_is_run_once_more():
+def test_a_paid_hosted_step_runs_once_and_its_failures_wait_for_the_next_run():
+    # review of #540: a second pass paid again for what failed after it was sent (a check that was lost), past what the
+    # run had admitted; every hosted step pays, so each runs once and the next run retries from what is stored
     calls = []
 
     def flaky(sel, spend, deadline):
         calls.append(1)
-        return ([("slab-1", "timeout")] if len(calls) == 1 else []), False
-    assert runner.hosted(flaky, None, None, math.inf) == ([], False) and len(calls) == 2
+        return [("slab-1", "timeout")], False
+    assert runner.hosted(flaky, None, None, math.inf) == (["slab-1: timeout"], False) and len(calls) == 1
 
 
 # --- one run at a time ------------------------------------------------------------------------------------------------

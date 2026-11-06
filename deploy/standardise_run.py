@@ -362,11 +362,10 @@ def gpu_round(batch, sel, tag, todo, run_id, deadline, spend):
 
 
 def hosted(step, sel, spend, deadline):
-    """A hosted step over every listing, run a second time for the listings that failed (a passing hiccup): (problems,
-    stopped)."""
+    """A hosted step over every listing, once: (problems, stopped). Every hosted step pays (a verdict, an edit, a check),
+    so a listing that failed is tried again by the next run, from what is stored, never a second time in this one: a run
+    never spends past what it admitted (review of #540)."""
     failures, stopped = step(sel, spend, deadline)
-    if failures and not stopped:
-        failures, stopped = step(sel, spend, deadline)
     return [f"{key}: {why}" for key, why in failures], stopped
 
 
@@ -415,15 +414,23 @@ def admit(sel, plans, left, cap_left, window):
 
 def clean_step(sel, plans, spend, clean, deadline, window):
     """The clean step over `plans`: admitted (admit), then paid (select.clean_all on the cleaning cap). (problems,
-    stopped): what could not be paid or read, and a line per send that waits (a click by its listing, the marks
-    counted)."""
+    stopped, the plans paid): what could not be paid or read, and a line per send that waits (a click by its listing,
+    the marks counted)."""
     goes, waits = admit(sel, plans, spend.left(), clean.left(), window)
     clicks = {plan.listing["key"] for plan in plans if plan.click}
     problems = [f"{key}: the owner's click waits: {why}" for key, why in waits.items() if key in clicks]
     if marks := [why for key, why in waits.items() if key not in clicks]:
         problems += [f"the marks of {marks.count(why)} listings wait: {why}" for why in dict.fromkeys(marks)]
     found, stopped = hosted(lambda s, cap, d: select.clean_all(s, goes, cap, d), sel, clean, deadline)
-    return problems + found, stopped
+    return problems + found, stopped, goes
+
+
+def owed_copy(sel, listing):
+    """Whether the listing's clicked photo has a cleaned copy the GPU has not run yet (made by an earlier run): the
+    clicks' step finishes it, as it was priced (admit counts clean_todo)."""
+    rnd = sel.rounds[1][1][listing["source"]]
+    sha = sel.clicks[listing["sku"]]["sha"]
+    return sha in rnd.cleaned and select.needs_gpu(rnd, sha)
 
 
 def through(steps, deadline, clock, problems):
@@ -459,19 +466,28 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
         plans, failures = work.plans()
         if work is not sel:                            # the clicks' step: only the owner's clicks
             plans = [plan for plan in plans if plan.click]
-        found, stopped = clean_step(work, plans, spend, clean, deadline, gpu_deadline - clock())
-        return [f"{key}: {why}" for key, why in failures] + found, stopped
-    mine = sel.only([l for l in sel.listings if l["sku"] in sel.clicks], sel.clicks)
+        found, stopped, goes = clean_step(work, plans, spend, clean, deadline, gpu_deadline - clock())
+        return [f"{key}: {why}" for key, why in failures] + found, stopped, goes
+    clicked = sel.only([l for l in sel.listings if l["sku"] in sel.clicks], sel.clicks)
+    finishing = []                                     # the clicks' step finishes only what it admitted and owes
+
+    def clicks_cleaned():
+        found, stopped, goes = cleaning(clicked)
+        paid = {plan.listing["key"] for plan in goes}
+        finishing.append(clicked.only([l for l in clicked.listings if l["key"] in paid or owed_copy(clicked, l)],
+                                      clicked.clicks))
+        return found, stopped
     first = []
-    if clean is not None and mine.listings:
-        say(f"==> the owner's clicks first: {len(mine.listings)} listings with a click")
-        first = [lambda: cleaning(mine),
-                 lambda: gpu_round(batch, mine, mine.tags[1], mine.clean_todo(), run_id, gpu_deadline, spend),
-                 lambda: hosted(select.judge_all, mine, spend, deadline)]
+    if clean is not None and clicked.listings:
+        say(f"==> the owner's clicks first: {len(clicked.listings)} listings with a click")
+        first = [clicks_cleaned,
+                 lambda: gpu_round(batch, finishing[0], finishing[0].tags[1], finishing[0].clean_todo(), run_id,
+                                   gpu_deadline, spend),
+                 lambda: hosted(select.judge_all, finishing[0], spend, deadline)]
     then = [lambda: gpu_round(batch, sel, sel.tags[0], sel.gpu_todo(), run_id, gpu_deadline, spend),
             lambda: hosted(select.settle, sel, spend, deadline),
             lambda: hosted(select.judge_all, sel, spend, deadline),
-            *([lambda: cleaning(sel)] if clean is not None else []),
+            *([lambda: cleaning(sel)[:2]] if clean is not None else []),
             lambda: gpu_round(batch, sel, sel.tags[1], sel.clean_todo(), run_id, gpu_deadline, spend),
             lambda: hosted(select.settle, sel, spend, deadline),
             lambda: hosted(select.judge_all, sel, spend, deadline)]

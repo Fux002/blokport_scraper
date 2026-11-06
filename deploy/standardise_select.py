@@ -458,10 +458,11 @@ def _attempt(client, cl, sha, name, original, spend, use):
                 job = _get_json(client, f"{att}.request.json")
             else:
                 price = C.CLEAN_PRICE_USD[name]            # an edit is billed at its list price once the queue has it
+                prepared = clean.prepare(name, original)   # before anything is reserved: a failure here is free and loud
                 spend.reserve(price + C.JUDGE_PRICE_USD)
                 held = C.JUDGE_PRICE_USD
                 try:
-                    job, _ = settled(spend, price, lambda: (clean.submit(name, original), price),
+                    job, _ = settled(spend, price, lambda: (clean.submit(prepared), price),
                                      f"edit {name} {sha[:12]}", {**use, "model": name, "call": "edit"})
                 except Exception as exc:
                     if refused(exc) is None:           # may have been billed: counted, never sent again
@@ -475,9 +476,9 @@ def _attempt(client, cl, sha, name, original, spend, use):
             try:
                 copy = clean.collect(job)
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in (404, 410):     # the queue lost a paid request: never sent again
+                if exc.response.status_code in (404, 410):     # a paid request's result is gone: never sent again
                     return _failed(client, cl, att, ident, name,
-                                   f"the queue no longer has the request ({exc.response.status_code}): counted as paid")
+                                   f"its result could not be found ({exc.response.status_code}): counted as paid")
                 if (code := given_up(exc)) is None:
                     raise                              # anything else (auth, balance, 5xx, 429): loud, collected again
                 return _failed(client, cl, att, ident, name, f"the edit failed ({code})")

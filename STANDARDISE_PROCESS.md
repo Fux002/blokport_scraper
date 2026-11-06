@@ -235,7 +235,9 @@ then the marks, skipping any photo with no edit model left to try, one photo cle
 (`select.cleaned_copies`): a listing with a click is done only once that photo has its cleaned copy, whatever copies
 of its other photos exist; without a click any cleaned copy of the listing is its one photo. A model that refuses the
 photo for good (`CLEAN_FAILED_CODES`, 400 or 422, at submit or when collected) is a failed attempt and the next model
-gets its turn; refused at submit, it cost nothing. A click that cannot be used
+gets its turn; refused at submit, it cost nothing. An edit is prepared (`clean.prepare`: the photo encoded, the model's
+endpoint, the key) before anything is reserved, so a photo that cannot be encoded, an unknown model or a missing key
+fails loud and free; only the send and the reading of its answer are paid. A click that cannot be used
 (unreadable, no time, another SKU or listing than its file's, a photo not the listing's or not fixable) is never paid
 for, and the run's problems say why for any listing it names (its line in `tracked.csv` too). A listing whose choice
 record cannot be read stays exactly as published (its photo, its conflict-photo assignment and its files untouched, in
@@ -260,7 +262,9 @@ not tried yet, cheapest first, until a copy passes. A plan is admitted while bot
 every plan admitted before it: the process budget its copy's GPU round and judging (`gpu.price`, the one price a GPU
 round is also sized by, on top of the copies the next round runs anyway), the cleaning cap its edits and checks at
 worst (`select.clean_price`). An edit already paid for always goes (it is owed), even when the
-listing's new edit waits. A new edit that does not fit is not paid and waits; the run's problems name each click
+listing's new edit waits; when the owed checks alone pass the cleaning cap, they stop at the cap, which of them are
+checked this run depends on thread timing, and the rest are collected and checked next run (nothing is lost or paid
+twice). A new edit that does not fit is not paid and waits; the run's problems name each click
 ("the owner's click waits: month photo budget reached", "cleaning cap reached", or "too little of the work window
 left") and count the marks. The pay step
 (`select.pay`, a few listings at a time) never reaches either cap, so which listings are paid never depends on which
@@ -427,7 +431,8 @@ All in `stone_pipeline/config/settings.py` (`STANDARDISE`, plus the runner's `RU
 - Work window ended: the round's jobs are stopped, unfinished listings are `pending`; the next press goes on.
 - GPU job failed or a photo crashed the GPU: listed as problems; retried next press (a photo that crashes the GPU
   twice is held, as before).
-- Hosted call failed (timeout, 5xx, 429): that listing is retried once in the run, then next press. Auth or balance
+- Hosted call failed (timeout, 5xx, 429): that listing is tried again by the next run, from what is stored, never a
+  second time in the same run (every hosted call is paid, so a run never spends past what it admitted). Auth or balance
   errors are loud.
 - svc stopped mid-run: clean stop as above; if it is killed regardless, the next run stops the jobs it left, resets the
   ceiling and takes the lock over once it is stale. Rolls during a run stay forbidden (as for the produce).

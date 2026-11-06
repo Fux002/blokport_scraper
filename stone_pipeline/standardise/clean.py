@@ -22,14 +22,22 @@ def request(name, encoded):
     return {"prompt": C.CLEAN_INSTRUCTION, **({"image_url": image} if name in C.CLEAN_SINGLE_IMAGE else {"image_urls": [image]}), **extra}
 
 
-def submit(name, encoded):
-    """Send the photo to model `name`; the queued request ({"endpoint", "status_url", "response_url"}), to store at once:
-    from here on the edit is paid, and a re-run collects it instead of sending it again."""
+def prepare(name, encoded):
+    """Everything sending the photo to model `name` needs, made before anything is paid: the model's endpoint, its input
+    (the photo encoded) and the queue's headers (the key). A photo that cannot be encoded, an unknown model or a missing
+    key fails here: loud, and free."""
     endpoint, _ = MODELS[name]
-    sub = httpx.post(f"{C.CLEAN_QUEUE_URL}/{endpoint}", json=request(name, encoded), headers=_head(), timeout=C.CLEAN_TIMEOUT)
+    return {"endpoint": endpoint, "body": request(name, encoded), "headers": _head()}
+
+
+def submit(prepared):
+    """Send a prepared edit (prepare); the queued request ({"endpoint", "status_url", "response_url"}), to store at once:
+    from here on the edit is paid, and a re-run collects it instead of sending it again."""
+    sub = httpx.post(f"{C.CLEAN_QUEUE_URL}/{prepared['endpoint']}", json=prepared["body"], headers=prepared["headers"],
+                     timeout=C.CLEAN_TIMEOUT)
     sub.raise_for_status()
     job = sub.json()
-    return {"endpoint": endpoint, "status_url": job["status_url"], "response_url": job["response_url"]}
+    return {"endpoint": prepared["endpoint"], "status_url": job["status_url"], "response_url": job["response_url"]}
 
 
 def collect(job):
