@@ -361,6 +361,16 @@ class Thresholds:
     # default form; the middle is ambiguous and declines
     bulk_depth_fraction: float = 0.3
     default_depth_multiple: float = 3.0
+    # dimension plausibility (stages/derive): a value is plausible within [lo x floor_fraction, hi x
+    # ceiling_multiple] of the pack's per-category range; outside it is flagged out of range, and a value
+    # above the band whose /100 lands inside it was recorded in centimetres
+    dimension_range_floor_fraction: float = 0.3
+    dimension_range_ceiling_multiple: float = 3.0
+    # bundle size from area division (stages/derive): total / per-slab area is accepted as the slab count only
+    # when it lies in [bundle_ratio_min, bundle_ratio_max] and is within bundle_ratio_tolerance of an integer
+    bundle_ratio_min: int = 1
+    bundle_ratio_max: int = 60
+    bundle_ratio_tolerance: float = 0.15
     # magnitude drift (stages/magnitude_drift): a per-format median moving by warn x is a warning, by fail x
     # aborts before emit (a unit/normalisation slip); a format needs min_sample rows for a stable median
     magnitude_warn_factor: float = 4.0
@@ -741,6 +751,32 @@ class AutoTextureConfig:
 
 
 @dataclass(frozen=True)
+class VarietyColourConfig:
+    """Cut-offs of the product-photo colour classifier (stages/variety_color.classify): median stone RGB ->
+    a Medusa colour. Saturation and value on 0..1, hue in degrees, warm_margin in 0..255 red-over-blue."""
+
+    warm_margin: int = 12                 # red exceeds blue by more than this -> a warm light stone (Cream)
+    # the greyscale family: pure neutral (saturation below neutral_saturation), or a washed-out LIGHT stone
+    # (saturation below washed_saturation and value above washed_value)
+    neutral_saturation: float = 0.10
+    washed_saturation: float = 0.25
+    washed_value: float = 0.80
+    black_value: float = 0.27             # greyscale value below this -> Black
+    grey_value: float = 0.70              # below this -> Grey; above -> White / Cream (warm)
+    # hue buckets, upper bound exclusive: red wraps around 0 (below red_hue or from red_wrap_hue)
+    red_hue: float = 20.0
+    red_wrap_hue: float = 345.0
+    orange_hue: float = 45.0              # Brown (value below brown_value), else Gold (saturation above
+    brown_value: float = 0.55             # gold_saturation) or Beige
+    gold_saturation: float = 0.4
+    yellow_hue: float = 70.0              # Yellow when value above yellow_value, else Brown
+    yellow_value: float = 0.6
+    green_hue: float = 170.0
+    blue_hue: float = 255.0
+    purple_hue: float = 290.0             # above: Pink
+
+
+@dataclass(frozen=True)
 class LotConfig:
     """A lot is a set of ordinary products (pieces) sharing one lot_code (stages/lots.py). The code is
     `<label>-<uuid5(code_namespace, "<source_code>:<lot ref>")>`: unique, byte-identical on every piece,
@@ -769,6 +805,7 @@ class Settings:
     matching: MatchingConfig = field(default_factory=MatchingConfig)
     curation: CurationConfig = field(default_factory=CurationConfig)
     lots: LotConfig = field(default_factory=LotConfig)
+    variety_colour: VarietyColourConfig = field(default_factory=VarietyColourConfig)
 
     # The source proven first (section 14). develi is absent from the supplied
     # data, so polonine is the clean named-variety proving source.

@@ -3,10 +3,10 @@
 FULL combination set (the relational table has no size ceiling, so we pre-load every
 possible combination -- a future product is then far more likely to already match,
 needing no rebuild). Each variation gets EVERY finish its category supports x the UNION
-of every colour/quality we know for the variety (its backbone post, the scraped product,
-and a same-variety product in another category). The product's type wins so products
-always match; a no-data variation falls back to the type parsed from its Key/Name + the
-catalogue's most common colour.
+of every colour/quality we know for the SAME (type, variety): its backbone post, the scraped
+product, and a same-(type, variety) product in another category. The type is the variation's
+own Key type, else its Key-matched backbone post's, else the operator-assigned one; a
+variation nothing describes is reported uncovered, never priced under a default colour.
 
 Output is one row per valid combination (the 6-tuple) for
 POST /admin/valid-combinations/import -- no nested blob, no size ceiling:
@@ -74,10 +74,10 @@ def _read_backbone(paths: list[Path]):
 
 
 def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict, dict]:
-    """Three lookups: by Key (primary join), by (category, name) and by (type, name), to recover variations
-    whose Key isn't in the backbone (the block backbone is ~99% keyless, tiles mirror slabs). A variety's
-    identity is (type, name): a same-name post of another category lends its colours ONLY when its type is
-    the variation's own, so a same-name post of a different stone never does.
+    """Three lookups: by Key (primary join), by (category, type, name) and by (type, name), to recover
+    variations whose Key isn't in the backbone (the block backbone is ~99% keyless, tiles mirror slabs). A
+    variety's identity is (type, name): a same-name post, of the same category or another, lends its colours
+    ONLY when its type is the variation's own, so a same-name post of a different stone never does.
 
     KNOWN, ACCEPTED STATE (not a bug, do not "clean up" blindly): the block backbone is ~97% KEYLESS
     (~327/12160 keyed) while slab and tile are fully keyed. That is why the by-name lookups above exist and
@@ -98,9 +98,10 @@ def _load_backbone(paths: list[Path]) -> tuple[dict[str, dict], dict, dict]:
             by_key[post["key"]] = post
         name = match_key(post.get("variant") or "")   # canonical name key (accent/separator/punct-proof)
         cat = (post.get("category") or "").strip().lower()
+        typ = match_key(post.get("stone_type") or "")
         if name:
-            by_cat_name.setdefault((cat, name), post)
-            by_type_name.setdefault((match_key(post.get("stone_type") or ""), name), post)
+            by_cat_name.setdefault((cat, typ, name), post)
+            by_type_name.setdefault((typ, name), post)
     return by_key, by_cat_name, by_type_name
 
 
@@ -133,8 +134,9 @@ def _category_finishes(paths: list[Path], attr: dict, products: dict) -> dict[st
 
 
 def _load_products(path: Path | None) -> dict[str, dict]:
-    """Variation sourceId -> the combo the scrape gave it: {category, type, colors,
-    quals, finishes}. A variation may carry several products (several colours)."""
+    """Variation sourceId -> the combo the scrape gave it: {category, colors, quals,
+    finishes}. A variation may carry several products (several colours). The type is not
+    read: a variation's type is its own Key's (see build_combinations)."""
     out: dict[str, dict] = {}
     if not path or not Path(path).exists():
         return out
@@ -143,10 +145,8 @@ def _load_products(path: Path | None) -> dict[str, dict]:
             vid = (r.get("STN Variation Id") or "").strip()
             if not vid:
                 continue
-            d = out.setdefault(vid, {"category": "", "type": "", "colors": set(),
-                                     "quals": set(), "finishes": set()})
+            d = out.setdefault(vid, {"category": "", "colors": set(), "quals": set(), "finishes": set()})
             d["category"] = (r.get("Product Category 1") or "").strip() or d["category"]
-            d["type"] = (r.get("STN Type Id") or "").strip() or d["type"]
             for key, col in (("colors", "STN Color Id"), ("quals", "STN Quality Id"),
                              ("finishes", "STN Finish Id")):
                 v = (r.get(col) or "").strip()
@@ -267,9 +267,7 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
                 {attr["color"].get(match_key(x)) for x in (post.get("color") or [])},
                 {attr["quality"].get(match_key(x)) for x in (post.get("qualities") or [])})
 
-    # export rows + variety identity (Name) -> the colour/type a scrape gave it anywhere,
-    # so fan-out mirrors in other categories inherit it, plus catalogue defaults.
-    export_rows, name_of = [], {}
+    export_rows = []
     malformed = 0
     with Path(export_csv).open(encoding="utf-8-sig", newline="") as h:
         for r in csv.DictReader(h):
@@ -282,7 +280,6 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             # combination references a variation that will not exist after the Medusa cleanup.
             if vid and key and vid not in exclude_ids and key not in retired_keys and not looks_like_artifact(name):
                 export_rows.append((key, vid, name))
-                name_of[vid] = match_key(name)
             elif (vid or key or name) and not (vid and key):
                 # a row that carries data but is MISSING Id or Key is not a blank line -- it is a real
                 # variation being silently dropped from combinations. Surface it (fail-loud, without
@@ -291,12 +288,21 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     if malformed:
         log.warning("export rows missing Id/Key were skipped from combinations",
                     extra={"extra_fields": {"count": malformed, "export": str(export_csv)}})
-    variety: dict[str, dict] = {}
-    for vid, p in products.items():
-        nm = name_of.get(vid)
-        if nm:
-            d = variety.setdefault(nm, {"type": "", "colors": set(), "quals": set()})
-            d["type"] = p["type"] or d["type"]
+
+    def variation_type(key: str, nl: str):
+        """TYPE authority: the variation's own Key type (longest slug match), else its OWN backbone post's
+        type (KEY match only -- a name-only post can be a different stone), else a user-assigned type."""
+        kpost = by_key.get(key)
+        return _key_type(key, attr) or (combo(kpost)[0] if kpost else None) or assigned_types.get(nl)
+
+    # (type, variety name) -> the colours/qualities its products were sold in, in any category, so fan-out
+    # mirrors in other categories inherit them. Keyed by the variety identity (type, name): a product of one
+    # stone never colours a same-name variety of another type.
+    variety: dict[tuple, dict] = {}
+    for key, vid, name in export_rows:
+        nl = match_key(name)
+        if (p := products.get(vid)) and (typ := variation_type(key, nl)):
+            d = variety.setdefault((typ, nl), {"colors": set(), "quals": set()})
             d["colors"] |= p["colors"]
             d["quals"] |= p["quals"]
 
@@ -336,10 +342,9 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
     for key, vid, name in export_rows:
         prefix = key.split("_", 1)[0]
         nl = match_key(name)   # canonical: joins by_cat_name/variety/assigned_types keyed the same
-        # UNION every source's colours/qualities for the widest valid set (max match):
-        # the variety's backbone, the scraped product, and a same-variety product in
-        # another category. Finishes = every finish the category supports. The PRODUCT's
-        # type wins (it's what the product row carries, so the product always matches).
+        # UNION every source's colours/qualities for the widest valid set (max match): the variety's
+        # backbone, the scraped product, and a same-(type, variety) product in another category.
+        # Finishes = every finish the category supports.
         # The variation's TYPE is intrinsic to the variation (its Key), NOT what a product asserted. A
         # product mis-bound across a name collision or base<->backbone drift must never inject its own type
         # as a valid combination for THIS variation -- that shipped cross-type products the gate can't
@@ -351,17 +356,18 @@ def build_combinations(export_csv: Path, attributes_csv: Path, backbone_paths: l
             colors |= prod["colors"]
             quals |= prod["quals"]
         kpost = by_key.get(key)                                          # the variation's OWN backbone post
-        # TYPE authority: the variation's own Key type (longest slug match), else its OWN backbone post's
-        # type (KEY match only -- a name-only post can be a different stone), else a user-assigned type.
-        typ = _key_type(key, attr) or (combo(kpost)[0] if kpost else None) or assigned_types.get(nl)
-        # colour/quality sources, all the SAME variety: its own post, the same-category post of its name, or
-        # a same-name post of another category with its own type (the union model's identity is (type, name))
-        post = kpost or by_cat_name.get((prefix + "s", nl)) or (by_type_name.get((type_key.get(typ, ""), nl)) if typ else None)
+        typ = variation_type(key, nl)
+        # colour/quality sources, all the SAME variety (type, name): its own post, else the same-category post
+        # of its name and type, else a same-name post of another category with its type
+        post = kpost
+        if post is None and typ:
+            tk = type_key.get(typ, "")
+            post = by_cat_name.get((prefix + "s", tk, nl)) or by_type_name.get((tk, nl))
         if post:
             _t, c, q = combo(post)
             colors |= c
             quals |= q
-        if inh := variety.get(nl):
+        if inh := variety.get((typ, nl)):
             colors |= inh["colors"]
             quals |= inh["quals"]
         # Operator leaf decisions (config.db overlay): a colour/quality the operator has already APPROVED is

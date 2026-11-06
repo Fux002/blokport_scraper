@@ -225,19 +225,26 @@ def _resolve_dimension(row: CanonicalRow, field: str, value: float | None, defau
     return default
 
 
+def _plausible_band(lo: float, hi: float) -> tuple[float, float]:
+    """The plausible band around a pack range (lo, hi): the ONE tolerance the unit correction and the
+    out-of-range check share, so they can never disagree."""
+    t = SETTINGS.thresholds
+    return lo * t.dimension_range_floor_fraction, hi * t.dimension_range_ceiling_multiple
+
+
 def _normalize_unit(value: float | None, field: str, category: str) -> tuple[float | None, bool]:
     """General unit sanity for one linear dimension, in metres. A stone dimension stored in CENTIMETRES
     (a real SlabWare data inconsistency -- a face recorded as 332 rather than 3.32) reads ~100x too large in
     metres and blows up the freight weight. Correct it once, against the SAME per-category physical range the
-    range check uses: a value far above the plausible max (> hi*3) whose value/100 lands back in the plausible
-    band [lo*0.3, hi*3] was centimetres -> divide by 100. This is deterministic and source-agnostic, and by
+    range check uses: a value above the plausible band (_plausible_band) whose value/100 lands back inside it
+    was centimetres -> divide by 100. This is deterministic and source-agnostic, and by
     construction it can ONLY touch a value that is already physically impossible as metres, so a correct value
     is never changed (2.8 stays 2.8; a genuinely odd 6.44 whose /100 is implausibly small is left for review).
     Returns (value, corrected)."""
     if value is None:
         return value, False
-    lo, hi = active_pack().dimension_ranges.get(category, {}).get(field, (0.0, 5.0))
-    if value > hi * 3 and lo * 0.3 <= value / 100.0 <= hi * 3:
+    band_lo, band_hi = _plausible_band(*active_pack().dimension_ranges.get(category, {}).get(field, (0.0, 5.0)))
+    if value > band_hi and band_lo <= value / 100.0 <= band_hi:
         return round(value / 100.0, 3), True
     return value, False
 
@@ -298,8 +305,8 @@ def derive_dimensions(row: CanonicalRow, ref: ReferenceData) -> None:
     for name, value in (("length", length), ("width", width), ("height", height), ("weight", weight)):
         if value is None:
             continue
-        lo, hi = ranges.get(name, (0.0, 5.0))
-        if value < lo * 0.3 or value > hi * 3:
+        band_lo, band_hi = _plausible_band(*ranges.get(name, (0.0, 5.0)))
+        if not band_lo <= value <= band_hi:
             row.add_flag(ReviewFlag(field=name, code=FlagCode.dimension_out_of_range,
                                     raw_value=str(value), confidence=Confidence.low,
                                     method="range_check", src_url=row.src_url))
@@ -347,7 +354,9 @@ def derive_bundle_size(row: CanonicalRow, ref: ReferenceData, source_cfg: Source
     per = _to_float(row.raw_per_slab_m2)
     if total and per and per > 0:
         quotient = total / per
-        if 1 <= quotient <= 60 and abs(quotient - round(quotient)) < 0.15:
+        t = SETTINGS.thresholds
+        if (t.bundle_ratio_min <= quotient <= t.bundle_ratio_max
+                and abs(quotient - round(quotient)) < t.bundle_ratio_tolerance):
             return _accept(round(quotient), "area_division", Confidence.medium)
         row.add_flag(ReviewFlag(field="bundle_size", code=FlagCode.bundle_ratio_noninteger,
                                 best_guess=f"{quotient:.2f}", confidence=Confidence.low,
@@ -368,7 +377,7 @@ _INVENTORY_MAX = 1_000_000
 
 def _inventory_from_area(row: CanonicalRow) -> int | None:
     """Stock as a PIECE count derived from an available stock AREA: pieces = raw_stock_m2 / one piece's face
-    area (length x height, both metres, set by derive_dimensions which runs first). For a source that
+    area (length x width, both metres, set by derive_dimensions which runs first). For a source that
     publishes square-metres in stock instead of a slab count (e.g. marenostone "Ready Stock"). Reads
     raw_stock_m2 -- NOT raw_total_m2, which is a bundle's own area and feeds bundle_size. Returns None when
     the stock area or the face dimensions are missing/non-positive (no derivation -> caller marks stock
@@ -551,19 +560,31 @@ def _to_iso(value: str, ref: ReferenceData) -> str | None:
     return resolve_iso(value, ref.country_codes, ref.valid_iso_codes)
 
 
-def _select_origin(candidates: list[str], home_iso: str) -> tuple[str, Confidence, FlagCode | None]:
+def _select_origin(candidates: list[str], home_iso: str) -> str | None:
     """Pick ONE origin from a variety's candidate countries, given the supplier's home country:
       * one candidate               -> it (the variety has a single known origin).                  [rule c]
       * many + home is a candidate  -> home (a supplier sells its own country's quarry output).      [rule b]
-      * many + home not a candidate -> first candidate, LOW confidence + review flag: the stone is   [rule d]
-        quarried in several countries, none the supplier's, so we cannot infer which (the list is not
-        priority-ordered) -- an operator resolves it (new origin in the list, or a per-supplier override).
+      * many + home not a candidate -> None: the stone is quarried in several countries, none the     [rule d]
+        supplier's, so which one is unknown (the list is not priority-ordered). Never guessed: the caller
+        holds the row for origin confirmation, answered by a per-supplier override.
     """
     if len(candidates) == 1:
-        return candidates[0], Confidence.high, None
+        return candidates[0]
     if home_iso and home_iso in candidates:
-        return home_iso, Confidence.high, None
-    return candidates[0], Confidence.low, FlagCode.origin_multi_home_absent
+        return home_iso
+    return None
+
+
+def _hold_for_origin_confirmation(row: CanonicalRow, map_countries: list[str], vendor_iso: str | None,
+                                  method: str) -> None:
+    """HOLD the row for a one-time origin confirmation (the separate per-vendor origin review queue): no
+    origin is shipped, the flag carries the map's countries and the vendor's country for the card. The ONE
+    hold every origin the evidence cannot decide goes through; the answer returns as a supplier_override."""
+    row.origin_source = "origin_needs_confirmation"
+    row.origin_confidence = _conf_name(Confidence.none)
+    row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_needs_confirmation,
+                            raw_value=",".join(map_countries), best_guess=vendor_iso, confidence=Confidence.none,
+                            method=method, src_url=row.src_url))
 
 
 def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig) -> None:
@@ -619,29 +640,25 @@ def derive_origin(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfi
             row.origin_source = "vendor_origin"
             row.origin_confidence = _conf_name(Confidence.high)
             return
-        row.origin_source = "origin_needs_confirmation"
-        row.origin_confidence = _conf_name(Confidence.none)
-        row.add_flag(ReviewFlag(field="origin", code=FlagCode.origin_needs_confirmation,
-                                raw_value=",".join(gate_rule.countries) if gate_rule else "",
-                                best_guess=vendor_iso, confidence=Confidence.none,
-                                method="vendor_map_mismatch", src_url=row.src_url))
+        _hold_for_origin_confirmation(row, gate_rule.countries if gate_rule else [], vendor_iso,
+                                      "vendor_map_mismatch")
         return
 
     # 3b. CLASSIC ladder (vendors without primary_origin): pick the candidate country that fits the supplier's
-    #     home (see _select_origin); a multi-country variety whose countries do not include the home flags for
-    #     review. Never a country guessed from another type.
+    #     home (see _select_origin); a multi-country variety whose countries do not include the home is HELD
+    #     for origin confirmation, like the vendor gate above (owner: never guess). Never a country guessed
+    #     from another type.
     if rule and rule.countries:
         home = _to_iso(source_cfg.origin_default, ref) or ""
-        iso, conf, flag = _select_origin(rule.countries, home)
+        iso = _select_origin(rule.countries, home)
+        if iso is None:
+            _hold_for_origin_confirmation(row, rule.countries, home or None, "multi_home_absent")
+            return
         row.origin_country_code = iso
         row.origin_city = rule.city
         row.origin_county = rule.county
         row.origin_source = "origin_map"
-        row.origin_confidence = _conf_name(conf)
-        if flag:
-            row.add_flag(ReviewFlag(field="origin", code=flag, raw_value=",".join(rule.countries),
-                                    best_guess=iso, confidence=conf, method="multi_home_absent",
-                                    src_url=row.src_url))
+        row.origin_confidence = _conf_name(Confidence.high)
         return
     # 4. supplier-country fallback. Strictly, the supplier's country is where the stone is SOLD FROM,
     #    not necessarily where it was quarried (a trader can ship stone from many countries) -- so the
@@ -852,7 +869,7 @@ def _derive_row(row: CanonicalRow, ref: ReferenceData, source_cfg: SourceConfig)
     derive_title(row)
     derive_description(row)
     _apply_overrides(row, ref)  # overrides win over the derived values
-    derive_handle(row, source_cfg)  # handle follows the (possibly overridden) title
+    derive_handle(row, source_cfg)  # keyed by variety + finish, never the (possibly overridden) title
 
 
 def run(rows: list[CanonicalRow], ref: ReferenceData, source_cfg: SourceConfig) -> StageMetric:

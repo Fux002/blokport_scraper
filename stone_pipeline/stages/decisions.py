@@ -108,7 +108,8 @@ def write_decision_gaps(gaps: list[dict]) -> int:
 
 def write_origin_confirm_file(rows) -> int:
     """Replace the pending ORIGIN queue with this run's rows held for origin confirmation (a vendor whose
-    primary_origin the per-variety map did not corroborate). ONE entry per (source, variety, type) -- keyed
+    primary_origin the per-variety map did not corroborate, or a multi-country variety none of whose
+    countries is the supplier's home). ONE entry per (source, variety, type) -- keyed
     so it is per-vendor and per-identity, separate from the variety mint queue. A resolved origin is simply
     absent next run, so it stops appearing (same lifecycle as the variety queue). Returns the count."""
     from stone_pipeline.core.schema import FlagCode

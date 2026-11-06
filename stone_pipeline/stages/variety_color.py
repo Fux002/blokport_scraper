@@ -29,30 +29,31 @@ def classify(rgb: tuple[int, int, int]) -> str:
     """Median stone RGB -> a Medusa colour name. Natural stone is mostly low-saturation, so the
     greyscale lightness ramp (Black/Grey/White, warm->Cream) carries most cases; saturated stones
     fall to a hue bucket."""
+    k = SETTINGS.variety_colour
     r, g, b = (x / 255 for x in rgb)
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
     h *= 360
-    warm = rgb[0] > rgb[2] + 12
-    # Three saturation bands: a pure-neutral stone (s<0.10) or a washed-out LIGHT stone (mildly
-    # saturated but very bright) reads as greyscale; everything else keeps its hue even when muted,
-    # so a sage-green or dusty-blue stone isn't flattened to Grey.
-    if s < 0.10 or (s < 0.25 and v > 0.80):       # greyscale / washed-light family
-        if v < 0.27:
+    warm = rgb[0] > rgb[2] + k.warm_margin
+    # Three saturation bands: a pure-neutral stone or a washed-out LIGHT stone (mildly saturated but very
+    # bright) reads as greyscale; everything else keeps its hue even when muted, so a sage-green or
+    # dusty-blue stone isn't flattened to Grey.
+    if s < k.neutral_saturation or (s < k.washed_saturation and v > k.washed_value):
+        if v < k.black_value:
             return "Black"
-        if v < 0.70:
+        if v < k.grey_value:
             return "Grey"
         return "Cream" if warm else "White"
-    if h < 20 or h >= 345:
+    if h < k.red_hue or h >= k.red_wrap_hue:
         return "Red"
-    if h < 45:
-        return "Brown" if v < 0.55 else ("Gold" if s > 0.4 else "Beige")
-    if h < 70:
-        return "Yellow" if v > 0.6 else "Brown"
-    if h < 170:
+    if h < k.orange_hue:
+        return "Brown" if v < k.brown_value else ("Gold" if s > k.gold_saturation else "Beige")
+    if h < k.yellow_hue:
+        return "Yellow" if v > k.yellow_value else "Brown"
+    if h < k.green_hue:
         return "Green"
-    if h < 255:
+    if h < k.blue_hue:
         return "Blue"
-    if h < 290:
+    if h < k.purple_hue:
         return "Purple"
     return "Pink"
 
