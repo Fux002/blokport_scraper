@@ -83,7 +83,10 @@ def judge(original, result, fmt):
 
 
 def current(verdict):
-    """Whether a stored verdict still stands: a pass always does, a fail only when made under the current bar."""
+    """Whether a stored verdict still stands: a pass always does, a fail only when made under the current bar; an
+    answer that did not parse never does (review 2026-11-06, A2.6: it is asked again, never read as a final fail)."""
+    if verdict.get("verdict") == "unparsed":
+        return False
     return passed(verdict) or verdict.get("version", 1) >= C.JUDGE_VERSION
 
 

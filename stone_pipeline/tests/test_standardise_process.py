@@ -671,7 +671,7 @@ def test_a_close_up_choice_moves_to_a_whole_slab_once_the_judge_passes_one_and_a
     select.judge_all(sel, spend, float("inf"))
     select.clean_all(sel, sel.plans()[0], spend, float("inf"))
     assert asked == [b"mb"] and spend.spent == pytest.approx(0.02)
-    result = select.report(sel)
+    result = select.report(sel, {})
     assert [c["sha"] for c in result["chosen"]] == [B]
     assert json.loads(s3.objects[f"{ROOT}chosen/one.json"]["Body"])["sha"] == B
     assert picked() == []                                           # a whole slab now: never picked again
@@ -692,7 +692,7 @@ def test_a_close_up_choice_with_no_whole_slab_left_to_try_costs_nothing_again(mo
     assert select.judge_all(sel, spend, float("inf")) == ([], False)
     assert select.clean_all(sel, sel.plans()[0], spend, float("inf")) == ([], False)
     s3.written.clear()
-    assert [c["sha"] for c in select.report(sel)["chosen"]] == [A]
+    assert [c["sha"] for c in select.report(sel, {})["chosen"]] == [A]
     assert spend.spent == 0 and s3.written == [f"{ROOT}tracked.csv"]   # the kept record is not written again
 
 
@@ -712,7 +712,7 @@ def test_an_open_book_chosen_before_its_halves_had_a_slab_gets_its_3d_without_a_
     spend = select.Spend(5.0)
     select.judge_all(sel, spend, float("inf"))
     s3.written.clear()
-    assert [c["sha"] for c in select.report(sel)["chosen"]] == [A] and spend.spent == 0
+    assert [c["sha"] for c in select.report(sel, {})["chosen"]] == [A] and spend.spent == 0
     assert f"{ROOT}chosen/one.json" not in s3.written                # the same choice: its record stays
     out = pub.publish(s3, ROOT, NO_TILES, {}, say=lambda m: None, assigned={})
     assert out["made_3d"] == 1 and imagestore.standard_key("sentas", A, "close") in s3.objects

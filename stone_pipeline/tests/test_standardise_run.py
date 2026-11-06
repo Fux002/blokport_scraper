@@ -250,7 +250,7 @@ def _steps(monkeypatch, cap_at=None):
     monkeypatch.setattr(runner.select, "settle", step("settle"))
     monkeypatch.setattr(runner.select, "judge_all", step("judge"))
     monkeypatch.setattr(runner.select, "clean_all", step("clean"))
-    monkeypatch.setattr(runner.select, "report", lambda sel: done.append("report") or {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits: done.append("report") or {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (done.append(f"gpu {tag}"), ([], False))[1])
     return done
 
@@ -276,7 +276,7 @@ def test_the_clean_up_edits_are_paid_from_the_cleaning_cap_and_the_judge_from_th
     monkeypatch.setattr(runner.select, "settle", lambda sel, spend, deadline: ([], False))
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: given.setdefault("judge", spend) and ([], False))
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: given.setdefault("clean", spend) and ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     runner.run(_Batch(), _selection([_listing(A)]), process, cleaning, "R1", math.inf, say=lambda m: None)
     assert given["judge"] is process and given["clean"] is cleaning
 
@@ -287,7 +287,7 @@ def test_the_gpu_rounds_end_before_the_judge_s_share_of_the_window_and_the_judge
     monkeypatch.setattr(runner, "gpu_round", lambda batch, sel, tag, todo, run_id, deadline, spend: (given.append((tag, deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "judge_all", lambda sel, spend, deadline: (given.append(("judge", deadline)), ([], False))[1])
     monkeypatch.setattr(runner.select, "clean_all", lambda sel, plans, spend, deadline: ([], False))
-    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits: {"chosen": [], "tracked": [], "pending": [], "click_problems": []})
     runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", 10_000, say=lambda m: None, clock=lambda: 0)
     gpu_end = 10_000 - C.JUDGE_WINDOW_SECONDS
     assert given == [("v9", gpu_end), ("judge", 10_000), ("v9-clean", gpu_end), ("judge", 10_000)]
@@ -339,7 +339,7 @@ def test_the_process_budget_still_ends_the_run_in_any_step(monkeypatch):
 
 def test_listings_left_not_fully_judged_are_one_problem(monkeypatch):
     _steps(monkeypatch)
-    monkeypatch.setattr(runner.select, "report", lambda sel: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": []})
+    monkeypatch.setattr(runner.select, "report", lambda sel, waits: {"chosen": [], "tracked": [], "pending": ["slab-1", "slab-2"], "click_problems": []})
     problems, _ = runner.run(_Batch(), _selection([_listing(A)]), sel_mod.Spend(10), None, "R1", math.inf, say=lambda m: None)
     assert problems == ["2 listings not fully judged (listed in r/summary.json)"]
 
@@ -733,10 +733,10 @@ def test_the_cap_edge_pays_the_same_listings_whatever_the_threads_do(monkeypatch
         monkeypatch.setattr(sel_mod.judge, "check_clean", lambda o, c: ({"passes": True}, 0.02))
         cap = sel_mod.Spend(3 * _send_price(), cap_error=sel_mod.CleanCapReached)
         plans, _ = s.plans()
-        problems, _, _ = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
+        problems, _, _, waits = runner.clean_step(s, plans, sel_mod.Spend(100), cap, math.inf, math.inf)
         paid.append(sorted(k for k in store.objects if "/cleaned/" in k))
         assert cap.spent <= cap.budget and not cap.capped
-        assert problems == [f"the marks of 5 listings wait: {runner.WAIT_CAP}"]
+        assert problems == [f"the marks of 5 listings wait: {runner.WAIT_CAP}"] and len(waits) == 5
     assert paid[0] == paid[1] == paid[2] == sorted(f"{CL_P}cleaned/{sha}.jpg" for sha in shas[:3])
 
 
@@ -747,6 +747,14 @@ def test_a_click_blocked_by_its_outline_at_the_start_is_paid_in_the_run_s_own_cl
     assert edits == ["nano2"] and [(r["key"], r["tag"]) for r in report["chosen"]] == [("slab-1", "v9-clean")]
     assert [tag for tag, todo in rounds if any(todo.values())] == ["v9", "v9-clean"]        # settled, then its copy
     assert not any("slab-1" in p for p in problems)
+
+
+def test_a_click_still_awaiting_its_outline_at_the_end_of_a_run_is_named_blocked(monkeypatch):
+    # dev run 20261106082352439: the click was counted "finished" with nothing paid and no line naming it
+    problems, report, store, edits, rounds, process = _clicked_run(monkeypatch, 10, backlog=(), outline_pending=(A,),
+                                                                   before=10.0)
+    assert edits == [] and report["chosen"] == []
+    assert any(p.startswith(f"slab-1: owner's click on {A[:12]}: blocked: the listing is not fully judged") for p in problems)
 
 
 def test_a_month_with_money_to_judge_but_none_for_a_round_judges_what_is_finished(monkeypatch):

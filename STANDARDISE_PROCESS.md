@@ -237,9 +237,17 @@ of its other photos exist; without a click any cleaned copy of the listing is it
 photo for good (`CLEAN_FAILED_CODES`, 400 or 422, at submit or when collected) is a failed attempt and the next model
 gets its turn; refused at submit, it cost nothing. An edit is prepared (`clean.prepare`: the photo encoded, the model's
 endpoint, the key) before anything is reserved, so a photo that cannot be encoded, an unknown model or a missing key
-fails loud and free; only the send and the reading of its answer are paid. A click that cannot be used
-(unreadable, no time, another SKU or listing than its file's, a photo not the listing's or not fixable) is never paid
-for, and the run's problems say why for any listing it names (its line in `tracked.csv` too). A listing whose choice
+fails loud and free; only the send and the reading of its answer are paid.
+
+A click has one state (`select.click_state`), read by the clean step, the run's problems and `tracked.csv` alike:
+`ready` (the plan sends it), `cleaned` (its copy is made and goes through the GPU and the judge), `done` (a photo of
+the listing passes), or `blocked` with why: its record (unreadable, no time, another SKU, listing or photo than its
+file's), the owner chose a photo, the listing is not fully judged yet (a photo awaits its GPU result, its outline
+recheck or its verdict), the photo is one a cleaned copy cannot fix, or no edit model is left to try. A blocked click is
+never paid and is a problem line of the run (`<listing>: owner's click on <photo>: blocked: <why>`); a ready click the
+budgets cannot cover waits, named by the run's admission and as `waiting: <why>` on its `tracked.csv` line. A
+judge's answer that did not parse is never final: the photo is asked again next run, and until then its listing is
+pending (review 2026-11-06). A listing whose choice
 record cannot be read stays exactly as published (its photo, its conflict-photo assignment and its files untouched, in
 every kind of run) and every run names it in its problems. A listing not fully judged is simply not cleaned yet (the
 report counts it pending); an edit already paid for is not collected once its listing has a passing photo or the

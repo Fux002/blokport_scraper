@@ -377,7 +377,11 @@ def test_a_click_that_cannot_be_used_is_never_paid_for_and_the_listing_says_why(
     assert edits == [] and spend.uses == []
     issue = sel.click_problem(s3, rounds[0][1]["sentas"], _listing(A, B), click, set())
     assert why in issue
-    assert f"owner's click not used: {issue}" in sel.photo_notes(s3, rounds, _listing(A, B), set(), {}, click, issue)
+    state = sel.click_state(s3, rounds, _listing(A, B), set(), click, "open")
+    assert state == ("blocked", issue)
+    assert sel.click_line(click, state) in sel.photo_notes(s3, rounds, _listing(A, B), set(), {}, click, state)
+    assert sel.click_line(click, state) == (f"owner's click on {click['sha'][:12]}" if "sha" in click
+                                            else "owner's click") + f": blocked: {issue}"
 
 
 def test_a_click_that_cannot_be_used_is_reported_for_a_pending_listing_too():
@@ -385,9 +389,9 @@ def test_a_click_that_cannot_be_used_is_reported_for_a_pending_listing_too():
     rounds = [("v9", {"sentas": _round(GPU, finished=(A,))}), ("v9-clean", {"sentas": _round(CL)})]   # A not judged
     s = _selection(_S3(), [_listing(A)], rounds)
     s.root, s.clicks = "r/", {"SEN-1": _click(D)}
-    out = sel.report(s)
+    out = sel.report(s, {})
     assert out["pending"] == ["slab-1"] and out["click_problems"] == [
-        "slab-1: owner's click not used: it names a photo that is not the listing's"]
+        f"slab-1: owner's click on {D[:12]}: blocked: it names a photo that is not the listing's"]
 
 
 def test_an_edit_paid_before_the_gate_is_always_collected_and_checked_and_nothing_new_is_sent(monkeypatch):
@@ -561,7 +565,7 @@ def test_each_listing_s_choice_is_its_own_record_and_a_run_touches_only_its_list
     s.client, s.exclude, s.root, s.owner, s.conflicts, s.clicks = s3, set(), "r/", {}, {}, {}
     s.listings = [_listing(A, key="one"), _listing(B, key="two")]
     s.rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(A, B))}), ("v9-clean", {"sentas": _round(CL)})]
-    result = sel.report(s)
+    result = sel.report(s, {})
     assert [c["key"] for c in result["chosen"]] == ["one"] and [t["listing"] for t in result["tracked"]] == ["two"]
     assert json.loads(s3.objects["r/chosen/one.json"])["sha"] == A                      # chosen: recorded
     assert "r/chosen/two.json" not in s3.objects                                        # now without a good photo
@@ -748,7 +752,7 @@ def test_the_report_works_listings_in_parallel_and_keeps_their_order(monkeypatch
             now[0] -= 1
         return choose(*a, **k)
     monkeypatch.setattr(sel, "choose", slow)
-    result = sel.report(s)
+    result = sel.report(s, {})
     assert [c["key"] for c in result["chosen"]] == ["one", "two", "three", "four"] and at_once[0] > 1
 
 
@@ -883,6 +887,81 @@ def test_a_call_that_may_have_been_billed_still_counts_at_its_price(monkeypatch)
     spend = sel.Spend(10)
     _clean(s3, rounds, _listing(A, B), set(), spend)
     assert spend.spent == pytest.approx(sum(C.CLEAN_PRICE_USD.values()))               # each model once, never again
+
+
+# --- one click state (review 2026-11-06, A2.5) -----------------------------------------------------------------------
+# A click's state was decided in three places: admitted as finished while its listing awaited an outline recheck (dev
+# run 20261106082352439, MAR-P/24/04), "owner's click: clean" on the review list while it waited, and admitted every run
+# with no model left.
+def _state(s3, rounds, listing, click, owner=None):
+    return sel.click_state(s3, rounds, listing, set(), click, sel.listing_state(s3, rounds, listing, set(), owner))
+
+
+def _reflection_on_a(monkeypatch):
+    s3, edits, rounds = _clean_setup(monkeypatch, passes_at="nano2")
+    s3.objects[f"{GPU}judged/{A}.json"] = _verdict("fail", "light_reflection")
+    return s3, edits, rounds
+
+
+def test_a_click_whose_listing_awaits_an_outline_recheck_is_blocked_never_planned(monkeypatch):
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    gpu = rounds[0][1]["sentas"]
+    gpu.slabs, gpu.checked = {A}, set()                                               # A: a whole slab, older outline
+    state, why = _state(s3, rounds, _listing(A, B), _click(A))
+    assert state == "blocked" and "not fully judged" in why
+    assert sel.clean_plan(s3, rounds, _listing(A, B), set(), None, _click(A)) is None
+
+
+def test_a_click_on_a_photo_not_judged_yet_is_blocked_as_pending_not_as_unfixable(monkeypatch):
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    rounds[0][1]["sentas"].judged.discard(A)
+    state, why = _state(s3, rounds, _listing(A, B), _click(A))
+    assert state == "blocked" and "not fully judged" in why
+
+
+def test_a_click_whose_photo_has_no_model_left_is_blocked_and_never_sent(monkeypatch):
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    _all_models_failed(s3, rounds, A)
+    assert _state(s3, rounds, _listing(A, B), _click(A)) == ("blocked", sel.NO_MODEL_LEFT)
+    plan = sel.clean_plan(s3, rounds, _listing(A, B), set(), None, _click(A))
+    assert plan is None or not plan.click
+
+
+def test_a_click_s_state_is_one_answer_and_the_plan_sends_only_a_ready_one(monkeypatch):
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    assert _state(s3, rounds, _listing(A, B), _click(A)) == ("ready", None)
+    assert sel.clean_plan(s3, rounds, _listing(A, B), set(), None, _click(A)).click
+    assert _state(s3, rounds, _listing(A, B), _click(A), owner=("v9", B))[0] == "blocked"
+    rounds[1][1]["sentas"].cleaned.add(A)
+    assert _state(s3, rounds, _listing(A, B), _click(A)) == ("cleaned", None)
+    assert _state(s3, rounds, _listing(A, B), None) is None
+
+
+def test_the_review_list_says_a_click_waits_and_why(monkeypatch):
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    s = _selection(s3, [_listing(A, B)], rounds)
+    s.root, s.clicks = "r/", {"SEN-1": _click(A)}
+    out = sel.report(s, {"slab-1": "month photo budget reached"})
+    assert f"owner's click on {A[:12]}: waiting: month photo budget reached" in out["tracked"][0]["what_happened"]
+    assert out["click_problems"] == []                                                # the run names the wait itself
+
+
+def test_a_blocked_click_is_a_problem_of_the_run(monkeypatch):
+    s3, _, rounds = _reflection_on_a(monkeypatch)
+    _all_models_failed(s3, rounds, A)
+    s = _selection(s3, [_listing(A, B)], rounds)
+    s.root, s.clicks = "r/", {"SEN-1": _click(A)}
+    assert sel.report(s, {})["click_problems"] == [f"slab-1: owner's click on {A[:12]}: blocked: {sel.NO_MODEL_LEFT}"]
+
+
+# --- an unparsed verdict is asked again (review 2026-11-06, A2.6) -----------------------------------------------------
+def test_an_unparsed_verdict_is_never_final_and_is_asked_again(monkeypatch):
+    unparsed = json.dumps({"verdict": "unparsed", "raw": "I think", "version": C.JUDGE_VERSION}).encode()
+    s3 = _S3({f"{GPU}judged/{A}.json": unparsed, f"dev/products/scraped/sentas/{A}.jpg": b"o", f"{GPU}{A}.main.jpg": b"m"})
+    rounds = [("v9", {"sentas": _round(GPU, finished=(A,), judged=(A,))}), ("v9-clean", {"sentas": _round(CL)})]
+    assert sel.choose(s3, rounds, _listing(A), set()) == (None, False)                   # pending, not a final fail
+    monkeypatch.setattr(sel.judge, "judge", lambda o, r, f: ({"verdict": "pass", "problems": [], "version": C.JUDGE_VERSION}, 0.02))
+    assert sel.choose(s3, rounds, _listing(A), set(), sel.Spend(10)) == (("v9", A), True)
 
 
 # --- the clicked photo is the unit (review 2026-11-06, A2.1) ---------------------------------------------------------
@@ -1028,7 +1107,7 @@ def _reported(objects, listing, rnd):
     s = object.__new__(sel.Selection)
     s.client, s.exclude, s.root, s.listings, s.owner, s.conflicts, s.clicks = s3, set(), "r/", [listing], {}, {}, {}
     s.rounds = [("v9", {"sentas": rnd}), ("v9-clean", {"sentas": _round(CL)})]
-    return s3, sel.report(s)
+    return s3, sel.report(s, {})
 
 
 def test_the_report_switches_a_kept_close_up_to_the_whole_slab_that_passed():
@@ -1386,7 +1465,7 @@ def test_the_review_list_says_which_photo_is_held_for_a_conflict_and_with_whom()
     rounds = [("v9", {"sentas": _round(GPU, finished=(A, B), judged=(B,))}), ("v9-clean", {"sentas": _round(CL)})]
     s = _selection(s3, [_listing(A, B)], rounds, conflicts={("sentas", A): ("other-stone", "slab-1")})
     s.root = "r/"
-    tracked = sel.report(s)["tracked"]
+    tracked = sel.report(s, {})["tracked"]
     assert [t["listing"] for t in tracked] == ["slab-1"]
     assert f"{A[:12]}: photo_conflict: also shown by other-stone" in tracked[0]["what_happened"]
 

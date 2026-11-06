@@ -414,15 +414,15 @@ def admit(sel, plans, left, cap_left, window):
 
 def clean_step(sel, plans, spend, clean, deadline, window):
     """The clean step over `plans`: admitted (admit), then paid (select.clean_all on the cleaning cap). (problems,
-    stopped, the plans paid): what could not be paid or read, and a line per send that waits (a click by its listing,
-    the marks counted)."""
+    stopped, the plans paid, waits): what could not be paid or read, and a line per send that waits (a click by its
+    listing, the marks counted); waits as admit gives them, for the review list."""
     goes, waits = admit(sel, plans, spend.left(), clean.left(), window)
     clicks = {plan.listing["key"] for plan in plans if plan.click}
     problems = [f"{key}: the owner's click waits: {why}" for key, why in waits.items() if key in clicks]
     if marks := [why for key, why in waits.items() if key not in clicks]:
         problems += [f"the marks of {marks.count(why)} listings wait: {why}" for why in dict.fromkeys(marks)]
     found, stopped = hosted(lambda s, cap, d: select.clean_all(s, goes, cap, d), sel, clean, deadline)
-    return problems + found, stopped, goes
+    return problems + found, stopped, goes, waits
 
 
 def owed_copy(sel, listing):
@@ -460,13 +460,14 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     report always runs, so what is chosen is recorded and published, unless a promotion failed: raised, and the next
     run of either kind finishes it at its start (select.finish, in process) before anything is published."""
     gpu_deadline = deadline - C.JUDGE_WINDOW_SECONDS
-    problems = []
+    problems, waiting = [], {}
 
     def cleaning(work):
         plans, failures = work.plans()
         if work is not sel:                            # the clicks' step: only the owner's clicks
             plans = [plan for plan in plans if plan.click]
-        found, stopped, goes = clean_step(work, plans, spend, clean, deadline, gpu_deadline - clock())
+        found, stopped, goes, waits = clean_step(work, plans, spend, clean, deadline, gpu_deadline - clock())
+        waiting.update(waits)
         return [f"{key}: {why}" for key, why in failures] + found, stopped, goes
     clicked = sel.only([l for l in sel.listings if l["sku"] in sel.clicks], sel.clicks)
     finishing = []                                     # the clicks' step finishes only what it admitted and owes
@@ -497,13 +498,13 @@ def run(batch, sel, spend, clean, run_id, deadline, say=print, clock=time.monoto
     if not ended:
         through(then, deadline, clock, problems)
     problems = list(dict.fromkeys(problems))           # a click waiting at both clean steps is named once
-    result = select.report(sel)
+    result = select.report(sel, waiting)
     by_tag = {tag: sum(c["tag"] == tag for c in result["chosen"]) for tag in sel.tags}
     say(f"==> {len(result['chosen'])} of {len(sel.listings)} listings with a good photo {by_tag}; "
         f"{len(result['tracked'])} on the review list (s3://{S3_BUCKET}/{sel.root}tracked.csv), {len(result['pending'])} pending")
     if result["pending"]:
         problems.append(f"{len(result['pending'])} listings not fully judged (listed in {sel.root}summary.json)")
-    problems += result["click_problems"]                 # a click that cannot be used, for any listing of the run
+    problems += result["click_problems"]                 # a click blocked (click_state), for any listing of the run
     return problems, result
 
 
