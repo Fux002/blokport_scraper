@@ -124,21 +124,28 @@ task's local disk and cross a roll only as S3 snapshots. They are saved:
 - on the task's stop (SIGTERM).
 
 A restore records what it fetched, so a new task never uploads its restored copy back over a newer save, and each
-server runs one save at a time per store, so its older copy can never land after its newer one (the two servers
-both save the ledger; an order flip between them is repaired by the next periodic save). The service runs one task at a
-time (`deployment_minimum_healthy_percent = 0`, `deployment_maximum_percent = 100` in
-`infra/modules/sync_service/main.tf`), which removes the overlap of two tasks serving at once. It does not order
-the saves: ECS can start the new task while the old one is still stopping, which is why durability rests on the
-immediate snapshots above, not on the order. The cost: the service is **down for the roll** (the old task's stop,
-up to its 120 s stopTimeout, plus the new task's boot and restore), and a running produce or photos run is stopped
-(it reads `interrupted` after the boot). A task that is killed without its stop (a crash, an OOM) loses at most
-the last snapshot interval of writes that are not saved at once, such as a produce's ledger write-through and
-sync acks (acks re-serve and re-ack to the same external_id, see `stone_pipeline/ledger/snapshot.py`).
+server runs one save at a time per store, so its older copy can never land after its newer one. The two servers
+both save the ledger (the config server after a lifecycle verb), each with its own record, so an older copy from
+one can land after a newer one from the other while the other's record still matches the db; the sync server's
+final save on stop is therefore forced (uploaded even when its record matches), so the stopping task's newest
+ledger is its last ledger write unless a lifecycle verb is still saving at that moment.
 
-A decision write answers only after its snapshot: on a stalled S3 that takes up to about 26 s (two attempts of a
-3 s connect plus 10 s read timeout; a lifecycle verb that also snapshots the ledger, up to twice that), past
-Blokport's 15 s client deadline. Retrying is safe: a statement (`PUT /review/decide`) replaces the vendor's
-statement for that spelling, and an undo of one already undone clears nothing.
+The service runs one task at a time (`deployment_minimum_healthy_percent = 0`, `deployment_maximum_percent = 100`
+in `infra/modules/sync_service/main.tf`), which removes the overlap of two tasks serving at once. It does not order
+the saves: ECS counts only running and pending tasks, so it can start the new task while the old one is still in
+its SIGTERM grace. A write that reaches the old task after the new task has restored is lost when the new task
+next saves a change; that is why durability rests on the immediate snapshots above, not on the order. The cost:
+the service is **down for the roll** (the old task's stop, up to its 120 s stopTimeout, plus the new task's boot
+and restore), and a running produce or photos run is stopped (it reads `interrupted` after the boot). A task that
+is killed without its stop (a crash, an OOM) loses at most the last snapshot interval of writes that are not
+saved at once, such as a produce's ledger write-through and sync acks (acks re-serve and re-ack to the same
+external_id, see `stone_pipeline/ledger/snapshot.py`).
+
+A decision write answers only after its snapshot. On a stalled S3 one save takes up to about 26 s (two attempts of
+a 3 s connect plus 10 s read timeout), and a request may first wait for a save of the same store already running
+(one at a time per store), so the worst case is about twice that, and more for a lifecycle verb that also saves
+the ledger: well past Blokport's 15 s client deadline. Retrying is safe: a statement (`PUT /review/decide`)
+replaces the vendor's statement for that spelling, and an undo of one already undone clears nothing.
 
 If you ever need to roll by hand (e.g. a manual `imageproc`/`gpu` dispatch, which deliberately does NOT
 roll the app task):

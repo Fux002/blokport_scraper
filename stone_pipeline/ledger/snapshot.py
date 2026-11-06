@@ -95,10 +95,12 @@ def _consistent_copy(src: Path, dest: Path) -> None:
         src_conn.close()
 
 
-def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -> bool:
+def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None, force: bool = False) -> bool:
     """Snapshot a SQLite db to S3 (the ledger by default; `key` targets another, e.g. config.db).
     Best-effort: logs and returns False on any error, never raises into the caller (a snapshot failure
-    must not take down the server or a run)."""
+    must not take down the server or a run). `force` uploads even when this process's record says the bytes are
+    on S3 already: the record is per process, and the ledger is saved by both servers, so an older copy from the
+    other one can have landed last. The sync server's final save on stop forces, once per task."""
     key = key or snapshot_key(env)
     ledger_path = Path(ledger_path)
     if not ledger_path.exists():
@@ -111,7 +113,7 @@ def save(ledger_path: str | Path, env: str = ENV_NAME, key: str | None = None) -
                 tmp_path = Path(tmp.name)
             _consistent_copy(ledger_path, tmp_path)
             digest = _digest(tmp_path)
-            if _LAST_UPLOADED.get(key) == digest:
+            if not force and _LAST_UPLOADED.get(key) == digest:
                 return True                       # unchanged since the last upload: it is on S3 already
             _s3().upload_file(str(tmp_path), S3_BUCKET, key)
             _LAST_UPLOADED[key] = digest

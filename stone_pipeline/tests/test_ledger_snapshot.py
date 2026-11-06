@@ -404,3 +404,29 @@ def test_a_failed_save_names_the_key_it_was_for(tmp_path, monkeypatch, caplog):
     with caplog.at_level("ERROR"):
         assert snapshot.save_config(db, env="development") is False
     assert any(snapshot.config_key("development") in r.getMessage() for r in caplog.records)
+
+
+def test_the_final_save_is_forced_so_a_cross_process_flip_cannot_survive_a_roll(tmp_path, monkeypatch):
+    # Both servers save the ledger, each with its own lock and upload record. The flip: the config server copies an
+    # OLDER ledger and its upload lands last, while the sync server has uploaded the newer one and recorded it. S3 now
+    # holds the older copy, and the sync server's record matches the db, so its plain saves skip. The sync server's
+    # final save on stop is forced, so the old task's newest ledger is the last thing written before a roll restores.
+    import hashlib
+    fake = _FakeS3()
+    monkeypatch.setattr(snapshot, "_s3", lambda: fake)
+    snapshot._LAST_UPLOADED.clear()
+    db = tmp_path / "development.db"
+    _seed(db, "slab_marble_test_1")
+    older = tmp_path / "older.db"
+    snapshot._consistent_copy(db, older)                           # the config server's copy, before the newer write
+    _seed(db, "slab_marble_test_2")
+    assert snapshot.save(db, env="development") is True            # the sync server: uploads and records the newer
+    key = snapshot.snapshot_key("development")
+    fake.store[(snapshot.S3_BUCKET, key)] = older.read_bytes()     # the config server's older upload lands last
+    newest = tmp_path / "newest.db"
+    snapshot._consistent_copy(db, newest)
+    assert snapshot.save(db, env="development") is True            # a plain save skips: its record matches the db
+    assert fake.store[(snapshot.S3_BUCKET, key)] == older.read_bytes()
+    assert snapshot.save(db, env="development", force=True) is True
+    assert fake.store[(snapshot.S3_BUCKET, key)] == newest.read_bytes()
+    assert snapshot._LAST_UPLOADED[key] == hashlib.sha256(newest.read_bytes()).hexdigest()

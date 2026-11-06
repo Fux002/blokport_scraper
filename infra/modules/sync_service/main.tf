@@ -351,13 +351,15 @@ resource "aws_ecs_service" "this" {
   # is never on by accident; the task role below gains the ssmmessages channel actions only when set.
   enable_execute_command = var.enable_execute_command
 
-  # ONE task at a time: a roll stops the old task before it starts the new one, so Medusa is never served by two tasks
-  # whose config.db and ledger (SQLite on each task's local disk, carried across tasks only by S3 snapshots) diverge.
-  # With the default 100/200 limits the two ran side by side and Cloud Map served both IPs. These limits do NOT order
-  # the saves: ECS counts only RUNNING/PENDING tasks, so the new task can boot while the old one is still in its
-  # SIGTERM grace. Durability comes from the snapshots themselves: every decision and lifecycle change is uploaded the
-  # moment it is made, and a restore records what it fetched, so the new task never uploads restored bytes back over the
-  # old task's final save (stone_pipeline/ledger/snapshot.py). The price is a short outage per roll.
+  # ONE task at a time: a roll starts stopping the old task before it starts the new one, so Medusa is never served by
+  # two tasks whose config.db and ledger (SQLite on each task's local disk, carried across tasks only by S3 snapshots)
+  # diverge. With the default 100/200 limits the two ran side by side and Cloud Map served both IPs. These limits do NOT
+  # order the saves: ECS counts only RUNNING/PENDING tasks, so the new task can boot while the old one is still in its
+  # SIGTERM grace, and a write that reaches the old task after the new task has restored is lost when the new task next
+  # saves a change. Durability comes from the snapshots themselves: every decision and lifecycle change is uploaded the
+  # moment it is made, a restore records what it fetched (the new task never uploads restored bytes back over the old
+  # task's final save), and the sync server's final save is forced (stone_pipeline/ledger/snapshot.py). The price is a
+  # short outage per roll.
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
 
