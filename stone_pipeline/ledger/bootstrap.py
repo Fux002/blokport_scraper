@@ -149,9 +149,10 @@ def seed_products(ledger: Ledger, path: str | Path | None = None) -> int:
         src, _, surrogate = sku.partition("-")
         inv = (info.get("inventory") or "").strip()
         ledger.execute(
+            # last_synced: the export shows Medusa holds it (db.in_medusa_sql), though no id was acked
             "INSERT OR IGNORE INTO product (sku, source, surrogate_key, handle, "
-            "inventory_quantity, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (sku, src.lower(), surrogate, info.get("handle") or "", inv or None, "synced", now, now),
+            "inventory_quantity, state, last_synced, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (sku, src.lower(), surrogate, info.get("handle") or "", inv or None, "synced", now, now, now),
         )
         # parse via the shared numeric front door: a bare .isdigit() coerced '10.0'/'1,000'/'12 ' to 0
         # (a phantom out-of-stock that then re-serves as a spurious delta). parse_number reads them right.

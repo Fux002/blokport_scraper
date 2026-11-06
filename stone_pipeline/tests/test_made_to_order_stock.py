@@ -133,7 +133,7 @@ def test_a_made_to_order_shape_is_served_on_both_paths_with_no_quantity(cfg, tmp
         assert stored == {"POL-A": (None, 1), "POL-B": (5, 0)}
         assert _lane(ledger) == {"POL-A": {"sku": "POL-A", "quantity": None, "made_to_order": True},
                                  "POL-B": {"sku": "POL-B", "quantity": 5, "made_to_order": False}}
-        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 2, "dead": 0}
+        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 2, "dead": 0, "waiting": 0}
 
 
 def test_an_ack_echoing_what_was_served_clears_the_delta(cfg, tmp_path):
@@ -235,7 +235,7 @@ def test_a_v11_ledger_keeps_its_stock_and_sync_marks_and_serves_nothing_new(tmp_
         rows = {r["sku"]: dict(r) for r in ledger.execute("SELECT * FROM inventory")}
         assert {k: (v["qty"], v["last_synced_qty"], v["made_to_order"], v["last_synced_made_to_order"], v["reason"])
                 for k, v in rows.items()} == {"POL-1": (4, 4, 0, 0, None), "POL-2": (0, None, 0, None, "no_photo")}
-        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 1, "dead": 0}     # only the never-synced one
+        assert sync.status(ledger)["inventory"] == {"total": 2, "delta": 1, "dead": 0, "waiting": 0}     # only the never-synced one
         assert {r["made_to_order"] for r in ledger.execute("SELECT made_to_order FROM product")} == {0}
 
 

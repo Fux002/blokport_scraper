@@ -32,7 +32,8 @@ from stone_pipeline.config.settings import CATEGORIES
 from stone_pipeline.core import logfmt
 from stone_pipeline.io import imagestore
 from stone_pipeline.ledger.db import (CLEAR_STOCK_FAILURES_SQL, FORGET_SYNCED_STOCK_SQL, RECORD_SYNCED_STOCK_SQL,
-                                      STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, now_iso, on_sale_sql)
+                                      STATES, STOCK_DELTA_SQL, UNHIDE_SQL, Ledger, in_medusa_sql, now_iso,
+                                      on_sale_sql)
 
 log = logfmt.get_logger("ledger.sync")
 
@@ -101,16 +102,17 @@ _CATEGORY = {c.name: c.label for c in CATEGORIES}
 def status(ledger: Ledger) -> dict[str, dict[str, int]]:
     """Per-type state counts. Each state-bearing table reports every state it can hold (db.STATES), 0 for one
     with no rows: a count is always a value, never an absent key (combination is all 0 until materialized);
-    inventory reports total rows, the `delta` count (exactly what the inventory lane would serve now) and the `dead`
-    count (dead-lettered stock rows not abandoned, like gap_held)."""
+    inventory reports total rows, the `delta` count (exactly what the inventory lane would serve now), the `dead`
+    count (dead-lettered stock rows not abandoned, like gap_held) and the `waiting` count (un-hides waiting on their
+    product's own sync)."""
     out: dict[str, dict[str, int]] = {}
     for table, states in STATES.items():
         held = ledger.counts(table)
         out[table] = {state: held.get(state, 0) for state in states}
     total = ledger.execute("SELECT COUNT(*) AS n FROM inventory").fetchone()["n"]
-    dead = ledger.execute(f"SELECT COUNT(*) AS n FROM inventory i WHERE {_STOCK_DEAD}",
-                          (_MAX_SYNC_ATTEMPTS,)).fetchone()["n"]
-    out["inventory"] = {"total": total, "delta": _count_inventory_lane(ledger), "dead": dead}
+    dead = ledger.execute(f"SELECT COUNT(*) AS n FROM inventory i WHERE {_STOCK_DEAD}").fetchone()["n"]
+    waiting = ledger.execute(f"SELECT COUNT(*) AS n {_UNHIDE_WAITING}").fetchone()["n"]
+    out["inventory"] = {"total": total, "delta": _count_inventory_lane(ledger), "dead": dead, "waiting": waiting}
     # E13: variation reconcile signal. `retiring` already surfaces in out["variation"] (a state count);
     # `orphaned` = synced, rendered varieties with 0 products (a source removal's shared orphan, or the old
     # side of a re-key awaiting retire). A distinct bucket, NOT a state, so it never double-counts the
@@ -324,20 +326,19 @@ def ready_products(ledger: Ledger, limit: int | None = None) -> list[dict]:
     })
 
 
-# A product Medusa holds: it has the id Medusa acked (an empty id is no id), or it is 'synced' without one (a
-# products_export bootstrap row or populate_discontinued's minimal row: Medusa holds it by SKU, and applies stock and
-# tombstones by SKU). Whatever its sync state otherwise: a dirty, leased or held product is still in Medusa. Over the
-# product table aliased `p`; the one definition, used by the stock gate, the stock ack and the hard reset's tombstones.
-_IN_MEDUSA = "((p.medusa_id IS NOT NULL AND p.medusa_id != '') OR p.state = 'synced')"
+# The serve gate of an inventory row (aliases i, p): every count move and every hide goes out for a product Medusa
+# holds (db.in_medusa_sql), but an un-hide (db.UNHIDE_SQL) waits until the product itself is synced, so a hidden product
+# never comes back on sale before its own update (a new photo, photo_ready) has reached Medusa. The serve only: an ack
+# of what was served is recorded whatever the product did since (_ack_inventory).
+_STOCK_GATE = f"{in_medusa_sql('p')} AND (p.state = 'synced' OR NOT {UNHIDE_SQL})"
 
-# The gate of an inventory row (aliases i, p), for its serve and its ack: every count move and every hide goes out for
-# a product Medusa holds, but an un-hide (db.UNHIDE_SQL) waits until the product itself is synced, so a hidden product
-# never comes back on sale before its own update (a new photo, photo_ready) has reached Medusa.
-_STOCK_GATE = f"{_IN_MEDUSA} AND (p.state = 'synced' OR NOT {UNHIDE_SQL})"
+# An un-hide held back only by the serve gate: a stock delta of a product Medusa holds that would bring it back on sale
+# while the product itself is not synced yet (GET /status `waiting`).
+_UNHIDE_WAITING = ("FROM inventory i JOIN product p ON p.sku = i.sku "
+                   f"WHERE {in_medusa_sql('p')} AND p.state != 'synced' AND {UNHIDE_SQL} AND {STOCK_DELTA_SQL}")
 
 # A dead stock row (alias i): the failed/refused acks reached the cap, and the operator has not abandoned it.
-# Parameter: the cap.
-_STOCK_DEAD = "i.sync_attempts >= ? AND i.abandoned_at IS NULL"
+_STOCK_DEAD = f"i.sync_attempts >= {_MAX_SYNC_ATTEMPTS} AND i.abandoned_at IS NULL"
 
 # ONE definition of the inventory lane, used by the serve, the non-leasing peek and GET /status's `delta`, so the
 # three never disagree: a stock delta through the stock gate, not waiting out a failed ack (retry_after), not dead or
@@ -348,9 +349,9 @@ _STOCK_DEAD = "i.sync_attempts >= ? AND i.abandoned_at IS NULL"
 _INVENTORY_LANE = (
     "FROM inventory i JOIN product p ON p.sku = i.sku "
     f"WHERE {_STOCK_GATE} AND {STOCK_DELTA_SQL} "
-    "AND (i.retry_after IS NULL OR i.retry_after <= ?) AND i.sync_attempts < ? "
+    "AND (i.retry_after IS NULL OR i.retry_after <= ?) AND i.sync_attempts < ? AND i.abandoned_at IS NULL "
     "AND (i.reason IS NOT 'replaced_by_lot' OR EXISTS (SELECT 1 FROM product q LEFT JOIN inventory j ON j.sku = q.sku "
-    "     WHERE q.lot_code = i.replaced_by_lot_code AND q.medusa_id IS NOT NULL "
+    f"     WHERE q.lot_code = i.replaced_by_lot_code AND {in_medusa_sql('q')} "
     f"    AND (j.sku IS NULL OR {on_sale_sql('j')}))) ")
 
 
@@ -416,12 +417,14 @@ def ready(ledger: Ledger, type_: str, limit: int | None = None) -> list[dict]:
 
 def _ack_inventory(ledger: Ledger, sku: str, status_: str, reason: str | None,
                    quantity: int | None, made_to_order: bool | None) -> int:
-    """One inventory ack, through the serve's gate (_STOCK_GATE). A success records the stock as synced and clears
-    the failure bookkeeping. A failure, or a success the echo guard refuses, counts an attempt and waits like a failed
-    product (_retry_after, dead at _MAX_SYNC_ATTEMPTS): without it the row stays a delta at the head of the sku-ordered
-    page and re-serves on every pull. Only a row that is a delta now counts a failure: a late or duplicate 'failed'
-    for a stock already synced is no failure of anything still to send. Returns 1 when the stock was recorded as
-    synced or the failure recorded, 0 for an unknown sku, a row outside the gate, a refused echo, or a failure on a
+    """One inventory ack, for a product Medusa holds (db.in_medusa_sql). A success whose echo matches the current stock
+    is always recorded as synced, whatever the product did since the serve (the un-hide gate is the serve's only: a
+    dropped ack would leave Medusa on sale with no delta left to correct it), and clears the failure bookkeeping.
+    A failure, or a success the echo guard refuses, counts an attempt and waits like a failed product (_retry_after,
+    dead at _MAX_SYNC_ATTEMPTS): without it the row stays a delta at the head of the sku-ordered page and re-serves
+    on every pull. Only a row that is a delta now counts a failure: a late or duplicate 'failed' for a stock already
+    synced is no failure of anything still to send. Returns 1 when the stock was recorded as
+    synced or the failure recorded, 0 for an unknown sku, a product not in Medusa, a refused echo, or a failure on a
     row with nothing to send.
 
     F4 lost-update guard: the stock is recorded only if the SERVED stock is still the current one. Each stock field
@@ -436,7 +439,7 @@ def _ack_inventory(ledger: Ledger, sku: str, status_: str, reason: str | None,
         cond, params = cond + " AND i.made_to_order = ?", params + [1 if made_to_order else 0]
     row = ledger.execute(f"SELECT i.qty, i.made_to_order, i.sync_attempts, ({cond}) AS echo_current, "
                          f"({STOCK_DELTA_SQL}) AS is_delta "
-                         f"FROM inventory i JOIN product p ON p.sku = i.sku WHERE i.sku = ? AND {_STOCK_GATE}",
+                         f"FROM inventory i JOIN product p ON p.sku = i.sku WHERE i.sku = ? AND {in_medusa_sql('p')}",
                          (*params, sku)).fetchone()
     if row is None:
         return 0
@@ -637,7 +640,7 @@ def requeue_dead_lettered(ledger: Ledger, type_: str | None = None) -> int:
     for lane in ([type_] if type_ else REQUEUE_TYPES):
         if lane == "inventory":
             n += ledger.execute(f"UPDATE inventory AS i SET {CLEAR_STOCK_FAILURES_SQL}, updated_at = ? "
-                                f"WHERE {_STOCK_DEAD}", (now, _MAX_SYNC_ATTEMPTS)).rowcount   # abandoned stays
+                                f"WHERE {_STOCK_DEAD}", (now,)).rowcount   # abandoned stays
             continue
         n += ledger.execute(
             f"UPDATE {_ENTITY[lane][0]} SET state = 'dirty', sync_attempts = 0, sync_error = NULL, retry_after = NULL, "
@@ -800,13 +803,13 @@ def reset_sync_state(ledger: Ledger, source_codes: list[str] | None = None,
         out["attribute_ids_restored"] = restore_attribute_ids(ledger)
 
     if hard:                                   # drop the scraper output; re-scrape rebuilds it
-        # TOMBSTONE every product Medusa holds (_IN_MEDUSA) before deleting it, so Medusa deletes it too. Without
+        # TOMBSTONE every product Medusa holds (db.in_medusa_sql) before deleting it, so Medusa deletes it too. Without
         # this a hard / factory reset drops products locally but never tells Medusa, and its upsert-only catalogue
         # pull leaves them as orphans forever. A product Medusa never received is dropped silently. Mirrors
         # retire_variation's E2 synced-only rule.
         # the SELECT already has a WHERE, so fold a scoped source filter in as AND (not a second WHERE)
         src_and = where.replace(" WHERE ", " AND ", 1) if scoped else ""
-        synced = ledger.execute(f"SELECT p.sku, p.source FROM product p WHERE {_IN_MEDUSA}{src_and}",
+        synced = ledger.execute(f"SELECT p.sku, p.source FROM product p WHERE {in_medusa_sql('p')}{src_and}",
                                 params).fetchall()
         if synced:
             record_tombstones(ledger, [(r["sku"], r["source"]) for r in synced],

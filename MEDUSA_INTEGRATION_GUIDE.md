@@ -387,7 +387,9 @@ POST can be retried safely.
   - `synced` = applied and acked.
   - inventory `delta` = the stock deltas the inventory lane would serve now (stock that moved since the
     last sync, for a product in Medusa, not waiting out a failure); inventory `dead` = stock rows
-    dead-lettered after repeated failures (like `gap_held`; listed in `GET /sync/v1/failures`).
+    dead-lettered after repeated failures (like `gap_held`; listed in `GET /sync/v1/failures`);
+    inventory `waiting` = stocks that would bring a hidden product back on sale, held until that
+    product's own update is acked.
 
   `pending`/`dirty`/`delta` all at zero means the two systems are in sync. Poll it to
   confirm convergence, and alarm on a rising `gap_held` or a stuck `pending` (the signal

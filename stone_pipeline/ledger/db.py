@@ -46,6 +46,14 @@ def on_sale_sql(alias: str) -> str:
     return f"({alias}.qty > 0 OR {alias}.made_to_order = 1)"
 
 
+def in_medusa_sql(alias: str) -> str:
+    """The one rule for a product (aliased `alias`) Medusa holds: Medusa acked its id (a non-empty medusa_id), or it
+    was synced once (last_synced: set by a successful ack, and by the rows the products export shows, the bootstrap
+    seed and populate_discontinued's minimal rows, which Medusa holds by SKU). Whatever its sync state now: a dirty,
+    leased or held product is still in Medusa. A reset clears both, so a reset product is new again."""
+    return f"(({alias}.medusa_id IS NOT NULL AND {alias}.medusa_id != '') OR {alias}.last_synced IS NOT NULL)"
+
+
 # The inventory rows whose count (qty, made_to_order) differs from the last synced count, or was never synced
 # (last_synced_made_to_order NULL): all the inventory CSV (4_inventory_update.csv: SKU + quantity) can carry.
 COUNT_DELTA_SQL = ("(i.last_synced_made_to_order IS NULL OR i.last_synced_made_to_order != i.made_to_order "
@@ -237,6 +245,12 @@ class Ledger:
             self.conn.execute("ALTER TABLE product ADD COLUMN photo_ready INTEGER NOT NULL DEFAULT 1")
         if "made_to_order" not in prod_cols:   # v12: on sale with no count (read by Blokport at create)
             self.conn.execute("ALTER TABLE product ADD COLUMN made_to_order INTEGER NOT NULL DEFAULT 0")
+        if from_version < 13:
+            # v13 reads "Medusa holds it" from last_synced (in_medusa_sql); before, a products export row was only
+            # 'synced' (seed_products and populate_discontinued wrote no last_synced). Keyed on the version: a 'synced'
+            # row without last_synced is exactly such a row (an ack always sets it).
+            self.conn.execute("UPDATE product SET last_synced = updated_at "
+                              "WHERE state = 'synced' AND last_synced IS NULL")
         if from_version < 11:
             # Before v11 the decision was kept only as the stock reason, so derive it from that. Keyed on the version,
             # not on the ALTER: the ALTER commits on its own, so a crash before the version bump below leaves the

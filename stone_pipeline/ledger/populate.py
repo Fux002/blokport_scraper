@@ -18,7 +18,7 @@ from stone_pipeline.config.settings import SETTINGS, category
 from stone_pipeline.config.sources import SourceConfig
 from stone_pipeline.core.schema import CanonicalRow
 from stone_pipeline.core.text import match_key
-from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, now_iso, payload_hash
+from stone_pipeline.ledger.db import CLEAR_STOCK_FAILURES_SQL, Ledger, in_medusa_sql, now_iso, payload_hash
 from stone_pipeline.stages.emit import _sku
 from stone_pipeline.stages.emit_catalog import _COLS as _VARIANTS_FULL_COLS
 from stone_pipeline.stages.product_state import inventory_str
@@ -374,14 +374,15 @@ def populate_inventory(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: Source
 
 
 def withdraw_unsent(ledger: Ledger, rows: Iterable[CanonicalRow], cfg: SourceConfig) -> int:
-    """Withdraw this source's products that Medusa never received (no medusa_id, waiting to be served) and
+    """Withdraw this source's products that Medusa never received (not db.in_medusa_sql, waiting to be served) and
     that this run no longer produces: dropped by the supplier, held this run, or found not to be a product
     (a void slab). Left waiting, the next pull would create them with stale data and stock. A product
     already in Medusa (the delist owns it) or in flight ('syncing') is untouched; a withdrawn product that
     comes back is simply written again. Returns how many were withdrawn."""
     produced = {_sku(r, cfg) for r in rows}
     stale = [r["sku"] for r in ledger.execute(
-        "SELECT sku FROM product WHERE source = ? AND medusa_id IS NULL AND state IN ('pending', 'dirty')",
+        f"SELECT p.sku FROM product p WHERE p.source = ? AND NOT {in_medusa_sql('p')} "
+        "AND p.state IN ('pending', 'dirty')",
         (cfg.source_code,)) if r["sku"] not in produced]
     for sku in stale:
         ledger.execute("DELETE FROM inventory WHERE sku = ?", (sku,))   # the stock row references the product
@@ -406,10 +407,11 @@ def populate_discontinued(ledger: Ledger, pairs: Iterable[tuple[str, str]],
         if not sku:
             continue
         src, _, _ = sku.partition("-")
+        # a dropped product is one the products export showed, so Medusa holds it by SKU (db.in_medusa_sql)
         ledger.execute(
-            "INSERT OR IGNORE INTO product (sku, source, handle, state, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (sku, src.lower(), handle or "", "synced", now, now),
+            "INSERT OR IGNORE INTO product (sku, source, handle, state, last_synced, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (sku, src.lower(), handle or "", "synced", now, now, now),
         )
         # a plain drop is dead stock, whatever hid it before (a photo-hidden product its supplier drops is purgeable),
         # and no longer replaced by a lot

@@ -58,7 +58,7 @@ def test_status_reports_state_histograms_and_inventory_delta(tmp_path):
     assert st["variation"] == held("variation", synced=1, pending=1)
     assert st["product"] == held("product", pending=1)
     assert st["combination"] == held("combination")   # all 0 until materialized
-    assert st["inventory"] == {"total": 1, "delta": 0, "dead": 0}   # S-1 moved, but Medusa does not hold the product yet
+    assert st["inventory"] == {"total": 1, "delta": 0, "dead": 0, "waiting": 0}   # S-1 moved, but Medusa does not hold the product yet
 
 
 def test_sync_loop_serve_ack_converges(tmp_path):
