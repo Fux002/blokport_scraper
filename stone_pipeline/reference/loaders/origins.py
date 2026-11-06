@@ -157,8 +157,8 @@ def load_origin_map(path: Path | None = None) -> OriginMap:
 class OriginOverrides:
     # (source, variety, stone_type) -> ISO2. A curated per-SUPPLIER origin for a stone a supplier SELLS but
     # does NOT quarry in its home country (a reseller/trader). Scoped to ONE source, so it never affects
-    # another supplier of the same variety. This is the resolution of an origin_multi_home_absent review
-    # where the supplier's stone is one of the KNOWN candidate origins (not a new quarry country).
+    # another supplier of the same variety. This is the resolution of an origin confirmation (a held
+    # multi-country origin without the supplier's home, or a vendor-map mismatch).
     rules: dict[tuple[str, str, str], str] = field(default_factory=dict)
 
     def lookup(self, source: str, variety: str, stone_type: str | None) -> Optional[str]:

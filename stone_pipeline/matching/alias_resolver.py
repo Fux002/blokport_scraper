@@ -34,10 +34,6 @@ log = logfmt.get_logger("alias_resolver")
 # distinct variety) now live in the active domain pack -- `active_pack().generic_descriptors` -- so a
 # non-stone pack supplies its own. Read lazily in `decide_against` (see AliasResolver._generic_set).
 
-# De-spaced char similarity above which two names are the SAME variety (a typo/spelling variant); and above
-# which an uncertain near-match is REVIEWED rather than minted. A distinct sibling ('Cristallo Divine' vs
-# 'Cristallo Bianco') shares a prefix but stays below the alias floor, so it is never auto-merged.
-
 
 def _norm(s: str) -> str:
     # the shared canonical key: ascii-fold accents too, so 'Porriño'/'Porrino' don't look different.

@@ -80,15 +80,17 @@ def write_curation(result: CurationResult, rows: list[CanonicalRow]) -> None:
     upload_rows = [r for r in upload_rows if _is_real_delta(r) and r["Key"] not in _delete_keys]
     if before != len(upload_rows):
         log.info("update delta pruned", extra={"extra_fields": {"dropped_noops": before - len(upload_rows)}})
-    if upload_rows:
-        _write_csv(to_upload / "1_variants_update.csv", _IMPORT_COLS, upload_rows, sanitize=False)  # Medusa import
+    # ALWAYS written, header-only when empty: emit_catalog reads this file as THIS run's delta, so skipping
+    # an empty write would leave a previous run's delta in place to be applied again.
+    _write_csv(to_upload / "1_variants_update.csv", _IMPORT_COLS, upload_rows, sanitize=False)  # Medusa import
     # the ONLY review file from curate: the decision ledger (uncertain new varieties, confirm
     # true/false). Always (re)written so applied/rejected rows drop out. Advisory sets (uncertain
     # alias spellings, code-like names, images) are logged as counts, not clutter files.
     from stone_pipeline.stages import decisions
     decisions.write_confirm_file(result.pending_confirm)
-    # SEPARATE origin queue: rows held because a vendor's primary_origin was not corroborated by the map
-    # (origin_needs_confirmation). One entry per (source, variety, type); never mixed into the variety queue
+    # SEPARATE origin queue: rows held because their origin is not known for the vendor (origin_needs_confirmation:
+    # a primary_origin the map does not corroborate, or several map countries none of them the supplier's
+    # home). One entry per (source, variety, type); never mixed into the variety queue
     # above. Always called (empty clears it) so a confirmed origin drops off, like the variety queue.
     decisions.write_origin_confirm_file(rows)
     if result.backbone_updates:   # human-readable audit of the leaf additions (the queue below is the surface)

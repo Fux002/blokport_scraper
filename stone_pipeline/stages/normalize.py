@@ -175,8 +175,8 @@ def normalize_row(row: CanonicalRow, resolvers: AttributeResolvers, ref: Referen
     # Blocks are sold raw/unfinished, so sources rarely give a finish ('' or 'Other');
     # that would null finish_id and reject the row at validate (finish is required).
     # Default a block to 'Raw' -- the standard block finish, in attributes.csv and the
-    # block backbone. Check raw_format too: normalize runs BEFORE format_resolve, so
-    # format_value isn't set yet -- the source format tag is what's available here.
+    # block backbone. format_resolve runs before normalize, so format_value is the resolved
+    # format; raw_format (the source's own tag) covers a row the resolver left unresolved.
     fmt = (row.format_value or row.raw_format or "").strip().lower()
     block_finish = active_pack().block_finish
     if fmt == bulk_form_name() and not row.finish_id:

@@ -52,14 +52,25 @@ def _type_vocab() -> dict[str, str]:
 
 def _origin_as_card(item: dict) -> dict:
     """An origin confirmation in the variety-card shape: the product bound fine, only its origin could not be
-    corroborated, so the card says so and prefills the vendor's declared country. Every field stays open to
-    the operator's statement, like any other card."""
+    decided. A vendor-map mismatch says so and prefills the vendor's declared country. A multi-country stone
+    without the supplier's home names where the supplier is based (NOT a declared own country, and by
+    definition not a documented origin) and prefills nothing: the operator chooses. Every field stays open
+    to the operator's statement, like any other card."""
+    documented = ", ".join(c.strip() for c in (item.get("map_country") or "").split(",") if c.strip())
+    from stone_pipeline.core.schema import ORIGIN_HOLD_MULTI_HOME
+    if item.get("hold") == ORIGIN_HOLD_MULTI_HOME:
+        reason = (f"Origin not known: supplier based in {item.get('vendor_origin') or '?'}; stone documented in "
+                  f"{documented}. Choose the origin, or state what this product is.")
+        prefill = ""
+    else:
+        reason = (f"Origin not corroborated: the vendor declares {item.get('vendor_origin') or '?'}, the "
+                  f"stone documents {item.get('map_country') or 'no country'}. Confirm the origin, or "
+                  f"state what this product is.")
+        prefill = item.get("vendor_origin") or ""
     return {"kind": "origin", "ref": item.get("ref", ""), "variant": item.get("variety", ""),
             "stone_type": item.get("stone_type", ""), "color": "",
-            "reason": (f"Origin not corroborated: the vendor declares {item.get('vendor_origin') or '?'}, the "
-                       f"stone documents {item.get('map_country') or 'no country'}. Confirm the origin, or "
-                       f"state what this product is."),
-            "origin": item.get("current_country") or item.get("vendor_origin") or "",
+            "reason": reason,
+            "origin": item.get("current_country") or prefill,
             "nearest_existing": "", "score": "", "model_prob": "",
             "src": item.get("source", ""), "scraped": item.get("scraped", ""),
             "spellings": [item["scraped"]] if item.get("scraped") else [],

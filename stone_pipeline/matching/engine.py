@@ -165,12 +165,6 @@ class VariationMatch:
     ambiguous: bool = False
 
 
-# Phonetic tier (4) char-similarity floor, on char_similarity's 0..100 scale (jaro-winkler x 100). Guards
-# the phonetic exact tier so a phonetic collision does not over-merge across dissimilar spellings. A pure
-# NAME-similarity threshold: independent of product domain and brand (a matcher tuning value, not a per-pack
-# or per-source setting), so it lives here with the engine, alongside the alias_resolver's _CHAR_* floors.
-
-
 class VariationEngine:
     """Category-scoped tiered resolver over one CandidateIndex (one branch).
 

@@ -36,10 +36,13 @@ class FlagCode(str, Enum):
     stock_undetermined = "stock_undetermined"
     origin_unresolved = "origin_unresolved"
     origin_supplier_default = "origin_supplier_default"
+    # no longer raised (a multi-country origin without the supplier's home is now held, see below); kept so
+    # rows staged before that change still load
     origin_multi_home_absent = "origin_multi_home_absent"
-    # a vendor with a configured primary_origin has a map origin that does NOT corroborate it (different
-    # country, multi-country, or no map entry), so the origin is NOT known for this vendor -- the row is
-    # held for a one-time origin CONFIRMATION (the separate origin review queue), never silently shipped.
+    # the origin is NOT known for this vendor: a vendor with a configured primary_origin whose map origin
+    # does NOT corroborate it (different country, multi-country, or no map entry), or a multi-country
+    # variety none of whose countries is the supplier's home. The row is held for a one-time origin
+    # CONFIRMATION (the separate origin review queue), never silently shipped.
     origin_needs_confirmation = "origin_needs_confirmation"
     # the curated (name, type) origin lookups were SKIPPED because the row's type is not
     # variation-authoritative (name-derived / fallback), so a homonym could not resolve the wrong stone's
@@ -108,6 +111,12 @@ class ReviewFlag(BaseModel):
     method: str = ""
     src_url: Optional[str] = None
     detail: Optional[str] = None      # free-text reviewer note; callers pass detail= (was silently dropped)
+
+
+# The origin_needs_confirmation flag's method for a multi-country stone none of whose countries is the
+# supplier's home (derive raises it, the review card words it): its best_guess is the supplier's HOME, not a
+# country the vendor declared, so the card must not offer it as the origin.
+ORIGIN_HOLD_MULTI_HOME = "multi_home_absent"
 
 
 class RejectReason(BaseModel):
