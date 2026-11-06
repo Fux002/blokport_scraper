@@ -72,7 +72,6 @@ from stone_pipeline.standardise import index, judge
 ROOT = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/"
 LOCK = f"{ROOT}run.lock"
 _TAKEN = ("PreconditionFailed", "ConditionalRequestConflict")
-_MISSING = ("404", "NoSuchKey", "NotFound")
 
 
 class RunActive(RuntimeError):
@@ -90,14 +89,14 @@ def _lost(s3, etag, exc):
     ETag; any other failure is a passing one."""
     if not isinstance(exc, ClientError):
         return False
-    if _code(exc) == "PreconditionFailed" or _code(exc) in _MISSING:
+    if _code(exc) == "PreconditionFailed" or _code(exc) in publish.MISSING:
         return True
     if _code(exc) != "ConditionalRequestConflict":
         return False
     try:
         return s3.head_object(Bucket=S3_BUCKET, Key=LOCK)["ETag"] != etag
     except ClientError as missing:
-        return _code(missing) in _MISSING
+        return _code(missing) in publish.MISSING
     except BotoCoreError:
         return False
 
@@ -148,7 +147,7 @@ def _acquire(s3, owner, now):
         try:
             held = s3.head_object(Bucket=S3_BUCKET, Key=LOCK)
         except ClientError as exc:
-            if _code(exc) in _MISSING:
+            if _code(exc) in publish.MISSING:
                 continue
             raise
         since = held["LastModified"]
@@ -177,7 +176,7 @@ def _release(s3, etag):
             s3.delete_object(Bucket=S3_BUCKET, Key=LOCK, IfMatch=etag)
             return
         except ClientError as exc:
-            if _code(exc) not in _TAKEN + _MISSING:
+            if _code(exc) not in _TAKEN + publish.MISSING:
                 raise
             if _lost(s3, etag, exc):
                 print("==> the run lock is no longer this run's: left as it is", flush=True)
@@ -535,7 +534,7 @@ class Decisions:
 def read_decisions(s3, root, listings):
     """The Decisions for these listings. The conflict set is the produce's (stages.images.link_standard), never
     re-classified; none stored yet: publish.NoConflictSet, nothing done."""
-    exclude = publish.read_exclude(publish.EXCLUDE_PATH.read_text())
+    exclude = publish.excluded()
     (owner, broken), clicks = owner_records(s3, root), publish.read_clicks(s3, root)
     conflicts = publish.read_conflicts(s3, {l["source"] for l in listings})
     rounds = select.read_rounds(s3, (C.RUN_TAG, C.CLEAN_TAG), sorted({l["source"] for l in listings}))
@@ -681,14 +680,14 @@ def reap(run_id):
     never ran): stop that run's GPU jobs and, only while the run lock is still that run's (its body names the run), set
     the pool's ceiling back and remove the lock. Nothing of another process is touched: a rolling deploy's other task or
     a process started by hand keeps its jobs, its lock and its ceiling."""
-    retries = Config(retries={"mode": "standard", "max_attempts": 10})
+    retries = Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS})
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     stopped = gpu.stop_run(batch, run_id)
     try:
         held = s3.get_object(Bucket=S3_BUCKET, Key=LOCK)
     except ClientError as exc:
-        if _code(exc) not in _MISSING:
+        if _code(exc) not in publish.MISSING:
             raise
         held = None
     ours = held is not None and json.loads(held["Body"].read()).get("run_id") == run_id
@@ -755,7 +754,7 @@ def main() -> int:
         print(f"ERROR: not configured: {', '.join(missing)}; aborting")
         return 2
     deadline = time.monotonic() + C.WORK_SECONDS
-    retries = Config(retries={"mode": "standard", "max_attempts": 10})     # a throttled call is retried, never fatal
+    retries = Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS})     # a throttled call is retried, never fatal
     s3 = boto3.client("s3", region_name=S3_REGION, config=retries)
     batch = boto3.client("batch", region_name=S3_REGION, config=retries)
     # The runner's run id names the lock and the GPU jobs, so the runner can clear exactly what this run left if it

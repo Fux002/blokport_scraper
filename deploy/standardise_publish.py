@@ -20,6 +20,7 @@ its content, the listing's size or finish, or TILE_RENDER_VERSION. A tile listin
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -32,7 +33,6 @@ from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE a
 from stone_pipeline.io import imagestore
 from stone_pipeline.standardise import cutout, tile_plan, tile_stone
 
-WORKERS = 32
 EXCLUDE_PATH = Path(__file__).resolve().parents[1] / "stone_pipeline" / "config" / "standardise_exclude.txt"
 _SHA = re.compile(r"^([0-9a-f]{64})\b")
 _MADE_FROM = "made-from"                     # the outline's S3 metadata: what its 3D slab was made from (made_from)
@@ -59,13 +59,9 @@ def clicks_prefix(root):
     return f"{root}{C.CLICKS_DIR}/"
 
 
-# The owner's click to clean one photo of a listing: the one shape every writer makes (write_click) and every photos run
-# reads (read_clicks).
-CLICK_FIELDS = ("sku", "listing", "source", "sha", "at")
-
-
 def click_record(sku, listing, source, sha, at):
-    """The owner's click to clean photo `sha` of a listing, each value in its named field (CLICK_FIELDS)."""
+    """The owner's click to clean photo `sha` of a listing, each value in its named field: the one shape every writer
+    makes (write_click) and every photos run reads (read_clicks)."""
     return {"sku": sku, "listing": listing, "source": source, "sha": sha, "at": at}
 
 
@@ -109,7 +105,7 @@ def read_records(s3, prefix, name):
             return None, f"not JSON ({exc})"
         return (record, None) if isinstance(record, dict) else (None, "not a JSON object")
     records, errors = {}, {}
-    for key, (record, why) in zip(keys, pool_map(WORKERS, one, keys)):
+    for key, (record, why) in zip(keys, pool_map(C.STORE_WORKERS, one, keys)):
         if why is None:
             records[name(key)] = record
         else:
@@ -130,9 +126,16 @@ def read_conflicts(client, sources):
     keys = sorted(k for k in _objects(client, imagestore.conflicts_prefix()) if imagestore.conflicts_source(k))
     if missing := sorted(set(sources) - {imagestore.conflicts_source(k) for k in keys}):
         raise NoConflictSet(f"no conflict set yet for {', '.join(missing)}: run a produce first")
-    sets = pool_map(WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
+    sets = pool_map(C.STORE_WORKERS, lambda k: json.loads(client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read()), keys)
     return {(imagestore.conflicts_source(k), sha): tuple(handles)
             for k, photos in zip(keys, sets) for sha, handles in sorted(photos.items())}
+
+
+@functools.cache
+def excluded():
+    """The reviewed exclude list (EXCLUDE_PATH, read_exclude), read once a process: a file of the image, so it cannot
+    change while a run works."""
+    return frozenset(read_exclude(EXCLUDE_PATH.read_text()))
 
 
 def read_exclude(text):
@@ -260,7 +263,7 @@ def _check(client, slab):
 _TILE_ERRORS = (ClientError, BotoCoreError, cv2.error, ValueError, OSError)
 
 
-_MISSING = ("NoSuchKey", "404", "NotFound")
+MISSING = ("NoSuchKey", "404", "NotFound")   # the codes S3 answers a missing key with
 
 
 def _record(client, key):
@@ -270,7 +273,7 @@ def _record(client, key):
     try:
         body = client.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read()
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in _MISSING:
+        if exc.response.get("Error", {}).get("Code") in MISSING:
             return None
         raise
     try:
@@ -477,21 +480,21 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
                               f"removed")
     chosen = [c for c in chosen if assigned.get((c["source"], c["sha"]), True)]
     made = {k: t for prefix in sorted({c["prefix"] for c in chosen}) for k, t in _objects(client, prefix).items()}
-    exclude = read_exclude(EXCLUDE_PATH.read_text())
+    exclude = excluded()
     plan, todo = copies(chosen, made, exclude), slabs(chosen, made, exclude)
     folders = [*map(imagestore.standard_prefix, (*imagestore.STANDARD_VIEWS, imagestore.CUTOUT_SUBDIR, imagestore.TILE_SUBDIR))]
     published = {k: t for prefix in folders for k, t in _objects(client, prefix).items()}
     fresh = unpublished(plan, made, published)
-    stamps = dict(zip(todo, pool_map(WORKERS, lambda s: _stamp(client, s, published), todo)))
+    stamps = dict(zip(todo, pool_map(C.STORE_WORKERS, lambda s: _stamp(client, s, published), todo)))
     remake = outdated(todo, made, published, stamps)
     files = list(_objects(client, imagestore.assigned_prefix()))
-    current = dict(zip(files, pool_map(WORKERS, lambda k: client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read(), files)))
+    current = dict(zip(files, pool_map(C.STORE_WORKERS, lambda k: client.get_object(Bucket=S3_BUCKET, Key=k)["Body"].read(), files)))
     writes, unassigned = assignment_changes(assigned, {t for _, t in plan}, current)
     # A conflict photo's assignment file goes up before its views, and a stale one comes down after the views it covered:
     # a publish stopped half way never leaves a conflict photo's view without the file that says whose it is.
     for key, body in writes.items():
         client.put_object(Bucket=S3_BUCKET, Key=key, Body=body, ContentType="application/json")
-    pool_map(WORKERS, lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
+    pool_map(C.STORE_WORKERS, lambda kv: client.copy_object(Bucket=S3_BUCKET, Key=kv[1], CopySource={"Bucket": S3_BUCKET, "Key": kv[0]},
                                                     ContentType="image/jpeg", MetadataDirective="REPLACE"), fresh)
     # each cut-out holds a full-size slab in memory
     made_3d = sum(pool_map(C.CUTOUT_WORKERS, lambda s: _publish_cutout(client, s, todo[s], made[todo[s]]), remake))
@@ -499,7 +502,7 @@ def publish(client, root, sheet, photos, say=print, *, assigned):
     cutouts = {k: t for k, t in _objects(client, imagestore.cutout_prefix()).items() if k in slab_3d}
     tiles = publish_tiles(client, sheet, photos, {c["key"]: c for c in chosen}, cutouts, published, say)
     gone = [] if unreadable else stale(published, [t for _, t in plan] + sorted(slab_3d) + tiles["keep"])
-    pool_map(WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
+    pool_map(C.STORE_WORKERS, lambda k: client.delete_object(Bucket=S3_BUCKET, Key=k), gone)
     unassigned = [] if unreadable else unassigned      # the same: an unreadable record may still need its assignment
     for key in unassigned:                             # only once the views it covered are gone
         client.delete_object(Bucket=S3_BUCKET, Key=key)

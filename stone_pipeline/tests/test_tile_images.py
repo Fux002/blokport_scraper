@@ -649,7 +649,7 @@ def test_a_tile_s_problem_is_on_the_run_s_problem_list(monkeypatch):
     monkeypatch.setattr(proc, "sheet_and_photos", lambda client: ("", {}))
     monkeypatch.setattr(proc, "photo_listings", lambda sheet, photos: [])
     monkeypatch.setattr(proc.gpu, "clear_leftovers", lambda batch, run_id: [])
-    monkeypatch.setattr(proc, "choices", lambda client, root: {})
+    monkeypatch.setattr(proc, "choices", lambda client, root: ({}, {}))
     monkeypatch.setattr(proc, "run", lambda *a, **k: ([], {"chosen": [], "tracked": [], "pending": [], "click_problems": []}))
     monkeypatch.setattr(proc.publish, "publish", lambda *a, **k: {"changed": True, "tiles_hidden": {"x": "no slab"},
                                                              "tiles_problems": {"t": "RuntimeError: boom"}})

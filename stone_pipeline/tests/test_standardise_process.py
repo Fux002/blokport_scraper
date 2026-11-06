@@ -317,8 +317,7 @@ def test_a_click_is_written_in_the_one_shape_every_run_reads():
 
 def test_a_click_record_has_exactly_the_click_fields_each_value_in_its_named_field():
     record = pub.click_record(sku="SKU", listing="LISTING", source="SOURCE", sha="SHA", at="AT")
-    assert set(record) == set(pub.CLICK_FIELDS) and len(record) == len(pub.CLICK_FIELDS)
-    assert all(record[name] == name.upper() for name in pub.CLICK_FIELDS)
+    assert record == {"sku": "SKU", "listing": "LISTING", "source": "SOURCE", "sha": "SHA", "at": "AT"}
     root, s3 = f"{proc.ROOT}{C.CLEAN_TAG}/", _S3()
     pub.write_click(s3, root, **record)
     assert pub.read_clicks(s3, root) == {"SKU": record}                     # the writer stores exactly that record

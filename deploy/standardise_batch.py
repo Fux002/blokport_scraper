@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from deploy.standardise_publish import WORKERS, pool_map
+from deploy.standardise_publish import pool_map
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
 from stone_pipeline.core import env
 
@@ -138,7 +138,7 @@ def stop(batch, ids, why):
             batch.terminate_job(jobId=job_id, reason=why[:250])
         except (BotoCoreError, ClientError) as exc:
             print(f"   could not stop GPU job {job_id}: {exc}", flush=True)
-    pool_map(WORKERS, one, ids)
+    pool_map(C.STORE_WORKERS, one, ids)
 
 
 def wait_limit(n_slices):

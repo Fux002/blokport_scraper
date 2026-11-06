@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from deploy.standardise_publish import EXCLUDE_PATH, chosen_prefix, pool_map, read_exclude
+from deploy.standardise_publish import chosen_prefix, excluded, pool_map
 from deploy.standardise_source import (LOGO_STEP, REDRAW, candidate_prefix, candidate_rule, discard, noted, promote,
                                        remove_candidate, round_prefix, undecided)
 from stone_pipeline.config.settings import ENV_SEGMENT, S3_BUCKET, STANDARDISE as C
@@ -746,7 +746,7 @@ class Selection:
         self.owner, self.conflicts, self.rounds, self.chosen = owner, conflicts, rounds, sorted(set(chosen))
         self.clicks, self.frozen = clicks, frozen
         self.sources = sorted({l["source"] for l in listings} | {src for _, src, _ in self.chosen})
-        self.exclude = read_exclude(EXCLUDE_PATH.read_text())
+        self.exclude = excluded()
         self.root = f"{ENV_SEGMENT}/{C.TEST_PREFIX}/{clean_tag}/"
         self._asked = {}
         self._share_asked()
@@ -944,7 +944,7 @@ def report(sel, waits):
 
 
 def _each(listings, work, deadline, clock=time.monotonic):
-    """work(listing) on every listing, WORKERS at a time: (failures, stopped). A failure is reported and the rest go on;
+    """work(listing) on every listing, SELECT_WORKERS at a time: (failures, stopped). A failure is reported and the rest go on;
     reaching a cap (or a stop) stops what has not started. stopped: the run's paid work has ended (the process budget,
     a stop), so no step after this one starts; the cleaning cap ends only this step (CleanCapReached). A listing not
     started by the deadline (the process's work window, on `clock`) is left as it is: the report counts it pending and

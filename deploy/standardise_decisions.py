@@ -54,9 +54,8 @@ from botocore.config import Config
 
 from deploy import standardise_run as proc
 from deploy import standardise_select as select
-from deploy.standardise_publish import (EXCLUDE_PATH, NoConflictSet, chosen_prefix, click_record, clicks_prefix,
-                                       owner_key, owner_prefix, read_clicks, read_conflicts, read_exclude,
-                                       records_by_sku, write_click)
+from deploy.standardise_publish import (NoConflictSet, chosen_prefix, click_record, clicks_prefix, excluded, owner_key,
+                                       owner_prefix, read_clicks, read_conflicts, records_by_sku, write_click)
 from deploy.standardise_source import sheet_and_photos
 from stone_pipeline.config.settings import ENV_NAME, S3_BUCKET, S3_REGION, STANDARDISE as C
 from stone_pipeline.io import imagestore
@@ -432,8 +431,8 @@ def main() -> int:
     except (OSError, InvalidDecisions) as exc:
         print(f"ERROR: {exc}; nothing applied")
         return 2
-    s3 = boto3.client("s3", region_name=S3_REGION, config=Config(retries={"mode": "standard", "max_attempts": 10}))
-    exclude = read_exclude(EXCLUDE_PATH.read_text())
+    s3 = boto3.client("s3", region_name=S3_REGION, config=Config(retries={"mode": "standard", "max_attempts": C.AWS_MAX_ATTEMPTS}))
+    exclude = excluded()
     print(f"==> {len(docs)} owner decisions from {path}")
     try:
         if dry:

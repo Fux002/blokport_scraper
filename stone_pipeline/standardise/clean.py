@@ -18,7 +18,7 @@ class NoImage(RuntimeError):
 def request(name, encoded):
     """The model's input for this photo."""
     _, extra = MODELS[name]
-    image = data_uri(encoded, C.CLEAN_SEND_LONG, 92)
+    image = data_uri(encoded, C.CLEAN_SEND_LONG, C.JPEG_QUALITY)
     return {"prompt": C.CLEAN_INSTRUCTION, **({"image_url": image} if name in C.CLEAN_SINGLE_IMAGE else {"image_urls": [image]}), **extra}
 
 
@@ -44,14 +44,14 @@ def collect(job):
     """The cleaned photo's bytes of a stored request, once the queue has finished it."""
     deadline = time.monotonic() + C.CLEAN_TIMEOUT
     while True:
-        status = httpx.get(job["status_url"], headers=_head(), timeout=60)
+        status = httpx.get(job["status_url"], headers=_head(), timeout=C.CLEAN_COLLECT_TIMEOUT)
         status.raise_for_status()
         if status.json()["status"] == "COMPLETED":
             break
         if time.monotonic() > deadline:
             raise TimeoutError(f"{job['endpoint']}: not done after {C.CLEAN_TIMEOUT}s")
         time.sleep(C.CLEAN_POLL)
-    res = httpx.get(job["response_url"], headers=_head(), timeout=60)
+    res = httpx.get(job["response_url"], headers=_head(), timeout=C.CLEAN_COLLECT_TIMEOUT)
     res.raise_for_status()
     images = res.json().get("images") or []
     if not images or not images[0].get("url"):
